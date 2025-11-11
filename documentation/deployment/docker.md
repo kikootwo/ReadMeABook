@@ -330,6 +330,19 @@ docker compose exec -T postgres psql -U readmeabook readmeabook < backup.sql
 
 3. **Next.js Config**: Removed deprecated `experimental.serverComponentsExternalPackages` from `next.config.ts` - this option has been moved to top-level `serverExternalPackages` in Next.js 16.
 
+4. **DownloadHistory Model**: Fixed multiple field name mismatches in:
+   - `src/app/api/admin/downloads/active/route.ts`
+   - `src/lib/processors/monitor-download.processor.ts`
+   - `src/lib/processors/download-torrent.processor.ts`
+
+   Common errors:
+   - `status` → `downloadStatus`
+   - `errorMessage` → `downloadError`
+   - `size` → `torrentSizeBytes`
+   - Removed: `downloadSpeed`, `eta`, `progress`, `updatedAt`, `audiobookId` (don't exist)
+   - Added required: `indexerName` (required field)
+   - Fixed relation: DownloadHistory → request → audiobook (not direct audiobook relation)
+
 **Note:** Always check the Prisma schema (`prisma/schema.prisma`) for correct field names when getting TypeScript errors.
 
 ### Application won't start
