@@ -63,6 +63,12 @@ ReadMeABook is deployed as a multi-container Docker application using Docker Com
 - Automatic Next.js optimization
 - Minimal production dependencies
 
+**Build-Time Environment Variables:**
+- `DATABASE_URL` - Set to a dummy value during build for Prisma client generation
+  - Prisma's `generate` command requires DATABASE_URL to be set, but doesn't actually connect
+  - Actual DATABASE_URL from docker-compose.yml is used at runtime
+  - Build uses: `postgresql://dummy:dummy@localhost:5432/dummy?schema=public`
+
 ### Docker Compose Services
 
 #### 1. Application Service (app)
@@ -262,6 +268,16 @@ docker compose exec -T postgres psql -U readmeabook readmeabook < backup.sql
 - Image optimization enabled
 
 ## Troubleshooting
+
+### Prisma build errors during Docker build
+
+**Error:** `PrismaConfigEnvError: Missing required environment variable: DATABASE_URL`
+
+**Cause:** Prisma's `generate` command runs during the Docker build stage, but environment variables from docker-compose.yml are only available at runtime.
+
+**Solution:** The Dockerfile now sets a dummy DATABASE_URL during build (Dockerfile:37). The actual DATABASE_URL from docker-compose.yml is used at runtime.
+
+**Note:** Prisma generate doesn't actually connect to the database - it only needs the URL format to be valid.
 
 ### Application won't start
 

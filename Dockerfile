@@ -32,6 +32,9 @@ COPY . .
 COPY --from=deps /app/node_modules ./node_modules
 
 # Generate Prisma client
+# Prisma generate requires DATABASE_URL to be set, but doesn't actually connect
+# Provide a dummy URL for build time - actual URL comes from docker-compose.yml at runtime
+ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy?schema=public"
 RUN npx prisma generate
 
 # Build Next.js application
