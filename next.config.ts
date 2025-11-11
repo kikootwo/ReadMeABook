@@ -8,8 +8,26 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
 
   // Externalize packages that should only run on the server
-  // Bull uses child processes and is incompatible with the Edge Runtime
-  serverComponentsExternalPackages: ['bull'],
+  // Bull uses child processes and is incompatible with client bundling
+  serverExternalPackages: ['bull'],
+
+  // Experimental features
+  experimental: {
+    // Also mark Bull as external in experimental config for Turbopack compatibility
+    serverComponentsExternalPackages: ['bull'],
+  },
+
+  // Webpack configuration for when not using Turbopack
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      // Don't bundle Bull on the client side - it's server-only
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        'bull': false,
+      };
+    }
+    return config;
+  },
 
   // Image optimization
   images: {

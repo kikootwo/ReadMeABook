@@ -40,6 +40,8 @@ RUN npx prisma generate
 # Build Next.js application
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+# Disable Turbopack - use Webpack which properly handles server-only packages
+ENV TURBOPACK=0
 
 RUN npm run build
 

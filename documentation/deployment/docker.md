@@ -296,9 +296,21 @@ docker compose exec -T postgres psql -U readmeabook readmeabook < backup.sql
 
 **Error:** `Module not found: Can't resolve './ROOT/node_modules/bull/lib/process/master.js'`
 
-**Cause:** Bull uses Node.js child processes which are incompatible with Next.js client-side bundling.
+**Cause:** Bull uses Node.js child processes which are incompatible with Next.js client-side bundling. Additionally, Next.js 16's Turbopack has issues properly externalizing server-only packages like Bull.
 
-**Solution:** The `next.config.ts` now includes `serverComponentsExternalPackages: ['bull']` to exclude it from client bundles. Bull only runs on the server-side API routes.
+**Solution Applied:**
+1. **Dockerfile**: Set `TURBOPACK=0` environment variable to disable Turbopack and use Webpack for builds (Dockerfile:44)
+2. **next.config.ts**: Added multiple configurations to ensure Bull is never bundled for client:
+   - `serverExternalPackages: ['bull']` - Next.js 16 syntax
+   - `experimental.serverComponentsExternalPackages: ['bull']` - Fallback for compatibility
+   - `webpack.resolve.alias` configuration to alias 'bull' to false on client builds
+
+**Why Webpack Instead of Turbopack:**
+- Turbopack in Next.js 16 doesn't fully respect server-only package configurations yet
+- Webpack properly handles the Bull exclusion through resolve.alias
+- Bull only runs in server-side API routes, never on the client
+
+**Note:** This is a temporary workaround until Turbopack fully supports server-only package externalization.
 
 ### Application won't start
 
