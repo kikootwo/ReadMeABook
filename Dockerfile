@@ -78,6 +78,7 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+COPY --from=builder /app/node_modules/.bin ./node_modules/.bin
 
 # Create directories for volumes
 RUN mkdir -p /app/config /downloads /media && \
@@ -94,4 +95,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:3030/api/health || exit 1
 
 # Run migrations and start server
-CMD sh -c 'echo "🚀 Starting ReadMeABook..." && npx prisma migrate deploy && npx prisma generate && echo "✨ Starting server on port 3030..." && node server.js'
+CMD sh -c 'echo "🚀 Starting ReadMeABook..." && ./node_modules/.bin/prisma migrate deploy && ./node_modules/.bin/prisma generate && echo "✨ Starting server on port 3030..." && node server.js'
