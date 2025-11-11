@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const prowlarrService = getProwlarrService();
+    const prowlarrService = await getProwlarrService();
 
     // Test connection and get indexers
     const indexers = await prowlarrService.getIndexers(url, apiKey);
