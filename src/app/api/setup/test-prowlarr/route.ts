@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getProwlarrService } from '@/lib/integrations/prowlarr.service';
+import { ProwlarrService } from '@/lib/integrations/prowlarr.service';
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,10 +17,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const prowlarrService = await getProwlarrService();
+    // Create a new ProwlarrService instance with test credentials
+    const prowlarrService = new ProwlarrService(url, apiKey);
 
     // Test connection and get indexers
-    const indexers = await prowlarrService.getIndexers(url, apiKey);
+    const indexers = await prowlarrService.getIndexers();
 
     // Only count enabled indexers
     const enabledIndexers = indexers.filter((indexer) => indexer.enable);
