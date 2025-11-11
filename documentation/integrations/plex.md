@@ -494,17 +494,26 @@ console.log('Authenticated as:', user.username);
 
 ### Fixed Issues ✅
 
-**1. XML Parsing for Server Identity (Fixed)**
-- **Issue:** Server info (platform, version) returned as undefined from testConnection
-- **Root Cause:** Plex /identity endpoint returns XML with attributes in `MediaContainer.$`, not directly in `MediaContainer`
-- **Fix:** Updated testConnection method to properly extract attributes from parsed XML:
-  ```typescript
-  // Before: data = parsed.MediaContainer
-  // After: data = parsed.MediaContainer && parsed.MediaContainer.$
-  //              ? parsed.MediaContainer.$
-  //              : parsed.MediaContainer || {}
+**1. Plex API Response Format Handling (Fixed)**
+- **Issue:** Server info showing as "unknown" and libraries failing to load
+- **Root Cause:** Modern Plex servers return JSON (not XML) when `Accept: application/json` header is used. Code was only handling XML parsing with `MediaContainer.$` attributes.
+- **Actual Response Format:** Plex returns JSON with direct properties:
+  ```json
+  {
+    "machineIdentifier": "abc123",
+    "version": "1.32.5.7349",
+    "platform": "Linux",
+    "Directory": [
+      { "key": "3", "title": "Audiobooks", "type": "artist", ... }
+    ]
+  }
   ```
-- **Additional Fix:** Added fallback values (`'unknown'`, `'Plex Server'`) to prevent undefined in responses
+- **Fix Applied:**
+  - Added JSON response handling alongside XML parsing
+  - Used optional chaining (`dir.$?.key` instead of `dir.$.key`) to prevent errors when `$` is undefined
+  - Reordered property checks to prioritize direct properties (JSON format)
+  - Added comprehensive logging to identify response format
+- **Result:** Libraries now display correctly, server info shows proper version
 
 ### Current Issues
 
