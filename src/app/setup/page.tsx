@@ -15,6 +15,12 @@ import { DownloadClientStep } from './steps/DownloadClientStep';
 import { PathsStep } from './steps/PathsStep';
 import { ReviewStep } from './steps/ReviewStep';
 
+interface SelectedIndexer {
+  id: number;
+  name: string;
+  priority: number;
+}
+
 interface SetupState {
   currentStep: number;
   plexUrl: string;
@@ -22,6 +28,7 @@ interface SetupState {
   plexLibraryId: string;
   prowlarrUrl: string;
   prowlarrApiKey: string;
+  prowlarrIndexers: SelectedIndexer[];
   downloadClient: 'qbittorrent' | 'transmission';
   downloadClientUrl: string;
   downloadClientUsername: string;
@@ -45,6 +52,7 @@ export default function SetupWizard() {
     plexLibraryId: '',
     prowlarrUrl: '',
     prowlarrApiKey: '',
+    prowlarrIndexers: [],
     downloadClient: 'qbittorrent',
     downloadClientUrl: '',
     downloadClientUsername: 'admin',
@@ -68,7 +76,7 @@ export default function SetupWizard() {
     setState((prev) => ({ ...prev, ...updates }));
   };
 
-  const updateField = (field: string, value: string) => {
+  const updateField = (field: string, value: any) => {
     setState((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -94,6 +102,7 @@ export default function SetupWizard() {
           prowlarr: {
             url: state.prowlarrUrl,
             api_key: state.prowlarrApiKey,
+            indexers: state.prowlarrIndexers,
           },
           downloadClient: {
             type: state.downloadClient,

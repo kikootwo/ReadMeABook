@@ -5,12 +5,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 
 export async function POST(request: NextRequest) {
-  return requireAuth(request, async (req: AuthenticatedRequest) => {
-    try {
-      const { plex, prowlarr, downloadClient, paths } = await request.json();
+  try {
+    const { plex, prowlarr, downloadClient, paths } = await request.json();
 
     // Validate required fields
     if (
@@ -19,6 +17,9 @@ export async function POST(request: NextRequest) {
       !plex?.audiobook_library_id ||
       !prowlarr?.url ||
       !prowlarr?.api_key ||
+      !prowlarr?.indexers ||
+      !Array.isArray(prowlarr.indexers) ||
+      prowlarr.indexers.length === 0 ||
       !downloadClient?.type ||
       !downloadClient?.url ||
       !downloadClient?.username ||
@@ -65,6 +66,12 @@ export async function POST(request: NextRequest) {
       where: { key: 'prowlarr_api_key' },
       update: { value: prowlarr.api_key },
       create: { key: 'prowlarr_api_key', value: prowlarr.api_key },
+    });
+
+    await prisma.configuration.upsert({
+      where: { key: 'prowlarr_indexers' },
+      update: { value: JSON.stringify(prowlarr.indexers) },
+      create: { key: 'prowlarr_indexers', value: JSON.stringify(prowlarr.indexers) },
     });
 
     // Download client configuration
@@ -118,15 +125,14 @@ export async function POST(request: NextRequest) {
       success: true,
       message: 'Setup completed successfully',
     });
-    } catch (error) {
-      console.error('[Setup] Failed to save configuration:', error);
-      return NextResponse.json(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Failed to save configuration',
-        },
-        { status: 500 }
-      );
-    }
-  });
+  } catch (error) {
+    console.error('[Setup] Failed to save configuration:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to save configuration',
+      },
+      { status: 500 }
+    );
+  }
 }

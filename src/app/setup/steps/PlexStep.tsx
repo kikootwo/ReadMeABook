@@ -134,7 +134,14 @@ export function PlexStep({
             onChange={(e) => onUpdate('plexToken', e.target.value)}
           />
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Find your token in Plex settings → Network → "Show Advanced" → X-Plex-Token
+            <a
+              href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              How to find your Plex authentication token
+            </a>
           </p>
         </div>
 
@@ -243,10 +250,11 @@ export function PlexStep({
           </svg>
           <div>
             <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
-              How to find your Plex token
+              About Plex Token
             </p>
             <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
-              In Plex Web, go to Settings → Network → Show Advanced → Look for X-Plex-Token in the URL
+              Your Plex authentication token is required to connect to your Plex server.
+              Ensure you have access to your Plex server before proceeding.
             </p>
           </div>
         </div>

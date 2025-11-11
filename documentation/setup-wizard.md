@@ -42,7 +42,9 @@ The setup wizard guides first-time users through configuring ReadMeABook, connec
    - Server URL input
    - API key input
    - Test connection button
-   - Show available indexers count
+   - Display available indexers with checkbox selection
+   - Assign priority (1-25) to each selected indexer
+   - Higher priority indexers are preferred when ranking search results
 
 4. Download Client Configuration
    - Choose client: qBittorrent or Transmission
@@ -96,6 +98,11 @@ interface SetupState {
   // Prowlarr
   prowlarrUrl: string;
   prowlarrApiKey: string;
+  prowlarrIndexers: Array<{
+    id: number;
+    name: string;
+    priority: number;
+  }>;
 
   // Download Client
   downloadClient: 'qbittorrent' | 'transmission';
@@ -125,7 +132,8 @@ interface SetupState {
 
 **POST /api/setup/test-prowlarr**
 - Tests Prowlarr connection
-- Returns indexer count if successful
+- Returns indexer count and indexer details (id, name, protocol) if successful
+- Allows user to select which indexers to use and assign priorities
 
 **POST /api/setup/test-download-client**
 - Tests qBittorrent/Transmission connection
@@ -216,6 +224,8 @@ async function completeSetup() {
 - URL must be valid
 - API key must not be empty
 - Connection test must succeed
+- At least one indexer must be selected
+- Each selected indexer must have a priority between 1-25
 
 **Download Client:**
 - URL must be valid
@@ -251,6 +261,26 @@ async function completeSetup() {
 **2. Library Selection Display**
 - **Issue:** Library selection dropdown appears correctly after successful connection test
 - **Implementation:** Dropdown is conditionally rendered when `libraries.length > 0` and properly maps library data from the test connection response.
+
+**3. Authentication Requirement for Setup Completion (Fixed)**
+- **Issue:** Setup completion endpoint returned "Error No authentication token provided" when completing the wizard.
+- **Root Cause:** The `/api/setup/complete` endpoint used `requireAuth` middleware, but the setup wizard runs before user login.
+- **Fix:** Removed authentication requirement from the setup completion endpoint since it runs before users can authenticate.
+
+**4. Plex Token Hint Incorrect (Fixed)**
+- **Issue:** The hint for finding the Plex token showed incorrect path: "Find your token in Plex settings → Network → "Show Advanced" → X-Plex-Token"
+- **Fix:** Updated to link to official Plex documentation: https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/
+
+**5. Prowlarr Indexer Selection Added (Feature)**
+- **Issue:** Users were unable to select which Prowlarr indexers to use - all indexers were used by default.
+- **Implementation:**
+  - Added indexer selection UI with checkboxes for each available indexer
+  - Added priority input (1-25) for each selected indexer
+  - Higher priority indexers are preferred when ranking search results
+  - Indexers with equal priority compete on a level playing field
+  - Auto-selects all indexers with default priority of 10 on successful connection
+  - Validates that at least one indexer is selected before proceeding
+  - Saves indexer configuration (id, name, priority) to database as JSON
 
 ## Future Enhancements
 

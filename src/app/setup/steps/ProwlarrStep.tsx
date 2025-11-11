@@ -12,9 +12,21 @@ import { Input } from '@/components/ui/Input';
 interface ProwlarrStepProps {
   prowlarrUrl: string;
   prowlarrApiKey: string;
-  onUpdate: (field: string, value: string) => void;
+  onUpdate: (field: string, value: any) => void;
   onNext: () => void;
   onBack: () => void;
+}
+
+interface IndexerInfo {
+  id: number;
+  name: string;
+  protocol: string;
+}
+
+interface SelectedIndexer {
+  id: number;
+  name: string;
+  priority: number;
 }
 
 export function ProwlarrStep({
@@ -30,6 +42,8 @@ export function ProwlarrStep({
     message: string;
     indexerCount?: number;
   } | null>(null);
+  const [availableIndexers, setAvailableIndexers] = useState<IndexerInfo[]>([]);
+  const [selectedIndexers, setSelectedIndexers] = useState<Record<number, SelectedIndexer>>({});
 
   const testConnection = async () => {
     setTesting(true);
@@ -50,6 +64,19 @@ export function ProwlarrStep({
           message: `Connected successfully! Found ${data.indexerCount || 0} configured indexers.`,
           indexerCount: data.indexerCount,
         });
+        setAvailableIndexers(data.indexers || []);
+
+        // Auto-select all indexers with default priority of 10
+        const autoSelected: Record<number, SelectedIndexer> = {};
+        data.indexers.forEach((indexer: IndexerInfo) => {
+          autoSelected[indexer.id] = {
+            id: indexer.id,
+            name: indexer.name,
+            priority: 10,
+          };
+        });
+        setSelectedIndexers(autoSelected);
+        onUpdate('prowlarrIndexers', Object.values(autoSelected));
       } else {
         setTestResult({
           success: false,
@@ -66,6 +93,37 @@ export function ProwlarrStep({
     }
   };
 
+  const toggleIndexer = (indexer: IndexerInfo) => {
+    setSelectedIndexers((prev) => {
+      const newSelected = { ...prev };
+      if (newSelected[indexer.id]) {
+        delete newSelected[indexer.id];
+      } else {
+        newSelected[indexer.id] = {
+          id: indexer.id,
+          name: indexer.name,
+          priority: 10, // Default priority
+        };
+      }
+      onUpdate('prowlarrIndexers', Object.values(newSelected));
+      return newSelected;
+    });
+  };
+
+  const updatePriority = (indexerId: number, priority: number) => {
+    setSelectedIndexers((prev) => {
+      const newSelected = { ...prev };
+      if (newSelected[indexerId]) {
+        newSelected[indexerId] = {
+          ...newSelected[indexerId],
+          priority: Math.max(1, Math.min(25, priority)), // Clamp between 1-25
+        };
+      }
+      onUpdate('prowlarrIndexers', Object.values(newSelected));
+      return newSelected;
+    });
+  };
+
   const handleNext = () => {
     if (!testResult?.success) {
       setTestResult({
@@ -75,10 +133,10 @@ export function ProwlarrStep({
       return;
     }
 
-    if (testResult.indexerCount === 0) {
+    if (Object.keys(selectedIndexers).length === 0) {
       setTestResult({
         success: false,
-        message: 'No indexers configured in Prowlarr. Please add at least one indexer.',
+        message: 'Please select at least one indexer',
       });
       return;
     }
@@ -193,6 +251,70 @@ export function ProwlarrStep({
             </div>
           </div>
         )}
+
+        {/* Indexer Selection */}
+        {availableIndexers.length > 0 && (
+          <div className="space-y-3">
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+              <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-3">
+                Select Indexers & Set Priorities (1-25)
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                Higher priority indexers (closer to 25) will be preferred when ranking search results.
+                Indexers with equal priority will compete on a level playing field.
+              </p>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {availableIndexers.map((indexer) => (
+                  <div
+                    key={indexer.id}
+                    className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                  >
+                    <input
+                      type="checkbox"
+                      id={`indexer-${indexer.id}`}
+                      checked={!!selectedIndexers[indexer.id]}
+                      onChange={() => toggleIndexer(indexer)}
+                      className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <label
+                      htmlFor={`indexer-${indexer.id}`}
+                      className="flex-1 text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer"
+                    >
+                      {indexer.name}
+                      <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
+                        ({indexer.protocol})
+                      </span>
+                    </label>
+                    {selectedIndexers[indexer.id] && (
+                      <div className="flex items-center gap-2">
+                        <label
+                          htmlFor={`priority-${indexer.id}`}
+                          className="text-xs text-gray-600 dark:text-gray-400"
+                        >
+                          Priority:
+                        </label>
+                        <input
+                          id={`priority-${indexer.id}`}
+                          type="number"
+                          min="1"
+                          max="25"
+                          value={selectedIndexers[indexer.id].priority}
+                          onChange={(e) =>
+                            updatePriority(indexer.id, parseInt(e.target.value) || 10)
+                          }
+                          className="w-16 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                        />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                Selected: {Object.keys(selectedIndexers).length} of {availableIndexers.length} indexers
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
@@ -210,11 +332,11 @@ export function ProwlarrStep({
           </svg>
           <div>
             <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
-              About Prowlarr
+              About Prowlarr Indexers
             </p>
             <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
-              Prowlarr is an indexer manager that allows you to search across multiple torrent indexers.
-              Make sure you have at least one indexer configured before proceeding.
+              Prowlarr searches across multiple torrent indexers. Select which indexers to use and assign priorities to control
+              how search results are ranked. Make sure you have at least one indexer configured in Prowlarr before proceeding.
             </p>
           </div>
         </div>
