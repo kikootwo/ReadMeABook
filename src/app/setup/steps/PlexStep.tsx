@@ -19,7 +19,7 @@ interface PlexStepProps {
 }
 
 interface PlexLibrary {
-  key: string;
+  id: string;
   title: string;
   type: string;
 }
@@ -216,7 +216,7 @@ export function PlexStep({
             >
               <option value="">Select a library...</option>
               {libraries.map((lib) => (
-                <option key={lib.key} value={lib.key}>
+                <option key={lib.id} value={lib.id}>
                   {lib.title} ({lib.type})
                 </option>
               ))}
