@@ -34,8 +34,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      serverName: connectionResult.info.friendlyName || 'Plex Server',
+      serverName: `${connectionResult.info.platform} ${connectionResult.info.version}`,
       version: connectionResult.info.version,
+      machineIdentifier: connectionResult.info.machineIdentifier,
       libraries: libraries.map((lib) => ({
         key: lib.key,
         title: lib.title,
