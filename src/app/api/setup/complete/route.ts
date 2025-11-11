@@ -1,0 +1,137 @@
+/**
+ * Component: Setup Wizard Complete API
+ * Documentation: documentation/setup-wizard.md
+ */
+
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/db';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+
+export async function POST(request: NextRequest) {
+  try {
+    // Verify user is authenticated
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const { plex, prowlarr, downloadClient, paths } = await request.json();
+
+    // Validate required fields
+    if (
+      !plex?.url ||
+      !plex?.token ||
+      !plex?.audiobook_library_id ||
+      !prowlarr?.url ||
+      !prowlarr?.api_key ||
+      !downloadClient?.type ||
+      !downloadClient?.url ||
+      !downloadClient?.username ||
+      !downloadClient?.password ||
+      !paths?.download_dir ||
+      !paths?.media_dir
+    ) {
+      return NextResponse.json(
+        { success: false, error: 'Missing required configuration fields' },
+        { status: 400 }
+      );
+    }
+
+    // Save configuration to database
+    // Use upsert to handle both initial setup and updates
+
+    // Plex configuration
+    await prisma.config.upsert({
+      where: { key: 'plex_url' },
+      update: { value: plex.url },
+      create: { key: 'plex_url', value: plex.url },
+    });
+
+    await prisma.config.upsert({
+      where: { key: 'plex_token' },
+      update: { value: plex.token },
+      create: { key: 'plex_token', value: plex.token },
+    });
+
+    await prisma.config.upsert({
+      where: { key: 'plex_audiobook_library_id' },
+      update: { value: plex.audiobook_library_id },
+      create: { key: 'plex_audiobook_library_id', value: plex.audiobook_library_id },
+    });
+
+    // Prowlarr configuration
+    await prisma.config.upsert({
+      where: { key: 'prowlarr_url' },
+      update: { value: prowlarr.url },
+      create: { key: 'prowlarr_url', value: prowlarr.url },
+    });
+
+    await prisma.config.upsert({
+      where: { key: 'prowlarr_api_key' },
+      update: { value: prowlarr.api_key },
+      create: { key: 'prowlarr_api_key', value: prowlarr.api_key },
+    });
+
+    // Download client configuration
+    await prisma.config.upsert({
+      where: { key: 'download_client_type' },
+      update: { value: downloadClient.type },
+      create: { key: 'download_client_type', value: downloadClient.type },
+    });
+
+    await prisma.config.upsert({
+      where: { key: 'download_client_url' },
+      update: { value: downloadClient.url },
+      create: { key: 'download_client_url', value: downloadClient.url },
+    });
+
+    await prisma.config.upsert({
+      where: { key: 'download_client_username' },
+      update: { value: downloadClient.username },
+      create: { key: 'download_client_username', value: downloadClient.username },
+    });
+
+    await prisma.config.upsert({
+      where: { key: 'download_client_password' },
+      update: { value: downloadClient.password },
+      create: { key: 'download_client_password', value: downloadClient.password },
+    });
+
+    // Path configuration
+    await prisma.config.upsert({
+      where: { key: 'download_dir' },
+      update: { value: paths.download_dir },
+      create: { key: 'download_dir', value: paths.download_dir },
+    });
+
+    await prisma.config.upsert({
+      where: { key: 'media_dir' },
+      update: { value: paths.media_dir },
+      create: { key: 'media_dir', value: paths.media_dir },
+    });
+
+    // Mark setup as complete
+    await prisma.config.upsert({
+      where: { key: 'setup_completed' },
+      update: { value: 'true' },
+      create: { key: 'setup_completed', value: 'true' },
+    });
+
+    console.log('[Setup] Configuration saved successfully');
+
+    return NextResponse.json({
+      success: true,
+      message: 'Setup completed successfully',
+    });
+  } catch (error) {
+    console.error('[Setup] Failed to save configuration:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to save configuration',
+      },
+      { status: 500 }
+    );
+  }
+}

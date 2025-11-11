@@ -374,6 +374,44 @@ export class QBittorrentService {
   }
 
   /**
+   * Static method to test connection with custom credentials (for setup wizard)
+   */
+  static async testConnectionWithCredentials(
+    url: string,
+    username: string,
+    password: string
+  ): Promise<string> {
+    const baseUrl = url.replace(/\/$/, '');
+
+    try {
+      const response = await axios.post(
+        `${baseUrl}/api/v2/auth/login`,
+        new URLSearchParams({ username, password }),
+        {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        }
+      );
+
+      // Get version to confirm connection
+      const cookies = response.headers['set-cookie'];
+      if (!cookies || cookies.length === 0) {
+        throw new Error('Failed to authenticate');
+      }
+
+      const cookie = cookies[0].split(';')[0];
+
+      const versionResponse = await axios.get(`${baseUrl}/api/v2/app/version`, {
+        headers: { Cookie: cookie },
+      });
+
+      return versionResponse.data || 'Connected';
+    } catch (error) {
+      console.error('qBittorrent connection test failed:', error);
+      throw new Error('Failed to connect to qBittorrent');
+    }
+  }
+
+  /**
    * Get download progress details
    */
   getDownloadProgress(torrent: TorrentInfo): DownloadProgress {
