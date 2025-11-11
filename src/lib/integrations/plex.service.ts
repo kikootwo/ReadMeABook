@@ -229,8 +229,6 @@ export class PlexService {
         }
       }
 
-      console.log('[Plex] Libraries response:', JSON.stringify(data, null, 2));
-
       const directories = data.Directory || [];
 
       const libraries = directories.map((dir: any) => ({
@@ -245,7 +243,6 @@ export class PlexService {
           : [],
       }));
 
-      console.log(`[Plex] Found ${libraries.length} libraries`);
       return libraries;
     } catch (error) {
       console.error('Failed to get Plex libraries:', error);

@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { WizardLayout } from './components/WizardLayout';
 import { WelcomeStep } from './steps/WelcomeStep';
+import { AdminAccountStep } from './steps/AdminAccountStep';
 import { PlexStep } from './steps/PlexStep';
 import { ProwlarrStep } from './steps/ProwlarrStep';
 import { DownloadClientStep } from './steps/DownloadClientStep';
@@ -23,6 +24,8 @@ interface SelectedIndexer {
 
 interface SetupState {
   currentStep: number;
+  adminUsername: string;
+  adminPassword: string;
   plexUrl: string;
   plexToken: string;
   plexLibraryId: string;
@@ -47,6 +50,8 @@ export default function SetupWizard() {
   const router = useRouter();
   const [state, setState] = useState<SetupState>({
     currentStep: 1,
+    adminUsername: 'admin',
+    adminPassword: '',
     plexUrl: '',
     plexToken: '',
     plexLibraryId: '',
@@ -70,7 +75,7 @@ export default function SetupWizard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const totalSteps = 6;
+  const totalSteps = 7;
 
   const updateState = (updates: Partial<SetupState>) => {
     setState((prev) => ({ ...prev, ...updates }));
@@ -94,6 +99,10 @@ export default function SetupWizard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          admin: {
+            username: state.adminUsername,
+            password: state.adminPassword,
+          },
           plex: {
             url: state.plexUrl,
             token: state.plexToken,
@@ -122,6 +131,15 @@ export default function SetupWizard() {
         throw new Error(data.message || 'Failed to complete setup');
       }
 
+      const data = await response.json();
+
+      // Store admin auth tokens
+      if (data.accessToken && data.refreshToken) {
+        localStorage.setItem('accessToken', data.accessToken);
+        localStorage.setItem('refreshToken', data.refreshToken);
+        localStorage.setItem('user', JSON.stringify(data.user));
+      }
+
       // Redirect to homepage after successful setup
       router.push('/');
     } catch (err) {
@@ -138,10 +156,9 @@ export default function SetupWizard() {
 
       case 2:
         return (
-          <PlexStep
-            plexUrl={state.plexUrl}
-            plexToken={state.plexToken}
-            plexLibraryId={state.plexLibraryId}
+          <AdminAccountStep
+            adminUsername={state.adminUsername}
+            adminPassword={state.adminPassword}
             onUpdate={updateField}
             onNext={() => goToStep(3)}
             onBack={() => goToStep(1)}
@@ -150,9 +167,10 @@ export default function SetupWizard() {
 
       case 3:
         return (
-          <ProwlarrStep
-            prowlarrUrl={state.prowlarrUrl}
-            prowlarrApiKey={state.prowlarrApiKey}
+          <PlexStep
+            plexUrl={state.plexUrl}
+            plexToken={state.plexToken}
+            plexLibraryId={state.plexLibraryId}
             onUpdate={updateField}
             onNext={() => goToStep(4)}
             onBack={() => goToStep(2)}
@@ -161,11 +179,9 @@ export default function SetupWizard() {
 
       case 4:
         return (
-          <DownloadClientStep
-            downloadClient={state.downloadClient}
-            downloadClientUrl={state.downloadClientUrl}
-            downloadClientUsername={state.downloadClientUsername}
-            downloadClientPassword={state.downloadClientPassword}
+          <ProwlarrStep
+            prowlarrUrl={state.prowlarrUrl}
+            prowlarrApiKey={state.prowlarrApiKey}
             onUpdate={updateField}
             onNext={() => goToStep(5)}
             onBack={() => goToStep(3)}
@@ -174,9 +190,11 @@ export default function SetupWizard() {
 
       case 5:
         return (
-          <PathsStep
-            downloadDir={state.downloadDir}
-            mediaDir={state.mediaDir}
+          <DownloadClientStep
+            downloadClient={state.downloadClient}
+            downloadClientUrl={state.downloadClientUrl}
+            downloadClientUsername={state.downloadClientUsername}
+            downloadClientPassword={state.downloadClientPassword}
             onUpdate={updateField}
             onNext={() => goToStep(6)}
             onBack={() => goToStep(4)}
@@ -185,12 +203,23 @@ export default function SetupWizard() {
 
       case 6:
         return (
+          <PathsStep
+            downloadDir={state.downloadDir}
+            mediaDir={state.mediaDir}
+            onUpdate={updateField}
+            onNext={() => goToStep(7)}
+            onBack={() => goToStep(5)}
+          />
+        );
+
+      case 7:
+        return (
           <ReviewStep
             config={state}
             loading={loading}
             error={error}
             onComplete={completeSetup}
-            onBack={() => goToStep(5)}
+            onBack={() => goToStep(6)}
           />
         );
 

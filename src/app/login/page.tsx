@@ -17,6 +17,9 @@ function LoginContent() {
 
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [adminUsername, setAdminUsername] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
 
   // Redirect if already logged in
   useEffect(() => {
@@ -26,7 +29,7 @@ function LoginContent() {
     }
   }, [user, authLoading, router, searchParams]);
 
-  const handleLogin = async () => {
+  const handlePlexLogin = async () => {
     setIsLoggingIn(true);
     setError(null);
 
@@ -66,6 +69,43 @@ function LoginContent() {
       router.push(redirect);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoggingIn(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/auth/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: adminUsername,
+          password: adminPassword,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Login failed');
+      }
+
+      // Store tokens
+      localStorage.setItem('accessToken', data.accessToken);
+      localStorage.setItem('refreshToken', data.refreshToken);
+      localStorage.setItem('user', JSON.stringify(data.user));
+
+      // Redirect to intended page or homepage
+      const redirect = searchParams.get('redirect') || '/';
+      router.push(redirect);
+      router.refresh(); // Force a refresh to update auth context
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Admin login failed. Please try again.');
     } finally {
       setIsLoggingIn(false);
     }
@@ -120,9 +160,9 @@ function LoginContent() {
               </div>
             )}
 
-            {/* Login button */}
+            {/* Plex Login button */}
             <Button
-              onClick={handleLogin}
+              onClick={handlePlexLogin}
               disabled={isLoggingIn}
               loading={isLoggingIn}
               className="w-full text-lg py-4 bg-orange-600 hover:bg-orange-700 text-white font-semibold"
@@ -134,6 +174,82 @@ function LoginContent() {
             <div className="mt-6 text-center text-sm text-gray-500">
               <p>You'll be redirected to Plex to authorize this application</p>
             </div>
+
+            {/* Divider */}
+            <div className="relative my-8">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-700"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-4 bg-gray-900/80 text-gray-400">or</span>
+              </div>
+            </div>
+
+            {/* Admin Login Toggle */}
+            <button
+              onClick={() => setShowAdminLogin(!showAdminLogin)}
+              className="w-full text-sm text-gray-400 hover:text-gray-300 transition-colors py-2 flex items-center justify-center gap-2"
+            >
+              {showAdminLogin ? (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                  </svg>
+                  Hide Admin Login
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                  Admin Login
+                </>
+              )}
+            </button>
+
+            {/* Admin Login Form */}
+            {showAdminLogin && (
+              <form onSubmit={handleAdminLogin} className="mt-6 space-y-4">
+                <div>
+                  <label htmlFor="admin-username" className="block text-sm font-medium text-gray-300 mb-2">
+                    Username
+                  </label>
+                  <input
+                    type="text"
+                    id="admin-username"
+                    value={adminUsername}
+                    onChange={(e) => setAdminUsername(e.target.value)}
+                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                    placeholder="admin"
+                    required
+                    autoComplete="username"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="admin-password" className="block text-sm font-medium text-gray-300 mb-2">
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    id="admin-password"
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                    placeholder="••••••••"
+                    required
+                    autoComplete="current-password"
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  disabled={isLoggingIn}
+                  loading={isLoggingIn}
+                  className="w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold"
+                >
+                  {isLoggingIn ? 'Logging in...' : 'Login as Admin'}
+                </Button>
+              </form>
+            )}
           </div>
 
           {/* Footer info */}

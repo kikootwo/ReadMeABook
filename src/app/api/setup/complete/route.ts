@@ -5,13 +5,17 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import bcrypt from 'bcrypt';
+import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
 
 export async function POST(request: NextRequest) {
   try {
-    const { plex, prowlarr, downloadClient, paths } = await request.json();
+    const { admin, plex, prowlarr, downloadClient, paths } = await request.json();
 
     // Validate required fields
     if (
+      !admin?.username ||
+      !admin?.password ||
       !plex?.url ||
       !plex?.token ||
       !plex?.audiobook_library_id ||
@@ -32,6 +36,20 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Create admin user
+    const hashedPassword = await bcrypt.hash(admin.password, 10);
+    const adminUser = await prisma.user.create({
+      data: {
+        plexId: `local-${admin.username}`,
+        plexUsername: admin.username,
+        plexEmail: null,
+        role: 'admin',
+        avatarUrl: null,
+        authToken: hashedPassword, // Store hashed password in authToken field for local users
+        lastLoginAt: new Date(),
+      },
+    });
 
     // Save configuration to database
     // Use upsert to handle both initial setup and updates
@@ -119,11 +137,31 @@ export async function POST(request: NextRequest) {
       create: { key: 'setup_completed', value: 'true' },
     });
 
+    // Generate JWT tokens for auto-login
+    const accessToken = generateAccessToken({
+      sub: adminUser.id,
+      plexId: adminUser.plexId,
+      username: adminUser.plexUsername,
+      role: adminUser.role,
+    });
+
+    const refreshToken = generateRefreshToken(adminUser.id);
+
     console.log('[Setup] Configuration saved successfully');
 
     return NextResponse.json({
       success: true,
       message: 'Setup completed successfully',
+      accessToken,
+      refreshToken,
+      user: {
+        id: adminUser.id,
+        plexId: adminUser.plexId,
+        username: adminUser.plexUsername,
+        email: adminUser.plexEmail,
+        role: adminUser.role,
+        avatarUrl: adminUser.avatarUrl,
+      },
     });
   } catch (error) {
     console.error('[Setup] Failed to save configuration:', error);
