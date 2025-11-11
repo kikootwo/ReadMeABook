@@ -44,7 +44,7 @@ services:
     container_name: readmeabook-app
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3030:3030"
     volumes:
       - ./config:/app/config
       - ./downloads:/downloads
@@ -62,7 +62,7 @@ services:
       REDIS_URL: redis://redis:6379
 
       # NextAuth Configuration
-      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_URL: http://localhost:3030
       NEXTAUTH_SECRET: CHANGE_THIS_TO_A_RANDOM_SECRET_MINIMUM_32_CHARS
 
       # Plex OAuth (Get from https://www.plex.tv/claim/)
@@ -76,12 +76,12 @@ services:
       LOG_LEVEL: info
 
       # Application Settings
-      PORT: 3000
+      PORT: 3030
       HOSTNAME: 0.0.0.0
     networks:
       - readmeabook-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3030/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3

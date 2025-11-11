@@ -23,8 +23,8 @@ fi
 echo ""
 
 echo "✨ Application ready - starting server..."
-echo "📍 Health check: http://localhost:3000/api/health"
-echo "🔧 Setup wizard: http://localhost:3000/setup"
+echo "📍 Health check: http://localhost:3030/api/health"
+echo "🔧 Setup wizard: http://localhost:3030/setup"
 echo ""
 
 # Execute the CMD
