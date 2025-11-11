@@ -234,14 +234,14 @@ export class PlexService {
       const directories = data.Directory || [];
 
       const libraries = directories.map((dir: any) => ({
-        id: (dir.key || dir.$.key || '').toString(),
-        title: dir.title || dir.$.title || 'Unknown Library',
-        type: dir.type || dir.$.type || 'unknown',
-        language: dir.language || dir.$.language || 'en',
-        scanner: dir.scanner || dir.$.scanner || '',
-        agent: dir.agent || dir.$.agent || '',
+        id: (dir.key || dir.$?.key || '').toString(),
+        title: dir.title || dir.$?.title || 'Unknown Library',
+        type: dir.type || dir.$?.type || 'unknown',
+        language: dir.language || dir.$?.language || 'en',
+        scanner: dir.scanner || dir.$?.scanner || '',
+        agent: dir.agent || dir.$?.agent || '',
         locations: Array.isArray(dir.Location)
-          ? dir.Location.map((loc: any) => loc.$.path || loc.path)
+          ? dir.Location.map((loc: any) => loc.path || loc.$?.path || '')
           : [],
       }));
 
