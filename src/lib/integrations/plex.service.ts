@@ -161,15 +161,26 @@ export class PlexService {
         },
       });
 
-      // Plex may return XML, try to parse it
       let data = response.data;
+
+      // Handle different response formats from Plex
       if (typeof data === 'string') {
+        // XML response - parse it
         const parsed = await parseStringPromise(data);
-        // XML structure: MediaContainer.$ contains attributes
+        // XML attributes are in MediaContainer.$
         data = parsed.MediaContainer && parsed.MediaContainer.$
           ? parsed.MediaContainer.$
           : parsed.MediaContainer || {};
+      } else if (data && typeof data === 'object') {
+        // JSON response - could be direct object or wrapped in MediaContainer
+        if (data.MediaContainer) {
+          // If wrapped, extract the MediaContainer object
+          data = data.MediaContainer;
+        }
+        // else data is already the right format
       }
+
+      console.log('[Plex] Identity response:', JSON.stringify(data, null, 2));
 
       const info: PlexServerInfo = {
         machineIdentifier: data.machineIdentifier || 'unknown',
@@ -204,19 +215,28 @@ export class PlexService {
         },
       });
 
-      // Handle XML response
       let data = response.data;
+
+      // Handle different response formats from Plex
       if (typeof data === 'string') {
+        // XML response - parse it
         const parsed = await parseStringPromise(data);
         data = parsed.MediaContainer;
+      } else if (data && typeof data === 'object') {
+        // JSON response - could be wrapped in MediaContainer
+        if (data.MediaContainer) {
+          data = data.MediaContainer;
+        }
       }
+
+      console.log('[Plex] Libraries response:', JSON.stringify(data, null, 2));
 
       const directories = data.Directory || [];
 
-      return directories.map((dir: any) => ({
-        id: dir.key || dir.$.key,
-        title: dir.title || dir.$.title,
-        type: dir.type || dir.$.type,
+      const libraries = directories.map((dir: any) => ({
+        id: (dir.key || dir.$.key || '').toString(),
+        title: dir.title || dir.$.title || 'Unknown Library',
+        type: dir.type || dir.$.type || 'unknown',
         language: dir.language || dir.$.language || 'en',
         scanner: dir.scanner || dir.$.scanner || '',
         agent: dir.agent || dir.$.agent || '',
@@ -224,6 +244,9 @@ export class PlexService {
           ? dir.Location.map((loc: any) => loc.$.path || loc.path)
           : [],
       }));
+
+      console.log(`[Plex] Found ${libraries.length} libraries`);
+      return libraries;
     } catch (error) {
       console.error('Failed to get Plex libraries:', error);
       throw new Error('Failed to retrieve libraries from Plex server');
