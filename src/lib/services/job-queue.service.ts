@@ -72,7 +72,6 @@ export interface QueueStats {
   completed: number;
   failed: number;
   delayed: number;
-  paused: number;
 }
 
 export class JobQueueService {
@@ -408,7 +407,6 @@ export class JobQueueService {
       completed: counts.completed || 0,
       failed: counts.failed || 0,
       delayed: counts.delayed || 0,
-      paused: counts.paused || 0,
     };
   }
 

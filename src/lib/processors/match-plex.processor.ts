@@ -23,12 +23,12 @@ export async function processMatchPlex(payload: MatchPlexPayload): Promise<any> 
     const configService = getConfigService();
     const plexConfig = await configService.getPlexConfig();
 
-    if (!plexConfig.url || !plexConfig.token) {
+    if (!plexConfig.serverUrl || !plexConfig.authToken) {
       throw new Error('Plex is not configured');
     }
 
     // Get audiobook library ID
-    const libraryId = plexConfig.audiobook_library_id;
+    const libraryId = plexConfig.libraryId;
     if (!libraryId) {
       throw new Error('Plex audiobook library not configured');
     }
@@ -36,8 +36,8 @@ export async function processMatchPlex(payload: MatchPlexPayload): Promise<any> 
     // Search Plex library
     const plexService = getPlexService();
     const searchResults = await plexService.searchLibrary(
-      plexConfig.url,
-      plexConfig.token,
+      plexConfig.serverUrl,
+      plexConfig.authToken,
       libraryId,
       title
     );
@@ -101,7 +101,6 @@ export async function processMatchPlex(payload: MatchPlexPayload): Promise<any> 
         where: { id: audiobookId },
         data: {
           plexGuid: bestMatch.item.guid,
-          plexRatingKey: bestMatch.item.ratingKey,
           availableAt: new Date(),
           updatedAt: new Date(),
         },

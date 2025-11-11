@@ -109,7 +109,7 @@ export default function SearchPage() {
             {/* Results Grid */}
             <AudiobookGrid
               audiobooks={results}
-              isLoading={isLoading && page === 1}
+              isLoading={!!(isLoading && page === 1)}
               emptyMessage={`No results found for "${debouncedQuery}"`}
             />
 
