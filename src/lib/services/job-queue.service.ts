@@ -6,9 +6,11 @@
 import Queue, { Job as BullJob, JobOptions } from 'bull';
 import Redis from 'ioredis';
 import { prisma } from '../db';
+import { TorrentResult } from '../utils/ranking-algorithm';
 
 export type JobType =
   | 'search_indexers'
+  | 'download_torrent'
   | 'monitor_download'
   | 'organize_files'
   | 'scan_plex'
@@ -25,6 +27,16 @@ export interface SearchIndexersPayload {
     title: string;
     author: string;
   };
+}
+
+export interface DownloadTorrentPayload {
+  requestId: string;
+  audiobook: {
+    id: string;
+    title: string;
+    author: string;
+  };
+  torrent: TorrentResult;
 }
 
 export interface MonitorDownloadPayload {
@@ -141,6 +153,12 @@ export class JobQueueService {
       return await processSearchIndexers(job.data);
     });
 
+    // Download torrent processor
+    this.queue.process('download_torrent', 3, async (job: BullJob<DownloadTorrentPayload>) => {
+      const { processDownloadTorrent } = await import('../processors/download-torrent.processor');
+      return await processDownloadTorrent(job.data);
+    });
+
     // Monitor download processor
     this.queue.process('monitor_download', 5, async (job: BullJob<MonitorDownloadPayload>) => {
       const { processMonitorDownload } = await import('../processors/monitor-download.processor');
@@ -249,6 +267,27 @@ export class JobQueueService {
       } as SearchIndexersPayload,
       {
         priority: 10, // High priority for user-initiated requests
+      }
+    );
+  }
+
+  /**
+   * Add download torrent job
+   */
+  async addDownloadJob(
+    requestId: string,
+    audiobook: { id: string; title: string; author: string },
+    torrent: TorrentResult
+  ): Promise<string> {
+    return await this.addJob(
+      'download_torrent',
+      {
+        requestId,
+        audiobook,
+        torrent,
+      } as DownloadTorrentPayload,
+      {
+        priority: 9, // High priority - download selected torrent
       }
     );
   }
