@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     const configMap = new Map(configs.map((c) => [c.key, c.value]));
 
     // Mask sensitive values
-    const maskValue = (key: string, value: string | undefined) => {
+    const maskValue = (key: string, value: string | null | undefined) => {
       const sensitiveKeys = ['token', 'api_key', 'password'];
       if (value && sensitiveKeys.some((k) => key.includes(k))) {
         return '••••••••••••';
