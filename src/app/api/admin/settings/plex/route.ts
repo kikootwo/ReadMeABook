@@ -21,7 +21,7 @@ export async function PUT(request: NextRequest) {
     }
 
     // Update configuration
-    await prisma.config.upsert({
+    await prisma.configuration.upsert({
       where: { key: 'plex_url' },
       update: { value: url },
       create: { key: 'plex_url', value: url },
@@ -29,14 +29,14 @@ export async function PUT(request: NextRequest) {
 
     // Only update token if it's not the masked value
     if (!token.startsWith('••••')) {
-      await prisma.config.upsert({
+      await prisma.configuration.upsert({
         where: { key: 'plex_token' },
         update: { value: token },
         create: { key: 'plex_token', value: token },
       });
     }
 
-    await prisma.config.upsert({
+    await prisma.configuration.upsert({
       where: { key: 'plex_audiobook_library_id' },
       update: { value: libraryId },
       create: { key: 'plex_audiobook_library_id', value: libraryId },

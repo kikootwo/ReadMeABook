@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
         user: {
           select: {
             id: true,
-            name: true,
+            plexUsername: true,
           },
         },
         downloadHistory: {
@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
       progress: download.progress,
       speed: download.downloadHistory[0]?.downloadSpeed || 0,
       eta: download.downloadHistory[0]?.eta || null,
-      user: download.user.name,
+      user: download.user.plexUsername,
       startedAt: download.updatedAt,
     }));
 

@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     return requireAdmin(req, async () => {
       try {
         // Fetch all configuration
-    const configs = await prisma.config.findMany();
+    const configs = await prisma.configuration.findMany();
     const configMap = new Map(configs.map((c) => [c.key, c.value]));
 
     // Mask sensitive values

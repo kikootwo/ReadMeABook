@@ -312,6 +312,26 @@ docker compose exec -T postgres psql -U readmeabook readmeabook < backup.sql
 
 **Note:** This is a temporary workaround until Turbopack fully supports server-only package externalization.
 
+### TypeScript compilation errors during build
+
+**Error:** `Type error: Object literal may only specify known properties, and 'name' does not exist in type 'UserSelect<DefaultArgs>'`
+
+**Cause:** The Prisma User model uses `plexUsername` field, not `name`. Also, the Configuration model was being accessed as `config` instead of `configuration`.
+
+**Solutions Applied:**
+1. **User Model**: Changed all references from `user.name` to `user.plexUsername` in:
+   - `src/app/api/admin/downloads/active/route.ts`
+   - `src/app/api/admin/requests/recent/route.ts`
+
+2. **Configuration Model**: Changed all references from `prisma.config` to `prisma.configuration` in:
+   - `src/app/api/admin/settings/plex/route.ts` (3 occurrences)
+   - `src/app/api/admin/settings/route.ts` (1 occurrence)
+   - `src/app/api/setup/complete/route.ts` (12 occurrences)
+
+3. **Next.js Config**: Removed deprecated `experimental.serverComponentsExternalPackages` from `next.config.ts` - this option has been moved to top-level `serverExternalPackages` in Next.js 16.
+
+**Note:** Always check the Prisma schema (`prisma/schema.prisma`) for correct field names when getting TypeScript errors.
+
 ### Application won't start
 
 ```bash

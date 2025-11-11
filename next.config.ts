@@ -11,12 +11,6 @@ const nextConfig: NextConfig = {
   // Bull uses child processes and is incompatible with client bundling
   serverExternalPackages: ['bull'],
 
-  // Experimental features
-  experimental: {
-    // Also mark Bull as external in experimental config for Turbopack compatibility
-    serverComponentsExternalPackages: ['bull'],
-  },
-
   // Webpack configuration for when not using Turbopack
   webpack: (config, { isServer }) => {
     if (!isServer) {

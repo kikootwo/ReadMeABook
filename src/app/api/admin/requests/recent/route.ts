@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
         user: {
           select: {
             id: true,
-            name: true,
+            plexUsername: true,
           },
         },
       },
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
       title: request.audiobook.title,
       author: request.audiobook.author,
       status: request.status,
-      user: request.user.name,
+      user: request.user.plexUsername,
       createdAt: request.createdAt,
       completedAt: request.completedAt,
       errorMessage: request.errorMessage,

@@ -36,77 +36,77 @@ export async function POST(request: NextRequest) {
     // Use upsert to handle both initial setup and updates
 
     // Plex configuration
-    await prisma.config.upsert({
+    await prisma.configuration.upsert({
       where: { key: 'plex_url' },
       update: { value: plex.url },
       create: { key: 'plex_url', value: plex.url },
     });
 
-    await prisma.config.upsert({
+    await prisma.configuration.upsert({
       where: { key: 'plex_token' },
       update: { value: plex.token },
       create: { key: 'plex_token', value: plex.token },
     });
 
-    await prisma.config.upsert({
+    await prisma.configuration.upsert({
       where: { key: 'plex_audiobook_library_id' },
       update: { value: plex.audiobook_library_id },
       create: { key: 'plex_audiobook_library_id', value: plex.audiobook_library_id },
     });
 
     // Prowlarr configuration
-    await prisma.config.upsert({
+    await prisma.configuration.upsert({
       where: { key: 'prowlarr_url' },
       update: { value: prowlarr.url },
       create: { key: 'prowlarr_url', value: prowlarr.url },
     });
 
-    await prisma.config.upsert({
+    await prisma.configuration.upsert({
       where: { key: 'prowlarr_api_key' },
       update: { value: prowlarr.api_key },
       create: { key: 'prowlarr_api_key', value: prowlarr.api_key },
     });
 
     // Download client configuration
-    await prisma.config.upsert({
+    await prisma.configuration.upsert({
       where: { key: 'download_client_type' },
       update: { value: downloadClient.type },
       create: { key: 'download_client_type', value: downloadClient.type },
     });
 
-    await prisma.config.upsert({
+    await prisma.configuration.upsert({
       where: { key: 'download_client_url' },
       update: { value: downloadClient.url },
       create: { key: 'download_client_url', value: downloadClient.url },
     });
 
-    await prisma.config.upsert({
+    await prisma.configuration.upsert({
       where: { key: 'download_client_username' },
       update: { value: downloadClient.username },
       create: { key: 'download_client_username', value: downloadClient.username },
     });
 
-    await prisma.config.upsert({
+    await prisma.configuration.upsert({
       where: { key: 'download_client_password' },
       update: { value: downloadClient.password },
       create: { key: 'download_client_password', value: downloadClient.password },
     });
 
     // Path configuration
-    await prisma.config.upsert({
+    await prisma.configuration.upsert({
       where: { key: 'download_dir' },
       update: { value: paths.download_dir },
       create: { key: 'download_dir', value: paths.download_dir },
     });
 
-    await prisma.config.upsert({
+    await prisma.configuration.upsert({
       where: { key: 'media_dir' },
       update: { value: paths.media_dir },
       create: { key: 'media_dir', value: paths.media_dir },
     });
 
     // Mark setup as complete
-    await prisma.config.upsert({
+    await prisma.configuration.upsert({
       where: { key: 'setup_completed' },
       update: { value: 'true' },
       create: { key: 'setup_completed', value: 'true' },
