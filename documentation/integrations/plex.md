@@ -492,7 +492,21 @@ console.log('Authenticated as:', user.username);
 
 ## Known Issues
 
-*This section will be updated during implementation.*
+### Fixed Issues ✅
+
+**1. XML Parsing for Server Identity (Fixed)**
+- **Issue:** Server info (platform, version) returned as undefined from testConnection
+- **Root Cause:** Plex /identity endpoint returns XML with attributes in `MediaContainer.$`, not directly in `MediaContainer`
+- **Fix:** Updated testConnection method to properly extract attributes from parsed XML:
+  ```typescript
+  // Before: data = parsed.MediaContainer
+  // After: data = parsed.MediaContainer && parsed.MediaContainer.$
+  //              ? parsed.MediaContainer.$
+  //              : parsed.MediaContainer || {}
+  ```
+- **Additional Fix:** Added fallback values (`'unknown'`, `'Plex Server'`) to prevent undefined in responses
+
+### Current Issues
 
 **Potential Issues:**
 - Plex's audiobook support is limited (uses music library)

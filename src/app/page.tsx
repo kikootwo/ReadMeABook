@@ -8,14 +8,16 @@
 import { Header } from '@/components/layout/Header';
 import { AudiobookGrid } from '@/components/audiobooks/AudiobookGrid';
 import { useAudiobooks } from '@/lib/hooks/useAudiobooks';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 
 export default function HomePage() {
   const { audiobooks: popular, isLoading: loadingPopular } = useAudiobooks('popular', 20);
   const { audiobooks: newReleases, isLoading: loadingNewReleases } = useAudiobooks('new-releases', 20);
 
   return (
-    <div className="min-h-screen">
-      <Header />
+    <ProtectedRoute>
+      <div className="min-h-screen">
+        <Header />
 
       <main className="container mx-auto px-4 py-8 max-w-7xl space-y-12">
         {/* Hero Section */}
@@ -103,6 +105,7 @@ export default function HomePage() {
           </div>
         </div>
       </footer>
-    </div>
+      </div>
+    </ProtectedRoute>
   );
 }

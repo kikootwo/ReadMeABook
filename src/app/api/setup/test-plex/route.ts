@@ -32,11 +32,16 @@ export async function POST(request: NextRequest) {
     // Get libraries
     const libraries = await plexService.getLibraries(url, token);
 
+    // Format server name safely
+    const serverName = connectionResult.info
+      ? `${connectionResult.info.platform || 'Plex Server'} v${connectionResult.info.version || 'Unknown'}`
+      : 'Plex Server';
+
     return NextResponse.json({
       success: true,
-      serverName: `${connectionResult.info.platform} ${connectionResult.info.version}`,
-      version: connectionResult.info.version,
-      machineIdentifier: connectionResult.info.machineIdentifier,
+      serverName,
+      version: connectionResult.info?.version || 'Unknown',
+      machineIdentifier: connectionResult.info?.machineIdentifier || 'unknown',
       libraries: libraries.map((lib) => ({
         id: lib.id,
         title: lib.title,

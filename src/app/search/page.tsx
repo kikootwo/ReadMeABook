@@ -9,6 +9,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Header } from '@/components/layout/Header';
 import { AudiobookGrid } from '@/components/audiobooks/AudiobookGrid';
 import { useSearch } from '@/lib/hooks/useAudiobooks';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 
 export default function SearchPage() {
   const [query, setQuery] = useState('');
@@ -37,8 +38,9 @@ export default function SearchPage() {
   }, []);
 
   return (
-    <div className="min-h-screen">
-      <Header />
+    <ProtectedRoute>
+      <div className="min-h-screen">
+        <Header />
 
       <main className="container mx-auto px-4 py-8 max-w-7xl space-y-8">
         {/* Search Header */}
@@ -157,6 +159,7 @@ export default function SearchPage() {
           </div>
         )}
       </main>
-    </div>
+      </div>
+    </ProtectedRoute>
   );
 }

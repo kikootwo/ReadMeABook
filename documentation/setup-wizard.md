@@ -241,7 +241,16 @@ async function completeSetup() {
 
 ## Known Issues
 
-*This section will be updated during implementation.*
+### Fixed Issues ✅
+
+**1. Plex Server Info Parsing (Fixed)**
+- **Issue:** Success message showed "Connected to undefined undefined successfully!"
+- **Root Cause:** Plex `/identity` endpoint returns XML by default, not JSON. The XML parsing wasn't correctly extracting server info attributes.
+- **Fix:** Updated `testConnection` method in `plex.service.ts` to properly parse XML attributes from `MediaContainer.$` object. Added fallback values to prevent undefined values in success message.
+
+**2. Library Selection Display**
+- **Issue:** Library selection dropdown appears correctly after successful connection test
+- **Implementation:** Dropdown is conditionally rendered when `libraries.length > 0` and properly maps library data from the test connection response.
 
 ## Future Enhancements
 

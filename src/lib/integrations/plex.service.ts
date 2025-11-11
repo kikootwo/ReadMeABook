@@ -165,19 +165,22 @@ export class PlexService {
       let data = response.data;
       if (typeof data === 'string') {
         const parsed = await parseStringPromise(data);
-        data = parsed.MediaContainer ? parsed.MediaContainer.$ : {};
+        // XML structure: MediaContainer.$ contains attributes
+        data = parsed.MediaContainer && parsed.MediaContainer.$
+          ? parsed.MediaContainer.$
+          : parsed.MediaContainer || {};
       }
 
       const info: PlexServerInfo = {
-        machineIdentifier: data.machineIdentifier,
-        version: data.version,
-        platform: data.platform,
+        machineIdentifier: data.machineIdentifier || 'unknown',
+        version: data.version || 'unknown',
+        platform: data.platform || 'Plex Server',
         platformVersion: data.platformVersion,
       };
 
       return {
         success: true,
-        message: `Connected to Plex server (${info.platform} ${info.version})`,
+        message: `Connected to Plex server (${info.platform} v${info.version})`,
         info,
       };
     } catch (error) {
