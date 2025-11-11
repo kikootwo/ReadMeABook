@@ -73,11 +73,13 @@ COPY --from=builder /app/.next/static ./.next/static
 # Copy Prisma schema
 COPY --from=builder /app/prisma ./prisma
 
+# Copy Prisma generated client from builder (custom output path)
+COPY --from=builder /app/src/generated/prisma ./src/generated/prisma
+
 # Copy production node_modules from deps stage (includes all runtime dependencies)
 COPY --from=deps /app/node_modules ./node_modules
 
-# Copy Prisma generated client from builder
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+# Copy Prisma dependencies from builder
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
 # Create directories for volumes and set ownership only for writable directories
@@ -95,4 +97,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:3030/api/health || exit 1
 
 # Run migrations and start server
-CMD sh -c 'echo "🚀 Starting ReadMeABook..." && ./node_modules/.bin/prisma migrate deploy && ./node_modules/.bin/prisma generate && echo "✨ Starting server on port 3030..." && node server.js'
+CMD sh -c 'echo "🚀 Starting ReadMeABook..." && ./node_modules/.bin/prisma migrate deploy && echo "✨ Starting server on port 3030..." && node server.js'
