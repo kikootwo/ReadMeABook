@@ -1,0 +1,177 @@
+/**
+ * ReadMeABook Database Schema
+ * Documentation: documentation/backend/database.md
+ */
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// MODELS
+// ============================================================================
+
+model User {
+  id            String    @id @default(uuid())
+  plexId        String    @unique @map("plex_id")
+  plexUsername  String    @map("plex_username")
+  plexEmail     String?   @map("plex_email")
+  role          String    @default("user") // 'user' or 'admin'
+  avatarUrl     String?   @map("avatar_url")
+  authToken     String?   @map("auth_token") // Encrypted
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  lastLoginAt   DateTime? @map("last_login_at")
+
+  // Relations
+  requests Request[]
+
+  @@index([plexId])
+  @@index([role])
+  @@map("users")
+}
+
+model Audiobook {
+  id                 String    @id @default(uuid())
+  audibleId          String?   @unique @map("audible_id")
+  title              String
+  author             String
+  narrator           String?
+  description        String?   @db.Text
+  coverArtUrl        String?   @map("cover_art_url") @db.Text
+  durationMinutes    Int?      @map("duration_minutes")
+  releaseDate        DateTime? @map("release_date") @db.Date
+  rating             Decimal?  @db.Decimal(3, 2)
+  genres             Json      @default("[]")
+  plexGuid           String?   @unique @map("plex_guid")
+  plexLibraryId      String?   @map("plex_library_id")
+  filePath           String?   @map("file_path") @db.Text
+  fileFormat         String?   @map("file_format") // m4b, m4a, mp3
+  fileSizeBytes      BigInt?   @map("file_size_bytes")
+  availabilityStatus String    @default("unknown") @map("availability_status")
+  // Status values: unknown, requested, downloading, processing, available, failed
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  availableAt        DateTime? @map("available_at")
+
+  // Relations
+  requests Request[]
+
+  @@index([audibleId])
+  @@index([plexGuid])
+  @@index([title])
+  @@index([author])
+  @@index([availabilityStatus])
+  @@map("audiobooks")
+}
+
+model Request {
+  id               String    @id @default(uuid())
+  userId           String    @map("user_id")
+  audiobookId      String    @map("audiobook_id")
+  status           String    @default("pending")
+  // Status values: pending, searching, downloading, processing, completed, failed, cancelled
+  progress         Int       @default(0) // 0-100
+  priority         Int       @default(0)
+  errorMessage     String?   @map("error_message") @db.Text
+  searchAttempts   Int       @default(0) @map("search_attempts")
+  downloadAttempts Int       @default(0) @map("download_attempts")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  completedAt      DateTime? @map("completed_at")
+
+  // Relations
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  audiobook        Audiobook          @relation(fields: [audiobookId], references: [id], onDelete: Cascade)
+  downloadHistory  DownloadHistory[]
+  jobs             Job[]
+
+  @@unique([userId, audiobookId])
+  @@index([userId])
+  @@index([audiobookId])
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@map("requests")
+}
+
+model DownloadHistory {
+  id               String    @id @default(uuid())
+  requestId        String    @map("request_id")
+  indexerName      String    @map("indexer_name")
+  torrentName      String?   @map("torrent_name")
+  torrentHash      String?   @map("torrent_hash")
+  torrentSizeBytes BigInt?   @map("torrent_size_bytes")
+  magnetLink       String?   @map("magnet_link") @db.Text
+  torrentUrl       String?   @map("torrent_url") @db.Text
+  seeders          Int?
+  leechers         Int?
+  qualityScore     Int?      @map("quality_score")
+  selected         Boolean   @default(false)
+  downloadClient   String?   @map("download_client") // qbittorrent, transmission
+  downloadClientId String?   @map("download_client_id")
+  downloadStatus   String?   @map("download_status")
+  // Status values: queued, downloading, completed, failed, stalled
+  downloadError    String?   @map("download_error") @db.Text
+  startedAt        DateTime? @map("started_at")
+  completedAt      DateTime? @map("completed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  request Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@index([selected])
+  @@index([createdAt(sort: Desc)])
+  @@map("download_history")
+}
+
+model Configuration {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String?  @db.Text
+  encrypted   Boolean  @default(false)
+  category    String? // plex, indexer, download_client, system, automation
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([key])
+  @@index([category])
+  @@map("configuration")
+}
+
+model Job {
+  id          String    @id @default(uuid())
+  bullJobId   String?   @map("bull_job_id")
+  requestId   String?   @map("request_id")
+  type        String
+  // Job types: search_indexers, monitor_download, organize_files, scan_plex, match_plex
+  status      String    @default("pending")
+  // Status values: pending, active, completed, failed, delayed, stuck
+  priority    Int       @default(0)
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3) @map("max_attempts")
+  payload     Json?
+  result      Json?
+  errorMessage String?   @map("error_message") @db.Text
+  stackTrace  String?   @map("stack_trace") @db.Text
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  request Request? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+
+  @@index([requestId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@map("jobs")
+}
