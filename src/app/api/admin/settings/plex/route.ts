@@ -4,28 +4,14 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 
 export async function PUT(request: NextRequest) {
-  try {
-    // Verify user is authenticated and is admin
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { role: true },
-    });
-
-    if (user?.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-
-    const { url, token, libraryId } = await request.json();
+  return requireAuth(request, async (req: AuthenticatedRequest) => {
+    return requireAdmin(req, async () => {
+      try {
+        const { url, token, libraryId } = await request.json();
 
     if (!url || !token || !libraryId) {
       return NextResponse.json(
@@ -62,14 +48,16 @@ export async function PUT(request: NextRequest) {
       success: true,
       message: 'Plex settings updated successfully',
     });
-  } catch (error) {
-    console.error('[Admin] Failed to update Plex settings:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to update settings',
-      },
-      { status: 500 }
-    );
-  }
+      } catch (error) {
+        console.error('[Admin] Failed to update Plex settings:', error);
+        return NextResponse.json(
+          {
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to update settings',
+          },
+          { status: 500 }
+        );
+      }
+    });
+  });
 }

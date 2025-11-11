@@ -5,18 +5,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 
 export async function POST(request: NextRequest) {
-  try {
-    // Verify user is authenticated
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.id) {
-      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const { plex, prowlarr, downloadClient, paths } = await request.json();
+  return requireAuth(request, async (req: AuthenticatedRequest) => {
+    try {
+      const { plex, prowlarr, downloadClient, paths } = await request.json();
 
     // Validate required fields
     if (
@@ -124,14 +118,15 @@ export async function POST(request: NextRequest) {
       success: true,
       message: 'Setup completed successfully',
     });
-  } catch (error) {
-    console.error('[Setup] Failed to save configuration:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to save configuration',
-      },
-      { status: 500 }
-    );
-  }
+    } catch (error) {
+      console.error('[Setup] Failed to save configuration:', error);
+      return NextResponse.json(
+        {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to save configuration',
+        },
+        { status: 500 }
+      );
+    }
+  });
 }

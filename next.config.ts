@@ -7,6 +7,10 @@ const nextConfig: NextConfig = {
   // Optimize for production
   reactStrictMode: true,
 
+  // Externalize packages that should only run on the server
+  // Bull uses child processes and is incompatible with the Edge Runtime
+  serverComponentsExternalPackages: ['bull'],
+
   // Image optimization
   images: {
     remotePatterns: [

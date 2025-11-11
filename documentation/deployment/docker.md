@@ -279,6 +279,27 @@ docker compose exec -T postgres psql -U readmeabook readmeabook < backup.sql
 
 **Note:** Prisma generate doesn't actually connect to the database - it only needs the URL format to be valid.
 
+### Next.js build errors with missing modules
+
+**Error:** `Module not found: Can't resolve 'next-auth'` or `Module not found: Can't resolve '@/components/ui/Input'`
+
+**Cause:** Missing dependencies or components in the codebase.
+
+**Solutions Applied:**
+1. **Input Component**: Created `/src/components/ui/Input.tsx` component for form inputs
+2. **Authentication**: Replaced next-auth references with custom JWT authentication middleware (`requireAuth`, `requireAdmin`)
+3. **Bull Queue Library**: Added `serverComponentsExternalPackages: ['bull']` to `next.config.ts` to prevent bundling server-only packages
+
+**Note:** The project uses custom JWT authentication with Plex OAuth, not NextAuth.
+
+### Bull queue library build errors
+
+**Error:** `Module not found: Can't resolve './ROOT/node_modules/bull/lib/process/master.js'`
+
+**Cause:** Bull uses Node.js child processes which are incompatible with Next.js client-side bundling.
+
+**Solution:** The `next.config.ts` now includes `serverComponentsExternalPackages: ['bull']` to exclude it from client bundles. Bull only runs on the server-side API routes.
+
 ### Application won't start
 
 ```bash
