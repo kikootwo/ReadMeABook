@@ -79,10 +79,6 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 
-# Copy entrypoint script and make it executable
-COPY --from=builder /app/docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
-
 # Create directories for volumes
 RUN mkdir -p /app/config /downloads /media && \
     chown -R nextjs:nodejs /app /downloads /media
@@ -97,6 +93,5 @@ EXPOSE 3030
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:3030/api/health || exit 1
 
-# Use entrypoint script
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
-CMD ["node", "server.js"]
+# Run migrations and start server
+CMD sh -c 'echo "🚀 Starting ReadMeABook..." && npx prisma migrate deploy && npx prisma generate && echo "✨ Starting server on port 3030..." && node server.js'

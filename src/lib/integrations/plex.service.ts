@@ -144,7 +144,7 @@ export class PlexService {
    */
   getOAuthUrl(pinCode: string): string {
     const callbackUrl = encodeURIComponent(
-      process.env.PLEX_OAUTH_CALLBACK_URL || 'http://localhost:3000/api/auth/plex/callback'
+      process.env.PLEX_OAUTH_CALLBACK_URL || 'http://localhost:3030/api/auth/plex/callback'
     );
     return `https://app.plex.tv/auth#?clientID=${PLEX_CLIENT_IDENTIFIER}&code=${pinCode}&context[device][product]=${PLEX_PRODUCT_NAME}&forwardUrl=${callbackUrl}`;
   }
