@@ -32,15 +32,15 @@ export async function GET(request: NextRequest) {
         },
         downloadHistory: {
           where: {
-            status: 'downloading',
+            downloadStatus: 'downloading',
           },
           orderBy: {
             createdAt: 'desc',
           },
           take: 1,
           select: {
-            downloadSpeed: true,
-            eta: true,
+            downloadStatus: true,
+            torrentName: true,
           },
         },
       },
@@ -55,9 +55,10 @@ export async function GET(request: NextRequest) {
       requestId: download.id,
       title: download.audiobook.title,
       author: download.audiobook.author,
+      status: download.status,
       progress: download.progress,
-      speed: download.downloadHistory[0]?.downloadSpeed || 0,
-      eta: download.downloadHistory[0]?.eta || null,
+      torrentName: download.downloadHistory[0]?.torrentName || null,
+      downloadStatus: download.downloadHistory[0]?.downloadStatus || null,
       user: download.user.plexUsername,
       startedAt: download.updatedAt,
     }));

@@ -51,15 +51,17 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
     const downloadHistory = await prisma.downloadHistory.create({
       data: {
         requestId,
-        audiobookId: audiobook.id,
+        indexerName: torrent.indexer,
         downloadClient: 'qbittorrent',
         downloadClientId: torrentHash,
         torrentName: torrent.title,
         torrentHash: torrent.infoHash || torrentHash,
-        size: torrent.size,
+        torrentSizeBytes: torrent.size,
         seeders: torrent.seeders,
-        status: 'downloading',
-        progress: 0,
+        leechers: torrent.leechers || 0,
+        downloadStatus: 'downloading',
+        selected: true,
+        startedAt: new Date(),
       },
     });
 

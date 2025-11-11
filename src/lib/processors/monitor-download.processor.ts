@@ -44,11 +44,7 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
     await prisma.downloadHistory.update({
       where: { id: downloadHistoryId },
       data: {
-        progress: progress.percent,
-        status: progress.state,
-        downloadSpeed: progress.speed,
-        eta: progress.eta > 0 ? progress.eta : null,
-        updatedAt: new Date(),
+        downloadStatus: progress.state,
       },
     });
 
@@ -67,30 +63,30 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
       await prisma.downloadHistory.update({
         where: { id: downloadHistoryId },
         data: {
-          status: 'completed',
+          downloadStatus: 'completed',
           completedAt: new Date(),
         },
       });
 
-      // Get audiobook details
-      const downloadHistory = await prisma.downloadHistory.findUnique({
-        where: { id: downloadHistoryId },
+      // Get request with audiobook details
+      const request = await prisma.request.findUnique({
+        where: { id: requestId },
         include: {
           audiobook: true,
         },
       });
 
-      if (!downloadHistory || !downloadHistory.audiobook) {
-        throw new Error('Download history or audiobook not found');
+      if (!request || !request.audiobook) {
+        throw new Error('Request or audiobook not found');
       }
 
       // Trigger organize files job
       const jobQueue = getJobQueueService();
       await jobQueue.addOrganizeJob(
         requestId,
-        downloadHistory.audiobookId,
+        request.audiobook.id,
         `${downloadPath}/${torrent.name}`,
-        `/media/audiobooks/${downloadHistory.audiobook.author}/${downloadHistory.audiobook.title}`
+        `/media/audiobooks/${request.audiobook.author}/${request.audiobook.title}`
       );
 
       console.log(`[MonitorDownload] Triggered organize_files job for request ${requestId}`);
@@ -120,8 +116,8 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
       await prisma.downloadHistory.update({
         where: { id: downloadHistoryId },
         data: {
-          status: 'failed',
-          errorMessage: 'Download failed in qBittorrent',
+          downloadStatus: 'failed',
+          downloadError: 'Download failed in qBittorrent',
         },
       });
 
