@@ -88,12 +88,17 @@ src/
 
 ### Request Components
 
-**RequestCard** - Display single request
-- Audiobook info
+**RequestCard** - Display single request (✅ Implemented)
+- Audiobook cover art with fallback icon
+- Title and author
 - Status badge with color coding
-- Progress bar (for downloads)
-- Timestamps
-- Action buttons (cancel, retry)
+- Progress bar with animated shimmer (for downloads)
+- Active indicator for in-progress requests
+- Expandable error messages for failed requests
+- Relative timestamps (e.g., "2h ago")
+- Cancel button for pending/active requests
+- "View in Plex" link for completed requests
+- Hover effects and responsive layout
 
 **StatusBadge** - Visual status indicator
 - Color coded by status:
@@ -322,6 +327,104 @@ function AudiobookCard({ audiobook }) {
       >
         Request
       </Button>
+    </div>
+  );
+}
+```
+
+### Requests Page (✅ Implemented)
+
+The requests page (`/requests`) displays all user requests with real-time status updates:
+
+**Features:**
+- Filter tabs: All, Active, Completed, Failed, Cancelled
+- Real-time auto-refresh every 5 seconds (via SWR)
+- Request counts in each filter tab
+- Loading skeletons for initial load
+- Empty states with contextual messages
+- Authentication guard (redirects to login if not authenticated)
+- Cancel functionality for active requests
+- Responsive layout with hover effects
+
+```tsx
+export default function RequestsPage() {
+  const { user } = useAuth();
+  const [filter, setFilter] = useState<FilterStatus>('all');
+  const { requests, isLoading } = useRequests(apiStatus);
+
+  // Filter requests client-side for 'active' status
+  const filteredRequests = filter === 'active'
+    ? requests.filter(r => ['pending', 'searching', 'downloading', 'processing'].includes(r.status))
+    : requests;
+
+  return (
+    <div>
+      <Header />
+      <main>
+        {/* Filter Tabs */}
+        <div className="border-b">
+          {filterOptions.map(option => (
+            <button onClick={() => setFilter(option.value)}>
+              {option.label} ({count})
+            </button>
+          ))}
+        </div>
+
+        {/* Request Cards */}
+        <div className="space-y-4">
+          {filteredRequests.map(request => (
+            <RequestCard key={request.id} request={request} />
+          ))}
+        </div>
+      </main>
+    </div>
+  );
+}
+```
+
+### Profile Page (✅ Implemented)
+
+The profile page (`/profile`) displays user information and request statistics:
+
+**Features:**
+- User information card (avatar, username, email, role, Plex ID)
+- Statistics grid with 5 metric cards:
+  - Total requests
+  - Active requests (pending, searching, downloading, processing)
+  - Completed requests
+  - Failed requests
+  - Cancelled requests
+- Active downloads section (only displayed if downloads are in progress)
+- Recent requests section (last 5 requests)
+- Links to view all requests
+- Real-time auto-refresh every 5 seconds (via SWR)
+- Loading skeletons for metrics and requests
+- Empty state with call-to-action to search audiobooks
+- Authentication guard
+
+```tsx
+export default function ProfilePage() {
+  const { user } = useAuth();
+  const { requests, isLoading } = useRequests();
+
+  // Calculate statistics
+  const stats = useMemo(() => ({
+    total: requests.length,
+    completed: requests.filter(r => r.status === 'completed').length,
+    active: requests.filter(r => ['pending', 'searching', 'downloading', 'processing'].includes(r.status)).length,
+    failed: requests.filter(r => r.status === 'failed').length,
+    cancelled: requests.filter(r => r.status === 'cancelled').length,
+  }), [requests]);
+
+  return (
+    <div>
+      <Header />
+      <main>
+        {/* User Info Card with Avatar and Details */}
+        {/* Statistics Grid with 5 Metric Cards */}
+        {/* Active Downloads Section */}
+        {/* Recent Requests Section */}
+      </main>
     </div>
   );
 }
