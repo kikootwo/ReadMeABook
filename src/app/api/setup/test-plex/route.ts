@@ -20,15 +20,22 @@ export async function POST(request: NextRequest) {
     const plexService = getPlexService();
 
     // Test connection and get server info
-    const serverInfo = await plexService.testConnection(url, token);
+    const connectionResult = await plexService.testConnection(url, token);
+
+    if (!connectionResult.success || !connectionResult.info) {
+      return NextResponse.json(
+        { success: false, error: connectionResult.message },
+        { status: 400 }
+      );
+    }
 
     // Get libraries
     const libraries = await plexService.getLibraries(url, token);
 
     return NextResponse.json({
       success: true,
-      serverName: serverInfo.friendlyName || 'Plex Server',
-      version: serverInfo.version,
+      serverName: connectionResult.info.friendlyName || 'Plex Server',
+      version: connectionResult.info.version,
       libraries: libraries.map((lib) => ({
         key: lib.key,
         title: lib.title,
