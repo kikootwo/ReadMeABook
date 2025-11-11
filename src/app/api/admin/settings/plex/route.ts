@@ -1,0 +1,75 @@
+/**
+ * Component: Admin Plex Settings API
+ * Documentation: documentation/settings-pages.md
+ */
+
+import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { prisma } from '@/lib/db';
+
+export async function PUT(request: NextRequest) {
+  try {
+    // Verify user is authenticated and is admin
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { role: true },
+    });
+
+    if (user?.role !== 'admin') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    const { url, token, libraryId } = await request.json();
+
+    if (!url || !token || !libraryId) {
+      return NextResponse.json(
+        { error: 'URL, token, and library ID are required' },
+        { status: 400 }
+      );
+    }
+
+    // Update configuration
+    await prisma.config.upsert({
+      where: { key: 'plex_url' },
+      update: { value: url },
+      create: { key: 'plex_url', value: url },
+    });
+
+    // Only update token if it's not the masked value
+    if (!token.startsWith('••••')) {
+      await prisma.config.upsert({
+        where: { key: 'plex_token' },
+        update: { value: token },
+        create: { key: 'plex_token', value: token },
+      });
+    }
+
+    await prisma.config.upsert({
+      where: { key: 'plex_audiobook_library_id' },
+      update: { value: libraryId },
+      create: { key: 'plex_audiobook_library_id', value: libraryId },
+    });
+
+    console.log('[Admin] Plex settings updated');
+
+    return NextResponse.json({
+      success: true,
+      message: 'Plex settings updated successfully',
+    });
+  } catch (error) {
+    console.error('[Admin] Failed to update Plex settings:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update settings',
+      },
+      { status: 500 }
+    );
+  }
+}
