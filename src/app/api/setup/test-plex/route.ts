@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
       version: connectionResult.info.version,
       machineIdentifier: connectionResult.info.machineIdentifier,
       libraries: libraries.map((lib) => ({
-        key: lib.key,
+        id: lib.id,
         title: lib.title,
         type: lib.type,
       })),
