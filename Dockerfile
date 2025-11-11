@@ -73,12 +73,12 @@ COPY --from=builder /app/.next/static ./.next/static
 # Copy Prisma schema
 COPY --from=builder /app/prisma ./prisma
 
-# Copy necessary node_modules that aren't in standalone
-# Prisma client and CLI for migrations
+# Copy production node_modules from deps stage (includes all runtime dependencies)
+COPY --from=deps /app/node_modules ./node_modules
+
+# Copy Prisma generated client from builder
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
-COPY --from=builder /app/node_modules/.bin ./node_modules/.bin
 
 # Create directories for volumes
 RUN mkdir -p /app/config /downloads /media && \
