@@ -140,6 +140,25 @@ src/
 - Search/filter
 - Multi-select option
 
+### Authentication Components
+
+**ProtectedRoute** - Route protection wrapper (✅ Implemented)
+- Checks authentication status from AuthContext
+- Shows loading state while verifying auth
+- Redirects unauthenticated users to /login
+- Preserves intended destination URL for post-login redirect
+- Supports optional admin role requirement
+- Renders children only when authorized
+
+**LoginPage** - Stylized login page (✅ Implemented)
+- Full-screen immersive design
+- Floating audiobook cover animations
+- "Login with Plex" primary CTA
+- Plex OAuth integration via popup
+- Error handling and user feedback
+- Auto-redirect after successful login
+- Dark theme optimized
+
 ### Admin Components
 
 **MetricCard** - Dashboard metric display

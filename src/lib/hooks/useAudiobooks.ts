@@ -18,6 +18,10 @@ export interface Audiobook {
   releaseDate?: string;
   rating?: number;
   genres?: string[];
+  availabilityStatus?: string;
+  isAvailable?: boolean;
+  plexGuid?: string | null;
+  dbId?: string | null;
 }
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());

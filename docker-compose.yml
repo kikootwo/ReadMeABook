@@ -61,13 +61,16 @@ services:
       # Redis Configuration
       REDIS_URL: redis://redis:6379
 
-      # NextAuth Configuration
-      NEXTAUTH_URL: http://localhost:3030
-      NEXTAUTH_SECRET: CHANGE_THIS_TO_A_RANDOM_SECRET_MINIMUM_32_CHARS
+      # JWT Secrets
+      JWT_SECRET: XdiVg4yJjlabEGsJFfmRQoTTLfIWetvOsx2ToqYiUSg=
+      JWT_REFRESH_SECRET: pqj7mGktILiLYrMAJVNJ4NKz9gU2jX4oRcTlCgFyLrA=
 
-      # Plex OAuth (Get from https://www.plex.tv/claim/)
-      # PLEX_CLIENT_ID: your-client-id-here
-      # PLEX_CLIENT_SECRET: your-client-secret-here
+      # Encryption Key (for storing sensitive config in database)
+      CONFIG_ENCRYPTION_KEY: XKYTHVE1FST3LUycTmmrcnvFmJA+eFLzDNHiKb7Fqw0=
+
+      # Plex Configuration
+      PLEX_CLIENT_IDENTIFIER: readmeabook-unique-client-id
+      PLEX_PRODUCT_NAME: ReadMeABook
 
       # Node Environment
       NODE_ENV: production

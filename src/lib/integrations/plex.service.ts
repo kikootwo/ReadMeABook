@@ -161,23 +161,37 @@ export class PlexService {
         },
       });
 
-      // Plex may return XML, try to parse it
       let data = response.data;
+
+      // Handle different response formats from Plex
       if (typeof data === 'string') {
+        // XML response - parse it
         const parsed = await parseStringPromise(data);
-        data = parsed.MediaContainer ? parsed.MediaContainer.$ : {};
+        // XML attributes are in MediaContainer.$
+        data = parsed.MediaContainer && parsed.MediaContainer.$
+          ? parsed.MediaContainer.$
+          : parsed.MediaContainer || {};
+      } else if (data && typeof data === 'object') {
+        // JSON response - could be direct object or wrapped in MediaContainer
+        if (data.MediaContainer) {
+          // If wrapped, extract the MediaContainer object
+          data = data.MediaContainer;
+        }
+        // else data is already the right format
       }
 
+      console.log('[Plex] Identity response:', JSON.stringify(data, null, 2));
+
       const info: PlexServerInfo = {
-        machineIdentifier: data.machineIdentifier,
-        version: data.version,
-        platform: data.platform,
+        machineIdentifier: data.machineIdentifier || 'unknown',
+        version: data.version || 'unknown',
+        platform: data.platform || 'Plex Server',
         platformVersion: data.platformVersion,
       };
 
       return {
         success: true,
-        message: `Connected to Plex server (${info.platform} ${info.version})`,
+        message: `Connected to Plex server (${info.platform} v${info.version})`,
         info,
       };
     } catch (error) {
@@ -201,26 +215,35 @@ export class PlexService {
         },
       });
 
-      // Handle XML response
       let data = response.data;
+
+      // Handle different response formats from Plex
       if (typeof data === 'string') {
+        // XML response - parse it
         const parsed = await parseStringPromise(data);
         data = parsed.MediaContainer;
+      } else if (data && typeof data === 'object') {
+        // JSON response - could be wrapped in MediaContainer
+        if (data.MediaContainer) {
+          data = data.MediaContainer;
+        }
       }
 
       const directories = data.Directory || [];
 
-      return directories.map((dir: any) => ({
-        id: dir.key || dir.$.key,
-        title: dir.title || dir.$.title,
-        type: dir.type || dir.$.type,
-        language: dir.language || dir.$.language || 'en',
-        scanner: dir.scanner || dir.$.scanner || '',
-        agent: dir.agent || dir.$.agent || '',
+      const libraries = directories.map((dir: any) => ({
+        id: (dir.key || dir.$?.key || '').toString(),
+        title: dir.title || dir.$?.title || 'Unknown Library',
+        type: dir.type || dir.$?.type || 'unknown',
+        language: dir.language || dir.$?.language || 'en',
+        scanner: dir.scanner || dir.$?.scanner || '',
+        agent: dir.agent || dir.$?.agent || '',
         locations: Array.isArray(dir.Location)
-          ? dir.Location.map((loc: any) => loc.$.path || loc.path)
+          ? dir.Location.map((loc: any) => loc.path || loc.$?.path || '')
           : [],
       }));
+
+      return libraries;
     } catch (error) {
       console.error('Failed to get Plex libraries:', error);
       throw new Error('Failed to retrieve libraries from Plex server');

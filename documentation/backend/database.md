@@ -2,9 +2,11 @@
 
 ## Current State
 
-**Status:** Design Phase - Not yet implemented
+**Status:** Implemented ✅
 
-This document defines the PostgreSQL database schema for the ReadMeABook application. The database will be embedded within the Docker container and store all application data including users, audiobooks, requests, downloads, configuration, and background jobs.
+This document defines the PostgreSQL database schema for the ReadMeABook application. The database is embedded within the Docker container and stores all application data including users, audiobooks, requests, downloads, configuration, and background jobs.
+
+**Database Setup:** The database schema is automatically created on container startup using `prisma db push`, which syncs the Prisma schema directly to the database without requiring migration files.
 
 ## Design Architecture
 
@@ -17,14 +19,14 @@ This document defines the PostgreSQL database schema for the ReadMeABook applica
 - Reliable for embedded use cases
 - Built-in encryption capabilities
 
-### ORM: To Be Determined
+### ORM: Prisma
 
-Options under consideration:
-- **Prisma** - Modern, type-safe, excellent DX, automatic migrations
-- **TypeORM** - Mature, decorator-based, good TypeScript support
-- **Sequelize** - Well-established, extensive documentation
-
-**Decision:** Will be made during implementation phase based on Docker embedding requirements.
+**Why Prisma:**
+- Modern, type-safe ORM with excellent TypeScript support
+- Automatic type generation from schema
+- Simple database setup with `prisma db push`
+- Built-in connection pooling and query optimization
+- Supports PostgreSQL natively
 
 ## Schema Overview
 
@@ -351,22 +353,31 @@ CREATE INDEX idx_jobs_created_at ON jobs(created_at DESC);
 - **Plex ID** - Each Plex user can only authenticate once
 - **Audible ID** - Each audiobook is unique by Audible identifier
 
-## Migrations Strategy
+## Database Setup Strategy
 
-**Approach:** Use ORM's built-in migration system
+**Approach:** Schema synchronization using `prisma db push`
 
 **Workflow:**
-1. Define schema changes in ORM models
-2. Generate migration files automatically
-3. Migrations run automatically on Docker container startup
-4. Version control all migration files
-5. Support rollback for failed migrations
+1. Define schema changes in `prisma/schema.prisma`
+2. On container startup, Prisma automatically syncs schema to database
+3. No migration files needed - schema is the source of truth
+4. Changes are applied idempotently (safe to run multiple times)
 
-**Migration Execution:**
-- Container startup script checks for pending migrations
-- Applies migrations before starting application
-- Logs migration results
-- Exits with error code if migrations fail
+**Setup Execution:**
+- Docker entrypoint script (`docker-entrypoint.sh`) runs `prisma db push`
+- Also configured in Dockerfile CMD as fallback
+- Generates Prisma client after schema sync
+- Logs setup results
+- Exits with error code if setup fails
+
+**Why `db push` instead of migrations:**
+- Simpler for single-instance Docker deployments
+- No migration file management needed
+- Schema file is single source of truth
+- Automatically handles schema drift
+- Perfect for development and small production deployments
+
+**Note:** For larger production deployments with multiple instances or complex rollback requirements, consider switching to `prisma migrate` with proper migration files.
 
 ## Performance Considerations
 
@@ -426,9 +437,10 @@ Sensitive fields encrypted using AES-256:
 ## Tech Stack
 
 **Database:** PostgreSQL 15+
-**ORM:** TBD (Prisma, TypeORM, or Sequelize)
-**Migration Tool:** ORM's built-in migration system
+**ORM:** Prisma 6.x
+**Schema Management:** `prisma db push` (schema synchronization)
 **Encryption:** Node.js crypto module
+**Client Generation:** Prisma Client with custom output path (`src/generated/prisma`)
 
 ## Dependencies
 

@@ -213,9 +213,13 @@ let prowlarrService: ProwlarrService | null = null;
 
 export async function getProwlarrService(): Promise<ProwlarrService> {
   if (!prowlarrService) {
-    // Get configuration from environment or config service
-    const baseUrl = process.env.PROWLARR_URL || 'http://prowlarr:9696';
-    const apiKey = process.env.PROWLARR_API_KEY;
+    // Get configuration from database
+    const { getConfigService } = await import('@/lib/services/config.service');
+    const configService = getConfigService();
+
+    const config = await configService.getMany(['prowlarr_url', 'prowlarr_api_key']);
+    const baseUrl = config.prowlarr_url || process.env.PROWLARR_URL || 'http://prowlarr:9696';
+    const apiKey = config.prowlarr_api_key || process.env.PROWLARR_API_KEY;
 
     if (!apiKey) {
       throw new Error('Prowlarr API key not configured');

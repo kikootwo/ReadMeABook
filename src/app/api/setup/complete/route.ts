@@ -5,20 +5,25 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
+import bcrypt from 'bcrypt';
+import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
 
 export async function POST(request: NextRequest) {
-  return requireAuth(request, async (req: AuthenticatedRequest) => {
-    try {
-      const { plex, prowlarr, downloadClient, paths } = await request.json();
+  try {
+    const { admin, plex, prowlarr, downloadClient, paths } = await request.json();
 
     // Validate required fields
     if (
+      !admin?.username ||
+      !admin?.password ||
       !plex?.url ||
       !plex?.token ||
       !plex?.audiobook_library_id ||
       !prowlarr?.url ||
       !prowlarr?.api_key ||
+      !prowlarr?.indexers ||
+      !Array.isArray(prowlarr.indexers) ||
+      prowlarr.indexers.length === 0 ||
       !downloadClient?.type ||
       !downloadClient?.url ||
       !downloadClient?.username ||
@@ -31,6 +36,20 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Create admin user
+    const hashedPassword = await bcrypt.hash(admin.password, 10);
+    const adminUser = await prisma.user.create({
+      data: {
+        plexId: `local-${admin.username}`,
+        plexUsername: admin.username,
+        plexEmail: null,
+        role: 'admin',
+        avatarUrl: null,
+        authToken: hashedPassword, // Store hashed password in authToken field for local users
+        lastLoginAt: new Date(),
+      },
+    });
 
     // Save configuration to database
     // Use upsert to handle both initial setup and updates
@@ -65,6 +84,12 @@ export async function POST(request: NextRequest) {
       where: { key: 'prowlarr_api_key' },
       update: { value: prowlarr.api_key },
       create: { key: 'prowlarr_api_key', value: prowlarr.api_key },
+    });
+
+    await prisma.configuration.upsert({
+      where: { key: 'prowlarr_indexers' },
+      update: { value: JSON.stringify(prowlarr.indexers) },
+      create: { key: 'prowlarr_indexers', value: JSON.stringify(prowlarr.indexers) },
     });
 
     // Download client configuration
@@ -112,21 +137,40 @@ export async function POST(request: NextRequest) {
       create: { key: 'setup_completed', value: 'true' },
     });
 
+    // Generate JWT tokens for auto-login
+    const accessToken = generateAccessToken({
+      sub: adminUser.id,
+      plexId: adminUser.plexId,
+      username: adminUser.plexUsername,
+      role: adminUser.role,
+    });
+
+    const refreshToken = generateRefreshToken(adminUser.id);
+
     console.log('[Setup] Configuration saved successfully');
 
     return NextResponse.json({
       success: true,
       message: 'Setup completed successfully',
+      accessToken,
+      refreshToken,
+      user: {
+        id: adminUser.id,
+        plexId: adminUser.plexId,
+        username: adminUser.plexUsername,
+        email: adminUser.plexEmail,
+        role: adminUser.role,
+        avatarUrl: adminUser.avatarUrl,
+      },
     });
-    } catch (error) {
-      console.error('[Setup] Failed to save configuration:', error);
-      return NextResponse.json(
-        {
-          success: false,
-          error: error instanceof Error ? error.message : 'Failed to save configuration',
-        },
-        { status: 500 }
-      );
-    }
-  });
+  } catch (error) {
+    console.error('[Setup] Failed to save configuration:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to save configuration',
+      },
+      { status: 500 }
+    );
+  }
 }

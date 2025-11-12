@@ -23,13 +23,18 @@ export async function POST(request: NextRequest) {
     // Test connection and get indexers
     const indexers = await prowlarrService.getIndexers();
 
-    // Only count enabled indexers
+    // Only return enabled indexers
     const enabledIndexers = indexers.filter((indexer) => indexer.enable);
 
     return NextResponse.json({
       success: true,
       indexerCount: enabledIndexers.length,
       totalIndexers: indexers.length,
+      indexers: enabledIndexers.map((indexer) => ({
+        id: indexer.id,
+        name: indexer.name,
+        protocol: indexer.protocol,
+      })),
     });
   } catch (error) {
     console.error('[Setup] Prowlarr test failed:', error);

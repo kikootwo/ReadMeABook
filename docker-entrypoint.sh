@@ -5,11 +5,12 @@ echo "🚀 ReadMeABook - Starting application..."
 echo ""
 
 # Run database migrations
-echo "📦 Running database migrations..."
-if npx prisma migrate deploy; then
-  echo "✅ Migrations completed successfully"
+echo "📦 Setting up database..."
+if npx prisma db push --skip-generate --accept-data-loss; then
+  echo "✅ Database schema synced successfully"
 else
-  echo "⚠️  Migrations failed or no migrations to apply"
+  echo "❌ Database setup failed"
+  exit 1
 fi
 echo ""
 
