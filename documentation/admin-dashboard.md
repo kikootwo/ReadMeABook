@@ -166,12 +166,28 @@ Dashboard data refreshes automatically every 10 seconds to show real-time update
 />
 ```
 
+## Navigation
+
+The admin dashboard includes navigation elements to improve usability:
+
+- **Back to Home Button:** Located in the header, allows admins to quickly return to the main application homepage
+- **Quick Actions:** Links to settings, users, library, and system logs
+- **Jobs Management:** Link to /admin/jobs for managing recurring tasks
+
 ## Security
 
 - Admin dashboard requires authenticated user with admin role
 - Middleware checks user.role === 'admin' before allowing access
 - API endpoints validate admin status
 - Sensitive information (API keys, passwords) never exposed
+
+## Related Pages
+
+- **/admin/jobs** - Scheduled Jobs Management (see documentation/backend/services/scheduler.md)
+- **/admin/settings** - Settings Management
+- **/admin/users** - User Management
+- **/admin/library** - Library Management
+- **/admin/logs** - System Logs
 
 ## Future Enhancements
 

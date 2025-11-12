@@ -97,4 +97,14 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:3030/api/health || exit 1
 
 # Run database setup and start server
-CMD sh -c 'echo "🚀 Starting ReadMeABook..." && ./node_modules/.bin/prisma db push --skip-generate --accept-data-loss && echo "✨ Starting server on port 3030..." && node server.js'
+CMD sh -c 'echo "🚀 Starting ReadMeABook..." && \
+    ./node_modules/.bin/prisma db push --skip-generate --accept-data-loss && \
+    echo "✨ Starting server on port 3030..." && \
+    node server.js & \
+    SERVER_PID=$! && \
+    echo "⏳ Waiting for server to be ready..." && \
+    sleep 5 && \
+    echo "🔧 Initializing application services..." && \
+    curl -f http://localhost:3030/api/init || echo "⚠️  Warning: Failed to initialize services" && \
+    echo "✅ Server running with PID $SERVER_PID" && \
+    wait $SERVER_PID'
