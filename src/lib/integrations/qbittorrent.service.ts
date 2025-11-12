@@ -135,10 +135,15 @@ export class QBittorrentService {
     }
 
     try {
+      const category = options?.category || this.defaultCategory;
+
+      // Ensure category exists
+      await this.ensureCategory(category);
+
       const form = new URLSearchParams({
         urls: url,
         savepath: options?.savePath || this.defaultSavePath,
-        category: options?.category || this.defaultCategory,
+        category,
         paused: options?.paused ? 'true' : 'false',
         sequentialDownload: (options?.sequentialDownload !== false).toString(),
       });
@@ -147,19 +152,67 @@ export class QBittorrentService {
         form.append('tags', options.tags.join(','));
       }
 
-      await this.client.post('/torrents/add', form, {
+      console.log('[qBittorrent] Adding torrent with category:', category);
+
+      const addResponse = await this.client.post('/torrents/add', form, {
         headers: {
           Cookie: this.cookie,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
       });
 
-      // Extract hash from magnet link or URL
-      const hash = this.extractHash(url);
+      console.log('[qBittorrent] Add torrent response status:', addResponse.status);
+      console.log('[qBittorrent] Add torrent response data:', addResponse.data);
 
-      console.log(`Added torrent to qBittorrent: ${hash}`);
+      // Try to extract hash from magnet link
+      const extractedHash = this.extractHash(url);
 
-      return hash;
+      // If we got a real hash from magnet link, return it
+      if (extractedHash !== 'pending') {
+        console.log(`[qBittorrent] Added torrent (from magnet): ${extractedHash}`);
+        return extractedHash;
+      }
+
+      // For .torrent URLs, we need to query qBittorrent to get the actual hash
+      console.log('[qBittorrent] Waiting for torrent to be processed...');
+
+      // Wait for qBittorrent to process the torrent
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // First, try to get all torrents regardless of category to see if it was added
+      const allTorrents = await this.getTorrents();
+      console.log(`[qBittorrent] Total torrents in qBittorrent: ${allTorrents.length}`);
+
+      // Get torrents in our category
+      const categoryTorrents = await this.getTorrents(category);
+      console.log(`[qBittorrent] Torrents in category "${category}": ${categoryTorrents.length}`);
+
+      if (categoryTorrents.length === 0) {
+        // Check if torrent was added without category
+        if (allTorrents.length > 0) {
+          const newestOverall = allTorrents.reduce((newest, current) =>
+            current.added_on > newest.added_on ? current : newest
+          );
+          console.warn(`[qBittorrent] Torrent may have been added without category. Newest torrent: ${newestOverall.hash} in category "${newestOverall.category}"`);
+
+          // Set the correct category
+          await this.setCategory(newestOverall.hash, category);
+          console.log(`[qBittorrent] Set category to "${category}" for torrent ${newestOverall.hash}`);
+
+          return newestOverall.hash;
+        }
+
+        throw new Error('Failed to retrieve torrent after adding - no torrents found');
+      }
+
+      // Find the most recently added torrent in our category
+      const newestTorrent = categoryTorrents.reduce((newest, current) =>
+        current.added_on > newest.added_on ? current : newest
+      );
+
+      console.log(`[qBittorrent] Added torrent: ${newestTorrent.hash} (${newestTorrent.name})`);
+
+      return newestTorrent.hash;
     } catch (error) {
       // Try re-authenticating if we get a 403
       if (axios.isAxiosError(error) && error.response?.status === 403) {
@@ -170,6 +223,37 @@ export class QBittorrentService {
 
       console.error('Failed to add torrent:', error);
       throw new Error('Failed to add torrent to qBittorrent');
+    }
+  }
+
+  /**
+   * Ensure category exists in qBittorrent
+   */
+  private async ensureCategory(category: string): Promise<void> {
+    if (!this.cookie) {
+      await this.login();
+    }
+
+    try {
+      // Create category (this is idempotent - won't fail if it already exists)
+      await this.client.post(
+        '/torrents/createCategory',
+        new URLSearchParams({
+          category,
+          savePath: this.defaultSavePath,
+        }),
+        {
+          headers: {
+            Cookie: this.cookie,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        }
+      );
+
+      console.log(`[qBittorrent] Category "${category}" ensured`);
+    } catch (error) {
+      // Ignore errors - category might already exist
+      console.log(`[qBittorrent] Category creation returned:`, error);
     }
   }
 
@@ -475,42 +559,56 @@ export async function getQBittorrentService(): Promise<QBittorrentService> {
   // Always recreate if config hasn't been loaded successfully
   if (!qbittorrentService || !configLoaded) {
     try {
-      // Get configuration from database
+      // Get configuration from database ONLY (no env var fallback)
       const { getConfigService } = await import('@/lib/services/config.service');
       const configService = getConfigService();
 
       console.log('[qBittorrent] Loading configuration from database...');
       const config = await configService.getMany([
-        'qbittorrent_url',
-        'qbittorrent_username',
-        'qbittorrent_password',
-        'paths_downloads',
+        'download_client_url',
+        'download_client_username',
+        'download_client_password',
+        'download_dir',
       ]);
 
       console.log('[qBittorrent] Config loaded:', {
-        hasUrl: !!config.qbittorrent_url,
-        hasUsername: !!config.qbittorrent_username,
-        hasPassword: !!config.qbittorrent_password,
-        hasPath: !!config.paths_downloads,
+        hasUrl: !!config.download_client_url,
+        hasUsername: !!config.download_client_username,
+        hasPassword: !!config.download_client_password,
+        hasPath: !!config.download_dir,
       });
 
-      const baseUrl = config.qbittorrent_url || process.env.QBITTORRENT_URL || 'http://qbittorrent:8080';
-      const username = config.qbittorrent_username || process.env.QBITTORRENT_USERNAME || 'admin';
-      const password = config.qbittorrent_password || process.env.QBITTORRENT_PASSWORD;
-      const savePath = config.paths_downloads || process.env.DOWNLOAD_DIR || '/downloads';
+      // Validate all required fields are present (no env var fallback)
+      const missingFields: string[] = [];
 
-      if (!password) {
-        console.error('[qBittorrent] Password not found in database or environment variables');
-        console.error('[qBittorrent] Database config:', {
-          qbittorrent_password: config.qbittorrent_password === null ? 'null' : config.qbittorrent_password === undefined ? 'undefined' : 'exists',
-        });
-        console.error('[qBittorrent] Environment variable QBITTORRENT_PASSWORD:', process.env.QBITTORRENT_PASSWORD ? 'exists' : 'not set');
-        throw new Error('qBittorrent password not configured. Please set it in the admin settings or as an environment variable.');
+      if (!config.download_client_url) {
+        missingFields.push('qBittorrent URL');
       }
+      if (!config.download_client_username) {
+        missingFields.push('qBittorrent username');
+      }
+      if (!config.download_client_password) {
+        missingFields.push('qBittorrent password');
+      }
+      if (!config.download_dir) {
+        missingFields.push('Download path');
+      }
+
+      if (missingFields.length > 0) {
+        const errorMsg = `qBittorrent is not fully configured. Missing: ${missingFields.join(', ')}. Please configure qBittorrent in the admin settings.`;
+        console.error('[qBittorrent]', errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      // TypeScript type narrowing: at this point we know all values are non-null
+      const url = config.download_client_url as string;
+      const username = config.download_client_username as string;
+      const password = config.download_client_password as string;
+      const savePath = config.download_dir as string;
 
       console.log('[qBittorrent] Creating service instance...');
       qbittorrentService = new QBittorrentService(
-        baseUrl,
+        url,
         username,
         password,
         savePath,
@@ -522,6 +620,7 @@ export async function getQBittorrentService(): Promise<QBittorrentService> {
       const isConnected = await qbittorrentService.testConnection();
       if (!isConnected) {
         console.warn('[qBittorrent] Connection test failed');
+        throw new Error('qBittorrent connection test failed. Please check your configuration in admin settings.');
       } else {
         console.log('[qBittorrent] Connection test successful');
         configLoaded = true; // Mark as successfully loaded

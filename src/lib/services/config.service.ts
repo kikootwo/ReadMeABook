@@ -195,14 +195,14 @@ export class ConfigurationService {
    */
   async getPlexConfig(): Promise<PlexConfig> {
     const config = await this.getMany([
-      'plex_server_url',
-      'plex_auth_token',
+      'plex_url',
+      'plex_token',
       'plex_audiobook_library_id',
     ]);
 
     return {
-      serverUrl: config.plex_server_url,
-      authToken: config.plex_auth_token,
+      serverUrl: config.plex_url,
+      authToken: config.plex_token,
       libraryId: config.plex_audiobook_library_id,
     };
   }

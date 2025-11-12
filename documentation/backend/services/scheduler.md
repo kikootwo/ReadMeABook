@@ -6,6 +6,13 @@
 
 This service manages recurring/scheduled jobs for the ReadMeABook application, providing automated tasks like Plex library scans and Audible data refreshes. It offers both scheduled (cron-like) execution and manual triggering via admin UI.
 
+**Recent Updates:**
+- Added configuration validation before job execution (prevents jobs from running with incomplete config)
+- Audible refresh now persists data to database instead of just console logging
+- Enhanced error handling with clear error messages about missing configuration
+- Added schedule editing UI with professional toast notifications
+- Jobs validate all required configuration fields before executing
+
 ## Design Architecture
 
 ### Why a Scheduler Service?
@@ -421,6 +428,13 @@ async function processAudibleRefresh() {
 
 ## Known Issues
 
+**Fixed Issues:**
+- ✅ Jobs running without configuration validation (Fixed: added validation before execution)
+- ✅ Default alert() popups for job triggers (Fixed: replaced with toast notifications)
+- ✅ No UI for editing schedules (Fixed: added edit modal)
+- ✅ Audible data not persisting (Fixed: now saves to database)
+
+**Current Issues:**
 *None currently.*
 
 ## Future Enhancements

@@ -45,104 +45,84 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
 
     console.log(`[ScanPlex] Found ${plexAudiobooks.length} items in Plex library`);
 
-    let matchedCount = 0;
+    let newCount = 0;
     let updatedCount = 0;
-    const matchResults: any[] = [];
+    let skippedCount = 0;
+    const results: any[] = [];
 
-    // 3. Match each Plex audiobook against database audiobooks
+    // 3. Process each Plex audiobook - save to database if not exists, update if exists
     for (const plexBook of plexAudiobooks) {
       if (!plexBook.title) {
+        skippedCount++;
         continue;
       }
 
-      // Search for potential matches in database by title similarity
-      // First, get all audiobooks to match against (could be optimized with better query)
-      const dbAudiobooks = await prisma.audiobook.findMany({
-        where: {
-          OR: [
-            { title: { contains: plexBook.title.substring(0, 20), mode: 'insensitive' } },
-            { author: { contains: plexBook.author?.substring(0, 20) || '', mode: 'insensitive' } },
-          ],
-        },
-        take: 50, // Limit to avoid performance issues
-      });
+      try {
+        // Check if this Plex audiobook already exists in database by plexGuid
+        const existing = await prisma.audiobook.findFirst({
+          where: { plexGuid: plexBook.guid },
+        });
 
-      if (dbAudiobooks.length === 0) {
-        continue;
-      }
+        if (existing) {
+          // Update existing record with latest Plex data
+          await prisma.audiobook.update({
+            where: { id: existing.id },
+            data: {
+              title: plexBook.title,
+              author: plexBook.author || existing.author,
+              narrator: plexBook.narrator || existing.narrator,
+              description: plexBook.summary || existing.description,
+              plexLibraryId: targetLibraryId,
+              availabilityStatus: 'available',
+              availableAt: existing.availableAt || new Date(),
+              updatedAt: new Date(),
+            },
+          });
 
-      // Fuzzy match to find best candidate
-      const candidates = dbAudiobooks.map((dbBook) => {
-        const titleScore = compareTwoStrings(
-          plexBook.title.toLowerCase(),
-          dbBook.title.toLowerCase()
-        );
-        const authorScore = plexBook.author && dbBook.author
-          ? compareTwoStrings(plexBook.author.toLowerCase(), dbBook.author.toLowerCase())
-          : 0.5;
+          updatedCount++;
+          console.log(`[ScanPlex] Updated: "${plexBook.title}"`);
+        } else {
+          // Create new audiobook entry from Plex data
+          const newAudiobook = await prisma.audiobook.create({
+            data: {
+              plexGuid: plexBook.guid,
+              title: plexBook.title,
+              author: plexBook.author || 'Unknown Author',
+              narrator: plexBook.narrator,
+              description: plexBook.summary,
+              durationMinutes: plexBook.duration ? Math.round(plexBook.duration / 60000) : null,
+              plexLibraryId: targetLibraryId,
+              availabilityStatus: 'available',
+              availableAt: new Date(),
+            },
+          });
 
-        // Weighted average: title is more important
-        const overallScore = titleScore * 0.7 + authorScore * 0.3;
+          newCount++;
+          console.log(`[ScanPlex] Added new: "${plexBook.title}" by ${plexBook.author}`);
 
-        return {
-          dbBook,
-          score: overallScore,
-          titleScore,
-          authorScore,
-        };
-      });
-
-      // Sort by score and get best match
-      candidates.sort((a, b) => b.score - a.score);
-      const bestMatch = candidates[0];
-
-      // Accept match if score >= 70%
-      if (bestMatch && bestMatch.score >= 0.7) {
-        matchedCount++;
-
-        // Check if audiobook already has this Plex GUID
-        if (bestMatch.dbBook.plexGuid === plexBook.guid) {
-          console.log(`[ScanPlex] "${plexBook.title}" already matched (score: ${Math.round(bestMatch.score * 100)}%)`);
-          continue;
+          results.push({
+            id: newAudiobook.id,
+            title: plexBook.title,
+            author: plexBook.author,
+          });
         }
-
-        console.log(`[ScanPlex] Matched "${plexBook.title}" to database audiobook "${bestMatch.dbBook.title}" (score: ${Math.round(bestMatch.score * 100)}%)`);
-
-        // Update audiobook with Plex info
-        await prisma.audiobook.update({
-          where: { id: bestMatch.dbBook.id },
-          data: {
-            plexGuid: plexBook.guid,
-            availabilityStatus: 'available',
-            availableAt: new Date(),
-            plexLibraryId: targetLibraryId,
-            updatedAt: new Date(),
-          },
-        });
-
-        updatedCount++;
-
-        matchResults.push({
-          plexTitle: plexBook.title,
-          plexAuthor: plexBook.author,
-          dbTitle: bestMatch.dbBook.title,
-          dbAuthor: bestMatch.dbBook.author,
-          matchScore: bestMatch.score,
-          audiobookId: bestMatch.dbBook.id,
-        });
+      } catch (error) {
+        console.error(`[ScanPlex] Failed to process "${plexBook.title}":`, error);
+        skippedCount++;
       }
     }
 
-    console.log(`[ScanPlex] Scan complete: ${plexAudiobooks.length} items scanned, ${matchedCount} matched, ${updatedCount} updated`);
+    console.log(`[ScanPlex] Scan complete: ${plexAudiobooks.length} items scanned, ${newCount} new, ${updatedCount} updated, ${skippedCount} skipped`);
 
     return {
       success: true,
       message: 'Plex library scan completed successfully',
       libraryId: targetLibraryId,
       totalScanned: plexAudiobooks.length,
-      matchedCount,
+      newCount,
       updatedCount,
-      matches: matchResults,
+      skippedCount,
+      newAudiobooks: results,
     };
   } catch (error) {
     console.error('[ScanPlex] Error:', error);

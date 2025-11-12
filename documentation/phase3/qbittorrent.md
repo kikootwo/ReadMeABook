@@ -2,9 +2,15 @@
 
 ## Current State
 
-**Status:** Not Implemented
+**Status:** Implemented ✅
 
 qBittorrent is a free, open-source BitTorrent client with a comprehensive Web API. It's the primary download client for ReadMeABook.
+
+**Recent Updates:**
+- Removed all environment variable fallbacks - configuration now ONLY from database via admin UI
+- Added comprehensive validation with clear error messages listing all missing fields
+- Connection test now required to pass before service initialization succeeds
+- Improved error messages to guide users to admin settings for configuration
 
 ## Design Architecture
 
@@ -260,21 +266,16 @@ function mapQBittorrentState(state: TorrentState): string {
 
 ## Configuration
 
-```typescript
-const config = {
-  url: process.env.QBITTORRENT_URL || 'http://qbittorrent:8080',
-  username: process.env.QBITTORRENT_USERNAME || 'admin',
-  password: process.env.QBITTORRENT_PASSWORD,
-  defaultSavePath: process.env.QBITTORRENT_SAVE_PATH || '/downloads',
-  category: 'readmeabook',
-};
-```
+**IMPORTANT:** All configuration is managed exclusively through the admin UI settings. Environment variables are NOT used as fallbacks.
 
-**Required Configuration Keys:**
-- `download_client.qbittorrent_url`
-- `download_client.qbittorrent_username`
-- `download_client.qbittorrent_password`
-- `paths.download_dir`
+**Required Configuration Keys (in database):**
+- `qbittorrent_url` - qBittorrent web UI URL
+- `qbittorrent_username` - qBittorrent username
+- `qbittorrent_password` - qBittorrent password (encrypted in database)
+- `paths_downloads` - Download directory path
+
+**Configuration Validation:**
+The service validates all required fields are present before initialization. If any field is missing, a clear error message is shown listing all missing fields and directing the user to admin settings.
 
 ## Usage Examples
 
@@ -381,7 +382,14 @@ for (const torrent of failedTorrents) {
 
 ## Known Issues
 
-*This section will be updated during implementation.*
+**Fixed Issues:**
+- ✅ Configuration falling back to environment variables (Fixed: removed all env var fallbacks)
+- ✅ Unclear error messages about missing configuration (Fixed: specific error messages listing missing fields)
+- ✅ Service initializing even with incomplete configuration (Fixed: validation required before initialization)
+- ✅ Torrent hash returning "pending" for .torrent URLs (Fixed: now queries qBittorrent after adding to get actual hash)
+
+**Current Issues:**
+*None currently.*
 
 ## Future Enhancements
 

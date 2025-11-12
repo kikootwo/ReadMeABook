@@ -66,14 +66,14 @@ export class SchedulerService {
         name: 'Plex Library Scan',
         type: 'plex_library_scan' as ScheduledJobType,
         schedule: '0 */6 * * *', // Every 6 hours
-        enabled: true,
+        enabled: false, // Start disabled until first setup is complete
         payload: {},
       },
       {
         name: 'Audible Data Refresh',
         type: 'audible_refresh' as ScheduledJobType,
         schedule: '0 0 * * *', // Daily at midnight
-        enabled: true,
+        enabled: false, // Start disabled until first setup is complete
         payload: {},
       },
     ];
@@ -87,7 +87,7 @@ export class SchedulerService {
         await prisma.scheduledJob.create({
           data: defaultJob,
         });
-        console.log(`[Scheduler] Created default job: ${defaultJob.name}`);
+        console.log(`[Scheduler] Created default job: ${defaultJob.name} (disabled by default)`);
       }
     }
   }
@@ -237,8 +237,31 @@ export class SchedulerService {
     const { getConfigService } = await import('./config.service');
     const configService = getConfigService();
 
-    const libraryId = job.payload?.libraryId ||
-      await configService.get('plex_audiobook_library_id');
+    // Validate Plex configuration before triggering scan
+    const plexConfig = await configService.getMany([
+      'plex_url',
+      'plex_token',
+      'plex_audiobook_library_id',
+    ]);
+
+    const missingFields: string[] = [];
+    if (!plexConfig.plex_url) {
+      missingFields.push('Plex server URL');
+    }
+    if (!plexConfig.plex_token) {
+      missingFields.push('Plex auth token');
+    }
+    if (!plexConfig.plex_audiobook_library_id) {
+      missingFields.push('Plex audiobook library ID');
+    }
+
+    if (missingFields.length > 0) {
+      const errorMsg = `Plex is not configured. Missing: ${missingFields.join(', ')}. Please configure Plex in the admin settings before running library scans.`;
+      console.error('[ScanPlex] Error:', errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    const libraryId = job.payload?.libraryId || plexConfig.plex_audiobook_library_id;
 
     const payload: ScanPlexPayload = {
       libraryId: libraryId || undefined,
@@ -256,17 +279,153 @@ export class SchedulerService {
    */
   private async triggerAudibleRefresh(job: any): Promise<string> {
     const { getAudibleService } = await import('../integrations/audible.service');
+    const { compareTwoStrings } = await import('string-similarity');
     const audibleService = getAudibleService();
+
+    console.log('[AudibleRefresh] Starting Audible data refresh...');
 
     // Fetch popular and new releases
     const popular = await audibleService.getPopularAudiobooks(50);
     const newReleases = await audibleService.getNewReleases(50);
 
-    // Cache in database (create a cache table or use existing)
-    // For now, we'll just log that it was refreshed
-    console.log(`[Scheduler] Audible refresh: ${popular.length} popular, ${newReleases.length} new releases`);
+    console.log(`[AudibleRefresh] Fetched ${popular.length} popular, ${newReleases.length} new releases`);
 
-    // Return a placeholder job ID since this doesn't use the job queue
+    // Get all Plex audiobooks to check for matches
+    const plexAudiobooks = await prisma.audiobook.findMany({
+      where: {
+        plexGuid: { not: null },
+        availabilityStatus: 'available',
+      },
+      select: {
+        id: true,
+        title: true,
+        author: true,
+        plexGuid: true,
+      },
+    });
+
+    console.log(`[AudibleRefresh] Found ${plexAudiobooks.length} audiobooks in Plex library for matching`);
+
+    // Helper function to check if Audible book matches Plex book
+    const findPlexMatch = (audibleTitle: string, audibleAuthor: string) => {
+      for (const plexBook of plexAudiobooks) {
+        const titleScore = compareTwoStrings(
+          audibleTitle.toLowerCase(),
+          plexBook.title.toLowerCase()
+        );
+        const authorScore = plexBook.author && audibleAuthor
+          ? compareTwoStrings(audibleAuthor.toLowerCase(), plexBook.author.toLowerCase())
+          : 0.5;
+
+        const overallScore = titleScore * 0.7 + authorScore * 0.3;
+
+        // Match threshold: 85% for Audible data (stricter than Plex scan)
+        if (overallScore >= 0.85) {
+          return plexBook.id;
+        }
+      }
+      return null;
+    };
+
+    // Persist to database - upsert audiobooks to cache the data
+    let popularSaved = 0;
+    let newReleasesSaved = 0;
+    let matchedToPlex = 0;
+
+    for (const audiobook of popular) {
+      try {
+        // Check if this matches a Plex audiobook
+        const plexMatchId = findPlexMatch(audiobook.title, audiobook.author);
+
+        await prisma.audiobook.upsert({
+          where: { audibleId: audiobook.asin },
+          create: {
+            audibleId: audiobook.asin,
+            title: audiobook.title,
+            author: audiobook.author,
+            narrator: audiobook.narrator,
+            description: audiobook.description,
+            coverArtUrl: audiobook.coverArtUrl,
+            durationMinutes: audiobook.durationMinutes,
+            releaseDate: audiobook.releaseDate ? new Date(audiobook.releaseDate) : null,
+            rating: audiobook.rating ? audiobook.rating : null,
+            genres: audiobook.genres || [],
+            availabilityStatus: plexMatchId ? 'available' : 'unknown',
+            availableAt: plexMatchId ? new Date() : null,
+          },
+          update: {
+            title: audiobook.title,
+            author: audiobook.author,
+            narrator: audiobook.narrator,
+            description: audiobook.description,
+            coverArtUrl: audiobook.coverArtUrl,
+            durationMinutes: audiobook.durationMinutes,
+            releaseDate: audiobook.releaseDate ? new Date(audiobook.releaseDate) : null,
+            rating: audiobook.rating ? audiobook.rating : null,
+            genres: audiobook.genres || [],
+            // Only update availability if not already set
+            ...(plexMatchId && {
+              availabilityStatus: 'available',
+              availableAt: new Date(),
+            }),
+          },
+        });
+        popularSaved++;
+        if (plexMatchId) matchedToPlex++;
+      } catch (error) {
+        console.error(`[AudibleRefresh] Failed to save popular audiobook ${audiobook.title}:`, error);
+      }
+    }
+
+    for (const audiobook of newReleases) {
+      try {
+        // Check if this matches a Plex audiobook
+        const plexMatchId = findPlexMatch(audiobook.title, audiobook.author);
+
+        await prisma.audiobook.upsert({
+          where: { audibleId: audiobook.asin },
+          create: {
+            audibleId: audiobook.asin,
+            title: audiobook.title,
+            author: audiobook.author,
+            narrator: audiobook.narrator,
+            description: audiobook.description,
+            coverArtUrl: audiobook.coverArtUrl,
+            durationMinutes: audiobook.durationMinutes,
+            releaseDate: audiobook.releaseDate ? new Date(audiobook.releaseDate) : null,
+            rating: audiobook.rating ? audiobook.rating : null,
+            genres: audiobook.genres || [],
+            availabilityStatus: plexMatchId ? 'available' : 'unknown',
+            availableAt: plexMatchId ? new Date() : null,
+          },
+          update: {
+            title: audiobook.title,
+            author: audiobook.author,
+            narrator: audiobook.narrator,
+            description: audiobook.description,
+            coverArtUrl: audiobook.coverArtUrl,
+            durationMinutes: audiobook.durationMinutes,
+            releaseDate: audiobook.releaseDate ? new Date(audiobook.releaseDate) : null,
+            rating: audiobook.rating ? audiobook.rating : null,
+            genres: audiobook.genres || [],
+            // Only update availability if not already set
+            ...(plexMatchId && {
+              availabilityStatus: 'available',
+              availableAt: new Date(),
+            }),
+          },
+        });
+        newReleasesSaved++;
+        if (plexMatchId) matchedToPlex++;
+      } catch (error) {
+        console.error(`[AudibleRefresh] Failed to save new release ${audiobook.title}:`, error);
+      }
+    }
+
+    console.log(`[AudibleRefresh] Saved ${popularSaved} popular and ${newReleasesSaved} new releases to database`);
+    console.log(`[AudibleRefresh] Matched ${matchedToPlex} Audible books to existing Plex library`);
+
+    // Return a placeholder job ID since this doesn't use the Bull queue
     return `audible-refresh-${Date.now()}`;
   }
 

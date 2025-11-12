@@ -49,6 +49,34 @@ export async function GET(request: NextRequest) {
     // Get user info from Plex
     const plexUser = await plexService.getUserInfo(authToken);
 
+    // Validate user info
+    if (!plexUser || !plexUser.id) {
+      console.error('[Plex OAuth] Invalid user info received:', plexUser);
+      return NextResponse.json(
+        {
+          error: 'OAuthError',
+          message: 'Failed to get user information from Plex',
+          details: 'User ID is missing from Plex response',
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!plexUser.username) {
+      console.error('[Plex OAuth] Username missing from Plex user:', plexUser);
+      return NextResponse.json(
+        {
+          error: 'OAuthError',
+          message: 'Failed to get user information from Plex',
+          details: 'Username is missing from Plex response',
+        },
+        { status: 500 }
+      );
+    }
+
+    // Convert id to string safely
+    const plexIdString = typeof plexUser.id === 'string' ? plexUser.id : plexUser.id.toString();
+
     // Check if this is the first user (should be promoted to admin)
     const userCount = await prisma.user.count();
     const isFirstUser = userCount === 0;
@@ -56,20 +84,20 @@ export async function GET(request: NextRequest) {
 
     // Create or update user in database
     const user = await prisma.user.upsert({
-      where: { plexId: plexUser.id.toString() },
+      where: { plexId: plexIdString },
       create: {
-        plexId: plexUser.id.toString(),
+        plexId: plexIdString,
         plexUsername: plexUser.username,
-        plexEmail: plexUser.email,
+        plexEmail: plexUser.email || null,
         role,
-        avatarUrl: plexUser.thumb,
+        avatarUrl: plexUser.thumb || null,
         authToken: encryptionService.encrypt(authToken),
         lastLoginAt: new Date(),
       },
       update: {
         plexUsername: plexUser.username,
-        plexEmail: plexUser.email,
-        avatarUrl: plexUser.thumb,
+        plexEmail: plexUser.email || null,
+        avatarUrl: plexUser.thumb || null,
         authToken: encryptionService.encrypt(authToken),
         lastLoginAt: new Date(),
       },

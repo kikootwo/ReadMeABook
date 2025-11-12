@@ -134,6 +134,12 @@ export function AudiobookCard({
         <div className="pt-2">
           {isRequested && requestStatus ? (
             <StatusBadge status={requestStatus} className="w-full justify-center py-2" />
+          ) : audiobook.isAvailable ? (
+            <div className="w-full py-2 px-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md text-center">
+              <span className="text-sm font-medium text-green-700 dark:text-green-400">
+                In Your Library
+              </span>
+            </div>
           ) : (
             <Button
               onClick={handleRequest}

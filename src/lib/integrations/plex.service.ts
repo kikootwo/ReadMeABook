@@ -126,15 +126,56 @@ export class PlexService {
         },
       });
 
+      let userData: any;
+
+      // Handle different response formats from Plex
+      if (typeof response.data === 'string') {
+        // XML response - parse it
+        console.log('[Plex] Received XML response, parsing...');
+        const parsed = await parseStringPromise(response.data);
+
+        // XML attributes are in user.$
+        if (parsed.user && parsed.user.$) {
+          userData = parsed.user.$;
+        } else {
+          console.error('[Plex] Unexpected XML structure:', parsed);
+          throw new Error('Unexpected XML structure in Plex response');
+        }
+      } else if (response.data && typeof response.data === 'object') {
+        // JSON response
+        console.log('[Plex] Received JSON response');
+        userData = response.data;
+      } else {
+        console.error('[Plex] Unexpected response type:', typeof response.data);
+        throw new Error('Unexpected response format from Plex');
+      }
+
+      console.log('[Plex] Parsed user data:', JSON.stringify(userData, null, 2));
+
+      // Validate required fields
+      if (!userData.id) {
+        console.error('[Plex] User ID missing from parsed data:', userData);
+        throw new Error('User ID missing from Plex response');
+      }
+
+      const username = userData.username || userData.title;
+      if (!username) {
+        console.error('[Plex] Username missing from parsed data:', userData);
+        throw new Error('Username missing from Plex response');
+      }
+
       return {
-        id: response.data.id,
-        username: response.data.username || response.data.title,
-        email: response.data.email,
-        thumb: response.data.thumb,
+        id: parseInt(userData.id, 10),
+        username,
+        email: userData.email || undefined,
+        thumb: userData.thumb || undefined,
         authToken,
       };
     } catch (error) {
       console.error('Failed to get Plex user info:', error);
+      if (error instanceof Error) {
+        throw error; // Re-throw our custom errors
+      }
       throw new Error('Failed to retrieve user information from Plex');
     }
   }
@@ -268,25 +309,43 @@ export class PlexService {
         }
       );
 
+      console.log('[Plex] Library content response type:', typeof response.data);
+
       // Handle XML response
       let data = response.data;
       if (typeof data === 'string') {
+        console.log('[Plex] Parsing XML response...');
         const parsed = await parseStringPromise(data);
         data = parsed.MediaContainer;
+      } else if (data && typeof data === 'object') {
+        // JSON response - could be wrapped in MediaContainer
+        if (data.MediaContainer) {
+          console.log('[Plex] Extracting from MediaContainer wrapper');
+          data = data.MediaContainer;
+        }
       }
 
-      const tracks = data.Metadata || data.Track || [];
+      console.log('[Plex] Data structure keys:', Object.keys(data || {}));
+      console.log('[Plex] Looking for content in: Metadata, Track, Directory, Album');
+
+      const tracks = data.Metadata || data.Track || data.Directory || data.Album || [];
+      console.log('[Plex] Found', Array.isArray(tracks) ? tracks.length : '(not an array)', 'items');
+
+      if (!Array.isArray(tracks)) {
+        console.warn('[Plex] tracks is not an array:', tracks);
+        return [];
+      }
 
       return tracks.map((item: any) => ({
-        ratingKey: item.ratingKey || item.$.ratingKey,
-        guid: item.guid || item.$.guid || '',
-        title: item.title || item.$.title,
-        author: item.grandparentTitle || item.$.grandparentTitle || item.originalTitle,
-        narrator: item.writer || item.$.writer,
+        ratingKey: item.ratingKey || item.$?.ratingKey,
+        guid: item.guid || item.$?.guid || '',
+        title: item.title || item.$?.title,
+        author: item.grandparentTitle || item.$?.grandparentTitle || item.originalTitle,
+        narrator: item.writer || item.$?.writer,
         duration: item.duration ? parseInt(item.duration) : undefined,
         year: item.year ? parseInt(item.year) : undefined,
-        summary: item.summary || item.$.summary,
-        thumb: item.thumb || item.$.thumb,
+        summary: item.summary || item.$?.summary,
+        thumb: item.thumb || item.$?.thumb,
         addedAt: item.addedAt ? parseInt(item.addedAt) : Date.now(),
         updatedAt: item.updatedAt ? parseInt(item.updatedAt) : Date.now(),
       }));

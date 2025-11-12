@@ -2,19 +2,31 @@
 
 ## Current State
 
-**Status:** Design Phase - Not yet implemented
+**Status:** Implemented ✅
 
-This integration provides connectivity to Plex Media Server for authentication (OAuth), library management, content detection, and automatic scanning after new audiobooks are added.
+This integration provides connectivity to Plex Media Server for authentication (OAuth), library management, content detection, and automatic scanning. The system maintains a database of all audiobooks in your Plex library and uses this as the source of truth for availability status.
 
 ## Design Architecture
+
+### Data Flow
+
+**Plex as Source of Truth:**
+The system treats Plex library content as the authoritative source for what audiobooks are available. The data flow is:
+
+1. **Plex Scan Job** → Fetches all audiobooks from Plex → Populates/updates database with `availabilityStatus: 'available'`
+2. **Audible Refresh Job** → Fetches popular/new audiobooks from Audible → Fuzzy matches against Plex data in database → Sets `availabilityStatus: 'available'` for matches
+3. **User Interface** → Queries database → Shows "In Your Library" for available books → Prevents duplicate requests
+
+**Key Principle:** Database always reflects what's in Plex. Audible data is matched against this to determine availability before showing users.
 
 ### Integration Points
 
 1. **OAuth Authentication** - User login via Plex accounts
 2. **Library Detection** - Discover available audiobook libraries
-3. **Content Scanning** - Trigger library scans after file additions
-4. **Metadata Matching** - Fuzzy match requested audiobooks to Plex library items
+3. **Content Scanning** - Populate database with all Plex library content
+4. **Metadata Matching** - Fuzzy match Audible audiobooks to Plex library items
 5. **Server Information** - Retrieve server details for validation
+6. **Availability Status** - Track which books are available, requested, or unknown
 
 ### Plex API: XML-Based REST API
 
@@ -209,22 +221,27 @@ function normalizeString(str: string): string {
 ### Library Scanning Strategy
 
 **When to Trigger Scans:**
-- Immediately after moving files to media library
+- On a schedule (default: every 6 hours)
 - After manual admin action (bulk operations)
-- On a schedule (every 6 hours as fallback)
+- After download completion (future enhancement)
 
-**Scan Process:**
-1. Trigger Plex library scan via API
-2. Wait 5 seconds for scan to start
-3. Poll library content every 10 seconds
-4. Check if new item appeared (fuzzy match)
-5. Timeout after 5 minutes
-6. If not found, mark for manual review
+**Scan Process (Implemented):**
+1. Fetch all audiobooks from Plex library via API
+2. For each Plex audiobook:
+   - Check if exists in database by `plexGuid`
+   - If exists: Update metadata and set `availabilityStatus: 'available'`
+   - If new: Create database entry with `availabilityStatus: 'available'`
+3. Return summary: total scanned, new count, updated count
+
+**Key Difference from Original Design:**
+- **Original:** Scan was meant to match against pending requests
+- **Current:** Scan populates entire library into database as source of truth
+- **Result:** Database always reflects current Plex library state
 
 **Optimization:**
-- Partial scans if Plex supports it (scan specific directory)
-- Batch multiple additions before scanning
+- Batch database operations for better performance
 - Rate limit scans to avoid overwhelming Plex server
+- Default to disabled until first setup is complete
 
 ## Plex Service API
 
@@ -524,13 +541,60 @@ console.log('Authenticated as:', user.username);
   - Updated `/api/auth/plex/login` route to pass `pin.id` to `getOAuthUrl()`
 - **Result:** Plex OAuth login now works correctly, pinId is available in callback for PIN status checking
 
+**3. Plex Scan Architecture - Matching vs Populating (Fixed)**
+- **Issue:** Scan matched Plex items against existing database requests, resulting in 0 matches when database was empty
+- **Root Cause:** Architectural misunderstanding - scan was treating requests as source of truth instead of Plex
+- **User Feedback:** "I am seeing audiobooks on the home page that I know are in my library, and it is still suggesting I request them. So matching against requests is a poor setup."
+- **Fix Applied:**
+  - Rewrote `processScanPlex()` to create/update database entries for ALL Plex audiobooks
+  - Each Plex audiobook now stored with `plexGuid`, `availabilityStatus: 'available'`, and metadata
+  - Audible refresh now matches against Plex data in database (85% similarity threshold)
+  - UI shows "In Your Library" badge for available books
+  - Server-side validation prevents requests for books already in Plex
+- **Result:** Database reflects complete Plex library, prevents duplicate requests, user knows what they already own
+
+**Recent OAuth Fixes (Fixed):**
+- ✅ OAuth callback error "Cannot read properties of undefined (reading 'toString')" (Fixed: added proper validation)
+- ✅ Missing validation of Plex API responses (Fixed: comprehensive response validation)
+- ✅ No error handling for malformed user data (Fixed: validates all required fields before use)
+
 ### Current Issues
 
 **Potential Issues:**
 - Plex's audiobook support is limited (uses music library)
 - Metadata quality depends on Plex's agents
-- Fuzzy matching may have false positives
+- Fuzzy matching may have false positives (mitigated by 85% threshold)
 - Scans can be slow on large libraries
+
+### Availability Checking & Request Prevention
+
+**Implementation (Completed):**
+
+**1. Database Population:**
+- Plex scan job populates database with all library audiobooks
+- Each entry has `plexGuid`, `availabilityStatus: 'available'`, and `availableAt` timestamp
+- Updates existing entries on subsequent scans to keep metadata fresh
+
+**2. Audible Matching:**
+- Audible refresh job fetches popular/new releases from Audible
+- Fuzzy matches each Audible book against Plex books in database (85% threshold)
+- Sets `availabilityStatus: 'available'` for matches
+- This enables "In Your Library" badges on Audible content that user already owns
+
+**3. API Enrichment:**
+- `/api/audiobooks/popular` and `/api/audiobooks/new-releases` query database for matches
+- Return `isAvailable: true` for books with `availabilityStatus === 'available'`
+- Uses fuzzy matching with 70% threshold for API responses (more lenient than job processing)
+
+**4. UI Prevention:**
+- `AudiobookCard` component checks `audiobook.isAvailable`
+- If available: Shows "In Your Library" badge instead of "Request" button
+- If not available: Shows "Request" button (or status badge if already requested)
+
+**5. Server-Side Validation:**
+- POST `/api/requests` checks `availabilityStatus` before creating request
+- Returns 409 Conflict with "AlreadyAvailable" error if book is in Plex
+- Prevents accidental duplicate requests even if UI bypassed
 
 ## Future Enhancements
 

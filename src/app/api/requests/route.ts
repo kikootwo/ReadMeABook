@@ -67,6 +67,18 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      // Check if audiobook is already available in Plex
+      if (audiobookRecord.availabilityStatus === 'available') {
+        return NextResponse.json(
+          {
+            error: 'AlreadyAvailable',
+            message: 'This audiobook is already available in your Plex library',
+            audiobook: audiobookRecord,
+          },
+          { status: 409 }
+        );
+      }
+
       // Check if user already has a request for this audiobook
       const existingRequest = await prisma.request.findUnique({
         where: {
