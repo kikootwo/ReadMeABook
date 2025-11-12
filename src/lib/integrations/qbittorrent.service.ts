@@ -4,8 +4,11 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
-import parseTorrent from 'parse-torrent';
+import * as parseTorrentModule from 'parse-torrent';
 import FormData from 'form-data';
+
+// Handle both ESM and CommonJS imports
+const parseTorrent = (parseTorrentModule as any).default || parseTorrentModule;
 
 export interface AddTorrentOptions {
   savePath?: string;

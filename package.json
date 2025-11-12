@@ -42,6 +42,7 @@
     "@types/bull": "^4.10.0",
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20",
+    "@types/parse-torrent": "^5.8.8",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/string-similarity": "^4.0.2",
