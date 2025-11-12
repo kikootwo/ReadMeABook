@@ -7,7 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { authenticatedFetcher } from '@/lib/utils/api';
+import { authenticatedFetcher, fetchJSON } from '@/lib/utils/api';
 
 interface ScheduledJob {
   id: string;
@@ -50,7 +50,7 @@ export default function AdminJobsPage() {
 
     try {
       setTriggering(jobId);
-      await authenticatedFetcher(`/api/admin/jobs/${jobId}/trigger`, {
+      await fetchJSON(`/api/admin/jobs/${jobId}/trigger`, {
         method: 'POST',
       });
       alert('Job triggered successfully');
