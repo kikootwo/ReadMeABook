@@ -302,6 +302,9 @@ export class PlexService {
       const response = await this.client.get(
         `${serverUrl}/library/sections/${libraryId}/all`,
         {
+          params: {
+            type: 9, // Type 9 = Albums (books in audiobook context)
+          },
           headers: {
             'X-Plex-Token': authToken,
             'Accept': 'application/json',
@@ -339,8 +342,8 @@ export class PlexService {
       return tracks.map((item: any) => ({
         ratingKey: item.ratingKey || item.$?.ratingKey,
         guid: item.guid || item.$?.guid || '',
-        title: item.title || item.$?.title,
-        author: item.grandparentTitle || item.$?.grandparentTitle || item.originalTitle,
+        title: item.title || item.$?.title, // Album title (book name)
+        author: item.parentTitle || item.$?.parentTitle || item.originalTitle, // Artist name (author)
         narrator: item.writer || item.$?.writer,
         duration: item.duration ? parseInt(item.duration) : undefined,
         year: item.year ? parseInt(item.year) : undefined,
