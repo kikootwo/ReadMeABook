@@ -11,7 +11,7 @@ export type ScheduledJobType = 'plex_library_scan' | 'audible_refresh';
 export interface ScheduledJob {
   id: string;
   name: string;
-  type: ScheduledJobType;
+  type: string; // Changed from ScheduledJobType to string for Prisma compatibility
   schedule: string; // Cron expression
   enabled: boolean;
   payload: any;
