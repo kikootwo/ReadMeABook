@@ -17,8 +17,8 @@ export async function POST() {
     // Request PIN from Plex
     const pin = await plexService.requestPin();
 
-    // Generate OAuth URL
-    const authUrl = plexService.getOAuthUrl(pin.code);
+    // Generate OAuth URL with pinId
+    const authUrl = plexService.getOAuthUrl(pin.code, pin.id);
 
     return NextResponse.json({
       success: true,

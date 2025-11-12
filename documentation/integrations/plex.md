@@ -515,6 +515,15 @@ console.log('Authenticated as:', user.username);
   - Added comprehensive logging to identify response format
 - **Result:** Libraries now display correctly, server info shows proper version
 
+**2. OAuth Callback Missing pinId Parameter (Fixed)**
+- **Issue:** After Plex OAuth authorization, callback received error "Missing pinId parameter"
+- **Root Cause:** The OAuth forward URL did not include the pinId parameter, so when Plex redirected back to our callback, the pinId was unavailable
+- **Fix Applied:**
+  - Modified `getOAuthUrl()` method to accept `pinId` parameter
+  - Appended pinId as query parameter to callback URL before encoding: `callbackUrl?pinId={pinId}`
+  - Updated `/api/auth/plex/login` route to pass `pin.id` to `getOAuthUrl()`
+- **Result:** Plex OAuth login now works correctly, pinId is available in callback for PIN status checking
+
 ### Current Issues
 
 **Potential Issues:**

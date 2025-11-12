@@ -472,11 +472,21 @@ let qbittorrentService: QBittorrentService | null = null;
 
 export async function getQBittorrentService(): Promise<QBittorrentService> {
   if (!qbittorrentService) {
-    // Get configuration from environment or config service
-    const baseUrl = process.env.QBITTORRENT_URL || 'http://qbittorrent:8080';
-    const username = process.env.QBITTORRENT_USERNAME || 'admin';
-    const password = process.env.QBITTORRENT_PASSWORD;
-    const savePath = process.env.DOWNLOAD_DIR || '/downloads';
+    // Get configuration from database
+    const { getConfigService } = await import('@/lib/services/config.service');
+    const configService = getConfigService();
+
+    const config = await configService.getMany([
+      'qbittorrent_url',
+      'qbittorrent_username',
+      'qbittorrent_password',
+      'paths_downloads',
+    ]);
+
+    const baseUrl = config.qbittorrent_url || process.env.QBITTORRENT_URL || 'http://qbittorrent:8080';
+    const username = config.qbittorrent_username || process.env.QBITTORRENT_USERNAME || 'admin';
+    const password = config.qbittorrent_password || process.env.QBITTORRENT_PASSWORD;
+    const savePath = config.paths_downloads || process.env.DOWNLOAD_DIR || '/downloads';
 
     if (!password) {
       throw new Error('qBittorrent password not configured');

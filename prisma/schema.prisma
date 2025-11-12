@@ -175,3 +175,20 @@ model Job {
   @@index([createdAt(sort: Desc)])
   @@map("jobs")
 }
+
+model ScheduledJob {
+  id        String    @id @default(uuid())
+  name      String
+  type      String    // 'plex_library_scan', 'audible_refresh'
+  schedule  String    // Cron expression
+  enabled   Boolean   @default(true)
+  payload   Json      @default("{}")
+  lastRun   DateTime? @map("last_run")
+  nextRun   DateTime? @map("next_run")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@index([type])
+  @@index([enabled])
+  @@map("scheduled_jobs")
+}

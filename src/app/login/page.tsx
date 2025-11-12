@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/Button';
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, login, isLoading: authLoading } = useAuth();
+  const { user, login, setAuthData, isLoading: authLoading } = useAuth();
 
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -100,10 +100,12 @@ function LoginContent() {
       localStorage.setItem('refreshToken', data.refreshToken);
       localStorage.setItem('user', JSON.stringify(data.user));
 
+      // Update auth context immediately
+      setAuthData(data.user, data.accessToken);
+
       // Redirect to intended page or homepage
       const redirect = searchParams.get('redirect') || '/';
       router.push(redirect);
-      router.refresh(); // Force a refresh to update auth context
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Admin login failed. Please try again.');
     } finally {
