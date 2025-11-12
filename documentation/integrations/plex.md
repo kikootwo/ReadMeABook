@@ -62,10 +62,13 @@ Response: List of all libraries with IDs and types
 
 **3. Get Library Content**
 ```
-GET {server_url}/library/sections/{library_id}/all
+GET {server_url}/library/sections/{library_id}/all?type=9
 Headers: X-Plex-Token: {auth_token}
+Query Params: type=9 (Albums - for audiobooks)
 
-Response: All items in library (audiobooks)
+Response: All albums in library (audiobooks)
+Note: Type 9 = Albums. Important for music libraries used for audiobooks,
+      as it returns book-level items instead of artist-level items.
 ```
 
 **4. Scan Library**
@@ -293,8 +296,8 @@ interface PlexLibrary {
 interface PlexAudiobook {
   ratingKey: string; // Plex's unique ID
   guid: string;      // Plex GUID
-  title: string;
-  author: string;    // Stored in "parentTitle" or "grandparentTitle"
+  title: string;     // Album title (book name)
+  author: string;    // Artist name from "parentTitle" (when querying albums)
   narrator?: string;
   duration: number;  // Milliseconds
   year?: number;
@@ -557,6 +560,17 @@ console.log('Authenticated as:', user.username);
 - ✅ OAuth callback error "Cannot read properties of undefined (reading 'toString')" (Fixed: added proper validation)
 - ✅ Missing validation of Plex API responses (Fixed: comprehensive response validation)
 - ✅ No error handling for malformed user data (Fixed: validates all required fields before use)
+
+**4. Plex Scan Mapping Artist Instead of Album (Fixed)**
+- **Issue:** Plex scan was incorrectly mapping author names as titles and leaving author field undefined
+- **Root Cause:** The `getLibraryContent()` method was querying all items without specifying type, which returned Artist-level items (authors) instead of Album-level items (books). Since Artist items have their name in `item.title` and no `grandparentTitle`, the mapping was backwards.
+- **User Feedback:** Logs showed `[ScanPlex] Added new: "Ruth Ware" by undefined` - author names appearing as titles
+- **Fix Applied:**
+  - Added `type: 9` query parameter to `/library/sections/{libraryId}/all` endpoint to specifically request Albums
+  - Changed field mapping from `author: item.grandparentTitle` to `author: item.parentTitle`
+  - In Plex music library structure: Artist (author) → Album (book) → Track (audio file)
+  - For Album-level items: `item.title` = book name, `item.parentTitle` = author name
+- **Result:** Scans now correctly identify book titles as titles and authors as authors
 
 ### Current Issues
 

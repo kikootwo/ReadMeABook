@@ -160,6 +160,38 @@ interface AudibleSearchResult {
 }
 ```
 
+### API Route Enrichment
+
+**Implementation:** All Audible API routes (`/api/audiobooks/popular`, `/api/audiobooks/new-releases`, `/api/audiobooks/search`) enrich the scraped Audible data with availability information from the database.
+
+**Enrichment Process:**
+1. Fetch audiobooks from Audible via web scraping
+2. For each audiobook, query the database for potential matches:
+   - Exact match by `audibleId` (ASIN)
+   - Fuzzy match by title and author (using `string-similarity`)
+3. Calculate fuzzy match score: `titleScore * 0.7 + authorScore * 0.3`
+4. Accept matches with score >= 70%
+5. Add availability fields to response:
+   - `availabilityStatus`: 'available' | 'requested' | 'unknown'
+   - `isAvailable`: boolean (true if in Plex library)
+   - `plexGuid`: Plex GUID if available
+   - `dbId`: Database ID if matched
+
+**Enriched Response:**
+```typescript
+interface EnrichedAudibleAudiobook extends AudibleAudiobook {
+  availabilityStatus: 'available' | 'requested' | 'unknown';
+  isAvailable: boolean;
+  plexGuid: string | null;
+  dbId: string | null;
+}
+```
+
+**Benefits:**
+- UI can show "In Your Library" badges for books already in Plex
+- Prevents duplicate requests for books user already owns
+- Works across all discovery surfaces (popular, new releases, search)
+
 ## Usage Examples
 
 ### Get Popular Audiobooks
