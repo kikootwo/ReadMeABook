@@ -4,6 +4,11 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
+import * as parseTorrentModule from 'parse-torrent';
+import FormData from 'form-data';
+
+// Handle both ESM and CommonJS imports
+const parseTorrent = (parseTorrentModule as any).default || parseTorrentModule;
 
 export interface AddTorrentOptions {
   savePath?: string;
@@ -126,7 +131,7 @@ export class QBittorrentService {
   }
 
   /**
-   * Add torrent (magnet link or file URL)
+   * Add torrent (magnet link or file URL) - Enterprise Implementation
    */
   async addTorrent(url: string, options?: AddTorrentOptions): Promise<string> {
     // Ensure we're authenticated
@@ -140,90 +145,163 @@ export class QBittorrentService {
       // Ensure category exists
       await this.ensureCategory(category);
 
-      const form = new URLSearchParams({
-        urls: url,
-        savepath: options?.savePath || this.defaultSavePath,
-        category,
-        paused: options?.paused ? 'true' : 'false',
-        sequentialDownload: (options?.sequentialDownload !== false).toString(),
-      });
-
-      if (options?.tags) {
-        form.append('tags', options.tags.join(','));
+      // Determine if this is a magnet link or .torrent file URL
+      if (url.startsWith('magnet:')) {
+        console.log('[qBittorrent] Detected magnet link');
+        return await this.addMagnetLink(url, category, options);
+      } else {
+        console.log('[qBittorrent] Detected .torrent file URL');
+        return await this.addTorrentFile(url, category, options);
       }
-
-      console.log('[qBittorrent] Adding torrent with category:', category);
-
-      const addResponse = await this.client.post('/torrents/add', form, {
-        headers: {
-          Cookie: this.cookie,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      });
-
-      console.log('[qBittorrent] Add torrent response status:', addResponse.status);
-      console.log('[qBittorrent] Add torrent response data:', addResponse.data);
-
-      // Try to extract hash from magnet link
-      const extractedHash = this.extractHash(url);
-
-      // If we got a real hash from magnet link, return it
-      if (extractedHash !== 'pending') {
-        console.log(`[qBittorrent] Added torrent (from magnet): ${extractedHash}`);
-        return extractedHash;
-      }
-
-      // For .torrent URLs, we need to query qBittorrent to get the actual hash
-      console.log('[qBittorrent] Waiting for torrent to be processed...');
-
-      // Wait for qBittorrent to process the torrent
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // First, try to get all torrents regardless of category to see if it was added
-      const allTorrents = await this.getTorrents();
-      console.log(`[qBittorrent] Total torrents in qBittorrent: ${allTorrents.length}`);
-
-      // Get torrents in our category
-      const categoryTorrents = await this.getTorrents(category);
-      console.log(`[qBittorrent] Torrents in category "${category}": ${categoryTorrents.length}`);
-
-      if (categoryTorrents.length === 0) {
-        // Check if torrent was added without category
-        if (allTorrents.length > 0) {
-          const newestOverall = allTorrents.reduce((newest, current) =>
-            current.added_on > newest.added_on ? current : newest
-          );
-          console.warn(`[qBittorrent] Torrent may have been added without category. Newest torrent: ${newestOverall.hash} in category "${newestOverall.category}"`);
-
-          // Set the correct category
-          await this.setCategory(newestOverall.hash, category);
-          console.log(`[qBittorrent] Set category to "${category}" for torrent ${newestOverall.hash}`);
-
-          return newestOverall.hash;
-        }
-
-        throw new Error('Failed to retrieve torrent after adding - no torrents found');
-      }
-
-      // Find the most recently added torrent in our category
-      const newestTorrent = categoryTorrents.reduce((newest, current) =>
-        current.added_on > newest.added_on ? current : newest
-      );
-
-      console.log(`[qBittorrent] Added torrent: ${newestTorrent.hash} (${newestTorrent.name})`);
-
-      return newestTorrent.hash;
     } catch (error) {
       // Try re-authenticating if we get a 403
       if (axios.isAxiosError(error) && error.response?.status === 403) {
-        console.log('Session expired, re-authenticating...');
+        console.log('[qBittorrent] Session expired, re-authenticating...');
         await this.login();
         return this.addTorrent(url, options); // Retry once
       }
 
-      console.error('Failed to add torrent:', error);
+      console.error('[qBittorrent] Failed to add torrent:', error);
       throw new Error('Failed to add torrent to qBittorrent');
     }
+  }
+
+  /**
+   * Add magnet link - hash is extractable from URI (deterministic)
+   */
+  private async addMagnetLink(
+    magnetUrl: string,
+    category: string,
+    options?: AddTorrentOptions
+  ): Promise<string> {
+    // Extract info_hash from magnet link (deterministic)
+    const infoHash = this.extractHashFromMagnet(magnetUrl);
+
+    if (!infoHash) {
+      throw new Error('Invalid magnet link - could not extract info_hash');
+    }
+
+    console.log(`[qBittorrent] Extracted info_hash from magnet: ${infoHash}`);
+
+    // Check for duplicates
+    try {
+      const existing = await this.getTorrent(infoHash);
+      console.log(`[qBittorrent] Torrent ${infoHash} already exists (duplicate), returning existing hash`);
+      return infoHash;
+    } catch {
+      // Torrent doesn't exist, continue with adding
+    }
+
+    // Upload via 'urls' parameter
+    const form = new URLSearchParams({
+      urls: magnetUrl,
+      savepath: options?.savePath || this.defaultSavePath,
+      category,
+      paused: options?.paused ? 'true' : 'false',
+      sequentialDownload: (options?.sequentialDownload !== false).toString(),
+    });
+
+    if (options?.tags) {
+      form.append('tags', options.tags.join(','));
+    }
+
+    console.log('[qBittorrent] Uploading magnet link...');
+
+    const response = await this.client.post('/torrents/add', form, {
+      headers: {
+        Cookie: this.cookie,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    });
+
+    if (response.data !== 'Ok.') {
+      throw new Error(`qBittorrent rejected magnet link: ${response.data}`);
+    }
+
+    console.log(`[qBittorrent] Successfully added magnet link: ${infoHash}`);
+    return infoHash;
+  }
+
+  /**
+   * Add .torrent file - download, parse, extract hash, upload content (deterministic)
+   */
+  private async addTorrentFile(
+    torrentUrl: string,
+    category: string,
+    options?: AddTorrentOptions
+  ): Promise<string> {
+    console.log(`[qBittorrent] Downloading .torrent file from: ${torrentUrl}`);
+
+    // Download .torrent file into memory
+    const torrentResponse = await axios.get(torrentUrl, {
+      responseType: 'arraybuffer',
+      timeout: 30000,
+    });
+
+    const torrentBuffer = Buffer.from(torrentResponse.data);
+    console.log(`[qBittorrent] Downloaded ${torrentBuffer.length} bytes`);
+
+    // Parse .torrent file to extract info_hash (deterministic)
+    let parsedTorrent: any;
+    try {
+      parsedTorrent = await parseTorrent(torrentBuffer);
+    } catch (error) {
+      console.error('[qBittorrent] Failed to parse .torrent file:', error);
+      throw new Error('Invalid .torrent file - failed to parse');
+    }
+
+    const infoHash = parsedTorrent.infoHash;
+
+    if (!infoHash) {
+      throw new Error('Failed to extract info_hash from .torrent file');
+    }
+
+    console.log(`[qBittorrent] Extracted info_hash: ${infoHash}`);
+    console.log(`[qBittorrent] Torrent name: ${parsedTorrent.name || 'Unknown'}`);
+
+    // Check for duplicates
+    try {
+      const existing = await this.getTorrent(infoHash);
+      console.log(`[qBittorrent] Torrent ${infoHash} already exists (duplicate), returning existing hash`);
+      return infoHash;
+    } catch {
+      // Torrent doesn't exist, continue with adding
+    }
+
+    // Upload .torrent file content via multipart/form-data
+    const formData = new FormData();
+
+    const filename = parsedTorrent.name ? `${parsedTorrent.name}.torrent` : 'torrent.torrent';
+    formData.append('torrents', torrentBuffer, {
+      filename,
+      contentType: 'application/x-bittorrent',
+    });
+    formData.append('savepath', options?.savePath || this.defaultSavePath);
+    formData.append('category', category);
+    formData.append('paused', options?.paused ? 'true' : 'false');
+    formData.append('sequentialDownload', (options?.sequentialDownload !== false).toString());
+
+    if (options?.tags) {
+      formData.append('tags', options.tags.join(','));
+    }
+
+    console.log('[qBittorrent] Uploading .torrent file content...');
+
+    const response = await this.client.post('/torrents/add', formData, {
+      headers: {
+        Cookie: this.cookie,
+        ...formData.getHeaders(),
+      },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
+    });
+
+    if (response.data !== 'Ok.') {
+      throw new Error(`qBittorrent rejected .torrent file: ${response.data}`);
+    }
+
+    console.log(`[qBittorrent] Successfully added torrent: ${infoHash}`);
+    return infoHash;
   }
 
   /**
@@ -533,21 +611,16 @@ export class QBittorrentService {
   }
 
   /**
-   * Extract hash from magnet link or .torrent URL
+   * Extract info_hash from magnet link
    */
-  private extractHash(url: string): string {
-    // Check if it's a magnet link
-    if (url.startsWith('magnet:')) {
-      // Extract hash from magnet:?xt=urn:btih:HASH
-      const match = url.match(/xt=urn:btih:([a-fA-F0-9]{40}|[a-zA-Z0-9]{32})/i);
-      if (match) {
-        return match[1].toLowerCase();
-      }
+  private extractHashFromMagnet(magnetUrl: string): string | null {
+    // Extract hash from magnet:?xt=urn:btih:HASH
+    const match = magnetUrl.match(/xt=urn:btih:([a-fA-F0-9]{40}|[a-zA-Z0-9]{32})/i);
+    if (match) {
+      return match[1].toLowerCase();
     }
 
-    // If we can't extract hash, generate a temporary placeholder
-    // The actual hash will be available after qBittorrent processes it
-    return 'pending';
+    return null;
   }
 }
 
