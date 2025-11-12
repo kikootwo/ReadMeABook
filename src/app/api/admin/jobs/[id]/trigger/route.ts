@@ -13,7 +13,7 @@ import { getSchedulerService } from '@/lib/services/scheduler.service';
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // Verify admin auth
@@ -27,8 +27,11 @@ export async function POST(
       return NextResponse.json({ error: 'Forbidden - Admin access required' }, { status: 403 });
     }
 
+    // Await params in Next.js 15+
+    const { id } = await params;
+
     const schedulerService = getSchedulerService();
-    const jobId = await schedulerService.triggerJobNow(params.id);
+    const jobId = await schedulerService.triggerJobNow(id);
 
     return NextResponse.json({
       success: true,
