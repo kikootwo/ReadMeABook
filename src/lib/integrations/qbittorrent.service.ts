@@ -140,6 +140,21 @@ export class QBittorrentService {
       // Ensure category exists
       await this.ensureCategory(category);
 
+      // Try to extract hash from magnet link or URL FIRST
+      const extractedHash = this.extractHash(url);
+
+      // Get snapshot of existing torrent hashes BEFORE adding
+      // This is crucial for detecting if the torrent was actually added
+      const beforeTorrents = await this.getTorrents();
+      const beforeHashes = new Set(beforeTorrents.map(t => t.hash));
+      console.log(`[qBittorrent] Existing torrents before add: ${beforeHashes.size}`);
+
+      // Check if this torrent already exists (duplicate detection)
+      if (extractedHash !== 'pending' && beforeHashes.has(extractedHash)) {
+        console.warn(`[qBittorrent] Torrent ${extractedHash} already exists (duplicate), returning existing hash`);
+        return extractedHash;
+      }
+
       const form = new URLSearchParams({
         urls: url,
         savepath: options?.savePath || this.defaultSavePath,
@@ -164,55 +179,61 @@ export class QBittorrentService {
       console.log('[qBittorrent] Add torrent response status:', addResponse.status);
       console.log('[qBittorrent] Add torrent response data:', addResponse.data);
 
-      // Try to extract hash from magnet link
-      const extractedHash = this.extractHash(url);
-
-      // If we got a real hash from magnet link, return it
+      // For magnet links with extractable hashes, we can potentially return early
+      // But we should still verify it was actually added
       if (extractedHash !== 'pending') {
-        console.log(`[qBittorrent] Added torrent (from magnet): ${extractedHash}`);
-        return extractedHash;
+        console.log(`[qBittorrent] Extracted hash from URL: ${extractedHash}`);
       }
-
-      // For .torrent URLs, we need to query qBittorrent to get the actual hash
-      console.log('[qBittorrent] Waiting for torrent to be processed...');
 
       // Wait for qBittorrent to process the torrent
+      console.log('[qBittorrent] Waiting for torrent to be processed...');
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // First, try to get all torrents regardless of category to see if it was added
-      const allTorrents = await this.getTorrents();
-      console.log(`[qBittorrent] Total torrents in qBittorrent: ${allTorrents.length}`);
+      // Get all torrents AFTER adding
+      const afterTorrents = await this.getTorrents();
+      console.log(`[qBittorrent] Total torrents after add: ${afterTorrents.length}`);
 
-      // Get torrents in our category
-      const categoryTorrents = await this.getTorrents(category);
-      console.log(`[qBittorrent] Torrents in category "${category}": ${categoryTorrents.length}`);
+      // Find NEW torrent by comparing hashes (what's in "after" that wasn't in "before")
+      const newTorrents = afterTorrents.filter(t => !beforeHashes.has(t.hash));
 
-      if (categoryTorrents.length === 0) {
-        // Check if torrent was added without category
-        if (allTorrents.length > 0) {
-          const newestOverall = allTorrents.reduce((newest, current) =>
-            current.added_on > newest.added_on ? current : newest
-          );
-          console.warn(`[qBittorrent] Torrent may have been added without category. Newest torrent: ${newestOverall.hash} in category "${newestOverall.category}"`);
+      if (newTorrents.length === 0) {
+        // No new torrent was added
+        console.error('[qBittorrent] No new torrent detected after add operation');
+        console.error('[qBittorrent] qBittorrent returned "Ok." but torrent was not added to the queue');
 
-          // Set the correct category
-          await this.setCategory(newestOverall.hash, category);
-          console.log(`[qBittorrent] Set category to "${category}" for torrent ${newestOverall.hash}`);
-
-          return newestOverall.hash;
-        }
-
-        throw new Error('Failed to retrieve torrent after adding - no torrents found');
+        // qBittorrent said "Ok." but didn't actually add the torrent
+        throw new Error(
+          'qBittorrent failed to add the torrent. Possible reasons: ' +
+          '(1) Invalid or inaccessible torrent URL - the download link may have expired or is blocked, ' +
+          '(2) qBittorrent internal error - check qBittorrent logs for details, ' +
+          '(3) Network connectivity issue between ReadMeABook and the torrent source. ' +
+          'Try selecting a different torrent or check the qBittorrent web UI directly.'
+        );
       }
 
-      // Find the most recently added torrent in our category
-      const newestTorrent = categoryTorrents.reduce((newest, current) =>
-        current.added_on > newest.added_on ? current : newest
-      );
+      if (newTorrents.length > 1) {
+        console.warn(`[qBittorrent] Multiple new torrents detected (${newTorrents.length}), using first one`);
+      }
 
-      console.log(`[qBittorrent] Added torrent: ${newestTorrent.hash} (${newestTorrent.name})`);
+      const newTorrent = newTorrents[0];
+      console.log(`[qBittorrent] New torrent detected: ${newTorrent.hash} (${newTorrent.name})`);
 
-      return newestTorrent.hash;
+      // Verify this matches our extracted hash if we have one
+      if (extractedHash !== 'pending' && extractedHash !== newTorrent.hash) {
+        console.warn(
+          `[qBittorrent] Hash mismatch: expected ${extractedHash}, got ${newTorrent.hash}. ` +
+          `This may indicate the torrent file was different than expected.`
+        );
+      }
+
+      // Check if the new torrent has the correct category
+      if (newTorrent.category !== category) {
+        console.warn(`[qBittorrent] Torrent added with category "${newTorrent.category}", setting to "${category}"`);
+        await this.setCategory(newTorrent.hash, category);
+      }
+
+      console.log(`[qBittorrent] Successfully added torrent: ${newTorrent.hash}`);
+      return newTorrent.hash;
     } catch (error) {
       // Try re-authenticating if we get a 403
       if (axios.isAxiosError(error) && error.response?.status === 403) {

@@ -163,10 +163,29 @@ async addTorrent(
   // Ensure we're authenticated
   if (!this.cookie) await this.login();
 
+  const category = options?.category || 'readmeabook';
+
+  // Ensure category exists
+  await this.ensureCategory(category);
+
+  // Try to extract hash from URL (works for magnet links)
+  const extractedHash = this.extractHash(url);
+
+  // Get snapshot of existing torrents BEFORE adding
+  const beforeTorrents = await this.getTorrents();
+  const beforeHashes = new Set(beforeTorrents.map(t => t.hash));
+
+  // Check for duplicates
+  if (extractedHash !== 'pending' && beforeHashes.has(extractedHash)) {
+    console.warn('Torrent already exists (duplicate)');
+    return extractedHash;
+  }
+
+  // Add the torrent
   const form = new URLSearchParams({
     urls: url, // Magnet link or .torrent URL
     savepath: options?.savePath || this.defaultSavePath,
-    category: options?.category || 'readmeabook',
+    category,
     paused: options?.paused ? 'true' : 'false',
     sequentialDownload: 'true', // Download in order for streaming
   });
@@ -182,9 +201,29 @@ async addTorrent(
     },
   });
 
-  // qBittorrent doesn't return hash, calculate from magnet/URL
-  const hash = extractHashFromUrl(url);
-  return hash;
+  // Wait for qBittorrent to process
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  // Get torrents AFTER adding
+  const afterTorrents = await this.getTorrents();
+
+  // Find NEW torrent by comparing before/after
+  const newTorrents = afterTorrents.filter(
+    t => !beforeHashes.has(t.hash)
+  );
+
+  if (newTorrents.length === 0) {
+    throw new Error('Failed to add torrent - check URL and qBittorrent logs');
+  }
+
+  const newTorrent = newTorrents[0];
+
+  // Ensure correct category
+  if (newTorrent.category !== category) {
+    await this.setCategory(newTorrent.hash, category);
+  }
+
+  return newTorrent.hash;
 }
 ```
 
@@ -387,6 +426,8 @@ for (const torrent of failedTorrents) {
 - ✅ Unclear error messages about missing configuration (Fixed: specific error messages listing missing fields)
 - ✅ Service initializing even with incomplete configuration (Fixed: validation required before initialization)
 - ✅ Torrent hash returning "pending" for .torrent URLs (Fixed: now queries qBittorrent after adding to get actual hash)
+- ✅ **Critical: Torrent hash detection fails when torrent isn't actually added** (Fixed: now captures snapshot of existing torrents before adding, compares after adding to detect new torrent, throws detailed error if no new torrent detected instead of hijacking unrelated torrents)
+- ✅ Duplicate torrent detection (Fixed: now checks if torrent already exists before attempting to add, returns existing hash for duplicates)
 
 **Current Issues:**
 *None currently.*
