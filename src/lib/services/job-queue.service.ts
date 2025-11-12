@@ -54,7 +54,7 @@ export interface OrganizeFilesPayload {
 }
 
 export interface ScanPlexPayload {
-  libraryId: string;
+  libraryId?: string;
   partial?: boolean;
   path?: string;
 }
