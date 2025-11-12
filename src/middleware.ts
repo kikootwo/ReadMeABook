@@ -1,28 +1,17 @@
 /**
  * Component: Next.js Middleware
  * Documentation: documentation/backend/middleware.md
+ *
+ * Note: Edge Runtime compatible - no Node.js APIs or Prisma
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
 
 /**
- * Check if initial setup has been completed
- */
-async function isSetupComplete(): Promise<boolean> {
-  try {
-    const config = await prisma.configuration.findUnique({
-      where: { key: 'setup_completed' },
-    });
-    return config?.value === 'true';
-  } catch (error) {
-    // If database is not ready or table doesn't exist, setup is not complete
-    return false;
-  }
-}
-
-/**
- * Middleware to handle setup flow and authentication
+ * Middleware to handle setup flow
+ *
+ * We check setup status via a lightweight API call instead of Prisma
+ * since middleware runs in Edge Runtime which doesn't support Node.js APIs
  */
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -37,19 +26,32 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check if setup is complete
-  const setupComplete = await isSetupComplete();
+  // Check setup status via API endpoint
+  try {
+    const checkUrl = new URL('/api/setup/status', request.url);
+    const response = await fetch(checkUrl, {
+      method: 'GET',
+      headers: {
+        'x-middleware-request': 'true',
+      },
+    });
 
-  if (!setupComplete) {
-    // Setup not complete - redirect everything to /setup
-    if (pathname !== '/setup') {
-      return NextResponse.redirect(new URL('/setup', request.url));
+    if (response.ok) {
+      const { setupComplete } = await response.json();
+
+      if (!setupComplete && pathname !== '/setup') {
+        // Setup not complete - redirect to /setup
+        return NextResponse.redirect(new URL('/setup', request.url));
+      }
+
+      if (setupComplete && pathname === '/setup') {
+        // Setup complete - block access to /setup
+        return NextResponse.redirect(new URL('/', request.url));
+      }
     }
-  } else {
-    // Setup complete - block access to /setup
-    if (pathname === '/setup') {
-      return NextResponse.redirect(new URL('/', request.url));
-    }
+  } catch (error) {
+    // If check fails, allow request through to avoid breaking the app
+    console.error('[Middleware] Setup check failed:', error);
   }
 
   return NextResponse.next();
