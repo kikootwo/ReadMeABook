@@ -8,17 +8,16 @@
 import { useEffect } from 'react';
 import useSWR from 'swr';
 import Link from 'next/link';
+import { authenticatedFetcher } from '@/lib/utils/api';
 import { MetricCard } from './components/MetricCard';
 import { ActiveDownloadsTable } from './components/ActiveDownloadsTable';
 import { RecentRequestsTable } from './components/RecentRequestsTable';
-
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export default function AdminDashboard() {
   // Fetch data with auto-refresh every 10 seconds
   const { data: metrics, error: metricsError } = useSWR(
     '/api/admin/metrics',
-    fetcher,
+    authenticatedFetcher,
     {
       refreshInterval: 10000,
     }
@@ -26,7 +25,7 @@ export default function AdminDashboard() {
 
   const { data: downloadsData, error: downloadsError } = useSWR(
     '/api/admin/downloads/active',
-    fetcher,
+    authenticatedFetcher,
     {
       refreshInterval: 5000, // Refresh downloads more frequently
     }
@@ -34,7 +33,7 @@ export default function AdminDashboard() {
 
   const { data: requestsData, error: requestsError } = useSWR(
     '/api/admin/requests/recent',
-    fetcher,
+    authenticatedFetcher,
     {
       refreshInterval: 10000,
     }

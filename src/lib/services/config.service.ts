@@ -3,9 +3,12 @@
  * Documentation: documentation/backend/services/config.md
  */
 
-import { prisma } from '../db';
+import { prisma } from '@/lib/db';
 import { getEncryptionService } from './encryption.service';
 
+/**
+ * Configuration update payload
+ */
 export interface ConfigUpdate {
   key: string;
   value: string;
@@ -14,304 +17,216 @@ export interface ConfigUpdate {
   description?: string;
 }
 
+/**
+ * Plex configuration structure
+ */
 export interface PlexConfig {
-  serverUrl?: string;
-  libraryId?: string;
-  authToken?: string;
+  serverUrl: string | null;
+  authToken: string | null;
+  libraryId: string | null;
 }
 
-export interface IndexerConfig {
-  type?: string; // 'prowlarr' or 'jackett'
-  url?: string;
-  apiKey?: string;
-}
-
-export interface DownloadClientConfig {
-  type?: string; // 'qbittorrent' or 'transmission'
-  url?: string;
-  username?: string;
-  password?: string;
-}
-
-export interface PathsConfig {
-  downloads: string;
-  mediaLibrary: string;
-}
-
-export interface AutomationConfig {
-  checkIntervalSeconds: number;
-  maxSearchAttempts: number;
-  maxDownloadAttempts: number;
-  qualityPreference: string;
-  preferredFormat: string;
-}
-
-const CONFIG_DEFAULTS: Record<string, string> = {
-  'automation.check_interval_seconds': '60',
-  'automation.max_search_attempts': '3',
-  'automation.max_download_attempts': '2',
-  'automation.quality_preference': 'high',
-  'automation.preferred_format': 'm4b',
-  'system.setup_completed': 'false',
-  'system.log_level': 'info',
-  'paths.downloads': '/downloads',
-  'paths.media_library': '/media',
-};
-
-export class ConfigService {
-  private encryptionService = getEncryptionService();
+/**
+ * Configuration service for reading settings from database
+ */
+export class ConfigurationService {
+  private cache: Map<string, string> = new Map();
+  private cacheExpiry: Map<string, number> = new Map();
+  private readonly CACHE_TTL = 60000; // 1 minute
 
   /**
-   * Get a single configuration value
+   * Get a configuration value by key (decrypted if encrypted)
    */
   async get(key: string): Promise<string | null> {
-    const config = await prisma.configuration.findUnique({
-      where: { key },
-    });
+    // Check cache first
+    const cached = this.cache.get(key);
+    const expiry = this.cacheExpiry.get(key);
 
-    if (!config) {
-      return CONFIG_DEFAULTS[key] || null;
+    if (cached && expiry && Date.now() < expiry) {
+      return cached;
     }
 
-    if (config.encrypted && config.value) {
-      try {
-        return this.encryptionService.decrypt(config.value);
-      } catch (error) {
-        console.error(`Failed to decrypt config key ${key}:`, error);
-        return null;
-      }
-    }
-
-    return config.value;
-  }
-
-  /**
-   * Get a configuration value or return a default
-   */
-  async getOrDefault(key: string, defaultValue: string): Promise<string> {
-    const value = await this.get(key);
-    return value ?? defaultValue;
-  }
-
-  /**
-   * Get a boolean configuration value
-   */
-  async getBoolean(key: string): Promise<boolean> {
-    const value = await this.get(key);
-    return value === 'true';
-  }
-
-  /**
-   * Get a number configuration value
-   */
-  async getNumber(key: string): Promise<number> {
-    const value = await this.get(key);
-    return value ? parseInt(value, 10) : 0;
-  }
-
-  /**
-   * Get a JSON configuration value
-   */
-  async getJSON<T>(key: string): Promise<T | null> {
-    const value = await this.get(key);
-    if (!value) return null;
+    // Fetch from database
     try {
-      return JSON.parse(value) as T;
-    } catch {
+      const config = await prisma.configuration.findUnique({
+        where: { key },
+      });
+
+      if (config && config.value) {
+        let value = config.value;
+
+        // Decrypt if encrypted
+        if (config.encrypted) {
+          const encryptionService = getEncryptionService();
+          value = encryptionService.decrypt(config.value);
+        }
+
+        // Cache the decrypted value
+        this.cache.set(key, value);
+        this.cacheExpiry.set(key, Date.now() + this.CACHE_TTL);
+        return value;
+      }
+
+      return null;
+    } catch (error) {
+      console.error(`[Config] Failed to get config key "${key}":`, error);
       return null;
     }
   }
 
   /**
-   * Set a single configuration value
+   * Get multiple configuration values
    */
-  async set(
-    key: string,
-    value: string,
-    encrypted: boolean = false,
-    category?: string,
-    description?: string
-  ): Promise<void> {
-    const encryptedValue = encrypted ? this.encryptionService.encrypt(value) : value;
+  async getMany(keys: string[]): Promise<Record<string, string | null>> {
+    const result: Record<string, string | null> = {};
 
-    await prisma.configuration.upsert({
-      where: { key },
-      create: {
-        key,
-        value: encryptedValue,
-        encrypted,
-        category,
-        description,
-      },
-      update: {
-        value: encryptedValue,
-        encrypted,
-        category,
-        description,
-        updatedAt: new Date(),
-      },
-    });
-  }
-
-  /**
-   * Set multiple configuration values at once
-   */
-  async setMany(updates: ConfigUpdate[]): Promise<void> {
     await Promise.all(
-      updates.map((update) =>
-        this.set(
-          update.key,
-          update.value,
-          update.encrypted,
-          update.category,
-          update.description
-        )
-      )
+      keys.map(async (key) => {
+        result[key] = await this.get(key);
+      })
     );
-  }
-
-  /**
-   * Get all configuration for a category
-   */
-  async getCategory(category: string): Promise<Record<string, string>> {
-    const configs = await prisma.configuration.findMany({
-      where: { category },
-    });
-
-    const result: Record<string, string> = {};
-
-    for (const config of configs) {
-      const keyParts = config.key.split('.');
-      const shortKey = keyParts[keyParts.length - 1];
-
-      if (config.encrypted && config.value) {
-        try {
-          result[shortKey] = this.encryptionService.decrypt(config.value);
-        } catch (error) {
-          console.error(`Failed to decrypt ${config.key}:`, error);
-          result[shortKey] = '***';
-        }
-      } else {
-        result[shortKey] = config.value || '';
-      }
-    }
 
     return result;
   }
 
   /**
-   * Get Plex configuration
+   * Get all configuration items for a specific category
+   */
+  async getCategory(category: string): Promise<Record<string, any>> {
+    try {
+      const configs = await prisma.configuration.findMany({
+        where: { category },
+      });
+
+      const result: Record<string, any> = {};
+
+      for (const config of configs) {
+        let value = config.value;
+
+        // Decrypt if encrypted
+        if (config.encrypted && value) {
+          const encryptionService = getEncryptionService();
+          value = encryptionService.decrypt(value);
+        }
+
+        result[config.key] = {
+          value,
+          encrypted: config.encrypted,
+          description: config.description,
+        };
+      }
+
+      return result;
+    } catch (error) {
+      console.error(`[Config] Failed to get category "${category}":`, error);
+      return {};
+    }
+  }
+
+  /**
+   * Get all configuration items (with masked sensitive values)
+   */
+  async getAll(): Promise<Record<string, any>> {
+    try {
+      const configs = await prisma.configuration.findMany();
+
+      const result: Record<string, any> = {};
+
+      for (const config of configs) {
+        result[config.key] = {
+          value: config.encrypted ? '***ENCRYPTED***' : config.value,
+          encrypted: config.encrypted,
+          category: config.category,
+          description: config.description,
+        };
+      }
+
+      return result;
+    } catch (error) {
+      console.error('[Config] Failed to get all configuration:', error);
+      return {};
+    }
+  }
+
+  /**
+   * Set multiple configuration values (encrypts if needed)
+   */
+  async setMany(updates: ConfigUpdate[]): Promise<void> {
+    try {
+      const encryptionService = getEncryptionService();
+
+      for (const update of updates) {
+        let value = update.value;
+
+        // Encrypt if needed
+        if (update.encrypted) {
+          value = encryptionService.encrypt(value);
+        }
+
+        // Upsert configuration
+        await prisma.configuration.upsert({
+          where: { key: update.key },
+          create: {
+            key: update.key,
+            value,
+            encrypted: update.encrypted || false,
+            category: update.category,
+            description: update.description,
+          },
+          update: {
+            value,
+            encrypted: update.encrypted || false,
+            category: update.category,
+            description: update.description,
+          },
+        });
+
+        // Clear cache for this key
+        this.clearCache(update.key);
+      }
+    } catch (error) {
+      console.error('[Config] Failed to set configuration:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get Plex-specific configuration
    */
   async getPlexConfig(): Promise<PlexConfig> {
+    const config = await this.getMany([
+      'plex_server_url',
+      'plex_auth_token',
+      'plex_audiobook_library_id',
+    ]);
+
     return {
-      serverUrl: (await this.get('plex.server_url')) || undefined,
-      libraryId: (await this.get('plex.library_id')) || undefined,
-      authToken: (await this.get('plex.auth_token')) || undefined,
+      serverUrl: config.plex_server_url,
+      authToken: config.plex_auth_token,
+      libraryId: config.plex_audiobook_library_id,
     };
   }
 
   /**
-   * Get indexer configuration
+   * Clear the cache for a specific key or all keys
    */
-  async getIndexerConfig(): Promise<IndexerConfig> {
-    const type = await this.get('indexer.type');
-
-    if (!type) {
-      return {};
+  clearCache(key?: string): void {
+    if (key) {
+      this.cache.delete(key);
+      this.cacheExpiry.delete(key);
+    } else {
+      this.cache.clear();
+      this.cacheExpiry.clear();
     }
-
-    return {
-      type,
-      url: (await this.get(`indexer.${type}.url`)) || undefined,
-      apiKey: (await this.get(`indexer.${type}.api_key`)) || undefined,
-    };
-  }
-
-  /**
-   * Get download client configuration
-   */
-  async getDownloadClientConfig(): Promise<DownloadClientConfig> {
-    const type = await this.get('download_client.type');
-
-    if (!type) {
-      return {};
-    }
-
-    return {
-      type,
-      url: (await this.get(`download_client.${type}.url`)) || undefined,
-      username: (await this.get(`download_client.${type}.username`)) || undefined,
-      password: (await this.get(`download_client.${type}.password`)) || undefined,
-    };
-  }
-
-  /**
-   * Get paths configuration
-   */
-  async getPathsConfig(): Promise<PathsConfig> {
-    return {
-      downloads: await this.getOrDefault('paths.downloads', '/downloads'),
-      mediaLibrary: await this.getOrDefault('paths.media_library', '/media'),
-    };
-  }
-
-  /**
-   * Get automation configuration
-   */
-  async getAutomationConfig(): Promise<AutomationConfig> {
-    return {
-      checkIntervalSeconds: await this.getNumber('automation.check_interval_seconds'),
-      maxSearchAttempts: await this.getNumber('automation.max_search_attempts'),
-      maxDownloadAttempts: await this.getNumber('automation.max_download_attempts'),
-      qualityPreference: await this.getOrDefault('automation.quality_preference', 'high'),
-      preferredFormat: await this.getOrDefault('automation.preferred_format', 'm4b'),
-    };
-  }
-
-  /**
-   * Check if initial setup is completed
-   */
-  async isSetupCompleted(): Promise<boolean> {
-    return await this.getBoolean('system.setup_completed');
-  }
-
-  /**
-   * Mark setup as completed
-   */
-  async markSetupCompleted(): Promise<void> {
-    await this.set('system.setup_completed', 'true', false, 'system');
-  }
-
-  /**
-   * Delete a configuration key
-   */
-  async delete(key: string): Promise<void> {
-    await prisma.configuration.delete({
-      where: { key },
-    });
-  }
-
-  /**
-   * Get all configuration keys (with masked encrypted values)
-   */
-  async getAll(): Promise<Array<{ key: string; value: string; encrypted: boolean; category?: string }>> {
-    const configs = await prisma.configuration.findMany();
-
-    return configs.map((config) => ({
-      key: config.key,
-      value: config.encrypted ? '***' : config.value || '',
-      encrypted: config.encrypted,
-      category: config.category || undefined,
-    }));
   }
 }
 
 // Singleton instance
-let configService: ConfigService | null = null;
+let configService: ConfigurationService | null = null;
 
-export function getConfigService(): ConfigService {
+export function getConfigService(): ConfigurationService {
   if (!configService) {
-    configService = new ConfigService();
+    configService = new ConfigurationService();
   }
   return configService;
 }

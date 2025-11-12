@@ -138,10 +138,13 @@ export default function SetupWizard() {
         localStorage.setItem('accessToken', data.accessToken);
         localStorage.setItem('refreshToken', data.refreshToken);
         localStorage.setItem('user', JSON.stringify(data.user));
-      }
 
-      // Redirect to homepage after successful setup
-      router.push('/');
+        // Force full page reload to initialize auth context with new tokens
+        window.location.href = '/';
+      } else {
+        // Fallback if no tokens returned
+        router.push('/');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Setup failed');
     } finally {
