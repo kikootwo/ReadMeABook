@@ -469,41 +469,68 @@ export class QBittorrentService {
 
 // Singleton instance
 let qbittorrentService: QBittorrentService | null = null;
+let configLoaded = false;
 
 export async function getQBittorrentService(): Promise<QBittorrentService> {
-  if (!qbittorrentService) {
-    // Get configuration from database
-    const { getConfigService } = await import('@/lib/services/config.service');
-    const configService = getConfigService();
+  // Always recreate if config hasn't been loaded successfully
+  if (!qbittorrentService || !configLoaded) {
+    try {
+      // Get configuration from database
+      const { getConfigService } = await import('@/lib/services/config.service');
+      const configService = getConfigService();
 
-    const config = await configService.getMany([
-      'qbittorrent_url',
-      'qbittorrent_username',
-      'qbittorrent_password',
-      'paths_downloads',
-    ]);
+      console.log('[qBittorrent] Loading configuration from database...');
+      const config = await configService.getMany([
+        'qbittorrent_url',
+        'qbittorrent_username',
+        'qbittorrent_password',
+        'paths_downloads',
+      ]);
 
-    const baseUrl = config.qbittorrent_url || process.env.QBITTORRENT_URL || 'http://qbittorrent:8080';
-    const username = config.qbittorrent_username || process.env.QBITTORRENT_USERNAME || 'admin';
-    const password = config.qbittorrent_password || process.env.QBITTORRENT_PASSWORD;
-    const savePath = config.paths_downloads || process.env.DOWNLOAD_DIR || '/downloads';
+      console.log('[qBittorrent] Config loaded:', {
+        hasUrl: !!config.qbittorrent_url,
+        hasUsername: !!config.qbittorrent_username,
+        hasPassword: !!config.qbittorrent_password,
+        hasPath: !!config.paths_downloads,
+      });
 
-    if (!password) {
-      throw new Error('qBittorrent password not configured');
-    }
+      const baseUrl = config.qbittorrent_url || process.env.QBITTORRENT_URL || 'http://qbittorrent:8080';
+      const username = config.qbittorrent_username || process.env.QBITTORRENT_USERNAME || 'admin';
+      const password = config.qbittorrent_password || process.env.QBITTORRENT_PASSWORD;
+      const savePath = config.paths_downloads || process.env.DOWNLOAD_DIR || '/downloads';
 
-    qbittorrentService = new QBittorrentService(
-      baseUrl,
-      username,
-      password,
-      savePath,
-      'readmeabook'
-    );
+      if (!password) {
+        console.error('[qBittorrent] Password not found in database or environment variables');
+        console.error('[qBittorrent] Database config:', {
+          qbittorrent_password: config.qbittorrent_password === null ? 'null' : config.qbittorrent_password === undefined ? 'undefined' : 'exists',
+        });
+        console.error('[qBittorrent] Environment variable QBITTORRENT_PASSWORD:', process.env.QBITTORRENT_PASSWORD ? 'exists' : 'not set');
+        throw new Error('qBittorrent password not configured. Please set it in the admin settings or as an environment variable.');
+      }
 
-    // Test connection
-    const isConnected = await qbittorrentService.testConnection();
-    if (!isConnected) {
-      console.warn('Warning: qBittorrent connection test failed');
+      console.log('[qBittorrent] Creating service instance...');
+      qbittorrentService = new QBittorrentService(
+        baseUrl,
+        username,
+        password,
+        savePath,
+        'readmeabook'
+      );
+
+      // Test connection
+      console.log('[qBittorrent] Testing connection...');
+      const isConnected = await qbittorrentService.testConnection();
+      if (!isConnected) {
+        console.warn('[qBittorrent] Connection test failed');
+      } else {
+        console.log('[qBittorrent] Connection test successful');
+        configLoaded = true; // Mark as successfully loaded
+      }
+    } catch (error) {
+      console.error('[qBittorrent] Failed to initialize service:', error);
+      qbittorrentService = null; // Reset service on error
+      configLoaded = false;
+      throw error;
     }
   }
 

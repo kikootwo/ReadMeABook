@@ -206,7 +206,7 @@ export default function AdminDashboard() {
             </div>
 
             {/* Quick Actions */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               <Link
                 href="/admin/settings"
                 className="block p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:shadow-md transition-all"
@@ -265,6 +265,28 @@ export default function AdminDashboard() {
                   </svg>
                   <span className="font-medium text-gray-900 dark:text-gray-100">
                     Library
+                  </span>
+                </div>
+              </Link>
+
+              <Link
+                href="/admin/jobs"
+                className="block p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:shadow-md transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <svg
+                    className="w-6 h-6 text-gray-600 dark:text-gray-400"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  <span className="font-medium text-gray-900 dark:text-gray-100">
+                    Scheduled Jobs
                   </span>
                 </div>
               </Link>

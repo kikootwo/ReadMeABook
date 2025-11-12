@@ -51,6 +51,9 @@ export class SchedulerService {
     // Load and schedule all enabled jobs
     await this.scheduleAllJobs();
 
+    // Check and trigger overdue jobs
+    await this.triggerOverdueJobs();
+
     console.log('[Scheduler] Scheduler service started');
   }
 
@@ -279,6 +282,97 @@ export class SchedulerService {
    */
   async disableJob(id: string): Promise<void> {
     await this.updateScheduledJob(id, { enabled: false });
+  }
+
+  /**
+   * Check for overdue jobs and trigger them
+   */
+  private async triggerOverdueJobs(): Promise<void> {
+    console.log('[Scheduler] Checking for overdue jobs...');
+
+    const jobs = await prisma.scheduledJob.findMany({
+      where: { enabled: true },
+    });
+
+    for (const job of jobs) {
+      try {
+        if (this.isJobOverdue(job)) {
+          console.log(`[Scheduler] Job "${job.name}" is overdue, triggering now...`);
+          await this.triggerJobNow(job.id);
+        }
+      } catch (error) {
+        console.error(`[Scheduler] Failed to trigger overdue job "${job.name}":`, error);
+      }
+    }
+  }
+
+  /**
+   * Check if a job is overdue based on its schedule and last run time
+   */
+  private isJobOverdue(job: any): boolean {
+    // If never run, consider it overdue
+    if (!job.lastRun) {
+      return true;
+    }
+
+    // Parse cron expression to get interval in milliseconds
+    const intervalMs = this.getIntervalFromCron(job.schedule);
+    if (!intervalMs) {
+      console.warn(`[Scheduler] Could not parse interval for job "${job.name}", skipping`);
+      return false;
+    }
+
+    // Calculate time since last run
+    const timeSinceLastRun = Date.now() - new Date(job.lastRun).getTime();
+
+    // Job is overdue if time since last run exceeds the interval
+    return timeSinceLastRun >= intervalMs;
+  }
+
+  /**
+   * Get interval in milliseconds from cron expression
+   * Supports common patterns like "0 * * * *" (hourly), "0 *\/6 * * *" (every 6 hours), etc.
+   */
+  private getIntervalFromCron(cronExpression: string): number | null {
+    const parts = cronExpression.split(' ');
+    if (parts.length < 5) {
+      return null;
+    }
+
+    const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+
+    // Daily: "0 0 * * *"
+    if (minute === '0' && hour === '0' && dayOfMonth === '*' && month === '*') {
+      return 24 * 60 * 60 * 1000; // 24 hours
+    }
+
+    // Every N hours: "0 */N * * *"
+    const hourMatch = hour.match(/^\*\/(\d+)$/);
+    if (minute === '0' && hourMatch && dayOfMonth === '*' && month === '*') {
+      const hours = parseInt(hourMatch[1], 10);
+      return hours * 60 * 60 * 1000;
+    }
+
+    // Hourly: "0 * * * *"
+    if (minute === '0' && hour === '*' && dayOfMonth === '*' && month === '*') {
+      return 60 * 60 * 1000; // 1 hour
+    }
+
+    // Every N minutes: "*/N * * * *"
+    const minuteMatch = minute.match(/^\*\/(\d+)$/);
+    if (minuteMatch && hour === '*' && dayOfMonth === '*' && month === '*') {
+      const minutes = parseInt(minuteMatch[1], 10);
+      return minutes * 60 * 1000;
+    }
+
+    // Weekly: "0 0 * * 0" (Sunday at midnight)
+    if (minute === '0' && hour === '0' && dayOfMonth === '*' && month === '*' && dayOfWeek === '0') {
+      return 7 * 24 * 60 * 60 * 1000; // 7 days
+    }
+
+    // For other patterns, return a conservative default (24 hours)
+    console.warn(`[Scheduler] Unknown cron pattern "${cronExpression}", defaulting to 24 hours`);
+    return 24 * 60 * 60 * 1000;
   }
 
   /**
