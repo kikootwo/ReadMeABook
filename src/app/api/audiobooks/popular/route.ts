@@ -5,10 +5,14 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { enrichAudiobooksWithMatches } from '@/lib/utils/audiobook-matcher';
 
 /**
  * GET /api/audiobooks/popular?page=1&limit=20
  * Get popular audiobooks from database cache with pagination
+ *
+ * NOTE: Uses real-time matching to determine availability status.
+ * This ensures matching works regardless of job execution order.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -52,8 +56,6 @@ export async function GET(request: NextRequest) {
           releaseDate: true,
           rating: true,
           genres: true,
-          availabilityStatus: true,
-          plexGuid: true,
           lastAudibleSync: true,
         },
       }),
@@ -78,8 +80,8 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Transform to match expected response format
-    const enrichedAudiobooks = audiobooks.map((book) => ({
+    // Transform to Audible format for matching
+    const audibleBooks = audiobooks.map((book) => ({
       asin: book.audibleId || '',
       title: book.title,
       author: book.author,
@@ -90,11 +92,11 @@ export async function GET(request: NextRequest) {
       releaseDate: book.releaseDate?.toISOString() || undefined,
       rating: book.rating ? parseFloat(book.rating.toString()) : undefined,
       genres: (book.genres as string[]) || [],
-      availabilityStatus: book.availabilityStatus,
-      isAvailable: book.availabilityStatus === 'available',
-      plexGuid: book.plexGuid || null,
-      dbId: book.id,
     }));
+
+    // Enrich with real-time availability matching
+    // This matches against ALL database records (Plex scans, previous requests, etc.)
+    const enrichedAudiobooks = await enrichAudiobooksWithMatches(audibleBooks);
 
     const totalPages = Math.ceil(totalCount / limit);
     const hasMore = page < totalPages;
