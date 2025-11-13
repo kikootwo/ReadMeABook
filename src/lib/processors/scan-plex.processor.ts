@@ -1,17 +1,18 @@
 /**
  * Component: Scan Plex Job Processor
  * Documentation: documentation/backend/services/jobs.md
+ *
+ * Scans Plex library and populates plex_library table with all audiobooks.
  */
 
 import { ScanPlexPayload } from '../services/job-queue.service';
 import { prisma } from '../db';
 import { getPlexService } from '../integrations/plex.service';
 import { getConfigService } from '../services/config.service';
-import { compareTwoStrings } from 'string-similarity';
 
 /**
  * Process scan Plex job
- * Scans Plex library and updates availability status for matching audiobooks
+ * Scans Plex library and updates plex_library table
  */
 export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
   const { libraryId, partial, path } = payload;
@@ -50,50 +51,58 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
     let skippedCount = 0;
     const results: any[] = [];
 
-    // 3. Process each Plex audiobook - save to database if not exists, update if exists
+    // 3. Process each Plex audiobook - populate plex_library table
     for (const plexBook of plexAudiobooks) {
-      if (!plexBook.title) {
+      if (!plexBook.title || !plexBook.guid) {
         skippedCount++;
         continue;
       }
 
       try {
-        // Check if this Plex audiobook already exists in database by plexGuid
-        const existing = await prisma.audiobook.findFirst({
+        // Check if this Plex audiobook already exists in plex_library by plexGuid
+        const existing = await prisma.plexLibrary.findFirst({
           where: { plexGuid: plexBook.guid },
         });
 
         if (existing) {
           // Update existing record with latest Plex data
-          await prisma.audiobook.update({
+          await prisma.plexLibrary.update({
             where: { id: existing.id },
             data: {
               title: plexBook.title,
               author: plexBook.author || existing.author,
               narrator: plexBook.narrator || existing.narrator,
-              description: plexBook.summary || existing.description,
+              summary: plexBook.summary || existing.summary,
+              duration: plexBook.duration || existing.duration,
+              year: plexBook.year || existing.year,
+              filePath: plexBook.filePath || existing.filePath,
+              thumbUrl: plexBook.thumb || existing.thumbUrl,
               plexLibraryId: targetLibraryId,
-              availabilityStatus: 'available',
-              availableAt: existing.availableAt || new Date(),
+              plexRatingKey: plexBook.ratingKey || existing.plexRatingKey,
+              lastScannedAt: new Date(),
               updatedAt: new Date(),
             },
           });
 
           updatedCount++;
-          console.log(`[ScanPlex] Updated: "${plexBook.title}"`);
+          console.log(`[ScanPlex] Updated: "${plexBook.title}" by ${plexBook.author}`);
         } else {
-          // Create new audiobook entry from Plex data
-          const newAudiobook = await prisma.audiobook.create({
+          // Create new plex_library entry
+          const newPlexBook = await prisma.plexLibrary.create({
             data: {
               plexGuid: plexBook.guid,
+              plexRatingKey: plexBook.ratingKey,
               title: plexBook.title,
               author: plexBook.author || 'Unknown Author',
               narrator: plexBook.narrator,
-              description: plexBook.summary,
-              durationMinutes: plexBook.duration ? Math.round(plexBook.duration / 60000) : null,
+              summary: plexBook.summary,
+              duration: plexBook.duration,
+              year: plexBook.year,
+              filePath: plexBook.filePath,
+              thumbUrl: plexBook.thumb,
               plexLibraryId: targetLibraryId,
-              availabilityStatus: 'available',
-              availableAt: new Date(),
+              addedAt: plexBook.addedAt ? new Date(plexBook.addedAt * 1000) : new Date(),
+              lastScannedAt: new Date(),
             },
           });
 
@@ -101,7 +110,8 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
           console.log(`[ScanPlex] Added new: "${plexBook.title}" by ${plexBook.author}`);
 
           results.push({
-            id: newAudiobook.id,
+            id: newPlexBook.id,
+            plexGuid: newPlexBook.plexGuid,
             title: plexBook.title,
             author: plexBook.author,
           });

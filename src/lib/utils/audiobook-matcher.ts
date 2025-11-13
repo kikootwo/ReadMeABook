@@ -2,8 +2,8 @@
  * Component: Audiobook Matching Utility
  * Documentation: documentation/integrations/audible.md
  *
- * Shared utility for matching Audible audiobooks to database records.
- * Used by: search API, popular API, new-releases API, and scheduler service.
+ * Real-time matching between Audible books and Plex library.
+ * Queries plex_library table to determine availability.
  */
 
 import { prisma } from '@/lib/db';
@@ -16,27 +16,23 @@ export interface AudiobookMatchInput {
 }
 
 export interface AudiobookMatchResult {
-  id: string;
-  audibleId: string | null;
+  plexGuid: string;
   title: string;
   author: string;
-  availabilityStatus: string;
-  plexGuid: string | null;
 }
 
 /**
- * Find a matching audiobook in the database for a given Audible audiobook.
+ * Find a matching audiobook in the Plex library for a given Audible audiobook.
  *
  * Matching logic:
- * 1. Try exact ASIN match first
- * 2. Query database for fuzzy candidates (substring match on title/author)
- * 3. Perform fuzzy matching with 70% threshold
- * 4. Return best match or null
+ * 1. Query plex_library for fuzzy candidates (substring match on title/author)
+ * 2. Perform fuzzy matching with 70% threshold
+ * 3. Return best match or null
  *
  * @param audiobook - Audible audiobook to match
- * @returns Matched database audiobook or null
+ * @returns Matched Plex library item or null
  */
-export async function findAudiobookMatch(
+export async function findPlexMatch(
   audiobook: AudiobookMatchInput
 ): Promise<AudiobookMatchResult | null> {
   console.log('\n🔍 [MATCHER] Starting match for:', {
@@ -45,80 +41,59 @@ export async function findAudiobookMatch(
     asin: audiobook.asin,
   });
 
-  // Query database for potential matches
-  // This matches ANY audiobook (not just ones with availabilityStatus='available')
-  const dbAudiobooks = await prisma.audiobook.findMany({
+  // Query plex_library for potential matches using fuzzy substring search
+  const plexBooks = await prisma.plexLibrary.findMany({
     where: {
       OR: [
-        // Exact ASIN match
-        { audibleId: audiobook.asin },
         // Fuzzy match by title/author substring (narrows down candidates)
         {
           AND: [
-            { title: { contains: audiobook.title.substring(0, 20), mode: 'insensitive' } },
-            { author: { contains: audiobook.author.substring(0, 20), mode: 'insensitive' } },
+            { title: { contains: audiobook.title.substring(0, Math.min(20, audiobook.title.length)), mode: 'insensitive' } },
+            { author: { contains: audiobook.author.substring(0, Math.min(20, audiobook.author.length)), mode: 'insensitive' } },
           ],
         },
       ],
     },
     select: {
-      id: true,
-      audibleId: true,
+      plexGuid: true,
       title: true,
       author: true,
-      availabilityStatus: true,
-      plexGuid: true,
     },
     take: 5, // Limit to top 5 candidates for performance
   });
 
-  console.log(`   📊 Found ${dbAudiobooks.length} candidate(s) in database`);
+  console.log(`   📊 Found ${plexBooks.length} candidate(s) in Plex library`);
 
   // If no candidates found, return null
-  if (dbAudiobooks.length === 0) {
-    console.log('   ❌ No candidates found - no match');
+  if (plexBooks.length === 0) {
+    console.log('   ❌ No candidates found - not in Plex library');
     return null;
   }
 
-  // If exact match by ASIN, use it immediately
-  const exactMatch = dbAudiobooks.find((db) => db.audibleId === audiobook.asin);
-  if (exactMatch) {
-    console.log('   ✅ EXACT ASIN MATCH found:', {
-      dbTitle: exactMatch.title,
-      dbAuthor: exactMatch.author,
-      plexGuid: exactMatch.plexGuid,
-      availabilityStatus: exactMatch.availabilityStatus,
-    });
-    return exactMatch;
-  }
-
-  console.log('   🔢 No exact ASIN match, performing fuzzy matching...');
-
-  // Otherwise, perform fuzzy matching on candidates
-  const candidates = dbAudiobooks.map((dbBook) => {
+  // Perform fuzzy matching on candidates
+  const candidates = plexBooks.map((plexBook) => {
     const titleScore = compareTwoStrings(
       audiobook.title.toLowerCase(),
-      dbBook.title.toLowerCase()
+      plexBook.title.toLowerCase()
     );
     const authorScore = compareTwoStrings(
       audiobook.author.toLowerCase(),
-      dbBook.author.toLowerCase()
+      plexBook.author.toLowerCase()
     );
 
     // Weighted score: 70% title, 30% author
     const overallScore = titleScore * 0.7 + authorScore * 0.3;
 
     console.log('      📝 Candidate:', {
-      dbTitle: dbBook.title,
-      dbAuthor: dbBook.author,
+      plexTitle: plexBook.title,
+      plexAuthor: plexBook.author,
       titleScore: `${(titleScore * 100).toFixed(1)}%`,
       authorScore: `${(authorScore * 100).toFixed(1)}%`,
       overallScore: `${(overallScore * 100).toFixed(1)}%`,
-      plexGuid: dbBook.plexGuid,
-      availabilityStatus: dbBook.availabilityStatus,
+      plexGuid: plexBook.plexGuid,
     });
 
-    return { dbBook, titleScore, authorScore, score: overallScore };
+    return { plexBook, titleScore, authorScore, score: overallScore };
   });
 
   // Sort by score descending
@@ -130,15 +105,14 @@ export async function findAudiobookMatch(
   // Accept match if score >= 70%
   if (bestMatch && bestMatch.score >= 0.7) {
     console.log('   ✅ MATCH ACCEPTED:', {
-      dbTitle: bestMatch.dbBook.title,
-      dbAuthor: bestMatch.dbBook.author,
+      plexTitle: bestMatch.plexBook.title,
+      plexAuthor: bestMatch.plexBook.author,
       titleMatch: `${(bestMatch.titleScore * 100).toFixed(1)}%`,
       authorMatch: `${(bestMatch.authorScore * 100).toFixed(1)}%`,
       overallScore: `${(bestMatch.score * 100).toFixed(1)}%`,
-      plexGuid: bestMatch.dbBook.plexGuid,
-      availabilityStatus: bestMatch.dbBook.availabilityStatus,
+      plexGuid: bestMatch.plexBook.plexGuid,
     });
-    return bestMatch.dbBook;
+    return bestMatch.plexBook;
   }
 
   // No match found
@@ -147,21 +121,19 @@ export async function findAudiobookMatch(
 }
 
 /**
- * Enrich an Audible audiobook with database match information.
+ * Enrich an Audible audiobook with Plex library match information.
  * Used by API routes to add availability status to responses.
  */
 export async function enrichAudiobookWithMatch(audiobook: AudiobookMatchInput & Record<string, any>) {
-  const match = await findAudiobookMatch(audiobook);
+  const match = await findPlexMatch(audiobook);
 
   const enriched = {
     ...audiobook,
-    availabilityStatus: match?.availabilityStatus || 'unknown',
-    isAvailable: match?.availabilityStatus === 'available',
+    isAvailable: match !== null,
     plexGuid: match?.plexGuid || null,
-    dbId: match?.id || null,
   };
 
-  console.log(`   📦 Enriched result: availabilityStatus="${enriched.availabilityStatus}", isAvailable=${enriched.isAvailable}, plexGuid=${enriched.plexGuid ? 'YES' : 'NO'}\n`);
+  console.log(`   📦 Enriched result: isAvailable=${enriched.isAvailable}, plexGuid=${enriched.plexGuid ? 'YES' : 'NO'}\n`);
 
   return enriched;
 }
@@ -180,8 +152,7 @@ export async function enrichAudiobooksWithMatches(
   const summary = {
     total: results.length,
     available: results.filter(r => r.isAvailable).length,
-    unknown: results.filter(r => r.availabilityStatus === 'unknown').length,
-    requested: results.filter(r => r.availabilityStatus === 'requested').length,
+    notAvailable: results.filter(r => !r.isAvailable).length,
   };
 
   console.log('📊 [MATCHER BATCH] Summary:', summary);
