@@ -46,6 +46,7 @@ export async function POST(request: NextRequest) {
         asin: audiobook.asin,
         title: audiobook.title,
         author: audiobook.author,
+        narrator: audiobook.narrator,
       });
 
       if (plexMatch) {

@@ -13,6 +13,7 @@ export interface AudiobookMatchInput {
   asin: string;
   title: string;
   author: string;
+  narrator?: string;
 }
 
 export interface AudiobookMatchResult {
@@ -68,6 +69,7 @@ export async function findPlexMatch(
   console.log('\n🔍 [MATCHER] Starting match for:', {
     title: audiobook.title,
     author: audiobook.author,
+    narrator: audiobook.narrator || 'N/A',
     asin: audiobook.asin,
   });
 
@@ -120,12 +122,40 @@ export async function findPlexMatch(
 
   console.log('   📝 No ASIN found in plexGuids, falling back to fuzzy matching...');
 
+  // FILTER OUT candidates with wrong ASINs in plexGuid
+  // If a plexGuid contains an ASIN pattern but it's NOT our ASIN, it's definitely wrong
+  const ASIN_PATTERN = /[A-Z0-9]{10}/g;
+  const validCandidates = plexBooks.filter((plexBook) => {
+    if (!plexBook.plexGuid) return true; // No GUID, can't rule out
+
+    const asinsInGuid = plexBook.plexGuid.match(ASIN_PATTERN);
+    if (!asinsInGuid || asinsInGuid.length === 0) return true; // No ASIN in GUID
+
+    // If GUID has ASINs but none match ours, reject this candidate
+    const hasOurAsin = asinsInGuid.some(asin => asin === audiobook.asin);
+    const hasOtherAsins = asinsInGuid.some(asin => asin !== audiobook.asin);
+
+    if (hasOtherAsins && !hasOurAsin) {
+      console.log(`      ❌ Rejecting candidate - plexGuid contains different ASIN: ${asinsInGuid.join(', ')}`);
+      return false;
+    }
+
+    return true;
+  });
+
+  console.log(`   🔍 After ASIN filtering: ${validCandidates.length} of ${plexBooks.length} candidates remain`);
+
+  if (validCandidates.length === 0) {
+    console.log('   ❌ No valid candidates after ASIN filtering');
+    return null;
+  }
+
   // Normalize the Audible title once for all comparisons
   const normalizedAudibleTitle = normalizeTitle(audiobook.title);
   console.log(`   🔤 Normalized Audible title: "${audiobook.title}" → "${normalizedAudibleTitle}"`);
 
   // PRIORITY 2: Perform fuzzy matching on candidates with normalized titles
-  const candidates = plexBooks.map((plexBook) => {
+  const candidates = validCandidates.map((plexBook) => {
     // Normalize Plex title for fair comparison
     const normalizedPlexTitle = normalizeTitle(plexBook.title);
 
@@ -133,13 +163,28 @@ export async function findPlexMatch(
       normalizedAudibleTitle,
       normalizedPlexTitle
     );
+
+    // Try matching both author and narrator (if available), take the better score
+    // This handles cases where Plex has narrator as author
     const authorScore = compareTwoStrings(
       audiobook.author.toLowerCase(),
       plexBook.author.toLowerCase()
     );
 
-    // Weighted score: 70% title, 30% author
-    const overallScore = titleScore * 0.7 + authorScore * 0.3;
+    let narratorScore = 0;
+    let usedNarratorMatch = false;
+    if (audiobook.narrator) {
+      narratorScore = compareTwoStrings(
+        audiobook.narrator.toLowerCase(),
+        plexBook.author.toLowerCase()
+      );
+      usedNarratorMatch = narratorScore > authorScore;
+    }
+
+    const personScore = usedNarratorMatch ? narratorScore : authorScore;
+
+    // Weighted score: 70% title, 30% person (author or narrator, whichever matches better)
+    const overallScore = titleScore * 0.7 + personScore * 0.3;
 
     console.log('      📝 Candidate:', {
       plexTitle: plexBook.title,
@@ -147,11 +192,13 @@ export async function findPlexMatch(
       plexAuthor: plexBook.author,
       titleScore: `${(titleScore * 100).toFixed(1)}%`,
       authorScore: `${(authorScore * 100).toFixed(1)}%`,
+      narratorScore: audiobook.narrator ? `${(narratorScore * 100).toFixed(1)}%` : 'N/A',
+      usedMatch: usedNarratorMatch ? 'narrator' : 'author',
       overallScore: `${(overallScore * 100).toFixed(1)}%`,
       plexGuid: plexBook.plexGuid,
     });
 
-    return { plexBook, titleScore, authorScore, score: overallScore };
+    return { plexBook, titleScore, authorScore, narratorScore, usedNarratorMatch, score: overallScore };
   });
 
   // Sort by score descending
@@ -167,6 +214,8 @@ export async function findPlexMatch(
       plexAuthor: bestMatch.plexBook.author,
       titleMatch: `${(bestMatch.titleScore * 100).toFixed(1)}%`,
       authorMatch: `${(bestMatch.authorScore * 100).toFixed(1)}%`,
+      narratorMatch: audiobook.narrator ? `${(bestMatch.narratorScore * 100).toFixed(1)}%` : 'N/A',
+      usedMatch: bestMatch.usedNarratorMatch ? 'narrator' : 'author',
       overallScore: `${(bestMatch.score * 100).toFixed(1)}%`,
       plexGuid: bestMatch.plexBook.plexGuid,
     });
