@@ -178,15 +178,17 @@ interface AudibleSearchResult {
 
 ### Unified Matching Architecture
 
-**Status:** Implemented ✅
+**Status:** Implemented ✅ - Production Ready
 
 **Location:** `src/lib/utils/audiobook-matcher.ts`
 
-**Purpose:** Provides a single, consistent matching algorithm used across the entire application to match Audible audiobooks with database records.
+**Purpose:** Provides a single, consistent matching algorithm used across the entire application to match Audible audiobooks with database records. This is the **only** matching system in use - all APIs use it.
 
 **Used By:**
-- ✅ Search API (`/api/audiobooks/search`)
-- ✅ Audible Refresh Job (scheduler service)
+- ✅ Search API (`/api/audiobooks/search`) - Real-time matching
+- ✅ Popular API (`/api/audiobooks/popular`) - Real-time matching
+- ✅ New Releases API (`/api/audiobooks/new-releases`) - Real-time matching
+- ✅ Audible Refresh Job (scheduler service) - Background matching
 - ✅ Any future feature needing audiobook matching
 
 **Matching Algorithm:**
@@ -212,32 +214,51 @@ interface AudibleSearchResult {
 4. **Return best match** or null
 
 **Key Benefits:**
-- 🎯 **Single source of truth** - No duplicate logic
-- 🔄 **Consistent behavior** - Same matching everywhere
-- ⚡ **Query-time matching** - Checks at query time (no pre-loading)
+- 🎯 **Single source of truth** - No duplicate logic across codebase
+- 🔄 **Consistent behavior** - Same matching everywhere (search, homepage, jobs)
+- ⚡ **Real-time matching** - All API routes use query-time matching
+- 🔧 **Order-independent** - Works regardless of Audible/Plex job execution order
 - 📊 **Status-agnostic** - Matches ANY database record, not just `availabilityStatus='available'`
 - 🛡️ **Duplicate protection** - Prevents multiple Audible books claiming same `plexGuid`
 
-### API Route Implementation: Database-First Approach
+**Why Real-Time Matching:**
 
-**Status:** Implemented ✅
+The previous architecture relied on pre-matched data set during the Audible refresh job. This had a critical flaw: if the Audible refresh ran BEFORE the Plex scan, there was nothing to match against, resulting in all books showing `availabilityStatus: 'unknown'`. The data never got re-matched, even after Plex scan completed.
 
-**Implementation:** Discovery API routes (`/api/audiobooks/popular`, `/api/audiobooks/new-releases`) now serve cached data from the database instead of hitting Audible directly.
+**Solution:** All discovery APIs (popular, new-releases, search) now use **real-time matching** at query time. The Audible refresh job still performs matching to optimize database state, but the API routes don't rely on it - they always perform fresh matching. This ensures:
+
+1. ✅ Homepage works correctly regardless of job execution order
+2. ✅ Books become available immediately after Plex scan (no waiting for next Audible refresh)
+3. ✅ Consistency between search page and homepage
+4. ✅ Production-ready resilience
+
+### API Route Implementation: Database-First with Real-Time Matching
+
+**Status:** Implemented ✅ - Production Ready
+
+**Implementation:** Discovery API routes (`/api/audiobooks/popular`, `/api/audiobooks/new-releases`) serve cached data from the database with **real-time matching** applied at query time.
 
 **How It Works:**
 1. **Data Refresh Job:** The `audible_refresh` scheduled job runs periodically (default: daily at midnight):
    - Fetches 200 popular audiobooks and 200 new releases from Audible via multi-page scraping
-   - For EACH audiobook, uses **shared matcher** to find database match
-   - If match found with `plexGuid`, assigns it (with duplicate checking)
-   - Sets `availabilityStatus` based on match
+   - Stores/updates audiobooks in database with category flags (`isPopular`, `isNewRelease`)
+   - Stores ranking information (`popularRank`, `newReleaseRank`)
+   - May perform background matching for optimization, but API routes don't rely on this
 2. **Database Storage:** Audiobooks are cached in the database with:
    - Category flags (`isPopular`, `isNewRelease`)
    - Ranking information (`popularRank`, `newReleaseRank`)
    - Sync timestamp (`lastAudibleSync`)
    - Full metadata (title, author, narrator, cover art, etc.)
-   - Availability status and `plexGuid` from matching
-3. **API Routes:** Discovery routes query the database for cached data with pagination support
-4. **Availability Display:** Books with `plexGuid` automatically show "In Your Library" badge
+3. **API Routes:** Discovery routes query database for cached audiobooks, then:
+   - Transform results to Audible format
+   - Call `enrichAudiobooksWithMatches()` for **real-time availability matching**
+   - Return enriched results with current availability status
+4. **Availability Display:** Books with matched `plexGuid` automatically show "In Your Library" badge
+
+**Key Difference from Previous Implementation:**
+- **Previous:** API routes returned pre-matched `availabilityStatus` from database (broken if jobs ran out of order)
+- **Current:** API routes perform real-time matching at query time (works regardless of job order)
+- **Result:** Resilient, production-ready matching that "just works"
 
 **API Endpoints:**
 
