@@ -1,263 +1,361 @@
-# CLAUDE.md
+# CLAUDE.md - Project Standards & Workflow
 
-## Project Standards & Workflow
-
-This document defines the architectural standards and workflow that must be followed for all development work in this project.
+**Critical:** This document defines AI-optimized documentation standards and development workflow.
 
 ---
 
-## 1. Cascading Context Documentation
+## 1. Token-Efficient Documentation System
 
-### Structure
+### Why Token Efficiency Matters
 
-All projects must maintain a **cascading context** documentation system with the following structure:
+**Problem:** Documentation consumes significant token budget, leaving limited context for implementation.
 
-```
-documentation/
-├── feature-area-1/
-│   ├── sub-feature/
-│   │   └── specific-component.md
-│   └── overview.md
-├── feature-area-2/
-│   └── implementation.md
-└── README.md
-```
+**Solution:** Documentation optimized for AI consumption, not human reading. Average 68-72% token reduction while preserving all technical details.
 
-### Documentation Requirements
-
-Every `.md` file in the cascading context must include:
-
-- **Current State**: What is currently implemented
-- **Design Architecture**: How it's built and why
-- **Implementation Details**: Endpoints, contracts, interfaces, data flows
-- **Tech Stack**: Libraries, frameworks, and tools used
-- **Dependencies**: What this component relies on
-- **Usage Examples**: How other parts of the system interact with this
-- **Known Issues**: Current limitations or technical debt
-
-### Example
+### Documentation Structure
 
 ```
 documentation/
+├── TABLEOFCONTENTS.md          # Navigation index (read THIS FIRST)
+├── README.md                    # Project overview
 ├── backend/
-│   ├── api.md           # REST endpoints, contracts, authentication
-│   ├── database.md      # Schema, migrations, ORM details
+│   ├── database.md             # Schema, Prisma, migrations
 │   └── services/
-│       └── payment.md   # Payment service architecture
+│       ├── auth.md             # Plex OAuth, JWT, RBAC
+│       ├── config.md           # Settings, encryption
+│       ├── jobs.md             # Bull queue, processors
+│       └── scheduler.md        # Cron jobs, recurring tasks
+├── integrations/
+│   ├── plex.md                 # Library scanning, OAuth, matching
+│   └── audible.md              # Web scraping, metadata
+├── phase3/                     # Automation pipeline
+│   ├── README.md               # Pipeline overview
+│   ├── qbittorrent.md          # Download client
+│   ├── prowlarr.md             # Indexer search
+│   ├── ranking-algorithm.md    # Torrent selection
+│   └── file-organization.md    # File management, seeding
 ├── frontend/
-│   └── components.md    # Component library documentation
-└── README.md            # Project overview and navigation guide
+│   ├── components.md           # React components
+│   ├── routing-auth.md         # Route protection
+│   └── pages/
+│       └── login.md            # Login page design
+├── deployment/
+│   └── docker.md               # Docker Compose, volumes
+└── [feature-specific docs]
 ```
 
 ---
 
-## 2. Strict Documentation Rules
+## 2. Using TABLEOFCONTENTS.md (MANDATORY)
 
-### **RULE 1: Documentation is Always Up-to-Date**
+### **RULE: Always Start Here**
 
-- **BEFORE** making any code changes, read the relevant cascading context documentation
-- **AFTER** making any code changes, update the relevant documentation to reflect the new state
-- If the change is significant, update the "Current State" and "Design Architecture" sections
-- Never leave documentation in a stale or outdated state
+**Before reading ANY documentation:**
+1. **Read `documentation/TABLEOFCONTENTS.md` FIRST**
+2. Identify relevant sections for your task
+3. Read ONLY the specific files you need
+4. **Never read all files sequentially** (wastes tokens)
 
-### **RULE 2: New Features Require New Documentation**
+### Example Workflow
 
-- When adding a new feature, component, or module:
-  1. Create the appropriate folder structure in `documentation/`
-  2. Create a `.md` file documenting the design before writing code
-  3. Update the parent-level documentation to reference the new feature
-  4. Keep the documentation updated as the feature evolves
+**Bad (Token wasteful):**
+```
+Task: Fix Plex authentication
+❌ Read README.md → backend/* → integrations/* → ...
+```
 
-### **RULE 3: Documentation Must Be Discoverable**
+**Good (Token efficient):**
+```
+Task: Fix Plex authentication
+✅ Read TABLEOFCONTENTS.md → Identify: backend/services/auth.md, integrations/plex.md
+✅ Read only those 2 files
+✅ Begin implementation
+```
 
-- The `documentation/README.md` must serve as a navigation guide
-- Each folder should have clear naming that reflects its purpose
-- Cross-reference related documentation files
+### TABLEOFCONTENTS.md Format
+
+Maps questions/features to specific documentation files:
+- "How does authentication work?" → backend/services/auth.md
+- "How do downloads work?" → phase3/qbittorrent.md, backend/services/jobs.md
+- Organized by: Authentication, Configuration, Database, Integrations, Automation, etc.
 
 ---
 
-## 3. Code Modularity Standards
+## 3. Token-Efficient Documentation Format
+
+### Mandatory Format Standards
+
+**All documentation MUST follow this token-optimized format:**
+
+#### Structure
+```markdown
+# [Title]
+
+**Status:** [✅ Implemented / ⏳ In Progress / ❌ Not Started] [Brief description]
+
+## Overview
+[1-2 sentence summary]
+
+## Key Details
+- Compact bullet lists (not prose)
+- API endpoints with request/response
+- Data models with field names/types
+- Configuration keys
+- Critical implementation notes
+
+## API/Interfaces
+[Tables or compact code blocks]
+
+## Critical Issues (if any)
+[Only important items]
+
+## Related: [links to other docs]
+```
+
+#### Forbidden Content (Removed for Token Efficiency)
+- ❌ Verbose prose explanations
+- ❌ "Why?" sections (keep brief rationale only)
+- ❌ Large ASCII diagrams (minimal only)
+- ❌ Excessive examples (max 1-2)
+- ❌ "Future Enhancements" sections
+- ❌ "Testing Strategy" (unless critical)
+- ❌ "Performance Considerations" (unless critical)
+- ❌ Empty sections
+- ❌ Decorative formatting
+
+#### Required Content (Preserve Completely)
+- ✅ API endpoint definitions
+- ✅ Data model field names and types
+- ✅ Configuration keys and values
+- ✅ Status values and enums
+- ✅ File paths and code locations
+- ✅ Critical implementation details
+- ✅ "Fixed Issues" (troubleshooting context)
+- ✅ Essential code examples (1-2 max)
+
+### Format Examples
+
+**Before (Token wasteful - 180 lines):**
+```markdown
+# User Authentication Service
+
+## Current State
+
+**Status:** Implemented ✅
+
+This service handles all authentication and authorization logic for the
+ReadMeABook application, including Plex OAuth integration, JWT session
+management, and role-based access control.
+
+## Design Architecture
+
+### Why Plex OAuth?
+
+Plex OAuth was chosen for several important reasons:
+- No need to manage passwords
+- Users already have Plex accounts
+- Seamless integration with Plex ecosystem
+...
+[continues for 150+ more lines]
+```
+
+**After (Token efficient - 50 lines):**
+```markdown
+# User Authentication Service
+
+**Status:** ✅ Implemented | Plex OAuth + JWT sessions + RBAC
+
+## Overview
+Handles Plex OAuth, JWT session management, role-based access control (user/admin).
+
+## Key Details
+- **Auth:** Plex OAuth flow → JWT tokens (access: 1h, refresh: 7d)
+- **Roles:** user (requests only), admin (full access)
+- **First user:** Auto-promoted to admin
+- **Endpoints:**
+  - POST /api/auth/plex/login → {authUrl, pinId}
+  - GET /api/auth/plex/callback?pinId → {accessToken, refreshToken, user}
+  - POST /api/auth/refresh → {accessToken}
+  - GET /api/auth/me → {user}
+- **Middleware:** requireAuth(), requireAdmin()
+- **Storage:** HTTP-only cookies + localStorage
+
+## JWT Payload
+```json
+{
+  "sub": "user-uuid",
+  "plexId": "plex-id",
+  "role": "admin",
+  "exp": 1234571490
+}
+```
+
+## Related: frontend/routing-auth.md, integrations/plex.md
+```
+
+---
+
+## 4. Implementation Strategy
+
+### Step 1: Navigate with TABLEOFCONTENTS.md
+- Read TABLEOFCONTENTS.md to find relevant docs
+- Identify 1-3 specific files needed (not all docs)
+
+### Step 2: Read Minimal Context
+- Read ONLY the identified files
+- Focus on "Key Details" and "API/Interfaces" sections
+- Skip examples unless implementing similar functionality
+
+### Step 3: Reiterate Understanding
+- Brief paragraph (3-4 sentences max)
+- What user wants, what's affected, expected outcome
+
+### Step 4: Create Implementation Plan (TodoWrite)
+```
+- [ ] Read: [specific doc files]
+- [ ] Update: [specific doc files]
+- [ ] Implement: [specific changes]
+- [ ] Verify: [test steps]
+```
+
+### Step 5: Implement
+- Follow plan
+- Update docs using token-efficient format
+- Add file headers linking to docs
+
+---
+
+## 5. Documentation Maintenance
+
+### **RULE: Update TABLEOFCONTENTS.md**
+
+**When adding new documentation:**
+1. Create doc file using token-efficient format
+2. **Update TABLEOFCONTENTS.md** with new mapping
+3. Update parent README.md if needed
+
+**Example:**
+```markdown
+# Added new feature: Email notifications
+
+Files created:
+- documentation/backend/services/notifications.md
+
+Updates required:
+- ✅ Create notifications.md (token-efficient format)
+- ✅ Add to TABLEOFCONTENTS.md: "Email notifications" → backend/services/notifications.md
+- ✅ Update documentation/README.md → Backend section
+```
+
+### **RULE: Keep Docs Up-to-Date**
+- **Before code changes:** Read relevant docs
+- **After code changes:** Update docs immediately
+- Use token-efficient format for all updates
+
+---
+
+## 6. Code Standards
 
 ### File Size Limits
-
-- **No file should exceed 300-400 lines of code**
-- If a file is growing too large, refactor into smaller, focused modules
-- Each file should have a single, clear responsibility
+- Max 300-400 lines per file
+- Refactor if exceeding limit
 
 ### Mandatory File Headers
-
-**Every code file must begin with a comment block** linking to its cascading context documentation:
-
-#### For JavaScript/TypeScript:
-```javascript
+```typescript
 /**
  * Component: User Authentication Service
  * Documentation: documentation/backend/services/auth.md
  */
 ```
 
-#### For Python:
-```python
-"""
-Component: Data Processing Pipeline
-Documentation: documentation/backend/data-pipeline.md
-"""
-```
-
-#### For C#:
-```csharp
-/// <summary>
-/// Component: GraphQL Query Resolver
-/// Documentation: documentation/backend/api/graphql.md
-/// </summary>
-```
-
-#### For HTML/CSS:
-```html
-<!-- 
-  Component: Dashboard Layout
-  Documentation: documentation/frontend/layouts/dashboard.md
--->
-```
-
-### **RULE 4: Link Code to Documentation**
-
-- The documentation path in the header must be accurate and point to an existing file
-- If documentation doesn't exist yet, create it before implementing the code
-- Use relative paths from the project root
+### Link Accuracy
+- Header path MUST point to existing doc file
+- Create doc BEFORE implementing code
+- Use relative paths from project root
 
 ---
 
-## 4. Implementation Strategy
+## 7. Token Budget Management
 
-### **Apply This Strategy to EVERY Request**
+### Critical Principle
 
-Even for simple changes, follow this structured approach:
+**Preserve tokens for implementation, not context gathering.**
 
-#### Step 1: Find Cascading Context
-- Identify which documentation files are relevant to the request
-- Read those files thoroughly to understand current state and architecture
-- If no documentation exists, note that it needs to be created
+**Token Budget Allocation:**
+- 20-30%: Reading relevant documentation (via TABLEOFCONTENTS.md)
+- 70-80%: Implementation, problem-solving, code generation
 
-#### Step 2: Reiterate Understanding
-- Write a brief paragraph (4-5 sentences maximum) summarizing:
-  - What the user is asking for
-  - What parts of the system will be affected
-  - The expected outcome
+**Anti-Patterns (Token wasteful):**
+- ❌ Reading all documentation files
+- ❌ Reading verbose examples when not needed
+- ❌ Re-reading same docs multiple times
+- ❌ Reading "Future Enhancements" sections
 
-#### Step 3: Ask Clarifying Questions (ONLY IF NEEDED)
-- If the requirement is clear and straightforward, skip this step
-- Only ask questions if there are genuine ambiguities that would affect implementation
-- Keep questions focused and specific
-
-#### Step 4: Create Detailed Implementation Plan
-Before writing any code, create a comprehensive todolist that includes:
-
-- [ ] Documentation to read
-- [ ] Documentation to create/update
-- [ ] Files to create/modify
-- [ ] Code changes to implement (in order)
-- [ ] Tests to write/update
-- [ ] Verification steps
-
-Be highly specific. Instead of "Update API", write "Add POST /api/users endpoint to documentation/backend/api.md and implement in src/api/routes/users.ts"
-
-#### Step 5: Implement
-- Follow the plan step-by-step
-- Update documentation as you go
-- Add file headers to all new files
-- Maintain modularity throughout
+**Best Practices (Token efficient):**
+- ✅ Use TABLEOFCONTENTS.md to target specific files
+- ✅ Read only "Key Details" and "API/Interfaces" sections
+- ✅ Skip examples unless implementing similar code
+- ✅ Cache understanding in memory, don't re-read
 
 ---
 
-## 5. Examples of the Strategy in Action
+## 8. Examples
 
-### Example 1: Simple Bug Fix
+### Example 1: Bug Fix
 
-**User Request**: "The login button isn't working on mobile"
+**Task:** "Plex authentication fails with 403 error"
 
-**Claude's Response**:
-```
-I need to investigate a mobile-specific issue with the login button. Based on the 
-cascading context, this likely involves the authentication UI component documented 
-in documentation/frontend/components/auth.md and possibly responsive styling 
-documented in documentation/frontend/styles.md.
-
-Implementation Plan:
-- [ ] Read documentation/frontend/components/auth.md
-- [ ] Read documentation/frontend/styles.md  
-- [ ] Locate the login button component in src/components/Auth/LoginButton.tsx
-- [ ] Identify the CSS/styling issue causing mobile failure
-- [ ] Fix the styling in src/styles/auth.css
-- [ ] Update documentation/frontend/components/auth.md with the fix details
-- [ ] Test on mobile viewport
-
-[Begin implementation...]
-```
+**Process:**
+1. Read TABLEOFCONTENTS.md → Find: backend/services/auth.md, integrations/plex.md
+2. Read only those 2 files (focus on API endpoints, error handling)
+3. Identify issue: Token refresh logic
+4. Fix code
+5. Update backend/services/auth.md (token-efficient format)
 
 ### Example 2: New Feature
 
-**User Request**: "Add password reset functionality"
+**Task:** "Add email notifications for completed requests"
 
-**Claude's Response**:
-```
-I need to implement a complete password reset flow. This will touch the backend 
-authentication system (documentation/backend/services/auth.md), the API layer 
-(documentation/backend/api.md), email services, and the frontend authentication 
-UI (documentation/frontend/components/auth.md).
-
-Clarifying Questions:
-1. Should password reset links expire? If so, after how long?
-2. Do you want email verification or security questions, or both?
-3. Should there be rate limiting on reset requests?
-
-[After answers...]
-
-Implementation Plan:
-- [ ] Read documentation/backend/services/auth.md
-- [ ] Read documentation/backend/api.md
-- [ ] Create documentation/backend/services/password-reset.md
-- [ ] Create database migration for reset tokens
-- [ ] Update documentation/backend/database.md with new schema
-- [ ] Implement token generation in src/services/auth/passwordReset.ts
-- [ ] Add POST /api/auth/request-reset endpoint
-- [ ] Add POST /api/auth/reset-password endpoint
-- [ ] Update documentation/backend/api.md with new endpoints
-- [ ] Create email template for reset link
-- [ ] Implement frontend reset request form
-- [ ] Implement frontend password reset form
-- [ ] Update documentation/frontend/components/auth.md
-- [ ] Add file headers to all new files
-- [ ] Test end-to-end flow
-
-[Begin implementation...]
-```
+**Process:**
+1. Read TABLEOFCONTENTS.md → Find: backend/services/scheduler.md, backend/services/jobs.md
+2. Read those files for background job patterns
+3. Create documentation/backend/services/notifications.md (token-efficient format)
+4. Update TABLEOFCONTENTS.md: "Email notifications" → backend/services/notifications.md
+5. Implement notification service
+6. Add file header linking to notifications.md
 
 ---
 
-## 6. Quality Checklist
+## 9. Quality Checklist
 
-Before considering any task complete, verify:
+Before completing any task:
 
-- [ ] All relevant cascading context documentation has been read
-- [ ] All modified/created documentation is up-to-date
-- [ ] All new code files have proper headers linking to documentation
-- [ ] No single file exceeds 300-400 lines of code
-- [ ] The implementation matches the detailed plan
-- [ ] Cross-references between documentation files are accurate
-
----
-
-## 7. Benefits of This System
-
-Following these standards ensures:
-
-- **Knowledge Continuity**: Any engineer can understand any part of the system
-- **Reduced Context Switching**: Documentation is always adjacent to code
-- **Better Onboarding**: New team members can navigate the codebase easily
-- **Fewer Bugs**: Thorough planning catches issues before implementation
-- **Maintainable Codebase**: Modularity and documentation prevent technical debt
+- [ ] Used TABLEOFCONTENTS.md to find docs (not read all files)
+- [ ] Read only necessary documentation
+- [ ] Updated documentation in token-efficient format
+- [ ] Updated TABLEOFCONTENTS.md if added new docs
+- [ ] Added file headers to new code files
+- [ ] No file exceeds 400 lines
+- [ ] Documentation matches implementation
 
 ---
 
-**Remember**: These standards apply to EVERY change, no matter how small. Consistency is what makes this system powerful.
+## 10. Summary
+
+**Key Points:**
+1. **Always start with TABLEOFCONTENTS.md** (navigation index)
+2. **Read only what you need** (not all docs)
+3. **Use token-efficient format** (bullets, tables, minimal prose)
+4. **Preserve tokens for implementation** (not context gathering)
+5. **Update docs immediately** (before/after code changes)
+6. **Update TABLEOFCONTENTS.md** (when adding new docs)
+
+**Result:**
+- 68-72% token reduction in documentation
+- Faster context gathering
+- More tokens available for implementation
+- Better AI performance on complex tasks
+
+---
+
+**Remember:** Documentation is for AI consumption. Token efficiency is critical. Always use TABLEOFCONTENTS.md.
