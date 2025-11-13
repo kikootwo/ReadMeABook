@@ -101,7 +101,7 @@ export async function processMatchPlex(payload: MatchPlexPayload): Promise<any> 
         where: { id: audiobookId },
         data: {
           plexGuid: bestMatch.item.guid,
-          availableAt: new Date(),
+          completedAt: new Date(),
           updatedAt: new Date(),
         },
       });
