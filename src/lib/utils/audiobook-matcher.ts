@@ -158,19 +158,10 @@ export async function findPlexMatch(
   candidates.sort((a, b) => b.score - a.score);
   const bestMatch = candidates[0];
 
-  // Adaptive threshold based on author match quality
-  // If author match is poor (< 30%), require higher overall score to avoid false positives
-  // This handles cases like different editions (Full-Cast vs single narrator)
-  const requiresHigherThreshold = bestMatch.authorScore < 0.3;
-  const threshold = requiresHigherThreshold ? 0.8 : 0.7;
-  const thresholdReason = requiresHigherThreshold
-    ? 'poor author match (<30%), requiring 80%'
-    : 'standard 70%';
+  console.log(`   🏆 Best match score: ${(bestMatch.score * 100).toFixed(1)}% (threshold: 70%)`);
 
-  console.log(`   🏆 Best match score: ${(bestMatch.score * 100).toFixed(1)}% (threshold: ${thresholdReason})`);
-
-  // Accept match if score >= threshold
-  if (bestMatch && bestMatch.score >= threshold) {
+  // Accept match if score >= 70%
+  if (bestMatch && bestMatch.score >= 0.7) {
     console.log('   ✅ FUZZY MATCH ACCEPTED:', {
       plexTitle: bestMatch.plexBook.title,
       plexAuthor: bestMatch.plexBook.author,
@@ -183,7 +174,7 @@ export async function findPlexMatch(
   }
 
   // No match found
-  console.log(`   ❌ MATCH REJECTED - Best score ${(bestMatch.score * 100).toFixed(1)}% below ${(threshold * 100).toFixed(0)}% threshold (${thresholdReason})`);
+  console.log(`   ❌ MATCH REJECTED - Best score ${(bestMatch.score * 100).toFixed(1)}% below 70% threshold`);
   return null;
 }
 
