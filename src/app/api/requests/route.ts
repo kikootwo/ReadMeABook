@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
+import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { z } from 'zod';
 
 const CreateRequestSchema = z.object({
@@ -40,43 +41,42 @@ export async function POST(request: NextRequest) {
       const body = await req.json();
       const { audiobook } = CreateRequestSchema.parse(body);
 
-      // Create or find audiobook in database
-      const audiobookRecord = await prisma.audiobook.upsert({
-        where: { audibleId: audiobook.asin },
-        create: {
-          audibleId: audiobook.asin,
-          title: audiobook.title,
-          author: audiobook.author,
-          narrator: audiobook.narrator,
-          description: audiobook.description,
-          coverArtUrl: audiobook.coverArtUrl,
-          durationMinutes: audiobook.durationMinutes,
-          releaseDate: audiobook.releaseDate ? new Date(audiobook.releaseDate) : null,
-          rating: audiobook.rating,
-          availabilityStatus: 'requested',
-        },
-        update: {
-          // Update metadata if audiobook already exists
-          title: audiobook.title,
-          author: audiobook.author,
-          narrator: audiobook.narrator,
-          description: audiobook.description,
-          coverArtUrl: audiobook.coverArtUrl,
-          durationMinutes: audiobook.durationMinutes,
-          rating: audiobook.rating,
-        },
+      // Check if audiobook is already available in Plex library
+      const plexMatch = await findPlexMatch({
+        asin: audiobook.asin,
+        title: audiobook.title,
+        author: audiobook.author,
       });
 
-      // Check if audiobook is already available in Plex
-      if (audiobookRecord.availabilityStatus === 'available') {
+      if (plexMatch) {
         return NextResponse.json(
           {
             error: 'AlreadyAvailable',
             message: 'This audiobook is already available in your Plex library',
-            audiobook: audiobookRecord,
+            plexGuid: plexMatch.plexGuid,
           },
           { status: 409 }
         );
+      }
+
+      // Try to find existing audiobook record by ASIN
+      let audiobookRecord = await prisma.audiobook.findFirst({
+        where: { audibleAsin: audiobook.asin },
+      });
+
+      // If not found, create new audiobook record
+      if (!audiobookRecord) {
+        audiobookRecord = await prisma.audiobook.create({
+          data: {
+            audibleAsin: audiobook.asin,
+            title: audiobook.title,
+            author: audiobook.author,
+            narrator: audiobook.narrator,
+            description: audiobook.description,
+            coverArtUrl: audiobook.coverArtUrl,
+            status: 'requested',
+          },
+        });
       }
 
       // Check if user already has a request for this audiobook
