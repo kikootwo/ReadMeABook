@@ -1,6 +1,8 @@
 /**
  * Component: New Releases API Route
  * Documentation: documentation/integrations/audible.md
+ *
+ * Serves new release audiobooks from audible_cache with real-time Plex matching
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -9,10 +11,9 @@ import { enrichAudiobooksWithMatches } from '@/lib/utils/audiobook-matcher';
 
 /**
  * GET /api/audiobooks/new-releases?page=1&limit=20
- * Get new release audiobooks from database cache with pagination
+ * Get new release audiobooks from audible_cache with pagination
  *
- * NOTE: Uses real-time matching to determine availability status.
- * This ensures matching works regardless of job execution order.
+ * Real-time matching against plex_library determines availability.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -33,9 +34,9 @@ export async function GET(request: NextRequest) {
 
     const skip = (page - 1) * limit;
 
-    // Query database for new release audiobooks
+    // Query audible_cache for new release audiobooks
     const [audiobooks, totalCount] = await Promise.all([
-      prisma.audiobook.findMany({
+      prisma.audibleCache.findMany({
         where: {
           isNewRelease: true,
         },
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest) {
         take: limit,
         select: {
           id: true,
-          audibleId: true,
+          asin: true,
           title: true,
           author: true,
           narrator: true,
@@ -56,10 +57,10 @@ export async function GET(request: NextRequest) {
           releaseDate: true,
           rating: true,
           genres: true,
-          lastAudibleSync: true,
+          lastSyncedAt: true,
         },
       }),
-      prisma.audiobook.count({
+      prisma.audibleCache.count({
         where: {
           isNewRelease: true,
         },
@@ -80,9 +81,9 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Transform to Audible format for matching
+    // Transform to matcher input format (uses ASIN as required field)
     const audibleBooks = audiobooks.map((book) => ({
-      asin: book.audibleId || '',
+      asin: book.asin,
       title: book.title,
       author: book.author,
       narrator: book.narrator || undefined,
@@ -94,8 +95,7 @@ export async function GET(request: NextRequest) {
       genres: (book.genres as string[]) || [],
     }));
 
-    // Enrich with real-time availability matching
-    // This matches against ALL database records (Plex scans, previous requests, etc.)
+    // Enrich with real-time Plex library matching
     const enrichedAudiobooks = await enrichAudiobooksWithMatches(audibleBooks);
 
     const totalPages = Math.ceil(totalCount / limit);
@@ -109,7 +109,7 @@ export async function GET(request: NextRequest) {
       page,
       totalPages,
       hasMore,
-      lastSync: audiobooks[0]?.lastAudibleSync?.toISOString() || null,
+      lastSync: audiobooks[0]?.lastSyncedAt?.toISOString() || null,
     });
   } catch (error) {
     console.error('Failed to get new releases:', error);

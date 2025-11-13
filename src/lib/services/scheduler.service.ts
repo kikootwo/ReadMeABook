@@ -302,16 +302,17 @@ export class SchedulerService {
 
   /**
    * Trigger Audible data refresh
+   * Populates audible_cache table with popular/new-release audiobooks
+   * NO matching logic - that happens at query time
    */
   private async triggerAudibleRefresh(job: any): Promise<string> {
     const { getAudibleService } = await import('../integrations/audible.service');
-    const { findAudiobookMatch } = await import('../utils/audiobook-matcher');
     const audibleService = getAudibleService();
 
     console.log('[AudibleRefresh] Starting Audible data refresh...');
 
     // Clear previous popular/new-release flags for fresh data
-    await prisma.audiobook.updateMany({
+    await prisma.audibleCache.updateMany({
       where: {
         OR: [
           { isPopular: true },
@@ -325,53 +326,26 @@ export class SchedulerService {
         newReleaseRank: null,
       },
     });
-    console.log('[AudibleRefresh] Cleared previous popular/new-release flags');
+    console.log('[AudibleRefresh] Cleared previous popular/new-release flags in audible_cache');
 
-    // Fetch popular and new releases - increased to 200 items each
+    // Fetch popular and new releases - 200 items each
     const popular = await audibleService.getPopularAudiobooks(200);
     const newReleases = await audibleService.getNewReleases(200);
 
-    console.log(`[AudibleRefresh] Fetched ${popular.length} popular, ${newReleases.length} new releases`);
+    console.log(`[AudibleRefresh] Fetched ${popular.length} popular, ${newReleases.length} new releases from Audible`);
 
-    // Persist to database - upsert audiobooks to cache the data
+    // Persist to audible_cache - pure Audible metadata, no matching
     let popularSaved = 0;
     let newReleasesSaved = 0;
-    let matchedToPlex = 0;
-    let skippedDuplicatePlexGuids = 0;
     const syncTime = new Date();
 
     for (let i = 0; i < popular.length; i++) {
       const audiobook = popular[i];
       try {
-        // Use shared matching logic (same as search API)
-        const match = await findAudiobookMatch({
-          asin: audiobook.asin,
-          title: audiobook.title,
-          author: audiobook.author,
-        });
-
-        // If we have a match with plexGuid, check if another audiobook already has it
-        let canAssignPlexGuid = true;
-        if (match?.plexGuid) {
-          const existingWithPlexGuid = await prisma.audiobook.findUnique({
-            where: { plexGuid: match.plexGuid },
-            select: { audibleId: true },
-          });
-
-          // If another audiobook already has this plexGuid, skip assignment
-          if (existingWithPlexGuid && existingWithPlexGuid.audibleId !== audiobook.asin) {
-            canAssignPlexGuid = false;
-            skippedDuplicatePlexGuids++;
-            if (i < 3) {
-              console.log(`[AudibleRefresh] Skipping plexGuid for "${audiobook.title}" - already assigned`);
-            }
-          }
-        }
-
-        await prisma.audiobook.upsert({
-          where: { audibleId: audiobook.asin },
+        await prisma.audibleCache.upsert({
+          where: { asin: audiobook.asin },
           create: {
-            audibleId: audiobook.asin,
+            asin: audiobook.asin,
             title: audiobook.title,
             author: audiobook.author,
             narrator: audiobook.narrator,
@@ -381,12 +355,9 @@ export class SchedulerService {
             releaseDate: audiobook.releaseDate ? new Date(audiobook.releaseDate) : null,
             rating: audiobook.rating ? audiobook.rating : null,
             genres: audiobook.genres || [],
-            availabilityStatus: match && canAssignPlexGuid ? match.availabilityStatus : 'unknown',
-            availableAt: match && canAssignPlexGuid && match.availabilityStatus === 'available' ? new Date() : null,
-            plexGuid: match && canAssignPlexGuid ? match.plexGuid : null,
             isPopular: true,
             popularRank: i + 1,
-            lastAudibleSync: syncTime,
+            lastSyncedAt: syncTime,
           },
           update: {
             title: audiobook.title,
@@ -400,23 +371,11 @@ export class SchedulerService {
             genres: audiobook.genres || [],
             isPopular: true,
             popularRank: i + 1,
-            lastAudibleSync: syncTime,
-            // Update availability based on match
-            availabilityStatus: match && canAssignPlexGuid ? match.availabilityStatus : 'unknown',
-            ...(match && canAssignPlexGuid && match.plexGuid && {
-              plexGuid: match.plexGuid,
-              availableAt: match.availabilityStatus === 'available' ? new Date() : null,
-            }),
+            lastSyncedAt: syncTime,
           },
         });
 
         popularSaved++;
-        if (match && canAssignPlexGuid && match.plexGuid) {
-          matchedToPlex++;
-          if (i < 3) {
-            console.log(`[AudibleRefresh] Matched "${audiobook.title}" (status: ${match.availabilityStatus})`);
-          }
-        }
       } catch (error) {
         console.error(`[AudibleRefresh] Failed to save popular audiobook ${audiobook.title}:`, error);
       }
@@ -425,32 +384,10 @@ export class SchedulerService {
     for (let i = 0; i < newReleases.length; i++) {
       const audiobook = newReleases[i];
       try {
-        // Use shared matching logic (same as search API)
-        const match = await findAudiobookMatch({
-          asin: audiobook.asin,
-          title: audiobook.title,
-          author: audiobook.author,
-        });
-
-        // If we have a match with plexGuid, check if another audiobook already has it
-        let canAssignPlexGuid = true;
-        if (match?.plexGuid) {
-          const existingWithPlexGuid = await prisma.audiobook.findUnique({
-            where: { plexGuid: match.plexGuid },
-            select: { audibleId: true },
-          });
-
-          // If another audiobook already has this plexGuid, skip assignment
-          if (existingWithPlexGuid && existingWithPlexGuid.audibleId !== audiobook.asin) {
-            canAssignPlexGuid = false;
-            skippedDuplicatePlexGuids++;
-          }
-        }
-
-        await prisma.audiobook.upsert({
-          where: { audibleId: audiobook.asin },
+        await prisma.audibleCache.upsert({
+          where: { asin: audiobook.asin },
           create: {
-            audibleId: audiobook.asin,
+            asin: audiobook.asin,
             title: audiobook.title,
             author: audiobook.author,
             narrator: audiobook.narrator,
@@ -460,12 +397,9 @@ export class SchedulerService {
             releaseDate: audiobook.releaseDate ? new Date(audiobook.releaseDate) : null,
             rating: audiobook.rating ? audiobook.rating : null,
             genres: audiobook.genres || [],
-            availabilityStatus: match && canAssignPlexGuid ? match.availabilityStatus : 'unknown',
-            availableAt: match && canAssignPlexGuid && match.availabilityStatus === 'available' ? new Date() : null,
-            plexGuid: match && canAssignPlexGuid ? match.plexGuid : null,
             isNewRelease: true,
             newReleaseRank: i + 1,
-            lastAudibleSync: syncTime,
+            lastSyncedAt: syncTime,
           },
           update: {
             title: audiobook.title,
@@ -479,42 +413,22 @@ export class SchedulerService {
             genres: audiobook.genres || [],
             isNewRelease: true,
             newReleaseRank: i + 1,
-            lastAudibleSync: syncTime,
-            // Update availability based on match
-            availabilityStatus: match && canAssignPlexGuid ? match.availabilityStatus : 'unknown',
-            ...(match && canAssignPlexGuid && match.plexGuid && {
-              plexGuid: match.plexGuid,
-              availableAt: match.availabilityStatus === 'available' ? new Date() : null,
-            }),
+            lastSyncedAt: syncTime,
           },
         });
 
         newReleasesSaved++;
-        if (match && canAssignPlexGuid && match.plexGuid) {
-          matchedToPlex++;
-        }
       } catch (error) {
         console.error(`[AudibleRefresh] Failed to save new release ${audiobook.title}:`, error);
       }
     }
 
-    console.log(`[AudibleRefresh] Saved ${popularSaved} popular and ${newReleasesSaved} new releases to database`);
-    console.log(`[AudibleRefresh] Matched ${matchedToPlex} Audible books to database records`);
+    console.log(`[AudibleRefresh] Saved ${popularSaved} popular and ${newReleasesSaved} new releases to audible_cache`);
+    console.log('[AudibleRefresh] Matching will happen at query time when displaying books');
 
-    if (skippedDuplicatePlexGuids > 0) {
-      console.log(`[AudibleRefresh] Skipped ${skippedDuplicatePlexGuids} duplicate plexGuid assignments`);
-    }
-
-    if (matchedToPlex > 0) {
-      const matchRate = ((matchedToPlex / (popularSaved + newReleasesSaved)) * 100).toFixed(1);
-      console.log(`[AudibleRefresh] Match rate: ${matchRate}% (${matchedToPlex}/${popularSaved + newReleasesSaved})`);
-    } else {
-      console.log(`[AudibleRefresh] No matches found - run Plex Library Scan first to populate database with Plex audiobooks`);
-    }
-
-    // Return a placeholder job ID since this doesn't use the Bull queue
-    return `audible-refresh-${Date.now()}`;
+    return 'audible-refresh-' + Date.now();
   }
+
 
   /**
    * Enable a scheduled job

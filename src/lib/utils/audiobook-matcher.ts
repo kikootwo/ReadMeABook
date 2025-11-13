@@ -2,168 +2,244 @@
  * Component: Audiobook Matching Utility
  * Documentation: documentation/integrations/audible.md
  *
- * Shared utility for matching Audible audiobooks to database records.
- * Used by: search API, popular API, new-releases API, and scheduler service.
+ * Real-time matching between Audible books and Plex library.
+ * Queries plex_library table to determine availability.
  */
 
 import { prisma } from '@/lib/db';
 import { compareTwoStrings } from 'string-similarity';
 
+// Debug logging controlled by LOG_LEVEL environment variable
+const DEBUG_ENABLED = process.env.LOG_LEVEL === 'debug';
+
 export interface AudiobookMatchInput {
   asin: string;
   title: string;
   author: string;
+  narrator?: string;
 }
 
 export interface AudiobookMatchResult {
-  id: string;
-  audibleId: string | null;
+  plexGuid: string;
   title: string;
   author: string;
-  availabilityStatus: string;
-  plexGuid: string | null;
 }
 
 /**
- * Find a matching audiobook in the database for a given Audible audiobook.
+ * Normalize audiobook title for matching by removing common suffixes/prefixes
+ * that don't affect the core title identity.
+ */
+function normalizeTitle(title: string): string {
+  let normalized = title.toLowerCase().trim();
+
+  // Remove common parenthetical additions (case-insensitive)
+  normalized = normalized.replace(/\s*\(unabridged\)\s*/gi, ' ');
+  normalized = normalized.replace(/\s*\(abridged\)\s*/gi, ' ');
+  normalized = normalized.replace(/\s*\(full cast\)\s*/gi, ' ');
+  normalized = normalized.replace(/\s*\(full-cast edition\)\s*/gi, ' ');
+  normalized = normalized.replace(/\s*\(dramatized\)\s*/gi, ' ');
+  normalized = normalized.replace(/\s*\(narrated by[^)]*\)\s*/gi, ' ');
+
+  // Remove common subtitle patterns
+  normalized = normalized.replace(/:\s*a novel\s*$/gi, '');
+  normalized = normalized.replace(/:\s*a thriller\s*$/gi, '');
+  normalized = normalized.replace(/:\s*a memoir\s*$/gi, '');
+
+  // Remove book number suffixes (but keep them in main title if they're significant)
+  // Only remove if they're clearly series indicators at the end
+  normalized = normalized.replace(/,?\s*book\s+\d+\s*$/gi, '');
+  normalized = normalized.replace(/:\s*book\s+\d+\s*$/gi, '');
+
+  // Clean up extra whitespace
+  normalized = normalized.replace(/\s+/g, ' ').trim();
+
+  return normalized;
+}
+
+/**
+ * Find a matching audiobook in the Plex library for a given Audible audiobook.
  *
- * Matching logic:
- * 1. Try exact ASIN match first
- * 2. Query database for fuzzy candidates (substring match on title/author)
- * 3. Perform fuzzy matching with 70% threshold
- * 4. Return best match or null
+ * Matching logic (in order of priority):
+ * 1. **ASIN in plexGuid** - Check if any Plex book's GUID contains the Audible ASIN (100% match)
+ * 2. **Fuzzy matching** - Normalized title/author string similarity with 70% threshold
  *
  * @param audiobook - Audible audiobook to match
- * @returns Matched database audiobook or null
+ * @returns Matched Plex library item or null
  */
-export async function findAudiobookMatch(
+export async function findPlexMatch(
   audiobook: AudiobookMatchInput
 ): Promise<AudiobookMatchResult | null> {
-  console.log('\n🔍 [MATCHER] Starting match for:', {
-    title: audiobook.title,
-    author: audiobook.author,
-    asin: audiobook.asin,
-  });
-
-  // Query database for potential matches
-  // This matches ANY audiobook (not just ones with availabilityStatus='available')
-  const dbAudiobooks = await prisma.audiobook.findMany({
+  // Query plex_library for potential matches
+  // IMPORTANT: Search by TITLE ONLY (not author) because Plex often has narrator as author
+  const titleSearchLength = Math.min(20, audiobook.title.length);
+  const plexBooks = await prisma.plexLibrary.findMany({
     where: {
-      OR: [
-        // Exact ASIN match
-        { audibleId: audiobook.asin },
-        // Fuzzy match by title/author substring (narrows down candidates)
-        {
-          AND: [
-            { title: { contains: audiobook.title.substring(0, 20), mode: 'insensitive' } },
-            { author: { contains: audiobook.author.substring(0, 20), mode: 'insensitive' } },
-          ],
-        },
-      ],
+      title: {
+        contains: audiobook.title.substring(0, titleSearchLength),
+        mode: 'insensitive',
+      },
     },
     select: {
-      id: true,
-      audibleId: true,
+      plexGuid: true,
       title: true,
       author: true,
-      availabilityStatus: true,
-      plexGuid: true,
     },
-    take: 5, // Limit to top 5 candidates for performance
+    take: 20,
   });
 
-  console.log(`   📊 Found ${dbAudiobooks.length} candidate(s) in database`);
+  // Build match result for logging
+  const matchResult: any = {
+    input: {
+      title: audiobook.title,
+      author: audiobook.author,
+      narrator: audiobook.narrator || null,
+      asin: audiobook.asin,
+    },
+    candidatesFound: plexBooks.length,
+    matchType: null,
+    matched: false,
+    result: null,
+  };
 
-  // If no candidates found, return null
-  if (dbAudiobooks.length === 0) {
-    console.log('   ❌ No candidates found - no match');
+  // If no candidates found, log and return null
+  if (plexBooks.length === 0) {
+    matchResult.matchType = 'no_candidates';
+    if (DEBUG_ENABLED) console.log(JSON.stringify({ MATCHER: matchResult }));
     return null;
   }
 
-  // If exact match by ASIN, use it immediately
-  const exactMatch = dbAudiobooks.find((db) => db.audibleId === audiobook.asin);
-  if (exactMatch) {
-    console.log('   ✅ EXACT ASIN MATCH found:', {
-      dbTitle: exactMatch.title,
-      dbAuthor: exactMatch.author,
-      plexGuid: exactMatch.plexGuid,
-      availabilityStatus: exactMatch.availabilityStatus,
-    });
-    return exactMatch;
+  // PRIORITY 1: Check for EXACT ASIN match in plexGuid
+  for (const plexBook of plexBooks) {
+    if (plexBook.plexGuid && plexBook.plexGuid.includes(audiobook.asin)) {
+      matchResult.matchType = 'asin_exact';
+      matchResult.matched = true;
+      matchResult.result = {
+        plexGuid: plexBook.plexGuid,
+        plexTitle: plexBook.title,
+        plexAuthor: plexBook.author,
+        confidence: 100,
+      };
+      if (DEBUG_ENABLED) console.log(JSON.stringify({ MATCHER: matchResult }));
+      return plexBook;
+    }
   }
 
-  console.log('   🔢 No exact ASIN match, performing fuzzy matching...');
+  // FILTER OUT candidates with wrong ASINs in plexGuid
+  const ASIN_PATTERN = /[A-Z0-9]{10}/g;
+  const rejectedAsins: string[] = [];
+  const validCandidates = plexBooks.filter((plexBook) => {
+    if (!plexBook.plexGuid) return true;
+    const asinsInGuid = plexBook.plexGuid.match(ASIN_PATTERN);
+    if (!asinsInGuid || asinsInGuid.length === 0) return true;
 
-  // Otherwise, perform fuzzy matching on candidates
-  const candidates = dbAudiobooks.map((dbBook) => {
-    const titleScore = compareTwoStrings(
-      audiobook.title.toLowerCase(),
-      dbBook.title.toLowerCase()
-    );
+    const hasOurAsin = asinsInGuid.some(asin => asin === audiobook.asin);
+    const hasOtherAsins = asinsInGuid.some(asin => asin !== audiobook.asin);
+
+    if (hasOtherAsins && !hasOurAsin) {
+      rejectedAsins.push(...asinsInGuid);
+      return false;
+    }
+    return true;
+  });
+
+  matchResult.asinFiltering = {
+    beforeCount: plexBooks.length,
+    afterCount: validCandidates.length,
+    rejectedAsins: rejectedAsins.length > 0 ? rejectedAsins : undefined,
+  };
+
+  if (validCandidates.length === 0) {
+    matchResult.matchType = 'asin_filtered_all';
+    if (DEBUG_ENABLED) console.log(JSON.stringify({ MATCHER: matchResult }));
+    return null;
+  }
+
+  // Normalize the Audible title
+  const normalizedAudibleTitle = normalizeTitle(audiobook.title);
+
+  // PRIORITY 2: Perform fuzzy matching
+  const candidates = validCandidates.map((plexBook) => {
+    const normalizedPlexTitle = normalizeTitle(plexBook.title);
+    const titleScore = compareTwoStrings(normalizedAudibleTitle, normalizedPlexTitle);
     const authorScore = compareTwoStrings(
       audiobook.author.toLowerCase(),
-      dbBook.author.toLowerCase()
+      plexBook.author.toLowerCase()
     );
 
-    // Weighted score: 70% title, 30% author
-    const overallScore = titleScore * 0.7 + authorScore * 0.3;
+    let narratorScore = 0;
+    let usedNarratorMatch = false;
+    if (audiobook.narrator) {
+      narratorScore = compareTwoStrings(
+        audiobook.narrator.toLowerCase(),
+        plexBook.author.toLowerCase()
+      );
+      usedNarratorMatch = narratorScore > authorScore;
+    }
 
-    console.log('      📝 Candidate:', {
-      dbTitle: dbBook.title,
-      dbAuthor: dbBook.author,
-      titleScore: `${(titleScore * 100).toFixed(1)}%`,
-      authorScore: `${(authorScore * 100).toFixed(1)}%`,
-      overallScore: `${(overallScore * 100).toFixed(1)}%`,
-      plexGuid: dbBook.plexGuid,
-      availabilityStatus: dbBook.availabilityStatus,
-    });
+    const personScore = usedNarratorMatch ? narratorScore : authorScore;
+    const overallScore = titleScore * 0.7 + personScore * 0.3;
 
-    return { dbBook, titleScore, authorScore, score: overallScore };
+    return {
+      plexBook,
+      titleScore,
+      authorScore,
+      narratorScore,
+      usedNarratorMatch,
+      score: overallScore
+    };
   });
 
   // Sort by score descending
   candidates.sort((a, b) => b.score - a.score);
   const bestMatch = candidates[0];
 
-  console.log(`   🏆 Best match score: ${(bestMatch.score * 100).toFixed(1)}% (threshold: 70%)`);
+  // Add best match details to result
+  matchResult.bestCandidate = {
+    plexTitle: bestMatch.plexBook.title,
+    plexAuthor: bestMatch.plexBook.author,
+    plexGuid: bestMatch.plexBook.plexGuid,
+    scores: {
+      title: Math.round(bestMatch.titleScore * 100),
+      author: Math.round(bestMatch.authorScore * 100),
+      narrator: audiobook.narrator ? Math.round(bestMatch.narratorScore * 100) : null,
+      usedMatch: bestMatch.usedNarratorMatch ? 'narrator' : 'author',
+      overall: Math.round(bestMatch.score * 100),
+    },
+    threshold: 70,
+  };
 
   // Accept match if score >= 70%
   if (bestMatch && bestMatch.score >= 0.7) {
-    console.log('   ✅ MATCH ACCEPTED:', {
-      dbTitle: bestMatch.dbBook.title,
-      dbAuthor: bestMatch.dbBook.author,
-      titleMatch: `${(bestMatch.titleScore * 100).toFixed(1)}%`,
-      authorMatch: `${(bestMatch.authorScore * 100).toFixed(1)}%`,
-      overallScore: `${(bestMatch.score * 100).toFixed(1)}%`,
-      plexGuid: bestMatch.dbBook.plexGuid,
-      availabilityStatus: bestMatch.dbBook.availabilityStatus,
-    });
-    return bestMatch.dbBook;
+    matchResult.matchType = 'fuzzy';
+    matchResult.matched = true;
+    matchResult.result = {
+      plexGuid: bestMatch.plexBook.plexGuid,
+      plexTitle: bestMatch.plexBook.title,
+      plexAuthor: bestMatch.plexBook.author,
+      confidence: Math.round(bestMatch.score * 100),
+    };
+    if (DEBUG_ENABLED) console.log(JSON.stringify({ MATCHER: matchResult }));
+    return bestMatch.plexBook;
   }
 
   // No match found
-  console.log(`   ❌ MATCH REJECTED - Best score ${(bestMatch.score * 100).toFixed(1)}% below 70% threshold`);
+  matchResult.matchType = 'fuzzy_below_threshold';
+  if (DEBUG_ENABLED) console.log(JSON.stringify({ MATCHER: matchResult }));
   return null;
 }
 
 /**
- * Enrich an Audible audiobook with database match information.
+ * Enrich an Audible audiobook with Plex library match information.
  * Used by API routes to add availability status to responses.
  */
 export async function enrichAudiobookWithMatch(audiobook: AudiobookMatchInput & Record<string, any>) {
-  const match = await findAudiobookMatch(audiobook);
+  const match = await findPlexMatch(audiobook);
 
-  const enriched = {
+  return {
     ...audiobook,
-    availabilityStatus: match?.availabilityStatus || 'unknown',
-    isAvailable: match?.availabilityStatus === 'available',
+    isAvailable: match !== null,
     plexGuid: match?.plexGuid || null,
-    dbId: match?.id || null,
   };
-
-  console.log(`   📦 Enriched result: availabilityStatus="${enriched.availabilityStatus}", isAvailable=${enriched.isAvailable}, plexGuid=${enriched.plexGuid ? 'YES' : 'NO'}\n`);
-
-  return enriched;
 }
 
 /**
@@ -173,19 +249,16 @@ export async function enrichAudiobookWithMatch(audiobook: AudiobookMatchInput & 
 export async function enrichAudiobooksWithMatches(
   audiobooks: Array<AudiobookMatchInput & Record<string, any>>
 ) {
-  console.log(`\n🔄 [MATCHER BATCH] Starting batch enrichment for ${audiobooks.length} audiobook(s)...`);
-
   const results = await Promise.all(audiobooks.map((book) => enrichAudiobookWithMatch(book)));
 
-  const summary = {
-    total: results.length,
-    available: results.filter(r => r.isAvailable).length,
-    unknown: results.filter(r => r.availabilityStatus === 'unknown').length,
-    requested: results.filter(r => r.availabilityStatus === 'requested').length,
-  };
-
-  console.log('📊 [MATCHER BATCH] Summary:', summary);
-  console.log('─'.repeat(80) + '\n');
+  if (DEBUG_ENABLED) {
+    const summary = {
+      total: results.length,
+      available: results.filter(r => r.isAvailable).length,
+      notAvailable: results.filter(r => !r.isAvailable).length,
+    };
+    console.log(JSON.stringify({ MATCHER_BATCH_SUMMARY: summary }));
+  }
 
   return results;
 }

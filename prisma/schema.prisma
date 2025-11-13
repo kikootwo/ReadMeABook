@@ -1,6 +1,12 @@
 /**
  * ReadMeABook Database Schema
  * Documentation: documentation/backend/database.md
+ *
+ * ARCHITECTURE:
+ * - audible_cache: Pure Audible metadata (popular/new releases from Audible.com)
+ * - plex_library: Pure Plex library content (what's in your Plex server)
+ * - audiobooks: User-requested audiobooks only (created on request)
+ * - Matching happens at QUERY TIME by comparing audible_cache against plex_library
  */
 
 generator client {
@@ -37,49 +43,120 @@ model User {
   @@map("users")
 }
 
-model Audiobook {
-  id                 String    @id @default(uuid())
-  audibleId          String?   @unique @map("audible_id")
-  title              String
-  author             String
-  narrator           String?
-  description        String?   @db.Text
-  coverArtUrl        String?   @map("cover_art_url") @db.Text
-  durationMinutes    Int?      @map("duration_minutes")
-  releaseDate        DateTime? @map("release_date") @db.Date
-  rating             Decimal?  @db.Decimal(3, 2)
-  genres             Json      @default("[]")
-  plexGuid           String?   @unique @map("plex_guid")
-  plexLibraryId      String?   @map("plex_library_id")
-  filePath           String?   @map("file_path") @db.Text
-  fileFormat         String?   @map("file_format") // m4b, m4a, mp3
-  fileSizeBytes      BigInt?   @map("file_size_bytes")
-  availabilityStatus String    @default("unknown") @map("availability_status")
-  // Status values: unknown, requested, downloading, processing, available, failed
+// ============================================================================
+// AUDIBLE CACHE TABLE
+// Pure Audible metadata - Popular/New Releases cached from Audible.com
+// No Plex data, no availability status - just Audible metadata
+// ============================================================================
+model AudibleCache {
+  id              String    @id @default(uuid())
+  asin            String    @unique // Audible Standard Identification Number
+  title           String
+  author          String
+  narrator        String?
+  description     String?   @db.Text
+  coverArtUrl     String?   @map("cover_art_url") @db.Text
+  durationMinutes Int?      @map("duration_minutes")
+  releaseDate     DateTime? @map("release_date") @db.Date
+  rating          Decimal?  @db.Decimal(3, 2)
+  genres          Json      @default("[]")
 
-  // Audible discovery categories
-  isPopular          Boolean   @default(false) @map("is_popular")
-  isNewRelease       Boolean   @default(false) @map("is_new_release")
-  popularRank        Int?      @map("popular_rank")
-  newReleaseRank     Int?      @map("new_release_rank")
-  lastAudibleSync    DateTime? @map("last_audible_sync")
+  // Discovery categories
+  isPopular      Boolean   @default(false) @map("is_popular")
+  isNewRelease   Boolean   @default(false) @map("is_new_release")
+  popularRank    Int?      @map("popular_rank")
+  newReleaseRank Int?      @map("new_release_rank")
 
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
-  availableAt        DateTime? @map("available_at")
+  lastSyncedAt   DateTime  @default(now()) @map("last_synced_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  // Relations
-  requests Request[]
-
-  @@index([audibleId])
-  @@index([plexGuid])
+  @@index([asin])
   @@index([title])
   @@index([author])
-  @@index([availabilityStatus])
   @@index([isPopular])
   @@index([isNewRelease])
   @@index([popularRank])
   @@index([newReleaseRank])
+  @@map("audible_cache")
+}
+
+// ============================================================================
+// PLEX LIBRARY TABLE
+// Pure Plex library content - What's actually in your Plex server
+// No Audible data - just Plex metadata and file info
+// ============================================================================
+model PlexLibrary {
+  id            String    @id @default(uuid())
+  plexGuid      String    @unique @map("plex_guid") // Plex's unique identifier
+  plexRatingKey String?   @map("plex_rating_key") // Plex's rating key
+
+  title         String
+  author        String
+  narrator      String?
+  summary       String?   @db.Text
+  duration      Int?      // Duration in milliseconds (Plex format)
+  year          Int?
+
+  // File information
+  filePath      String?   @map("file_path") @db.Text
+  thumbUrl      String?   @map("thumb_url") @db.Text // Plex thumbnail URL
+
+  // Plex metadata
+  plexLibraryId String    @map("plex_library_id") // Which Plex library contains this
+  addedAt       DateTime? @map("added_at") // When added to Plex
+
+  lastScannedAt DateTime  @default(now()) @map("last_scanned_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@index([plexGuid])
+  @@index([title])
+  @@index([author])
+  @@index([plexLibraryId])
+  @@map("plex_library")
+}
+
+// ============================================================================
+// AUDIOBOOK TABLE (Simplified)
+// Only created when user requests an audiobook
+// Links to AudibleCache for metadata (optional - search results may not be cached)
+// ============================================================================
+model Audiobook {
+  id              String    @id @default(uuid())
+
+  // Core metadata (may come from Audible search, not necessarily cached)
+  audibleAsin     String?   @map("audible_asin") // ASIN if from Audible
+  title           String
+  author          String
+  narrator        String?
+  description     String?   @db.Text
+  coverArtUrl     String?   @map("cover_art_url") @db.Text
+
+  // Request tracking
+  status          String    @default("requested") // requested, downloading, processing, completed, failed
+
+  // File information (populated after download/organization)
+  filePath        String?   @map("file_path") @db.Text
+  fileFormat      String?   @map("file_format") // m4b, m4a, mp3
+  fileSizeBytes   BigInt?   @map("file_size_bytes")
+
+  // Plex integration (populated after successful import)
+  plexGuid        String?   @map("plex_guid") // Set when imported into Plex
+  plexLibraryId   String?   @map("plex_library_id")
+
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  completedAt     DateTime? @map("completed_at")
+
+  // Relations
+  requests Request[]
+
+  @@index([audibleAsin])
+  @@index([plexGuid])
+  @@index([title])
+  @@index([author])
+  @@index([status])
   @@map("audiobooks")
 }
 

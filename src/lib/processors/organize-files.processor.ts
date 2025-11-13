@@ -56,12 +56,13 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
 
     console.log(`[OrganizeFiles] Successfully moved ${result.filesMovedCount} files to ${result.targetPath}`);
 
-    // Update audiobook record with file path
+    // Update audiobook record with file path and status
     await prisma.audiobook.update({
       where: { id: audiobookId },
       data: {
         filePath: result.targetPath,
-        availabilityStatus: 'available',
+        status: 'completed',
+        completedAt: new Date(),
         updatedAt: new Date(),
       },
     });
