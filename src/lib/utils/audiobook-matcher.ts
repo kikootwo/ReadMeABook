@@ -9,6 +9,9 @@
 import { prisma } from '@/lib/db';
 import { compareTwoStrings } from 'string-similarity';
 
+// Debug logging controlled by LOG_LEVEL environment variable
+const DEBUG_ENABLED = process.env.LOG_LEVEL === 'debug';
+
 export interface AudiobookMatchInput {
   asin: string;
   title: string;
@@ -66,16 +69,8 @@ function normalizeTitle(title: string): string {
 export async function findPlexMatch(
   audiobook: AudiobookMatchInput
 ): Promise<AudiobookMatchResult | null> {
-  console.log('\n🔍 [MATCHER] Starting match for:', {
-    title: audiobook.title,
-    author: audiobook.author,
-    narrator: audiobook.narrator || 'N/A',
-    asin: audiobook.asin,
-  });
-
   // Query plex_library for potential matches
   // IMPORTANT: Search by TITLE ONLY (not author) because Plex often has narrator as author
-  // We'll validate the author match during fuzzy matching or rely on ASIN matching
   const titleSearchLength = Math.min(20, audiobook.title.length);
   const plexBooks = await prisma.plexLibrary.findMany({
     where: {
@@ -89,83 +84,83 @@ export async function findPlexMatch(
       title: true,
       author: true,
     },
-    take: 20, // Increased to 20 to handle more candidates (since we removed author filter)
+    take: 20,
   });
 
-  console.log(`   📊 Found ${plexBooks.length} candidate(s) in Plex library (title-based search)`);
+  // Build match result for logging
+  const matchResult: any = {
+    input: {
+      title: audiobook.title,
+      author: audiobook.author,
+      narrator: audiobook.narrator || null,
+      asin: audiobook.asin,
+    },
+    candidatesFound: plexBooks.length,
+    matchType: null,
+    matched: false,
+    result: null,
+  };
 
-  // If no candidates found, return null
+  // If no candidates found, log and return null
   if (plexBooks.length === 0) {
-    console.log('   ❌ No candidates found - not in Plex library');
+    matchResult.matchType = 'no_candidates';
+    if (DEBUG_ENABLED) console.log(JSON.stringify({ MATCHER: matchResult }));
     return null;
   }
 
   // PRIORITY 1: Check for EXACT ASIN match in plexGuid
-  // Many Plex agents (especially Audnexus) embed the ASIN in the GUID
-  // Example: com.plexapp.agents.audnexus://B08G9PRS1K_us?lang=en
-  console.log('   🎯 Checking for ASIN in plexGuid...');
   for (const plexBook of plexBooks) {
     if (plexBook.plexGuid && plexBook.plexGuid.includes(audiobook.asin)) {
-      console.log('   ✅ EXACT ASIN MATCH IN PLEX GUID:', {
+      matchResult.matchType = 'asin_exact';
+      matchResult.matched = true;
+      matchResult.result = {
+        plexGuid: plexBook.plexGuid,
         plexTitle: plexBook.title,
         plexAuthor: plexBook.author,
-        plexGuid: plexBook.plexGuid,
-        asin: audiobook.asin,
-        confidence: '100%',
-        note: plexBook.author !== audiobook.author
-          ? `Author mismatch (Plex: "${plexBook.author}" vs Audible: "${audiobook.author}") but ASIN is definitive`
-          : undefined,
-      });
+        confidence: 100,
+      };
+      if (DEBUG_ENABLED) console.log(JSON.stringify({ MATCHER: matchResult }));
       return plexBook;
     }
   }
 
-  console.log('   📝 No ASIN found in plexGuids, falling back to fuzzy matching...');
-
   // FILTER OUT candidates with wrong ASINs in plexGuid
-  // If a plexGuid contains an ASIN pattern but it's NOT our ASIN, it's definitely wrong
   const ASIN_PATTERN = /[A-Z0-9]{10}/g;
+  const rejectedAsins: string[] = [];
   const validCandidates = plexBooks.filter((plexBook) => {
-    if (!plexBook.plexGuid) return true; // No GUID, can't rule out
-
+    if (!plexBook.plexGuid) return true;
     const asinsInGuid = plexBook.plexGuid.match(ASIN_PATTERN);
-    if (!asinsInGuid || asinsInGuid.length === 0) return true; // No ASIN in GUID
+    if (!asinsInGuid || asinsInGuid.length === 0) return true;
 
-    // If GUID has ASINs but none match ours, reject this candidate
     const hasOurAsin = asinsInGuid.some(asin => asin === audiobook.asin);
     const hasOtherAsins = asinsInGuid.some(asin => asin !== audiobook.asin);
 
     if (hasOtherAsins && !hasOurAsin) {
-      console.log(`      ❌ Rejecting candidate - plexGuid contains different ASIN: ${asinsInGuid.join(', ')}`);
+      rejectedAsins.push(...asinsInGuid);
       return false;
     }
-
     return true;
   });
 
-  console.log(`   🔍 After ASIN filtering: ${validCandidates.length} of ${plexBooks.length} candidates remain`);
+  matchResult.asinFiltering = {
+    beforeCount: plexBooks.length,
+    afterCount: validCandidates.length,
+    rejectedAsins: rejectedAsins.length > 0 ? rejectedAsins : undefined,
+  };
 
   if (validCandidates.length === 0) {
-    console.log('   ❌ No valid candidates after ASIN filtering');
+    matchResult.matchType = 'asin_filtered_all';
+    if (DEBUG_ENABLED) console.log(JSON.stringify({ MATCHER: matchResult }));
     return null;
   }
 
-  // Normalize the Audible title once for all comparisons
+  // Normalize the Audible title
   const normalizedAudibleTitle = normalizeTitle(audiobook.title);
-  console.log(`   🔤 Normalized Audible title: "${audiobook.title}" → "${normalizedAudibleTitle}"`);
 
-  // PRIORITY 2: Perform fuzzy matching on candidates with normalized titles
+  // PRIORITY 2: Perform fuzzy matching
   const candidates = validCandidates.map((plexBook) => {
-    // Normalize Plex title for fair comparison
     const normalizedPlexTitle = normalizeTitle(plexBook.title);
-
-    const titleScore = compareTwoStrings(
-      normalizedAudibleTitle,
-      normalizedPlexTitle
-    );
-
-    // Try matching both author and narrator (if available), take the better score
-    // This handles cases where Plex has narrator as author
+    const titleScore = compareTwoStrings(normalizedAudibleTitle, normalizedPlexTitle);
     const authorScore = compareTwoStrings(
       audiobook.author.toLowerCase(),
       plexBook.author.toLowerCase()
@@ -182,48 +177,54 @@ export async function findPlexMatch(
     }
 
     const personScore = usedNarratorMatch ? narratorScore : authorScore;
-
-    // Weighted score: 70% title, 30% person (author or narrator, whichever matches better)
     const overallScore = titleScore * 0.7 + personScore * 0.3;
 
-    console.log('      📝 Candidate:', {
-      plexTitle: plexBook.title,
-      normalizedPlexTitle: normalizedPlexTitle,
-      plexAuthor: plexBook.author,
-      titleScore: `${(titleScore * 100).toFixed(1)}%`,
-      authorScore: `${(authorScore * 100).toFixed(1)}%`,
-      narratorScore: audiobook.narrator ? `${(narratorScore * 100).toFixed(1)}%` : 'N/A',
-      usedMatch: usedNarratorMatch ? 'narrator' : 'author',
-      overallScore: `${(overallScore * 100).toFixed(1)}%`,
-      plexGuid: plexBook.plexGuid,
-    });
-
-    return { plexBook, titleScore, authorScore, narratorScore, usedNarratorMatch, score: overallScore };
+    return {
+      plexBook,
+      titleScore,
+      authorScore,
+      narratorScore,
+      usedNarratorMatch,
+      score: overallScore
+    };
   });
 
   // Sort by score descending
   candidates.sort((a, b) => b.score - a.score);
   const bestMatch = candidates[0];
 
-  console.log(`   🏆 Best match score: ${(bestMatch.score * 100).toFixed(1)}% (threshold: 70%)`);
+  // Add best match details to result
+  matchResult.bestCandidate = {
+    plexTitle: bestMatch.plexBook.title,
+    plexAuthor: bestMatch.plexBook.author,
+    plexGuid: bestMatch.plexBook.plexGuid,
+    scores: {
+      title: Math.round(bestMatch.titleScore * 100),
+      author: Math.round(bestMatch.authorScore * 100),
+      narrator: audiobook.narrator ? Math.round(bestMatch.narratorScore * 100) : null,
+      usedMatch: bestMatch.usedNarratorMatch ? 'narrator' : 'author',
+      overall: Math.round(bestMatch.score * 100),
+    },
+    threshold: 70,
+  };
 
   // Accept match if score >= 70%
   if (bestMatch && bestMatch.score >= 0.7) {
-    console.log('   ✅ FUZZY MATCH ACCEPTED:', {
+    matchResult.matchType = 'fuzzy';
+    matchResult.matched = true;
+    matchResult.result = {
+      plexGuid: bestMatch.plexBook.plexGuid,
       plexTitle: bestMatch.plexBook.title,
       plexAuthor: bestMatch.plexBook.author,
-      titleMatch: `${(bestMatch.titleScore * 100).toFixed(1)}%`,
-      authorMatch: `${(bestMatch.authorScore * 100).toFixed(1)}%`,
-      narratorMatch: audiobook.narrator ? `${(bestMatch.narratorScore * 100).toFixed(1)}%` : 'N/A',
-      usedMatch: bestMatch.usedNarratorMatch ? 'narrator' : 'author',
-      overallScore: `${(bestMatch.score * 100).toFixed(1)}%`,
-      plexGuid: bestMatch.plexBook.plexGuid,
-    });
+      confidence: Math.round(bestMatch.score * 100),
+    };
+    if (DEBUG_ENABLED) console.log(JSON.stringify({ MATCHER: matchResult }));
     return bestMatch.plexBook;
   }
 
   // No match found
-  console.log(`   ❌ MATCH REJECTED - Best score ${(bestMatch.score * 100).toFixed(1)}% below 70% threshold`);
+  matchResult.matchType = 'fuzzy_below_threshold';
+  if (DEBUG_ENABLED) console.log(JSON.stringify({ MATCHER: matchResult }));
   return null;
 }
 
@@ -234,15 +235,11 @@ export async function findPlexMatch(
 export async function enrichAudiobookWithMatch(audiobook: AudiobookMatchInput & Record<string, any>) {
   const match = await findPlexMatch(audiobook);
 
-  const enriched = {
+  return {
     ...audiobook,
     isAvailable: match !== null,
     plexGuid: match?.plexGuid || null,
   };
-
-  console.log(`   📦 Enriched result: isAvailable=${enriched.isAvailable}, plexGuid=${enriched.plexGuid ? 'YES' : 'NO'}\n`);
-
-  return enriched;
 }
 
 /**
@@ -252,18 +249,16 @@ export async function enrichAudiobookWithMatch(audiobook: AudiobookMatchInput & 
 export async function enrichAudiobooksWithMatches(
   audiobooks: Array<AudiobookMatchInput & Record<string, any>>
 ) {
-  console.log(`\n🔄 [MATCHER BATCH] Starting batch enrichment for ${audiobooks.length} audiobook(s)...`);
-
   const results = await Promise.all(audiobooks.map((book) => enrichAudiobookWithMatch(book)));
 
-  const summary = {
-    total: results.length,
-    available: results.filter(r => r.isAvailable).length,
-    notAvailable: results.filter(r => !r.isAvailable).length,
-  };
-
-  console.log('📊 [MATCHER BATCH] Summary:', summary);
-  console.log('─'.repeat(80) + '\n');
+  if (DEBUG_ENABLED) {
+    const summary = {
+      total: results.length,
+      available: results.filter(r => r.isAvailable).length,
+      notAvailable: results.filter(r => !r.isAvailable).length,
+    };
+    console.log(JSON.stringify({ MATCHER_BATCH_SUMMARY: summary }));
+  }
 
   return results;
 }
