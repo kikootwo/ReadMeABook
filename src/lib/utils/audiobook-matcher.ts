@@ -24,10 +24,9 @@ export interface AudiobookMatchResult {
 /**
  * Find a matching audiobook in the Plex library for a given Audible audiobook.
  *
- * Matching logic:
- * 1. Query plex_library for fuzzy candidates (substring match on title/author)
- * 2. Perform fuzzy matching with 70% threshold
- * 3. Return best match or null
+ * Matching logic (in order of priority):
+ * 1. **ASIN in plexGuid** - Check if any Plex book's GUID contains the Audible ASIN (100% match)
+ * 2. **Fuzzy matching** - Title/author string similarity with 70% threshold
  *
  * @param audiobook - Audible audiobook to match
  * @returns Matched Plex library item or null
@@ -59,7 +58,7 @@ export async function findPlexMatch(
       title: true,
       author: true,
     },
-    take: 5, // Limit to top 5 candidates for performance
+    take: 10, // Increased from 5 to 10 to catch more potential ASIN matches
   });
 
   console.log(`   📊 Found ${plexBooks.length} candidate(s) in Plex library`);
@@ -70,7 +69,26 @@ export async function findPlexMatch(
     return null;
   }
 
-  // Perform fuzzy matching on candidates
+  // PRIORITY 1: Check for EXACT ASIN match in plexGuid
+  // Many Plex agents (especially Audnexus) embed the ASIN in the GUID
+  // Example: com.plexapp.agents.audnexus://B08V8B2CGV_us?lang=en
+  console.log('   🎯 Checking for ASIN in plexGuid...');
+  for (const plexBook of plexBooks) {
+    if (plexBook.plexGuid && plexBook.plexGuid.includes(audiobook.asin)) {
+      console.log('   ✅ EXACT ASIN MATCH IN PLEX GUID:', {
+        plexTitle: plexBook.title,
+        plexAuthor: plexBook.author,
+        plexGuid: plexBook.plexGuid,
+        asin: audiobook.asin,
+        confidence: '100%',
+      });
+      return plexBook;
+    }
+  }
+
+  console.log('   📝 No ASIN found in plexGuids, falling back to fuzzy matching...');
+
+  // PRIORITY 2: Perform fuzzy matching on candidates
   const candidates = plexBooks.map((plexBook) => {
     const titleScore = compareTwoStrings(
       audiobook.title.toLowerCase(),
@@ -104,7 +122,7 @@ export async function findPlexMatch(
 
   // Accept match if score >= 70%
   if (bestMatch && bestMatch.score >= 0.7) {
-    console.log('   ✅ MATCH ACCEPTED:', {
+    console.log('   ✅ FUZZY MATCH ACCEPTED:', {
       plexTitle: bestMatch.plexBook.title,
       plexAuthor: bestMatch.plexBook.author,
       titleMatch: `${(bestMatch.titleScore * 100).toFixed(1)}%`,
