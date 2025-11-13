@@ -189,10 +189,6 @@ Handles Plex OAuth, JWT session management, role-based access control (user/admi
   "exp": 1234571490
 }
 ```
-
-## Related: frontend/routing-auth.md, integrations/plex.md
-```
-
 ---
 
 ## 4. Implementation Strategy
