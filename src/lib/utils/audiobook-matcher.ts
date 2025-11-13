@@ -40,28 +40,26 @@ export async function findPlexMatch(
     asin: audiobook.asin,
   });
 
-  // Query plex_library for potential matches using fuzzy substring search
+  // Query plex_library for potential matches
+  // IMPORTANT: Search by TITLE ONLY (not author) because Plex often has narrator as author
+  // We'll validate the author match during fuzzy matching or rely on ASIN matching
+  const titleSearchLength = Math.min(20, audiobook.title.length);
   const plexBooks = await prisma.plexLibrary.findMany({
     where: {
-      OR: [
-        // Fuzzy match by title/author substring (narrows down candidates)
-        {
-          AND: [
-            { title: { contains: audiobook.title.substring(0, Math.min(20, audiobook.title.length)), mode: 'insensitive' } },
-            { author: { contains: audiobook.author.substring(0, Math.min(20, audiobook.author.length)), mode: 'insensitive' } },
-          ],
-        },
-      ],
+      title: {
+        contains: audiobook.title.substring(0, titleSearchLength),
+        mode: 'insensitive',
+      },
     },
     select: {
       plexGuid: true,
       title: true,
       author: true,
     },
-    take: 10, // Increased from 5 to 10 to catch more potential ASIN matches
+    take: 20, // Increased to 20 to handle more candidates (since we removed author filter)
   });
 
-  console.log(`   📊 Found ${plexBooks.length} candidate(s) in Plex library`);
+  console.log(`   📊 Found ${plexBooks.length} candidate(s) in Plex library (title-based search)`);
 
   // If no candidates found, return null
   if (plexBooks.length === 0) {
@@ -71,7 +69,7 @@ export async function findPlexMatch(
 
   // PRIORITY 1: Check for EXACT ASIN match in plexGuid
   // Many Plex agents (especially Audnexus) embed the ASIN in the GUID
-  // Example: com.plexapp.agents.audnexus://B08V8B2CGV_us?lang=en
+  // Example: com.plexapp.agents.audnexus://B08G9PRS1K_us?lang=en
   console.log('   🎯 Checking for ASIN in plexGuid...');
   for (const plexBook of plexBooks) {
     if (plexBook.plexGuid && plexBook.plexGuid.includes(audiobook.asin)) {
@@ -81,6 +79,9 @@ export async function findPlexMatch(
         plexGuid: plexBook.plexGuid,
         asin: audiobook.asin,
         confidence: '100%',
+        note: plexBook.author !== audiobook.author
+          ? `Author mismatch (Plex: "${plexBook.author}" vs Audible: "${audiobook.author}") but ASIN is definitive`
+          : undefined,
       });
       return plexBook;
     }
