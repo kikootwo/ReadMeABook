@@ -22,11 +22,42 @@ export interface AudiobookMatchResult {
 }
 
 /**
+ * Normalize audiobook title for matching by removing common suffixes/prefixes
+ * that don't affect the core title identity.
+ */
+function normalizeTitle(title: string): string {
+  let normalized = title.toLowerCase().trim();
+
+  // Remove common parenthetical additions (case-insensitive)
+  normalized = normalized.replace(/\s*\(unabridged\)\s*/gi, ' ');
+  normalized = normalized.replace(/\s*\(abridged\)\s*/gi, ' ');
+  normalized = normalized.replace(/\s*\(full cast\)\s*/gi, ' ');
+  normalized = normalized.replace(/\s*\(full-cast edition\)\s*/gi, ' ');
+  normalized = normalized.replace(/\s*\(dramatized\)\s*/gi, ' ');
+  normalized = normalized.replace(/\s*\(narrated by[^)]*\)\s*/gi, ' ');
+
+  // Remove common subtitle patterns
+  normalized = normalized.replace(/:\s*a novel\s*$/gi, '');
+  normalized = normalized.replace(/:\s*a thriller\s*$/gi, '');
+  normalized = normalized.replace(/:\s*a memoir\s*$/gi, '');
+
+  // Remove book number suffixes (but keep them in main title if they're significant)
+  // Only remove if they're clearly series indicators at the end
+  normalized = normalized.replace(/,?\s*book\s+\d+\s*$/gi, '');
+  normalized = normalized.replace(/:\s*book\s+\d+\s*$/gi, '');
+
+  // Clean up extra whitespace
+  normalized = normalized.replace(/\s+/g, ' ').trim();
+
+  return normalized;
+}
+
+/**
  * Find a matching audiobook in the Plex library for a given Audible audiobook.
  *
  * Matching logic (in order of priority):
  * 1. **ASIN in plexGuid** - Check if any Plex book's GUID contains the Audible ASIN (100% match)
- * 2. **Fuzzy matching** - Title/author string similarity with 70% threshold
+ * 2. **Fuzzy matching** - Normalized title/author string similarity with 70% threshold
  *
  * @param audiobook - Audible audiobook to match
  * @returns Matched Plex library item or null
@@ -89,11 +120,18 @@ export async function findPlexMatch(
 
   console.log('   📝 No ASIN found in plexGuids, falling back to fuzzy matching...');
 
-  // PRIORITY 2: Perform fuzzy matching on candidates
+  // Normalize the Audible title once for all comparisons
+  const normalizedAudibleTitle = normalizeTitle(audiobook.title);
+  console.log(`   🔤 Normalized Audible title: "${audiobook.title}" → "${normalizedAudibleTitle}"`);
+
+  // PRIORITY 2: Perform fuzzy matching on candidates with normalized titles
   const candidates = plexBooks.map((plexBook) => {
+    // Normalize Plex title for fair comparison
+    const normalizedPlexTitle = normalizeTitle(plexBook.title);
+
     const titleScore = compareTwoStrings(
-      audiobook.title.toLowerCase(),
-      plexBook.title.toLowerCase()
+      normalizedAudibleTitle,
+      normalizedPlexTitle
     );
     const authorScore = compareTwoStrings(
       audiobook.author.toLowerCase(),
@@ -105,6 +143,7 @@ export async function findPlexMatch(
 
     console.log('      📝 Candidate:', {
       plexTitle: plexBook.title,
+      normalizedPlexTitle: normalizedPlexTitle,
       plexAuthor: plexBook.author,
       titleScore: `${(titleScore * 100).toFixed(1)}%`,
       authorScore: `${(authorScore * 100).toFixed(1)}%`,
