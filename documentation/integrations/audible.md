@@ -1,158 +1,87 @@
 # Audible Integration
 
-## Current State
+**Status:** ✅ Implemented (Web Scraping)
 
-**Status:** Design Phase - Not yet implemented
+Audiobook metadata scraping from Audible.com for discovery, search, and request features.
 
-This integration provides audiobook metadata scraping from Audible.com for discovery, search, and request features. Since Audible doesn't offer a public API, this service uses web scraping.
+## Scraping Strategy
 
-## Design Architecture
+- Parse Audible HTML with Cheerio
+- Multi-page scraping (20 items/page)
+- Rate limit: max 10 req/min, 1.5s delay between pages
+- Cache results in database (24hr TTL)
+- Extract JSON-LD structured data when available
 
-### Integration Method: Web Scraping
+## Data Sources
 
-**Why Web Scraping:**
-- No official Audible API available
-- Publicly accessible data on Audible.com
-- Alternative: Use third-party APIs (AudiobookBay API, Goodreads)
+1. **Best Sellers:** `https://www.audible.com/adblbestsellers`
+2. **New Releases:** `https://www.audible.com/newreleases`
+3. **Search:** `https://www.audible.com/search?keywords={query}`
+4. **Detail Page:** `https://www.audible.com/pd/{asin}`
 
-**Scraping Strategy:**
-- Parse Audible HTML pages
-- Extract structured data from JSON-LD
-- Cache results to minimize requests
-- Respect rate limits (max 10 requests/minute)
+## Metadata Extracted
 
-### Data Sources
+- ASIN (Audible ID)
+- Title, author, narrator
+- Duration (minutes), release date, rating
+- Description, cover art URL
+- Genres/categories
 
-**Pages to Scrape:**
-1. **Best Sellers** - https://www.audible.com/adblbestsellers
-2. **New Releases** - https://www.audible.com/newreleases
-3. **Search Results** - https://www.audible.com/search?keywords={query}
-4. **Book Detail Page** - https://www.audible.com/pd/{asin}
+## Unified Matching (`audiobook-matcher.ts`)
 
-## Implementation Details
+**Status:** ✅ Production Ready
 
-### Metadata Extracted
+Single matching algorithm used everywhere (search, popular, new-releases, jobs).
 
-From audiobook detail pages:
-- **ASIN** - Audible Standard Identification Number (unique ID)
-- **Title** - Book title
-- **Author** - Author name(s)
-- **Narrator** - Narrator name(s)
-- **Duration** - Length in minutes
-- **Release Date** - Publication date
-- **Description** - Full book description/summary
-- **Cover Art URL** - High-resolution cover image
-- **Rating** - Average user rating (out of 5)
-- **Genres/Categories** - Book categories
+**Process:**
+1. Query DB candidates: `audibleId` exact match OR partial title+author match
+2. If exact ASIN match → return immediately
+3. Fuzzy match: title 70% + author 30% weights, 70% threshold
+4. Return best match or null
 
-### Scraping Techniques
+**Benefits:**
+- Real-time matching at query time (not pre-matched)
+- Works regardless of job execution order
+- Prevents duplicate `plexGuid` assignments
+- Used by all APIs for consistency
 
-**Cheerio for HTML Parsing with Pagination:**
+## Database-First Approach
+
+**Status:** ✅ Implemented
+
+Discovery APIs serve cached data from DB with real-time matching.
+
+**Flow:**
+1. `audible_refresh` job runs daily → fetches 200 popular + 200 new releases
+2. Stores in DB with flags (`isPopular`, `isNewRelease`) and rankings
+3. API routes query DB → apply real-time matching → return enriched results
+4. Homepage loads instantly (no Audible API hits)
+
+**API Endpoints:**
+
+**GET /api/audiobooks/popular?page=1&limit=20**
+**GET /api/audiobooks/new-releases?page=1&limit=20**
+
+Response:
 ```typescript
-import axios from 'axios';
-import * as cheerio from 'cheerio';
-
-// Multi-page scraping to get 200 items
-const audiobooks: AudibleAudiobook[] = [];
-let page = 1;
-const maxPages = Math.ceil(limit / 20); // ~20 items per page
-
-while (audiobooks.length < limit && page <= maxPages) {
-  const response = await axios.get(url, {
-    params: page > 1 ? { page } : {},
-  });
-  const $ = cheerio.load(response.data);
-
-  // Extract data from specific selectors
-  $('.productListItem').each((index, element) => {
-    const title = $(element).find('h1.bc-heading').text();
-    const author = $(element).find('a.authorLabel').text();
-    audiobooks.push({ title, author, ... });
-  });
-
-  // Add delay between pages (1.5s) to respect rate limits
-  await delay(1500);
-  page++;
-}
-```
-
-**JSON-LD Extraction:**
-Many pages include structured data in JSON-LD format:
-```html
-<script type="application/ld+json">
 {
-  "@type": "Book",
-  "name": "Project Hail Mary",
-  "author": "Andy Weir",
-  ...
-}
-</script>
-```
-
-### Rate Limiting
-
-To avoid being blocked:
-- Maximum 10 requests per minute
-- Add random delays between requests (1-3 seconds)
-- Use request queue to manage rate
-- Implement exponential backoff on errors
-- Cache results for 24 hours
-
-### Error Handling
-
-**Common Issues:**
-- Page structure changes (requires scraper updates)
-- Captcha challenges (need user intervention or proxy rotation)
-- Rate limiting (429 errors)
-- Network timeouts
-
-**Mitigation:**
-- Graceful fallback to cached data
-- Log scraping errors for manual review
-- Admin notifications for persistent failures
-- Alternative data sources as backup
-
-## Tech Stack
-
-**HTTP Client:** axios
-**HTML Parsing:** cheerio
-**Caching:** Redis (24-hour TTL)
-**Rate Limiting:** Custom implementation
-
-## Dependencies
-
-- axios for HTTP requests
-- cheerio for HTML parsing
-- Redis for caching (optional but recommended)
-- User-Agent rotation to avoid detection
-
-## API Contracts
-
-### Audible Service API
-
-```typescript
-interface AudibleService {
-  // Discovery
-  getPopularAudiobooks(limit?: number): Promise<AudibleAudiobook[]>;
-  getNewReleases(limit?: number): Promise<AudibleAudiobook[]>;
-
-  // Search
-  search(query: string, page?: number): Promise<AudibleSearchResult>;
-
-  // Detail
-  getAudiobookDetails(asin: string): Promise<AudibleAudiobook>;
-
-  // Caching
-  clearCache(): Promise<void>;
+  success: boolean;
+  audiobooks: EnrichedAudibleAudiobook[];
+  count: number;
+  totalCount: number;
+  page: number;
+  totalPages: number;
+  hasMore: boolean;
+  lastSync: string | null; // ISO timestamp
+  message?: string; // if no data
 }
 ```
 
-### Data Models
+## Data Models
 
-**AudibleAudiobook:**
 ```typescript
 interface AudibleAudiobook {
-  asin: string; // Unique Audible ID
+  asin: string;
   title: string;
   author: string;
   narrator?: string;
@@ -163,140 +92,8 @@ interface AudibleAudiobook {
   rating?: number;
   genres?: string[];
 }
-```
 
-**AudibleSearchResult:**
-```typescript
-interface AudibleSearchResult {
-  query: string;
-  results: AudibleAudiobook[];
-  totalResults: number;
-  page: number;
-  hasMore: boolean;
-}
-```
-
-### Unified Matching Architecture
-
-**Status:** Implemented ✅ - Production Ready
-
-**Location:** `src/lib/utils/audiobook-matcher.ts`
-
-**Purpose:** Provides a single, consistent matching algorithm used across the entire application to match Audible audiobooks with database records. This is the **only** matching system in use - all APIs use it.
-
-**Used By:**
-- ✅ Search API (`/api/audiobooks/search`) - Real-time matching
-- ✅ Popular API (`/api/audiobooks/popular`) - Real-time matching
-- ✅ New Releases API (`/api/audiobooks/new-releases`) - Real-time matching
-- ✅ Audible Refresh Job (scheduler service) - Background matching
-- ✅ Any future feature needing audiobook matching
-
-**Matching Algorithm:**
-1. **Query database for candidates:**
-   ```typescript
-   where: {
-     OR: [
-       { audibleId: audiobook.asin },  // Exact ASIN match
-       {
-         AND: [
-           { title: { contains: audiobook.title.substring(0, 20) } },
-           { author: { contains: audiobook.author.substring(0, 20) } }
-         ]
-       }
-     ]
-   }
-   ```
-2. **Check exact ASIN match first** - If found, return immediately
-3. **Perform fuzzy matching** using `string-similarity`:
-   - Title score: 70% weight
-   - Author score: 30% weight
-   - Overall score threshold: 70%
-4. **Return best match** or null
-
-**Key Benefits:**
-- 🎯 **Single source of truth** - No duplicate logic across codebase
-- 🔄 **Consistent behavior** - Same matching everywhere (search, homepage, jobs)
-- ⚡ **Real-time matching** - All API routes use query-time matching
-- 🔧 **Order-independent** - Works regardless of Audible/Plex job execution order
-- 📊 **Status-agnostic** - Matches ANY database record, not just `availabilityStatus='available'`
-- 🛡️ **Duplicate protection** - Prevents multiple Audible books claiming same `plexGuid`
-
-**Why Real-Time Matching:**
-
-The previous architecture relied on pre-matched data set during the Audible refresh job. This had a critical flaw: if the Audible refresh ran BEFORE the Plex scan, there was nothing to match against, resulting in all books showing `availabilityStatus: 'unknown'`. The data never got re-matched, even after Plex scan completed.
-
-**Solution:** All discovery APIs (popular, new-releases, search) now use **real-time matching** at query time. The Audible refresh job still performs matching to optimize database state, but the API routes don't rely on it - they always perform fresh matching. This ensures:
-
-1. ✅ Homepage works correctly regardless of job execution order
-2. ✅ Books become available immediately after Plex scan (no waiting for next Audible refresh)
-3. ✅ Consistency between search page and homepage
-4. ✅ Production-ready resilience
-
-### API Route Implementation: Database-First with Real-Time Matching
-
-**Status:** Implemented ✅ - Production Ready
-
-**Implementation:** Discovery API routes (`/api/audiobooks/popular`, `/api/audiobooks/new-releases`) serve cached data from the database with **real-time matching** applied at query time.
-
-**How It Works:**
-1. **Data Refresh Job:** The `audible_refresh` scheduled job runs periodically (default: daily at midnight):
-   - Fetches 200 popular audiobooks and 200 new releases from Audible via multi-page scraping
-   - Stores/updates audiobooks in database with category flags (`isPopular`, `isNewRelease`)
-   - Stores ranking information (`popularRank`, `newReleaseRank`)
-   - May perform background matching for optimization, but API routes don't rely on this
-2. **Database Storage:** Audiobooks are cached in the database with:
-   - Category flags (`isPopular`, `isNewRelease`)
-   - Ranking information (`popularRank`, `newReleaseRank`)
-   - Sync timestamp (`lastAudibleSync`)
-   - Full metadata (title, author, narrator, cover art, etc.)
-3. **API Routes:** Discovery routes query database for cached audiobooks, then:
-   - Transform results to Audible format
-   - Call `enrichAudiobooksWithMatches()` for **real-time availability matching**
-   - Return enriched results with current availability status
-4. **Availability Display:** Books with matched `plexGuid` automatically show "In Your Library" badge
-
-**Key Difference from Previous Implementation:**
-- **Previous:** API routes returned pre-matched `availabilityStatus` from database (broken if jobs ran out of order)
-- **Current:** API routes perform real-time matching at query time (works regardless of job order)
-- **Result:** Resilient, production-ready matching that "just works"
-
-**API Endpoints:**
-
-**GET /api/audiobooks/popular?page=1&limit=20**
-- Returns popular audiobooks from database cache
-- Supports pagination with `page` and `limit` parameters
-- Returns helpful message if no data exists (prompts user to run refresh job)
-
-**GET /api/audiobooks/new-releases?page=1&limit=20**
-- Returns new releases from database cache
-- Supports pagination with `page` and `limit` parameters
-- Returns helpful message if no data exists
-
-**Response Format:**
-```typescript
-interface AudiobooksResponse {
-  success: boolean;
-  audiobooks: EnrichedAudibleAudiobook[];
-  count: number;          // Number of items in current page
-  totalCount: number;     // Total items across all pages
-  page: number;           // Current page number
-  totalPages: number;     // Total number of pages
-  hasMore: boolean;       // Whether more pages exist
-  lastSync: string | null; // ISO timestamp of last Audible sync
-  message?: string;       // Optional message (e.g., if no data)
-}
-
-interface EnrichedAudibleAudiobook {
-  asin: string;
-  title: string;
-  author: string;
-  narrator?: string;
-  description?: string;
-  coverArtUrl?: string;
-  durationMinutes?: number;
-  releaseDate?: string;
-  rating?: number;
-  genres: string[];
+interface EnrichedAudibleAudiobook extends AudibleAudiobook {
   availabilityStatus: 'available' | 'requested' | 'unknown';
   isAvailable: boolean;
   plexGuid: string | null;
@@ -304,129 +101,10 @@ interface EnrichedAudibleAudiobook {
 }
 ```
 
-**Benefits:**
-- **Performance:** No web scraping on every page load - instant responses from database
-- **Reliability:** No dependency on Audible.com availability for homepage
-- **Scalability:** Can serve many concurrent users without rate limiting
-- **Freshness:** Data refreshed automatically via scheduled job
-- **Pagination:** Supports large datasets (200 items per category) with efficient pagination
-- **Availability:** Database already includes Plex availability status from refresh job matching
+## Tech Stack
 
-## Usage Examples
-
-### Get Popular Audiobooks
-
-```typescript
-import { getAudibleService } from './integrations/audible.service';
-
-const audibleService = getAudibleService();
-
-// Get top 20 popular audiobooks
-const popular = await audibleService.getPopularAudiobooks(20);
-
-for (const book of popular) {
-  console.log(`${book.title} by ${book.author}`);
-}
-```
-
-### Search for Audiobooks
-
-```typescript
-// Search for "Project Hail Mary"
-const results = await audibleService.search('Project Hail Mary');
-
-console.log(`Found ${results.totalResults} results`);
-console.log('First result:', results.results[0].title);
-```
-
-### Get Audiobook Details
-
-```typescript
-// Get full details for a specific audiobook
-const details = await audibleService.getAudiobookDetails('B08GCLPKH7');
-
-console.log('Title:', details.title);
-console.log('Author:', details.author);
-console.log('Narrator:', details.narrator);
-console.log('Duration:', details.durationMinutes, 'minutes');
-console.log('Rating:', details.rating);
-```
-
-## Security Considerations
-
-### Legal Compliance
-
-- Only scrape publicly available data
-- Respect robots.txt directives
-- Don't scrape user-generated content requiring authentication
-- Review Audible's Terms of Service
-
-### Anti-Scraping Measures
-
-- Use realistic User-Agent headers
-- Implement random delays
-- Don't overwhelm servers with requests
-- Be prepared to adapt if blocked
-
-### Data Privacy
-
-- Don't store personal user data from Audible
-- Only cache public metadata
-- Clear cache regularly
-
-## Performance Considerations
-
-### Caching Strategy
-
-- Cache popular audiobooks for 24 hours
-- Cache search results for 1 hour
-- Cache individual book details for 7 days
-- Use Redis for distributed caching
-
-### Request Optimization
-
-- Batch requests when possible
-- Prefetch popular content during off-hours
-- Use conditional requests (If-Modified-Since)
-
-## Testing Strategy
-
-### Unit Tests
-
-- HTML parsing logic
-- JSON-LD extraction
-- Rate limiting enforcement
-- Error handling
-
-### Integration Tests
-
-- Full scraping flow with mocked responses
-- Caching behavior
-- Fallback mechanisms
-
-### Manual Tests
-
-- Test with real Audible pages
-- Verify data accuracy
-- Check rate limiting doesn't block
-- Monitor for page structure changes
-
-## Known Issues
-
-*This section will be updated during implementation.*
-
-**Potential Issues:**
-- Audible page structure changes frequently
-- Captcha challenges may appear
-- Geographic restrictions (different content per region)
-- Cover art URLs may expire
-
-## Future Enhancements
-
-- **Multiple region support** - Scrape Audible.co.uk, Audible.de, etc.
-- **Author/narrator pages** - Get full discographies
-- **Series detection** - Identify book series automatically
-- **Alternative data sources** - Integrate Goodreads, Google Books APIs
-- **Machine learning** - Auto-detect page structure changes
-- **Proxy rotation** - Use proxies to avoid IP bans
-- **Webhook monitoring** - Alert on scraping failures
+- axios (HTTP)
+- cheerio (HTML parsing)
+- Redis (caching, optional)
+- Database (PostgreSQL)
+- string-similarity (matching)
