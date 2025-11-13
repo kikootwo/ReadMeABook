@@ -18,8 +18,7 @@ export interface Audiobook {
   releaseDate?: string;
   rating?: number;
   genres?: string[];
-  availabilityStatus?: string;
-  isAvailable?: boolean;
+  isAvailable?: boolean;  // Set by real-time matching against plex_library
   plexGuid?: string | null;
   dbId?: string | null;
 }
