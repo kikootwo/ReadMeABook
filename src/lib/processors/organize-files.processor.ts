@@ -105,16 +105,80 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
   } catch (error) {
     console.error('[OrganizeFiles] Error:', error);
 
-    // Update request to failed
-    await prisma.request.update({
-      where: { id: requestId },
-      data: {
-        status: 'failed',
-        errorMessage: error instanceof Error ? error.message : 'File organization failed',
-        updatedAt: new Date(),
-      },
-    });
+    const errorMessage = error instanceof Error ? error.message : 'File organization failed';
 
-    throw error;
+    // Check if this is a "no files found" error that should be retried
+    const isNoFilesError = errorMessage.includes('No audiobook files found');
+
+    if (isNoFilesError) {
+      // Get current request to check retry count
+      const currentRequest = await prisma.request.findUnique({
+        where: { id: requestId },
+        select: { importAttempts: true, maxImportRetries: true },
+      });
+
+      if (!currentRequest) {
+        throw new Error('Request not found');
+      }
+
+      const newAttempts = currentRequest.importAttempts + 1;
+
+      if (newAttempts < currentRequest.maxImportRetries) {
+        // Still have retries left - queue for re-import
+        console.log(`[OrganizeFiles] No files found for request ${requestId}, queueing for retry (attempt ${newAttempts}/${currentRequest.maxImportRetries})`);
+
+        await prisma.request.update({
+          where: { id: requestId },
+          data: {
+            status: 'awaiting_import',
+            importAttempts: newAttempts,
+            lastImportAt: new Date(),
+            errorMessage: `${errorMessage}. Retry ${newAttempts}/${currentRequest.maxImportRetries}`,
+            updatedAt: new Date(),
+          },
+        });
+
+        return {
+          success: false,
+          message: 'No audiobook files found, queued for re-import',
+          requestId,
+          attempts: newAttempts,
+          maxRetries: currentRequest.maxImportRetries,
+        };
+      } else {
+        // Max retries exceeded - move to warn status
+        console.log(`[OrganizeFiles] Max retries (${currentRequest.maxImportRetries}) exceeded for request ${requestId}, moving to warn status`);
+
+        await prisma.request.update({
+          where: { id: requestId },
+          data: {
+            status: 'warn',
+            importAttempts: newAttempts,
+            errorMessage: `${errorMessage}. Max retries (${currentRequest.maxImportRetries}) exceeded. Manual retry available.`,
+            updatedAt: new Date(),
+          },
+        });
+
+        return {
+          success: false,
+          message: 'Max import retries exceeded, manual intervention required',
+          requestId,
+          attempts: newAttempts,
+          maxRetries: currentRequest.maxImportRetries,
+        };
+      }
+    } else {
+      // Other error - fail immediately
+      await prisma.request.update({
+        where: { id: requestId },
+        data: {
+          status: 'failed',
+          errorMessage,
+          updatedAt: new Date(),
+        },
+      });
+
+      throw error;
+    }
   }
 }

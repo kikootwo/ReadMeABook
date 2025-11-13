@@ -4,13 +4,15 @@
 
 **Status:** Completed ✅
 
-The setup wizard guides first-time users through configuring ReadMeABook, connecting external services, and setting up directory paths. All six steps are implemented with connection testing, validation, and database persistence.
+The setup wizard guides first-time users through configuring ReadMeABook, connecting external services, and setting up directory paths. All eight steps are implemented with connection testing, validation, database persistence, and automated initial job execution.
 
 **Implemented Features:**
-- 6-step wizard with progress indicator
+- 8-step wizard with progress indicator
 - Connection testing for all external services (Plex, Prowlarr, qBittorrent)
 - Path validation with write permission checking
 - Configuration persistence to database
+- Automated initial job execution (Audible refresh, Plex scan)
+- Auto-enabling of scheduled jobs
 - Error handling and user feedback
 - Dark mode support throughout
 
@@ -60,6 +62,13 @@ The setup wizard guides first-time users through configuring ReadMeABook, connec
 6. Review & Complete
    - Summary of all configurations
    - Save to database
+   - Create admin account and generate auth tokens
+
+7. Finalize Setup
+   - Run initial Audible data refresh
+   - Run initial Plex library scan
+   - Show job execution status
+   - Enable scheduled jobs for future runs
    - Redirect to homepage
 ```
 
@@ -72,11 +81,13 @@ src/app/setup/
 ├── page.tsx                    # Main wizard container
 ├── steps/
 │   ├── WelcomeStep.tsx        # Step 1: Introduction
-│   ├── PlexStep.tsx           # Step 2: Plex configuration
-│   ├── ProwlarrStep.tsx       # Step 3: Indexer configuration
-│   ├── DownloadClientStep.tsx # Step 4: Download client
-│   ├── PathsStep.tsx          # Step 5: Directory paths
-│   └── ReviewStep.tsx         # Step 6: Review and save
+│   ├── AdminAccountStep.tsx   # Step 2: Admin account creation
+│   ├── PlexStep.tsx           # Step 3: Plex configuration
+│   ├── ProwlarrStep.tsx       # Step 4: Indexer configuration
+│   ├── DownloadClientStep.tsx # Step 5: Download client
+│   ├── PathsStep.tsx          # Step 6: Directory paths
+│   ├── ReviewStep.tsx         # Step 7: Review and save
+│   └── FinalizeStep.tsx       # Step 8: Run initial jobs
 └── components/
     ├── WizardLayout.tsx       # Progress indicator, navigation
     ├── ConnectionTest.tsx     # Reusable connection test button
@@ -141,8 +152,10 @@ interface SetupState {
 
 **POST /api/setup/complete**
 - Saves all configuration to database
+- Creates admin user account
+- Enables auto jobs (Plex Library Scan, Audible Data Refresh)
 - Marks setup as complete
-- Returns success status
+- Returns JWT tokens for auto-login
 
 ## Tech Stack
 
@@ -207,10 +220,36 @@ async function completeSetup() {
   });
 
   if (response.ok) {
-    router.push('/');
+    const data = await response.json();
+
+    // Store auth tokens
+    localStorage.setItem('accessToken', data.accessToken);
+    localStorage.setItem('refreshToken', data.refreshToken);
+    localStorage.setItem('user', JSON.stringify(data.user));
+
+    // Go to finalize step
+    goToStep(8);
   }
 }
 ```
+
+### Finalize Step
+
+```tsx
+<WizardLayout currentStep={8} totalSteps={8}>
+  <FinalizeStep
+    onComplete={() => window.location.href = '/'}
+    onBack={() => goToStep(7)}
+  />
+</WizardLayout>
+```
+
+The FinalizeStep automatically:
+1. Fetches all scheduled jobs from `/api/admin/jobs`
+2. Finds the `plex_library_scan` and `audible_refresh` jobs
+3. Triggers both jobs via `/api/admin/jobs/:id/trigger`
+4. Shows real-time status of each job execution
+5. Enables "Finish Setup" button when complete
 
 ## Validation Rules
 
@@ -281,6 +320,15 @@ async function completeSetup() {
   - Auto-selects all indexers with default priority of 10 on successful connection
   - Validates that at least one indexer is selected before proceeding
   - Saves indexer configuration (id, name, priority) to database as JSON
+
+**6. Initial Job Execution Added (Feature)**
+- **Implementation:** Added FinalizeStep (step 8) that automatically runs initial jobs after setup completion
+  - Audible Data Refresh: Fetches popular and new releases to populate browse catalog
+  - Plex Library Scan: Discovers audiobooks already in user's Plex library
+  - Both jobs are enabled by default in the scheduler
+  - Shows real-time execution status with visual indicators
+  - Provides descriptive text explaining what each job does
+  - Prevents navigation until jobs complete or fail
 
 ## Future Enhancements
 

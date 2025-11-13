@@ -137,6 +137,20 @@ export async function POST(request: NextRequest) {
       create: { key: 'setup_completed', value: 'true' },
     });
 
+    // Enable auto jobs (Plex Library Scan and Audible Data Refresh)
+    await prisma.scheduledJob.updateMany({
+      where: {
+        type: {
+          in: ['plex_library_scan', 'audible_refresh'],
+        },
+      },
+      data: {
+        enabled: true,
+      },
+    });
+
+    console.log('[Setup] Auto jobs enabled (Plex Library Scan, Audible Data Refresh)');
+
     // Generate JWT tokens for auto-login
     const accessToken = generateAccessToken({
       sub: adminUser.id,

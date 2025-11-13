@@ -127,6 +127,14 @@ CREATE TABLE audiobooks (
   file_size_bytes BIGINT,
   availability_status VARCHAR(50) NOT NULL DEFAULT 'unknown',
     -- 'unknown', 'requested', 'downloading', 'processing', 'available', 'failed'
+
+  -- Audible discovery categories
+  is_popular BOOLEAN DEFAULT FALSE,
+  is_new_release BOOLEAN DEFAULT FALSE,
+  popular_rank INTEGER,  -- Position in popular list (1-200)
+  new_release_rank INTEGER,  -- Position in new releases list (1-200)
+  last_audible_sync TIMESTAMP,  -- When data was last fetched from Audible
+
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
   available_at TIMESTAMP  -- When it became available in Plex
@@ -137,6 +145,10 @@ CREATE INDEX idx_audiobooks_plex_guid ON audiobooks(plex_guid);
 CREATE INDEX idx_audiobooks_title ON audiobooks(title);
 CREATE INDEX idx_audiobooks_author ON audiobooks(author);
 CREATE INDEX idx_audiobooks_availability ON audiobooks(availability_status);
+CREATE INDEX idx_audiobooks_is_popular ON audiobooks(is_popular);
+CREATE INDEX idx_audiobooks_is_new_release ON audiobooks(is_new_release);
+CREATE INDEX idx_audiobooks_popular_rank ON audiobooks(popular_rank);
+CREATE INDEX idx_audiobooks_new_release_rank ON audiobooks(new_release_rank);
 ```
 
 **Fields:**
@@ -155,6 +167,12 @@ CREATE INDEX idx_audiobooks_availability ON audiobooks(availability_status);
 - `file_format` - Audio format
 - `file_size_bytes` - Total size
 - `availability_status` - Current lifecycle status
+- **Audible Discovery Fields:**
+  - `is_popular` - Boolean flag indicating if in popular category
+  - `is_new_release` - Boolean flag indicating if in new releases category
+  - `popular_rank` - Position in popular list (1-200)
+  - `new_release_rank` - Position in new releases list (1-200)
+  - `last_audible_sync` - Timestamp of last Audible data refresh
 - Timestamps for tracking
 
 ### Requests Table
@@ -167,12 +185,17 @@ CREATE TABLE requests (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   audiobook_id UUID NOT NULL REFERENCES audiobooks(id) ON DELETE CASCADE,
   status VARCHAR(50) NOT NULL DEFAULT 'pending',
-    -- 'pending', 'searching', 'downloading', 'processing', 'completed', 'failed', 'cancelled'
+    -- 'pending', 'searching', 'downloading', 'processing', 'completed', 'failed',
+    -- 'cancelled', 'awaiting_search', 'awaiting_import', 'warn'
   progress INTEGER DEFAULT 0,  -- 0-100 for download progress
   priority INTEGER DEFAULT 0,  -- Higher = more important
   error_message TEXT,
   search_attempts INTEGER DEFAULT 0,
   download_attempts INTEGER DEFAULT 0,
+  import_attempts INTEGER DEFAULT 0,
+  max_import_retries INTEGER DEFAULT 5,
+  last_search_at TIMESTAMP,
+  last_import_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
   completed_at TIMESTAMP,
@@ -190,14 +213,30 @@ CREATE INDEX idx_requests_created_at ON requests(created_at DESC);
 - `id` - Internal UUID primary key
 - `user_id` - Foreign key to user who made the request
 - `audiobook_id` - Foreign key to requested audiobook
-- `status` - Current processing status
+- `status` - Current processing status (see status values above)
 - `progress` - Download percentage (0-100)
 - `priority` - Request priority (for queue management)
-- `error_message` - Details when status is 'failed'
+- `error_message` - Details when status is 'failed', 'warn', or 'awaiting_*'
 - `search_attempts` - Number of indexer searches performed
 - `download_attempts` - Number of download retry attempts
+- `import_attempts` - Number of file import retry attempts
+- `max_import_retries` - Maximum number of import retries before moving to 'warn' status (default: 5)
+- `last_search_at` - Timestamp of last search attempt (for retry scheduling)
+- `last_import_at` - Timestamp of last import attempt (for retry scheduling)
 - Timestamps for tracking
 - `completed_at` - When request was fulfilled
+
+**Status Values:**
+- `pending` - Initial state, waiting to start
+- `searching` - Actively searching indexers for torrents
+- `downloading` - Torrent is downloading
+- `processing` - Download complete, organizing files
+- `completed` - Successfully added to Plex library
+- `failed` - Unrecoverable failure (other than search/import issues)
+- `cancelled` - User cancelled the request
+- `awaiting_search` - No torrents found, queued for automatic re-search
+- `awaiting_import` - No audiobook files found in download, queued for automatic re-import
+- `warn` - Max retries exceeded, manual intervention required
 
 ### Download_History Table
 

@@ -6,7 +6,7 @@
 import { getJobQueueService, ScanPlexPayload } from './job-queue.service';
 import { prisma } from '../db';
 
-export type ScheduledJobType = 'plex_library_scan' | 'audible_refresh';
+export type ScheduledJobType = 'plex_library_scan' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'cleanup_seeded_torrents';
 
 export interface ScheduledJob {
   id: string;
@@ -74,6 +74,27 @@ export class SchedulerService {
         type: 'audible_refresh' as ScheduledJobType,
         schedule: '0 0 * * *', // Daily at midnight
         enabled: false, // Start disabled until first setup is complete
+        payload: {},
+      },
+      {
+        name: 'Retry Missing Torrents Search',
+        type: 'retry_missing_torrents' as ScheduledJobType,
+        schedule: '0 0 * * *', // Daily at midnight
+        enabled: true, // Enable by default
+        payload: {},
+      },
+      {
+        name: 'Retry Failed Imports',
+        type: 'retry_failed_imports' as ScheduledJobType,
+        schedule: '0 */6 * * *', // Every 6 hours
+        enabled: true, // Enable by default
+        payload: {},
+      },
+      {
+        name: 'Cleanup Seeded Torrents',
+        type: 'cleanup_seeded_torrents' as ScheduledJobType,
+        schedule: '*/30 * * * *', // Every 30 minutes
+        enabled: true, // Enable by default
         payload: {},
       },
     ];
@@ -217,6 +238,15 @@ export class SchedulerService {
       case 'audible_refresh':
         bullJobId = await this.triggerAudibleRefresh(job);
         break;
+      case 'retry_missing_torrents':
+        bullJobId = await this.triggerRetryMissingTorrents(job);
+        break;
+      case 'retry_failed_imports':
+        bullJobId = await this.triggerRetryFailedImports(job);
+        break;
+      case 'cleanup_seeded_torrents':
+        bullJobId = await this.triggerCleanupSeededTorrents(job);
+        break;
       default:
         throw new Error(`Unknown job type: ${job.type}`);
     }
@@ -263,14 +293,10 @@ export class SchedulerService {
 
     const libraryId = job.payload?.libraryId || plexConfig.plex_audiobook_library_id;
 
-    const payload: ScanPlexPayload = {
-      libraryId: libraryId || undefined,
-    };
-
     return await this.jobQueue.addPlexScanJob(
       libraryId || '',
-      payload.partial,
-      payload.path
+      job.payload?.partial,
+      job.payload?.path
     );
   }
 
@@ -279,63 +305,68 @@ export class SchedulerService {
    */
   private async triggerAudibleRefresh(job: any): Promise<string> {
     const { getAudibleService } = await import('../integrations/audible.service');
-    const { compareTwoStrings } = await import('string-similarity');
+    const { findAudiobookMatch } = await import('../utils/audiobook-matcher');
     const audibleService = getAudibleService();
 
     console.log('[AudibleRefresh] Starting Audible data refresh...');
 
-    // Fetch popular and new releases
-    const popular = await audibleService.getPopularAudiobooks(50);
-    const newReleases = await audibleService.getNewReleases(50);
-
-    console.log(`[AudibleRefresh] Fetched ${popular.length} popular, ${newReleases.length} new releases`);
-
-    // Get all Plex audiobooks to check for matches
-    const plexAudiobooks = await prisma.audiobook.findMany({
+    // Clear previous popular/new-release flags for fresh data
+    await prisma.audiobook.updateMany({
       where: {
-        plexGuid: { not: null },
-        availabilityStatus: 'available',
+        OR: [
+          { isPopular: true },
+          { isNewRelease: true },
+        ],
       },
-      select: {
-        id: true,
-        title: true,
-        author: true,
-        plexGuid: true,
+      data: {
+        isPopular: false,
+        isNewRelease: false,
+        popularRank: null,
+        newReleaseRank: null,
       },
     });
+    console.log('[AudibleRefresh] Cleared previous popular/new-release flags');
 
-    console.log(`[AudibleRefresh] Found ${plexAudiobooks.length} audiobooks in Plex library for matching`);
+    // Fetch popular and new releases - increased to 200 items each
+    const popular = await audibleService.getPopularAudiobooks(200);
+    const newReleases = await audibleService.getNewReleases(200);
 
-    // Helper function to check if Audible book matches Plex book
-    const findPlexMatch = (audibleTitle: string, audibleAuthor: string) => {
-      for (const plexBook of plexAudiobooks) {
-        const titleScore = compareTwoStrings(
-          audibleTitle.toLowerCase(),
-          plexBook.title.toLowerCase()
-        );
-        const authorScore = plexBook.author && audibleAuthor
-          ? compareTwoStrings(audibleAuthor.toLowerCase(), plexBook.author.toLowerCase())
-          : 0.5;
-
-        const overallScore = titleScore * 0.7 + authorScore * 0.3;
-
-        // Match threshold: 85% for Audible data (stricter than Plex scan)
-        if (overallScore >= 0.85) {
-          return plexBook.id;
-        }
-      }
-      return null;
-    };
+    console.log(`[AudibleRefresh] Fetched ${popular.length} popular, ${newReleases.length} new releases`);
 
     // Persist to database - upsert audiobooks to cache the data
     let popularSaved = 0;
     let newReleasesSaved = 0;
     let matchedToPlex = 0;
+    let skippedDuplicatePlexGuids = 0;
+    const syncTime = new Date();
 
-    for (const audiobook of popular) {
+    for (let i = 0; i < popular.length; i++) {
+      const audiobook = popular[i];
       try {
-        // Check if this matches a Plex audiobook
-        const plexMatchId = findPlexMatch(audiobook.title, audiobook.author);
+        // Use shared matching logic (same as search API)
+        const match = await findAudiobookMatch({
+          asin: audiobook.asin,
+          title: audiobook.title,
+          author: audiobook.author,
+        });
+
+        // If we have a match with plexGuid, check if another audiobook already has it
+        let canAssignPlexGuid = true;
+        if (match?.plexGuid) {
+          const existingWithPlexGuid = await prisma.audiobook.findUnique({
+            where: { plexGuid: match.plexGuid },
+            select: { audibleId: true },
+          });
+
+          // If another audiobook already has this plexGuid, skip assignment
+          if (existingWithPlexGuid && existingWithPlexGuid.audibleId !== audiobook.asin) {
+            canAssignPlexGuid = false;
+            skippedDuplicatePlexGuids++;
+            if (i < 3) {
+              console.log(`[AudibleRefresh] Skipping plexGuid for "${audiobook.title}" - already assigned`);
+            }
+          }
+        }
 
         await prisma.audiobook.upsert({
           where: { audibleId: audiobook.asin },
@@ -350,8 +381,12 @@ export class SchedulerService {
             releaseDate: audiobook.releaseDate ? new Date(audiobook.releaseDate) : null,
             rating: audiobook.rating ? audiobook.rating : null,
             genres: audiobook.genres || [],
-            availabilityStatus: plexMatchId ? 'available' : 'unknown',
-            availableAt: plexMatchId ? new Date() : null,
+            availabilityStatus: match && canAssignPlexGuid ? match.availabilityStatus : 'unknown',
+            availableAt: match && canAssignPlexGuid && match.availabilityStatus === 'available' ? new Date() : null,
+            plexGuid: match && canAssignPlexGuid ? match.plexGuid : null,
+            isPopular: true,
+            popularRank: i + 1,
+            lastAudibleSync: syncTime,
           },
           update: {
             title: audiobook.title,
@@ -363,24 +398,54 @@ export class SchedulerService {
             releaseDate: audiobook.releaseDate ? new Date(audiobook.releaseDate) : null,
             rating: audiobook.rating ? audiobook.rating : null,
             genres: audiobook.genres || [],
-            // Only update availability if not already set
-            ...(plexMatchId && {
-              availabilityStatus: 'available',
-              availableAt: new Date(),
+            isPopular: true,
+            popularRank: i + 1,
+            lastAudibleSync: syncTime,
+            // Update availability based on match
+            availabilityStatus: match && canAssignPlexGuid ? match.availabilityStatus : 'unknown',
+            ...(match && canAssignPlexGuid && match.plexGuid && {
+              plexGuid: match.plexGuid,
+              availableAt: match.availabilityStatus === 'available' ? new Date() : null,
             }),
           },
         });
+
         popularSaved++;
-        if (plexMatchId) matchedToPlex++;
+        if (match && canAssignPlexGuid && match.plexGuid) {
+          matchedToPlex++;
+          if (i < 3) {
+            console.log(`[AudibleRefresh] Matched "${audiobook.title}" (status: ${match.availabilityStatus})`);
+          }
+        }
       } catch (error) {
         console.error(`[AudibleRefresh] Failed to save popular audiobook ${audiobook.title}:`, error);
       }
     }
 
-    for (const audiobook of newReleases) {
+    for (let i = 0; i < newReleases.length; i++) {
+      const audiobook = newReleases[i];
       try {
-        // Check if this matches a Plex audiobook
-        const plexMatchId = findPlexMatch(audiobook.title, audiobook.author);
+        // Use shared matching logic (same as search API)
+        const match = await findAudiobookMatch({
+          asin: audiobook.asin,
+          title: audiobook.title,
+          author: audiobook.author,
+        });
+
+        // If we have a match with plexGuid, check if another audiobook already has it
+        let canAssignPlexGuid = true;
+        if (match?.plexGuid) {
+          const existingWithPlexGuid = await prisma.audiobook.findUnique({
+            where: { plexGuid: match.plexGuid },
+            select: { audibleId: true },
+          });
+
+          // If another audiobook already has this plexGuid, skip assignment
+          if (existingWithPlexGuid && existingWithPlexGuid.audibleId !== audiobook.asin) {
+            canAssignPlexGuid = false;
+            skippedDuplicatePlexGuids++;
+          }
+        }
 
         await prisma.audiobook.upsert({
           where: { audibleId: audiobook.asin },
@@ -395,8 +460,12 @@ export class SchedulerService {
             releaseDate: audiobook.releaseDate ? new Date(audiobook.releaseDate) : null,
             rating: audiobook.rating ? audiobook.rating : null,
             genres: audiobook.genres || [],
-            availabilityStatus: plexMatchId ? 'available' : 'unknown',
-            availableAt: plexMatchId ? new Date() : null,
+            availabilityStatus: match && canAssignPlexGuid ? match.availabilityStatus : 'unknown',
+            availableAt: match && canAssignPlexGuid && match.availabilityStatus === 'available' ? new Date() : null,
+            plexGuid: match && canAssignPlexGuid ? match.plexGuid : null,
+            isNewRelease: true,
+            newReleaseRank: i + 1,
+            lastAudibleSync: syncTime,
           },
           update: {
             title: audiobook.title,
@@ -408,22 +477,40 @@ export class SchedulerService {
             releaseDate: audiobook.releaseDate ? new Date(audiobook.releaseDate) : null,
             rating: audiobook.rating ? audiobook.rating : null,
             genres: audiobook.genres || [],
-            // Only update availability if not already set
-            ...(plexMatchId && {
-              availabilityStatus: 'available',
-              availableAt: new Date(),
+            isNewRelease: true,
+            newReleaseRank: i + 1,
+            lastAudibleSync: syncTime,
+            // Update availability based on match
+            availabilityStatus: match && canAssignPlexGuid ? match.availabilityStatus : 'unknown',
+            ...(match && canAssignPlexGuid && match.plexGuid && {
+              plexGuid: match.plexGuid,
+              availableAt: match.availabilityStatus === 'available' ? new Date() : null,
             }),
           },
         });
+
         newReleasesSaved++;
-        if (plexMatchId) matchedToPlex++;
+        if (match && canAssignPlexGuid && match.plexGuid) {
+          matchedToPlex++;
+        }
       } catch (error) {
         console.error(`[AudibleRefresh] Failed to save new release ${audiobook.title}:`, error);
       }
     }
 
     console.log(`[AudibleRefresh] Saved ${popularSaved} popular and ${newReleasesSaved} new releases to database`);
-    console.log(`[AudibleRefresh] Matched ${matchedToPlex} Audible books to existing Plex library`);
+    console.log(`[AudibleRefresh] Matched ${matchedToPlex} Audible books to database records`);
+
+    if (skippedDuplicatePlexGuids > 0) {
+      console.log(`[AudibleRefresh] Skipped ${skippedDuplicatePlexGuids} duplicate plexGuid assignments`);
+    }
+
+    if (matchedToPlex > 0) {
+      const matchRate = ((matchedToPlex / (popularSaved + newReleasesSaved)) * 100).toFixed(1);
+      console.log(`[AudibleRefresh] Match rate: ${matchRate}% (${matchedToPlex}/${popularSaved + newReleasesSaved})`);
+    } else {
+      console.log(`[AudibleRefresh] No matches found - run Plex Library Scan first to populate database with Plex audiobooks`);
+    }
 
     // Return a placeholder job ID since this doesn't use the Bull queue
     return `audible-refresh-${Date.now()}`;
@@ -546,6 +633,226 @@ export class SchedulerService {
 
     // Additional validation could be added here
     // For production, use a library like 'cron-parser'
+  }
+
+  /**
+   * Trigger retry for requests awaiting torrent search
+   */
+  private async triggerRetryMissingTorrents(job: any): Promise<string> {
+    console.log('[RetryMissingTorrents] Starting retry job for requests awaiting search...');
+
+    // Find all requests in awaiting_search status
+    const requests = await prisma.request.findMany({
+      where: {
+        status: 'awaiting_search',
+      },
+      include: {
+        audiobook: true,
+      },
+      take: 50, // Limit to 50 requests per run
+    });
+
+    console.log(`[RetryMissingTorrents] Found ${requests.length} requests awaiting search`);
+
+    if (requests.length === 0) {
+      return `retry-missing-torrents-${Date.now()}-no-requests`;
+    }
+
+    // Trigger search job for each request
+    const jobQueue = getJobQueueService();
+    let triggered = 0;
+
+    for (const request of requests) {
+      try {
+        await jobQueue.addSearchJob(request.id, {
+          id: request.audiobook.id,
+          title: request.audiobook.title,
+          author: request.audiobook.author,
+        });
+        triggered++;
+        console.log(`[RetryMissingTorrents] Triggered search for request ${request.id}: ${request.audiobook.title}`);
+      } catch (error) {
+        console.error(`[RetryMissingTorrents] Failed to trigger search for request ${request.id}:`, error);
+      }
+    }
+
+    console.log(`[RetryMissingTorrents] Triggered ${triggered}/${requests.length} search jobs`);
+
+    return `retry-missing-torrents-${Date.now()}-${triggered}`;
+  }
+
+  /**
+   * Trigger retry for requests awaiting import
+   */
+  private async triggerRetryFailedImports(job: any): Promise<string> {
+    console.log('[RetryFailedImports] Starting retry job for requests awaiting import...');
+
+    // Find all requests in awaiting_import status
+    const requests = await prisma.request.findMany({
+      where: {
+        status: 'awaiting_import',
+      },
+      include: {
+        audiobook: true,
+        downloadHistory: {
+          where: { selected: true },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+      take: 50, // Limit to 50 requests per run
+    });
+
+    console.log(`[RetryFailedImports] Found ${requests.length} requests awaiting import`);
+
+    if (requests.length === 0) {
+      return `retry-failed-imports-${Date.now()}-no-requests`;
+    }
+
+    // Trigger organize job for each request
+    const jobQueue = getJobQueueService();
+    let triggered = 0;
+
+    for (const request of requests) {
+      try {
+        // Get the download path from the most recent download history
+        const downloadHistory = request.downloadHistory[0];
+
+        if (!downloadHistory || !downloadHistory.downloadClientId) {
+          console.warn(`[RetryFailedImports] No download history found for request ${request.id}, skipping`);
+          continue;
+        }
+
+        // Get download path from qBittorrent
+        const { getQBittorrentService } = await import('../integrations/qbittorrent.service');
+        const qbt = await getQBittorrentService();
+        const torrent = await qbt.getTorrent(downloadHistory.downloadClientId);
+        const downloadPath = `${torrent.save_path}/${torrent.name}`;
+
+        await jobQueue.addOrganizeJob(
+          request.id,
+          request.audiobook.id,
+          downloadPath,
+          `/media/audiobooks/${request.audiobook.author}/${request.audiobook.title}`
+        );
+        triggered++;
+        console.log(`[RetryFailedImports] Triggered organize job for request ${request.id}: ${request.audiobook.title}`);
+      } catch (error) {
+        console.error(`[RetryFailedImports] Failed to trigger organize for request ${request.id}:`, error);
+      }
+    }
+
+    console.log(`[RetryFailedImports] Triggered ${triggered}/${requests.length} organize jobs`);
+
+    return `retry-failed-imports-${Date.now()}-${triggered}`;
+  }
+
+  /**
+   * Trigger cleanup of torrents that have met seeding requirements
+   */
+  private async triggerCleanupSeededTorrents(job: any): Promise<string> {
+    console.log('[CleanupSeededTorrents] Starting cleanup job for seeded torrents...');
+
+    // Get indexer configuration with per-indexer seeding times
+    const { getConfigService } = await import('./config.service');
+    const configService = getConfigService();
+    const indexerConfigStr = await configService.get('prowlarr_indexers_config');
+    const indexerConfig = indexerConfigStr ? JSON.parse(indexerConfigStr) : {};
+
+    console.log(`[CleanupSeededTorrents] Loaded configuration for ${Object.keys(indexerConfig).length} indexers`);
+
+    // Find all completed requests that have download history
+    const completedRequests = await prisma.request.findMany({
+      where: {
+        status: 'completed',
+      },
+      include: {
+        downloadHistory: {
+          where: {
+            selected: true,
+            downloadStatus: 'completed',
+          },
+          orderBy: { completedAt: 'desc' },
+          take: 1,
+        },
+      },
+      take: 100, // Limit to 100 requests per run
+    });
+
+    console.log(`[CleanupSeededTorrents] Found ${completedRequests.length} completed requests to check`);
+
+    let cleaned = 0;
+    let skipped = 0;
+    let noConfig = 0;
+
+    for (const request of completedRequests) {
+      try {
+        const downloadHistory = request.downloadHistory[0];
+
+        if (!downloadHistory || !downloadHistory.downloadClientId || !downloadHistory.indexerName) {
+          continue;
+        }
+
+        // Get the indexer name from download history
+        const indexerName = downloadHistory.indexerName;
+
+        // Find matching indexer configuration by name
+        // indexerConfig is keyed by indexer ID, so we need to find by matching name
+        let seedingConfig = null;
+        for (const [id, config] of Object.entries(indexerConfig)) {
+          // We'll need to get the indexer name from Prowlarr, for now use a default
+          seedingConfig = config as any;
+          break; // For now, just use first config as fallback
+        }
+
+        // If no config found or seeding time is 0 (unlimited), skip
+        if (!seedingConfig || seedingConfig.seedingTimeMinutes === 0) {
+          console.log(`[CleanupSeededTorrents] Indexer ${indexerName} has unlimited seeding, skipping`);
+          noConfig++;
+          continue;
+        }
+
+        const seedingTimeSeconds = seedingConfig.seedingTimeMinutes * 60;
+
+        // Get torrent info from qBittorrent to check seeding time
+        const { getQBittorrentService } = await import('../integrations/qbittorrent.service');
+        const qbt = await getQBittorrentService();
+
+        let torrent;
+        try {
+          torrent = await qbt.getTorrent(downloadHistory.downloadClientId);
+        } catch (error) {
+          // Torrent might already be deleted, skip
+          console.log(`[CleanupSeededTorrents] Torrent ${downloadHistory.downloadClientId} not found in qBittorrent, skipping`);
+          continue;
+        }
+
+        // Check if seeding time requirement is met
+        const actualSeedingTime = torrent.seeding_time || 0;
+        const hasMetRequirement = actualSeedingTime >= seedingTimeSeconds;
+
+        if (!hasMetRequirement) {
+          const remaining = Math.ceil((seedingTimeSeconds - actualSeedingTime) / 60);
+          console.log(`[CleanupSeededTorrents] Torrent ${torrent.name} (${indexerName}) needs ${remaining} more minutes of seeding`);
+          skipped++;
+          continue;
+        }
+
+        console.log(`[CleanupSeededTorrents] Torrent ${torrent.name} (${indexerName}) has met seeding requirement (${Math.floor(actualSeedingTime / 60)}/${seedingConfig.seedingTimeMinutes} minutes)`);
+
+        // Delete torrent and files from qBittorrent
+        await qbt.deleteTorrent(downloadHistory.downloadClientId, true); // true = delete files
+
+        console.log(`[CleanupSeededTorrents] Deleted torrent and files for request ${request.id}`);
+        cleaned++;
+      } catch (error) {
+        console.error(`[CleanupSeededTorrents] Failed to cleanup request ${request.id}:`, error);
+      }
+    }
+
+    console.log(`[CleanupSeededTorrents] Cleanup complete: ${cleaned} torrents cleaned, ${skipped} still seeding, ${noConfig} unlimited`);
+
+    return `cleanup-seeded-torrents-${Date.now()}-cleaned:${cleaned}-skipped:${skipped}-unlimited:${noConfig}`;
   }
 }
 

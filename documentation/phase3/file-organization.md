@@ -2,9 +2,9 @@
 
 ## Current State
 
-**Status:** Not Implemented
+**Status:** Implemented ✅
 
-The file organization system moves completed downloads into a standardized directory structure that Plex Media Server expects for audiobooks.
+The file organization system copies completed downloads into a standardized directory structure that Plex Media Server expects for audiobooks. Original files are kept in the download directory for seeding and are cleaned up by a scheduled job after seeding requirements are met.
 
 ## Design Architecture
 
@@ -41,17 +41,22 @@ The file organization system moves completed downloads into a standardized direc
    └─> Ignore NFO, TXT, JPG (except cover)
 
 3. Determine structure:
-   └─> Single M4B: Move directly
+   └─> Single M4B: Copy directly
    └─> Multiple M4A/MP3: Keep together in subfolder
    └─> Preserve chapters if present
 
 4. Create target directory:
    └─> /media/audiobooks/[Author]/[Title]/
 
-5. Move files:
+5. Copy files (do NOT delete originals):
    └─> Audiobook file(s)
    └─> Cover art (if found)
-   └─> Clean up source directory
+   └─> Keep originals for seeding
+
+6. Seeding and cleanup:
+   └─> Files remain in download directory for seeding
+   └─> Scheduled cleanup job checks seeding time
+   └─> Only delete after seeding requirements met
 ```
 
 ## Implementation Details
@@ -427,7 +432,41 @@ describe('File Organizer', () => {
 
 ## Known Issues
 
-*This section will be updated during implementation.*
+**Fixed Issues:**
+- ✅ EPERM errors when copying files across filesystems - Fixed by using fs.readFile/writeFile instead of copyFile
+- ✅ Immediate deletion of download files preventing seeding - Fixed by keeping originals and using scheduled cleanup job
+- ✅ Files being moved instead of copied - Changed to copy-only approach to support seeding
+
+**Current Issues:**
+*None currently.*
+
+## Seeding Support
+
+### Configuration
+
+Seeding time is configured in the admin settings under "Download Client":
+- **seeding_time_minutes**: Number of minutes to seed (0 = unlimited, never delete)
+- Default: 0 (unlimited)
+- Range: 0-∞
+
+### Cleanup Process
+
+A scheduled job (`cleanup_seeded_torrents`) runs every 30 minutes and:
+1. Checks all completed requests with download history
+2. Queries qBittorrent for actual seeding time
+3. Compares actual seeding time to configured requirement
+4. Deletes torrent and files only after requirement is met
+5. Uses qBittorrent's seeding_time field (reliable, not affected by restarts)
+
+### Configuration Example
+
+```json
+{
+  "seeding_time_minutes": 1440  // 24 hours
+}
+```
+
+Set to 0 for unlimited seeding (files never deleted automatically).
 
 ## Future Enhancements
 

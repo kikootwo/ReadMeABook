@@ -56,6 +56,14 @@ model Audiobook {
   fileSizeBytes      BigInt?   @map("file_size_bytes")
   availabilityStatus String    @default("unknown") @map("availability_status")
   // Status values: unknown, requested, downloading, processing, available, failed
+
+  // Audible discovery categories
+  isPopular          Boolean   @default(false) @map("is_popular")
+  isNewRelease       Boolean   @default(false) @map("is_new_release")
+  popularRank        Int?      @map("popular_rank")
+  newReleaseRank     Int?      @map("new_release_rank")
+  lastAudibleSync    DateTime? @map("last_audible_sync")
+
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
   availableAt        DateTime? @map("available_at")
@@ -68,6 +76,10 @@ model Audiobook {
   @@index([title])
   @@index([author])
   @@index([availabilityStatus])
+  @@index([isPopular])
+  @@index([isNewRelease])
+  @@index([popularRank])
+  @@index([newReleaseRank])
   @@map("audiobooks")
 }
 
@@ -76,12 +88,16 @@ model Request {
   userId           String    @map("user_id")
   audiobookId      String    @map("audiobook_id")
   status           String    @default("pending")
-  // Status values: pending, searching, downloading, processing, completed, failed, cancelled
+  // Status values: pending, searching, downloading, processing, completed, failed, cancelled, awaiting_search, awaiting_import, warn
   progress         Int       @default(0) // 0-100
   priority         Int       @default(0)
   errorMessage     String?   @map("error_message") @db.Text
   searchAttempts   Int       @default(0) @map("search_attempts")
   downloadAttempts Int       @default(0) @map("download_attempts")
+  importAttempts   Int       @default(0) @map("import_attempts")
+  maxImportRetries Int       @default(5) @map("max_import_retries")
+  lastSearchAt     DateTime? @map("last_search_at")
+  lastImportAt     DateTime? @map("last_import_at")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
   completedAt      DateTime? @map("completed_at")

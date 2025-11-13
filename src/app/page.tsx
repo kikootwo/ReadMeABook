@@ -5,14 +5,30 @@
 
 'use client';
 
+import { useState } from 'react';
 import { Header } from '@/components/layout/Header';
 import { AudiobookGrid } from '@/components/audiobooks/AudiobookGrid';
 import { useAudiobooks } from '@/lib/hooks/useAudiobooks';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { Pagination } from '@/components/ui/Pagination';
 
 export default function HomePage() {
-  const { audiobooks: popular, isLoading: loadingPopular } = useAudiobooks('popular', 20);
-  const { audiobooks: newReleases, isLoading: loadingNewReleases } = useAudiobooks('new-releases', 20);
+  const [popularPage, setPopularPage] = useState(1);
+  const [newReleasesPage, setNewReleasesPage] = useState(1);
+
+  const {
+    audiobooks: popular,
+    isLoading: loadingPopular,
+    totalPages: popularTotalPages,
+    message: popularMessage,
+  } = useAudiobooks('popular', 20, popularPage);
+
+  const {
+    audiobooks: newReleases,
+    isLoading: loadingNewReleases,
+    totalPages: newReleasesTotalPages,
+    message: newReleasesMessage,
+  } = useAudiobooks('new-releases', 20, newReleasesPage);
 
   return (
     <ProtectedRoute>
@@ -38,11 +54,31 @@ export default function HomePage() {
             </h2>
           </div>
 
-          <AudiobookGrid
-            audiobooks={popular}
-            isLoading={loadingPopular}
-            emptyMessage="No popular audiobooks available"
-          />
+          {popularMessage && !loadingPopular && popular.length === 0 ? (
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-6 text-center">
+              <p className="text-yellow-800 dark:text-yellow-200 mb-2 font-medium">
+                No popular audiobooks found
+              </p>
+              <p className="text-yellow-700 dark:text-yellow-300 text-sm">
+                {popularMessage}
+              </p>
+            </div>
+          ) : (
+            <>
+              <AudiobookGrid
+                audiobooks={popular}
+                isLoading={loadingPopular}
+                emptyMessage="No popular audiobooks available"
+              />
+
+              <Pagination
+                currentPage={popularPage}
+                totalPages={popularTotalPages}
+                onPageChange={setPopularPage}
+                className="mt-8"
+              />
+            </>
+          )}
         </section>
 
         {/* New Releases */}
@@ -53,11 +89,31 @@ export default function HomePage() {
             </h2>
           </div>
 
-          <AudiobookGrid
-            audiobooks={newReleases}
-            isLoading={loadingNewReleases}
-            emptyMessage="No new releases available"
-          />
+          {newReleasesMessage && !loadingNewReleases && newReleases.length === 0 ? (
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-6 text-center">
+              <p className="text-yellow-800 dark:text-yellow-200 mb-2 font-medium">
+                No new releases found
+              </p>
+              <p className="text-yellow-700 dark:text-yellow-300 text-sm">
+                {newReleasesMessage}
+              </p>
+            </div>
+          ) : (
+            <>
+              <AudiobookGrid
+                audiobooks={newReleases}
+                isLoading={loadingNewReleases}
+                emptyMessage="No new releases available"
+              />
+
+              <Pagination
+                currentPage={newReleasesPage}
+                totalPages={newReleasesTotalPages}
+                onPageChange={setNewReleasesPage}
+                className="mt-8"
+              />
+            </>
+          )}
         </section>
 
         {/* Call to Action */}

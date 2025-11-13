@@ -35,6 +35,8 @@ export interface TorrentInfo {
   save_path: string;
   completion_on: number; // Unix timestamp
   added_on: number;
+  seeding_time?: number; // Seconds spent seeding
+  ratio?: number; // Upload/download ratio
 }
 
 export type TorrentState =

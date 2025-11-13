@@ -26,11 +26,11 @@ export interface Audiobook {
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
-export function useAudiobooks(type: 'popular' | 'new-releases', limit: number = 20) {
+export function useAudiobooks(type: 'popular' | 'new-releases', limit: number = 20, page: number = 1) {
   const endpoint =
     type === 'popular'
-      ? `/api/audiobooks/popular?limit=${limit}`
-      : `/api/audiobooks/new-releases?limit=${limit}`;
+      ? `/api/audiobooks/popular?page=${page}&limit=${limit}`
+      : `/api/audiobooks/new-releases?page=${page}&limit=${limit}`;
 
   const { data, error, isLoading } = useSWR(endpoint, fetcher, {
     revalidateOnFocus: false,
@@ -40,6 +40,11 @@ export function useAudiobooks(type: 'popular' | 'new-releases', limit: number = 
 
   return {
     audiobooks: data?.audiobooks || [],
+    totalCount: data?.totalCount || 0,
+    totalPages: data?.totalPages || 0,
+    currentPage: data?.page || page,
+    hasMore: data?.hasMore || false,
+    message: data?.message || null,
     isLoading,
     error,
   };

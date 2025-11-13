@@ -46,19 +46,22 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     console.log(`[SearchIndexers] Found ${searchResults.length} results`);
 
     if (searchResults.length === 0) {
-      // No results found
+      // No results found - queue for re-search instead of failing
+      console.log(`[SearchIndexers] No torrents found for request ${requestId}, marking as awaiting_search`);
+
       await prisma.request.update({
         where: { id: requestId },
         data: {
-          status: 'failed',
-          errorMessage: 'No torrents found for this audiobook',
+          status: 'awaiting_search',
+          errorMessage: 'No torrents found. Will retry automatically.',
+          lastSearchAt: new Date(),
           updatedAt: new Date(),
         },
       });
 
       return {
         success: false,
-        message: 'No torrents found',
+        message: 'No torrents found, queued for re-search',
         requestId,
       };
     }

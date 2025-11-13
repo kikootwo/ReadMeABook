@@ -15,6 +15,7 @@ import { ProwlarrStep } from './steps/ProwlarrStep';
 import { DownloadClientStep } from './steps/DownloadClientStep';
 import { PathsStep } from './steps/PathsStep';
 import { ReviewStep } from './steps/ReviewStep';
+import { FinalizeStep } from './steps/FinalizeStep';
 
 interface SelectedIndexer {
   id: number;
@@ -75,7 +76,7 @@ export default function SetupWizard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const totalSteps = 7;
+  const totalSteps = 8;
 
   const updateState = (updates: Partial<SetupState>) => {
     setState((prev) => ({ ...prev, ...updates }));
@@ -139,11 +140,11 @@ export default function SetupWizard() {
         localStorage.setItem('refreshToken', data.refreshToken);
         localStorage.setItem('user', JSON.stringify(data.user));
 
-        // Force full page reload to initialize auth context with new tokens
-        window.location.href = '/';
+        // Go to finalize step to run initial jobs
+        goToStep(8);
       } else {
         // Fallback if no tokens returned
-        router.push('/');
+        goToStep(8);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Setup failed');
@@ -223,6 +224,17 @@ export default function SetupWizard() {
             error={error}
             onComplete={completeSetup}
             onBack={() => goToStep(6)}
+          />
+        );
+
+      case 8:
+        return (
+          <FinalizeStep
+            onComplete={() => {
+              // Force full page reload to initialize auth context with new tokens
+              window.location.href = '/';
+            }}
+            onBack={() => goToStep(7)}
           />
         );
 

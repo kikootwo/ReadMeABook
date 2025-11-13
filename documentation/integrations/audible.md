@@ -47,17 +47,33 @@ From audiobook detail pages:
 
 ### Scraping Techniques
 
-**Cheerio for HTML Parsing:**
+**Cheerio for HTML Parsing with Pagination:**
 ```typescript
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
-const response = await axios.get(url);
-const $ = cheerio.load(response.data);
+// Multi-page scraping to get 200 items
+const audiobooks: AudibleAudiobook[] = [];
+let page = 1;
+const maxPages = Math.ceil(limit / 20); // ~20 items per page
 
-// Extract data from specific selectors
-const title = $('h1.bc-heading').text();
-const author = $('a.authorLabel').text();
+while (audiobooks.length < limit && page <= maxPages) {
+  const response = await axios.get(url, {
+    params: page > 1 ? { page } : {},
+  });
+  const $ = cheerio.load(response.data);
+
+  // Extract data from specific selectors
+  $('.productListItem').each((index, element) => {
+    const title = $(element).find('h1.bc-heading').text();
+    const author = $(element).find('a.authorLabel').text();
+    audiobooks.push({ title, author, ... });
+  });
+
+  // Add delay between pages (1.5s) to respect rate limits
+  await delay(1500);
+  page++;
+}
 ```
 
 **JSON-LD Extraction:**
@@ -160,37 +176,120 @@ interface AudibleSearchResult {
 }
 ```
 
-### API Route Enrichment
+### Unified Matching Architecture
 
-**Implementation:** All Audible API routes (`/api/audiobooks/popular`, `/api/audiobooks/new-releases`, `/api/audiobooks/search`) enrich the scraped Audible data with availability information from the database.
+**Status:** Implemented ✅
 
-**Enrichment Process:**
-1. Fetch audiobooks from Audible via web scraping
-2. For each audiobook, query the database for potential matches:
-   - Exact match by `audibleId` (ASIN)
-   - Fuzzy match by title and author (using `string-similarity`)
-3. Calculate fuzzy match score: `titleScore * 0.7 + authorScore * 0.3`
-4. Accept matches with score >= 70%
-5. Add availability fields to response:
-   - `availabilityStatus`: 'available' | 'requested' | 'unknown'
-   - `isAvailable`: boolean (true if in Plex library)
-   - `plexGuid`: Plex GUID if available
-   - `dbId`: Database ID if matched
+**Location:** `src/lib/utils/audiobook-matcher.ts`
 
-**Enriched Response:**
+**Purpose:** Provides a single, consistent matching algorithm used across the entire application to match Audible audiobooks with database records.
+
+**Used By:**
+- ✅ Search API (`/api/audiobooks/search`)
+- ✅ Audible Refresh Job (scheduler service)
+- ✅ Any future feature needing audiobook matching
+
+**Matching Algorithm:**
+1. **Query database for candidates:**
+   ```typescript
+   where: {
+     OR: [
+       { audibleId: audiobook.asin },  // Exact ASIN match
+       {
+         AND: [
+           { title: { contains: audiobook.title.substring(0, 20) } },
+           { author: { contains: audiobook.author.substring(0, 20) } }
+         ]
+       }
+     ]
+   }
+   ```
+2. **Check exact ASIN match first** - If found, return immediately
+3. **Perform fuzzy matching** using `string-similarity`:
+   - Title score: 70% weight
+   - Author score: 30% weight
+   - Overall score threshold: 70%
+4. **Return best match** or null
+
+**Key Benefits:**
+- 🎯 **Single source of truth** - No duplicate logic
+- 🔄 **Consistent behavior** - Same matching everywhere
+- ⚡ **Query-time matching** - Checks at query time (no pre-loading)
+- 📊 **Status-agnostic** - Matches ANY database record, not just `availabilityStatus='available'`
+- 🛡️ **Duplicate protection** - Prevents multiple Audible books claiming same `plexGuid`
+
+### API Route Implementation: Database-First Approach
+
+**Status:** Implemented ✅
+
+**Implementation:** Discovery API routes (`/api/audiobooks/popular`, `/api/audiobooks/new-releases`) now serve cached data from the database instead of hitting Audible directly.
+
+**How It Works:**
+1. **Data Refresh Job:** The `audible_refresh` scheduled job runs periodically (default: daily at midnight):
+   - Fetches 200 popular audiobooks and 200 new releases from Audible via multi-page scraping
+   - For EACH audiobook, uses **shared matcher** to find database match
+   - If match found with `plexGuid`, assigns it (with duplicate checking)
+   - Sets `availabilityStatus` based on match
+2. **Database Storage:** Audiobooks are cached in the database with:
+   - Category flags (`isPopular`, `isNewRelease`)
+   - Ranking information (`popularRank`, `newReleaseRank`)
+   - Sync timestamp (`lastAudibleSync`)
+   - Full metadata (title, author, narrator, cover art, etc.)
+   - Availability status and `plexGuid` from matching
+3. **API Routes:** Discovery routes query the database for cached data with pagination support
+4. **Availability Display:** Books with `plexGuid` automatically show "In Your Library" badge
+
+**API Endpoints:**
+
+**GET /api/audiobooks/popular?page=1&limit=20**
+- Returns popular audiobooks from database cache
+- Supports pagination with `page` and `limit` parameters
+- Returns helpful message if no data exists (prompts user to run refresh job)
+
+**GET /api/audiobooks/new-releases?page=1&limit=20**
+- Returns new releases from database cache
+- Supports pagination with `page` and `limit` parameters
+- Returns helpful message if no data exists
+
+**Response Format:**
 ```typescript
-interface EnrichedAudibleAudiobook extends AudibleAudiobook {
+interface AudiobooksResponse {
+  success: boolean;
+  audiobooks: EnrichedAudibleAudiobook[];
+  count: number;          // Number of items in current page
+  totalCount: number;     // Total items across all pages
+  page: number;           // Current page number
+  totalPages: number;     // Total number of pages
+  hasMore: boolean;       // Whether more pages exist
+  lastSync: string | null; // ISO timestamp of last Audible sync
+  message?: string;       // Optional message (e.g., if no data)
+}
+
+interface EnrichedAudibleAudiobook {
+  asin: string;
+  title: string;
+  author: string;
+  narrator?: string;
+  description?: string;
+  coverArtUrl?: string;
+  durationMinutes?: number;
+  releaseDate?: string;
+  rating?: number;
+  genres: string[];
   availabilityStatus: 'available' | 'requested' | 'unknown';
   isAvailable: boolean;
   plexGuid: string | null;
-  dbId: string | null;
+  dbId: string;
 }
 ```
 
 **Benefits:**
-- UI can show "In Your Library" badges for books already in Plex
-- Prevents duplicate requests for books user already owns
-- Works across all discovery surfaces (popular, new releases, search)
+- **Performance:** No web scraping on every page load - instant responses from database
+- **Reliability:** No dependency on Audible.com availability for homepage
+- **Scalability:** Can serve many concurrent users without rate limiting
+- **Freshness:** Data refreshed automatically via scheduled job
+- **Pagination:** Supports large datasets (200 items per category) with efficient pagination
+- **Availability:** Database already includes Plex availability status from refresh job matching
 
 ## Usage Examples
 

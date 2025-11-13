@@ -79,7 +79,7 @@ export class FileOrganizer {
       // Create target directory
       await fs.mkdir(targetPath, { recursive: true });
 
-      // Move audio files
+      // Copy audio files (do NOT delete originals - needed for seeding)
       for (const audioFile of audioFiles) {
         const sourcePath = path.join(downloadPath, audioFile);
         const filename = path.basename(audioFile);
@@ -87,26 +87,39 @@ export class FileOrganizer {
 
         // Check if source exists
         try {
-          await fs.access(sourcePath);
+          await fs.access(sourcePath, fs.constants.R_OK);
         } catch {
-          console.warn(`[FileOrganizer] Source file not found: ${sourcePath}`);
+          console.warn(`[FileOrganizer] Source file not found or not readable: ${sourcePath}`);
           result.errors.push(`Source file not found: ${audioFile}`);
           continue;
         }
 
-        // Move file (or copy if crossing filesystems)
+        // Check if target already exists (skip if already copied)
         try {
-          await fs.rename(sourcePath, targetFilePath);
-        } catch (renameError) {
-          // If rename fails (crossing filesystems), copy then delete
-          console.log(`[FileOrganizer] Rename failed, using copy+delete for: ${filename}`);
-          await fs.copyFile(sourcePath, targetFilePath);
-          await fs.unlink(sourcePath);
+          await fs.access(targetFilePath);
+          console.log(`[FileOrganizer] File already exists, skipping: ${filename}`);
+          result.audioFiles.push(targetFilePath);
+          continue;
+        } catch {
+          // File doesn't exist, continue with copy
         }
 
-        result.audioFiles.push(targetFilePath);
-        result.filesMovedCount++;
-        console.log(`[FileOrganizer] Moved: ${filename}`);
+        // Copy file (do NOT delete original - needed for seeding)
+        try {
+          // Read source file
+          const fileData = await fs.readFile(sourcePath);
+          // Write to target with explicit permissions
+          await fs.writeFile(targetFilePath, fileData, { mode: 0o644 });
+
+          result.audioFiles.push(targetFilePath);
+          result.filesMovedCount++;
+          console.log(`[FileOrganizer] Copied: ${filename}`);
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          console.error(`[FileOrganizer] Failed to copy ${filename}:`, errorMsg);
+          result.errors.push(`Failed to copy ${audioFile}: ${errorMsg}`);
+          // Continue with other files instead of throwing
+        }
       }
 
       // Handle cover art
@@ -115,13 +128,15 @@ export class FileOrganizer {
         const targetCoverPath = path.join(targetPath, 'cover.jpg');
 
         try {
-          await fs.rename(sourcePath, targetCoverPath);
+          // Copy cover art (do NOT delete original)
+          const coverData = await fs.readFile(sourcePath);
+          await fs.writeFile(targetCoverPath, coverData, { mode: 0o644 });
           result.coverArtFile = targetCoverPath;
           result.filesMovedCount++;
-          console.log(`[FileOrganizer] Moved cover art`);
+          console.log(`[FileOrganizer] Copied cover art`);
         } catch (error) {
-          console.warn(`[FileOrganizer] Failed to move cover art:`, error);
-          result.errors.push('Failed to move cover art');
+          console.warn(`[FileOrganizer] Failed to copy cover art:`, error);
+          result.errors.push('Failed to copy cover art');
         }
       } else if (audiobook.coverArtUrl) {
         // Download cover art from Audible if not in torrent
@@ -138,15 +153,9 @@ export class FileOrganizer {
       result.targetPath = targetPath;
       result.success = true;
 
-      // Clean up download directory
-      try {
-        await this.cleanup(downloadPath);
-      } catch (error) {
-        console.warn(`[FileOrganizer] Cleanup warning:`, error);
-        result.errors.push('Failed to cleanup download directory');
-      }
-
-      console.log(`[FileOrganizer] Organization complete: ${result.filesMovedCount} files moved`);
+      // DO NOT clean up download directory - files needed for seeding
+      // Cleanup will be handled by the seeding cleanup job after seeding requirements are met
+      console.log(`[FileOrganizer] Organization complete: ${result.filesMovedCount} files copied (originals kept for seeding)`);
 
       return result;
     } catch (error) {

@@ -44,54 +44,84 @@ export class AudibleService {
   }
 
   /**
-   * Get popular audiobooks from best sellers
+   * Get popular audiobooks from best sellers (with pagination support)
    */
   async getPopularAudiobooks(limit: number = 20): Promise<AudibleAudiobook[]> {
     try {
-      console.log('[Audible] Fetching popular audiobooks...');
-
-      const response = await this.client.get('/adblbestsellers');
-      const $ = cheerio.load(response.data);
+      console.log(`[Audible] Fetching popular audiobooks (limit: ${limit})...`);
 
       const audiobooks: AudibleAudiobook[] = [];
+      let page = 1;
+      const maxPages = Math.ceil(limit / 20); // Audible shows ~20 items per page
 
-      // Parse audiobook items from best sellers page
-      $('.productListItem').each((index, element) => {
-        if (audiobooks.length >= limit) return false;
+      while (audiobooks.length < limit && page <= maxPages) {
+        console.log(`[Audible] Fetching page ${page}/${maxPages}...`);
 
-        const $el = $(element);
-
-        // Extract ASIN from data attribute or link
-        const asin = $el.find('li').attr('data-asin') ||
-                     $el.find('a').attr('href')?.match(/\/pd\/[^\/]+\/([A-Z0-9]{10})/)?.[1] || '';
-
-        if (!asin) return;
-
-        const title = $el.find('h3 a').text().trim() ||
-                      $el.find('.bc-heading a').text().trim();
-
-        const authorText = $el.find('.authorLabel').text().trim() ||
-                           $el.find('.bc-size-small .bc-text-bold').first().text().trim();
-
-        const narratorText = $el.find('.narratorLabel').text().trim() ||
-                             $el.find('.bc-size-small .bc-text-bold').eq(1).text().trim();
-
-        const coverArtUrl = $el.find('img').attr('src') || '';
-
-        const ratingText = $el.find('.ratingsLabel').text().trim();
-        const rating = ratingText ? parseFloat(ratingText.split(' ')[0]) : undefined;
-
-        audiobooks.push({
-          asin,
-          title,
-          author: authorText.replace('By:', '').replace('Written by:', '').trim(),
-          narrator: narratorText.replace('Narrated by:', '').trim(),
-          coverArtUrl: coverArtUrl.replace(/\._.*_\./, '._SL500_.'),
-          rating,
+        const response = await this.client.get('/adblbestsellers', {
+          params: page > 1 ? { page } : {},
         });
-      });
+        const $ = cheerio.load(response.data);
 
-      console.log(`[Audible] Found ${audiobooks.length} popular audiobooks`);
+        let foundOnPage = 0;
+
+        // Parse audiobook items from best sellers page
+        $('.productListItem').each((index, element) => {
+          if (audiobooks.length >= limit) return false;
+
+          const $el = $(element);
+
+          // Extract ASIN from data attribute or link
+          const asin = $el.find('li').attr('data-asin') ||
+                       $el.find('a').attr('href')?.match(/\/pd\/[^\/]+\/([A-Z0-9]{10})/)?.[1] || '';
+
+          if (!asin) return;
+
+          // Skip duplicates
+          if (audiobooks.some(book => book.asin === asin)) return;
+
+          const title = $el.find('h3 a').text().trim() ||
+                        $el.find('.bc-heading a').text().trim();
+
+          const authorText = $el.find('.authorLabel').text().trim() ||
+                             $el.find('.bc-size-small .bc-text-bold').first().text().trim();
+
+          const narratorText = $el.find('.narratorLabel').text().trim() ||
+                               $el.find('.bc-size-small .bc-text-bold').eq(1).text().trim();
+
+          const coverArtUrl = $el.find('img').attr('src') || '';
+
+          const ratingText = $el.find('.ratingsLabel').text().trim();
+          const rating = ratingText ? parseFloat(ratingText.split(' ')[0]) : undefined;
+
+          audiobooks.push({
+            asin,
+            title,
+            author: authorText.replace('By:', '').replace('Written by:', '').trim(),
+            narrator: narratorText.replace('Narrated by:', '').trim(),
+            coverArtUrl: coverArtUrl.replace(/\._.*_\./, '._SL500_.'),
+            rating,
+          });
+
+          foundOnPage++;
+        });
+
+        console.log(`[Audible] Found ${foundOnPage} audiobooks on page ${page}`);
+
+        // If we got fewer than expected, probably no more pages
+        if (foundOnPage < 10) {
+          console.log(`[Audible] Reached end of available pages`);
+          break;
+        }
+
+        page++;
+
+        // Add delay between pages to respect rate limiting
+        if (page <= maxPages && audiobooks.length < limit) {
+          await this.delay(1500);
+        }
+      }
+
+      console.log(`[Audible] Found ${audiobooks.length} popular audiobooks across ${page} pages`);
       return audiobooks;
     } catch (error) {
       console.error('[Audible] Failed to fetch popular audiobooks:', error);
@@ -100,48 +130,78 @@ export class AudibleService {
   }
 
   /**
-   * Get new release audiobooks
+   * Get new release audiobooks (with pagination support)
    */
   async getNewReleases(limit: number = 20): Promise<AudibleAudiobook[]> {
     try {
-      console.log('[Audible] Fetching new releases...');
-
-      const response = await this.client.get('/newreleases');
-      const $ = cheerio.load(response.data);
+      console.log(`[Audible] Fetching new releases (limit: ${limit})...`);
 
       const audiobooks: AudibleAudiobook[] = [];
+      let page = 1;
+      const maxPages = Math.ceil(limit / 20); // Audible shows ~20 items per page
 
-      // Parse audiobook items from new releases page
-      $('.productListItem').each((index, element) => {
-        if (audiobooks.length >= limit) return false;
+      while (audiobooks.length < limit && page <= maxPages) {
+        console.log(`[Audible] Fetching page ${page}/${maxPages}...`);
 
-        const $el = $(element);
-
-        const asin = $el.find('li').attr('data-asin') ||
-                     $el.find('a').attr('href')?.match(/\/pd\/[^\/]+\/([A-Z0-9]{10})/)?.[1] || '';
-
-        if (!asin) return;
-
-        const title = $el.find('h3 a').text().trim() ||
-                      $el.find('.bc-heading a').text().trim();
-
-        const authorText = $el.find('.authorLabel').text().trim() ||
-                           $el.find('.bc-size-small .bc-text-bold').first().text().trim();
-
-        const narratorText = $el.find('.narratorLabel').text().trim();
-
-        const coverArtUrl = $el.find('img').attr('src') || '';
-
-        audiobooks.push({
-          asin,
-          title,
-          author: authorText.replace('By:', '').replace('Written by:', '').trim(),
-          narrator: narratorText.replace('Narrated by:', '').trim(),
-          coverArtUrl: coverArtUrl.replace(/\._.*_\./, '._SL500_.'),
+        const response = await this.client.get('/newreleases', {
+          params: page > 1 ? { page } : {},
         });
-      });
+        const $ = cheerio.load(response.data);
 
-      console.log(`[Audible] Found ${audiobooks.length} new releases`);
+        let foundOnPage = 0;
+
+        // Parse audiobook items from new releases page
+        $('.productListItem').each((index, element) => {
+          if (audiobooks.length >= limit) return false;
+
+          const $el = $(element);
+
+          const asin = $el.find('li').attr('data-asin') ||
+                       $el.find('a').attr('href')?.match(/\/pd\/[^\/]+\/([A-Z0-9]{10})/)?.[1] || '';
+
+          if (!asin) return;
+
+          // Skip duplicates
+          if (audiobooks.some(book => book.asin === asin)) return;
+
+          const title = $el.find('h3 a').text().trim() ||
+                        $el.find('.bc-heading a').text().trim();
+
+          const authorText = $el.find('.authorLabel').text().trim() ||
+                             $el.find('.bc-size-small .bc-text-bold').first().text().trim();
+
+          const narratorText = $el.find('.narratorLabel').text().trim();
+
+          const coverArtUrl = $el.find('img').attr('src') || '';
+
+          audiobooks.push({
+            asin,
+            title,
+            author: authorText.replace('By:', '').replace('Written by:', '').trim(),
+            narrator: narratorText.replace('Narrated by:', '').trim(),
+            coverArtUrl: coverArtUrl.replace(/\._.*_\./, '._SL500_.'),
+          });
+
+          foundOnPage++;
+        });
+
+        console.log(`[Audible] Found ${foundOnPage} audiobooks on page ${page}`);
+
+        // If we got fewer than expected, probably no more pages
+        if (foundOnPage < 10) {
+          console.log(`[Audible] Reached end of available pages`);
+          break;
+        }
+
+        page++;
+
+        // Add delay between pages to respect rate limiting
+        if (page <= maxPages && audiobooks.length < limit) {
+          await this.delay(1500);
+        }
+      }
+
+      console.log(`[Audible] Found ${audiobooks.length} new releases across ${page} pages`);
       return audiobooks;
     } catch (error) {
       console.error('[Audible] Failed to fetch new releases:', error);

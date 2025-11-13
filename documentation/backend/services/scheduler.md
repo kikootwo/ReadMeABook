@@ -38,10 +38,34 @@ This service manages recurring/scheduled jobs for the ReadMeABook application, p
 1. **plex_library_scan** - Scan Plex library for new audiobooks
    - Default: Every 6 hours
    - Triggers full library refresh
+   - Disabled by default (enable after initial setup)
 
 2. **audible_refresh** - Cache Audible popular/new releases
-   - Default: Every 24 hours
-   - Reduces API calls from frontend
+   - Default: Every 24 hours (midnight)
+   - Fetches 200 popular audiobooks and 200 new releases from Audible
+   - Stores data in database with category flags and rankings
+   - Enables database-first approach for homepage (no Audible API hits on page load)
+   - Disabled by default (enable after initial setup)
+
+3. **retry_missing_torrents** - Retry searches for requests with no torrents found
+   - Default: Every 24 hours (midnight)
+   - Re-searches all requests in 'awaiting_search' status
+   - Enabled by default
+   - Limits to 50 requests per run
+
+4. **retry_failed_imports** - Retry imports for requests with no audiobook files found
+   - Default: Every 6 hours
+   - Re-attempts file organization for requests in 'awaiting_import' status
+   - Enabled by default
+   - Limits to 50 requests per run
+
+5. **cleanup_seeded_torrents** - Clean up torrents after seeding requirements are met
+   - Default: Every 30 minutes
+   - Checks all completed requests for seeding time
+   - Uses qBittorrent's actual seeding_time data
+   - Only deletes torrents/files after configured seeding time is met
+   - Respects seeding_time_minutes configuration (0 = unlimited, never cleanup)
+   - Enabled by default
 
 ## Implementation Details
 
@@ -331,27 +355,72 @@ async function processPlexLibraryScan(payload: ScanPlexPayload) {
 
 ### Audible Refresh Processor
 
+**Updated Implementation:** Fetches 200 items per category and stores with ranking
+
 ```typescript
 async function processAudibleRefresh() {
   const audibleService = getAudibleService();
 
-  // Fetch and cache popular audiobooks
-  const popular = await audibleService.getPopularAudiobooks(50);
+  // Clear previous popular/new-release flags
+  await prisma.audiobook.updateMany({
+    where: { OR: [{ isPopular: true }, { isNewRelease: true }] },
+    data: {
+      isPopular: false,
+      isNewRelease: false,
+      popularRank: null,
+      newReleaseRank: null
+    },
+  });
 
-  // Fetch and cache new releases
-  const newReleases = await audibleService.getNewReleases(50);
+  // Fetch 200 popular audiobooks and 200 new releases
+  const popular = await audibleService.getPopularAudiobooks(200);
+  const newReleases = await audibleService.getNewReleases(200);
 
-  // Store in cache/database
-  await cacheAudibleData('popular', popular);
-  await cacheAudibleData('newReleases', newReleases);
+  const syncTime = new Date();
+
+  // Store popular audiobooks with ranking
+  for (let i = 0; i < popular.length; i++) {
+    await prisma.audiobook.upsert({
+      where: { audibleId: audiobook.asin },
+      create: {
+        // ... full metadata ...
+        isPopular: true,
+        popularRank: i + 1,
+        lastAudibleSync: syncTime,
+      },
+      update: {
+        // ... metadata updates ...
+        isPopular: true,
+        popularRank: i + 1,
+        lastAudibleSync: syncTime,
+      },
+    });
+  }
+
+  // Store new releases with ranking (same pattern)
+  // ...
 
   return {
     popularCount: popular.length,
     newReleasesCount: newReleases.length,
-    cachedAt: new Date(),
+    cachedAt: syncTime,
   };
 }
 ```
+
+**Key Features:**
+- Clears previous category flags before refresh for clean slate
+- Fetches 200 items per category (increased from 50) via multi-page scraping
+- Stores rank position from Audible for proper ordering
+- Records sync timestamp for freshness tracking
+- Performs fuzzy matching (70% threshold) against Plex library
+- Stores `plexGuid` when match is found (with duplicate checking)
+- Updates `availabilityStatus` to 'available' or 'unknown' based on current Plex library state
+- Prevents multiple Audible books from claiming the same `plexGuid` (unique constraint protection)
+- This enables "In Your Library" badges on homepage without additional API calls
+
+**Duplicate PlexGuid Handling:**
+Since `plexGuid` has a UNIQUE constraint (one Plex item = one database record), when multiple Audible books match the same Plex audiobook (e.g., different editions, series books), only the first match gets the `plexGuid` assigned. Subsequent matches are skipped to prevent constraint violations.
 
 ## Error Handling
 
@@ -433,6 +502,12 @@ async function processAudibleRefresh() {
 - ✅ Default alert() popups for job triggers (Fixed: replaced with toast notifications)
 - ✅ No UI for editing schedules (Fixed: added edit modal)
 - ✅ Audible data not persisting (Fixed: now saves to database)
+- ✅ Download progress logging ~500 times/second (Fixed: added 10-second delay and reduced log frequency)
+- ✅ Requests failing permanently when no torrents found (Fixed: added retry system with 'awaiting_search' status)
+- ✅ Requests failing permanently when no files found (Fixed: added retry system with max 5 retries and 'warn' status)
+- ✅ Failed requests blocking re-requests (Fixed: allow re-requesting failed/warn/cancelled requests)
+- ✅ Files deleted immediately preventing seeding (Fixed: files kept until seeding requirements met)
+- ✅ No seeding time configuration (Fixed: added seeding_time_minutes configuration)
 
 **Current Issues:**
 *None currently.*

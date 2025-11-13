@@ -90,14 +90,25 @@ export async function POST(request: NextRequest) {
       });
 
       if (existingRequest) {
-        return NextResponse.json(
-          {
-            error: 'DuplicateRequest',
-            message: 'You have already requested this audiobook',
-            request: existingRequest,
-          },
-          { status: 409 }
-        );
+        // Allow re-requesting if the status is failed, warn, or cancelled
+        const canReRequest = ['failed', 'warn', 'cancelled'].includes(existingRequest.status);
+
+        if (!canReRequest) {
+          return NextResponse.json(
+            {
+              error: 'DuplicateRequest',
+              message: 'You have already requested this audiobook',
+              request: existingRequest,
+            },
+            { status: 409 }
+          );
+        }
+
+        // Delete the existing failed/warn/cancelled request
+        console.log(`[Requests] Deleting existing ${existingRequest.status} request ${existingRequest.id} to allow re-request`);
+        await prisma.request.delete({
+          where: { id: existingRequest.id },
+        });
       }
 
       // Create request

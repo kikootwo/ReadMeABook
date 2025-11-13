@@ -15,8 +15,6 @@ import { getQBittorrentService } from '../integrations/qbittorrent.service';
 export async function processMonitorDownload(payload: MonitorDownloadPayload): Promise<any> {
   const { requestId, downloadHistoryId, downloadClientId, downloadClient } = payload;
 
-  console.log(`[MonitorDownload] Checking download ${downloadClientId} for request ${requestId}`);
-
   try {
     // Get download client service (currently only qBittorrent supported)
     if (downloadClient !== 'qbittorrent') {
@@ -28,8 +26,6 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
     // Get torrent status
     const torrent = await qbt.getTorrent(downloadClientId);
     const progress = qbt.getDownloadProgress(torrent);
-
-    console.log(`[MonitorDownload] Progress: ${progress.percent}% (${progress.state})`);
 
     // Update request progress
     await prisma.request.update({
@@ -129,16 +125,21 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         progress: progress.percent,
       };
     } else {
-      // Still downloading - schedule another check in 5 seconds
+      // Still downloading - schedule another check in 10 seconds
       const jobQueue = getJobQueueService();
       await jobQueue.addMonitorJob(
         requestId,
         downloadHistoryId,
         downloadClientId,
-        downloadClient
+        downloadClient,
+        10 // Delay 10 seconds between checks
       );
 
-      console.log(`[MonitorDownload] Download in progress (${progress.percent}%), will check again in 5 seconds`);
+      // Only log every 5% progress to reduce log spam
+      const shouldLog = progress.percent % 5 === 0 || progress.percent < 5;
+      if (shouldLog) {
+        console.log(`[MonitorDownload] Request ${requestId}: ${progress.percent}% complete (${progress.state})`);
+      }
 
       return {
         success: true,

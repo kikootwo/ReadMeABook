@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
         url: configMap.get('download_client_url') || '',
         username: configMap.get('download_client_username') || '',
         password: maskValue('password', configMap.get('download_client_password')),
+        seedingTimeMinutes: parseInt(configMap.get('seeding_time_minutes') || '0'),
       },
       paths: {
         downloadDir: configMap.get('download_dir') || '/downloads',

@@ -27,6 +27,7 @@ interface SelectedIndexer {
   id: number;
   name: string;
   priority: number;
+  seedingTimeMinutes: number;
 }
 
 export function ProwlarrStep({
@@ -66,13 +67,14 @@ export function ProwlarrStep({
         });
         setAvailableIndexers(data.indexers || []);
 
-        // Auto-select all indexers with default priority of 10
+        // Auto-select all indexers with default priority of 10 and seeding time of 0 (unlimited)
         const autoSelected: Record<number, SelectedIndexer> = {};
         data.indexers.forEach((indexer: IndexerInfo) => {
           autoSelected[indexer.id] = {
             id: indexer.id,
             name: indexer.name,
             priority: 10,
+            seedingTimeMinutes: 0,
           };
         });
         setSelectedIndexers(autoSelected);
@@ -103,6 +105,7 @@ export function ProwlarrStep({
           id: indexer.id,
           name: indexer.name,
           priority: 10, // Default priority
+          seedingTimeMinutes: 0, // Default: unlimited seeding
         };
       }
       onUpdate('prowlarrIndexers', Object.values(newSelected));
@@ -117,6 +120,20 @@ export function ProwlarrStep({
         newSelected[indexerId] = {
           ...newSelected[indexerId],
           priority: Math.max(1, Math.min(25, priority)), // Clamp between 1-25
+        };
+      }
+      onUpdate('prowlarrIndexers', Object.values(newSelected));
+      return newSelected;
+    });
+  };
+
+  const updateSeedingTime = (indexerId: number, seedingTimeMinutes: number) => {
+    setSelectedIndexers((prev) => {
+      const newSelected = { ...prev };
+      if (newSelected[indexerId]) {
+        newSelected[indexerId] = {
+          ...newSelected[indexerId],
+          seedingTimeMinutes: Math.max(0, seedingTimeMinutes), // Minimum 0 (unlimited)
         };
       }
       onUpdate('prowlarrIndexers', Object.values(newSelected));
@@ -257,11 +274,11 @@ export function ProwlarrStep({
           <div className="space-y-3">
             <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
               <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-3">
-                Select Indexers & Set Priorities (1-25)
+                Select Indexers & Configure (Priority: 1-25, Seeding Time)
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                 Higher priority indexers (closer to 25) will be preferred when ranking search results.
-                Indexers with equal priority will compete on a level playing field.
+                Seeding time is in minutes (0 = unlimited). Files will be kept until the seeding requirement is met.
               </p>
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {availableIndexers.map((indexer) => (
@@ -286,24 +303,46 @@ export function ProwlarrStep({
                       </span>
                     </label>
                     {selectedIndexers[indexer.id] && (
-                      <div className="flex items-center gap-2">
-                        <label
-                          htmlFor={`priority-${indexer.id}`}
-                          className="text-xs text-gray-600 dark:text-gray-400"
-                        >
-                          Priority:
-                        </label>
-                        <input
-                          id={`priority-${indexer.id}`}
-                          type="number"
-                          min="1"
-                          max="25"
-                          value={selectedIndexers[indexer.id].priority}
-                          onChange={(e) =>
-                            updatePriority(indexer.id, parseInt(e.target.value) || 10)
-                          }
-                          className="w-16 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                        />
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                          <label
+                            htmlFor={`priority-${indexer.id}`}
+                            className="text-xs text-gray-600 dark:text-gray-400"
+                          >
+                            Priority:
+                          </label>
+                          <input
+                            id={`priority-${indexer.id}`}
+                            type="number"
+                            min="1"
+                            max="25"
+                            value={selectedIndexers[indexer.id].priority}
+                            onChange={(e) =>
+                              updatePriority(indexer.id, parseInt(e.target.value) || 10)
+                            }
+                            className="w-16 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <label
+                            htmlFor={`seeding-${indexer.id}`}
+                            className="text-xs text-gray-600 dark:text-gray-400"
+                          >
+                            Seeding (min):
+                          </label>
+                          <input
+                            id={`seeding-${indexer.id}`}
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={selectedIndexers[indexer.id].seedingTimeMinutes}
+                            onChange={(e) =>
+                              updateSeedingTime(indexer.id, parseInt(e.target.value) || 0)
+                            }
+                            className="w-20 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                            placeholder="0 = ∞"
+                          />
+                        </div>
                       </div>
                     )}
                   </div>

@@ -137,27 +137,123 @@ export async function PATCH(
           request: updated,
           message: 'Request cancelled successfully',
         });
-      } else if (action === 'retry' && req.user.role === 'admin') {
-        // Retry failed request (admin only)
-        const updated = await prisma.request.update({
-          where: { id },
-          data: {
-            status: 'pending',
-            progress: 0,
-            errorMessage: null,
-            updatedAt: new Date(),
-          },
-          include: {
-            audiobook: true,
-          },
-        });
+      } else if (action === 'retry') {
+        // Retry failed request - allow users to retry their own warn/failed requests
+        // Only allow retry for failed, warn, or awaiting_* statuses
+        const retryableStatuses = ['failed', 'warn', 'awaiting_search', 'awaiting_import'];
 
-        // TODO: Trigger search job again
+        if (!retryableStatuses.includes(requestRecord.status)) {
+          return NextResponse.json(
+            {
+              error: 'ValidationError',
+              message: `Cannot retry request with status: ${requestRecord.status}`,
+            },
+            { status: 400 }
+          );
+        }
+
+        // Determine which job to trigger based on the current status
+        const { getJobQueueService } = await import('@/lib/services/job-queue.service');
+        const jobQueue = getJobQueueService();
+
+        let jobType: string;
+        let updated;
+
+        if (requestRecord.status === 'warn' || requestRecord.status === 'awaiting_import') {
+          // Retry import
+          const requestWithData = await prisma.request.findUnique({
+            where: { id },
+            include: {
+              audiobook: true,
+              downloadHistory: {
+                where: { selected: true },
+                orderBy: { createdAt: 'desc' },
+                take: 1,
+              },
+            },
+          });
+
+          if (!requestWithData || !requestWithData.downloadHistory[0]) {
+            return NextResponse.json(
+              {
+                error: 'ValidationError',
+                message: 'No download history found, cannot retry import',
+              },
+              { status: 400 }
+            );
+          }
+
+          const downloadHistory = requestWithData.downloadHistory[0];
+
+          // Get download path from qBittorrent
+          const { getQBittorrentService } = await import('@/lib/integrations/qbittorrent.service');
+          const qbt = await getQBittorrentService();
+          const torrent = await qbt.getTorrent(downloadHistory.downloadClientId!);
+          const downloadPath = `${torrent.save_path}/${torrent.name}`;
+
+          await jobQueue.addOrganizeJob(
+            id,
+            requestWithData.audiobook.id,
+            downloadPath,
+            `/media/audiobooks/${requestWithData.audiobook.author}/${requestWithData.audiobook.title}`
+          );
+
+          updated = await prisma.request.update({
+            where: { id },
+            data: {
+              status: 'processing',
+              progress: 100,
+              errorMessage: null,
+              updatedAt: new Date(),
+            },
+            include: {
+              audiobook: true,
+            },
+          });
+
+          jobType = 'import';
+        } else {
+          // Retry search
+          const requestWithData = await prisma.request.findUnique({
+            where: { id },
+            include: {
+              audiobook: true,
+            },
+          });
+
+          if (!requestWithData) {
+            return NextResponse.json(
+              { error: 'NotFound', message: 'Request not found' },
+              { status: 404 }
+            );
+          }
+
+          await jobQueue.addSearchJob(id, {
+            id: requestWithData.audiobook.id,
+            title: requestWithData.audiobook.title,
+            author: requestWithData.audiobook.author,
+          });
+
+          updated = await prisma.request.update({
+            where: { id },
+            data: {
+              status: 'pending',
+              progress: 0,
+              errorMessage: null,
+              updatedAt: new Date(),
+            },
+            include: {
+              audiobook: true,
+            },
+          });
+
+          jobType = 'search';
+        }
 
         return NextResponse.json({
           success: true,
           request: updated,
-          message: 'Request retry initiated',
+          message: `Request retry initiated (${jobType})`,
         });
       }
 

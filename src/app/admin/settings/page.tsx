@@ -9,6 +9,23 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import Link from 'next/link';
+import { fetchWithAuth } from '@/lib/utils/api';
+
+interface PlexLibrary {
+  id: string;
+  title: string;
+  type: string;
+}
+
+interface IndexerConfig {
+  id: number;
+  name: string;
+  protocol: string;
+  privacy: string;
+  enabled: boolean;
+  priority: number;
+  seedingTimeMinutes: number;
+}
 
 interface Settings {
   plex: {
@@ -30,40 +47,95 @@ interface Settings {
     downloadDir: string;
     mediaDir: string;
   };
-  general: {
-    appName: string;
-    allowRegistrations: boolean;
-    maxConcurrentDownloads: number;
-    autoApproveRequests: boolean;
-  };
 }
 
 export default function AdminSettings() {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [plexLibraries, setPlexLibraries] = useState<PlexLibrary[]>([]);
+  const [indexers, setIndexers] = useState<IndexerConfig[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingLibraries, setLoadingLibraries] = useState(false);
+  const [loadingIndexers, setLoadingIndexers] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
-  const [activeTab, setActiveTab] = useState<
-    'plex' | 'prowlarr' | 'download' | 'paths' | 'general'
-  >('plex');
+  const [activeTab, setActiveTab] = useState<'plex' | 'prowlarr' | 'download' | 'paths'>('plex');
 
   useEffect(() => {
     fetchSettings();
   }, []);
 
+  // Fetch libraries/indexers when tabs become active or when page first loads
+  useEffect(() => {
+    if (!settings) return;
+
+    if (activeTab === 'plex' && settings.plex.url && settings.plex.token) {
+      fetchPlexLibraries();
+    }
+  }, [activeTab, settings?.plex.url, settings?.plex.token]);
+
+  useEffect(() => {
+    if (!settings) return;
+
+    if (activeTab === 'prowlarr' && settings.prowlarr.url && settings.prowlarr.apiKey) {
+      fetchIndexers();
+    }
+  }, [activeTab, settings?.prowlarr.url, settings?.prowlarr.apiKey]);
+
   const fetchSettings = async () => {
     try {
-      const response = await fetch('/api/admin/settings');
+      const response = await fetchWithAuth('/api/admin/settings');
       if (response.ok) {
         const data = await response.json();
         setSettings(data);
+      } else {
+        console.error('Failed to fetch settings:', response.status, response.statusText);
       }
     } catch (error) {
       console.error('Failed to fetch settings:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPlexLibraries = async (force = false) => {
+    if (!force && plexLibraries.length > 0) return; // Already loaded
+
+    setLoadingLibraries(true);
+    try {
+      const response = await fetchWithAuth('/api/admin/settings/plex/libraries');
+      if (response.ok) {
+        const data = await response.json();
+        setPlexLibraries(data.libraries || []);
+      } else {
+        const data = await response.json();
+        console.error('Failed to fetch Plex libraries:', data);
+        setMessage({ type: 'error', text: data.message || 'Failed to load Plex libraries. Check your Plex URL and token.' });
+      }
+    } catch (error) {
+      console.error('Failed to fetch Plex libraries:', error);
+      setMessage({ type: 'error', text: 'Failed to load Plex libraries. Check your Plex URL and token.' });
+    } finally {
+      setLoadingLibraries(false);
+    }
+  };
+
+  const fetchIndexers = async () => {
+    if (indexers.length > 0) return; // Already loaded
+
+    setLoadingIndexers(true);
+    try {
+      const response = await fetchWithAuth('/api/admin/settings/prowlarr/indexers');
+      if (response.ok) {
+        const data = await response.json();
+        setIndexers(data.indexers || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch indexers:', error);
+      setMessage({ type: 'error', text: 'Failed to load Prowlarr indexers. Check your Prowlarr URL and API key.' });
+    } finally {
+      setLoadingIndexers(false);
     }
   };
 
@@ -75,7 +147,7 @@ export default function AdminSettings() {
 
     try {
       // Save Plex settings
-      const plexResponse = await fetch('/api/admin/settings/plex', {
+      const plexResponse = await fetchWithAuth('/api/admin/settings/plex', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings.plex),
@@ -83,6 +155,19 @@ export default function AdminSettings() {
 
       if (!plexResponse.ok) {
         throw new Error('Failed to save Plex settings');
+      }
+
+      // Save indexer configuration if on prowlarr tab
+      if (activeTab === 'prowlarr' && indexers.length > 0) {
+        const indexersResponse = await fetchWithAuth('/api/admin/settings/prowlarr/indexers', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ indexers }),
+        });
+
+        if (!indexersResponse.ok) {
+          throw new Error('Failed to save indexer configuration');
+        }
       }
 
       setMessage({ type: 'success', text: 'Settings saved successfully!' });
@@ -107,10 +192,9 @@ export default function AdminSettings() {
 
   const tabs = [
     { id: 'plex', label: 'Plex', icon: '📺' },
-    { id: 'prowlarr', label: 'Prowlarr', icon: '🔍' },
+    { id: 'prowlarr', label: 'Indexers', icon: '🔍' },
     { id: 'download', label: 'Download Client', icon: '⬇️' },
     { id: 'paths', label: 'Paths', icon: '📁' },
-    { id: 'general', label: 'General', icon: '⚙️' },
   ];
 
   return (
@@ -166,7 +250,11 @@ export default function AdminSettings() {
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
+                  onClick={() => {
+                    setActiveTab(tab.id as any);
+                    if (tab.id === 'plex') fetchPlexLibraries();
+                    if (tab.id === 'prowlarr') fetchIndexers();
+                  }}
                   className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${
                     activeTab === tab.id
                       ? 'border-blue-500 text-blue-600 dark:text-blue-400'
@@ -233,38 +321,55 @@ export default function AdminSettings() {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Audiobook Library ID
+                    Audiobook Library
                   </label>
-                  <Input
-                    type="text"
-                    value={settings.plex.libraryId}
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        plex: { ...settings.plex, libraryId: e.target.value },
-                      })
-                    }
-                    placeholder="Library ID"
-                  />
+                  {loadingLibraries ? (
+                    <div className="flex items-center gap-2 py-2">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                      <span className="text-sm text-gray-500">Loading libraries...</span>
+                    </div>
+                  ) : plexLibraries.length > 0 ? (
+                    <select
+                      value={settings.plex.libraryId}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          plex: { ...settings.plex, libraryId: e.target.value },
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                    >
+                      <option value="">Select a library...</option>
+                      {plexLibraries.map((lib) => (
+                        <option key={lib.id} value={lib.id}>
+                          {lib.title} ({lib.type})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="text-sm text-gray-500 py-2">
+                      Save your Plex URL and token first, then refresh to load libraries.
+                    </div>
+                  )}
                 </div>
               </div>
             )}
 
-            {/* Prowlarr Tab */}
+            {/* Prowlarr/Indexers Tab */}
             {activeTab === 'prowlarr' && (
-              <div className="space-y-6 max-w-2xl">
+              <div className="space-y-6 max-w-4xl">
                 <div>
                   <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                    Prowlarr Configuration
+                    Indexer Configuration
                   </h2>
                   <p className="text-gray-600 dark:text-gray-400 mb-6">
-                    Configure your Prowlarr indexer manager.
+                    Configure your Prowlarr connection and select which indexers to use with priority and seeding time.
                   </p>
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Server URL
+                    Prowlarr Server URL
                   </label>
                   <Input
                     type="url"
@@ -281,7 +386,7 @@ export default function AdminSettings() {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    API Key
+                    Prowlarr API Key
                   </label>
                   <Input
                     type="password"
@@ -297,6 +402,106 @@ export default function AdminSettings() {
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                     Found in Prowlarr Settings → General → Security → API Key
                   </p>
+                </div>
+
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
+                    Available Indexers
+                  </h3>
+                  {loadingIndexers ? (
+                    <div className="flex items-center gap-2 py-4">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                      <span className="text-sm text-gray-500">Loading indexers...</span>
+                    </div>
+                  ) : indexers.length > 0 ? (
+                    <div className="space-y-4">
+                      {indexers.map((indexer) => (
+                        <div
+                          key={indexer.id}
+                          className="border border-gray-200 dark:border-gray-700 rounded-lg p-4"
+                        >
+                          <div className="flex items-start gap-4">
+                            <input
+                              type="checkbox"
+                              checked={indexer.enabled}
+                              onChange={(e) => {
+                                setIndexers(
+                                  indexers.map((idx) =>
+                                    idx.id === indexer.id
+                                      ? { ...idx, enabled: e.target.checked }
+                                      : idx
+                                  )
+                                );
+                              }}
+                              className="mt-1 h-5 w-5 rounded border-gray-300"
+                            />
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <h4 className="font-medium text-gray-900 dark:text-gray-100">
+                                  {indexer.name}
+                                </h4>
+                                <span className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
+                                  {indexer.protocol}
+                                </span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                                    Priority (1-25)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="25"
+                                    value={indexer.priority}
+                                    onChange={(e) => {
+                                      const value = parseInt(e.target.value) || 10;
+                                      setIndexers(
+                                        indexers.map((idx) =>
+                                          idx.id === indexer.id
+                                            ? { ...idx, priority: Math.max(1, Math.min(25, value)) }
+                                            : idx
+                                        )
+                                      );
+                                    }}
+                                    disabled={!indexer.enabled}
+                                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
+                                  />
+                                  <p className="text-xs text-gray-500 mt-1">Higher = preferred</p>
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                                    Seeding Time (minutes)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={indexer.seedingTimeMinutes}
+                                    onChange={(e) => {
+                                      setIndexers(
+                                        indexers.map((idx) =>
+                                          idx.id === indexer.id
+                                            ? { ...idx, seedingTimeMinutes: parseInt(e.target.value) || 0 }
+                                            : idx
+                                        )
+                                      );
+                                    }}
+                                    disabled={!indexer.enabled}
+                                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
+                                  />
+                                  <p className="text-xs text-gray-500 mt-1">0 = unlimited</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-gray-500 py-4 text-center border border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+                      Save your Prowlarr URL and API key first, then refresh to load indexers.
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -420,7 +625,7 @@ export default function AdminSettings() {
                     className="font-mono"
                   />
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Temporary location for torrent downloads
+                    Temporary location for torrent downloads (kept for seeding)
                   </p>
                 </div>
 
@@ -442,61 +647,6 @@ export default function AdminSettings() {
                   />
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                     Final location for organized audiobook library (Plex scans this directory)
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* General Tab */}
-            {activeTab === 'general' && (
-              <div className="space-y-6 max-w-2xl">
-                <div>
-                  <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                    General Settings
-                  </h2>
-                  <p className="text-gray-600 dark:text-gray-400 mb-6">
-                    Configure general application preferences.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Application Name
-                  </label>
-                  <Input
-                    type="text"
-                    value={settings.general.appName}
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        general: { ...settings.general, appName: e.target.value },
-                      })
-                    }
-                    placeholder="ReadMeABook"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Max Concurrent Downloads
-                  </label>
-                  <Input
-                    type="number"
-                    min="1"
-                    max="10"
-                    value={settings.general.maxConcurrentDownloads}
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        general: {
-                          ...settings.general,
-                          maxConcurrentDownloads: parseInt(e.target.value),
-                        },
-                      })
-                    }
-                  />
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Maximum number of simultaneous downloads
                   </p>
                 </div>
               </div>

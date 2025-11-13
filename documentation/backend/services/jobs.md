@@ -65,6 +65,22 @@ Each job type has a dedicated processor function that:
 - Failed jobs moved to "failed" queue for manual review
 - Dead letter queue after max retries exceeded
 
+### Special Job Behaviors
+
+**monitor_download:**
+- Runs with a 10-second delay between checks (prevents excessive logging)
+- Only logs progress at 5% intervals or first 5%
+- Automatically reschedules itself until download completes or fails
+
+**search_indexers:**
+- If no torrents found, moves request to 'awaiting_search' status instead of failing
+- Allows automatic retry via scheduled job
+
+**organize_files:**
+- If no audiobook files found, moves request to 'awaiting_import' status
+- Tracks import attempts (max 5 by default)
+- After max retries, moves to 'warn' status for manual intervention
+
 ## Tech Stack
 
 **Queue:** Bull (npm package)
@@ -322,7 +338,10 @@ queue.on('stalled', async (job) => {
 
 ## Known Issues
 
-*This section will be updated during implementation.*
+**Fixed Issues:**
+- ✅ Monitor download job logging excessively (~500 times/second) - Fixed with 10-second delay
+- ✅ No retry mechanism for missing torrents - Fixed with 'awaiting_search' status
+- ✅ No retry mechanism for failed imports - Fixed with 'awaiting_import' status and max retries
 
 **Potential Issues:**
 - Stalled jobs if worker crashes (need monitoring)

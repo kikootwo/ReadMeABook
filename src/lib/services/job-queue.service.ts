@@ -298,7 +298,8 @@ export class JobQueueService {
     requestId: string,
     downloadHistoryId: string,
     downloadClientId: string,
-    downloadClient: 'qbittorrent' | 'transmission'
+    downloadClient: 'qbittorrent' | 'transmission',
+    delaySeconds: number = 0
   ): Promise<string> {
     return await this.addJob(
       'monitor_download',
@@ -310,6 +311,7 @@ export class JobQueueService {
       } as MonitorDownloadPayload,
       {
         priority: 5, // Medium priority
+        delay: delaySeconds * 1000, // Convert seconds to milliseconds
       }
     );
   }
