@@ -7,7 +7,6 @@
 
 import React from 'react';
 import Image from 'next/image';
-import Link from 'next/link';
 import { StatusBadge } from './StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { useCancelRequest } from '@/lib/hooks/useRequests';
@@ -193,15 +192,6 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
               >
                 Cancel
               </Button>
-            )}
-
-            {request.status === 'completed' && (
-              <Link
-                href="/profile"
-                className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-              >
-                View in Plex →
-              </Link>
             )}
           </div>
         </div>
