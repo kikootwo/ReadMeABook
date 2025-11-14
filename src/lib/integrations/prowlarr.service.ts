@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
+import { XMLParser } from 'fast-xml-parser';
 import { TorrentResult } from '../utils/ranking-algorithm';
 
 export interface SearchFilters {
@@ -18,6 +19,13 @@ export interface Indexer {
   enable: boolean;
   protocol: string;
   priority: number;
+  capabilities?: {
+    supportsRss?: boolean;
+  };
+  fields?: Array<{
+    name: string;
+    value: any;
+  }>;
 }
 
 export interface IndexerStats {
@@ -143,6 +151,114 @@ export class ProwlarrService {
       console.error('Failed to get Prowlarr stats:', error);
       throw new Error('Failed to get indexer statistics');
     }
+  }
+
+  /**
+   * Get RSS feed for a specific indexer
+   * Returns recent releases from the indexer's RSS feed
+   * Uses true RSS feed endpoint to avoid burdening indexers with searches
+   */
+  async getRssFeed(indexerId: number): Promise<TorrentResult[]> {
+    try {
+      // Prowlarr RSS endpoint: /{indexerId}/api?apikey={key}&t=search&cat=3030
+      const rssUrl = `${this.baseUrl}/${indexerId}/api`;
+
+      const response = await axios.get(rssUrl, {
+        params: {
+          apikey: this.apiKey,
+          t: 'search',
+          cat: this.defaultCategory.toString(),
+          limit: 100,
+          extended: 1,
+        },
+        timeout: 30000,
+        responseType: 'text', // Get XML as text
+      });
+
+      // Parse XML RSS feed
+      const parser = new XMLParser({
+        ignoreAttributes: false,
+        attributeNamePrefix: '@_',
+        allowBooleanAttributes: true,
+      });
+
+      const parsed = parser.parse(response.data);
+
+      // Extract items from RSS feed
+      const items = parsed?.rss?.channel?.item || [];
+      const itemsArray = Array.isArray(items) ? items : [items];
+
+      // Transform RSS items to TorrentResult format
+      const results: TorrentResult[] = [];
+
+      for (const item of itemsArray) {
+        if (!item) continue;
+
+        try {
+          // Extract torznab attributes
+          const attrs = Array.isArray(item['torznab:attr']) ? item['torznab:attr'] : [item['torznab:attr']];
+          const getAttr = (name: string) => {
+            const attr = attrs.find((a: any) => a?.['@_name'] === name);
+            return attr?.['@_value'];
+          };
+
+          const seeders = parseInt(getAttr('seeders') || '0', 10);
+          const peers = parseInt(getAttr('peers') || '0', 10);
+          const leechers = Math.max(0, peers - seeders);
+
+          // Extract metadata from title
+          const metadata = this.extractMetadata(item.title || '');
+
+          const result: TorrentResult = {
+            indexer: item.prowlarrindexer?.['#text'] || item.prowlarrindexer || 'Unknown',
+            title: item.title || '',
+            size: parseInt(item.size || '0', 10),
+            seeders,
+            leechers,
+            publishDate: item.pubDate ? new Date(item.pubDate) : new Date(),
+            downloadUrl: item.link || item.enclosure?.['@_url'] || '',
+            infoHash: getAttr('infohash'),
+            guid: item.guid || '',
+            format: metadata.format,
+            bitrate: metadata.bitrate,
+            hasChapters: metadata.hasChapters,
+          };
+
+          results.push(result);
+        } catch (error) {
+          console.error('Failed to parse RSS item:', error);
+          // Continue with other items
+        }
+      }
+
+      console.log(`RSS feed for indexer ${indexerId} returned ${results.length} results`);
+
+      return results;
+    } catch (error) {
+      console.error(`Failed to get RSS feed for indexer ${indexerId}:`, error);
+      throw new Error(`Failed to get RSS feed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Get RSS feeds from all enabled indexers
+   */
+  async getAllRssFeeds(indexerIds: number[]): Promise<TorrentResult[]> {
+    const allResults: TorrentResult[] = [];
+
+    for (const indexerId of indexerIds) {
+      try {
+        const results = await this.getRssFeed(indexerId);
+        allResults.push(...results);
+      } catch (error) {
+        console.error(`Failed to get RSS feed for indexer ${indexerId}:`, error);
+        // Continue with other indexers even if one fails
+      }
+    }
+
+    console.log(`RSS feeds from ${indexerIds.length} indexers returned ${allResults.length} total results`);
+
+    return allResults;
   }
 
   /**

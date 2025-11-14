@@ -1,8 +1,8 @@
 # Prowlarr Integration
 
-**Status:** ❌ Not Implemented
+**Status:** ✅ Implemented
 
-Indexer aggregator for searching multiple torrent/usenet indexers simultaneously.
+Indexer aggregator for searching multiple torrent/usenet indexers simultaneously. Supports manual search and automatic RSS feed monitoring.
 
 ## API
 
@@ -12,6 +12,7 @@ Indexer aggregator for searching multiple torrent/usenet indexers simultaneously
 **GET /search?query={q}&categories=3030** - Search all indexers (3030 = audiobooks)
 **GET /indexer** - List configured indexers
 **GET /indexerstats** - Indexer statistics
+**GET /feed/{indexerId}/api?t=search&cat=3030&limit=100** - RSS feed for specific indexer
 
 ## Search
 
@@ -43,6 +44,21 @@ interface TorrentResult {
 - 429: Rate limit (exponential backoff, max 3 retries)
 - 503: Service unavailable
 - Timeout: 30s per search
+
+## RSS Monitoring
+
+**Automatic Feed Monitoring:** Enabled per-indexer via setup wizard or settings page
+**Schedule:** Every 15 minutes (default, configurable)
+**Process:**
+1. Fetch RSS feeds from all indexers with RSS enabled
+2. Fuzzy match results against requests in 'awaiting_search' status
+3. Trigger search jobs for matches
+4. Limit: 100 results per feed, 100 missing requests per check
+
+**Matching Logic:**
+- Author name must appear in torrent title
+- At least 2 title words (>2 chars) must match
+- First match triggers search job (no duplicates)
 
 ## Tech Stack
 

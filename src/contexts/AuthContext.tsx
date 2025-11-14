@@ -5,7 +5,8 @@
 
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
+import { isTokenExpired, getRefreshTimeMs } from '@/lib/utils/jwt-client';
 
 interface User {
   id: string;
@@ -32,6 +33,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const refreshTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Clear any existing refresh timer
+  const clearRefreshTimer = () => {
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    }
+  };
+
+  // Schedule auto-refresh before token expires
+  const scheduleTokenRefresh = (token: string) => {
+    clearRefreshTimer();
+
+    const refreshTimeMs = getRefreshTimeMs(token);
+    if (refreshTimeMs === null || refreshTimeMs <= 0) {
+      // Token is already expired or about to expire, refresh immediately
+      refreshToken();
+      return;
+    }
+
+    // Schedule refresh 5 mins before expiry
+    refreshTimerRef.current = setTimeout(() => {
+      refreshToken();
+    }, refreshTimeMs);
+  };
 
   // Load user from localStorage on mount
   useEffect(() => {
@@ -39,12 +66,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const storedUser = localStorage.getItem('user');
 
     if (storedToken && storedUser) {
+      // Validate token hasn't expired
+      if (isTokenExpired(storedToken)) {
+        // Token expired - try to refresh
+        const storedRefreshToken = localStorage.getItem('refreshToken');
+        if (storedRefreshToken && !isTokenExpired(storedRefreshToken)) {
+          // Refresh token is still valid, attempt refresh
+          refreshTokenInternal(storedRefreshToken).finally(() => {
+            setIsLoading(false);
+          });
+          return;
+        } else {
+          // Refresh token also expired - clear everything
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('refreshToken');
+          localStorage.removeItem('user');
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      // Token is valid - restore session
       setAccessToken(storedToken);
       setUser(JSON.parse(storedUser));
+      scheduleTokenRefresh(storedToken);
     }
 
     setIsLoading(false);
   }, []);
+
+  // Internal refresh function (used by mount effect and public refresh)
+  const refreshTokenInternal = async (storedRefreshToken?: string) => {
+    const refreshTokenToUse = storedRefreshToken || localStorage.getItem('refreshToken');
+
+    if (!refreshTokenToUse) {
+      logout();
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: refreshTokenToUse }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setAccessToken(data.accessToken);
+        localStorage.setItem('accessToken', data.accessToken);
+
+        // Schedule next refresh
+        scheduleTokenRefresh(data.accessToken);
+      } else {
+        logout();
+      }
+    } catch (error) {
+      console.error('Token refresh error:', error);
+      logout();
+    }
+  };
 
   // Poll Plex OAuth callback during login
   const login = async (pinId: number) => {
@@ -66,6 +147,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           localStorage.setItem('refreshToken', data.refreshToken);
           localStorage.setItem('user', JSON.stringify(data.user));
 
+          // Schedule auto-refresh
+          scheduleTokenRefresh(data.accessToken);
+
           return;
         }
 
@@ -83,6 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    clearRefreshTimer();
     setUser(null);
     setAccessToken(null);
     localStorage.removeItem('accessToken');
@@ -94,37 +179,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshToken = async () => {
-    const storedRefreshToken = localStorage.getItem('refreshToken');
-
-    if (!storedRefreshToken) {
-      logout();
-      return;
-    }
-
-    try {
-      const response = await fetch('/api/auth/refresh', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: storedRefreshToken }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setAccessToken(data.accessToken);
-        localStorage.setItem('accessToken', data.accessToken);
-      } else {
-        logout();
-      }
-    } catch (error) {
-      console.error('Token refresh error:', error);
-      logout();
-    }
+    await refreshTokenInternal();
   };
 
   const setAuthData = (newUser: User, newAccessToken: string) => {
     setUser(newUser);
     setAccessToken(newAccessToken);
+    scheduleTokenRefresh(newAccessToken);
   };
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      clearRefreshTimer();
+    };
+  }, []);
+
+  // Listen for logout in other tabs (cross-tab sync)
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      // If access token was removed in another tab, logout here too
+      if (e.key === 'accessToken' && e.newValue === null) {
+        clearRefreshTimer();
+        setUser(null);
+        setAccessToken(null);
+      }
+      // If access token was added in another tab, sync it
+      else if (e.key === 'accessToken' && e.newValue) {
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) {
+          setAccessToken(e.newValue);
+          setUser(JSON.parse(storedUser));
+          scheduleTokenRefresh(e.newValue);
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
 
   return (
     <AuthContext.Provider

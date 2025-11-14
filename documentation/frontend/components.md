@@ -34,8 +34,9 @@ src/components/
 
 **Requests**
 - **RequestCard** ✅ - Cover, title, author, status badge, progress bar, timestamps, cancel button
-- **StatusBadge** - Color-coded status (pending=yellow, downloading=purple, completed=green, failed=red)
+- **StatusBadge** - Color-coded status (pending=yellow, downloading=purple, completed=green, failed=red). Shows "Initializing..." when downloading with 0% progress (fetching torrent info), "Downloading" when progress > 0%
 - **ProgressBar** - Animated fill with percentage
+- Active indicator: "Setting up..." with spinner when progress = 0%, "Active" with pulsing dot when progress > 0%
 
 **Forms**
 - **SearchBar** - Debounced input with suggestions

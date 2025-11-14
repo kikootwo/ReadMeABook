@@ -23,6 +23,7 @@
     "cheerio": "^1.0.0-rc.12",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
+    "fast-xml-parser": "^5.3.1",
     "form-data": "^4.0.4",
     "ioredis": "^5.3.2",
     "jsonwebtoken": "^9.0.2",

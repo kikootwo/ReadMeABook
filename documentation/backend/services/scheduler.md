@@ -18,13 +18,16 @@ Manages recurring/scheduled jobs providing automated tasks (Plex scans, Audible 
 3. **retry_missing_torrents** - Default: daily midnight, re-searches 'awaiting_search' status (limit 50), enabled by default
 4. **retry_failed_imports** - Default: every 6 hours, re-attempts 'awaiting_import' status (limit 50), enabled by default
 5. **cleanup_seeded_torrents** - Default: every 30 mins, deletes torrents after seeding requirements met, respects `seeding_time_minutes` config (0 = never), enabled by default
+6. **monitor_rss_feeds** - Default: every 15 mins, checks RSS feeds from enabled indexers, matches against 'awaiting_search' requests (limit 100), triggers search jobs for matches, enabled by default
 
 ## Architecture: Bull + Cron
 
-- Repeatable jobs with cron expressions
+- Repeatable jobs with cron expressions (Bull's built-in scheduler)
 - Manual trigger capability
 - Job persistence and retry logic
 - Admin UI management
+- Automatic scheduling/unscheduling when jobs enabled/disabled
+- Schedule updates handled by unscheduling old job and scheduling new one
 
 ## Cron Expressions
 
@@ -79,6 +82,27 @@ interface ScheduledJob {
 }
 ```
 
+## Implementation Details
+
+**Scheduler Service (`scheduler.service.ts`):**
+- `start()`: Initializes scheduler, creates default jobs, schedules all enabled jobs
+- `scheduleJob()`: Adds job to Bull as repeatable job with cron expression
+- `unscheduleJob()`: Removes repeatable job from Bull
+- `updateScheduledJob()`: Unschedules old job, updates DB, schedules new job if enabled
+- `deleteScheduledJob()`: Unschedules job before deleting from DB
+
+**Job Queue Service (`job-queue.service.ts`):**
+- `addRepeatableJob()`: Registers job type with Bull's repeat scheduler
+- `removeRepeatableJob()`: Removes job from Bull's repeat scheduler
+- Processors for each scheduled job type call `scheduler.triggerJobNow()`
+- `setMaxListeners(20)`: Set on both Redis client and Bull queue to accommodate 12 job processors (6 regular + 6 scheduled)
+
+**Flow:**
+1. App starts → `scheduler.start()` → schedules all enabled jobs
+2. Bull triggers job at cron time → processor calls `triggerJobNow()`
+3. `triggerJobNow()` executes job-specific logic (Plex scan, Audible refresh, etc.)
+4. Updates `lastRun` timestamp in database
+
 ## Audible Refresh Processor
 
 **Implementation:**
@@ -104,6 +128,8 @@ interface ScheduledJob {
 - ✅ Failed requests blocking re-requests → allow re-requesting failed/warn/cancelled
 - ✅ Files deleted immediately → kept until seeding requirements met
 - ✅ No seeding time config → added `seeding_time_minutes`
+- ✅ Scheduled jobs not running on schedule → implemented Bull repeatable jobs with cron scheduling
+- ✅ MaxListenersExceededWarning → increased maxListeners to 20 on both Redis client and Bull queue
 
 ## Tech Stack
 

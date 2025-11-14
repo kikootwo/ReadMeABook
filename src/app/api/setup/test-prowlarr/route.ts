@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
         id: indexer.id,
         name: indexer.name,
         protocol: indexer.protocol,
+        supportsRss: indexer.capabilities?.supportsRss !== false, // Default to true if not specified
       })),
     });
   } catch (error) {

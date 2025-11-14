@@ -358,8 +358,8 @@ export class QBittorrentService {
 
       return torrents[0];
     } catch (error) {
-      console.error('Failed to get torrent info:', error);
-      throw new Error('Failed to get torrent information');
+      // Don't log error here - caller handles it (e.g., duplicate checking)
+      throw error;
     }
   }
 

@@ -245,17 +245,78 @@ export async function enrichAudiobookWithMatch(audiobook: AudiobookMatchInput & 
 /**
  * Batch enrich multiple audiobooks with match information.
  * Processes in parallel for better performance.
+ *
+ * @param audiobooks - Audiobooks to enrich
+ * @param userId - Optional user ID to check request status
  */
 export async function enrichAudiobooksWithMatches(
-  audiobooks: Array<AudiobookMatchInput & Record<string, any>>
+  audiobooks: Array<AudiobookMatchInput & Record<string, any>>,
+  userId?: string
 ) {
   const results = await Promise.all(audiobooks.map((book) => enrichAudiobookWithMatch(book)));
+
+  // If userId is provided, enrich with request status
+  if (userId) {
+    const asins = audiobooks.map(book => book.asin);
+
+    // Get all audiobook records for these ASINs
+    const audiobookRecords = await prisma.audiobook.findMany({
+      where: {
+        audibleAsin: { in: asins },
+      },
+      select: {
+        id: true,
+        audibleAsin: true,
+        requests: {
+          where: {
+            userId: userId,
+          },
+          select: {
+            id: true,
+            status: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
+      },
+    });
+
+    // Create a map of ASIN -> request status
+    const requestMap = new Map<string, { requestId: string; requestStatus: string }>();
+    for (const record of audiobookRecords) {
+      if (record.requests.length > 0 && record.audibleAsin) {
+        const request = record.requests[0];
+        requestMap.set(record.audibleAsin, {
+          requestId: request.id,
+          requestStatus: request.status,
+        });
+      }
+    }
+
+    // Add request status to results
+    for (const result of results) {
+      const requestInfo = requestMap.get(result.asin);
+      const enrichedResult = result as any;
+      if (requestInfo) {
+        enrichedResult.isRequested = true;
+        enrichedResult.requestStatus = requestInfo.requestStatus;
+        enrichedResult.requestId = requestInfo.requestId;
+      } else {
+        enrichedResult.isRequested = false;
+        enrichedResult.requestStatus = null;
+        enrichedResult.requestId = null;
+      }
+    }
+  }
 
   if (DEBUG_ENABLED) {
     const summary = {
       total: results.length,
       available: results.filter(r => r.isAvailable).length,
       notAvailable: results.filter(r => !r.isAvailable).length,
+      requested: userId ? results.filter(r => (r as any).isRequested).length : 'N/A',
     };
     console.log(JSON.stringify({ MATCHER_BATCH_SUMMARY: summary }));
   }

@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import useSWR, { mutate } from 'swr';
 import { useAuth } from '@/contexts/AuthContext';
+import { fetchWithAuth } from '@/lib/utils/api';
 import { Audiobook } from './useAudiobooks';
 
 export interface Request {
@@ -30,10 +31,8 @@ export interface Request {
   };
 }
 
-const fetcher = (url: string, token: string) =>
-  fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  }).then((res) => res.json());
+const fetcher = (url: string) =>
+  fetchWithAuth(url).then((res) => res.json());
 
 export function useRequests(status?: string, limit: number = 50) {
   const { accessToken } = useAuth();
@@ -45,8 +44,8 @@ export function useRequests(status?: string, limit: number = 50) {
   const endpoint = accessToken ? `/api/requests?${params.toString()}` : null;
 
   const { data, error, isLoading } = useSWR(
-    endpoint ? [endpoint, accessToken] : null,
-    ([url, token]) => fetcher(url, token as string),
+    endpoint,
+    fetcher,
     {
       refreshInterval: 5000, // Refresh every 5 seconds for real-time updates
     }
@@ -65,8 +64,8 @@ export function useRequest(requestId: string) {
   const endpoint = accessToken && requestId ? `/api/requests/${requestId}` : null;
 
   const { data, error, isLoading } = useSWR(
-    endpoint ? [endpoint, accessToken] : null,
-    ([url, token]) => fetcher(url, token as string),
+    endpoint,
+    fetcher,
     {
       refreshInterval: 3000, // Refresh every 3 seconds for progress updates
     }
@@ -93,11 +92,10 @@ export function useCreateRequest() {
     setError(null);
 
     try {
-      const response = await fetch('/api/requests', {
+      const response = await fetchWithAuth('/api/requests', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({ audiobook }),
       });
@@ -109,7 +107,7 @@ export function useCreateRequest() {
       }
 
       // Revalidate requests list
-      mutate((key) => Array.isArray(key) && key[0]?.includes('/api/requests'));
+      mutate((key) => typeof key === 'string' && key.includes('/api/requests'));
 
       return data.request;
     } catch (err) {
@@ -138,11 +136,10 @@ export function useCancelRequest() {
     setError(null);
 
     try {
-      const response = await fetch(`/api/requests/${requestId}`, {
+      const response = await fetchWithAuth(`/api/requests/${requestId}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({ action: 'cancel' }),
       });
@@ -154,7 +151,7 @@ export function useCancelRequest() {
       }
 
       // Revalidate requests
-      mutate((key) => Array.isArray(key) && key[0]?.includes('/api/requests'));
+      mutate((key) => typeof key === 'string' && key.includes('/api/requests'));
 
       return data.request;
     } catch (err) {

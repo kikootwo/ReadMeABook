@@ -25,6 +25,8 @@ interface IndexerConfig {
   enabled: boolean;
   priority: number;
   seedingTimeMinutes: number;
+  rssEnabled: boolean;
+  supportsRss?: boolean;
 }
 
 interface Settings {
@@ -146,28 +148,72 @@ export default function AdminSettings() {
     setMessage(null);
 
     try {
-      // Save Plex settings
-      const plexResponse = await fetchWithAuth('/api/admin/settings/plex', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings.plex),
-      });
+      // Save settings based on active tab
+      switch (activeTab) {
+        case 'plex':
+          const plexResponse = await fetchWithAuth('/api/admin/settings/plex', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings.plex),
+          });
 
-      if (!plexResponse.ok) {
-        throw new Error('Failed to save Plex settings');
-      }
+          if (!plexResponse.ok) {
+            throw new Error('Failed to save Plex settings');
+          }
+          break;
 
-      // Save indexer configuration if on prowlarr tab
-      if (activeTab === 'prowlarr' && indexers.length > 0) {
-        const indexersResponse = await fetchWithAuth('/api/admin/settings/prowlarr/indexers', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ indexers }),
-        });
+        case 'prowlarr':
+          // Save Prowlarr URL and API key
+          const prowlarrResponse = await fetchWithAuth('/api/admin/settings/prowlarr', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings.prowlarr),
+          });
 
-        if (!indexersResponse.ok) {
-          throw new Error('Failed to save indexer configuration');
-        }
+          if (!prowlarrResponse.ok) {
+            throw new Error('Failed to save Prowlarr settings');
+          }
+
+          // Save indexer configuration if indexers are loaded
+          if (indexers.length > 0) {
+            const indexersResponse = await fetchWithAuth('/api/admin/settings/prowlarr/indexers', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ indexers }),
+            });
+
+            if (!indexersResponse.ok) {
+              throw new Error('Failed to save indexer configuration');
+            }
+          }
+          break;
+
+        case 'download':
+          const downloadResponse = await fetchWithAuth('/api/admin/settings/download-client', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings.downloadClient),
+          });
+
+          if (!downloadResponse.ok) {
+            throw new Error('Failed to save download client settings');
+          }
+          break;
+
+        case 'paths':
+          const pathsResponse = await fetchWithAuth('/api/admin/settings/paths', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings.paths),
+          });
+
+          if (!pathsResponse.ok) {
+            throw new Error('Failed to save paths settings');
+          }
+          break;
+
+        default:
+          throw new Error('Unknown settings tab');
       }
 
       setMessage({ type: 'success', text: 'Settings saved successfully!' });
@@ -444,7 +490,7 @@ export default function AdminSettings() {
                                   {indexer.protocol}
                                 </span>
                               </div>
-                              <div className="grid grid-cols-2 gap-4">
+                              <div className="grid grid-cols-3 gap-4">
                                 <div>
                                   <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
                                     Priority (1-25)
@@ -478,10 +524,11 @@ export default function AdminSettings() {
                                     min="0"
                                     value={indexer.seedingTimeMinutes}
                                     onChange={(e) => {
+                                      const value = e.target.value === '' ? 0 : parseInt(e.target.value);
                                       setIndexers(
                                         indexers.map((idx) =>
                                           idx.id === indexer.id
-                                            ? { ...idx, seedingTimeMinutes: parseInt(e.target.value) || 0 }
+                                            ? { ...idx, seedingTimeMinutes: isNaN(value) ? 0 : value }
                                             : idx
                                         )
                                       );
@@ -490,6 +537,29 @@ export default function AdminSettings() {
                                     className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:opacity-50"
                                   />
                                   <p className="text-xs text-gray-500 mt-1">0 = unlimited</p>
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                                    RSS Monitoring
+                                  </label>
+                                  <div className="flex items-center h-[42px]">
+                                    <input
+                                      type="checkbox"
+                                      checked={indexer.rssEnabled || false}
+                                      onChange={(e) => {
+                                        setIndexers(
+                                          indexers.map((idx) =>
+                                            idx.id === indexer.id
+                                              ? { ...idx, rssEnabled: e.target.checked }
+                                              : idx
+                                          )
+                                        );
+                                      }}
+                                      disabled={!indexer.enabled || indexer.supportsRss === false}
+                                      className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                                    />
+                                  </div>
+                                  <p className="text-xs text-gray-500 mt-1">Check every 15min</p>
                                 </div>
                               </div>
                             </div>

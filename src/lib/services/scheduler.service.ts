@@ -6,7 +6,7 @@
 import { getJobQueueService, ScanPlexPayload } from './job-queue.service';
 import { prisma } from '../db';
 
-export type ScheduledJobType = 'plex_library_scan' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'cleanup_seeded_torrents';
+export type ScheduledJobType = 'plex_library_scan' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'cleanup_seeded_torrents' | 'monitor_rss_feeds';
 
 export interface ScheduledJob {
   id: string;
@@ -97,6 +97,13 @@ export class SchedulerService {
         enabled: true, // Enable by default
         payload: {},
       },
+      {
+        name: 'Monitor RSS Feeds',
+        type: 'monitor_rss_feeds' as ScheduledJobType,
+        schedule: '*/15 * * * *', // Every 15 minutes
+        enabled: true, // Enable by default
+        payload: {},
+      },
     ];
 
     for (const defaultJob of defaults) {
@@ -132,9 +139,35 @@ export class SchedulerService {
    * Schedule a single job using Bull's repeatable jobs
    */
   private async scheduleJob(job: any): Promise<void> {
-    // Note: Bull repeatable jobs would be set up here
-    // For now, we'll track in database and trigger manually
-    console.log(`[Scheduler] Job scheduled: ${job.name} (${job.schedule})`);
+    try {
+      await this.jobQueue.addRepeatableJob(
+        job.type,
+        { scheduledJobId: job.id },
+        job.schedule,
+        `scheduled-${job.id}`
+      );
+      console.log(`[Scheduler] Job scheduled: ${job.name} (${job.schedule})`);
+    } catch (error) {
+      console.error(`[Scheduler] Failed to schedule job ${job.name}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Unschedule a job by removing it from Bull's repeatable jobs
+   */
+  private async unscheduleJob(job: any): Promise<void> {
+    try {
+      await this.jobQueue.removeRepeatableJob(
+        job.type,
+        job.schedule,
+        `scheduled-${job.id}`
+      );
+      console.log(`[Scheduler] Job unscheduled: ${job.name}`);
+    } catch (error) {
+      console.error(`[Scheduler] Failed to unschedule job ${job.name}:`, error);
+      // Don't throw - job might not exist in Bull yet
+    }
   }
 
   /**
@@ -190,6 +223,15 @@ export class SchedulerService {
       this.validateCronExpression(dto.schedule);
     }
 
+    // Get the old job to unschedule it
+    const oldJob = await prisma.scheduledJob.findUnique({
+      where: { id },
+    });
+
+    if (oldJob && oldJob.enabled) {
+      await this.unscheduleJob(oldJob);
+    }
+
     const job = await prisma.scheduledJob.update({
       where: { id },
       data: {
@@ -201,7 +243,7 @@ export class SchedulerService {
       },
     });
 
-    // Reschedule if needed
+    // Reschedule if enabled
     if (job.enabled) {
       await this.scheduleJob(job);
     }
@@ -213,6 +255,14 @@ export class SchedulerService {
    * Delete scheduled job
    */
   async deleteScheduledJob(id: string): Promise<void> {
+    const job = await prisma.scheduledJob.findUnique({
+      where: { id },
+    });
+
+    if (job && job.enabled) {
+      await this.unscheduleJob(job);
+    }
+
     await prisma.scheduledJob.delete({
       where: { id },
     });
@@ -246,6 +296,9 @@ export class SchedulerService {
         break;
       case 'cleanup_seeded_torrents':
         bullJobId = await this.triggerCleanupSeededTorrents(job);
+        break;
+      case 'monitor_rss_feeds':
+        bullJobId = await this.triggerMonitorRssFeeds(job);
         break;
       default:
         throw new Error(`Unknown job type: ${job.type}`);
@@ -662,6 +715,112 @@ export class SchedulerService {
   }
 
   /**
+   * Trigger RSS feed monitoring
+   * Checks RSS feeds for new releases and matches against missing audiobooks
+   */
+  private async triggerMonitorRssFeeds(job: any): Promise<string> {
+    console.log('[MonitorRssFeeds] Starting RSS feed monitoring...');
+
+    // Get indexer configuration
+    const { getConfigService } = await import('./config.service');
+    const configService = getConfigService();
+    const indexersConfigStr = await configService.get('prowlarr_indexers');
+
+    if (!indexersConfigStr) {
+      console.log('[MonitorRssFeeds] No indexers configured, skipping');
+      return 'monitor-rss-feeds-' + Date.now() + '-no-config';
+    }
+
+    const indexersConfig = JSON.parse(indexersConfigStr);
+
+    // Filter indexers that have RSS enabled
+    const rssEnabledIndexers = indexersConfig.filter(
+      (indexer: any) => indexer.rssEnabled === true
+    );
+
+    if (rssEnabledIndexers.length === 0) {
+      console.log('[MonitorRssFeeds] No indexers with RSS enabled, skipping');
+      return 'monitor-rss-feeds-' + Date.now() + '-no-rss-indexers';
+    }
+
+    console.log(`[MonitorRssFeeds] Monitoring ${rssEnabledIndexers.length} RSS-enabled indexers`);
+
+    // Get RSS feeds from all enabled indexers
+    const { getProwlarrService } = await import('../integrations/prowlarr.service');
+    const prowlarrService = await getProwlarrService();
+
+    const indexerIds = rssEnabledIndexers.map((i: any) => i.id);
+    const rssResults = await prowlarrService.getAllRssFeeds(indexerIds);
+
+    console.log(`[MonitorRssFeeds] Retrieved ${rssResults.length} items from RSS feeds`);
+
+    if (rssResults.length === 0) {
+      return 'monitor-rss-feeds-' + Date.now() + '-no-results';
+    }
+
+    // Get all requests awaiting search (missing audiobooks)
+    const missingRequests = await prisma.request.findMany({
+      where: {
+        status: 'awaiting_search',
+      },
+      include: {
+        audiobook: true,
+      },
+      take: 100, // Limit to prevent overwhelming the system
+    });
+
+    console.log(`[MonitorRssFeeds] Found ${missingRequests.length} requests awaiting search`);
+
+    if (missingRequests.length === 0) {
+      return 'monitor-rss-feeds-' + Date.now() + '-no-missing';
+    }
+
+    // Match RSS results against missing audiobooks
+    let matched = 0;
+    const jobQueue = getJobQueueService();
+
+    for (const request of missingRequests) {
+      const audiobook = request.audiobook;
+
+      // Simple fuzzy matching: check if torrent title contains author and partial title
+      const authorWords = audiobook.author.toLowerCase().split(' ');
+      const titleWords = audiobook.title.toLowerCase().split(' ').slice(0, 3); // First 3 words
+
+      for (const torrent of rssResults) {
+        const torrentTitle = torrent.title.toLowerCase();
+
+        // Check if torrent contains author name and at least 2 title words
+        const hasAuthor = authorWords.some(word => word.length > 2 && torrentTitle.includes(word));
+        const titleMatchCount = titleWords.filter(word => word.length > 2 && torrentTitle.includes(word)).length;
+
+        if (hasAuthor && titleMatchCount >= 2) {
+          console.log(`[MonitorRssFeeds] Match found! "${audiobook.title}" by ${audiobook.author} matches torrent: ${torrent.title}`);
+
+          // Trigger search job to process this request
+          try {
+            await jobQueue.addSearchJob(request.id, {
+              id: audiobook.id,
+              title: audiobook.title,
+              author: audiobook.author,
+            });
+            matched++;
+            console.log(`[MonitorRssFeeds] Triggered search job for request ${request.id}`);
+          } catch (error) {
+            console.error(`[MonitorRssFeeds] Failed to trigger search for request ${request.id}:`, error);
+          }
+
+          // Only trigger once per request
+          break;
+        }
+      }
+    }
+
+    console.log(`[MonitorRssFeeds] RSS monitoring complete: ${matched} matches found and queued for processing`);
+
+    return `monitor-rss-feeds-${Date.now()}-matched:${matched}`;
+  }
+
+  /**
    * Trigger cleanup of torrents that have met seeding requirements
    */
   private async triggerCleanupSeededTorrents(job: any): Promise<string> {
@@ -670,10 +829,22 @@ export class SchedulerService {
     // Get indexer configuration with per-indexer seeding times
     const { getConfigService } = await import('./config.service');
     const configService = getConfigService();
-    const indexerConfigStr = await configService.get('prowlarr_indexers_config');
-    const indexerConfig = indexerConfigStr ? JSON.parse(indexerConfigStr) : {};
+    const indexersConfigStr = await configService.get('prowlarr_indexers');
 
-    console.log(`[CleanupSeededTorrents] Loaded configuration for ${Object.keys(indexerConfig).length} indexers`);
+    if (!indexersConfigStr) {
+      console.log('[CleanupSeededTorrents] No indexer configuration found, skipping');
+      return 'cleanup-seeded-torrents-' + Date.now() + '-no-config';
+    }
+
+    const indexersConfig = JSON.parse(indexersConfigStr);
+
+    // Create a map of indexer name to config for quick lookup
+    const indexerConfigMap = new Map<string, any>();
+    for (const indexer of indexersConfig) {
+      indexerConfigMap.set(indexer.name, indexer);
+    }
+
+    console.log(`[CleanupSeededTorrents] Loaded configuration for ${indexerConfigMap.size} indexers`);
 
     // Find all completed requests that have download history
     const completedRequests = await prisma.request.findMany({
@@ -711,16 +882,16 @@ export class SchedulerService {
         const indexerName = downloadHistory.indexerName;
 
         // Find matching indexer configuration by name
-        // indexerConfig is keyed by indexer ID, so we need to find by matching name
-        let seedingConfig = null;
-        for (const [id, config] of Object.entries(indexerConfig)) {
-          // We'll need to get the indexer name from Prowlarr, for now use a default
-          seedingConfig = config as any;
-          break; // For now, just use first config as fallback
-        }
+        const seedingConfig = indexerConfigMap.get(indexerName);
 
         // If no config found or seeding time is 0 (unlimited), skip
-        if (!seedingConfig || seedingConfig.seedingTimeMinutes === 0) {
+        if (!seedingConfig) {
+          console.log(`[CleanupSeededTorrents] No configuration found for indexer ${indexerName}, skipping`);
+          noConfig++;
+          continue;
+        }
+
+        if (seedingConfig.seedingTimeMinutes === 0) {
           console.log(`[CleanupSeededTorrents] Indexer ${indexerName} has unlimited seeding, skipping`);
           noConfig++;
           continue;

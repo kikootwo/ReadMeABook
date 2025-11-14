@@ -124,6 +124,88 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
 
     console.log(`[ScanPlex] Scan complete: ${plexAudiobooks.length} items scanned, ${newCount} new, ${updatedCount} updated, ${skippedCount} skipped`);
 
+    // 4. Match downloaded requests against Plex library
+    console.log(`[ScanPlex] Checking for downloaded requests to match...`);
+    const downloadedRequests = await prisma.request.findMany({
+      where: { status: 'downloaded' },
+      include: { audiobook: true },
+      take: 50, // Limit to prevent overwhelming
+    });
+
+    console.log(`[ScanPlex] Found ${downloadedRequests.length} downloaded requests to match`);
+
+    let matchedCount = 0;
+    const { compareTwoStrings } = await import('string-similarity');
+
+    for (const request of downloadedRequests) {
+      try {
+        const audiobook = request.audiobook;
+        const title = audiobook.title.toLowerCase();
+        const author = (audiobook.author || '').toLowerCase();
+
+        // Search for matching Plex library entries
+        const potentialMatches = await prisma.plexLibrary.findMany({
+          where: {
+            OR: [
+              { title: { contains: audiobook.title, mode: 'insensitive' } },
+              { author: { contains: audiobook.author || '', mode: 'insensitive' } },
+            ],
+          },
+          take: 10,
+        });
+
+        if (potentialMatches.length === 0) {
+          console.log(`[ScanPlex] No potential matches for "${audiobook.title}" by ${audiobook.author}`);
+          continue;
+        }
+
+        // Fuzzy match to find best match
+        const matches = potentialMatches.map((plexItem) => {
+          const titleScore = compareTwoStrings(title, (plexItem.title || '').toLowerCase());
+          const authorScore = author
+            ? compareTwoStrings(author, (plexItem.author || '').toLowerCase())
+            : 0.5;
+          const overallScore = titleScore * 0.7 + authorScore * 0.3;
+
+          return { plexItem, score: overallScore };
+        });
+
+        matches.sort((a, b) => b.score - a.score);
+        const bestMatch = matches[0];
+
+        // Accept match if score >= 70%
+        if (bestMatch.score >= 0.7) {
+          console.log(`[ScanPlex] Match found! "${audiobook.title}" -> "${bestMatch.plexItem.title}" (${Math.round(bestMatch.score * 100)}%)`);
+
+          // Update audiobook with Plex info
+          await prisma.audiobook.update({
+            where: { id: audiobook.id },
+            data: {
+              plexGuid: bestMatch.plexItem.plexGuid,
+              updatedAt: new Date(),
+            },
+          });
+
+          // Update request to available
+          await prisma.request.update({
+            where: { id: request.id },
+            data: {
+              status: 'available',
+              updatedAt: new Date(),
+            },
+          });
+
+          matchedCount++;
+        } else {
+          console.log(`[ScanPlex] Low match score (${Math.round(bestMatch.score * 100)}%) for "${audiobook.title}"`);
+        }
+      } catch (error) {
+        console.error(`[ScanPlex] Failed to match request ${request.id}:`, error);
+      }
+    }
+
+    console.log(`[ScanPlex] Matched ${matchedCount}/${downloadedRequests.length} downloaded requests`);
+
     return {
       success: true,
       message: 'Plex library scan completed successfully',
@@ -133,6 +215,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
       updatedCount,
       skippedCount,
       newAudiobooks: results,
+      matchedDownloads: matchedCount,
     };
   } catch (error) {
     console.error('[ScanPlex] Error:', error);
