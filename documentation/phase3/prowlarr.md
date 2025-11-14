@@ -16,6 +16,8 @@ Indexer aggregator for searching multiple torrent/usenet indexers simultaneously
 
 ## Search
 
+**Extended Search:** Enabled (`extended=1`) - searches title, tags, labels, and metadata fields
+
 ```typescript
 interface TorrentResult {
   indexer: string;
