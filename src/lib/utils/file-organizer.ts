@@ -58,7 +58,7 @@ export class FileOrganizer {
       console.log(`[FileOrganizer] Organizing: ${downloadPath}`);
 
       // Find audiobook files
-      const { audioFiles, coverFile } = await this.findAudiobookFiles(downloadPath);
+      const { audioFiles, coverFile, isFile } = await this.findAudiobookFiles(downloadPath);
 
       if (audioFiles.length === 0) {
         throw new Error('No audiobook files found in download');
@@ -79,9 +79,12 @@ export class FileOrganizer {
       // Create target directory
       await fs.mkdir(targetPath, { recursive: true });
 
+      // Determine base path for source files
+      const baseSourcePath = isFile ? path.dirname(downloadPath) : downloadPath;
+
       // Copy audio files (do NOT delete originals - needed for seeding)
       for (const audioFile of audioFiles) {
-        const sourcePath = path.join(downloadPath, audioFile);
+        const sourcePath = isFile ? downloadPath : path.join(downloadPath, audioFile);
         const filename = path.basename(audioFile);
         const targetFilePath = path.join(targetPath, filename);
 
@@ -124,7 +127,7 @@ export class FileOrganizer {
 
       // Handle cover art
       if (coverFile) {
-        const sourcePath = path.join(downloadPath, coverFile);
+        const sourcePath = path.join(baseSourcePath, coverFile);
         const targetCoverPath = path.join(targetPath, 'cover.jpg');
 
         try {
@@ -166,11 +169,11 @@ export class FileOrganizer {
   }
 
   /**
-   * Find audiobook files in download directory
+   * Find audiobook files in download directory or single file
    */
   private async findAudiobookFiles(
     downloadPath: string
-  ): Promise<{ audioFiles: string[]; coverFile?: string }> {
+  ): Promise<{ audioFiles: string[]; coverFile?: string; isFile: boolean }> {
     const audioExtensions = ['.m4b', '.m4a', '.mp3', '.mp4', '.aa', '.aax'];
     const coverPatterns = [
       /cover\.(jpg|jpeg|png)$/i,
@@ -180,30 +183,46 @@ export class FileOrganizer {
 
     const audioFiles: string[] = [];
     let coverFile: string | undefined;
+    let isFile = false;
 
     try {
-      const files = await this.walkDirectory(downloadPath);
+      // Check if downloadPath is a file or directory
+      const stats = await fs.stat(downloadPath);
 
-      for (const file of files) {
-        const ext = path.extname(file).toLowerCase();
+      if (stats.isFile()) {
+        // Handle single file case
+        isFile = true;
+        const ext = path.extname(downloadPath).toLowerCase();
 
-        // Check if it's an audio file
         if (audioExtensions.includes(ext)) {
-          audioFiles.push(file);
+          // Return just the filename (not full path)
+          audioFiles.push(path.basename(downloadPath));
         }
+      } else {
+        // Handle directory case
+        const files = await this.walkDirectory(downloadPath);
 
-        // Check if it's cover art
-        const basename = path.basename(file);
-        if (coverPatterns.some((pattern) => pattern.test(basename))) {
-          coverFile = file;
+        for (const file of files) {
+          const ext = path.extname(file).toLowerCase();
+
+          // Check if it's an audio file
+          if (audioExtensions.includes(ext)) {
+            audioFiles.push(file);
+          }
+
+          // Check if it's cover art
+          const basename = path.basename(file);
+          if (coverPatterns.some((pattern) => pattern.test(basename))) {
+            coverFile = file;
+          }
         }
       }
     } catch (error) {
-      console.error('[FileOrganizer] Error walking directory:', error);
+      console.error('[FileOrganizer] Error reading directory:', error);
       throw error;
     }
 
-    return { audioFiles, coverFile };
+    return { audioFiles, coverFile, isFile };
   }
 
   /**

@@ -16,8 +16,8 @@ Copies completed downloads to standardized directory structure for Plex. Origina
 
 ## Process
 
-1. Download completes in `/downloads/[torrent-name]/`
-2. Identify audiobook files (.m4b, .m4a, .mp3)
+1. Download completes in `/downloads/[torrent-name]/` or `/downloads/[filename]` (single file)
+2. Identify audiobook files (.m4b, .m4a, .mp3) - supports both directories and single files
 3. Create `/media/audiobooks/[Author]/[Title]/`
 4. **Copy** files (not move - originals stay for seeding)
 5. Copy cover art if found, else download from Audible
@@ -64,6 +64,7 @@ async function organize(
 **1. EPERM errors** - Fixed with `fs.readFile/writeFile` instead of `copyFile`
 **2. Immediate deletion** - Changed to copy-only, scheduled cleanup after seeding
 **3. Files moved not copied** - Now copies to support seeding
+**4. Single file downloads** - Now supports files directly in downloads folder (not just directories)
 
 ## Tech Stack
 
