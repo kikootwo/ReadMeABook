@@ -292,3 +292,20 @@ export function getRankingAlgorithm(): RankingAlgorithm {
   }
   return ranker;
 }
+
+/**
+ * Helper function to rank torrents using the singleton instance
+ */
+export function rankTorrents(
+  torrents: TorrentResult[],
+  audiobook: AudiobookRequest
+): (TorrentResult & { qualityScore: number })[] {
+  const algorithm = getRankingAlgorithm();
+  const ranked = algorithm.rankTorrents(torrents, audiobook);
+
+  // Return torrents with qualityScore field for compatibility
+  return ranked.map((r) => ({
+    ...r,
+    qualityScore: Math.round(r.score),
+  }));
+}

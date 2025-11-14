@@ -168,3 +168,124 @@ export function useCancelRequest() {
 
   return { cancelRequest, isLoading, error };
 }
+
+export function useManualSearch() {
+  const { accessToken } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const triggerManualSearch = async (requestId: string) => {
+    if (!accessToken) {
+      throw new Error('Not authenticated');
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetchWithAuth(`/api/requests/${requestId}/manual-search`, {
+        method: 'POST',
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to trigger manual search');
+      }
+
+      // Revalidate requests
+      mutate((key) => typeof key === 'string' && key.includes('/api/requests'));
+
+      return data.request;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return { triggerManualSearch, isLoading, error };
+}
+
+export function useInteractiveSearch() {
+  const { accessToken } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const searchTorrents = async (requestId: string) => {
+    if (!accessToken) {
+      throw new Error('Not authenticated');
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetchWithAuth(`/api/requests/${requestId}/interactive-search`, {
+        method: 'POST',
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to search for torrents');
+      }
+
+      return data.results || [];
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return { searchTorrents, isLoading, error };
+}
+
+export function useSelectTorrent() {
+  const { accessToken } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const selectTorrent = async (requestId: string, torrent: any) => {
+    if (!accessToken) {
+      throw new Error('Not authenticated');
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetchWithAuth(`/api/requests/${requestId}/select-torrent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ torrent }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to download torrent');
+      }
+
+      // Revalidate requests
+      mutate((key) => typeof key === 'string' && key.includes('/api/requests'));
+
+      return data.request;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return { selectTorrent, isLoading, error };
+}
