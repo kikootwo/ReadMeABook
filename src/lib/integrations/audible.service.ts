@@ -294,55 +294,146 @@ export class AudibleService {
       const response = await this.client.get(`/pd/${asin}`);
       const $ = cheerio.load(response.data);
 
-      // Try to extract JSON-LD structured data
+      // Initialize result object
+      let result: AudibleAudiobook = {
+        asin,
+        title: '',
+        author: '',
+        narrator: '',
+        description: '',
+        coverArtUrl: '',
+      };
+
+      // Try to extract JSON-LD structured data first
       const jsonLdScript = $('script[type="application/ld+json"]').html();
       if (jsonLdScript) {
         try {
           const jsonData = JSON.parse(jsonLdScript);
-          if (jsonData['@type'] === 'Book') {
-            return {
-              asin,
-              title: jsonData.name || '',
-              author: Array.isArray(jsonData.author)
-                ? jsonData.author.map((a: any) => a.name).join(', ')
-                : jsonData.author?.name || '',
-              narrator: Array.isArray(jsonData.readBy)
-                ? jsonData.readBy.map((n: any) => n.name).join(', ')
-                : jsonData.readBy?.name,
-              description: jsonData.description || '',
-              coverArtUrl: jsonData.image || '',
-              rating: jsonData.aggregateRating?.ratingValue,
-              releaseDate: jsonData.datePublished,
-            };
+          if (jsonData['@type'] === 'Book' || jsonData['@type'] === 'Audiobook') {
+            console.log('[Audible] Found JSON-LD structured data');
+
+            result.title = jsonData.name || '';
+            result.author = Array.isArray(jsonData.author)
+              ? jsonData.author.map((a: any) => a.name || a).join(', ')
+              : jsonData.author?.name || jsonData.author || '';
+            result.narrator = Array.isArray(jsonData.readBy)
+              ? jsonData.readBy.map((n: any) => n.name || n).join(', ')
+              : jsonData.readBy?.name || jsonData.readBy || '';
+            result.description = jsonData.description || '';
+            result.coverArtUrl = jsonData.image || '';
+            result.rating = jsonData.aggregateRating?.ratingValue;
+            result.releaseDate = jsonData.datePublished;
+
+            if (jsonData.duration) {
+              const durationMatch = jsonData.duration.match(/PT(\d+)H(\d+)M/);
+              if (durationMatch) {
+                result.durationMinutes = parseInt(durationMatch[1]) * 60 + parseInt(durationMatch[2]);
+              }
+            }
           }
         } catch (e) {
-          // Fall through to HTML parsing
+          console.log('[Audible] JSON-LD parsing failed, falling back to HTML');
         }
       }
 
-      // Fallback to HTML parsing
-      const title = $('h1.bc-heading').text().trim();
-      const authorText = $('a.authorLabel').text().trim();
-      const narratorText = $('a.narratorLabel').text().trim();
-      const description = $('.bc-expander-content').text().trim();
-      const coverArtUrl = $('img.bc-image-inset-border').attr('src') || '';
+      // Fallback to HTML parsing for any missing fields
+      // Title - try multiple selectors
+      if (!result.title) {
+        result.title = $('h1.bc-heading').first().text().trim() ||
+                      $('h1[class*="heading"]').first().text().trim() ||
+                      $('.bc-container h1').first().text().trim() ||
+                      $('h1').first().text().trim();
+        console.log(`[Audible] Title from HTML: "${result.title}"`);
+      }
 
-      const runtimeText = $('.runtimeLabel').text().trim();
-      const durationMinutes = this.parseRuntime(runtimeText);
+      // Author - try multiple selectors
+      if (!result.author) {
+        result.author = $('li.authorLabel a').text().trim() ||
+                       $('span.authorLabel a').text().trim() ||
+                       $('.authorLabel').find('a').text().trim() ||
+                       $('a[href*="/author/"]').first().text().trim() ||
+                       $('.bc-size-small a[href*="/author/"]').first().text().trim();
+        result.author = result.author.replace(/^By:\s*/i, '').replace(/^Written by:\s*/i, '').trim();
+        console.log(`[Audible] Author from HTML: "${result.author}"`);
+      }
 
-      const ratingText = $('.ratingsLabel').text().trim();
-      const rating = ratingText ? parseFloat(ratingText.split(' ')[0]) : undefined;
+      // Narrator - try multiple selectors
+      if (!result.narrator) {
+        result.narrator = $('li.narratorLabel a').text().trim() ||
+                         $('span.narratorLabel a').text().trim() ||
+                         $('.narratorLabel').find('a').text().trim() ||
+                         $('a[href*="/narrator/"]').first().text().trim() ||
+                         $('.bc-size-small a[href*="/narrator/"]').first().text().trim();
+        result.narrator = result.narrator.replace(/^Narrated by:\s*/i, '').trim();
+        console.log(`[Audible] Narrator from HTML: "${result.narrator}"`);
+      }
 
-      return {
-        asin,
-        title,
-        author: authorText.replace('By:', '').trim(),
-        narrator: narratorText.replace('Narrated by:', '').trim(),
-        description,
-        coverArtUrl: coverArtUrl.replace(/\._.*_\./, '._SL500_.'),
-        durationMinutes,
-        rating,
-      };
+      // Description - try multiple selectors
+      if (!result.description) {
+        result.description = $('.bc-expander-content').first().text().trim() ||
+                            $('[class*="summary"] [class*="expander"]').text().trim() ||
+                            $('.productPublisherSummary').text().trim() ||
+                            $('[data-widget="publisherSummary"]').text().trim();
+        console.log(`[Audible] Description length: ${result.description.length} chars`);
+      }
+
+      // Cover art - try multiple selectors
+      if (!result.coverArtUrl) {
+        result.coverArtUrl = $('img.bc-image-inset-border').attr('src') ||
+                            $('img[class*="image"]').first().attr('src') ||
+                            $('.bc-pub-detail-image img').attr('src') ||
+                            $('img[src*="images-na.ssl-images-amazon.com"]').first().attr('src') ||
+                            '';
+        if (result.coverArtUrl) {
+          result.coverArtUrl = result.coverArtUrl.replace(/\._.*_\./, '._SL500_.');
+        }
+      }
+
+      // Runtime/Duration - try multiple selectors
+      if (!result.durationMinutes) {
+        const runtimeText = $('li.runtimeLabel span').text().trim() ||
+                           $('.runtimeLabel').text().trim() ||
+                           $('span:contains("Length:")').parent().text().trim();
+        result.durationMinutes = this.parseRuntime(runtimeText);
+        console.log(`[Audible] Duration: ${result.durationMinutes} minutes`);
+      }
+
+      // Rating - try multiple selectors
+      if (!result.rating) {
+        const ratingText = $('.ratingsLabel').text().trim() ||
+                          $('[class*="rating"]').first().text().trim();
+        if (ratingText) {
+          const ratingMatch = ratingText.match(/(\d+\.?\d*)\s*out of/i);
+          result.rating = ratingMatch ? parseFloat(ratingMatch[1]) : undefined;
+        }
+        console.log(`[Audible] Rating: ${result.rating}`);
+      }
+
+      // Release date - try multiple selectors
+      if (!result.releaseDate) {
+        const releaseDateText = $('li:contains("Release date:")').text().trim() ||
+                               $('span:contains("Release date:")').parent().text().trim();
+        const dateMatch = releaseDateText.match(/Release date:\s*(.+)/i);
+        if (dateMatch) {
+          result.releaseDate = dateMatch[1].trim();
+        }
+      }
+
+      // Genres - try to extract categories
+      const genres: string[] = [];
+      $('a[href*="/cat/"]').each((_, el) => {
+        const genre = $(el).text().trim();
+        if (genre && !genres.includes(genre) && genre.length < 50) {
+          genres.push(genre);
+        }
+      });
+      if (genres.length > 0) {
+        result.genres = genres.slice(0, 5); // Limit to 5 genres
+        console.log(`[Audible] Genres: ${result.genres.join(', ')}`);
+      }
+
+      console.log(`[Audible] Successfully fetched details for "${result.title}"`);
+      return result;
     } catch (error) {
       console.error(`[Audible] Failed to fetch details for ${asin}:`, error);
       return null;
