@@ -36,7 +36,7 @@ src/components/
 - **RequestCard** ✅ - Cover, title, author, status badge, progress bar, timestamps, action buttons (cancel, manual search, interactive search)
 - **StatusBadge** - Color-coded status (pending=yellow, searching=blue, downloading=purple, downloaded=green, processing=orange, available=green, completed=green, failed=red, warn=orange, cancelled=gray). Shows "Initializing..." when downloading with 0% progress (fetching torrent info), "Downloading" when progress > 0%
 - **ProgressBar** - Animated fill with percentage
-- **InteractiveTorrentSearchModal** ✅ - Modal showing ranked torrent results, allows user to select specific torrent
+- **InteractiveTorrentSearchModal** ✅ - Responsive table of ranked torrent results, uses ConfirmModal for downloads, hides columns on smaller screens (size on mobile, seeds on tablet, indexer on desktop)
 - Active indicator: "Setting up..." with spinner when progress = 0%, "Active" with pulsing dot when progress > 0%
 
 **Forms**
@@ -45,6 +45,7 @@ src/components/
 - **Input** - Label, error display, validation, icons
 - **Select** - Custom styling, search/filter
 - **Modal** ✅ - Dialog overlay with backdrop, sizes (sm/md/lg/xl/full), ESC to close, body scroll lock
+- **ConfirmModal** ✅ - Confirmation dialog with customizable title, message, buttons, loading state, and variant (primary/danger)
 
 **Auth**
 - **ProtectedRoute** ✅ - Auth check, loading state, redirects, admin role support
@@ -100,6 +101,18 @@ interface InteractiveTorrentSearchModalProps {
   onClose: () => void;
   requestId: string;
   audiobook: {title: string, author: string};
+}
+
+interface ConfirmModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title: string;
+  message: string;
+  confirmText?: string;
+  cancelText?: string;
+  isLoading?: boolean;
+  variant?: 'danger' | 'primary';
 }
 ```
 
