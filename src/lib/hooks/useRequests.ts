@@ -109,6 +109,9 @@ export function useCreateRequest() {
       // Revalidate requests list
       mutate((key) => typeof key === 'string' && key.includes('/api/requests'));
 
+      // Revalidate audiobook lists to update button states
+      mutate((key) => typeof key === 'string' && key.includes('/api/audiobooks'));
+
       return data.request;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
