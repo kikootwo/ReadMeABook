@@ -279,7 +279,7 @@ export function AudiobookDetailsModal({
                   <div>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">Genres</p>
                     <div className="flex flex-wrap gap-2">
-                      {audiobook.genres.map((genre) => (
+                      {audiobook.genres.map((genre: string) => (
                         <span
                           key={genre}
                           className="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-sm rounded-full"
