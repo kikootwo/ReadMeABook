@@ -9,8 +9,9 @@ import React from 'react';
 import Image from 'next/image';
 import { StatusBadge } from './StatusBadge';
 import { Button } from '@/components/ui/Button';
-import { useCancelRequest } from '@/lib/hooks/useRequests';
+import { useCancelRequest, useManualSearch } from '@/lib/hooks/useRequests';
 import { cn } from '@/lib/utils/cn';
+import { InteractiveTorrentSearchModal } from './InteractiveTorrentSearchModal';
 
 interface RequestCardProps {
   request: {
@@ -33,11 +34,14 @@ interface RequestCardProps {
 
 export function RequestCard({ request, showActions = true }: RequestCardProps) {
   const { cancelRequest, isLoading } = useCancelRequest();
+  const { triggerManualSearch, isLoading: isManualSearching } = useManualSearch();
   const [showError, setShowError] = React.useState(false);
+  const [showInteractiveSearch, setShowInteractiveSearch] = React.useState(false);
 
   const canCancel = ['pending', 'searching', 'downloading'].includes(request.status);
   const isActive = ['searching', 'downloading', 'processing'].includes(request.status);
   const isFailed = request.status === 'failed';
+  const canSearch = ['pending', 'failed', 'awaiting_search'].includes(request.status);
 
   const handleCancel = async () => {
     if (window.confirm('Are you sure you want to cancel this request?')) {
@@ -47,6 +51,20 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
         console.error('Failed to cancel request:', error);
       }
     }
+  };
+
+  const handleManualSearch = async () => {
+    try {
+      await triggerManualSearch(request.id);
+      // Request list will auto-refresh via SWR
+    } catch (error) {
+      console.error('Failed to trigger manual search:', error);
+      alert(error instanceof Error ? error.message : 'Failed to trigger manual search');
+    }
+  };
+
+  const handleInteractiveSearch = () => {
+    setShowInteractiveSearch(true);
   };
 
   const formatDate = (dateString: string) => {
@@ -182,20 +200,54 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
             </div>
 
             {/* Action Buttons */}
-            {showActions && canCancel && (
-              <Button
-                onClick={handleCancel}
-                loading={isLoading}
-                variant="outline"
-                size="sm"
-                className="text-red-600 border-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
-              >
-                Cancel
-              </Button>
+            {showActions && (
+              <div className="flex gap-2">
+                {canSearch && (
+                  <>
+                    <Button
+                      onClick={handleManualSearch}
+                      loading={isManualSearching}
+                      variant="outline"
+                      size="sm"
+                    >
+                      Manual Search
+                    </Button>
+                    <Button
+                      onClick={handleInteractiveSearch}
+                      variant="primary"
+                      size="sm"
+                    >
+                      Interactive Search
+                    </Button>
+                  </>
+                )}
+                {canCancel && (
+                  <Button
+                    onClick={handleCancel}
+                    loading={isLoading}
+                    variant="outline"
+                    size="sm"
+                    className="text-red-600 border-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  >
+                    Cancel
+                  </Button>
+                )}
+              </div>
             )}
           </div>
         </div>
       </div>
+
+      {/* Interactive Search Modal */}
+      <InteractiveTorrentSearchModal
+        isOpen={showInteractiveSearch}
+        onClose={() => setShowInteractiveSearch(false)}
+        requestId={request.id}
+        audiobook={{
+          title: request.audiobook.title,
+          author: request.audiobook.author,
+        }}
+      />
     </div>
   );
 }

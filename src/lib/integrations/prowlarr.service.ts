@@ -83,6 +83,7 @@ export class ProwlarrService {
         query,
         categories: filters?.category?.toString() || this.defaultCategory.toString(),
         type: 'search',
+        extended: 1, // Enable searching in tags, labels, and metadata
       };
 
       const response = await this.client.get('/search', { params });
