@@ -9,6 +9,7 @@ import React, { useState } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { TorrentResult } from '@/lib/utils/ranking-algorithm';
+import { useInteractiveSearch, useSelectTorrent } from '@/lib/hooks/useRequests';
 
 interface InteractiveTorrentSearchModalProps {
   isOpen: boolean;
@@ -26,10 +27,11 @@ export function InteractiveTorrentSearchModal({
   requestId,
   audiobook,
 }: InteractiveTorrentSearchModalProps) {
-  const [isSearching, setIsSearching] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
+  const { searchTorrents, isLoading: isSearching, error: searchError } = useInteractiveSearch();
+  const { selectTorrent, isLoading: isDownloading, error: downloadError } = useSelectTorrent();
   const [results, setResults] = useState<(TorrentResult & { rank: number; qualityScore?: number })[]>([]);
-  const [error, setError] = useState<string | null>(null);
+
+  const error = searchError || downloadError;
 
   // Perform search when modal opens
   React.useEffect(() => {
@@ -39,25 +41,12 @@ export function InteractiveTorrentSearchModal({
   }, [isOpen]);
 
   const performSearch = async () => {
-    setIsSearching(true);
-    setError(null);
-
     try {
-      const response = await fetch(`/api/requests/${requestId}/interactive-search`, {
-        method: 'POST',
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to search for torrents');
-      }
-
-      setResults(data.results || []);
+      const data = await searchTorrents(requestId);
+      setResults(data || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to search for torrents');
-    } finally {
-      setIsSearching(false);
+      // Error already handled by hook
+      console.error('Search failed:', err);
     }
   };
 
@@ -66,33 +55,14 @@ export function InteractiveTorrentSearchModal({
       return;
     }
 
-    setIsDownloading(true);
-    setError(null);
-
     try {
-      const response = await fetch(`/api/requests/${requestId}/select-torrent`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ torrent }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to download torrent');
-      }
-
+      await selectTorrent(requestId, torrent);
       // Close modal on success
       onClose();
-
-      // Trigger a page refresh or update the request list
-      window.location.reload();
+      // Request list will auto-refresh via SWR
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to download torrent');
-    } finally {
-      setIsDownloading(false);
+      // Error already handled by hook
+      console.error('Failed to download torrent:', err);
     }
   };
 

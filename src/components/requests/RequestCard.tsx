@@ -9,7 +9,7 @@ import React from 'react';
 import Image from 'next/image';
 import { StatusBadge } from './StatusBadge';
 import { Button } from '@/components/ui/Button';
-import { useCancelRequest } from '@/lib/hooks/useRequests';
+import { useCancelRequest, useManualSearch } from '@/lib/hooks/useRequests';
 import { cn } from '@/lib/utils/cn';
 import { InteractiveTorrentSearchModal } from './InteractiveTorrentSearchModal';
 
@@ -34,9 +34,9 @@ interface RequestCardProps {
 
 export function RequestCard({ request, showActions = true }: RequestCardProps) {
   const { cancelRequest, isLoading } = useCancelRequest();
+  const { triggerManualSearch, isLoading: isManualSearching } = useManualSearch();
   const [showError, setShowError] = React.useState(false);
   const [showInteractiveSearch, setShowInteractiveSearch] = React.useState(false);
-  const [isManualSearching, setIsManualSearching] = React.useState(false);
 
   const canCancel = ['pending', 'searching', 'downloading'].includes(request.status);
   const isActive = ['searching', 'downloading', 'processing'].includes(request.status);
@@ -54,25 +54,12 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
   };
 
   const handleManualSearch = async () => {
-    setIsManualSearching(true);
     try {
-      const response = await fetch(`/api/requests/${request.id}/manual-search`, {
-        method: 'POST',
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to trigger manual search');
-      }
-
-      // Refresh the page to show updated status
-      window.location.reload();
+      await triggerManualSearch(request.id);
+      // Request list will auto-refresh via SWR
     } catch (error) {
       console.error('Failed to trigger manual search:', error);
-      alert('Failed to trigger manual search');
-    } finally {
-      setIsManualSearching(false);
+      alert(error instanceof Error ? error.message : 'Failed to trigger manual search');
     }
   };
 
