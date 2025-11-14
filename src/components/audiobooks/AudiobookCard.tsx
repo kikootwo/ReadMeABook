@@ -9,6 +9,7 @@ import React, { useState } from 'react';
 import Image from 'next/image';
 import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/requests/StatusBadge';
+import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsModal';
 import { useCreateRequest } from '@/lib/hooks/useRequests';
 import { useAuth } from '@/contexts/AuthContext';
 import { Audiobook } from '@/lib/hooks/useAudiobooks';
@@ -30,6 +31,7 @@ export function AudiobookCard({
   const { createRequest, isLoading } = useCreateRequest();
   const [showToast, setShowToast] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showModal, setShowModal] = useState(false);
 
   const handleRequest = async () => {
     if (!user) {
@@ -56,52 +58,69 @@ export function AudiobookCard({
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
-      {/* Cover Art */}
-      <div className="relative aspect-[2/3] bg-gray-200 dark:bg-gray-700">
-        {audiobook.coverArtUrl ? (
-          <Image
-            src={audiobook.coverArtUrl}
-            alt={`Cover art for ${audiobook.title}`}
-            fill
-            className="object-cover"
-            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-          />
-        ) : (
-          <div className="flex items-center justify-center h-full text-gray-400">
-            <svg
-              className="w-16 h-16"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
-              />
-            </svg>
-          </div>
-        )}
+    <>
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
+        {/* Cover Art - Clickable */}
+        <div
+          className="relative aspect-[2/3] bg-gray-200 dark:bg-gray-700 cursor-pointer group"
+          onClick={() => setShowModal(true)}
+        >
+          {audiobook.coverArtUrl ? (
+            <Image
+              src={audiobook.coverArtUrl}
+              alt={`Cover art for ${audiobook.title}`}
+              fill
+              className="object-cover group-hover:scale-105 transition-transform duration-300"
+              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full text-gray-400">
+              <svg
+                className="w-16 h-16"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                />
+              </svg>
+            </div>
+          )}
 
-        {/* Availability Badge */}
-        {audiobook.isAvailable && (
-          <div className="absolute top-2 right-2 bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded-md shadow-lg flex items-center gap-1">
-            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-            </svg>
-            <span>Available</span>
+          {/* Hover overlay for click hint */}
+          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+            <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 dark:bg-gray-900/90 rounded-full p-3">
+              <svg className="w-6 h-6 text-gray-900 dark:text-gray-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+            </div>
           </div>
-        )}
-      </div>
 
-      {/* Content */}
-      <div className="p-4 space-y-2">
-        {/* Title */}
-        <h3 className="font-semibold text-gray-900 dark:text-gray-100 line-clamp-2 min-h-[3rem]">
-          {audiobook.title}
-        </h3>
+          {/* Availability Badge */}
+          {audiobook.isAvailable && (
+            <div className="absolute top-2 right-2 bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded-md shadow-lg flex items-center gap-1">
+              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              <span>Available</span>
+            </div>
+          )}
+        </div>
+
+        {/* Content */}
+        <div className="p-4 space-y-2">
+          {/* Title - Clickable */}
+          <h3
+            className="font-semibold text-gray-900 dark:text-gray-100 line-clamp-2 min-h-[3rem] cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            onClick={() => setShowModal(true)}
+          >
+            {audiobook.title}
+          </h3>
 
         {/* Author */}
         <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-1">
@@ -189,5 +208,14 @@ export function AudiobookCard({
         )}
       </div>
     </div>
+
+    {/* Details Modal */}
+    <AudiobookDetailsModal
+      asin={audiobook.asin}
+      isOpen={showModal}
+      onClose={() => setShowModal(false)}
+      onRequestSuccess={onRequestSuccess}
+    />
+    </>
   );
 }
