@@ -304,25 +304,46 @@ export class AudibleService {
         coverArtUrl: '',
       };
 
-      // Try to extract JSON-LD structured data first
-      const jsonLdScript = $('script[type="application/ld+json"]').html();
-      if (jsonLdScript) {
-        try {
-          const jsonData = JSON.parse(jsonLdScript);
-          if (jsonData['@type'] === 'Book' || jsonData['@type'] === 'Audiobook') {
-            console.log('[Audible] Found JSON-LD structured data');
+      // Debug: Save HTML in development
+      const isDev = process.env.NODE_ENV === 'development';
+      if (isDev) {
+        const fs = require('fs');
+        const path = require('path');
+        const debugPath = path.join('/tmp', `audible-${asin}.html`);
+        fs.writeFileSync(debugPath, response.data);
+        console.log(`[Audible] Saved HTML to ${debugPath} for debugging`);
+      }
 
-            result.title = jsonData.name || '';
-            result.author = Array.isArray(jsonData.author)
-              ? jsonData.author.map((a: any) => a.name || a).join(', ')
-              : jsonData.author?.name || jsonData.author || '';
-            result.narrator = Array.isArray(jsonData.readBy)
-              ? jsonData.readBy.map((n: any) => n.name || n).join(', ')
-              : jsonData.readBy?.name || jsonData.readBy || '';
-            result.description = jsonData.description || '';
-            result.coverArtUrl = jsonData.image || '';
-            result.rating = jsonData.aggregateRating?.ratingValue;
-            result.releaseDate = jsonData.datePublished;
+      // Try to extract JSON-LD structured data first
+      const jsonLdScripts = $('script[type="application/ld+json"]');
+      console.log(`[Audible] Found ${jsonLdScripts.length} JSON-LD script tags`);
+
+      jsonLdScripts.each((i, elem) => {
+        try {
+          const jsonData = JSON.parse($(elem).html() || '{}');
+          console.log(`[Audible] JSON-LD ${i} type:`, jsonData['@type']);
+
+          if (jsonData['@type'] === 'Book' || jsonData['@type'] === 'Audiobook' || jsonData['@type'] === 'Product') {
+            console.log('[Audible] Found valid JSON-LD structured data');
+
+            if (jsonData.name) result.title = jsonData.name;
+
+            if (jsonData.author) {
+              result.author = Array.isArray(jsonData.author)
+                ? jsonData.author.map((a: any) => a.name || a).join(', ')
+                : jsonData.author?.name || jsonData.author || '';
+            }
+
+            if (jsonData.readBy) {
+              result.narrator = Array.isArray(jsonData.readBy)
+                ? jsonData.readBy.map((n: any) => n.name || n).join(', ')
+                : jsonData.readBy?.name || jsonData.readBy || '';
+            }
+
+            if (jsonData.description) result.description = jsonData.description;
+            if (jsonData.image) result.coverArtUrl = jsonData.image;
+            if (jsonData.aggregateRating?.ratingValue) result.rating = jsonData.aggregateRating.ratingValue;
+            if (jsonData.datePublished) result.releaseDate = jsonData.datePublished;
 
             if (jsonData.duration) {
               const durationMatch = jsonData.duration.match(/PT(\d+)H(\d+)M/);
@@ -332,9 +353,9 @@ export class AudibleService {
             }
           }
         } catch (e) {
-          console.log('[Audible] JSON-LD parsing failed, falling back to HTML');
+          console.log(`[Audible] JSON-LD ${i} parsing failed:`, e);
         }
-      }
+      });
 
       // Fallback to HTML parsing for any missing fields
       // Title - try multiple selectors
@@ -346,84 +367,170 @@ export class AudibleService {
         console.log(`[Audible] Title from HTML: "${result.title}"`);
       }
 
-      // Author - try multiple selectors
+      // Author - try multiple approaches
       if (!result.author) {
-        result.author = $('li.authorLabel a').text().trim() ||
-                       $('span.authorLabel a').text().trim() ||
-                       $('.authorLabel').find('a').text().trim() ||
-                       $('a[href*="/author/"]').first().text().trim() ||
-                       $('.bc-size-small a[href*="/author/"]').first().text().trim();
+        // Try author links first
+        const authorLinks = $('a[href*="/author/"]');
+        const authors: string[] = [];
+        authorLinks.each((_, elem) => {
+          const text = $(elem).text().trim();
+          if (text && text.length > 0 && text.length < 100 && !text.includes('›')) {
+            authors.push(text);
+          }
+        });
+
+        if (authors.length > 0) {
+          result.author = [...new Set(authors)].join(', ');
+        } else {
+          // Fallback to class-based selectors
+          result.author = $('li.authorLabel a').text().trim() ||
+                         $('span.authorLabel a').text().trim() ||
+                         $('.authorLabel').find('a').text().trim() ||
+                         $('.bc-size-small a[href*="/author/"]').first().text().trim();
+        }
+
         result.author = result.author.replace(/^By:\s*/i, '').replace(/^Written by:\s*/i, '').trim();
         console.log(`[Audible] Author from HTML: "${result.author}"`);
       }
 
-      // Narrator - try multiple selectors
+      // Narrator - try multiple approaches
       if (!result.narrator) {
-        result.narrator = $('li.narratorLabel a').text().trim() ||
-                         $('span.narratorLabel a').text().trim() ||
-                         $('.narratorLabel').find('a').text().trim() ||
-                         $('a[href*="/narrator/"]').first().text().trim() ||
-                         $('.bc-size-small a[href*="/narrator/"]').first().text().trim();
+        // Try narrator links first
+        const narratorLinks = $('a[href*="/narrator/"]');
+        const narrators: string[] = [];
+        narratorLinks.each((_, elem) => {
+          const text = $(elem).text().trim();
+          if (text && text.length > 0 && text.length < 100 && !text.includes('›')) {
+            narrators.push(text);
+          }
+        });
+
+        if (narrators.length > 0) {
+          result.narrator = [...new Set(narrators)].join(', ');
+        } else {
+          // Fallback to class-based selectors
+          result.narrator = $('li.narratorLabel a').text().trim() ||
+                           $('span.narratorLabel a').text().trim() ||
+                           $('.narratorLabel').find('a').text().trim() ||
+                           $('.bc-size-small a[href*="/narrator/"]').first().text().trim();
+        }
+
         result.narrator = result.narrator.replace(/^Narrated by:\s*/i, '').trim();
         console.log(`[Audible] Narrator from HTML: "${result.narrator}"`);
       }
 
-      // Description - try multiple selectors
+      // Description - try multiple approaches
       if (!result.description) {
-        result.description = $('.bc-expander-content').first().text().trim() ||
-                            $('[class*="summary"] [class*="expander"]').text().trim() ||
-                            $('.productPublisherSummary').text().trim() ||
-                            $('[data-widget="publisherSummary"]').text().trim();
+        // Try multiple description selectors
+        result.description =
+          // Expander content (common pattern)
+          $('.bc-expander-content').first().text().trim() ||
+          $('[class*="productPublisherSummary"]').text().trim() ||
+          $('[data-widget="publisherSummary"]').text().trim() ||
+          // Try any element with "summary" in class
+          $('[class*="summary"]').first().text().trim() ||
+          // Try paragraphs near the product details
+          $('.bc-section p').first().text().trim() ||
+          // Look for long text blocks (likely descriptions)
+          (() => {
+            let longest = '';
+            $('p, div[class*="description"], div[class*="summary"]').each((_, elem) => {
+              const text = $(elem).text().trim();
+              if (text.length > longest.length && text.length > 100 && text.length < 5000) {
+                longest = text;
+              }
+            });
+            return longest;
+          })();
+
         console.log(`[Audible] Description length: ${result.description.length} chars`);
       }
 
       // Cover art - try multiple selectors
       if (!result.coverArtUrl) {
         result.coverArtUrl = $('img.bc-image-inset-border').attr('src') ||
-                            $('img[class*="image"]').first().attr('src') ||
+                            $('img[class*="product-image"]').first().attr('src') ||
+                            $('img[class*="cover"]').first().attr('src') ||
                             $('.bc-pub-detail-image img').attr('src') ||
                             $('img[src*="images-na.ssl-images-amazon.com"]').first().attr('src') ||
+                            $('img[src*="m.media-amazon.com"]').first().attr('src') ||
                             '';
         if (result.coverArtUrl) {
           result.coverArtUrl = result.coverArtUrl.replace(/\._.*_\./, '._SL500_.');
         }
       }
 
-      // Runtime/Duration - try multiple selectors
+      // Runtime/Duration - try multiple approaches
       if (!result.durationMinutes) {
-        const runtimeText = $('li.runtimeLabel span').text().trim() ||
-                           $('.runtimeLabel').text().trim() ||
-                           $('span:contains("Length:")').parent().text().trim();
+        // Look for runtime text in various places
+        const runtimeText =
+          $('li.runtimeLabel span').text().trim() ||
+          $('.runtimeLabel').text().trim() ||
+          $('span:contains("Length:")').parent().text().trim() ||
+          $('li:contains("Length:")').text().trim() ||
+          (() => {
+            // Look for any text matching duration pattern
+            let found = '';
+            $('li, span, div').each((_, elem) => {
+              const text = $(elem).text().trim();
+              if (text.match(/\d+\s*(hr|hour|h)\s*\d*\s*(min|minute|m)?/i) && text.length < 100) {
+                found = text;
+                return false; // break
+              }
+            });
+            return found;
+          })();
+
         result.durationMinutes = this.parseRuntime(runtimeText);
-        console.log(`[Audible] Duration: ${result.durationMinutes} minutes`);
+        console.log(`[Audible] Duration from "${runtimeText}": ${result.durationMinutes} minutes`);
       }
 
-      // Rating - try multiple selectors
+      // Rating - try multiple approaches
       if (!result.rating) {
-        const ratingText = $('.ratingsLabel').text().trim() ||
-                          $('[class*="rating"]').first().text().trim();
+        const ratingText =
+          $('.ratingsLabel').text().trim() ||
+          $('[class*="rating"]').first().text().trim() ||
+          $('span:contains("out of 5 stars")').parent().text().trim() ||
+          (() => {
+            // Look for rating pattern
+            let found = '';
+            $('span, div').each((_, elem) => {
+              const text = $(elem).text().trim();
+              if (text.match(/\d+\.?\d*\s*out of\s*5/i) && text.length < 50) {
+                found = text;
+                return false;
+              }
+            });
+            return found;
+          })();
+
         if (ratingText) {
           const ratingMatch = ratingText.match(/(\d+\.?\d*)\s*out of/i);
           result.rating = ratingMatch ? parseFloat(ratingMatch[1]) : undefined;
         }
-        console.log(`[Audible] Rating: ${result.rating}`);
+        console.log(`[Audible] Rating from "${ratingText}": ${result.rating}`);
       }
 
       // Release date - try multiple selectors
       if (!result.releaseDate) {
-        const releaseDateText = $('li:contains("Release date:")').text().trim() ||
-                               $('span:contains("Release date:")').parent().text().trim();
-        const dateMatch = releaseDateText.match(/Release date:\s*(.+)/i);
+        const releaseDateText =
+          $('li:contains("Release date:")').text().trim() ||
+          $('span:contains("Release date:")').parent().text().trim() ||
+          $('[class*="release"]').text().trim();
+
+        const dateMatch = releaseDateText.match(/Release date:\s*(.+)/i) ||
+                         releaseDateText.match(/(\w+ \d{1,2},? \d{4})/);
         if (dateMatch) {
           result.releaseDate = dateMatch[1].trim();
         }
+        console.log(`[Audible] Release date from "${releaseDateText}": ${result.releaseDate}`);
       }
 
       // Genres - try to extract categories
       const genres: string[] = [];
       $('a[href*="/cat/"]').each((_, el) => {
         const genre = $(el).text().trim();
-        if (genre && !genres.includes(genre) && genre.length < 50) {
+        if (genre && !genres.includes(genre) && genre.length < 50 && genre.length > 2) {
           genres.push(genre);
         }
       });
@@ -433,6 +540,16 @@ export class AudibleService {
       }
 
       console.log(`[Audible] Successfully fetched details for "${result.title}"`);
+      console.log(`[Audible] Final result:`, JSON.stringify({
+        title: result.title,
+        author: result.author,
+        narrator: result.narrator,
+        descLength: result.description.length,
+        duration: result.durationMinutes,
+        rating: result.rating,
+        genres: result.genres?.length || 0
+      }));
+
       return result;
     } catch (error) {
       console.error(`[Audible] Failed to fetch details for ${asin}:`, error);
