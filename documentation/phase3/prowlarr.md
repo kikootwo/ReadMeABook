@@ -1,8 +1,8 @@
 # Prowlarr Integration
 
-**Status:** ✅ Implemented
+**Status:** ✅ Implemented | Manual search, interactive search, automatic search
 
-Indexer aggregator for searching multiple torrent/usenet indexers simultaneously. Supports manual search and automatic RSS feed monitoring.
+Indexer aggregator for searching multiple torrent/usenet indexers simultaneously. Supports manual search, interactive torrent selection, and automatic RSS feed monitoring.
 
 ## API
 
@@ -44,6 +44,29 @@ interface TorrentResult {
 - 429: Rate limit (exponential backoff, max 3 retries)
 - 503: Service unavailable
 - Timeout: 30s per search
+
+## Manual & Interactive Search
+
+**Manual Search** (`POST /api/requests/{id}/manual-search`)
+- Triggers automatic search job for requests with status: pending, failed, awaiting_search
+- Uses ranking algorithm to select best torrent
+- Updates request status to 'pending'
+
+**Interactive Search** (`POST /api/requests/{id}/interactive-search`)
+- Returns ranked torrent results for user selection
+- Shows table with: rank, title, size, quality score, seeders, indexer, publish date
+- Available for same statuses as manual search
+- User clicks "Download" button to select specific torrent
+
+**Select Torrent** (`POST /api/requests/{id}/select-torrent`)
+- Downloads user-selected torrent from interactive search
+- Triggers download_torrent job
+- Updates request status to 'downloading'
+
+**UI Integration:**
+- Manual Search button: Triggers automatic search
+- Interactive Search button: Opens modal with torrent results
+- Both buttons shown for requests with status: pending, failed, awaiting_search
 
 ## RSS Monitoring
 
