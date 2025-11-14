@@ -32,6 +32,10 @@ export function StatusBadge({ status, progress, className }: StatusBadgeProps) {
       label: progress !== undefined && progress === 0 ? 'Initializing...' : 'Downloading',
       color: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
     },
+    downloaded: {
+      label: 'Downloaded',
+      color: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+    },
     processing: {
       label: 'Processing',
       color: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
@@ -39,6 +43,10 @@ export function StatusBadge({ status, progress, className }: StatusBadgeProps) {
     awaiting_import: {
       label: 'Awaiting Import',
       color: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
+    },
+    available: {
+      label: 'Available',
+      color: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
     },
     completed: {
       label: 'Available',
