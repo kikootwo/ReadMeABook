@@ -132,26 +132,48 @@ export function AudiobookCard({
 
         {/* Status or Action */}
         <div className="pt-2">
-          {isRequested && requestStatus ? (
-            <StatusBadge status={requestStatus} className="w-full justify-center py-2" />
-          ) : audiobook.isAvailable ? (
-            <div className="w-full py-2 px-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md text-center">
-              <span className="text-sm font-medium text-green-700 dark:text-green-400">
-                In Your Library
-              </span>
-            </div>
-          ) : (
-            <Button
-              onClick={handleRequest}
-              loading={isLoading}
-              disabled={!user}
-              variant="primary"
-              size="md"
-              className="w-full"
-            >
-              {!user ? 'Login to Request' : 'Request'}
-            </Button>
-          )}
+          {(() => {
+            // Check if book is already available in Plex or completed/available status
+            if (audiobook.isAvailable || audiobook.requestStatus === 'completed') {
+              return (
+                <div className="w-full py-2 px-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md text-center">
+                  <span className="text-sm font-medium text-green-700 dark:text-green-400">
+                    In Your Library
+                  </span>
+                </div>
+              );
+            }
+
+            // Check if book is requested and in progress (non-re-requestable statuses)
+            const inProgressStatuses = ['pending', 'awaiting_search', 'searching', 'downloading', 'processing', 'awaiting_import'];
+            if (audiobook.isRequested && audiobook.requestStatus && inProgressStatuses.includes(audiobook.requestStatus)) {
+              return (
+                <Button
+                  onClick={() => {}}
+                  disabled={true}
+                  variant="primary"
+                  size="md"
+                  className="w-full cursor-not-allowed opacity-75"
+                >
+                  Requested
+                </Button>
+              );
+            }
+
+            // For failed/warn/cancelled or no request - show Request button
+            return (
+              <Button
+                onClick={handleRequest}
+                loading={isLoading}
+                disabled={!user}
+                variant="primary"
+                size="md"
+                className="w-full"
+              >
+                {!user ? 'Login to Request' : 'Request'}
+              </Button>
+            );
+          })()}
         </div>
 
         {/* Error Message */}

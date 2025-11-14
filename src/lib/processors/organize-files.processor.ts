@@ -67,30 +67,18 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       },
     });
 
-    // Update request to completed
+    // Update request to downloaded (green status, waiting for Plex scan)
     await prisma.request.update({
       where: { id: requestId },
       data: {
-        status: 'completed',
+        status: 'downloaded',
         progress: 100,
         completedAt: new Date(),
         updatedAt: new Date(),
       },
     });
 
-    // Trigger Plex scan job
-    const jobQueue = getJobQueueService();
-
-    // For now, we'll trigger a match job instead of a full scan
-    // A full library scan would be too slow
-    await jobQueue.addPlexMatchJob(
-      requestId,
-      audiobookId,
-      audiobook.title,
-      audiobook.author
-    );
-
-    console.log(`[OrganizeFiles] Request ${requestId} completed successfully`);
+    console.log(`[OrganizeFiles] Request ${requestId} completed successfully - status: downloaded`);
 
     return {
       success: true,

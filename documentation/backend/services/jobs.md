@@ -13,18 +13,24 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - Jobs survive app restarts
 - Remove on complete: keep last 100
 - Remove on fail: keep last 200
+- MaxListeners: 20 on both Redis client and Bull queue (accommodates 12 job processors)
 
 ## Job Types
 
 1. **search_indexers** - Search Prowlarr for torrents
 2. **monitor_download** - Poll progress (10s intervals)
-3. **organize_files** - Move to media library
-4. **scan_plex** - Trigger Plex scan
-5. **match_plex** - Fuzzy match to Plex item
+3. **organize_files** - Move to media library, set status to 'downloaded'
+4. **scan_plex** - Scan Plex library, match 'downloaded' requests
+5. **match_plex** - Fuzzy match to Plex item (deprecated - now handled by scan_plex)
 
 ## Special Behaviors
 
 **monitor_download:**
+- 3s initial delay before first check (avoids race condition with qBittorrent processing)
+- Retry logic: 3 attempts with exponential backoff (500ms, 1s, 2s) for getTorrent failures
+- Transient error handling: "torrent not found" errors don't mark request as failed during retries
+- Request stays in "downloading" status during all retry attempts
+- Only marks request as "failed" after all Bull retries (3 attempts) exhausted
 - 10s delay between checks (prevents excessive logging)
 - Only logs progress at 5% intervals or first 5%
 - Auto-reschedules until complete/failed
@@ -37,6 +43,14 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - No audiobook files found → 'awaiting_import' status
 - Tracks `import_attempts` (max 5 default)
 - After max retries → 'warn' status for manual intervention
+- Success → 'downloaded' status (green, waiting for Plex scan)
+- No longer triggers immediate match_plex job
+
+**scan_plex:**
+- Scans Plex library and populates plex_library table
+- After scan, checks for requests with status 'downloaded'
+- Fuzzy matches downloaded requests against Plex library (70% threshold)
+- Matched requests → 'available' status with plexGuid linked
 
 ## Job Payloads
 
@@ -86,6 +100,10 @@ queue.on('stalled', async (job) => {
 - ✅ Monitor job logging excessively (~500x/s) → 10s delay
 - ✅ No retry for missing torrents → 'awaiting_search' status
 - ✅ No retry for failed imports → 'awaiting_import' + max retries
+- ✅ MaxListenersExceededWarning → increased maxListeners to 20 on both Redis client and Bull queue
+- ✅ Race condition causing "error" status on new downloads → 3s initial delay + retry with exponential backoff
+- ✅ Transient failures marking requests as "failed" prematurely → Distinguish transient vs permanent errors, only mark failed after all retries exhausted
+- ✅ Plex search error (400) immediately after file organization → Changed workflow: organize_files sets 'downloaded' status, scan_plex job handles matching during scheduled scans
 
 ## Tech Stack
 

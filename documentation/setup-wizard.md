@@ -18,7 +18,7 @@
 1. Welcome - Intro screen
 2. Admin Account - Create admin user
 3. Plex - Server URL, OAuth, library selection
-4. Prowlarr - URL, API key, indexer selection with priorities (1-25)
+4. Prowlarr - URL, API key, indexer selection with priorities (1-25), seeding time, RSS monitoring
 5. Download Client - qBittorrent/Transmission config
 6. Paths - Download + media directories with validation
 7. Review - Summary of all configs
@@ -53,7 +53,7 @@ interface SetupState {
   plexLibraryId: string;
   prowlarrUrl: string;
   prowlarrApiKey: string;
-  prowlarrIndexers: Array<{id: number, name: string, priority: number}>;
+  prowlarrIndexers: Array<{id: number, name: string, priority: number, seedingTimeMinutes: number, rssEnabled: boolean}>;
   downloadClient: 'qbittorrent' | 'transmission';
   downloadClientUrl: string;
   downloadClientUsername: string;
@@ -67,7 +67,7 @@ interface SetupState {
 ## Validation
 
 **Plex:** Valid URL, non-empty token, connection succeeds, library available
-**Prowlarr:** Valid URL, non-empty API key, connection succeeds, ≥1 indexer selected with priority 1-25
+**Prowlarr:** Valid URL, non-empty API key, connection succeeds, ≥1 indexer selected with priority 1-25, seedingTimeMinutes ≥0, rssEnabled boolean
 **Download Client:** Valid URL, credentials required, connection succeeds
 **Paths:** Absolute paths, writable
 

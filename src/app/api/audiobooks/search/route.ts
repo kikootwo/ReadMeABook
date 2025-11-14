@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { enrichAudiobooksWithMatches } from '@/lib/utils/audiobook-matcher';
+import { getCurrentUser } from '@/lib/middleware/auth';
 
 /**
  * GET /api/audiobooks/search?q=query&page=1
@@ -30,8 +31,12 @@ export async function GET(request: NextRequest) {
     const audibleService = getAudibleService();
     const results = await audibleService.search(query, page);
 
-    // Enrich search results with availability information from database
-    const enrichedResults = await enrichAudiobooksWithMatches(results.results);
+    // Get current user (optional - for request status enrichment)
+    const currentUser = getCurrentUser(request);
+    const userId = currentUser?.sub || undefined;
+
+    // Enrich search results with availability and request status information
+    const enrichedResults = await enrichAudiobooksWithMatches(results.results, userId);
 
     return NextResponse.json({
       success: true,

@@ -14,7 +14,13 @@ export type JobType =
   | 'monitor_download'
   | 'organize_files'
   | 'scan_plex'
-  | 'match_plex';
+  | 'match_plex'
+  | 'plex_library_scan'
+  | 'audible_refresh'
+  | 'retry_missing_torrents'
+  | 'retry_failed_imports'
+  | 'cleanup_seeded_torrents'
+  | 'monitor_rss_feeds';
 
 export interface JobPayload {
   [key: string]: any;
@@ -91,6 +97,9 @@ export class JobQueueService {
       },
     });
 
+    // Increase max listeners to accommodate all job processors (12 total)
+    this.redis.setMaxListeners(20);
+
     // Create Bull queue
     this.queue = new Queue('audiobook-jobs', redisUrl, {
       defaultJobOptions: {
@@ -103,6 +112,9 @@ export class JobQueueService {
         removeOnFail: 200,
       },
     });
+
+    // Increase max listeners to accommodate all job processors (12 total)
+    this.queue.setMaxListeners(20);
 
     this.setupEventHandlers();
     this.startProcessors();
@@ -126,6 +138,37 @@ export class JobQueueService {
         error.message,
         error.stack
       );
+
+      // Handle permanent failures for specific job types after all retries exhausted
+      if (job.name === 'monitor_download' && job.data) {
+        const payload = job.data as MonitorDownloadPayload;
+        console.error(`[MonitorDownload] Job permanently failed for request ${payload.requestId} after ${job.attemptsMade} attempts`);
+
+        // Update request status to failed (only happens after all retries exhausted)
+        try {
+          await prisma.request.update({
+            where: { id: payload.requestId },
+            data: {
+              status: 'failed',
+              errorMessage: error.message || 'Failed to monitor download after multiple retries',
+              updatedAt: new Date(),
+            },
+          });
+
+          // Update download history
+          if (payload.downloadHistoryId) {
+            await prisma.downloadHistory.update({
+              where: { id: payload.downloadHistoryId },
+              data: {
+                downloadStatus: 'failed',
+                downloadError: error.message || 'Failed to monitor download',
+              },
+            });
+          }
+        } catch (updateError) {
+          console.error('[MonitorDownload] Failed to update request/download status:', updateError);
+        }
+      }
     });
 
     this.queue.on('stalled', async (job: BullJob) => {
@@ -180,6 +223,67 @@ export class JobQueueService {
     this.queue.process('match_plex', 3, async (job: BullJob<MatchPlexPayload>) => {
       const { processMatchPlex } = await import('../processors/match-plex.processor');
       return await processMatchPlex(job.data);
+    });
+
+    // Scheduled job processors - these call the scheduler service trigger methods
+    this.queue.process('plex_library_scan', 1, async (job: BullJob) => {
+      const { getSchedulerService } = await import('./scheduler.service');
+      const scheduler = getSchedulerService();
+      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
+      if (scheduledJob) {
+        await scheduler.triggerJobNow(scheduledJob.id);
+      }
+      return { success: true };
+    });
+
+    this.queue.process('audible_refresh', 1, async (job: BullJob) => {
+      const { getSchedulerService } = await import('./scheduler.service');
+      const scheduler = getSchedulerService();
+      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
+      if (scheduledJob) {
+        await scheduler.triggerJobNow(scheduledJob.id);
+      }
+      return { success: true };
+    });
+
+    this.queue.process('retry_missing_torrents', 1, async (job: BullJob) => {
+      const { getSchedulerService } = await import('./scheduler.service');
+      const scheduler = getSchedulerService();
+      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
+      if (scheduledJob) {
+        await scheduler.triggerJobNow(scheduledJob.id);
+      }
+      return { success: true };
+    });
+
+    this.queue.process('retry_failed_imports', 1, async (job: BullJob) => {
+      const { getSchedulerService } = await import('./scheduler.service');
+      const scheduler = getSchedulerService();
+      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
+      if (scheduledJob) {
+        await scheduler.triggerJobNow(scheduledJob.id);
+      }
+      return { success: true };
+    });
+
+    this.queue.process('cleanup_seeded_torrents', 1, async (job: BullJob) => {
+      const { getSchedulerService } = await import('./scheduler.service');
+      const scheduler = getSchedulerService();
+      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
+      if (scheduledJob) {
+        await scheduler.triggerJobNow(scheduledJob.id);
+      }
+      return { success: true };
+    });
+
+    this.queue.process('monitor_rss_feeds', 1, async (job: BullJob) => {
+      const { getSchedulerService } = await import('./scheduler.service');
+      const scheduler = getSchedulerService();
+      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
+      if (scheduledJob) {
+        await scheduler.triggerJobNow(scheduledJob.id);
+      }
+      return { success: true };
     });
   }
 
@@ -512,6 +616,46 @@ export class JobQueueService {
   async close(): Promise<void> {
     await this.queue.close();
     this.redis.disconnect();
+  }
+
+  /**
+   * Add a repeatable job with cron schedule
+   */
+  async addRepeatableJob(
+    jobType: string,
+    payload: JobPayload,
+    cronExpression: string,
+    jobId: string
+  ): Promise<void> {
+    await this.queue.add(jobType, payload, {
+      repeat: {
+        cron: cronExpression,
+      },
+      jobId,
+    });
+    console.log(`[JobQueue] Added repeatable job: ${jobType} with cron ${cronExpression}`);
+  }
+
+  /**
+   * Remove a repeatable job
+   */
+  async removeRepeatableJob(
+    jobType: string,
+    cronExpression: string,
+    jobId: string
+  ): Promise<void> {
+    await this.queue.removeRepeatable(jobType, {
+      cron: cronExpression,
+      jobId,
+    });
+    console.log(`[JobQueue] Removed repeatable job: ${jobType}`);
+  }
+
+  /**
+   * Get all repeatable jobs
+   */
+  async getRepeatableJobs(): Promise<any[]> {
+    return await this.queue.getRepeatableJobs();
   }
 }
 

@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { enrichAudiobooksWithMatches } from '@/lib/utils/audiobook-matcher';
+import { getCurrentUser } from '@/lib/middleware/auth';
 
 /**
  * GET /api/audiobooks/new-releases?page=1&limit=20
@@ -95,8 +96,12 @@ export async function GET(request: NextRequest) {
       genres: (book.genres as string[]) || [],
     }));
 
-    // Enrich with real-time Plex library matching
-    const enrichedAudiobooks = await enrichAudiobooksWithMatches(audibleBooks);
+    // Get current user (optional - for request status enrichment)
+    const currentUser = getCurrentUser(request);
+    const userId = currentUser?.sub || undefined;
+
+    // Enrich with real-time Plex library matching and request status
+    const enrichedAudiobooks = await enrichAudiobooksWithMatches(audibleBooks, userId);
 
     const totalPages = Math.ceil(totalCount / limit);
     const hasMore = page < totalPages;

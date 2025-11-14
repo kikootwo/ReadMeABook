@@ -1,6 +1,6 @@
 # Route Authentication and Protection
 
-**Status:** ✅ Implemented
+**Status:** ✅ Implemented | Token expiry validation, auto-refresh, 401 handling
 
 Authentication and authorization system protecting routes, ensuring only authenticated users can access protected pages.
 
@@ -17,12 +17,7 @@ Authentication and authorization system protecting routes, ensuring only authent
 
 ## ProtectedRoute Component
 
-```typescript
-interface ProtectedRouteProps {
-  children: ReactNode;
-  requireAdmin?: boolean;
-}
-```
+**Location:** `src/components/auth/ProtectedRoute.tsx`
 
 **Behavior:**
 1. Check auth state from AuthContext
@@ -34,54 +29,101 @@ interface ProtectedRouteProps {
 
 ## API Middleware
 
-```typescript
-// Any authenticated user
-requireAuth(request, async (req) => {
-  const userId = req.user?.id;
-  // ... handler
-});
+**Location:** `src/lib/middleware/auth.ts`
 
-// Admin only
-requireAuth(request, async (req) => {
-  return requireAdmin(req, async (adminReq) => {
-    // ... admin handler
-  });
-});
-```
+**Server-side validation:**
+- `requireAuth()` - validates JWT, adds user to request
+- `requireAdmin()` - checks admin role, chains after requireAuth
+- Returns 401 for invalid/expired tokens
+- Returns 403 for insufficient permissions
 
 ## Token Management
 
-**Access Token:** 1hr lifetime, localStorage, auto-refresh 5 mins before expiry
-**Refresh Token:** 7 days, localStorage
+**Location:** `src/contexts/AuthContext.tsx`, `src/lib/utils/jwt-client.ts`
 
-**Auto-Refresh:**
+**Token Validation on Mount:**
+- Decodes access token to check expiry
+- If expired but refresh token valid → auto-refresh
+- If both expired → clear storage, redirect to login
+- Cross-tab logout sync via storage events
+
+**Auto-Refresh (5 mins before expiry):**
 ```typescript
-const expiresAt = tokenPayload.exp * 1000;
-const refreshTime = expiresAt - Date.now() - (5 * 60 * 1000);
-setTimeout(() => refreshToken(), refreshTime);
+const refreshTimeMs = getRefreshTimeMs(token);
+setTimeout(() => refreshToken(), refreshTimeMs);
+```
+
+**Schedule:**
+- After login → schedule first refresh
+- After token refresh → schedule next refresh
+- Cleanup on logout or unmount
+
+## API Client with 401 Handling
+
+**Location:** `src/lib/utils/api.ts`
+
+**fetchWithAuth():**
+- Adds Authorization header automatically
+- Catches 401 responses
+- Attempts token refresh once
+- Retries original request with new token
+- Logs out if refresh fails
+- Prevents duplicate refresh requests
+
+**Usage:**
+```typescript
+// In hooks/components
+import { fetchWithAuth, fetchJSON } from '@/lib/utils/api';
+
+// GET request
+const response = await fetchWithAuth('/api/requests');
+
+// POST with JSON
+const data = await fetchJSON('/api/requests', {
+  method: 'POST',
+  body: JSON.stringify({ audiobook }),
+});
 ```
 
 ## Error Handling
 
 **401 Unauthorized:**
-- Try refresh token
-- On success: retry original request
-- On failure: logout, redirect to login
+1. Attempt token refresh automatically
+2. Retry original request with new token
+3. If still 401 or refresh fails → logout + redirect to login
 
 **403 Forbidden:**
 - Valid token but insufficient permissions
-- Show error, redirect to home
+- Return error, don't logout
+
+## Cross-Tab Sync
+
+**Storage Events:**
+- Logout in one tab → logout in all tabs
+- Login in one tab → sync auth state to all tabs
+- Prevents stale sessions across browser tabs
 
 ## Security
 
 - Never log tokens
 - HTTPS only in production
-- Short access token expiry
+- Short access token expiry (1hr)
+- Auto-refresh 5 mins before expiry
+- Token expiry validation on mount
+- Prevent duplicate refresh requests
 - SameSite cookies for CSRF protection
-- Validate JWT structure before parsing
+- Client-side token decode (signature verified server-side only)
+
+## Fixed Issues
+
+- **Expired tokens not logging out:** Added token expiry validation on mount
+- **No auto-refresh:** Scheduled refresh 5 mins before token expires
+- **401 errors not handled:** Added global 401 interceptor with token refresh
+- **Logged-out sessions persisting:** Token validation clears expired sessions immediately
 
 ## Tech Stack
 
 - Next.js 14+ App Router
 - JWT via AuthContext
 - React Context API
+- Custom fetch wrapper for 401 handling

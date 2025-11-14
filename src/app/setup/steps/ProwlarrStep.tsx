@@ -21,6 +21,7 @@ interface IndexerInfo {
   id: number;
   name: string;
   protocol: string;
+  supportsRss: boolean;
 }
 
 interface SelectedIndexer {
@@ -28,6 +29,7 @@ interface SelectedIndexer {
   name: string;
   priority: number;
   seedingTimeMinutes: number;
+  rssEnabled: boolean;
 }
 
 export function ProwlarrStep({
@@ -67,7 +69,7 @@ export function ProwlarrStep({
         });
         setAvailableIndexers(data.indexers || []);
 
-        // Auto-select all indexers with default priority of 10 and seeding time of 0 (unlimited)
+        // Auto-select all indexers with default priority of 10, seeding time of 0 (unlimited), and RSS enabled if supported
         const autoSelected: Record<number, SelectedIndexer> = {};
         data.indexers.forEach((indexer: IndexerInfo) => {
           autoSelected[indexer.id] = {
@@ -75,6 +77,7 @@ export function ProwlarrStep({
             name: indexer.name,
             priority: 10,
             seedingTimeMinutes: 0,
+            rssEnabled: indexer.supportsRss, // Enable RSS by default if supported
           };
         });
         setSelectedIndexers(autoSelected);
@@ -106,6 +109,7 @@ export function ProwlarrStep({
           name: indexer.name,
           priority: 10, // Default priority
           seedingTimeMinutes: 0, // Default: unlimited seeding
+          rssEnabled: indexer.supportsRss, // Enable RSS by default if supported
         };
       }
       onUpdate('prowlarrIndexers', Object.values(newSelected));
@@ -127,13 +131,28 @@ export function ProwlarrStep({
     });
   };
 
-  const updateSeedingTime = (indexerId: number, seedingTimeMinutes: number) => {
+  const updateSeedingTime = (indexerId: number, value: string) => {
+    setSelectedIndexers((prev) => {
+      const newSelected = { ...prev };
+      if (newSelected[indexerId]) {
+        const seedingTimeMinutes = value === '' ? 0 : parseInt(value);
+        newSelected[indexerId] = {
+          ...newSelected[indexerId],
+          seedingTimeMinutes: isNaN(seedingTimeMinutes) ? 0 : Math.max(0, seedingTimeMinutes),
+        };
+      }
+      onUpdate('prowlarrIndexers', Object.values(newSelected));
+      return newSelected;
+    });
+  };
+
+  const toggleRss = (indexerId: number) => {
     setSelectedIndexers((prev) => {
       const newSelected = { ...prev };
       if (newSelected[indexerId]) {
         newSelected[indexerId] = {
           ...newSelected[indexerId],
-          seedingTimeMinutes: Math.max(0, seedingTimeMinutes), // Minimum 0 (unlimited)
+          rssEnabled: !newSelected[indexerId].rssEnabled,
         };
       }
       onUpdate('prowlarrIndexers', Object.values(newSelected));
@@ -274,11 +293,12 @@ export function ProwlarrStep({
           <div className="space-y-3">
             <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
               <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-3">
-                Select Indexers & Configure (Priority: 1-25, Seeding Time)
+                Select Indexers & Configure (Priority: 1-25, Seeding Time, RSS)
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                 Higher priority indexers (closer to 25) will be preferred when ranking search results.
                 Seeding time is in minutes (0 = unlimited). Files will be kept until the seeding requirement is met.
+                Enable RSS to automatically monitor indexer feeds for new releases matching your missing list (checked every 15 minutes).
               </p>
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {availableIndexers.map((indexer) => (
@@ -337,12 +357,29 @@ export function ProwlarrStep({
                             step="1"
                             value={selectedIndexers[indexer.id].seedingTimeMinutes}
                             onChange={(e) =>
-                              updateSeedingTime(indexer.id, parseInt(e.target.value) || 0)
+                              updateSeedingTime(indexer.id, e.target.value)
                             }
                             className="w-20 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                             placeholder="0 = ∞"
                           />
                         </div>
+                        {indexer.supportsRss && (
+                          <div className="flex items-center gap-2">
+                            <label
+                              htmlFor={`rss-${indexer.id}`}
+                              className="text-xs text-gray-600 dark:text-gray-400"
+                            >
+                              RSS:
+                            </label>
+                            <input
+                              id={`rss-${indexer.id}`}
+                              type="checkbox"
+                              checked={selectedIndexers[indexer.id].rssEnabled}
+                              onChange={() => toggleRss(indexer.id)}
+                              className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                            />
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

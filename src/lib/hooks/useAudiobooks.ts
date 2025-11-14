@@ -6,6 +6,7 @@
 'use client';
 
 import useSWR from 'swr';
+import { authenticatedFetcher } from '@/lib/utils/api';
 
 export interface Audiobook {
   asin: string;
@@ -21,9 +22,10 @@ export interface Audiobook {
   isAvailable?: boolean;  // Set by real-time matching against plex_library
   plexGuid?: string | null;
   dbId?: string | null;
+  isRequested?: boolean;  // Set if user has requested this audiobook
+  requestStatus?: string | null;  // Status of user's request (if any)
+  requestId?: string | null;  // ID of user's request (if any)
 }
-
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export function useAudiobooks(type: 'popular' | 'new-releases', limit: number = 20, page: number = 1) {
   const endpoint =
@@ -31,7 +33,7 @@ export function useAudiobooks(type: 'popular' | 'new-releases', limit: number = 
       ? `/api/audiobooks/popular?page=${page}&limit=${limit}`
       : `/api/audiobooks/new-releases?page=${page}&limit=${limit}`;
 
-  const { data, error, isLoading } = useSWR(endpoint, fetcher, {
+  const { data, error, isLoading } = useSWR(endpoint, authenticatedFetcher, {
     revalidateOnFocus: false,
     revalidateOnReconnect: false,
     dedupingInterval: 60000, // Cache for 1 minute
@@ -53,7 +55,7 @@ export function useSearch(query: string, page: number = 1) {
   const shouldFetch = query && query.length > 0;
   const endpoint = shouldFetch ? `/api/audiobooks/search?q=${encodeURIComponent(query)}&page=${page}` : null;
 
-  const { data, error, isLoading } = useSWR(endpoint, fetcher, {
+  const { data, error, isLoading } = useSWR(endpoint, authenticatedFetcher, {
     revalidateOnFocus: false,
     dedupingInterval: 30000, // Cache for 30 seconds
   });
@@ -70,7 +72,7 @@ export function useSearch(query: string, page: number = 1) {
 export function useAudiobookDetails(asin: string | null) {
   const endpoint = asin ? `/api/audiobooks/${asin}` : null;
 
-  const { data, error, isLoading } = useSWR(endpoint, fetcher, {
+  const { data, error, isLoading } = useSWR(endpoint, authenticatedFetcher, {
     revalidateOnFocus: false,
     dedupingInterval: 300000, // Cache for 5 minutes
   });

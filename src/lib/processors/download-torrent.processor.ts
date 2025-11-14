@@ -67,16 +67,18 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
 
     console.log(`[DownloadTorrent] Created download history record: ${downloadHistory.id}`);
 
-    // Trigger monitor download job
+    // Trigger monitor download job with initial delay
+    // qBittorrent needs a few seconds to process the torrent before it's available via API
     const jobQueue = getJobQueueService();
     await jobQueue.addMonitorJob(
       requestId,
       downloadHistory.id,
       torrentHash,
-      'qbittorrent'
+      'qbittorrent',
+      3 // Wait 3 seconds before first check to avoid race condition
     );
 
-    console.log(`[DownloadTorrent] Started monitoring job for request ${requestId}`);
+    console.log(`[DownloadTorrent] Started monitoring job for request ${requestId} (3s delay)`);
 
     return {
       success: true,

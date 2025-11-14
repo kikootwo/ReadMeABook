@@ -13,6 +13,7 @@ interface SavedIndexerConfig {
   name: string;
   priority: number;
   seedingTimeMinutes: number;
+  rssEnabled?: boolean;
 }
 
 /**
@@ -49,6 +50,8 @@ export async function GET(request: NextRequest) {
             enabled: !!saved, // Enabled if in saved list
             priority: saved?.priority || 10,
             seedingTimeMinutes: saved?.seedingTimeMinutes ?? 0,
+            rssEnabled: saved?.rssEnabled ?? false,
+            supportsRss: indexer.capabilities?.supportsRss !== false, // Default to true if not specified
           };
         });
 
@@ -89,6 +92,7 @@ export async function PUT(request: NextRequest) {
             name: indexer.name,
             priority: indexer.priority,
             seedingTimeMinutes: indexer.seedingTimeMinutes,
+            rssEnabled: indexer.rssEnabled || false,
           }));
 
         // Save to configuration (matches wizard format)

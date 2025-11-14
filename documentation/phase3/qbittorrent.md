@@ -76,6 +76,8 @@ type TorrentState = 'downloading' | 'uploading' | 'stalledDL' |
 **3. Duplicate detection** - Check if hash exists before adding
 **4. Config fallbacks to env** - Removed, database only
 **5. Unclear error messages** - List missing fields explicitly
+**6. Race condition on torrent availability** - Fixed with 3s initial delay + exponential backoff retry (500ms, 1s, 2s)
+**7. Error logging during duplicate check** - Removed console.error in getTorrent() during expected "not found" cases (duplicate checking)
 
 ## Tech Stack
 

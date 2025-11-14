@@ -8,6 +8,41 @@ import { prisma } from '../db';
 import { getQBittorrentService } from '../integrations/qbittorrent.service';
 
 /**
+ * Helper function to retry getTorrent with exponential backoff
+ * Handles race condition where torrent isn't immediately available after adding
+ */
+async function getTorrentWithRetry(
+  qbt: any,
+  hash: string,
+  maxRetries: number = 3,
+  initialDelayMs: number = 500
+): Promise<any> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await qbt.getTorrent(hash);
+    } catch (error) {
+      lastError = error as Error;
+
+      // If this is the last attempt, throw the error
+      if (attempt === maxRetries - 1) {
+        break;
+      }
+
+      // Exponential backoff: 500ms, 1000ms, 2000ms
+      const delayMs = initialDelayMs * Math.pow(2, attempt);
+      console.log(`[MonitorDownload] Torrent ${hash} not found, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+
+  // All retries failed
+  throw lastError || new Error('Failed to get torrent after retries');
+}
+
+/**
  * Process monitor download job
  * Checks download progress from download client and updates request status
  * Re-schedules itself if download is still in progress
@@ -23,8 +58,8 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
 
     const qbt = await getQBittorrentService();
 
-    // Get torrent status
-    const torrent = await qbt.getTorrent(downloadClientId);
+    // Get torrent status with retry logic (handles race condition)
+    const torrent = await getTorrentWithRetry(qbt, downloadClientId);
     const progress = qbt.getDownloadProgress(torrent);
 
     // Update request progress
@@ -155,16 +190,27 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
   } catch (error) {
     console.error('[MonitorDownload] Error:', error);
 
-    // Update request to failed
-    await prisma.request.update({
-      where: { id: requestId },
-      data: {
-        status: 'failed',
-        errorMessage: error instanceof Error ? error.message : 'Monitor download failed',
-        updatedAt: new Date(),
-      },
-    });
+    // Check if this is a transient "torrent not found" error
+    const errorMessage = error instanceof Error ? error.message : '';
+    const isTorrentNotFound = errorMessage.includes('not found') || errorMessage.includes('Torrent') && errorMessage.includes('not found');
 
+    if (isTorrentNotFound) {
+      // Transient error - don't mark request as failed, let Bull retry
+      // The request stays in 'downloading' status until Bull exhausts all retries
+      console.log(`[MonitorDownload] Transient error for request ${requestId}, allowing Bull to retry`);
+    } else {
+      // Permanent error - mark request as failed immediately
+      await prisma.request.update({
+        where: { id: requestId },
+        data: {
+          status: 'failed',
+          errorMessage: errorMessage || 'Monitor download failed',
+          updatedAt: new Date(),
+        },
+      });
+    }
+
+    // Rethrow to trigger Bull's retry mechanism
     throw error;
   }
 }

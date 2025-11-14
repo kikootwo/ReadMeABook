@@ -49,9 +49,14 @@ API Docs: `/PlexMediaServerAPIDocs.json`
 2. For each:
    - Exists by `plexGuid`? Update metadata + set `availabilityStatus: 'available'`
    - New? Create entry with `availabilityStatus: 'available'`
-3. Return summary (total, new count, updated count)
+3. Match downloaded requests (status: 'downloaded'):
+   - Fuzzy match against Plex library (70% threshold)
+   - Matched → Update request status to 'available' + link plexGuid
+4. Return summary (total, new count, updated count, matched downloads)
 
 **Trigger:** Scheduled (every 6 hours default) or manual admin action
+
+**Note:** Requests transition: pending → searching → downloading → downloaded (green) → available (after Plex scan)
 
 ## Data Models
 
@@ -100,6 +105,14 @@ interface PlexLibrary {
 - Issue: Author names as titles, undefined authors
 - Cause: Querying without `type=9` returned Artist items, not Albums
 - Fix: Added `type=9` parameter, changed `grandparentTitle` to `parentTitle` for author
+
+**5. Immediate Plex Search After File Organization (400 Error)**
+- Issue: organize_files job triggered match_plex immediately after copying files
+- Cause: Plex hadn't scanned new files yet, search API returned 400 error
+- User Experience: Error logs despite successful download
+- Fix: Removed immediate match_plex trigger, changed workflow:
+  - organize_files → status: 'downloaded' (green)
+  - Scheduled scan_plex (every 6 hours) → matches downloaded requests → status: 'available'
 
 ## Availability Checking
 

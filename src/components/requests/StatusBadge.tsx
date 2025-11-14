@@ -10,13 +10,18 @@ import { cn } from '@/lib/utils/cn';
 
 interface StatusBadgeProps {
   status: string;
+  progress?: number;
   className?: string;
 }
 
-export function StatusBadge({ status, className }: StatusBadgeProps) {
+export function StatusBadge({ status, progress, className }: StatusBadgeProps) {
   const statusConfig: Record<string, { label: string; color: string }> = {
     pending: {
       label: 'Pending',
+      color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+    },
+    awaiting_search: {
+      label: 'Awaiting Search',
       color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
     },
     searching: {
@@ -24,11 +29,15 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
       color: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
     },
     downloading: {
-      label: 'Downloading',
+      label: progress !== undefined && progress === 0 ? 'Initializing...' : 'Downloading',
       color: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
     },
     processing: {
       label: 'Processing',
+      color: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
+    },
+    awaiting_import: {
+      label: 'Awaiting Import',
       color: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
     },
     completed: {
@@ -38,6 +47,10 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
     failed: {
       label: 'Failed',
       color: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+    },
+    warn: {
+      label: 'Warning',
+      color: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
     },
     cancelled: {
       label: 'Cancelled',

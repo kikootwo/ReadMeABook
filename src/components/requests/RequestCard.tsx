@@ -115,11 +115,17 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
 
           {/* Status Badge */}
           <div className="flex items-center gap-2">
-            <StatusBadge status={request.status} />
-            {isActive && (
+            <StatusBadge status={request.status} progress={request.progress} />
+            {isActive && request.progress > 0 && (
               <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
                 <div className="animate-pulse w-2 h-2 bg-blue-500 rounded-full"></div>
                 <span>Active</span>
+              </div>
+            )}
+            {isActive && request.progress === 0 && (
+              <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                <div className="animate-spin w-3 h-3 border-2 border-gray-300 border-t-blue-500 rounded-full"></div>
+                <span>Setting up...</span>
               </div>
             )}
           </div>
