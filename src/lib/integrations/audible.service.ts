@@ -367,81 +367,122 @@ export class AudibleService {
         console.log(`[Audible] Title from HTML: "${result.title}"`);
       }
 
-      // Author - try multiple approaches
+      // Author - try multiple approaches (only in product details area)
       if (!result.author) {
-        // Try author links first
-        const authorLinks = $('a[href*="/author/"]');
+        // Look specifically in the product details section, not the whole page
+        const productSection = $('.bc-section, .product-top-section, [class*="product"]').first();
         const authors: string[] = [];
-        authorLinks.each((_, elem) => {
+
+        // First try labeled author sections
+        productSection.find('li.authorLabel a, span.authorLabel a, .authorLabel a').each((_, elem) => {
           const text = $(elem).text().trim();
-          if (text && text.length > 0 && text.length < 100 && !text.includes('›')) {
+          if (text && text.length > 0 && text.length < 80) {
             authors.push(text);
           }
         });
 
+        // If no labeled authors, look for author links near the title (first 3 only to avoid recommendations)
+        if (authors.length === 0) {
+          $('a[href*="/author/"]').slice(0, 3).each((_, elem) => {
+            const text = $(elem).text().trim();
+            // Filter out navigation breadcrumbs and promotional text
+            if (text && text.length > 1 && text.length < 80 &&
+                !text.includes('›') && !text.includes('...') &&
+                !text.toLowerCase().includes('more') && !text.toLowerCase().includes('see all')) {
+              authors.push(text);
+            }
+          });
+        }
+
         if (authors.length > 0) {
-          result.author = [...new Set(authors)].join(', ');
-        } else {
-          // Fallback to class-based selectors
-          result.author = $('li.authorLabel a').text().trim() ||
-                         $('span.authorLabel a').text().trim() ||
-                         $('.authorLabel').find('a').text().trim() ||
-                         $('.bc-size-small a[href*="/author/"]').first().text().trim();
+          // Deduplicate and limit to max 3 authors
+          result.author = [...new Set(authors)].slice(0, 3).join(', ');
         }
 
         result.author = result.author.replace(/^By:\s*/i, '').replace(/^Written by:\s*/i, '').trim();
         console.log(`[Audible] Author from HTML: "${result.author}"`);
       }
 
-      // Narrator - try multiple approaches
+      // Narrator - try multiple approaches (only in product details area)
       if (!result.narrator) {
-        // Try narrator links first
-        const narratorLinks = $('a[href*="/narrator/"]');
+        // Look specifically in the product details section
+        const productSection = $('.bc-section, .product-top-section, [class*="product"]').first();
         const narrators: string[] = [];
-        narratorLinks.each((_, elem) => {
+
+        // First try labeled narrator sections
+        productSection.find('li.narratorLabel a, span.narratorLabel a, .narratorLabel a').each((_, elem) => {
           const text = $(elem).text().trim();
-          if (text && text.length > 0 && text.length < 100 && !text.includes('›')) {
+          if (text && text.length > 0 && text.length < 80) {
             narrators.push(text);
           }
         });
 
+        // If no labeled narrators, look for narrator links (first 5 only)
+        if (narrators.length === 0) {
+          $('a[href*="/narrator/"]').slice(0, 5).each((_, elem) => {
+            const text = $(elem).text().trim();
+            if (text && text.length > 1 && text.length < 80 &&
+                !text.includes('›') && !text.includes('...')) {
+              narrators.push(text);
+            }
+          });
+        }
+
         if (narrators.length > 0) {
-          result.narrator = [...new Set(narrators)].join(', ');
-        } else {
-          // Fallback to class-based selectors
-          result.narrator = $('li.narratorLabel a').text().trim() ||
-                           $('span.narratorLabel a').text().trim() ||
-                           $('.narratorLabel').find('a').text().trim() ||
-                           $('.bc-size-small a[href*="/narrator/"]').first().text().trim();
+          // Deduplicate and limit to reasonable count
+          result.narrator = [...new Set(narrators)].slice(0, 5).join(', ');
         }
 
         result.narrator = result.narrator.replace(/^Narrated by:\s*/i, '').trim();
         console.log(`[Audible] Narrator from HTML: "${result.narrator}"`);
       }
 
-      // Description - try multiple approaches
+      // Description - try multiple approaches with strict filtering
       if (!result.description) {
-        // Try multiple description selectors
-        result.description =
-          // Expander content (common pattern)
-          $('.bc-expander-content').first().text().trim() ||
-          $('[class*="productPublisherSummary"]').text().trim() ||
-          $('[data-widget="publisherSummary"]').text().trim() ||
-          // Try any element with "summary" in class
-          $('[class*="summary"]').first().text().trim() ||
-          // Try paragraphs near the product details
-          $('.bc-section p').first().text().trim() ||
-          // Look for long text blocks (likely descriptions)
-          (() => {
-            let longest = '';
-            $('p, div[class*="description"], div[class*="summary"]').each((_, elem) => {
-              const text = $(elem).text().trim();
-              if (text.length > longest.length && text.length > 100 && text.length < 5000) {
-                longest = text;
-              }
-            });
-            return longest;
-          })();
+        const excludePatterns = [
+          /\$\d+\.\d+/,  // Price patterns
+          /cancel anytime/i,
+          /free trial/i,
+          /membership/i,
+          /subscribe/i,
+          /offer.*ends/i,
+          /^\s*by\s+[\w\s,]+$/i,  // Just author names
+        ];
+
+        const isValidDescription = (text: string): boolean => {
+          if (!text || text.length < 50 || text.length > 5000) return false;
+          // Reject if it contains promotional patterns
+          for (const pattern of excludePatterns) {
+            if (pattern.test(text)) return false;
+          }
+          return true;
+        };
+
+        // Try specific description selectors first
+        const candidates = [
+          $('.bc-expander-content').first().text().trim(),
+          $('[class*="productPublisherSummary"]').first().text().trim(),
+          $('[data-widget="publisherSummary"]').first().text().trim(),
+          $('.bc-section p').first().text().trim(),
+        ];
+
+        // Find first valid candidate
+        for (const candidate of candidates) {
+          if (isValidDescription(candidate)) {
+            result.description = candidate;
+            break;
+          }
+        }
+
+        // If still no description, search for valid paragraphs
+        if (!result.description) {
+          $('p, div[class*="description"]').each((_, elem) => {
+            const text = $(elem).text().trim();
+            if (isValidDescription(text) && text.length > (result.description?.length || 0)) {
+              result.description = text;
+            }
+          });
+        }
 
         console.log(`[Audible] Description length: ${result.description.length} chars`);
       }
