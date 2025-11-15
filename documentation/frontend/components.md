@@ -28,9 +28,9 @@ src/components/
 - **Footer** - Version, links
 
 **Audiobooks**
-- **AudiobookCard** - Cover, title, author, narrator, duration, request button
+- **AudiobookCard** ✅ - Cover, title, author, narrator, duration, request button, clickable to open details modal
 - **AudiobookGrid** - Responsive grid (1/2/3/4 cols)
-- **AudiobookDetails** - Modal with full metadata
+- **AudiobookDetailsModal** ✅ - Full-screen modal with comprehensive metadata (description, genres, rating, release date, narrator, request functionality)
 
 **Requests**
 - **RequestCard** ✅ - Cover, title, author, status badge, progress bar, timestamps, action buttons (cancel, manual search, interactive search)
@@ -80,6 +80,17 @@ interface AudiobookCardProps {
   onRequest?: (asin: string) => void;
   isRequested?: boolean;
   requestStatus?: string;
+  onRequestSuccess?: () => void;
+}
+
+interface AudiobookDetailsModalProps {
+  asin: string;
+  isOpen: boolean;
+  onClose: () => void;
+  onRequestSuccess?: () => void;
+  isRequested?: boolean;
+  requestStatus?: string | null;
+  isAvailable?: boolean;
 }
 
 interface RequestCardProps {
@@ -119,7 +130,8 @@ interface ConfirmModalProps {
 ## Custom Hooks
 
 - **useAuth** - `{user, login, logout, isLoading}`
-- **useAudiobooks** - `{audiobooks, isLoading, error}`
+- **useAudiobooks** - `{audiobooks, isLoading, error, totalPages, hasMore}`
+- **useAudiobookDetails** ✅ - `{audiobook, isLoading, error}` - Fetches individual audiobook by ASIN
 - **useRequest** - `{createRequest, cancelRequest, isLoading}`
 
 ## Styling
