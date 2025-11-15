@@ -286,11 +286,91 @@ export class AudibleService {
 
   /**
    * Get detailed audiobook information
+   * Primary: Audnexus API (reliable, structured data)
+   * Fallback: Audible scraping
    */
   async getAudiobookDetails(asin: string): Promise<AudibleAudiobook | null> {
     try {
       console.log(`[Audible] Fetching details for ASIN ${asin}...`);
 
+      // Try Audnexus first (more reliable)
+      const audnexusData = await this.fetchFromAudnexus(asin);
+      if (audnexusData) {
+        console.log(`[Audible] Successfully fetched from Audnexus for "${audnexusData.title}"`);
+        return audnexusData;
+      }
+
+      console.log(`[Audible] Audnexus failed, falling back to Audible scraping...`);
+
+      // Fallback to Audible scraping
+      return await this.scrapeAudibleDetails(asin);
+    } catch (error) {
+      console.error(`[Audible] Failed to fetch details for ${asin}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch audiobook details from Audnexus API
+   */
+  private async fetchFromAudnexus(asin: string): Promise<AudibleAudiobook | null> {
+    try {
+      console.log(`[Audnexus] Fetching ASIN ${asin}...`);
+
+      const response = await axios.get(`https://api.audnex.us/books/${asin}`, {
+        timeout: 10000,
+        headers: {
+          'User-Agent': 'ReadMeABook/1.0',
+        },
+      });
+
+      const data = response.data;
+
+      // Build result from Audnexus data
+      const result: AudibleAudiobook = {
+        asin,
+        title: data.title || '',
+        author: data.authors?.map((a: any) => a.name).join(', ') || '',
+        narrator: data.narrators?.map((n: any) => n.name).join(', ') || '',
+        description: data.description || data.summary || '',
+        coverArtUrl: data.image || '',
+        durationMinutes: data.runtimeLengthMin || undefined,
+        releaseDate: data.releaseDate || undefined,
+        rating: data.rating || undefined,
+        genres: data.genres?.map((g: any) => typeof g === 'string' ? g : g.name).slice(0, 5) || undefined,
+      };
+
+      // Ensure cover art URL is high quality
+      if (result.coverArtUrl && !result.coverArtUrl.includes('_SL500_')) {
+        result.coverArtUrl = result.coverArtUrl.replace(/\._.*_\./, '._SL500_.');
+      }
+
+      console.log(`[Audnexus] Success:`, JSON.stringify({
+        title: result.title,
+        author: result.author,
+        narrator: result.narrator,
+        descLength: result.description?.length || 0,
+        duration: result.durationMinutes,
+        rating: result.rating,
+        genres: result.genres?.length || 0
+      }));
+
+      return result;
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        console.log(`[Audnexus] Book not found (404) for ASIN ${asin}`);
+      } else {
+        console.log(`[Audnexus] Error fetching ASIN ${asin}:`, error.message);
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Scrape audiobook details from Audible (fallback method)
+   */
+  private async scrapeAudibleDetails(asin: string): Promise<AudibleAudiobook | null> {
+    try {
       const response = await this.client.get(`/pd/${asin}`);
       const $ = cheerio.load(response.data);
 

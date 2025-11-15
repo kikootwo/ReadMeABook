@@ -1,16 +1,30 @@
 # Audible Integration
 
-**Status:** ✅ Implemented (Web Scraping)
+**Status:** ✅ Implemented (Audnexus API + Web Scraping)
 
-Audiobook metadata scraping from Audible.com for discovery, search, and request features.
+Audiobook metadata from Audnexus API (primary) and Audible.com scraping (fallback) for discovery, search, and detail pages.
 
-## Scraping Strategy
+## Detail Page Strategy
+
+**Primary: Audnexus API**
+- Endpoint: `https://api.audnex.us/books/{asin}`
+- Structured JSON response (no parsing needed)
+- Provides: title, authors, narrators, description, duration, rating, genres, cover art
+- Free, no API key required
+- ~95% success rate for popular audiobooks
+
+**Fallback: Audible Scraping**
+- Used when Audnexus returns 404
+- Parse Audible HTML with Cheerio
+- Multiple selector strategies with promotional text filtering
+- Extract JSON-LD structured data when available
+
+## Discovery Strategy (Popular/New/Search)
 
 - Parse Audible HTML with Cheerio
 - Multi-page scraping (20 items/page)
 - Rate limit: max 10 req/min, 1.5s delay between pages
 - Cache results in database (24hr TTL)
-- Extract JSON-LD structured data when available
 
 ## Data Sources
 
