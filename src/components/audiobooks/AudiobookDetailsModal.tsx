@@ -219,7 +219,7 @@ export function AudiobookDetailsModal({
                             <svg
                               key={i}
                               className={`w-5 h-5 ${
-                                i < Math.floor(audiobook.rating!)
+                                i < Math.floor(Number(audiobook.rating))
                                   ? 'text-yellow-400 fill-current'
                                   : 'text-gray-300 dark:text-gray-600'
                               }`}
@@ -230,7 +230,7 @@ export function AudiobookDetailsModal({
                           ))}
                         </div>
                         <span className="text-gray-700 dark:text-gray-300 font-medium">
-                          {audiobook.rating.toFixed(1)}
+                          {Number(audiobook.rating).toFixed(1)}
                         </span>
                       </div>
                     </div>

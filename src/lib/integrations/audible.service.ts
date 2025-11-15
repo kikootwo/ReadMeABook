@@ -334,9 +334,9 @@ export class AudibleService {
         narrator: data.narrators?.map((n: any) => n.name).join(', ') || '',
         description: data.description || data.summary || '',
         coverArtUrl: data.image || '',
-        durationMinutes: data.runtimeLengthMin || undefined,
+        durationMinutes: data.runtimeLengthMin ? parseInt(data.runtimeLengthMin) : undefined,
         releaseDate: data.releaseDate || undefined,
-        rating: data.rating || undefined,
+        rating: data.rating ? parseFloat(data.rating) : undefined,
         genres: data.genres?.map((g: any) => typeof g === 'string' ? g : g.name).slice(0, 5) || undefined,
       };
 
