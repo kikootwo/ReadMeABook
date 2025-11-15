@@ -433,8 +433,10 @@ export class AudibleService {
           result.narrator = [...new Set(narrators)].slice(0, 5).join(', ');
         }
 
-        result.narrator = result.narrator.replace(/^Narrated by:\s*/i, '').trim();
-        console.log(`[Audible] Narrator from HTML: "${result.narrator}"`);
+        if (result.narrator) {
+          result.narrator = result.narrator.replace(/^Narrated by:\s*/i, '').trim();
+        }
+        console.log(`[Audible] Narrator from HTML: "${result.narrator || ''}"`);
       }
 
       // Description - try multiple approaches with strict filtering
