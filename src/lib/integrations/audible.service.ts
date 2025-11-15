@@ -587,7 +587,7 @@ export class AudibleService {
         title: result.title,
         author: result.author,
         narrator: result.narrator,
-        descLength: result.description.length,
+        descLength: result.description?.length || 0,
         duration: result.durationMinutes,
         rating: result.rating,
         genres: result.genres?.length || 0
