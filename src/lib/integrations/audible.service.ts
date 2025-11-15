@@ -486,7 +486,7 @@ export class AudibleService {
           });
         }
 
-        console.log(`[Audible] Description length: ${result.description.length} chars`);
+        console.log(`[Audible] Description length: ${result.description?.length || 0} chars`);
       }
 
       // Cover art - try multiple selectors
