@@ -88,6 +88,9 @@ interface AudiobookDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onRequestSuccess?: () => void;
+  isRequested?: boolean;
+  requestStatus?: string | null;
+  isAvailable?: boolean;
 }
 
 interface RequestCardProps {

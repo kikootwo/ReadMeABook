@@ -19,6 +19,9 @@ interface AudiobookDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onRequestSuccess?: () => void;
+  isRequested?: boolean;
+  requestStatus?: string | null;
+  isAvailable?: boolean;
 }
 
 export function AudiobookDetailsModal({
@@ -26,6 +29,9 @@ export function AudiobookDetailsModal({
   isOpen,
   onClose,
   onRequestSuccess,
+  isRequested = false,
+  requestStatus = null,
+  isAvailable = false,
 }: AudiobookDetailsModalProps) {
   const { user } = useAuth();
   const { audiobook, isLoading, error } = useAudiobookDetails(isOpen ? asin : null);
@@ -257,7 +263,7 @@ export function AudiobookDetailsModal({
                   )}
 
                   {/* Availability Status */}
-                  {audiobook.isAvailable && (
+                  {isAvailable && (
                     <div>
                       <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Status</p>
                       <div className="inline-flex items-center gap-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-sm font-semibold px-3 py-1 rounded-full">
@@ -308,8 +314,9 @@ export function AudiobookDetailsModal({
             {/* Action Buttons */}
             <div className="border-t border-gray-200 dark:border-gray-700 pt-6 flex flex-col sm:flex-row gap-3">
               {(() => {
+                // Use props from card instead of fetched audiobook data for request status
                 // Check if book is already available in Plex or completed status
-                if (audiobook.isAvailable || audiobook.requestStatus === 'completed') {
+                if (isAvailable || requestStatus === 'completed') {
                   return (
                     <div className="flex-1">
                       <div className="w-full py-3 px-6 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-lg text-center">
@@ -331,9 +338,9 @@ export function AudiobookDetailsModal({
                   'awaiting_import',
                 ];
                 if (
-                  audiobook.isRequested &&
-                  audiobook.requestStatus &&
-                  inProgressStatuses.includes(audiobook.requestStatus)
+                  isRequested &&
+                  requestStatus &&
+                  inProgressStatuses.includes(requestStatus)
                 ) {
                   return (
                     <div className="flex-1">

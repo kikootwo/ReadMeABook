@@ -215,6 +215,9 @@ export function AudiobookCard({
       isOpen={showModal}
       onClose={() => setShowModal(false)}
       onRequestSuccess={onRequestSuccess}
+      isRequested={audiobook.isRequested}
+      requestStatus={audiobook.requestStatus}
+      isAvailable={audiobook.isAvailable}
     />
     </>
   );
