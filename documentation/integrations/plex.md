@@ -14,7 +14,7 @@ Connectivity to Plex for OAuth, library management, content detection, and autom
 
 ## Core Endpoints
 
-**GET {server_url}/identity** - Server info (machineIdentifier, version, platform)
+**GET {server_url}/identity** - Server info (machineIdentifier, version, platform) | Also used for access verification
 **GET {server_url}/library/sections** - List libraries with IDs and types
 **GET {server_url}/library/sections/{id}/all?type=9** - All albums (type 9 = audiobooks)
 **GET {server_url}/library/sections/{id}/refresh** - Trigger async scan
@@ -25,6 +25,8 @@ Auth: `X-Plex-Token` header
 Response: XML (requires `xml2js` parsing to JSON)
 API Docs: `/PlexMediaServerAPIDocs.json`
 
+**Security:** During OAuth, user's accessible servers are fetched from `plex.tv/api/v2/resources`. Only users with the configured server in their resource list can authenticate.
+
 ## Plex OAuth
 
 **Base:** `https://plex.tv/api/v2`
@@ -33,6 +35,10 @@ API Docs: `/PlexMediaServerAPIDocs.json`
 2. Build auth URL: `https://app.plex.tv/auth#?clientID={id}&code={code}`
 3. `GET /pins/{id}` → Poll until authToken populated
 4. `GET /users/account` → Get user info with token
+5. **Security check:** Get server machineIdentifier from configured server
+6. **Security check:** Fetch user's accessible servers (`GET plex.tv/api/v2/resources` with user token)
+7. **Security check:** Verify configured server's machineIdentifier is in user's resource list
+8. Only grant access if server found in user's accessible resources (validates shared access)
 
 ## Audiobook Detection
 

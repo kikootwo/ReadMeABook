@@ -9,6 +9,14 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { authenticatedFetcher, fetchJSON } from '@/lib/utils/api';
 import { ToastProvider, useToast } from '@/components/ui/Toast';
+import {
+  cronToHuman,
+  SCHEDULE_PRESETS,
+  customScheduleToCron,
+  cronToCustomSchedule,
+  isValidCron,
+  type CustomSchedule,
+} from '@/lib/utils/cron';
 
 interface ScheduledJob {
   id: string;
@@ -35,6 +43,9 @@ function AdminJobsPageContent() {
     job: ScheduledJob | null;
   }>({ isOpen: false, job: null });
   const [editForm, setEditForm] = useState({ schedule: '', enabled: true });
+  const [scheduleMode, setScheduleMode] = useState<'preset' | 'custom' | 'advanced'>('preset');
+  const [selectedPreset, setSelectedPreset] = useState<string>('');
+  const [customSchedule, setCustomSchedule] = useState<CustomSchedule>({ type: 'hours', interval: 1 });
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
@@ -66,6 +77,23 @@ function AdminJobsPageContent() {
 
   const showEditDialog = (job: ScheduledJob) => {
     setEditForm({ schedule: job.schedule, enabled: job.enabled });
+
+    // Check if it's a preset
+    const preset = SCHEDULE_PRESETS.find(p => p.cron === job.schedule);
+    if (preset) {
+      setScheduleMode('preset');
+      setSelectedPreset(preset.cron);
+    } else {
+      // Try to parse as custom schedule
+      const parsed = cronToCustomSchedule(job.schedule);
+      if (parsed.type === 'custom') {
+        setScheduleMode('advanced');
+      } else {
+        setScheduleMode('custom');
+        setCustomSchedule(parsed);
+      }
+    }
+
     setEditDialog({ isOpen: true, job });
   };
 
@@ -96,12 +124,28 @@ function AdminJobsPageContent() {
   const saveJobSchedule = async () => {
     if (!editDialog.job) return;
 
+    // Calculate final cron expression based on mode
+    let finalCron: string;
+    if (scheduleMode === 'preset') {
+      finalCron = selectedPreset;
+    } else if (scheduleMode === 'custom') {
+      finalCron = customScheduleToCron(customSchedule);
+    } else {
+      finalCron = editForm.schedule;
+    }
+
+    // Validate cron expression
+    if (!isValidCron(finalCron)) {
+      toast.error('Invalid cron expression. Please check your schedule.');
+      return;
+    }
+
     try {
       setSaving(true);
       await fetchJSON(`/api/admin/jobs/${editDialog.job.id}`, {
         method: 'PUT',
         body: JSON.stringify({
-          schedule: editForm.schedule,
+          schedule: finalCron,
           enabled: editForm.enabled,
         }),
       });
@@ -190,8 +234,11 @@ function AdminJobsPageContent() {
                       {job.type}
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900 dark:text-gray-100 font-mono">
+                  <td className="px-6 py-4">
+                    <div className="text-sm text-gray-900 dark:text-gray-100">
+                      {cronToHuman(job.schedule)}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-1">
                       {job.schedule}
                     </div>
                   </td>
@@ -301,11 +348,12 @@ function AdminJobsPageContent() {
         {/* Edit Job Dialog */}
         {editDialog.isOpen && editDialog.job && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full p-6">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
                 Edit Job Schedule
               </h3>
               <div className="space-y-4 mb-6">
+                {/* Job Name */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Job Name
@@ -317,22 +365,247 @@ function AdminJobsPageContent() {
                     className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border border-gray-300 dark:border-gray-600 rounded-lg cursor-not-allowed"
                   />
                 </div>
+
+                {/* Schedule Mode Tabs */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Schedule (Cron Expression)
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Schedule Type
                   </label>
-                  <input
-                    type="text"
-                    value={editForm.schedule}
-                    onChange={(e) => setEditForm({ ...editForm, schedule: e.target.value })}
-                    placeholder="0 */6 * * *"
-                    className="w-full px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Format: minute hour day month weekday (e.g., &quot;0 */6 * * *&quot; for every 6 hours)
-                  </p>
+                  <div className="flex gap-2 mb-3">
+                    <button
+                      onClick={() => setScheduleMode('preset')}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        scheduleMode === 'preset'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      }`}
+                    >
+                      Common Schedules
+                    </button>
+                    <button
+                      onClick={() => setScheduleMode('custom')}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        scheduleMode === 'custom'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      }`}
+                    >
+                      Custom Schedule
+                    </button>
+                    <button
+                      onClick={() => setScheduleMode('advanced')}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                        scheduleMode === 'advanced'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      }`}
+                    >
+                      Advanced (Cron)
+                    </button>
+                  </div>
+
+                  {/* Preset Mode */}
+                  {scheduleMode === 'preset' && (
+                    <div className="space-y-2">
+                      {SCHEDULE_PRESETS.map((preset) => (
+                        <label
+                          key={preset.cron}
+                          className="flex items-start gap-3 p-3 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
+                        >
+                          <input
+                            type="radio"
+                            name="preset"
+                            value={preset.cron}
+                            checked={selectedPreset === preset.cron}
+                            onChange={(e) => setSelectedPreset(e.target.value)}
+                            className="mt-1 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600"
+                          />
+                          <div className="flex-1">
+                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                              {preset.label}
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              {preset.description}
+                            </div>
+                            <div className="text-xs text-gray-400 dark:text-gray-500 font-mono mt-1">
+                              {preset.cron}
+                            </div>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Custom Mode */}
+                  {scheduleMode === 'custom' && (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Frequency
+                        </label>
+                        <select
+                          value={customSchedule.type}
+                          onChange={(e) => setCustomSchedule({ ...customSchedule, type: e.target.value as any })}
+                          className="w-full px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="minutes">Every X minutes</option>
+                          <option value="hours">Every X hours</option>
+                          <option value="daily">Daily</option>
+                          <option value="weekly">Weekly</option>
+                          <option value="monthly">Monthly</option>
+                        </select>
+                      </div>
+
+                      {/* Minutes/Hours Interval */}
+                      {(customSchedule.type === 'minutes' || customSchedule.type === 'hours') && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Interval
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            max={customSchedule.type === 'minutes' ? 59 : 23}
+                            value={customSchedule.interval || 1}
+                            onChange={(e) => setCustomSchedule({ ...customSchedule, interval: parseInt(e.target.value, 10) })}
+                            className="w-full px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500"
+                          />
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Run every {customSchedule.interval || 1} {customSchedule.type}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Daily/Weekly/Monthly Time */}
+                      {(customSchedule.type === 'daily' || customSchedule.type === 'weekly' || customSchedule.type === 'monthly') && (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              Hour (0-23)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="23"
+                              value={customSchedule.time?.hour || 0}
+                              onChange={(e) =>
+                                setCustomSchedule({
+                                  ...customSchedule,
+                                  time: { hour: parseInt(e.target.value, 10), minute: customSchedule.time?.minute || 0 },
+                                })
+                              }
+                              className="w-full px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                              Minute (0-59)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="59"
+                              value={customSchedule.time?.minute || 0}
+                              onChange={(e) =>
+                                setCustomSchedule({
+                                  ...customSchedule,
+                                  time: { hour: customSchedule.time?.hour || 0, minute: parseInt(e.target.value, 10) },
+                                })
+                              }
+                              className="w-full px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Weekly Day Selection */}
+                      {customSchedule.type === 'weekly' && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Day of Week
+                          </label>
+                          <select
+                            value={customSchedule.dayOfWeek || 0}
+                            onChange={(e) => setCustomSchedule({ ...customSchedule, dayOfWeek: parseInt(e.target.value, 10) })}
+                            className="w-full px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="0">Sunday</option>
+                            <option value="1">Monday</option>
+                            <option value="2">Tuesday</option>
+                            <option value="3">Wednesday</option>
+                            <option value="4">Thursday</option>
+                            <option value="5">Friday</option>
+                            <option value="6">Saturday</option>
+                          </select>
+                        </div>
+                      )}
+
+                      {/* Monthly Day Selection */}
+                      {customSchedule.type === 'monthly' && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Day of Month (1-31)
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="31"
+                            value={customSchedule.dayOfMonth || 1}
+                            onChange={(e) => setCustomSchedule({ ...customSchedule, dayOfMonth: parseInt(e.target.value, 10) })}
+                            className="w-full px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                      )}
+
+                      {/* Preview */}
+                      <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                        <div className="text-sm font-medium text-blue-900 dark:text-blue-200">
+                          Preview: {cronToHuman(customScheduleToCron(customSchedule))}
+                        </div>
+                        <div className="text-xs text-blue-700 dark:text-blue-300 font-mono mt-1">
+                          {customScheduleToCron(customSchedule)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Advanced Mode */}
+                  {scheduleMode === 'advanced' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Cron Expression
+                      </label>
+                      <input
+                        type="text"
+                        value={editForm.schedule}
+                        onChange={(e) => setEditForm({ ...editForm, schedule: e.target.value })}
+                        placeholder="0 */6 * * *"
+                        className="w-full px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono"
+                      />
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Format: minute hour day month weekday
+                      </p>
+                      <div className="mt-2 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                        <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
+                          <div>• */15 * * * * = Every 15 minutes</div>
+                          <div>• 0 */6 * * * = Every 6 hours</div>
+                          <div>• 0 0 * * * = Daily at midnight</div>
+                          <div>• 0 0 * * 0 = Weekly on Sunday</div>
+                        </div>
+                      </div>
+                      {editForm.schedule && (
+                        <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                          <div className="text-sm font-medium text-blue-900 dark:text-blue-200">
+                            Preview: {cronToHuman(editForm.schedule)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-2">
+
+                {/* Enabled Checkbox */}
+                <div className="flex items-center gap-2 pt-4 border-t border-gray-200 dark:border-gray-700">
                   <input
                     type="checkbox"
                     id="enabled"
@@ -341,10 +614,12 @@ function AdminJobsPageContent() {
                     className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600"
                   />
                   <label htmlFor="enabled" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Enabled
+                    Enable this job
                   </label>
                 </div>
               </div>
+
+              {/* Actions */}
               <div className="flex justify-end gap-3">
                 <button
                   onClick={hideEditDialog}

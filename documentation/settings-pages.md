@@ -2,7 +2,7 @@
 
 **Status:** ✅ Implemented
 
-Single tabbed interface for admins to view/modify system configuration post-setup.
+Single tabbed interface for admins to view/modify system configuration post-setup with mandatory validation before saving.
 
 ## Sections
 
@@ -10,7 +10,34 @@ Single tabbed interface for admins to view/modify system configuration post-setu
 2. **Prowlarr** - URL, API key (masked), indexer selection with priority, seeding time, RSS monitoring toggle
 3. **Download Client** - Type, URL, credentials (masked)
 4. **Paths** - Download + media directories
-5. **General** - App name, user registrations, max concurrent downloads, auto-approve
+
+## Validation Flow
+
+**Plex, Download Client, Paths:**
+1. User modifies settings (URL, credentials, paths)
+2. User clicks "Test Connection" or "Test Paths"
+3. System validates settings
+4. On success: "Save Changes" button enabled
+5. On failure: Error shown, "Save Changes" remains disabled
+
+**Prowlarr (special handling):**
+1. **On tab load:** Current indexer configuration loaded from database automatically
+2. **Changing indexer settings** (enable/disable, priority, seeding time, RSS):
+   - No test required
+   - Can save immediately if URL/API key unchanged
+3. **Changing URL or API key:**
+   - Validation required before saving
+   - User clicks "Test Connection"
+   - On success: Indexers refresh automatically, "Save Changes" enabled
+4. **Button text adapts:**
+   - "Test Connection" when URL/API key changed
+   - "Refresh Indexers" when connection info unchanged
+
+**Validation state resets when:**
+- Plex: URL or token modified
+- Prowlarr: URL or API key modified (NOT indexer config)
+- Download Client: URL, username, or password modified
+- Paths: Directory paths modified
 
 ## API Endpoints
 
@@ -18,25 +45,49 @@ Single tabbed interface for admins to view/modify system configuration post-setu
 - Returns all config (passwords masked as ••••)
 - Admin auth required
 
+**GET /api/admin/settings/prowlarr/indexers**
+- Returns current indexer configuration merged with available Prowlarr indexers
+- Loads saved settings (enabled, priority, seeding time, RSS) from database
+- Merges with live indexer list from Prowlarr
+- Admin auth required
+
 **PUT /api/admin/settings/plex**
-- Updates Plex config, re-tests connection before saving
+- Updates Plex config
+- Requires prior successful test if URL/token changed
 
 **PUT /api/admin/settings/prowlarr**
-- Updates Prowlarr config, re-tests connection
+- Updates Prowlarr URL and API key
+- Requires prior successful test if values changed
+
+**PUT /api/admin/settings/prowlarr/indexers**
+- Updates indexer configuration (enabled, priority, seeding time, RSS)
+- No test required if URL/API key unchanged
+- Saves only enabled indexers to database
 
 **PUT /api/admin/settings/download-client**
-- Updates download client config, re-tests connection
+- Updates download client config
+- Requires prior successful test if credentials changed
 
 **PUT /api/admin/settings/paths**
-- Updates paths, validates writability, creates if missing
+- Updates paths
+- Requires prior successful test if paths changed
+
+**Test Endpoints (authenticated, handle masked values):**
+- POST /api/admin/settings/test-plex - Tests Plex connection, uses stored token if masked, returns libraries
+- POST /api/admin/settings/test-prowlarr - Tests connection, uses stored API key if masked, returns indexers
+- POST /api/admin/settings/test-download-client - Tests qBittorrent/Transmission, uses stored password if masked
+- POST /api/setup/test-paths - Validates paths writable (no sensitive data, reuses wizard endpoint)
 
 ## Features
 
 - Password visibility toggle
-- Connection test buttons
+- Mandatory "Test Connection" buttons per tab
+- "Save Changes" disabled until current tab validated
+- Test result display (success/error messages)
 - Toast notifications for save confirmations
 - Form validation with Zod schemas
 - Reuses setup wizard connection test endpoints
+- Visual warning when validation required
 
 ## Security
 
@@ -58,3 +109,29 @@ Single tabbed interface for admins to view/modify system configuration post-setu
 - Zod validation
 - Tab/sidebar navigation
 - Toast notifications
+
+## Fixed Issues ✅
+
+**1. Settings Save Without Validation**
+- Issue: Users could save invalid/broken settings (wrong URLs, bad credentials, invalid paths)
+- Cause: No validation enforcement before save
+- Fix: Added mandatory "Test Connection"/"Test Paths" buttons per tab, disabled "Save Changes" until validated
+- Behavior: Now matches wizard flow - test first, then save
+
+**2. Testing with Masked Credentials**
+- Issue: Test connection failed because it was testing with masked `••••` values instead of actual credentials
+- Cause: Test endpoints didn't handle masked values, tried to authenticate with literal `••••••••`
+- Fix: Created authenticated test endpoints that read actual values from database when masked values detected
+- Endpoints: `/api/admin/settings/test-plex`, `/test-prowlarr`, `/test-download-client`
+- Behavior: Users can test without re-entering unchanged passwords
+
+**3. Indexer Configuration Workflow**
+- Issue: Indexer settings required re-testing before saving, current settings weren't loading, workflow confusing
+- Cause: Indexers only loaded after test, changing any indexer setting invalidated connection
+- Fix:
+  - Load current indexer config from database on tab load (GET `/api/admin/settings/prowlarr/indexers`)
+  - Track which values changed (URL/API key vs indexer config)
+  - Only require test if URL/API key changed
+  - Allow saving indexer config changes without re-testing connection
+  - Button text adapts: "Test Connection" vs "Refresh Indexers"
+- Behavior: Natural workflow - see current settings, modify indexers, save immediately

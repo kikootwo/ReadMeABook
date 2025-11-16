@@ -244,6 +244,102 @@ export class PlexService {
   }
 
   /**
+   * Verify user has access to the configured Plex server
+   * Returns true if user can access the server, false otherwise
+   *
+   * This checks if the server appears in the user's list of accessible servers
+   * from plex.tv, which properly validates shared access permissions.
+   */
+  async verifyServerAccess(serverUrl: string, serverMachineId: string, userToken: string): Promise<boolean> {
+    try {
+      console.log('[Plex] Verifying server access for machineId:', serverMachineId);
+
+      // Get the list of servers/resources the user has access to
+      const response = await this.client.get('https://plex.tv/api/v2/resources', {
+        headers: {
+          'X-Plex-Token': userToken,
+          'X-Plex-Client-Identifier': PLEX_CLIENT_IDENTIFIER,
+          'Accept': 'application/json',
+        },
+        params: {
+          includeHttps: 1,
+          includeRelay: 1,
+        },
+        timeout: 10000,
+      });
+
+      const resources = response.data || [];
+      console.log('[Plex] User has access to', resources.length, 'resources');
+
+      // Log all resources for debugging
+      console.log('[Plex] User accessible resources:', JSON.stringify(
+        resources.map((r: any) => ({
+          name: r.name,
+          product: r.product,
+          provides: r.provides,
+          clientIdentifier: r.clientIdentifier,
+          machineIdentifier: r.machineIdentifier,
+          owned: r.owned,
+        })),
+        null,
+        2
+      ));
+
+      // Filter to only server resources (not clients like apps)
+      const servers = resources.filter((r: any) =>
+        r.provides === 'server' ||
+        r.product === 'Plex Media Server' ||
+        (r.provides && r.provides.includes && r.provides.includes('server'))
+      );
+
+      console.log('[Plex] Found', servers.length, 'server resources');
+
+      // Check if our server is in the list of accessible resources
+      const hasAccess = servers.some((resource: any) => {
+        const resourceId = resource.clientIdentifier || resource.machineIdentifier;
+        const match = resourceId === serverMachineId;
+
+        console.log('[Plex] Comparing:', {
+          resourceId,
+          serverMachineId,
+          match,
+          name: resource.name,
+        });
+
+        if (match) {
+          console.log('[Plex] ✓ Found matching server:', {
+            name: resource.name,
+            machineId: resourceId,
+            owned: resource.owned,
+          });
+        }
+
+        return match;
+      });
+
+      if (!hasAccess) {
+        console.warn('[Plex] ✗ Server not found in user\'s accessible resources');
+        console.warn('[Plex] Looking for machineId:', serverMachineId);
+        console.warn('[Plex] User has access to servers:',
+          servers.map((r: any) => ({
+            name: r.name,
+            clientId: r.clientIdentifier,
+            machineId: r.machineIdentifier,
+          }))
+        );
+      }
+
+      return hasAccess;
+    } catch (error: any) {
+      console.error('[Plex] Failed to verify server access:', error.response?.status || error.message);
+      if (error.response?.data) {
+        console.error('[Plex] Error response:', error.response.data);
+      }
+      return false;
+    }
+  }
+
+  /**
    * Get all libraries from Plex server
    */
   async getLibraries(serverUrl: string, authToken: string): Promise<PlexLibrary[]> {

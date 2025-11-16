@@ -53,12 +53,21 @@ interface Settings {
 
 export default function AdminSettings() {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [originalSettings, setOriginalSettings] = useState<Settings | null>(null); // Track original values
   const [plexLibraries, setPlexLibraries] = useState<PlexLibrary[]>([]);
   const [indexers, setIndexers] = useState<IndexerConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingLibraries, setLoadingLibraries] = useState(false);
   const [loadingIndexers, setLoadingIndexers] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [validated, setValidated] = useState({
+    plex: false,
+    prowlarr: false,
+    download: false,
+    paths: false,
+  });
+  const [testResults, setTestResults] = useState<Record<string, { success: boolean; message: string }>>({});
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
@@ -91,6 +100,7 @@ export default function AdminSettings() {
       if (response.ok) {
         const data = await response.json();
         setSettings(data);
+        setOriginalSettings(JSON.parse(JSON.stringify(data))); // Deep copy for comparison
       } else {
         console.error('Failed to fetch settings:', response.status, response.statusText);
       }
@@ -123,8 +133,8 @@ export default function AdminSettings() {
     }
   };
 
-  const fetchIndexers = async () => {
-    if (indexers.length > 0) return; // Already loaded
+  const fetchIndexers = async (force = false) => {
+    if (!force && indexers.length > 0) return; // Already loaded
 
     setLoadingIndexers(true);
     try {
@@ -132,12 +142,176 @@ export default function AdminSettings() {
       if (response.ok) {
         const data = await response.json();
         setIndexers(data.indexers || []);
+      } else {
+        console.error('Failed to fetch indexers:', response.status);
+        // Don't show error on initial load, only if user explicitly tries to load
+        if (force) {
+          setMessage({ type: 'error', text: 'Failed to load indexers. Check your Prowlarr settings.' });
+        }
       }
     } catch (error) {
       console.error('Failed to fetch indexers:', error);
-      setMessage({ type: 'error', text: 'Failed to load Prowlarr indexers. Check your Prowlarr URL and API key.' });
+      if (force) {
+        setMessage({ type: 'error', text: 'Failed to load Prowlarr indexers. Check your Prowlarr URL and API key.' });
+      }
     } finally {
       setLoadingIndexers(false);
+    }
+  };
+
+  const testPlexConnection = async () => {
+    if (!settings) return;
+
+    setTesting(true);
+    setMessage(null);
+
+    try {
+      const response = await fetchWithAuth('/api/admin/settings/test-plex', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: settings.plex.url,
+          token: settings.plex.token,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setValidated({ ...validated, plex: true });
+        setTestResults({ ...testResults, plex: { success: true, message: `Connected to ${data.serverName}` } });
+        setMessage({ type: 'success', text: `Connected to ${data.serverName}. You can now save.` });
+        // Update libraries
+        if (data.libraries) {
+          setPlexLibraries(data.libraries);
+        }
+      } else {
+        setValidated({ ...validated, plex: false });
+        setTestResults({ ...testResults, plex: { success: false, message: data.error || 'Connection failed' } });
+        setMessage({ type: 'error', text: data.error || 'Failed to connect to Plex' });
+      }
+    } catch (error) {
+      setValidated({ ...validated, plex: false });
+      const errorMsg = error instanceof Error ? error.message : 'Failed to test connection';
+      setTestResults({ ...testResults, plex: { success: false, message: errorMsg } });
+      setMessage({ type: 'error', text: errorMsg });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const testProwlarrConnection = async () => {
+    if (!settings) return;
+
+    setTesting(true);
+    setMessage(null);
+
+    try {
+      const response = await fetchWithAuth('/api/admin/settings/test-prowlarr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: settings.prowlarr.url,
+          apiKey: settings.prowlarr.apiKey,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setValidated({ ...validated, prowlarr: true });
+        setTestResults({ ...testResults, prowlarr: { success: true, message: `Connected to Prowlarr. Found ${data.indexers?.length || 0} indexers` } });
+        setMessage({ type: 'success', text: `Connected to Prowlarr. Found ${data.indexers?.length || 0} indexers. You can now save.` });
+        // Refresh indexers from database (merges saved config with available indexers)
+        await fetchIndexers(true);
+      } else {
+        setValidated({ ...validated, prowlarr: false });
+        setTestResults({ ...testResults, prowlarr: { success: false, message: data.error || 'Connection failed' } });
+        setMessage({ type: 'error', text: data.error || 'Failed to connect to Prowlarr' });
+      }
+    } catch (error) {
+      setValidated({ ...validated, prowlarr: false });
+      const errorMsg = error instanceof Error ? error.message : 'Failed to test connection';
+      setTestResults({ ...testResults, prowlarr: { success: false, message: errorMsg } });
+      setMessage({ type: 'error', text: errorMsg });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const testDownloadClientConnection = async () => {
+    if (!settings) return;
+
+    setTesting(true);
+    setMessage(null);
+
+    try {
+      const response = await fetchWithAuth('/api/admin/settings/test-download-client', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: settings.downloadClient.type,
+          url: settings.downloadClient.url,
+          username: settings.downloadClient.username,
+          password: settings.downloadClient.password,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setValidated({ ...validated, download: true });
+        setTestResults({ ...testResults, download: { success: true, message: `Connected to ${settings.downloadClient.type} (${data.version || 'version unknown'})` } });
+        setMessage({ type: 'success', text: `Connected to ${settings.downloadClient.type}. You can now save.` });
+      } else {
+        setValidated({ ...validated, download: false });
+        setTestResults({ ...testResults, download: { success: false, message: data.error || 'Connection failed' } });
+        setMessage({ type: 'error', text: data.error || 'Failed to connect to download client' });
+      }
+    } catch (error) {
+      setValidated({ ...validated, download: false });
+      const errorMsg = error instanceof Error ? error.message : 'Failed to test connection';
+      setTestResults({ ...testResults, download: { success: false, message: errorMsg } });
+      setMessage({ type: 'error', text: errorMsg });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const testPaths = async () => {
+    if (!settings) return;
+
+    setTesting(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch('/api/setup/test-paths', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          downloadDir: settings.paths.downloadDir,
+          mediaDir: settings.paths.mediaDir,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setValidated({ ...validated, paths: true });
+        setTestResults({ ...testResults, paths: { success: true, message: 'All paths are valid and writable' } });
+        setMessage({ type: 'success', text: 'All paths are valid and writable. You can now save.' });
+      } else {
+        setValidated({ ...validated, paths: false });
+        setTestResults({ ...testResults, paths: { success: false, message: data.error || 'Path validation failed' } });
+        setMessage({ type: 'error', text: data.error || 'Failed to validate paths' });
+      }
+    } catch (error) {
+      setValidated({ ...validated, paths: false });
+      const errorMsg = error instanceof Error ? error.message : 'Failed to test paths';
+      setTestResults({ ...testResults, paths: { success: false, message: errorMsg } });
+      setMessage({ type: 'error', text: errorMsg });
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -217,6 +391,10 @@ export default function AdminSettings() {
       }
 
       setMessage({ type: 'success', text: 'Settings saved successfully!' });
+      // Update original settings to reflect the saved state
+      if (settings) {
+        setOriginalSettings(JSON.parse(JSON.stringify(settings)));
+      }
       setTimeout(() => setMessage(null), 3000);
     } catch (error) {
       setMessage({
@@ -335,12 +513,13 @@ export default function AdminSettings() {
                   <Input
                     type="url"
                     value={settings.plex.url}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setSettings({
                         ...settings,
                         plex: { ...settings.plex, url: e.target.value },
-                      })
-                    }
+                      });
+                      setValidated({ ...validated, plex: false });
+                    }}
                     placeholder="http://localhost:32400"
                   />
                 </div>
@@ -352,12 +531,13 @@ export default function AdminSettings() {
                   <Input
                     type="password"
                     value={settings.plex.token}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setSettings({
                         ...settings,
                         plex: { ...settings.plex, token: e.target.value },
-                      })
-                    }
+                      });
+                      setValidated({ ...validated, plex: false });
+                    }}
                     placeholder="Enter your Plex token"
                   />
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -377,12 +557,13 @@ export default function AdminSettings() {
                   ) : plexLibraries.length > 0 ? (
                     <select
                       value={settings.plex.libraryId}
-                      onChange={(e) =>
+                      onChange={(e) => {
                         setSettings({
                           ...settings,
                           plex: { ...settings.plex, libraryId: e.target.value },
-                        })
-                      }
+                        });
+                        setValidated({ ...validated, plex: false });
+                      }}
                       className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                     >
                       <option value="">Select a library...</option>
@@ -394,7 +575,28 @@ export default function AdminSettings() {
                     </select>
                   ) : (
                     <div className="text-sm text-gray-500 py-2">
-                      Save your Plex URL and token first, then refresh to load libraries.
+                      Test your connection to load libraries.
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+                  <Button
+                    onClick={testPlexConnection}
+                    loading={testing}
+                    disabled={!settings.plex.url || !settings.plex.token}
+                    variant="outline"
+                    className="w-full"
+                  >
+                    Test Connection
+                  </Button>
+                  {testResults.plex && (
+                    <div className={`mt-3 p-3 rounded-lg text-sm ${
+                      testResults.plex.success
+                        ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200'
+                        : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
+                    }`}>
+                      {testResults.plex.message}
                     </div>
                   )}
                 </div>
@@ -420,12 +622,16 @@ export default function AdminSettings() {
                   <Input
                     type="url"
                     value={settings.prowlarr.url}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setSettings({
                         ...settings,
                         prowlarr: { ...settings.prowlarr, url: e.target.value },
-                      })
-                    }
+                      });
+                      // Only invalidate if URL actually changed from original
+                      if (originalSettings && e.target.value !== originalSettings.prowlarr.url) {
+                        setValidated({ ...validated, prowlarr: false });
+                      }
+                    }}
                     placeholder="http://localhost:9696"
                   />
                 </div>
@@ -437,12 +643,16 @@ export default function AdminSettings() {
                   <Input
                     type="password"
                     value={settings.prowlarr.apiKey}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setSettings({
                         ...settings,
                         prowlarr: { ...settings.prowlarr, apiKey: e.target.value },
-                      })
-                    }
+                      });
+                      // Only invalidate if API key actually changed from original
+                      if (originalSettings && e.target.value !== originalSettings.prowlarr.apiKey) {
+                        setValidated({ ...validated, prowlarr: false });
+                      }
+                    }}
                     placeholder="Enter API key"
                   />
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -451,9 +661,44 @@ export default function AdminSettings() {
                 </div>
 
                 <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-                  <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
-                    Available Indexers
-                  </h3>
+                  <Button
+                    onClick={testProwlarrConnection}
+                    loading={testing}
+                    disabled={!settings.prowlarr.url || !settings.prowlarr.apiKey}
+                    variant="outline"
+                    className="w-full"
+                  >
+                    {(() => {
+                      if (originalSettings &&
+                          settings.prowlarr.url === originalSettings.prowlarr.url &&
+                          settings.prowlarr.apiKey === originalSettings.prowlarr.apiKey) {
+                        return 'Refresh Indexers';
+                      }
+                      return 'Test Connection';
+                    })()}
+                  </Button>
+                  {testResults.prowlarr && (
+                    <div className={`mt-3 p-3 rounded-lg text-sm ${
+                      testResults.prowlarr.success
+                        ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200'
+                        : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
+                    }`}>
+                      {testResults.prowlarr.message}
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
+                      Indexer Configuration
+                    </h3>
+                    {indexers.length > 0 && !loadingIndexers && (
+                      <span className="text-sm text-gray-500 dark:text-gray-400">
+                        {indexers.filter(idx => idx.enabled).length} enabled
+                      </span>
+                    )}
+                  </div>
                   {loadingIndexers ? (
                     <div className="flex items-center gap-2 py-4">
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
@@ -559,7 +804,7 @@ export default function AdminSettings() {
                                       className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
                                     />
                                   </div>
-                                  <p className="text-xs text-gray-500 mt-1">Check every 15min</p>
+                                  <p className="text-xs text-gray-500 mt-1">Auto check for new releases</p>
                                 </div>
                               </div>
                             </div>
@@ -568,8 +813,13 @@ export default function AdminSettings() {
                       ))}
                     </div>
                   ) : (
-                    <div className="text-sm text-gray-500 py-4 text-center border border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
-                      Save your Prowlarr URL and API key first, then refresh to load indexers.
+                    <div className="text-sm text-gray-500 py-6 text-center border border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+                      <p className="mb-2">No indexers configured.</p>
+                      <p className="text-xs">
+                        {settings.prowlarr.url && settings.prowlarr.apiKey
+                          ? 'Click "Refresh Indexers" above to load available indexers from Prowlarr.'
+                          : 'Enter your Prowlarr URL and API key above, then click "Test Connection" to load indexers.'}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -594,12 +844,13 @@ export default function AdminSettings() {
                   </label>
                   <select
                     value={settings.downloadClient.type}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setSettings({
                         ...settings,
                         downloadClient: { ...settings.downloadClient, type: e.target.value },
-                      })
-                    }
+                      });
+                      setValidated({ ...validated, download: false });
+                    }}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
                   >
                     <option value="qbittorrent">qBittorrent</option>
@@ -614,12 +865,13 @@ export default function AdminSettings() {
                   <Input
                     type="url"
                     value={settings.downloadClient.url}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setSettings({
                         ...settings,
                         downloadClient: { ...settings.downloadClient, url: e.target.value },
-                      })
-                    }
+                      });
+                      setValidated({ ...validated, download: false });
+                    }}
                     placeholder="http://localhost:8080"
                   />
                 </div>
@@ -631,15 +883,16 @@ export default function AdminSettings() {
                   <Input
                     type="text"
                     value={settings.downloadClient.username}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setSettings({
                         ...settings,
                         downloadClient: {
                           ...settings.downloadClient,
                           username: e.target.value,
                         },
-                      })
-                    }
+                      });
+                      setValidated({ ...validated, download: false });
+                    }}
                     placeholder="admin"
                   />
                 </div>
@@ -651,17 +904,39 @@ export default function AdminSettings() {
                   <Input
                     type="password"
                     value={settings.downloadClient.password}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setSettings({
                         ...settings,
                         downloadClient: {
                           ...settings.downloadClient,
                           password: e.target.value,
                         },
-                      })
-                    }
+                      });
+                      setValidated({ ...validated, download: false });
+                    }}
                     placeholder="Enter password"
                   />
+                </div>
+
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+                  <Button
+                    onClick={testDownloadClientConnection}
+                    loading={testing}
+                    disabled={!settings.downloadClient.url || !settings.downloadClient.username || !settings.downloadClient.password}
+                    variant="outline"
+                    className="w-full"
+                  >
+                    Test Connection
+                  </Button>
+                  {testResults.download && (
+                    <div className={`mt-3 p-3 rounded-lg text-sm ${
+                      testResults.download.success
+                        ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200'
+                        : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
+                    }`}>
+                      {testResults.download.message}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -685,12 +960,13 @@ export default function AdminSettings() {
                   <Input
                     type="text"
                     value={settings.paths.downloadDir}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setSettings({
                         ...settings,
                         paths: { ...settings.paths, downloadDir: e.target.value },
-                      })
-                    }
+                      });
+                      setValidated({ ...validated, paths: false });
+                    }}
                     placeholder="/downloads"
                     className="font-mono"
                   />
@@ -706,18 +982,40 @@ export default function AdminSettings() {
                   <Input
                     type="text"
                     value={settings.paths.mediaDir}
-                    onChange={(e) =>
+                    onChange={(e) => {
                       setSettings({
                         ...settings,
                         paths: { ...settings.paths, mediaDir: e.target.value },
-                      })
-                    }
+                      });
+                      setValidated({ ...validated, paths: false });
+                    }}
                     placeholder="/media/audiobooks"
                     className="font-mono"
                   />
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                     Final location for organized audiobook library (Plex scans this directory)
                   </p>
+                </div>
+
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+                  <Button
+                    onClick={testPaths}
+                    loading={testing}
+                    disabled={!settings.paths.downloadDir || !settings.paths.mediaDir}
+                    variant="outline"
+                    className="w-full"
+                  >
+                    Test Paths
+                  </Button>
+                  {testResults.paths && (
+                    <div className={`mt-3 p-3 rounded-lg text-sm ${
+                      testResults.paths.success
+                        ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200'
+                        : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
+                    }`}>
+                      {testResults.paths.message}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -729,10 +1027,48 @@ export default function AdminSettings() {
               <Button variant="outline" onClick={() => window.location.reload()}>
                 Cancel
               </Button>
-              <Button onClick={saveSettings} loading={saving}>
+              <Button
+                onClick={saveSettings}
+                loading={saving}
+                disabled={(() => {
+                  // For Prowlarr tab: allow save if validated OR if URL/API key unchanged
+                  if (activeTab === 'prowlarr' && originalSettings && settings) {
+                    const connectionUnchanged =
+                      settings.prowlarr.url === originalSettings.prowlarr.url &&
+                      settings.prowlarr.apiKey === originalSettings.prowlarr.apiKey;
+                    return !validated.prowlarr && !connectionUnchanged;
+                  }
+                  // For all other tabs: require validation
+                  return !validated[activeTab];
+                })()}
+              >
                 Save Changes
               </Button>
             </div>
+            {(() => {
+              // For Prowlarr: show message only if URL/API key changed and not validated
+              if (activeTab === 'prowlarr' && originalSettings && settings) {
+                const connectionChanged =
+                  settings.prowlarr.url !== originalSettings.prowlarr.url ||
+                  settings.prowlarr.apiKey !== originalSettings.prowlarr.apiKey;
+                if (connectionChanged && !validated.prowlarr) {
+                  return (
+                    <p className="text-sm text-amber-600 dark:text-amber-400 mt-2 text-right">
+                      Please test your connection before saving
+                    </p>
+                  );
+                }
+              }
+              // For other tabs: show message if not validated
+              else if (!validated[activeTab]) {
+                return (
+                  <p className="text-sm text-amber-600 dark:text-amber-400 mt-2 text-right">
+                    Please test your connection before saving
+                  </p>
+                );
+              }
+              return null;
+            })()}
           </div>
         </div>
       </div>

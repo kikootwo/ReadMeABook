@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getPlexService } from '@/lib/integrations/plex.service';
 import { getEncryptionService } from '@/lib/services/encryption.service';
+import { getConfigService } from '@/lib/services/config.service';
 import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
 import { prisma } from '@/lib/db';
 
@@ -76,6 +77,75 @@ export async function GET(request: NextRequest) {
 
     // Convert id to string safely
     const plexIdString = typeof plexUser.id === 'string' ? plexUser.id : plexUser.id.toString();
+
+    // Get configured Plex server settings
+    const configService = getConfigService();
+    const plexConfig = await configService.getPlexConfig();
+
+    // Verify server is configured
+    if (!plexConfig.serverUrl || !plexConfig.authToken) {
+      console.error('[Plex OAuth] Server not configured');
+      return NextResponse.json(
+        {
+          error: 'ConfigurationError',
+          message: 'Plex server is not configured. Please contact your administrator.',
+        },
+        { status: 503 }
+      );
+    }
+
+    // Get server machine identifier for access verification
+    let serverMachineId: string;
+    try {
+      const serverInfo = await plexService.testConnection(plexConfig.serverUrl, plexConfig.authToken);
+      if (!serverInfo.success || !serverInfo.info?.machineIdentifier) {
+        console.error('[Plex OAuth] Could not get server machine ID');
+        return NextResponse.json(
+          {
+            error: 'ConfigurationError',
+            message: 'Server configuration error. Please contact your administrator.',
+          },
+          { status: 503 }
+        );
+      }
+      serverMachineId = serverInfo.info.machineIdentifier;
+      console.log('[Plex OAuth] Server machine ID:', serverMachineId);
+    } catch (error) {
+      console.error('[Plex OAuth] Failed to get server info:', error);
+      return NextResponse.json(
+        {
+          error: 'ConfigurationError',
+          message: 'Could not verify server configuration. Please contact your administrator.',
+        },
+        { status: 503 }
+      );
+    }
+
+    // SECURITY: Verify user has access to the configured Plex server
+    // This checks if the server appears in the user's list of accessible servers from plex.tv
+    // This properly validates shared access permissions
+    const hasAccess = await plexService.verifyServerAccess(
+      plexConfig.serverUrl,
+      serverMachineId,
+      authToken
+    );
+
+    if (!hasAccess) {
+      console.warn('[Plex OAuth] User attempted to authenticate without server access:', {
+        plexId: plexIdString,
+        username: plexUser.username,
+        serverMachineId,
+      });
+      return NextResponse.json(
+        {
+          error: 'AccessDenied',
+          message: 'You do not have access to this Plex server. Please contact the administrator to share their library with you.',
+        },
+        { status: 403 }
+      );
+    }
+
+    console.log('[Plex OAuth] User verified with server access:', plexUser.username);
 
     // Check if this is the first user (should be promoted to admin)
     const userCount = await prisma.user.count();

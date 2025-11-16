@@ -12,27 +12,30 @@ import { useRequests } from '@/lib/hooks/useRequests';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils/cn';
 
-type FilterStatus = 'all' | 'active' | 'completed' | 'failed' | 'cancelled';
+type FilterStatus = 'all' | 'active' | 'waiting' | 'completed' | 'failed' | 'cancelled';
 
 export default function RequestsPage() {
   const { user } = useAuth();
   const [filter, setFilter] = useState<FilterStatus>('all');
 
   // Determine which status to pass to the API
-  const apiStatus = filter === 'all' ? undefined : filter === 'active'
-    ? undefined // We'll filter client-side for 'active'
+  const apiStatus = filter === 'all' ? undefined : filter === 'active' || filter === 'waiting'
+    ? undefined // We'll filter client-side for 'active' and 'waiting'
     : filter;
 
   const { requests, isLoading } = useRequests(apiStatus);
 
-  // Filter requests client-side for 'active' status
+  // Filter requests client-side for 'active' and 'waiting' statuses
   const filteredRequests = filter === 'active'
     ? requests.filter((r: any) => ['pending', 'searching', 'downloading', 'processing'].includes(r.status))
+    : filter === 'waiting'
+    ? requests.filter((r: any) => ['awaiting_search', 'awaiting_import'].includes(r.status))
     : requests;
 
   const filterOptions: { value: FilterStatus; label: string }[] = [
     { value: 'all', label: 'All' },
     { value: 'active', label: 'Active' },
+    { value: 'waiting', label: 'Waiting' },
     { value: 'completed', label: 'Completed' },
     { value: 'failed', label: 'Failed' },
     { value: 'cancelled', label: 'Cancelled' },
@@ -106,6 +109,8 @@ export default function RequestsPage() {
                       ? requests.length
                       : option.value === 'active'
                       ? requests.filter((r: any) => ['pending', 'searching', 'downloading', 'processing'].includes(r.status)).length
+                      : option.value === 'waiting'
+                      ? requests.filter((r: any) => ['awaiting_search', 'awaiting_import'].includes(r.status)).length
                       : requests.filter((r: any) => r.status === option.value).length
                     })
                   </span>

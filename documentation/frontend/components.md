@@ -59,18 +59,20 @@ src/components/
 ## Pages Implemented ✅
 
 **Requests Page** (`/requests`)
-- Filter tabs: All, Active, Completed, Failed, Cancelled
+- Filter tabs: All, Active, Waiting, Completed, Failed, Cancelled
 - Auto-refresh every 5s (SWR)
 - Request counts per tab
 - Cancel functionality
 - Loading skeletons, empty states
+- Waiting filter shows awaiting_search and awaiting_import statuses
 
 **Profile Page** (`/profile`)
 - User info card (avatar, username, email, role, Plex ID)
-- Stats: Total/Active/Completed/Failed/Cancelled requests
+- Stats: Total/Active/Waiting/Completed/Failed/Cancelled requests
 - Active downloads section
 - Recent requests (last 5)
 - Auto-refresh every 5s
+- Waiting stat shows awaiting_search and awaiting_import statuses
 
 ## Component APIs
 

@@ -32,10 +32,11 @@ Handles authentication and authorization: Plex OAuth integration, JWT session ma
 4. Redirect back with code
 5. Exchange code for token
 6. Get Plex user info
-7. Create/update user in DB
-8. Generate JWT
-9. Return JWT to client
-10. Client includes JWT in subsequent requests
+7. **Verify user has access to configured Plex server** (security check)
+8. Create/update user in DB
+9. Generate JWT
+10. Return JWT to client
+11. Client includes JWT in subsequent requests
 
 ## OAuth Endpoints
 
@@ -92,6 +93,7 @@ Handles authentication and authorization: Plex OAuth integration, JWT session ma
 - Short access token expiry (1hr)
 - Optional refresh token rotation
 - Track valid tokens for revocation
+- **Server access verification**: Only users with access to the configured Plex server can authenticate (prevents any Plex user from accessing the instance)
 
 ## Tech Stack
 

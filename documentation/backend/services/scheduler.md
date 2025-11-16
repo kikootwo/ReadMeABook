@@ -10,6 +10,8 @@ Manages recurring/scheduled jobs providing automated tasks (Plex scans, Audible 
 - Audible refresh persists to database
 - Enhanced error handling with clear messages
 - Schedule editing UI with toast notifications
+- Human-friendly schedule descriptions and editor (preset/custom/advanced modes)
+- Real-time cron expression preview
 
 ## Scheduled Jobs
 
@@ -28,6 +30,26 @@ Manages recurring/scheduled jobs providing automated tasks (Plex scans, Audible 
 - Admin UI management
 - Automatic scheduling/unscheduling when jobs enabled/disabled
 - Schedule updates handled by unscheduling old job and scheduling new one
+
+## Human-Friendly Scheduling UI
+
+**Three Modes:**
+1. **Common Schedules** - Preset options (every 15min, hourly, daily, weekly, monthly)
+2. **Custom Schedule** - Visual builder with dropdowns for minutes/hours/daily/weekly/monthly
+3. **Advanced (Cron)** - Raw cron expression for power users
+
+**Features:**
+- Human-readable display: "Every 6 hours" instead of "0 */6 * * *"
+- Real-time preview of cron expressions
+- Visual schedule builder (no cron knowledge required)
+- Cron validation before saving
+- Shows both human text and cron expression in job list
+
+**Utility Functions** (`src/lib/utils/cron.ts`):
+- `cronToHuman(cron)` - Converts cron to readable text
+- `customScheduleToCron(schedule)` - Builds cron from visual inputs
+- `cronToCustomSchedule(cron)` - Parses cron to visual inputs
+- `isValidCron(cron)` - Validates cron expression
 
 ## Cron Expressions
 
@@ -130,6 +152,7 @@ interface ScheduledJob {
 - ✅ No seeding time config → added `seeding_time_minutes`
 - ✅ Scheduled jobs not running on schedule → implemented Bull repeatable jobs with cron scheduling
 - ✅ MaxListenersExceededWarning → increased maxListeners to 20 on both Redis client and Bull queue
+- ✅ Cron expressions not user-friendly → added human-readable descriptions and visual schedule builder
 
 ## Tech Stack
 

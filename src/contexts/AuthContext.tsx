@@ -137,6 +137,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const response = await fetch(`/api/auth/plex/callback?pinId=${pinId}`);
         const data = await response.json();
 
+        // Check for error responses (403 = access denied, 503 = server not configured, etc.)
+        if (!response.ok) {
+          // 202 means still waiting for user to authorize - continue polling
+          if (response.status === 202) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            attempts++;
+            continue;
+          }
+
+          // Any other error (403, 500, 503, etc.) - stop polling and show error
+          const errorMessage = data.message || 'Authentication failed';
+          throw new Error(errorMessage);
+        }
+
         if (data.success && data.authorized) {
           // Login successful
           setAccessToken(data.accessToken);
@@ -157,6 +171,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await new Promise(resolve => setTimeout(resolve, 2000));
         attempts++;
       } catch (error) {
+        // If it's our custom error, re-throw it to display to user
+        if (error instanceof Error) {
+          throw error;
+        }
+
+        // Network error or other issue - log and retry
         console.error('Login polling error:', error);
         await new Promise(resolve => setTimeout(resolve, 2000));
         attempts++;

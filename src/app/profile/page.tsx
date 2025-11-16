@@ -23,6 +23,7 @@ export default function ProfilePage() {
         total: 0,
         completed: 0,
         active: 0,
+        waiting: 0,
         failed: 0,
         cancelled: 0,
       };
@@ -33,6 +34,9 @@ export default function ProfilePage() {
       completed: requests.filter((r: any) => r.status === 'completed').length,
       active: requests.filter((r: any) =>
         ['pending', 'searching', 'downloading', 'processing'].includes(r.status)
+      ).length,
+      waiting: requests.filter((r: any) =>
+        ['awaiting_search', 'awaiting_import'].includes(r.status)
       ).length,
       failed: requests.filter((r: any) => r.status === 'failed').length,
       cancelled: requests.filter((r: any) => r.status === 'cancelled').length,
@@ -138,7 +142,7 @@ export default function ProfilePage() {
         </div>
 
         {/* Statistics Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           {/* Total Requests */}
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
             <div className="flex items-center gap-4">
@@ -172,6 +176,25 @@ export default function ProfilePage() {
                 <p className="text-sm text-gray-600 dark:text-gray-400">Active</p>
                 <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
                   {isLoading ? '...' : stats.active}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Waiting Requests */}
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+            <div className="flex items-center gap-4">
+              <div className="flex-shrink-0">
+                <div className="w-12 h-12 bg-yellow-100 dark:bg-yellow-900 rounded-lg flex items-center justify-center">
+                  <svg className="w-6 h-6 text-yellow-600 dark:text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Waiting</p>
+                <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                  {isLoading ? '...' : stats.waiting}
                 </p>
               </div>
             </div>

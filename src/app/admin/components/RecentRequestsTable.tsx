@@ -24,21 +24,34 @@ interface RecentRequestsTableProps {
 
 function getStatusBadge(status: string) {
   const styles: Record<string, string> = {
-    pending: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
-    searching: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-    downloading: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
-    processing: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
-    completed: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
-    failed: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+    pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+    awaiting_search: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+    searching: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+    downloading: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
+    downloaded: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+    processing: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
+    awaiting_import: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
+    available: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+    completed: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+    failed: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+    warn: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
+    cancelled: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
   };
 
-  const style = styles[status] || styles.pending;
+  const style = styles[status] || 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+
+  const labels: Record<string, string> = {
+    awaiting_search: 'Awaiting Search',
+    awaiting_import: 'Awaiting Import',
+  };
+
+  const label = labels[status] || status.charAt(0).toUpperCase() + status.slice(1);
 
   return (
     <span
       className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${style}`}
     >
-      {status.charAt(0).toUpperCase() + status.slice(1)}
+      {label}
     </span>
   );
 }
@@ -110,7 +123,7 @@ export function RecentRequestsTable({ requests }: RecentRequestsTableProps) {
                     <div className="text-sm text-gray-500 dark:text-gray-400">
                       {request.author}
                     </div>
-                    {request.errorMessage && (
+                    {request.errorMessage && (request.status === 'failed' || request.status === 'warn') && (
                       <div className="text-xs text-red-600 dark:text-red-400 mt-1">
                         {request.errorMessage}
                       </div>
