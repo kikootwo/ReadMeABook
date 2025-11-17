@@ -4,6 +4,7 @@
 
 ## Authentication & Users
 - **Plex OAuth, JWT sessions, RBAC** → [backend/services/auth.md](backend/services/auth.md)
+- **Local admin authentication, password change** → [backend/services/auth.md](backend/services/auth.md)
 - **Route protection, auth guards** → [frontend/routing-auth.md](frontend/routing-auth.md)
 - **Login page UI/UX** → [frontend/pages/login.md](frontend/pages/login.md)
 
@@ -58,4 +59,5 @@
 **"How do I configure external services?"** → [setup-wizard.md](setup-wizard.md), [settings-pages.md](settings-pages.md)
 **"What's the database schema?"** → [backend/database.md](backend/database.md)
 **"How does authentication work?"** → [backend/services/auth.md](backend/services/auth.md)
+**"How do I change the admin password?"** → [settings-pages.md](settings-pages.md), [backend/services/auth.md](backend/services/auth.md)
 **"How do I deploy?"** → [deployment/docker.md](deployment/docker.md)

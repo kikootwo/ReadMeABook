@@ -10,6 +10,7 @@ Single tabbed interface for admins to view/modify system configuration post-setu
 2. **Prowlarr** - URL, API key (masked), indexer selection with priority, seeding time, RSS monitoring toggle
 3. **Download Client** - Type, URL, credentials (masked)
 4. **Paths** - Download + media directories
+5. **Account** - Local admin password change (only visible to setup admin)
 
 ## Validation Flow
 
@@ -33,11 +34,19 @@ Single tabbed interface for admins to view/modify system configuration post-setu
    - "Test Connection" when URL/API key changed
    - "Refresh Indexers" when connection info unchanged
 
+**Account (local admin only):**
+1. Local admin can change password
+2. Requires: current password, new password (min 8 chars), confirmation
+3. No "Save Changes" button - uses dedicated "Change Password" button
+4. Form clears after successful change
+5. Only visible to users with `isSetupAdmin=true` AND `plexId` starts with `local-`
+
 **Validation state resets when:**
 - Plex: URL or token modified
 - Prowlarr: URL or API key modified (NOT indexer config)
 - Download Client: URL, username, or password modified
 - Paths: Directory paths modified
+- Account: No validation required (password change is immediate)
 
 ## API Endpoints
 
@@ -77,6 +86,10 @@ Single tabbed interface for admins to view/modify system configuration post-setu
 - POST /api/admin/settings/test-prowlarr - Tests connection, uses stored API key if masked, returns indexers
 - POST /api/admin/settings/test-download-client - Tests qBittorrent/Transmission, uses stored password if masked
 - POST /api/setup/test-paths - Validates paths writable (no sensitive data, reuses wizard endpoint)
+
+**Account Endpoints:**
+- POST /api/admin/settings/change-password - Change local admin password (local admin only)
+- GET /api/auth/is-local-admin - Check if current user is local admin (returns `{isLocalAdmin: boolean}`)
 
 ## Features
 
