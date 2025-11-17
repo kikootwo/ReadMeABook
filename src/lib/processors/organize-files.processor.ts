@@ -6,16 +6,20 @@
 import { OrganizeFilesPayload, getJobQueueService } from '../services/job-queue.service';
 import { prisma } from '../db';
 import { getFileOrganizer } from '../utils/file-organizer';
+import { createJobLogger } from '../utils/job-logger';
 
 /**
  * Process organize files job
  * Moves completed downloads to media library in proper directory structure
  */
 export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promise<any> {
-  const { requestId, audiobookId, downloadPath } = payload;
+  const { requestId, audiobookId, downloadPath, jobId } = payload;
 
-  console.log(`[OrganizeFiles] Processing request ${requestId}`);
-  console.log(`[OrganizeFiles] Download path: ${downloadPath}`);
+  // Create logger (fallback to console-only if jobId not provided)
+  const logger = jobId ? createJobLogger(jobId, 'OrganizeFiles') : null;
+
+  await logger?.info(`Processing request ${requestId}`);
+  await logger?.info(`Download path: ${downloadPath}`);
 
   try {
     // Update request status to processing
@@ -37,24 +41,28 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       throw new Error(`Audiobook ${audiobookId} not found`);
     }
 
-    console.log(`[OrganizeFiles] Organizing: ${audiobook.title} by ${audiobook.author}`);
+    await logger?.info(`Organizing: ${audiobook.title} by ${audiobook.author}`);
 
     // Get file organizer
     const organizer = getFileOrganizer();
 
-    // Organize files
-    const result = await organizer.organize(downloadPath, {
-      title: audiobook.title,
-      author: audiobook.author,
-      narrator: audiobook.narrator || undefined,
-      coverArtUrl: audiobook.coverArtUrl || undefined,
-    });
+    // Organize files (pass logger to file organizer)
+    const result = await organizer.organize(
+      downloadPath,
+      {
+        title: audiobook.title,
+        author: audiobook.author,
+        narrator: audiobook.narrator || undefined,
+        coverArtUrl: audiobook.coverArtUrl || undefined,
+      },
+      logger ? { jobId, context: 'FileOrganizer' } : undefined
+    );
 
     if (!result.success) {
       throw new Error(`File organization failed: ${result.errors.join(', ')}`);
     }
 
-    console.log(`[OrganizeFiles] Successfully moved ${result.filesMovedCount} files to ${result.targetPath}`);
+    await logger?.info(`Successfully moved ${result.filesMovedCount} files to ${result.targetPath}`);
 
     // Update audiobook record with file path and status
     await prisma.audiobook.update({
@@ -78,7 +86,17 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       },
     });
 
-    console.log(`[OrganizeFiles] Request ${requestId} completed successfully - status: downloaded`);
+    await logger?.info(`Request ${requestId} completed successfully - status: downloaded`, {
+      success: true,
+      message: 'Files organized successfully',
+      requestId,
+      audiobookId,
+      targetPath: result.targetPath,
+      filesCount: result.filesMovedCount,
+      audioFiles: result.audioFiles,
+      coverArt: result.coverArtFile,
+      errors: result.errors,
+    });
 
     return {
       success: true,
@@ -92,7 +110,7 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       errors: result.errors,
     };
   } catch (error) {
-    console.error('[OrganizeFiles] Error:', error);
+    await logger?.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
     const errorMessage = error instanceof Error ? error.message : 'File organization failed';
 
@@ -114,7 +132,7 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
 
       if (newAttempts < currentRequest.maxImportRetries) {
         // Still have retries left - queue for re-import
-        console.log(`[OrganizeFiles] No files found for request ${requestId}, queueing for retry (attempt ${newAttempts}/${currentRequest.maxImportRetries})`);
+        await logger?.warn(`No files found for request ${requestId}, queueing for retry (attempt ${newAttempts}/${currentRequest.maxImportRetries})`);
 
         await prisma.request.update({
           where: { id: requestId },
@@ -136,7 +154,7 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
         };
       } else {
         // Max retries exceeded - move to warn status
-        console.log(`[OrganizeFiles] Max retries (${currentRequest.maxImportRetries}) exceeded for request ${requestId}, moving to warn status`);
+        await logger?.warn(`Max retries (${currentRequest.maxImportRetries}) exceeded for request ${requestId}, moving to warn status`);
 
         await prisma.request.update({
           where: { id: requestId },

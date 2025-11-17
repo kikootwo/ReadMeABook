@@ -24,10 +24,11 @@ export type JobType =
   | 'monitor_rss_feeds';
 
 export interface JobPayload {
+  jobId?: string; // Database job ID (added automatically by addJob)
   [key: string]: any;
 }
 
-export interface SearchIndexersPayload {
+export interface SearchIndexersPayload extends JobPayload {
   requestId: string;
   audiobook: {
     id: string;
@@ -36,7 +37,7 @@ export interface SearchIndexersPayload {
   };
 }
 
-export interface DownloadTorrentPayload {
+export interface DownloadTorrentPayload extends JobPayload {
   requestId: string;
   audiobook: {
     id: string;
@@ -46,27 +47,27 @@ export interface DownloadTorrentPayload {
   torrent: TorrentResult;
 }
 
-export interface MonitorDownloadPayload {
+export interface MonitorDownloadPayload extends JobPayload {
   requestId: string;
   downloadHistoryId: string;
   downloadClientId: string;
   downloadClient: 'qbittorrent' | 'transmission';
 }
 
-export interface OrganizeFilesPayload {
+export interface OrganizeFilesPayload extends JobPayload {
   requestId: string;
   audiobookId: string;
   downloadPath: string;
   targetPath: string;
 }
 
-export interface ScanPlexPayload {
+export interface ScanPlexPayload extends JobPayload {
   libraryId?: string;
   partial?: boolean;
   path?: string;
 }
 
-export interface MatchPlexPayload {
+export interface MatchPlexPayload extends JobPayload {
   requestId: string;
   audiobookId: string;
   title: string;
@@ -351,12 +352,10 @@ export class JobQueueService {
     payload: JobPayload,
     options?: JobOptions
   ): Promise<string> {
-    const bullJob = await this.queue.add(type, payload, options);
-
-    // Persist to database
+    // First create the database job record
     const dbJob = await prisma.job.create({
       data: {
-        bullJobId: bullJob.id as string,
+        bullJobId: null, // Will be updated after Bull job is created
         requestId: payload.requestId || null,
         type,
         status: 'pending',
@@ -364,6 +363,18 @@ export class JobQueueService {
         payload,
         maxAttempts: options?.attempts || 3,
       },
+    });
+
+    // Add jobId to payload so processors can access it
+    const payloadWithJobId = { ...payload, jobId: dbJob.id };
+
+    // Create Bull job
+    const bullJob = await this.queue.add(type, payloadWithJobId, options);
+
+    // Update database job with Bull job ID
+    await prisma.job.update({
+      where: { id: dbJob.id },
+      data: { bullJobId: bullJob.id as string },
     });
 
     return dbJob.id;

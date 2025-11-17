@@ -1,8 +1,17 @@
 # Background Job System
 
-**Status:** ⏳ In Development
+**Status:** ✅ Implemented
 
 Manages background job queue using Bull (Redis-backed) for async tasks: searching indexers, monitoring downloads, organizing files, scanning Plex.
+
+## Detailed Event Logging
+
+- **JobEvent table:** Stores timestamped event logs for all job operations
+- **JobLogger utility:** (`src/lib/utils/job-logger.ts`) provides structured logging
+- **Levels:** info, warn, error
+- **Context:** Processor name (e.g., OrganizeFiles, FileOrganizer, MonitorDownload)
+- **Metadata:** Optional JSON data for structured details
+- **UI:** Admin logs page shows detailed event logs, job results, and errors
 
 ## Queue System: Bull + Redis
 
@@ -55,21 +64,47 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 
 ## Job Payloads
 
+All payloads now include `jobId` (database job ID) automatically added by the job queue service.
+
 ```typescript
 // search_indexers
-{requestId: string, audiobook: {id, title, author}}
+{jobId: string, requestId: string, audiobook: {id, title, author}}
 
 // monitor_download
-{requestId: string, downloadHistoryId: string, downloadClientId: string, downloadClient: 'qbittorrent'|'transmission'}
+{jobId: string, requestId: string, downloadHistoryId: string, downloadClientId: string, downloadClient: 'qbittorrent'|'transmission'}
 
 // organize_files
-{requestId: string, audiobookId: string, downloadPath: string, targetPath: string}
+{jobId: string, requestId: string, audiobookId: string, downloadPath: string, targetPath: string}
 
 // scan_plex
-{libraryId: string, partial?: boolean, path?: string}
+{jobId: string, libraryId: string, partial?: boolean, path?: string}
 
 // match_plex
-{requestId: string, audiobookId: string, title: string, author: string}
+{jobId: string, requestId: string, audiobookId: string, title: string, author: string}
+```
+
+## Using JobLogger in Processors
+
+```typescript
+import { createJobLogger } from '../utils/job-logger';
+
+export async function processOrganizeFiles(payload: OrganizeFilesPayload) {
+  const { jobId, requestId, audiobookId } = payload;
+
+  // Create logger
+  const logger = jobId ? createJobLogger(jobId, 'OrganizeFiles') : null;
+
+  // Log events
+  await logger?.info('Processing request');
+  await logger?.warn('Warning message', { metadata: 'optional' });
+  await logger?.error('Error occurred');
+
+  // Pass to utilities
+  const organizer = getFileOrganizer();
+  await organizer.organize(path, metadata,
+    logger ? { jobId, context: 'FileOrganizer' } : undefined
+  );
+}
 ```
 
 ## Event Handling
@@ -105,6 +140,7 @@ queue.on('stalled', async (job) => {
 - ✅ Race condition causing "error" status on new downloads → 3s initial delay + retry with exponential backoff
 - ✅ Transient failures marking requests as "failed" prematurely → Distinguish transient vs permanent errors, only mark failed after all retries exhausted
 - ✅ Plex search error (400) immediately after file organization → Changed workflow: organize_files sets 'downloaded' status, scan_plex job handles matching during scheduled scans
+- ✅ System logs page incomplete and missing detailed events → Added JobEvent table, JobLogger utility, comprehensive event logging with timestamps and metadata
 
 ## Tech Stack
 

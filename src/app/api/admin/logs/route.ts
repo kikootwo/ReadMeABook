@@ -44,6 +44,20 @@ export async function GET(request: NextRequest) {
               completedAt: true,
               createdAt: true,
               updatedAt: true,
+              result: true,
+              events: {
+                select: {
+                  id: true,
+                  level: true,
+                  context: true,
+                  message: true,
+                  metadata: true,
+                  createdAt: true,
+                },
+                orderBy: {
+                  createdAt: 'asc',
+                },
+              },
               request: {
                 select: {
                   id: true,

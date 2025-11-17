@@ -6,6 +6,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import axios from 'axios';
+import { createJobLogger, JobLogger } from './job-logger';
 
 export interface AudiobookMetadata {
   title: string;
@@ -30,6 +31,11 @@ export interface ValidationResult {
   path: string;
 }
 
+export interface LoggerConfig {
+  jobId: string;
+  context: string;
+}
+
 export class FileOrganizer {
   private mediaDir: string;
   private tempDir: string;
@@ -44,8 +50,12 @@ export class FileOrganizer {
    */
   async organize(
     downloadPath: string,
-    audiobook: AudiobookMetadata
+    audiobook: AudiobookMetadata,
+    loggerConfig?: LoggerConfig
   ): Promise<OrganizationResult> {
+    // Create logger if config provided
+    const logger = loggerConfig ? createJobLogger(loggerConfig.jobId, loggerConfig.context) : null;
+
     const result: OrganizationResult = {
       success: false,
       targetPath: '',
@@ -55,7 +65,7 @@ export class FileOrganizer {
     };
 
     try {
-      console.log(`[FileOrganizer] Organizing: ${downloadPath}`);
+      await logger?.info(`Organizing: ${downloadPath}`);
 
       // Find audiobook files
       const { audioFiles, coverFile, isFile } = await this.findAudiobookFiles(downloadPath);
@@ -64,7 +74,7 @@ export class FileOrganizer {
         throw new Error('No audiobook files found in download');
       }
 
-      console.log(`[FileOrganizer] Found ${audioFiles.length} audio files`);
+      await logger?.info(`Found ${audioFiles.length} audio files`);
 
       // Build target directory
       const targetPath = this.buildTargetPath(
@@ -74,7 +84,7 @@ export class FileOrganizer {
         audiobook.year
       );
 
-      console.log(`[FileOrganizer] Target path: ${targetPath}`);
+      await logger?.info(`Target path: ${targetPath}`);
 
       // Create target directory
       await fs.mkdir(targetPath, { recursive: true });
@@ -116,10 +126,10 @@ export class FileOrganizer {
 
           result.audioFiles.push(targetFilePath);
           result.filesMovedCount++;
-          console.log(`[FileOrganizer] Copied: ${filename}`);
+          await logger?.info(`Copied: ${filename}`);
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-          console.error(`[FileOrganizer] Failed to copy ${filename}:`, errorMsg);
+          await logger?.error(`Failed to copy ${filename}: ${errorMsg}`);
           result.errors.push(`Failed to copy ${audioFile}: ${errorMsg}`);
           // Continue with other files instead of throwing
         }
@@ -136,9 +146,9 @@ export class FileOrganizer {
           await fs.writeFile(targetCoverPath, coverData, { mode: 0o644 });
           result.coverArtFile = targetCoverPath;
           result.filesMovedCount++;
-          console.log(`[FileOrganizer] Copied cover art`);
+          await logger?.info(`Copied cover art`);
         } catch (error) {
-          console.warn(`[FileOrganizer] Failed to copy cover art:`, error);
+          await logger?.warn(`Failed to copy cover art: ${error instanceof Error ? error.message : 'Unknown error'}`);
           result.errors.push('Failed to copy cover art');
         }
       } else if (audiobook.coverArtUrl) {
@@ -146,9 +156,9 @@ export class FileOrganizer {
         try {
           await this.downloadCoverArt(audiobook.coverArtUrl, targetPath);
           result.coverArtFile = path.join(targetPath, 'cover.jpg');
-          console.log(`[FileOrganizer] Downloaded cover art from Audible`);
+          await logger?.info(`Downloaded cover art from Audible`);
         } catch (error) {
-          console.warn(`[FileOrganizer] Failed to download cover art:`, error);
+          await logger?.warn(`Failed to download cover art: ${error instanceof Error ? error.message : 'Unknown error'}`);
           result.errors.push('Failed to download cover art');
         }
       }
@@ -158,11 +168,11 @@ export class FileOrganizer {
 
       // DO NOT clean up download directory - files needed for seeding
       // Cleanup will be handled by the seeding cleanup job after seeding requirements are met
-      console.log(`[FileOrganizer] Organization complete: ${result.filesMovedCount} files copied (originals kept for seeding)`);
+      await logger?.info(`Organization complete: ${result.filesMovedCount} files copied (originals kept for seeding)`);
 
       return result;
     } catch (error) {
-      console.error(`[FileOrganizer] Organization failed:`, error);
+      await logger?.error(`Organization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       result.errors.push(error instanceof Error ? error.message : 'Unknown error');
       return result;
     }

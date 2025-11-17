@@ -262,12 +262,30 @@ model Job {
 
   // Relations
   request Request? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  events  JobEvent[]
 
   @@index([requestId])
   @@index([type])
   @@index([status])
   @@index([createdAt(sort: Desc)])
   @@map("jobs")
+}
+
+model JobEvent {
+  id        String   @id @default(uuid())
+  jobId     String   @map("job_id")
+  level     String   // info, warn, error
+  context   String   // e.g., OrganizeFiles, FileOrganizer, MonitorDownload
+  message   String   @db.Text
+  metadata  Json?    // Additional structured data
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([createdAt])
+  @@map("job_events")
 }
 
 model ScheduledJob {
