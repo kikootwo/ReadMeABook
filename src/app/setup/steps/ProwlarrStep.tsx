@@ -298,7 +298,7 @@ export function ProwlarrStep({
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                 Higher priority indexers (closer to 25) will be preferred when ranking search results.
                 Seeding time is in minutes (0 = unlimited). Files will be kept until the seeding requirement is met.
-                Enable RSS to automatically monitor indexer feeds for new releases matching your missing list (checked every 15 minutes).
+                Enable RSS to automatically monitor indexer feeds for new releases matching your missing list (default: every 15 minutes, configurable in scheduled jobs settings).
               </p>
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {availableIndexers.map((indexer) => (
