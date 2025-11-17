@@ -132,3 +132,85 @@ export function getCurrentUser(request: NextRequest): TokenPayload | null {
 export function isAdmin(user: TokenPayload | null): boolean {
   return user?.role === 'admin';
 }
+
+/**
+ * Middleware: Require local admin (setup admin)
+ * Must be chained after requireAuth
+ * Only allows local admin users (created during setup with username/password)
+ */
+export async function requireLocalAdmin(
+  request: AuthenticatedRequest,
+  handler: (request: AuthenticatedRequest) => Promise<NextResponse>
+): Promise<NextResponse> {
+  if (!request.user) {
+    return NextResponse.json(
+      {
+        error: 'Unauthorized',
+        message: 'Authentication required',
+      },
+      { status: 401 }
+    );
+  }
+
+  // Verify user is admin
+  if (request.user.role !== 'admin') {
+    return NextResponse.json(
+      {
+        error: 'Forbidden',
+        message: 'Admin access required',
+      },
+      { status: 403 }
+    );
+  }
+
+  // Fetch user from database to check isSetupAdmin flag
+  const user = await prisma.user.findUnique({
+    where: { id: request.user.id },
+    select: {
+      isSetupAdmin: true,
+      plexId: true,
+    },
+  });
+
+  if (!user) {
+    return NextResponse.json(
+      {
+        error: 'Unauthorized',
+        message: 'User not found',
+      },
+      { status: 401 }
+    );
+  }
+
+  // Check if user is local admin (setup admin with local authentication)
+  const isLocalAdmin = user.isSetupAdmin && user.plexId.startsWith('local-');
+
+  if (!isLocalAdmin) {
+    return NextResponse.json(
+      {
+        error: 'Forbidden',
+        message: 'This action is only available to the local admin account',
+      },
+      { status: 403 }
+    );
+  }
+
+  return handler(request);
+}
+
+/**
+ * Helper: Check if user is local admin (setup admin with local authentication)
+ */
+export async function isLocalAdmin(userId: string): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      isSetupAdmin: true,
+      plexId: true,
+    },
+  });
+
+  if (!user) return false;
+
+  return user.isSetupAdmin && user.plexId.startsWith('local-');
+}
