@@ -6,7 +6,7 @@
 import { getJobQueueService, ScanPlexPayload } from './job-queue.service';
 import { prisma } from '../db';
 
-export type ScheduledJobType = 'plex_library_scan' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'cleanup_seeded_torrents' | 'monitor_rss_feeds';
+export type ScheduledJobType = 'plex_library_scan' | 'plex_recently_added_check' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'cleanup_seeded_torrents' | 'monitor_rss_feeds';
 
 export interface ScheduledJob {
   id: string;
@@ -67,6 +67,13 @@ export class SchedulerService {
         type: 'plex_library_scan' as ScheduledJobType,
         schedule: '0 */6 * * *', // Every 6 hours
         enabled: false, // Start disabled until first setup is complete
+        payload: {},
+      },
+      {
+        name: 'Plex Recently Added Check',
+        type: 'plex_recently_added_check' as ScheduledJobType,
+        schedule: '*/5 * * * *', // Every 5 minutes
+        enabled: true, // Enable by default for quick detection
         payload: {},
       },
       {
@@ -285,6 +292,9 @@ export class SchedulerService {
       case 'plex_library_scan':
         bullJobId = await this.triggerPlexScan(job);
         break;
+      case 'plex_recently_added_check':
+        bullJobId = await this.triggerPlexRecentlyAddedCheck(job);
+        break;
       case 'audible_refresh':
         bullJobId = await this.triggerAudibleRefresh(job);
         break;
@@ -351,6 +361,177 @@ export class SchedulerService {
       job.payload?.partial,
       job.payload?.path
     );
+  }
+
+  /**
+   * Trigger Plex recently added check (lightweight polling)
+   * Checks top 10 recently added items for new content
+   */
+  private async triggerPlexRecentlyAddedCheck(job: any): Promise<string> {
+    const { getConfigService } = await import('./config.service');
+    const configService = getConfigService();
+
+    // Validate Plex configuration
+    const plexConfig = await configService.getMany([
+      'plex_url',
+      'plex_token',
+      'plex_audiobook_library_id',
+    ]);
+
+    const missingFields: string[] = [];
+    if (!plexConfig.plex_url) {
+      missingFields.push('Plex server URL');
+    }
+    if (!plexConfig.plex_token) {
+      missingFields.push('Plex auth token');
+    }
+    if (!plexConfig.plex_audiobook_library_id) {
+      missingFields.push('Plex audiobook library ID');
+    }
+
+    if (missingFields.length > 0) {
+      const errorMsg = `Plex is not configured. Missing: ${missingFields.join(', ')}. Please configure Plex in the admin settings.`;
+      console.log('[PlexRecentlyAdded]', errorMsg);
+      // Don't throw error - just skip this run
+      return 'plex-recently-added-check-' + Date.now() + '-skipped-no-config';
+    }
+
+    console.log('[PlexRecentlyAdded] Starting recently added check...');
+
+    const { getPlexService } = await import('../integrations/plex.service');
+    const plexService = getPlexService();
+
+    try {
+      // Fetch top 10 recently added items
+      const recentItems = await plexService.getRecentlyAdded(
+        plexConfig.plex_url!,
+        plexConfig.plex_token!,
+        plexConfig.plex_audiobook_library_id!,
+        10
+      );
+
+      console.log(`[PlexRecentlyAdded] Found ${recentItems.length} recently added items`);
+
+      if (recentItems.length === 0) {
+        return 'plex-recently-added-check-' + Date.now() + '-no-items';
+      }
+
+      // Check for new items not in database
+      let newCount = 0;
+      let updatedCount = 0;
+      let matchedDownloads = 0;
+
+      for (const item of recentItems) {
+        // Check if item already exists in plex_library
+        const existing = await prisma.plexLibrary.findUnique({
+          where: { plexGuid: item.guid },
+        });
+
+        if (!existing) {
+          // New item - add to database
+          await prisma.plexLibrary.create({
+            data: {
+              plexGuid: item.guid,
+              plexRatingKey: item.ratingKey,
+              title: item.title,
+              author: item.author || 'Unknown Author',
+              narrator: item.narrator,
+              summary: item.summary,
+              duration: item.duration,
+              year: item.year,
+              filePath: item.filePath,
+              thumbUrl: item.thumb,
+              plexLibraryId: plexConfig.plex_audiobook_library_id!,
+              addedAt: item.addedAt ? new Date(item.addedAt * 1000) : new Date(),
+              lastScannedAt: new Date(),
+            },
+          });
+          newCount++;
+          console.log(`[PlexRecentlyAdded] New item added: ${item.title} by ${item.author}`);
+        } else {
+          // Update existing item
+          await prisma.plexLibrary.update({
+            where: { plexGuid: item.guid },
+            data: {
+              title: item.title,
+              author: item.author || existing.author,
+              narrator: item.narrator || existing.narrator,
+              summary: item.summary || existing.summary,
+              duration: item.duration || existing.duration,
+              year: item.year || existing.year,
+              thumbUrl: item.thumb || existing.thumbUrl,
+              lastScannedAt: new Date(),
+            },
+          });
+          updatedCount++;
+        }
+      }
+
+      // After processing new items, check for downloaded requests to match
+      const downloadedRequests = await prisma.request.findMany({
+        where: { status: 'downloaded' },
+        include: { audiobook: true },
+        take: 50, // Limit to prevent overwhelming the system
+      });
+
+      if (downloadedRequests.length > 0) {
+        console.log(`[PlexRecentlyAdded] Checking ${downloadedRequests.length} downloaded requests for matches`);
+
+        // Use string-similarity for fuzzy matching
+        const stringSimilarity = await import('string-similarity');
+
+        for (const request of downloadedRequests) {
+          // Find best match in recently added items
+          for (const plexItem of recentItems) {
+            const titleSimilarity = stringSimilarity.compareTwoStrings(
+              request.audiobook.title.toLowerCase(),
+              plexItem.title.toLowerCase()
+            );
+            const authorSimilarity = stringSimilarity.compareTwoStrings(
+              request.audiobook.author.toLowerCase(),
+              (plexItem.author || '').toLowerCase()
+            );
+
+            // Match if both title and author are above 70% similarity
+            if (titleSimilarity >= 0.7 && authorSimilarity >= 0.7) {
+              console.log(
+                `[PlexRecentlyAdded] Match found: "${request.audiobook.title}" → "${plexItem.title}" (${Math.round(titleSimilarity * 100)}% title, ${Math.round(authorSimilarity * 100)}% author)`
+              );
+
+              // Update request to available status
+              await prisma.request.update({
+                where: { id: request.id },
+                data: {
+                  status: 'available',
+                  completedAt: new Date(),
+                },
+              });
+
+              // Link audiobook to Plex
+              await prisma.audiobook.update({
+                where: { id: request.audiobookId },
+                data: {
+                  plexGuid: plexItem.guid,
+                  plexLibraryId: plexConfig.plex_audiobook_library_id!,
+                },
+              });
+
+              matchedDownloads++;
+              break; // Only match once per request
+            }
+          }
+        }
+      }
+
+      console.log(
+        `[PlexRecentlyAdded] Complete: ${newCount} new, ${updatedCount} updated, ${matchedDownloads} matched downloads`
+      );
+
+      return `plex-recently-added-check-${Date.now()}-new:${newCount}-updated:${updatedCount}-matched:${matchedDownloads}`;
+    } catch (error) {
+      console.error('[PlexRecentlyAdded] Error checking recently added:', error);
+      throw error;
+    }
   }
 
   /**

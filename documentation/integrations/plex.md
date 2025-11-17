@@ -17,6 +17,7 @@ Connectivity to Plex for OAuth, library management, content detection, and autom
 **GET {server_url}/identity** - Server info (machineIdentifier, version, platform) | Also used for access verification
 **GET {server_url}/library/sections** - List libraries with IDs and types
 **GET {server_url}/library/sections/{id}/all?type=9** - All albums (type 9 = audiobooks)
+**GET {server_url}/library/sections/{id}/all?type=9&sort=addedAt:desc&X-Plex-Container-Start=0&X-Plex-Container-Size=10** - Recently added (lightweight polling)
 **GET {server_url}/library/sections/{id}/refresh** - Trigger async scan
 **GET {server_url}/library/metadata/{rating_key}** - Item metadata
 **GET {server_url}/library/sections/{id}/search?title={query}** - Search
@@ -50,6 +51,7 @@ API Docs: `/PlexMediaServerAPIDocs.json`
 
 ## Library Scanning
 
+### Full Library Scan
 **Scan Process:**
 1. Fetch all audiobooks via API (`type=9`)
 2. For each:
@@ -61,8 +63,20 @@ API Docs: `/PlexMediaServerAPIDocs.json`
 4. Return summary (total, new count, updated count, matched downloads)
 
 **Trigger:** Scheduled (every 6 hours default) or manual admin action
+**Note:** Heavy operation, scans entire library
 
-**Note:** Requests transition: pending → searching → downloading → downloaded (green) → available (after Plex scan)
+### Recently Added Check (Lightweight Polling)
+**Process:**
+1. Query top 10 items sorted by `addedAt:desc` with pagination
+2. For each item:
+   - New? Create in `plex_library` table
+   - Existing? Update metadata
+3. Match downloaded requests against recently added items (70% threshold)
+4. Return summary (new, updated, matched downloads)
+
+**Trigger:** Scheduled (every 5 minutes default), enabled by default
+**Benefits:** Lightweight, fast detection of new content without full scan
+**Note:** Requests transition: pending → searching → downloading → downloaded (green) → available (after detection)
 
 ## Data Models
 

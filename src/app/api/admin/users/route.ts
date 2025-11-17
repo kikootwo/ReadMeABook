@@ -18,6 +18,7 @@ export async function GET(request: NextRequest) {
             plexUsername: true,
             plexEmail: true,
             role: true,
+            isSetupAdmin: true,
             avatarUrl: true,
             createdAt: true,
             updatedAt: true,

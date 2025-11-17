@@ -29,6 +29,7 @@ model User {
   plexUsername  String    @map("plex_username")
   plexEmail     String?   @map("plex_email")
   role          String    @default("user") // 'user' or 'admin'
+  isSetupAdmin  Boolean   @default(false) @map("is_setup_admin") // First admin created during setup, cannot be demoted
   avatarUrl     String?   @map("avatar_url")
   authToken     String?   @map("auth_token") // Encrypted
   createdAt     DateTime  @default(now()) @map("created_at")
@@ -244,7 +245,7 @@ model Job {
   bullJobId   String?   @map("bull_job_id")
   requestId   String?   @map("request_id")
   type        String
-  // Job types: search_indexers, monitor_download, organize_files, scan_plex, match_plex
+  // Job types: search_indexers, monitor_download, organize_files, scan_plex, plex_recently_added_check, match_plex
   status      String    @default("pending")
   // Status values: pending, active, completed, failed, delayed, stuck
   priority    Int       @default(0)
@@ -272,7 +273,7 @@ model Job {
 model ScheduledJob {
   id        String    @id @default(uuid())
   name      String
-  type      String    // 'plex_library_scan', 'audible_refresh'
+  type      String    // 'plex_library_scan', 'plex_recently_added_check', 'audible_refresh', 'retry_missing_torrents', 'retry_failed_imports', 'cleanup_seeded_torrents', 'monitor_rss_feeds'
   schedule  String    // Cron expression
   enabled   Boolean   @default(true)
   payload   Json      @default("{}")

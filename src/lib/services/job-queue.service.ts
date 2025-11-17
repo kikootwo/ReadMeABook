@@ -16,6 +16,7 @@ export type JobType =
   | 'scan_plex'
   | 'match_plex'
   | 'plex_library_scan'
+  | 'plex_recently_added_check'
   | 'audible_refresh'
   | 'retry_missing_torrents'
   | 'retry_failed_imports'
@@ -227,6 +228,16 @@ export class JobQueueService {
 
     // Scheduled job processors - these call the scheduler service trigger methods
     this.queue.process('plex_library_scan', 1, async (job: BullJob) => {
+      const { getSchedulerService } = await import('./scheduler.service');
+      const scheduler = getSchedulerService();
+      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
+      if (scheduledJob) {
+        await scheduler.triggerJobNow(scheduledJob.id);
+      }
+      return { success: true };
+    });
+
+    this.queue.process('plex_recently_added_check', 1, async (job: BullJob) => {
       const { getSchedulerService } = await import('./scheduler.service');
       const scheduler = getSchedulerService();
       const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);

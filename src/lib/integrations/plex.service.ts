@@ -387,6 +387,76 @@ export class PlexService {
   }
 
   /**
+   * Get recently added items from a library (lightweight polling method)
+   * Uses sort by addedAt descending with pagination
+   */
+  async getRecentlyAdded(
+    serverUrl: string,
+    authToken: string,
+    libraryId: string,
+    limit: number = 10
+  ): Promise<PlexAudiobook[]> {
+    try {
+      const response = await this.client.get(
+        `${serverUrl}/library/sections/${libraryId}/all`,
+        {
+          params: {
+            type: 9, // Type 9 = Albums (books in audiobook context)
+            sort: 'addedAt:desc',
+            'X-Plex-Container-Start': 0,
+            'X-Plex-Container-Size': limit,
+          },
+          headers: {
+            'X-Plex-Token': authToken,
+            'Accept': 'application/json',
+          },
+        }
+      );
+
+      console.log('[Plex] Recently added response type:', typeof response.data);
+
+      // Handle XML response
+      let data = response.data;
+      if (typeof data === 'string') {
+        console.log('[Plex] Parsing XML response...');
+        const parsed = await parseStringPromise(data);
+        data = parsed.MediaContainer;
+      } else if (data && typeof data === 'object') {
+        // JSON response - could be wrapped in MediaContainer
+        if (data.MediaContainer) {
+          console.log('[Plex] Extracting from MediaContainer wrapper');
+          data = data.MediaContainer;
+        }
+      }
+
+      const tracks = data.Metadata || data.Track || data.Directory || data.Album || [];
+      console.log('[Plex] Found', Array.isArray(tracks) ? tracks.length : '(not an array)', 'recently added items');
+
+      if (!Array.isArray(tracks)) {
+        console.warn('[Plex] tracks is not an array:', tracks);
+        return [];
+      }
+
+      return tracks.map((item: any) => ({
+        ratingKey: item.ratingKey || item.$?.ratingKey,
+        guid: item.guid || item.$?.guid || '',
+        title: item.title || item.$?.title, // Album title (book name)
+        author: item.parentTitle || item.$?.parentTitle || item.originalTitle, // Artist name (author)
+        narrator: item.writer || item.$?.writer,
+        duration: item.duration ? parseInt(item.duration) : undefined,
+        year: item.year ? parseInt(item.year) : undefined,
+        summary: item.summary || item.$?.summary,
+        thumb: item.thumb || item.$?.thumb,
+        addedAt: item.addedAt ? parseInt(item.addedAt) : Date.now(),
+        updatedAt: item.updatedAt ? parseInt(item.updatedAt) : Date.now(),
+      }));
+    } catch (error) {
+      console.error('Failed to get recently added content:', error);
+      throw new Error('Failed to retrieve recently added content from Plex library');
+    }
+  }
+
+  /**
    * Get all items from a library
    */
   async getLibraryContent(

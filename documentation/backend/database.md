@@ -10,6 +10,7 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 
 ### Users
 - `id` (UUID PK), `plex_id` (unique), `plex_username`, `plex_email`, `role` ('user'|'admin')
+- `is_setup_admin` (bool, default false) - First admin created during setup, role protected from changes
 - `avatar_url`, `auth_token` (encrypted), `created_at`, `updated_at`, `last_login_at`
 - Indexes: `plex_id`, `role`
 

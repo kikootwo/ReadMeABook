@@ -45,6 +45,7 @@ export async function POST(request: NextRequest) {
         plexUsername: admin.username,
         plexEmail: null,
         role: 'admin',
+        isSetupAdmin: true, // Mark as setup admin - role cannot be changed
         avatarUrl: null,
         authToken: hashedPassword, // Store hashed password in authToken field for local users
         lastLoginAt: new Date(),

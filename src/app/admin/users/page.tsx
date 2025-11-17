@@ -17,6 +17,7 @@ interface User {
   plexUsername: string;
   plexEmail: string;
   role: 'user' | 'admin';
+  isSetupAdmin: boolean;
   avatarUrl: string | null;
   createdAt: string;
   updatedAt: string;
@@ -174,15 +175,22 @@ function AdminUsersPageContent() {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span
-                      className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        user.role === 'admin'
-                          ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400'
-                          : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400'
-                      }`}
-                    >
-                      {user.role.toUpperCase()}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                          user.role === 'admin'
+                            ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400'
+                            : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400'
+                        }`}
+                      >
+                        {user.role.toUpperCase()}
+                      </span>
+                      {user.isSetupAdmin && (
+                        <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
+                          SETUP ADMIN
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                     {user._count.requests}
@@ -193,15 +201,24 @@ function AdminUsersPageContent() {
                       : 'Never'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button
-                      onClick={() => showEditDialog(user)}
-                      className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                      <span>Edit Role</span>
-                    </button>
+                    {user.isSetupAdmin ? (
+                      <span className="inline-flex items-center gap-1 text-gray-400 dark:text-gray-600 cursor-not-allowed" title="Setup admin role cannot be changed">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                        <span>Protected</span>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => showEditDialog(user)}
+                        className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                        <span>Edit Role</span>
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -223,8 +240,8 @@ function AdminUsersPageContent() {
           <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
             <li>• <strong>User:</strong> Can request audiobooks, view own requests, and search the catalog</li>
             <li>• <strong>Admin:</strong> Full system access including settings, user management, and all requests</li>
+            <li>• <strong>Setup Admin:</strong> The initial admin account created during setup - this account's role is protected and cannot be changed</li>
             <li>• You cannot change your own role for security reasons</li>
-            <li>• The first user to authenticate automatically becomes an admin</li>
           </ul>
         </div>
 

@@ -34,6 +34,30 @@ export async function PUT(
           );
         }
 
+        // Check if user is the setup admin
+        const targetUser = await prisma.user.findUnique({
+          where: { id },
+          select: {
+            isSetupAdmin: true,
+            plexUsername: true,
+          },
+        });
+
+        if (!targetUser) {
+          return NextResponse.json(
+            { error: 'User not found' },
+            { status: 404 }
+          );
+        }
+
+        // Prevent changing setup admin role
+        if (targetUser.isSetupAdmin && role !== 'admin') {
+          return NextResponse.json(
+            { error: 'Cannot change the setup admin role. This account must always remain an admin.' },
+            { status: 403 }
+          );
+        }
+
         // Update user role
         const updatedUser = await prisma.user.update({
           where: { id },

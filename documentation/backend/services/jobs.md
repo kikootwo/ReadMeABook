@@ -20,8 +20,9 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 1. **search_indexers** - Search Prowlarr for torrents
 2. **monitor_download** - Poll progress (10s intervals)
 3. **organize_files** - Move to media library, set status to 'downloaded'
-4. **scan_plex** - Scan Plex library, match 'downloaded' requests
-5. **match_plex** - Fuzzy match to Plex item (deprecated - now handled by scan_plex)
+4. **scan_plex** - Full scan of Plex library, match 'downloaded' requests
+5. **plex_recently_added_check** - Lightweight polling of recently added items (top 10)
+6. **match_plex** - Fuzzy match to Plex item (deprecated - now handled by scan_plex)
 
 ## Special Behaviors
 

@@ -82,8 +82,10 @@ Handles authentication and authorization: Plex OAuth integration, JWT session ma
 
 ## First User Setup
 
-- First user authenticating automatically promoted to admin
-- Ensures someone can access admin panel after fresh install
+- First user created during setup automatically promoted to admin
+- Marked as "setup admin" with `isSetupAdmin=true` flag
+- Setup admin role is **protected** - cannot be changed to prevent lockout
+- Ensures someone always has admin access after fresh install
 - Subsequent users default to 'user' role
 
 ## Security
