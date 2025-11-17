@@ -477,26 +477,34 @@ export class SchedulerService {
       if (downloadedRequests.length > 0) {
         console.log(`[PlexRecentlyAdded] Checking ${downloadedRequests.length} downloaded requests for matches`);
 
-        // Use string-similarity for fuzzy matching
-        const stringSimilarity = await import('string-similarity');
+        // Use the centralized matcher (same as full scan and homepage)
+        const { findPlexMatch } = await import('../utils/audiobook-matcher');
 
         for (const request of downloadedRequests) {
-          // Find best match in recently added items
-          for (const plexItem of recentItems) {
-            const titleSimilarity = stringSimilarity.compareTwoStrings(
-              request.audiobook.title.toLowerCase(),
-              plexItem.title.toLowerCase()
-            );
-            const authorSimilarity = stringSimilarity.compareTwoStrings(
-              request.audiobook.author.toLowerCase(),
-              (plexItem.author || '').toLowerCase()
-            );
+          try {
+            const audiobook = request.audiobook;
 
-            // Match if both title and author are above 70% similarity
-            if (titleSimilarity >= 0.7 && authorSimilarity >= 0.7) {
+            // Use centralized matcher (handles ASIN matching, title normalization, narrator matching, etc.)
+            const match = await findPlexMatch({
+              asin: audiobook.audibleAsin || '',
+              title: audiobook.title,
+              author: audiobook.author,
+              narrator: audiobook.narrator || undefined,
+            });
+
+            if (match) {
               console.log(
-                `[PlexRecentlyAdded] Match found: "${request.audiobook.title}" → "${plexItem.title}" (${Math.round(titleSimilarity * 100)}% title, ${Math.round(authorSimilarity * 100)}% author)`
+                `[PlexRecentlyAdded] Match found: "${audiobook.title}" → "${match.title}"`
               );
+
+              // Update audiobook with Plex info
+              await prisma.audiobook.update({
+                where: { id: audiobook.id },
+                data: {
+                  plexGuid: match.plexGuid,
+                  updatedAt: new Date(),
+                },
+              });
 
               // Update request to available status
               await prisma.request.update({
@@ -504,21 +512,16 @@ export class SchedulerService {
                 data: {
                   status: 'available',
                   completedAt: new Date(),
-                },
-              });
-
-              // Link audiobook to Plex
-              await prisma.audiobook.update({
-                where: { id: request.audiobookId },
-                data: {
-                  plexGuid: plexItem.guid,
-                  plexLibraryId: plexConfig.plex_audiobook_library_id!,
+                  updatedAt: new Date(),
                 },
               });
 
               matchedDownloads++;
-              break; // Only match once per request
+            } else {
+              console.log(`[PlexRecentlyAdded] No match found for "${audiobook.title}" by ${audiobook.author}`);
             }
+          } catch (error) {
+            console.error(`[PlexRecentlyAdded] Failed to match request ${request.id}:`, error);
           }
         }
       }
