@@ -56,12 +56,22 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 
 ### Jobs
 - `id` (UUID PK), `bull_job_id`, `request_id` (FK nullable)
-- `type` ('search_indexers'|'monitor_download'|'organize_files'|'scan_plex'|'match_plex')
+- `type` ('search_indexers'|'monitor_download'|'organize_files'|'scan_plex'|'match_plex'|'plex_library_scan'|'plex_recently_added_check'|'audible_refresh'|'retry_missing_torrents'|'retry_failed_imports'|'cleanup_seeded_torrents'|'monitor_rss_feeds')
 - `status` ('pending'|'active'|'completed'|'failed'|'delayed'|'stuck')
 - `priority`, `attempts`, `max_attempts` (default 3)
 - `payload` (JSONB), `result` (JSONB), `error_message`, `stack_trace`
 - `started_at`, `completed_at`, `created_at`, `updated_at`
 - Indexes: `request_id`, `type`, `status`, `created_at DESC`
+
+### Job_Events
+- `id` (UUID PK), `job_id` (FK → Jobs, CASCADE delete)
+- `level` ('info'|'warn'|'error')
+- `context` (processor name: OrganizeFiles, FileOrganizer, MonitorDownload, etc.)
+- `message` (event description)
+- `metadata` (JSONB, optional structured data)
+- `created_at` (timestamp)
+- Indexes: `job_id`, `created_at`
+- **Purpose:** Store detailed event logs for job operations (shown in admin logs UI)
 
 ## Relationships
 
@@ -69,6 +79,7 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - Audiobook → Requests (1:many)
 - Request → Download History (1:many)
 - Request → Jobs (1:many, nullable)
+- Job → Job Events (1:many, CASCADE delete)
 
 ## Setup Strategy
 

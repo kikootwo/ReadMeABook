@@ -6,16 +6,24 @@
 import { DownloadTorrentPayload, getJobQueueService } from '../services/job-queue.service';
 import { prisma } from '../db';
 import { getQBittorrentService } from '../integrations/qbittorrent.service';
+import { createJobLogger } from '../utils/job-logger';
 
 /**
  * Process download torrent job
  * Adds selected torrent to download client and starts monitoring
  */
 export async function processDownloadTorrent(payload: DownloadTorrentPayload): Promise<any> {
-  const { requestId, audiobook, torrent } = payload;
+  const { requestId, audiobook, torrent, jobId } = payload;
 
-  console.log(`[DownloadTorrent] Processing request ${requestId} for "${audiobook.title}"`);
-  console.log(`[DownloadTorrent] Selected torrent: ${torrent.title}`);
+  const logger = jobId ? createJobLogger(jobId, 'DownloadTorrent') : null;
+
+  await logger?.info(`Processing request ${requestId} for "${audiobook.title}"`);
+  await logger?.info(`Selected torrent: ${torrent.title}`, {
+    size: torrent.size,
+    seeders: torrent.seeders,
+    format: torrent.format,
+    indexer: torrent.indexer,
+  });
 
   try {
     // Update request status to downloading
@@ -32,7 +40,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
     const qbt = await getQBittorrentService();
 
     // Add torrent to qBittorrent
-    console.log(`[DownloadTorrent] Adding torrent to qBittorrent: ${torrent.downloadUrl}`);
+    await logger?.info(`Adding torrent to qBittorrent`);
 
     const torrentHash = await qbt.addTorrent(torrent.downloadUrl, {
       category: 'readmeabook',
@@ -45,7 +53,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
       paused: false, // Start immediately
     });
 
-    console.log(`[DownloadTorrent] Torrent added with hash: ${torrentHash}`);
+    await logger?.info(`Torrent added with hash: ${torrentHash}`);
 
     // Create DownloadHistory record
     const downloadHistory = await prisma.downloadHistory.create({
@@ -65,7 +73,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
       },
     });
 
-    console.log(`[DownloadTorrent] Created download history record: ${downloadHistory.id}`);
+    await logger?.info(`Created download history record: ${downloadHistory.id}`);
 
     // Trigger monitor download job with initial delay
     // qBittorrent needs a few seconds to process the torrent before it's available via API
@@ -78,7 +86,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
       3 // Wait 3 seconds before first check to avoid race condition
     );
 
-    console.log(`[DownloadTorrent] Started monitoring job for request ${requestId} (3s delay)`);
+    await logger?.info(`Started monitoring job for request ${requestId} (3s initial delay)`);
 
     return {
       success: true,
@@ -94,7 +102,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
       },
     };
   } catch (error) {
-    console.error('[DownloadTorrent] Error:', error);
+    await logger?.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
     // Update request status to failed
     await prisma.request.update({

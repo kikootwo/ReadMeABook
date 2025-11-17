@@ -10,6 +10,15 @@ import useSWR from 'swr';
 import Link from 'next/link';
 import { authenticatedFetcher } from '@/lib/utils/api';
 
+interface JobEvent {
+  id: string;
+  level: string;
+  context: string;
+  message: string;
+  metadata: any;
+  createdAt: string;
+}
+
 interface Log {
   id: string;
   bullJobId: string | null;
@@ -23,6 +32,8 @@ interface Log {
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  result: any;
+  events: JobEvent[];
   request: {
     id: string;
     audiobook: {
@@ -188,10 +199,18 @@ export default function AdminLogsPage() {
             >
               <option value="all">All Types</option>
               <option value="search_indexers">Search Indexers</option>
+              <option value="download_torrent">Download Torrent</option>
               <option value="monitor_download">Monitor Download</option>
               <option value="organize_files">Organize Files</option>
               <option value="scan_plex">Scan Plex</option>
               <option value="match_plex">Match Plex</option>
+              <option value="plex_library_scan">Plex Library Scan</option>
+              <option value="plex_recently_added_check">Plex Recently Added</option>
+              <option value="audible_refresh">Audible Refresh</option>
+              <option value="retry_missing_torrents">Retry Missing Torrents</option>
+              <option value="retry_failed_imports">Retry Failed Imports</option>
+              <option value="cleanup_seeded_torrents">Cleanup Seeded Torrents</option>
+              <option value="monitor_rss_feeds">Monitor RSS Feeds</option>
             </select>
           </div>
         </div>
@@ -266,7 +285,7 @@ export default function AdminLogsPage() {
                         {log.attempts}/{log.maxAttempts}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        {(log.errorMessage || log.bullJobId) && (
+                        {(log.events.length > 0 || log.errorMessage || log.bullJobId || log.result) && (
                           <button
                             onClick={() => setExpandedLog(expandedLog === log.id ? null : log.id)}
                             className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
@@ -279,17 +298,58 @@ export default function AdminLogsPage() {
                     {expandedLog === log.id && (
                       <tr>
                         <td colSpan={7} className="px-6 py-4 bg-gray-50 dark:bg-gray-900">
-                          <div className="space-y-2">
+                          <div className="space-y-4">
                             {log.bullJobId && (
                               <div>
                                 <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Bull Job ID: </span>
                                 <span className="text-sm text-gray-600 dark:text-gray-400 font-mono">{log.bullJobId}</span>
                               </div>
                             )}
+
+                            {/* Event Logs */}
+                            {log.events.length > 0 && (
+                              <div>
+                                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Event Log</h4>
+                                <div className="space-y-1 max-h-96 overflow-y-auto bg-black/5 dark:bg-black/30 rounded p-3 font-mono text-xs">
+                                  {log.events.map((event) => {
+                                    const timestamp = new Date(event.createdAt).toISOString().split('T')[1].split('.')[0];
+                                    const levelColor = event.level === 'error'
+                                      ? 'text-red-500'
+                                      : event.level === 'warn'
+                                      ? 'text-yellow-500'
+                                      : 'text-green-500';
+
+                                    return (
+                                      <div key={event.id} className="text-gray-800 dark:text-gray-200">
+                                        <span className={levelColor}>[{event.context}]</span> {event.message}
+                                        <span className="text-gray-500 dark:text-gray-400 ml-2">{timestamp}</span>
+                                        {event.metadata && Object.keys(event.metadata).length > 0 && (
+                                          <pre className="ml-4 mt-1 text-gray-600 dark:text-gray-400 text-xs">
+                                            {JSON.stringify(event.metadata, null, 2)}
+                                          </pre>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Result Data */}
+                            {log.result && Object.keys(log.result).length > 0 && (
+                              <div>
+                                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Job Result</h4>
+                                <pre className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded text-xs text-blue-900 dark:text-blue-300 font-mono overflow-x-auto">
+                                  {JSON.stringify(log.result, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+
+                            {/* Error Message */}
                             {log.errorMessage && (
                               <div>
-                                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Error: </span>
-                                <div className="mt-1 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-sm text-red-700 dark:text-red-300 font-mono whitespace-pre-wrap">
+                                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Error</h4>
+                                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-sm text-red-700 dark:text-red-300 font-mono whitespace-pre-wrap">
                                   {log.errorMessage}
                                 </div>
                               </div>
@@ -343,9 +403,11 @@ export default function AdminLogsPage() {
           </h3>
           <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
             <li>• Logs are automatically refreshed every 10 seconds</li>
-            <li>• Failed jobs show error messages when you click "Show Details"</li>
+            <li>• Click "Show Details" to view detailed event logs, job results, and error messages</li>
+            <li>• Event logs show all internal operations with timestamps (similar to Docker logs)</li>
             <li>• Jobs are retried automatically based on their max attempts setting</li>
             <li>• Use filters to find specific job types or statuses</li>
+            <li>• All job types are tracked: searches, downloads, file organization, Plex scans, RSS monitoring, and more</li>
           </ul>
         </div>
       </div>

@@ -24,10 +24,11 @@ export type JobType =
   | 'monitor_rss_feeds';
 
 export interface JobPayload {
+  jobId?: string; // Database job ID (added automatically by addJob)
   [key: string]: any;
 }
 
-export interface SearchIndexersPayload {
+export interface SearchIndexersPayload extends JobPayload {
   requestId: string;
   audiobook: {
     id: string;
@@ -36,7 +37,7 @@ export interface SearchIndexersPayload {
   };
 }
 
-export interface DownloadTorrentPayload {
+export interface DownloadTorrentPayload extends JobPayload {
   requestId: string;
   audiobook: {
     id: string;
@@ -46,31 +47,55 @@ export interface DownloadTorrentPayload {
   torrent: TorrentResult;
 }
 
-export interface MonitorDownloadPayload {
+export interface MonitorDownloadPayload extends JobPayload {
   requestId: string;
   downloadHistoryId: string;
   downloadClientId: string;
   downloadClient: 'qbittorrent' | 'transmission';
 }
 
-export interface OrganizeFilesPayload {
+export interface OrganizeFilesPayload extends JobPayload {
   requestId: string;
   audiobookId: string;
   downloadPath: string;
   targetPath: string;
 }
 
-export interface ScanPlexPayload {
+export interface ScanPlexPayload extends JobPayload {
   libraryId?: string;
   partial?: boolean;
   path?: string;
 }
 
-export interface MatchPlexPayload {
+export interface MatchPlexPayload extends JobPayload {
   requestId: string;
   audiobookId: string;
   title: string;
   author: string;
+}
+
+export interface PlexRecentlyAddedPayload extends JobPayload {
+  scheduledJobId?: string;
+}
+
+export interface MonitorRssFeedsPayload extends JobPayload {
+  scheduledJobId?: string;
+}
+
+export interface AudibleRefreshPayload extends JobPayload {
+  scheduledJobId?: string;
+}
+
+export interface RetryMissingTorrentsPayload extends JobPayload {
+  scheduledJobId?: string;
+}
+
+export interface RetryFailedImportsPayload extends JobPayload {
+  scheduledJobId?: string;
+}
+
+export interface CleanupSeededTorrentsPayload extends JobPayload {
+  scheduledJobId?: string;
 }
 
 export interface QueueStats {
@@ -226,75 +251,41 @@ export class JobQueueService {
       return await processMatchPlex(job.data);
     });
 
-    // Scheduled job processors - these call the scheduler service trigger methods
+    // Scheduled job processors
     this.queue.process('plex_library_scan', 1, async (job: BullJob) => {
-      const { getSchedulerService } = await import('./scheduler.service');
-      const scheduler = getSchedulerService();
-      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
-      if (scheduledJob) {
-        await scheduler.triggerJobNow(scheduledJob.id);
-      }
-      return { success: true };
+      // plex_library_scan is just an alias for scan_plex
+      const { processScanPlex } = await import('../processors/scan-plex.processor');
+      return await processScanPlex(job.data);
     });
 
-    this.queue.process('plex_recently_added_check', 1, async (job: BullJob) => {
-      const { getSchedulerService } = await import('./scheduler.service');
-      const scheduler = getSchedulerService();
-      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
-      if (scheduledJob) {
-        await scheduler.triggerJobNow(scheduledJob.id);
-      }
-      return { success: true };
+    this.queue.process('plex_recently_added_check', 1, async (job: BullJob<PlexRecentlyAddedPayload>) => {
+      const { processPlexRecentlyAddedCheck } = await import('../processors/plex-recently-added.processor');
+      return await processPlexRecentlyAddedCheck(job.data);
     });
 
-    this.queue.process('audible_refresh', 1, async (job: BullJob) => {
-      const { getSchedulerService } = await import('./scheduler.service');
-      const scheduler = getSchedulerService();
-      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
-      if (scheduledJob) {
-        await scheduler.triggerJobNow(scheduledJob.id);
-      }
-      return { success: true };
+    this.queue.process('monitor_rss_feeds', 1, async (job: BullJob<MonitorRssFeedsPayload>) => {
+      const { processMonitorRssFeeds } = await import('../processors/monitor-rss-feeds.processor');
+      return await processMonitorRssFeeds(job.data);
     });
 
-    this.queue.process('retry_missing_torrents', 1, async (job: BullJob) => {
-      const { getSchedulerService } = await import('./scheduler.service');
-      const scheduler = getSchedulerService();
-      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
-      if (scheduledJob) {
-        await scheduler.triggerJobNow(scheduledJob.id);
-      }
-      return { success: true };
+    this.queue.process('audible_refresh', 1, async (job: BullJob<AudibleRefreshPayload>) => {
+      const { processAudibleRefresh } = await import('../processors/audible-refresh.processor');
+      return await processAudibleRefresh(job.data);
     });
 
-    this.queue.process('retry_failed_imports', 1, async (job: BullJob) => {
-      const { getSchedulerService } = await import('./scheduler.service');
-      const scheduler = getSchedulerService();
-      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
-      if (scheduledJob) {
-        await scheduler.triggerJobNow(scheduledJob.id);
-      }
-      return { success: true };
+    this.queue.process('retry_missing_torrents', 1, async (job: BullJob<RetryMissingTorrentsPayload>) => {
+      const { processRetryMissingTorrents } = await import('../processors/retry-missing-torrents.processor');
+      return await processRetryMissingTorrents(job.data);
     });
 
-    this.queue.process('cleanup_seeded_torrents', 1, async (job: BullJob) => {
-      const { getSchedulerService } = await import('./scheduler.service');
-      const scheduler = getSchedulerService();
-      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
-      if (scheduledJob) {
-        await scheduler.triggerJobNow(scheduledJob.id);
-      }
-      return { success: true };
+    this.queue.process('retry_failed_imports', 1, async (job: BullJob<RetryFailedImportsPayload>) => {
+      const { processRetryFailedImports } = await import('../processors/retry-failed-imports.processor');
+      return await processRetryFailedImports(job.data);
     });
 
-    this.queue.process('monitor_rss_feeds', 1, async (job: BullJob) => {
-      const { getSchedulerService } = await import('./scheduler.service');
-      const scheduler = getSchedulerService();
-      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
-      if (scheduledJob) {
-        await scheduler.triggerJobNow(scheduledJob.id);
-      }
-      return { success: true };
+    this.queue.process('cleanup_seeded_torrents', 1, async (job: BullJob<CleanupSeededTorrentsPayload>) => {
+      const { processCleanupSeededTorrents } = await import('../processors/cleanup-seeded-torrents.processor');
+      return await processCleanupSeededTorrents(job.data);
     });
   }
 
@@ -351,12 +342,10 @@ export class JobQueueService {
     payload: JobPayload,
     options?: JobOptions
   ): Promise<string> {
-    const bullJob = await this.queue.add(type, payload, options);
-
-    // Persist to database
+    // First create the database job record
     const dbJob = await prisma.job.create({
       data: {
-        bullJobId: bullJob.id as string,
+        bullJobId: null, // Will be updated after Bull job is created
         requestId: payload.requestId || null,
         type,
         status: 'pending',
@@ -364,6 +353,18 @@ export class JobQueueService {
         payload,
         maxAttempts: options?.attempts || 3,
       },
+    });
+
+    // Add jobId to payload so processors can access it
+    const payloadWithJobId = { ...payload, jobId: dbJob.id };
+
+    // Create Bull job
+    const bullJob = await this.queue.add(type, payloadWithJobId, options);
+
+    // Update database job with Bull job ID
+    await prisma.job.update({
+      where: { id: dbJob.id },
+      data: { bullJobId: bullJob.id as string },
     });
 
     return dbJob.id;
@@ -490,6 +491,96 @@ export class JobQueueService {
       } as MatchPlexPayload,
       {
         priority: 6,
+      }
+    );
+  }
+
+  /**
+   * Add Plex recently added check job
+   */
+  async addPlexRecentlyAddedJob(scheduledJobId?: string): Promise<string> {
+    return await this.addJob(
+      'plex_recently_added_check',
+      {
+        scheduledJobId,
+      } as PlexRecentlyAddedPayload,
+      {
+        priority: 8,
+      }
+    );
+  }
+
+  /**
+   * Add RSS feed monitoring job
+   */
+  async addMonitorRssFeedsJob(scheduledJobId?: string): Promise<string> {
+    return await this.addJob(
+      'monitor_rss_feeds',
+      {
+        scheduledJobId,
+      } as MonitorRssFeedsPayload,
+      {
+        priority: 8,
+      }
+    );
+  }
+
+  /**
+   * Add Audible refresh job
+   */
+  async addAudibleRefreshJob(scheduledJobId?: string): Promise<string> {
+    return await this.addJob(
+      'audible_refresh',
+      {
+        scheduledJobId,
+      } as AudibleRefreshPayload,
+      {
+        priority: 9,
+      }
+    );
+  }
+
+  /**
+   * Add retry missing torrents job
+   */
+  async addRetryMissingTorrentsJob(scheduledJobId?: string): Promise<string> {
+    return await this.addJob(
+      'retry_missing_torrents',
+      {
+        scheduledJobId,
+      } as RetryMissingTorrentsPayload,
+      {
+        priority: 7,
+      }
+    );
+  }
+
+  /**
+   * Add retry failed imports job
+   */
+  async addRetryFailedImportsJob(scheduledJobId?: string): Promise<string> {
+    return await this.addJob(
+      'retry_failed_imports',
+      {
+        scheduledJobId,
+      } as RetryFailedImportsPayload,
+      {
+        priority: 7,
+      }
+    );
+  }
+
+  /**
+   * Add cleanup seeded torrents job
+   */
+  async addCleanupSeededTorrentsJob(scheduledJobId?: string): Promise<string> {
+    return await this.addJob(
+      'cleanup_seeded_torrents',
+      {
+        scheduledJobId,
+      } as CleanupSeededTorrentsPayload,
+      {
+        priority: 10,
       }
     );
   }

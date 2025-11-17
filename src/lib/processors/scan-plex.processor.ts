@@ -9,15 +9,18 @@ import { ScanPlexPayload } from '../services/job-queue.service';
 import { prisma } from '../db';
 import { getPlexService } from '../integrations/plex.service';
 import { getConfigService } from '../services/config.service';
+import { createJobLogger } from '../utils/job-logger';
 
 /**
  * Process scan Plex job
  * Scans Plex library and updates plex_library table
  */
 export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
-  const { libraryId, partial, path } = payload;
+  const { libraryId, partial, path, jobId } = payload;
 
-  console.log(`[ScanPlex] Scanning library ${libraryId}${partial ? ' (partial)' : ''}`);
+  const logger = jobId ? createJobLogger(jobId, 'ScanPlex') : null;
+
+  await logger?.info(`Scanning library ${libraryId || 'default'}${partial ? ' (partial)' : ''}`);
 
   try {
     // 1. Get Plex configuration
@@ -34,7 +37,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
       throw new Error('Plex audiobook library not configured');
     }
 
-    console.log(`[ScanPlex] Fetching content from Plex library ${targetLibraryId}`);
+    await logger?.info(`Fetching content from Plex library ${targetLibraryId}`);
 
     // 2. Get all audiobooks from Plex library
     const plexService = getPlexService();
@@ -44,7 +47,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
       targetLibraryId
     );
 
-    console.log(`[ScanPlex] Found ${plexAudiobooks.length} items in Plex library`);
+    await logger?.info(`Found ${plexAudiobooks.length} items in Plex library`);
 
     let newCount = 0;
     let updatedCount = 0;
@@ -85,7 +88,6 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
           });
 
           updatedCount++;
-          console.log(`[ScanPlex] Updated: "${plexBook.title}" by ${plexBook.author}`);
         } else {
           // Create new plex_library entry
           const newPlexBook = await prisma.plexLibrary.create({
@@ -107,7 +109,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
           });
 
           newCount++;
-          console.log(`[ScanPlex] Added new: "${plexBook.title}" by ${plexBook.author}`);
+          await logger?.info(`Added new: "${plexBook.title}" by ${plexBook.author}`);
 
           results.push({
             id: newPlexBook.id,
@@ -117,22 +119,22 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
           });
         }
       } catch (error) {
-        console.error(`[ScanPlex] Failed to process "${plexBook.title}":`, error);
+        await logger?.error(`Failed to process "${plexBook.title}": ${error instanceof Error ? error.message : 'Unknown error'}`);
         skippedCount++;
       }
     }
 
-    console.log(`[ScanPlex] Scan complete: ${plexAudiobooks.length} items scanned, ${newCount} new, ${updatedCount} updated, ${skippedCount} skipped`);
+    await logger?.info(`Scan complete: ${plexAudiobooks.length} items scanned, ${newCount} new, ${updatedCount} updated, ${skippedCount} skipped`);
 
     // 4. Match downloaded requests against Plex library
-    console.log(`[ScanPlex] Checking for downloaded requests to match...`);
+    await logger?.info(`Checking for downloaded requests to match...`);
     const downloadedRequests = await prisma.request.findMany({
       where: { status: 'downloaded' },
       include: { audiobook: true },
       take: 50, // Limit to prevent overwhelming
     });
 
-    console.log(`[ScanPlex] Found ${downloadedRequests.length} downloaded requests to match`);
+    await logger?.info(`Found ${downloadedRequests.length} downloaded requests to match`);
 
     let matchedCount = 0;
     const { findPlexMatch } = await import('../utils/audiobook-matcher');
@@ -150,7 +152,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
         });
 
         if (match) {
-          console.log(`[ScanPlex] Match found! "${audiobook.title}" -> "${match.title}"`);
+          await logger?.info(`Match found! "${audiobook.title}" -> "${match.title}"`);
 
           // Update audiobook with Plex info
           await prisma.audiobook.update({
@@ -172,15 +174,19 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
           });
 
           matchedCount++;
-        } else {
-          console.log(`[ScanPlex] No match found for "${audiobook.title}" by ${audiobook.author}`);
         }
       } catch (error) {
-        console.error(`[ScanPlex] Failed to match request ${request.id}:`, error);
+        await logger?.error(`Failed to match request ${request.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     }
 
-    console.log(`[ScanPlex] Matched ${matchedCount}/${downloadedRequests.length} downloaded requests`);
+    await logger?.info(`Matched ${matchedCount}/${downloadedRequests.length} downloaded requests`, {
+      totalScanned: plexAudiobooks.length,
+      newCount,
+      updatedCount,
+      skippedCount,
+      matchedDownloads: matchedCount,
+    });
 
     return {
       success: true,
@@ -194,7 +200,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
       matchedDownloads: matchedCount,
     };
   } catch (error) {
-    console.error('[ScanPlex] Error:', error);
+    await logger?.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     throw error;
   }
 }
