@@ -74,6 +74,14 @@ export interface MatchPlexPayload extends JobPayload {
   author: string;
 }
 
+export interface PlexRecentlyAddedPayload extends JobPayload {
+  scheduledJobId?: string;
+}
+
+export interface MonitorRssFeedsPayload extends JobPayload {
+  scheduledJobId?: string;
+}
+
 export interface QueueStats {
   waiting: number;
   active: number;
@@ -227,27 +235,24 @@ export class JobQueueService {
       return await processMatchPlex(job.data);
     });
 
-    // Scheduled job processors - these call the scheduler service trigger methods
+    // Scheduled job processors
     this.queue.process('plex_library_scan', 1, async (job: BullJob) => {
-      const { getSchedulerService } = await import('./scheduler.service');
-      const scheduler = getSchedulerService();
-      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
-      if (scheduledJob) {
-        await scheduler.triggerJobNow(scheduledJob.id);
-      }
-      return { success: true };
+      // plex_library_scan is just an alias for scan_plex
+      const { processScanPlex } = await import('../processors/scan-plex.processor');
+      return await processScanPlex(job.data);
     });
 
-    this.queue.process('plex_recently_added_check', 1, async (job: BullJob) => {
-      const { getSchedulerService } = await import('./scheduler.service');
-      const scheduler = getSchedulerService();
-      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
-      if (scheduledJob) {
-        await scheduler.triggerJobNow(scheduledJob.id);
-      }
-      return { success: true };
+    this.queue.process('plex_recently_added_check', 1, async (job: BullJob<PlexRecentlyAddedPayload>) => {
+      const { processPlexRecentlyAddedCheck } = await import('../processors/plex-recently-added.processor');
+      return await processPlexRecentlyAddedCheck(job.data);
     });
 
+    this.queue.process('monitor_rss_feeds', 1, async (job: BullJob<MonitorRssFeedsPayload>) => {
+      const { processMonitorRssFeeds } = await import('../processors/monitor-rss-feeds.processor');
+      return await processMonitorRssFeeds(job.data);
+    });
+
+    // Other scheduled jobs - keep calling scheduler for now
     this.queue.process('audible_refresh', 1, async (job: BullJob) => {
       const { getSchedulerService } = await import('./scheduler.service');
       const scheduler = getSchedulerService();
@@ -279,16 +284,6 @@ export class JobQueueService {
     });
 
     this.queue.process('cleanup_seeded_torrents', 1, async (job: BullJob) => {
-      const { getSchedulerService } = await import('./scheduler.service');
-      const scheduler = getSchedulerService();
-      const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
-      if (scheduledJob) {
-        await scheduler.triggerJobNow(scheduledJob.id);
-      }
-      return { success: true };
-    });
-
-    this.queue.process('monitor_rss_feeds', 1, async (job: BullJob) => {
       const { getSchedulerService } = await import('./scheduler.service');
       const scheduler = getSchedulerService();
       const scheduledJob = await scheduler.getScheduledJob(job.data.scheduledJobId);
@@ -501,6 +496,36 @@ export class JobQueueService {
       } as MatchPlexPayload,
       {
         priority: 6,
+      }
+    );
+  }
+
+  /**
+   * Add Plex recently added check job
+   */
+  async addPlexRecentlyAddedJob(scheduledJobId?: string): Promise<string> {
+    return await this.addJob(
+      'plex_recently_added_check',
+      {
+        scheduledJobId,
+      } as PlexRecentlyAddedPayload,
+      {
+        priority: 8,
+      }
+    );
+  }
+
+  /**
+   * Add RSS feed monitoring job
+   */
+  async addMonitorRssFeedsJob(scheduledJobId?: string): Promise<string> {
+    return await this.addJob(
+      'monitor_rss_feeds',
+      {
+        scheduledJobId,
+      } as MonitorRssFeedsPayload,
+      {
+        priority: 8,
       }
     );
   }
