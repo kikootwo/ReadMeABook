@@ -55,7 +55,7 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
         narrator: audiobook.narrator || undefined,
         coverArtUrl: audiobook.coverArtUrl || undefined,
       },
-      logger ? { jobId, context: 'FileOrganizer' } : undefined
+      jobId ? { jobId, context: 'FileOrganizer' } : undefined
     );
 
     if (!result.success) {
