@@ -131,13 +131,17 @@ interface ScheduledJob {
 **Implementation:**
 1. Clear previous `isPopular`/`isNewRelease` flags
 2. Fetch 200 popular + 200 new releases (multi-page scraping)
-3. Store/update in DB with category flags and rankings (`popularRank`, `newReleaseRank`)
-4. Record sync timestamp (`lastAudibleSync`)
-5. Perform fuzzy matching (70% threshold) against Plex library
-6. Set `plexGuid` when match found (with duplicate protection)
-7. Update `availabilityStatus` to 'available' or 'unknown'
+3. Download and cache cover thumbnails locally (stored in `/app/cache/thumbnails`)
+4. Store/update in DB with category flags, rankings (`popularRank`, `newReleaseRank`), and cached cover paths
+5. Record sync timestamp (`lastAudibleSync`)
+6. Clean up unused thumbnails (removes covers for audiobooks no longer in cache)
+7. Perform fuzzy matching (70% threshold) against Plex library
+8. Set `plexGuid` when match found (with duplicate protection)
+9. Update `availabilityStatus` to 'available' or 'unknown'
 
 **Duplicate PlexGuid Handling:** Since `plexGuid` has UNIQUE constraint, only first match gets assigned to prevent violations.
+
+**Thumbnail Caching:** Downloads cover images from Audible and stores them locally to reduce external requests. Cached thumbnails are served via `/api/cache/thumbnails/[filename]` endpoint. Unused thumbnails are automatically cleaned up after each sync.
 
 ## Fixed Issues ✅
 

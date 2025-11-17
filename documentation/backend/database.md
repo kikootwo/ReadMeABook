@@ -14,14 +14,22 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - `avatar_url`, `auth_token` (encrypted), `created_at`, `updated_at`, `last_login_at`
 - Indexes: `plex_id`, `role`
 
+### Audible_Cache
+- `id` (UUID PK), `asin` (unique, Audible ID), `title`, `author`, `narrator`, `description`
+- `cover_art_url`, `cached_cover_path` (local thumbnail path), `duration_minutes`, `release_date`, `rating`, `genres` (JSONB)
+- **Discovery:** `is_popular` (bool), `is_new_release` (bool), `popular_rank`, `new_release_rank`
+- `last_synced_at`, `created_at`, `updated_at`
+- Indexes: `asin`, `title`, `author`, `is_popular`, `is_new_release`, `popular_rank`, `new_release_rank`
+- **Purpose:** Cached Audible metadata (popular/new releases), thumbnails stored locally in `/app/cache/thumbnails`
+
 ### Audiobooks
-- `id` (UUID PK), `audible_id` (unique), `title`, `author`, `narrator`, `description`
-- `cover_art_url`, `duration_minutes`, `release_date`, `rating`, `genres` (JSONB)
-- `plex_guid`, `plex_library_id`, `file_path`, `file_format`, `file_size_bytes`
-- `availability_status` ('unknown'|'requested'|'downloading'|'processing'|'available'|'failed')
-- **Discovery:** `is_popular` (bool), `is_new_release` (bool), `popular_rank`, `new_release_rank`, `last_audible_sync`
-- `created_at`, `updated_at`, `available_at`
-- Indexes: `audible_id`, `plex_guid`, `title`, `author`, `availability_status`, `is_popular`, `is_new_release`, `popular_rank`, `new_release_rank`
+- `id` (UUID PK), `audible_asin` (nullable), `title`, `author`, `narrator`, `description`
+- `cover_art_url`, `file_path`, `file_format`, `file_size_bytes`
+- `plex_guid` (nullable), `plex_library_id` (nullable)
+- `status` ('requested'|'downloading'|'processing'|'completed'|'failed')
+- `created_at`, `updated_at`, `completed_at`
+- Indexes: `audible_asin`, `plex_guid`, `title`, `author`, `status`
+- **Purpose:** User-requested audiobooks only (created on request)
 
 ### Requests
 - `id` (UUID PK), `user_id` (FK), `audiobook_id` (FK)

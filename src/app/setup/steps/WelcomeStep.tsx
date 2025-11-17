@@ -16,20 +16,12 @@ export function WelcomeStep({ onNext }: WelcomeStepProps) {
     <div className="space-y-6">
       <div className="text-center space-y-4">
         <div className="flex justify-center">
-          <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
-            <svg
-              className="w-12 h-12 text-blue-600 dark:text-blue-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
-              />
-            </svg>
+          <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center p-4">
+            <img
+              src="/rmab_32x32.png"
+              alt="ReadMeABook Logo"
+              className="w-full h-full object-contain"
+            />
           </div>
         </div>
 

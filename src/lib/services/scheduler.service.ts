@@ -540,11 +540,14 @@ export class SchedulerService {
   /**
    * Trigger Audible data refresh
    * Populates audible_cache table with popular/new-release audiobooks
+   * Caches cover thumbnails locally
    * NO matching logic - that happens at query time
    */
   private async triggerAudibleRefresh(job: any): Promise<string> {
     const { getAudibleService } = await import('../integrations/audible.service');
+    const { getThumbnailCacheService } = await import('./thumbnail-cache.service');
     const audibleService = getAudibleService();
+    const thumbnailCache = getThumbnailCacheService();
 
     console.log('[AudibleRefresh] Starting Audible data refresh...');
 
@@ -579,6 +582,12 @@ export class SchedulerService {
     for (let i = 0; i < popular.length; i++) {
       const audiobook = popular[i];
       try {
+        // Cache thumbnail if coverArtUrl exists
+        let cachedCoverPath: string | null = null;
+        if (audiobook.coverArtUrl) {
+          cachedCoverPath = await thumbnailCache.cacheThumbnail(audiobook.asin, audiobook.coverArtUrl);
+        }
+
         await prisma.audibleCache.upsert({
           where: { asin: audiobook.asin },
           create: {
@@ -588,6 +597,7 @@ export class SchedulerService {
             narrator: audiobook.narrator,
             description: audiobook.description,
             coverArtUrl: audiobook.coverArtUrl,
+            cachedCoverPath: cachedCoverPath,
             durationMinutes: audiobook.durationMinutes,
             releaseDate: audiobook.releaseDate ? new Date(audiobook.releaseDate) : null,
             rating: audiobook.rating ? audiobook.rating : null,
@@ -602,6 +612,7 @@ export class SchedulerService {
             narrator: audiobook.narrator,
             description: audiobook.description,
             coverArtUrl: audiobook.coverArtUrl,
+            cachedCoverPath: cachedCoverPath,
             durationMinutes: audiobook.durationMinutes,
             releaseDate: audiobook.releaseDate ? new Date(audiobook.releaseDate) : null,
             rating: audiobook.rating ? audiobook.rating : null,
@@ -621,6 +632,12 @@ export class SchedulerService {
     for (let i = 0; i < newReleases.length; i++) {
       const audiobook = newReleases[i];
       try {
+        // Cache thumbnail if coverArtUrl exists
+        let cachedCoverPath: string | null = null;
+        if (audiobook.coverArtUrl) {
+          cachedCoverPath = await thumbnailCache.cacheThumbnail(audiobook.asin, audiobook.coverArtUrl);
+        }
+
         await prisma.audibleCache.upsert({
           where: { asin: audiobook.asin },
           create: {
@@ -630,6 +647,7 @@ export class SchedulerService {
             narrator: audiobook.narrator,
             description: audiobook.description,
             coverArtUrl: audiobook.coverArtUrl,
+            cachedCoverPath: cachedCoverPath,
             durationMinutes: audiobook.durationMinutes,
             releaseDate: audiobook.releaseDate ? new Date(audiobook.releaseDate) : null,
             rating: audiobook.rating ? audiobook.rating : null,
@@ -644,6 +662,7 @@ export class SchedulerService {
             narrator: audiobook.narrator,
             description: audiobook.description,
             coverArtUrl: audiobook.coverArtUrl,
+            cachedCoverPath: cachedCoverPath,
             durationMinutes: audiobook.durationMinutes,
             releaseDate: audiobook.releaseDate ? new Date(audiobook.releaseDate) : null,
             rating: audiobook.rating ? audiobook.rating : null,
@@ -662,6 +681,15 @@ export class SchedulerService {
 
     console.log(`[AudibleRefresh] Saved ${popularSaved} popular and ${newReleasesSaved} new releases to audible_cache`);
     console.log('[AudibleRefresh] Matching will happen at query time when displaying books');
+
+    // Cleanup unused thumbnails
+    console.log('[AudibleRefresh] Cleaning up unused thumbnails...');
+    const allActiveAsins = await prisma.audibleCache.findMany({
+      select: { asin: true },
+    });
+    const activeAsinSet = new Set(allActiveAsins.map(item => item.asin));
+    const deletedCount = await thumbnailCache.cleanupUnusedThumbnails(activeAsinSet);
+    console.log(`[AudibleRefresh] Cleanup complete: ${deletedCount} unused thumbnails removed`);
 
     return 'audible-refresh-' + Date.now();
   }
