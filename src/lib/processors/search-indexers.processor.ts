@@ -7,15 +7,18 @@ import { SearchIndexersPayload, getJobQueueService } from '../services/job-queue
 import { prisma } from '../db';
 import { getProwlarrService } from '../integrations/prowlarr.service';
 import { getRankingAlgorithm } from '../utils/ranking-algorithm';
+import { createJobLogger } from '../utils/job-logger';
 
 /**
  * Process search indexers job
  * Searches configured indexers for audiobook torrents
  */
 export async function processSearchIndexers(payload: SearchIndexersPayload): Promise<any> {
-  const { requestId, audiobook } = payload;
+  const { requestId, audiobook, jobId } = payload;
 
-  console.log(`[SearchIndexers] Processing request ${requestId} for "${audiobook.title}"`);
+  const logger = jobId ? createJobLogger(jobId, 'SearchIndexers') : null;
+
+  await logger?.info(`Processing request ${requestId} for "${audiobook.title}"`);
 
   try {
     // Update request status to searching
@@ -34,7 +37,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     // Build search query (title + author for better results)
     const searchQuery = `${audiobook.title} ${audiobook.author}`;
 
-    console.log(`[SearchIndexers] Searching for: "${searchQuery}"`);
+    await logger?.info(`Searching for: "${searchQuery}"`);
 
     // Search indexers
     const searchResults = await prowlarr.search(searchQuery, {
@@ -43,11 +46,11 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       maxResults: 50, // Limit results
     });
 
-    console.log(`[SearchIndexers] Found ${searchResults.length} results`);
+    await logger?.info(`Found ${searchResults.length} results`);
 
     if (searchResults.length === 0) {
       // No results found - queue for re-search instead of failing
-      console.log(`[SearchIndexers] No torrents found for request ${requestId}, marking as awaiting_search`);
+      await logger?.warn(`No torrents found for request ${requestId}, marking as awaiting_search`);
 
       await prisma.request.update({
         where: { id: requestId },
@@ -76,16 +79,21 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       durationMinutes: undefined, // We don't have duration from Audible
     });
 
-    console.log(`[SearchIndexers] Ranked ${rankedResults.length} results`);
-    console.log(`[SearchIndexers] Best result: ${rankedResults[0].title} (score: ${rankedResults[0].score})`);
+    await logger?.info(`Ranked ${rankedResults.length} results`);
 
     // Select best result
     const bestResult = rankedResults[0];
 
-    // Log top 3 results for debugging
-    rankedResults.slice(0, 3).forEach((r, i) => {
-      console.log(`  #${i + 1}: ${r.title} - ${r.score} pts`);
-      console.log(`    Format: ${r.breakdown.formatScore}, Seeders: ${r.breakdown.seederScore}, Size: ${r.breakdown.sizeScore}, Match: ${r.breakdown.matchScore}`);
+    // Log top 3 results
+    const top3 = rankedResults.slice(0, 3).map((r, i) => ({
+      rank: i + 1,
+      title: r.title,
+      score: r.score,
+      breakdown: r.breakdown,
+    }));
+
+    await logger?.info(`Best result: ${bestResult.title} (score: ${bestResult.score})`, {
+      top3Results: top3,
     });
 
     // Trigger download job with best result
@@ -109,7 +117,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       },
     };
   } catch (error) {
-    console.error('[SearchIndexers] Error:', error);
+    await logger?.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
     await prisma.request.update({
       where: { id: requestId },
