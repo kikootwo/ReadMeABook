@@ -55,10 +55,10 @@ API Docs: `/PlexMediaServerAPIDocs.json`
 **Scan Process:**
 1. Fetch all audiobooks via API (`type=9`)
 2. For each:
-   - Exists by `plexGuid`? Update metadata + set `availabilityStatus: 'available'`
-   - New? Create entry with `availabilityStatus: 'available'`
+   - Exists by `plexGuid`? Update metadata
+   - New? Create entry in `plex_library` table
 3. Match downloaded requests (status: 'downloaded'):
-   - Fuzzy match against Plex library (70% threshold)
+   - Uses centralized `audiobook-matcher.ts` (ASIN matching, title normalization, narrator support)
    - Matched → Update request status to 'available' + link plexGuid
 4. Return summary (total, new count, updated count, matched downloads)
 
@@ -71,12 +71,14 @@ API Docs: `/PlexMediaServerAPIDocs.json`
 2. For each item:
    - New? Create in `plex_library` table
    - Existing? Update metadata
-3. Match downloaded requests against recently added items (70% threshold)
+3. Match downloaded requests:
+   - Uses centralized `audiobook-matcher.ts` (same as full scan and homepage)
+   - Searches entire `plex_library` table for matches
 4. Return summary (new, updated, matched downloads)
 
 **Trigger:** Scheduled (every 5 minutes default), enabled by default
-**Benefits:** Lightweight, fast detection of new content without full scan
-**Note:** Requests transition: pending → searching → downloading → downloaded (green) → available (after detection)
+**Benefits:** Lightweight polling for new items + comprehensive matching for downloaded requests
+**Note:** Requests transition: pending → searching → downloading → processing → downloaded → available (after detection)
 
 ## Data Models
 
@@ -139,6 +141,17 @@ interface PlexLibrary {
 - Cause: Recently added used AND logic (title >= 70% AND author >= 70%), full scan used weighted average (title × 0.7 + author × 0.3 >= 0.7)
 - User Experience: "The Tenant" → "The Tenant (Unabridged)" matched in full scan but not in recently added check
 - Fix: Changed recently added check to use same weighted scoring algorithm as full scan
+
+**7. Scan Methods Not Using Centralized Matcher**
+- Issue: Full scan and recently added check had custom matching logic, different from homepage matcher
+- Cause: Each component implemented its own fuzzy matching without title normalization, ASIN matching, or narrator support
+- User Experience: Inconsistent matching behavior across the application
+- Fix: Both scan methods now use `audiobook-matcher.ts` utility (same as homepage)
+  - ASIN matching: Checks plexGuid for exact ASIN (100% confidence)
+  - Title normalization: Removes "(Unabridged)", "(Abridged)", etc.
+  - Narrator matching: Can match narrator to Plex author field
+  - ASIN filtering: Rejects candidates with wrong ASINs in plexGuid
+  - Consistent 70% weighted threshold everywhere
 
 ## Availability Checking
 

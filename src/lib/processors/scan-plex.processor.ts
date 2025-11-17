@@ -135,53 +135,28 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
     console.log(`[ScanPlex] Found ${downloadedRequests.length} downloaded requests to match`);
 
     let matchedCount = 0;
-    const { compareTwoStrings } = await import('string-similarity');
+    const { findPlexMatch } = await import('../utils/audiobook-matcher');
 
     for (const request of downloadedRequests) {
       try {
         const audiobook = request.audiobook;
-        const title = audiobook.title.toLowerCase();
-        const author = (audiobook.author || '').toLowerCase();
 
-        // Search for matching Plex library entries
-        const potentialMatches = await prisma.plexLibrary.findMany({
-          where: {
-            OR: [
-              { title: { contains: audiobook.title, mode: 'insensitive' } },
-              { author: { contains: audiobook.author || '', mode: 'insensitive' } },
-            ],
-          },
-          take: 10,
+        // Use the centralized matcher (handles ASIN matching, title normalization, narrator matching, etc.)
+        const match = await findPlexMatch({
+          asin: audiobook.audibleAsin || '',
+          title: audiobook.title,
+          author: audiobook.author,
+          narrator: audiobook.narrator || undefined,
         });
 
-        if (potentialMatches.length === 0) {
-          console.log(`[ScanPlex] No potential matches for "${audiobook.title}" by ${audiobook.author}`);
-          continue;
-        }
-
-        // Fuzzy match to find best match
-        const matches = potentialMatches.map((plexItem) => {
-          const titleScore = compareTwoStrings(title, (plexItem.title || '').toLowerCase());
-          const authorScore = author
-            ? compareTwoStrings(author, (plexItem.author || '').toLowerCase())
-            : 0.5;
-          const overallScore = titleScore * 0.7 + authorScore * 0.3;
-
-          return { plexItem, score: overallScore };
-        });
-
-        matches.sort((a, b) => b.score - a.score);
-        const bestMatch = matches[0];
-
-        // Accept match if score >= 70%
-        if (bestMatch.score >= 0.7) {
-          console.log(`[ScanPlex] Match found! "${audiobook.title}" -> "${bestMatch.plexItem.title}" (${Math.round(bestMatch.score * 100)}%)`);
+        if (match) {
+          console.log(`[ScanPlex] Match found! "${audiobook.title}" -> "${match.title}"`);
 
           // Update audiobook with Plex info
           await prisma.audiobook.update({
             where: { id: audiobook.id },
             data: {
-              plexGuid: bestMatch.plexItem.plexGuid,
+              plexGuid: match.plexGuid,
               updatedAt: new Date(),
             },
           });
@@ -191,13 +166,14 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
             where: { id: request.id },
             data: {
               status: 'available',
+              completedAt: new Date(),
               updatedAt: new Date(),
             },
           });
 
           matchedCount++;
         } else {
-          console.log(`[ScanPlex] Low match score (${Math.round(bestMatch.score * 100)}%) for "${audiobook.title}"`);
+          console.log(`[ScanPlex] No match found for "${audiobook.title}" by ${audiobook.author}`);
         }
       } catch (error) {
         console.error(`[ScanPlex] Failed to match request ${request.id}:`, error);
