@@ -56,6 +56,7 @@ export default function AdminSettings() {
   const [originalSettings, setOriginalSettings] = useState<Settings | null>(null); // Track original values
   const [plexLibraries, setPlexLibraries] = useState<PlexLibrary[]>([]);
   const [indexers, setIndexers] = useState<IndexerConfig[]>([]);
+  const [isLocalAdmin, setIsLocalAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingLibraries, setLoadingLibraries] = useState(false);
   const [loadingIndexers, setLoadingIndexers] = useState(false);
@@ -71,11 +72,32 @@ export default function AdminSettings() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
-  const [activeTab, setActiveTab] = useState<'plex' | 'prowlarr' | 'download' | 'paths'>('plex');
+  const [activeTab, setActiveTab] = useState<'plex' | 'prowlarr' | 'download' | 'paths' | 'account'>('plex');
+
+  // Password change form state
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [changingPassword, setChangingPassword] = useState(false);
 
   useEffect(() => {
     fetchSettings();
+    fetchCurrentUser();
   }, []);
+
+  const fetchCurrentUser = async () => {
+    try {
+      const response = await fetchWithAuth('/api/auth/me');
+      if (response.ok) {
+        const data = await response.json();
+        setIsLocalAdmin(data.user?.isLocalAdmin || false);
+      }
+    } catch (error) {
+      console.error('Failed to fetch current user:', error);
+    }
+  };
 
   // Fetch libraries/indexers when tabs become active or when page first loads
   useEffect(() => {
@@ -315,6 +337,41 @@ export default function AdminSettings() {
     }
   };
 
+  const changePassword = async () => {
+    setChangingPassword(true);
+    setMessage(null);
+
+    try {
+      const response = await fetchWithAuth('/api/admin/settings/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(passwordForm),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setMessage({ type: 'success', text: 'Password changed successfully!' });
+        // Clear form
+        setPasswordForm({
+          currentPassword: '',
+          newPassword: '',
+          confirmPassword: '',
+        });
+        setTimeout(() => setMessage(null), 5000);
+      } else {
+        setMessage({ type: 'error', text: data.error || 'Failed to change password' });
+      }
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Failed to change password',
+      });
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
   const saveSettings = async () => {
     if (!settings) return;
 
@@ -419,6 +476,7 @@ export default function AdminSettings() {
     { id: 'prowlarr', label: 'Indexers', icon: '🔍' },
     { id: 'download', label: 'Download Client', icon: '⬇️' },
     { id: 'paths', label: 'Paths', icon: '📁' },
+    ...(isLocalAdmin ? [{ id: 'account', label: 'Account', icon: '🔒' }] : []),
   ];
 
   return (
@@ -1019,57 +1077,156 @@ export default function AdminSettings() {
                 </div>
               </div>
             )}
+
+            {/* Account Tab - Only visible to local admin */}
+            {activeTab === 'account' && isLocalAdmin && (
+              <div className="space-y-6 max-w-2xl">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                    Account Security
+                  </h2>
+                  <p className="text-gray-600 dark:text-gray-400 mb-6">
+                    Change your local admin account password.
+                  </p>
+                </div>
+
+                {/* Info Box */}
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-shrink-0 mt-0.5">
+                      <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div className="text-sm text-blue-800 dark:text-blue-200">
+                      <p className="font-medium mb-1">Local Admin Account</p>
+                      <p>
+                        This password is for your local admin account created during setup.
+                        This is separate from Plex authentication and is used to log in to the admin portal.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Current Password
+                  </label>
+                  <Input
+                    type="password"
+                    value={passwordForm.currentPassword}
+                    onChange={(e) =>
+                      setPasswordForm({ ...passwordForm, currentPassword: e.target.value })
+                    }
+                    placeholder="Enter current password"
+                    autoComplete="current-password"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    New Password
+                  </label>
+                  <Input
+                    type="password"
+                    value={passwordForm.newPassword}
+                    onChange={(e) =>
+                      setPasswordForm({ ...passwordForm, newPassword: e.target.value })
+                    }
+                    placeholder="Enter new password"
+                    autoComplete="new-password"
+                  />
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Must be at least 8 characters
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Confirm New Password
+                  </label>
+                  <Input
+                    type="password"
+                    value={passwordForm.confirmPassword}
+                    onChange={(e) =>
+                      setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })
+                    }
+                    placeholder="Confirm new password"
+                    autoComplete="new-password"
+                  />
+                </div>
+
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+                  <Button
+                    onClick={changePassword}
+                    loading={changingPassword}
+                    disabled={
+                      !passwordForm.currentPassword ||
+                      !passwordForm.newPassword ||
+                      !passwordForm.confirmPassword ||
+                      passwordForm.newPassword.length < 8 ||
+                      passwordForm.newPassword !== passwordForm.confirmPassword
+                    }
+                    className="w-full bg-blue-600 hover:bg-blue-700"
+                  >
+                    Change Password
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Footer */}
-          <div className="bg-gray-50 dark:bg-gray-900 px-8 py-4 border-t border-gray-200 dark:border-gray-700">
-            <div className="flex justify-end gap-4">
-              <Button variant="outline" onClick={() => window.location.reload()}>
-                Cancel
-              </Button>
-              <Button
-                onClick={saveSettings}
-                loading={saving}
-                disabled={(() => {
-                  // For Prowlarr tab: allow save if validated OR if URL/API key unchanged
-                  if (activeTab === 'prowlarr' && originalSettings && settings) {
-                    const connectionUnchanged =
-                      settings.prowlarr.url === originalSettings.prowlarr.url &&
-                      settings.prowlarr.apiKey === originalSettings.prowlarr.apiKey;
-                    return !validated.prowlarr && !connectionUnchanged;
+          {/* Footer - Hide for Account tab */}
+          {activeTab !== 'account' && (
+            <div className="bg-gray-50 dark:bg-gray-900 px-8 py-4 border-t border-gray-200 dark:border-gray-700">
+              <div className="flex justify-end gap-4">
+                <Button variant="outline" onClick={() => window.location.reload()}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={saveSettings}
+                  loading={saving}
+                  disabled={(() => {
+                    // For Prowlarr tab: allow save if validated OR if URL/API key unchanged
+                    if (activeTab === 'prowlarr' && originalSettings && settings) {
+                      const connectionUnchanged =
+                        settings.prowlarr.url === originalSettings.prowlarr.url &&
+                        settings.prowlarr.apiKey === originalSettings.prowlarr.apiKey;
+                      return !validated.prowlarr && !connectionUnchanged;
+                    }
+                    // For all other tabs: require validation
+                    return !validated[activeTab];
+                  })()}
+                >
+                  Save Changes
+                </Button>
+              </div>
+              {(() => {
+                // For Prowlarr: show message only if URL/API key changed and not validated
+                if (activeTab === 'prowlarr' && originalSettings && settings) {
+                  const connectionChanged =
+                    settings.prowlarr.url !== originalSettings.prowlarr.url ||
+                    settings.prowlarr.apiKey !== originalSettings.prowlarr.apiKey;
+                  if (connectionChanged && !validated.prowlarr) {
+                    return (
+                      <p className="text-sm text-amber-600 dark:text-amber-400 mt-2 text-right">
+                        Please test your connection before saving
+                      </p>
+                    );
                   }
-                  // For all other tabs: require validation
-                  return !validated[activeTab];
-                })()}
-              >
-                Save Changes
-              </Button>
-            </div>
-            {(() => {
-              // For Prowlarr: show message only if URL/API key changed and not validated
-              if (activeTab === 'prowlarr' && originalSettings && settings) {
-                const connectionChanged =
-                  settings.prowlarr.url !== originalSettings.prowlarr.url ||
-                  settings.prowlarr.apiKey !== originalSettings.prowlarr.apiKey;
-                if (connectionChanged && !validated.prowlarr) {
+                }
+                // For other tabs: show message if not validated
+                else if (!validated[activeTab]) {
                   return (
                     <p className="text-sm text-amber-600 dark:text-amber-400 mt-2 text-right">
                       Please test your connection before saving
                     </p>
                   );
                 }
-              }
-              // For other tabs: show message if not validated
-              else if (!validated[activeTab]) {
-                return (
-                  <p className="text-sm text-amber-600 dark:text-amber-400 mt-2 text-right">
-                    Please test your connection before saving
-                  </p>
-                );
-              }
-              return null;
-            })()}
-          </div>
+                return null;
+              })()}
+            </div>
+          )}
         </div>
       </div>
     </div>

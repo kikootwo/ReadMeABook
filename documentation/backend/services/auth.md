@@ -87,6 +87,23 @@ Handles authentication and authorization: Plex OAuth integration, JWT session ma
 - Setup admin role is **protected** - cannot be changed to prevent lockout
 - Ensures someone always has admin access after fresh install
 - Subsequent users default to 'user' role
+- Local admin uses username/password authentication (stored in `authToken` field as bcrypt hash)
+- `plexId` format: `local-{username}` for local admin accounts
+
+## Local Admin Authentication
+
+**Local Admin (Setup Admin):**
+- Created during setup wizard (step 2)
+- Username/password authentication (separate from Plex OAuth)
+- Password hashed with bcrypt (10 rounds) and stored in `authToken` field
+- Login: POST `/api/auth/admin/login` with username/password
+- Identified by: `isSetupAdmin=true` AND `plexId` starts with `local-`
+
+**Password Management:**
+- POST `/api/admin/settings/change-password` - Change local admin password
+- Requires: current password, new password (min 8 chars), confirmation
+- Security: Only accessible to local admin (verified via `requireLocalAdmin` middleware)
+- Validates current password before allowing change
 
 ## Security
 

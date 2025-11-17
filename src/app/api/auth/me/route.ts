@@ -32,6 +32,7 @@ export async function GET(request: NextRequest) {
         plexUsername: true,
         plexEmail: true,
         role: true,
+        isSetupAdmin: true,
         avatarUrl: true,
         createdAt: true,
         lastLoginAt: true,
@@ -48,6 +49,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Determine if user is local admin (setup admin with local authentication)
+    const isLocalAdmin = user.isSetupAdmin && user.plexId.startsWith('local-');
+
     return NextResponse.json({
       user: {
         id: user.id,
@@ -55,6 +59,7 @@ export async function GET(request: NextRequest) {
         username: user.plexUsername,
         email: user.plexEmail,
         role: user.role,
+        isLocalAdmin: isLocalAdmin,
         avatarUrl: user.avatarUrl,
         createdAt: user.createdAt,
         lastLoginAt: user.lastLoginAt,
