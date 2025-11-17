@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
               success: false,
               error: 'Current password is incorrect',
             },
-            { status: 401 }
+            { status: 400 }
           );
         }
 
