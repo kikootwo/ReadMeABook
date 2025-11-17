@@ -478,47 +478,56 @@ export class SchedulerService {
         console.log(`[PlexRecentlyAdded] Checking ${downloadedRequests.length} downloaded requests for matches`);
 
         // Use string-similarity for fuzzy matching
-        const stringSimilarity = await import('string-similarity');
+        const { compareTwoStrings } = await import('string-similarity');
 
         for (const request of downloadedRequests) {
-          // Find best match in recently added items
+          const audiobook = request.audiobook;
+          const title = audiobook.title.toLowerCase();
+          const author = (audiobook.author || '').toLowerCase();
+
+          let bestMatch: { plexItem: any; score: number } | null = null;
+
+          // Find best match in recently added items using weighted scoring (same as full scan)
           for (const plexItem of recentItems) {
-            const titleSimilarity = stringSimilarity.compareTwoStrings(
-              request.audiobook.title.toLowerCase(),
-              plexItem.title.toLowerCase()
-            );
-            const authorSimilarity = stringSimilarity.compareTwoStrings(
-              request.audiobook.author.toLowerCase(),
-              (plexItem.author || '').toLowerCase()
-            );
+            const titleScore = compareTwoStrings(title, (plexItem.title || '').toLowerCase());
+            const authorScore = author
+              ? compareTwoStrings(author, (plexItem.author || '').toLowerCase())
+              : 0.5;
+            const overallScore = titleScore * 0.7 + authorScore * 0.3;
 
-            // Match if both title and author are above 70% similarity
-            if (titleSimilarity >= 0.7 && authorSimilarity >= 0.7) {
-              console.log(
-                `[PlexRecentlyAdded] Match found: "${request.audiobook.title}" → "${plexItem.title}" (${Math.round(titleSimilarity * 100)}% title, ${Math.round(authorSimilarity * 100)}% author)`
-              );
-
-              // Update request to available status
-              await prisma.request.update({
-                where: { id: request.id },
-                data: {
-                  status: 'available',
-                  completedAt: new Date(),
-                },
-              });
-
-              // Link audiobook to Plex
-              await prisma.audiobook.update({
-                where: { id: request.audiobookId },
-                data: {
-                  plexGuid: plexItem.guid,
-                  plexLibraryId: plexConfig.plex_audiobook_library_id!,
-                },
-              });
-
-              matchedDownloads++;
-              break; // Only match once per request
+            if (!bestMatch || overallScore > bestMatch.score) {
+              bestMatch = { plexItem, score: overallScore };
             }
+          }
+
+          // Accept match if score >= 70%
+          if (bestMatch && bestMatch.score >= 0.7) {
+            console.log(
+              `[PlexRecentlyAdded] Match found: "${audiobook.title}" → "${bestMatch.plexItem.title}" (${Math.round(bestMatch.score * 100)}%)`
+            );
+
+            // Update audiobook with Plex info
+            await prisma.audiobook.update({
+              where: { id: audiobook.id },
+              data: {
+                plexGuid: bestMatch.plexItem.guid,
+                updatedAt: new Date(),
+              },
+            });
+
+            // Update request to available status
+            await prisma.request.update({
+              where: { id: request.id },
+              data: {
+                status: 'available',
+                completedAt: new Date(),
+                updatedAt: new Date(),
+              },
+            });
+
+            matchedDownloads++;
+          } else if (bestMatch) {
+            console.log(`[PlexRecentlyAdded] Low match score (${Math.round(bestMatch.score * 100)}%) for "${audiobook.title}"`);
           }
         }
       }

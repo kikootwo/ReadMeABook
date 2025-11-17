@@ -134,6 +134,12 @@ interface PlexLibrary {
   - organize_files → status: 'downloaded' (green)
   - Scheduled scan_plex (every 6 hours) → matches downloaded requests → status: 'available'
 
+**6. Recently Added Check Used Different Matching Criteria**
+- Issue: Recently added check didn't match downloaded requests that full scan matched
+- Cause: Recently added used AND logic (title >= 70% AND author >= 70%), full scan used weighted average (title × 0.7 + author × 0.3 >= 0.7)
+- User Experience: "The Tenant" → "The Tenant (Unabridged)" matched in full scan but not in recently added check
+- Fix: Changed recently added check to use same weighted scoring algorithm as full scan
+
 ## Availability Checking
 
 1. **DB Population:** Plex scan creates/updates records with `plexGuid` + `availabilityStatus: 'available'`
