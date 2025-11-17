@@ -67,9 +67,31 @@ Discovery APIs serve cached data from DB with real-time matching.
 
 **Flow:**
 1. `audible_refresh` job runs daily → fetches 200 popular + 200 new releases
-2. Stores in DB with flags (`isPopular`, `isNewRelease`) and rankings
-3. API routes query DB → apply real-time matching → return enriched results
-4. Homepage loads instantly (no Audible API hits)
+2. Downloads and caches cover thumbnails locally (reduces Audible load)
+3. Stores in DB with flags (`isPopular`, `isNewRelease`) and rankings
+4. Cleans up unused thumbnails after sync
+5. API routes query DB → apply real-time matching → return enriched results
+6. Homepage loads instantly (no Audible API hits)
+
+## Thumbnail Caching
+
+**Status:** ✅ Implemented
+
+Cover images cached locally to reduce external requests and improve performance.
+
+**Features:**
+- Downloads covers during `audible_refresh` job
+- Stores in `/app/cache/thumbnails` (Docker volume)
+- Serves via `/api/cache/thumbnails/[filename]`
+- Auto-cleanup of unused thumbnails
+- Falls back to original URL if cache fails
+- 24-hour browser cache headers
+
+**Implementation:**
+- Service: `src/lib/services/thumbnail-cache.service.ts`
+- API Route: `src/app/api/cache/thumbnails/[filename]/route.ts`
+- Storage: Docker volume `cache` mounted at `/app/cache`
+- Filename: `{asin}.{ext}` (e.g., `B08G9PRS1K.jpg`)
 
 **API Endpoints:**
 

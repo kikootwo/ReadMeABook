@@ -54,6 +54,7 @@ export async function GET(request: NextRequest) {
           narrator: true,
           description: true,
           coverArtUrl: true,
+          cachedCoverPath: true,
           durationMinutes: true,
           releaseDate: true,
           rating: true,
@@ -83,18 +84,28 @@ export async function GET(request: NextRequest) {
     }
 
     // Transform to matcher input format (uses ASIN as required field)
-    const audibleBooks = audiobooks.map((book) => ({
-      asin: book.asin,
-      title: book.title,
-      author: book.author,
-      narrator: book.narrator || undefined,
-      description: book.description || undefined,
-      coverArtUrl: book.coverArtUrl || undefined,
-      durationMinutes: book.durationMinutes || undefined,
-      releaseDate: book.releaseDate?.toISOString() || undefined,
-      rating: book.rating ? parseFloat(book.rating.toString()) : undefined,
-      genres: (book.genres as string[]) || [],
-    }));
+    // Use cached cover path when available, otherwise fall back to coverArtUrl
+    const audibleBooks = audiobooks.map((book) => {
+      // Convert cached path to API URL if it exists
+      let coverUrl = book.coverArtUrl || undefined;
+      if (book.cachedCoverPath) {
+        const filename = book.cachedCoverPath.split('/').pop();
+        coverUrl = `/api/cache/thumbnails/${filename}`;
+      }
+
+      return {
+        asin: book.asin,
+        title: book.title,
+        author: book.author,
+        narrator: book.narrator || undefined,
+        description: book.description || undefined,
+        coverArtUrl: coverUrl,
+        durationMinutes: book.durationMinutes || undefined,
+        releaseDate: book.releaseDate?.toISOString() || undefined,
+        rating: book.rating ? parseFloat(book.rating.toString()) : undefined,
+        genres: (book.genres as string[]) || [],
+      };
+    });
 
     // Get current user (optional - for request status enrichment)
     const currentUser = getCurrentUser(request);

@@ -56,8 +56,9 @@ model AudibleCache {
   author          String
   narrator        String?
   description     String?   @db.Text
-  coverArtUrl     String?   @map("cover_art_url") @db.Text
-  durationMinutes Int?      @map("duration_minutes")
+  coverArtUrl       String?   @map("cover_art_url") @db.Text
+  cachedCoverPath   String?   @map("cached_cover_path") @db.Text // Local path to cached cover image
+  durationMinutes   Int?      @map("duration_minutes")
   releaseDate     DateTime? @map("release_date") @db.Date
   rating          Decimal?  @db.Decimal(3, 2)
   genres          Json      @default("[]")

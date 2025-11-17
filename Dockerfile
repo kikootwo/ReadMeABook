@@ -83,8 +83,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
 # Create directories for volumes and set ownership only for writable directories
-RUN mkdir -p /app/config /downloads /media /app/.next/cache && \
-    chown -R nextjs:nodejs /app/config /downloads /media /app/.next/cache
+RUN mkdir -p /app/config /app/cache /downloads /media /app/.next/cache && \
+    chown -R nextjs:nodejs /app/config /app/cache /downloads /media /app/.next/cache
 
 # Switch to non-root user
 USER nextjs

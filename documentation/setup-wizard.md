@@ -67,7 +67,7 @@ interface SetupState {
 ## Validation
 
 **Plex:** Valid URL, non-empty token, connection succeeds, library available
-**Prowlarr:** Valid URL, non-empty API key, connection succeeds, ≥1 indexer selected with priority 1-25, seedingTimeMinutes ≥0, rssEnabled boolean
+**Prowlarr:** Valid URL, non-empty API key, connection succeeds, ≥1 indexer selected with priority 1-25, seedingTimeMinutes ≥0, rssEnabled boolean (RSS timing defaults to 15min, configurable in scheduled jobs)
 **Download Client:** Valid URL, credentials required, connection succeeds
 **Paths:** Absolute paths, writable
 
