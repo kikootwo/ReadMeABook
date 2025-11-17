@@ -36,16 +36,6 @@ export default function HomePage() {
         <Header />
 
       <main className="container mx-auto px-4 py-8 max-w-7xl space-y-12">
-        {/* Hero Section */}
-        <section className="text-center py-8">
-          <h1 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-gray-100 mb-4">
-            Discover Your Next Audiobook
-          </h1>
-          <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-            Request audiobooks and they'll automatically download and appear in your Plex library
-          </p>
-        </section>
-
         {/* Popular Audiobooks */}
         <section>
           <div className="flex items-center justify-between mb-6">
