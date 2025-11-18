@@ -79,26 +79,26 @@ export default function RequestsPage() {
     <div className="min-h-screen">
       <Header />
 
-      <main className="container mx-auto px-4 py-8 max-w-7xl space-y-8">
+      <main className="container mx-auto px-4 py-6 sm:py-8 max-w-7xl space-y-6 sm:space-y-8">
         {/* Page Header */}
-        <div className="space-y-4">
-          <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-100">
+        <div className="space-y-2 sm:space-y-4">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 dark:text-gray-100">
             My Requests
           </h1>
-          <p className="text-gray-600 dark:text-gray-400">
+          <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">
             Track the status of your audiobook requests in real-time
           </p>
         </div>
 
         {/* Filter Tabs */}
-        <div className="border-b border-gray-200 dark:border-gray-700">
-          <div className="flex gap-4 -mb-px overflow-x-auto">
+        <div className="border-b border-gray-200 dark:border-gray-700 -mx-4 px-4 sm:mx-0 sm:px-0">
+          <div className="flex gap-2 sm:gap-4 -mb-px overflow-x-auto scrollbar-hide">
             {filterOptions.map((option) => (
               <button
                 key={option.value}
                 onClick={() => setFilter(option.value)}
                 className={cn(
-                  'px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
+                  'px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
                   filter === option.value
                     ? 'border-blue-600 text-blue-600 dark:text-blue-400'
                     : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:border-gray-300'

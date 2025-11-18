@@ -86,10 +86,10 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
-      <div className="flex gap-4 p-4">
+      <div className="flex gap-3 sm:gap-4 p-3 sm:p-4">
         {/* Cover Art */}
         <div className="flex-shrink-0">
-          <div className="relative w-24 h-36 rounded overflow-hidden bg-gray-200 dark:bg-gray-700">
+          <div className="relative w-16 h-24 sm:w-24 sm:h-36 rounded overflow-hidden bg-gray-200 dark:bg-gray-700">
             {request.audiobook.coverArtUrl ? (
               <Image
                 src={request.audiobook.coverArtUrl}
@@ -119,13 +119,13 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
         </div>
 
         {/* Request Info */}
-        <div className="flex-1 min-w-0 space-y-2">
+        <div className="flex-1 min-w-0 space-y-1.5 sm:space-y-2">
           {/* Title and Author */}
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
+            <h3 className="text-sm sm:text-base md:text-lg font-semibold text-gray-900 dark:text-gray-100 line-clamp-2">
               {request.audiobook.title}
             </h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 truncate">
+            <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 truncate">
               By {request.audiobook.author}
             </p>
           </div>
@@ -192,7 +192,7 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
           )}
 
           {/* Timestamps and Actions */}
-          <div className="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
             <div className="text-xs text-gray-500 dark:text-gray-500">
               {request.completedAt
                 ? `Completed ${formatDate(request.completedAt)}`
@@ -201,7 +201,7 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
 
             {/* Action Buttons */}
             {showActions && (
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {canSearch && (
                   <>
                     <Button
@@ -209,6 +209,7 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
                       loading={isManualSearching}
                       variant="outline"
                       size="sm"
+                      className="text-xs sm:text-sm"
                     >
                       Manual Search
                     </Button>
@@ -216,6 +217,7 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
                       onClick={handleInteractiveSearch}
                       variant="primary"
                       size="sm"
+                      className="text-xs sm:text-sm"
                     >
                       Interactive Search
                     </Button>
@@ -227,7 +229,7 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
                     loading={isLoading}
                     variant="outline"
                     size="sm"
-                    className="text-red-600 border-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                    className="text-xs sm:text-sm text-red-600 border-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
                   >
                     Cancel
                   </Button>

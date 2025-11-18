@@ -96,8 +96,8 @@ export default function ProfilePage() {
 
       <main className="container mx-auto px-4 py-8 max-w-7xl space-y-8">
         {/* User Info Card */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-          <div className="flex items-center gap-6">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6">
             {/* Avatar */}
             <div className="flex-shrink-0">
               {user.avatarUrl ? (
@@ -114,8 +114,8 @@ export default function ProfilePage() {
             </div>
 
             {/* User Details */}
-            <div className="flex-1 space-y-2">
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+            <div className="flex-1 space-y-2 text-center sm:text-left">
+              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
                 {user.username}
               </h1>
               {user.email && (
@@ -143,20 +143,20 @@ export default function ProfilePage() {
         </div>
 
         {/* Statistics Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
           {/* Total Requests */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-            <div className="flex items-center gap-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
               <div className="flex-shrink-0">
-                <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
                   <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                 </div>
               </div>
               <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">Total</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Total</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">
                   {isLoading ? '...' : stats.total}
                 </p>
               </div>
@@ -164,18 +164,18 @@ export default function ProfilePage() {
           </div>
 
           {/* Active Requests */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-            <div className="flex items-center gap-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
               <div className="flex-shrink-0">
-                <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
                   <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                   </svg>
                 </div>
               </div>
               <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">Active</p>
-                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Active</p>
+                <p className="text-xl sm:text-2xl font-bold text-blue-600 dark:text-blue-400">
                   {isLoading ? '...' : stats.active}
                 </p>
               </div>
@@ -183,8 +183,8 @@ export default function ProfilePage() {
           </div>
 
           {/* Waiting Requests */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-            <div className="flex items-center gap-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
               <div className="flex-shrink-0">
                 <div className="w-12 h-12 bg-yellow-100 dark:bg-yellow-900 rounded-lg flex items-center justify-center">
                   <svg className="w-6 h-6 text-yellow-600 dark:text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -193,8 +193,8 @@ export default function ProfilePage() {
                 </div>
               </div>
               <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">Waiting</p>
-                <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Waiting</p>
+                <p className="text-xl sm:text-2xl font-bold text-yellow-600 dark:text-yellow-400">
                   {isLoading ? '...' : stats.waiting}
                 </p>
               </div>
@@ -202,8 +202,8 @@ export default function ProfilePage() {
           </div>
 
           {/* Completed Requests */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-            <div className="flex items-center gap-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
               <div className="flex-shrink-0">
                 <div className="w-12 h-12 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center">
                   <svg className="w-6 h-6 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -212,8 +212,8 @@ export default function ProfilePage() {
                 </div>
               </div>
               <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">Completed</p>
-                <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Completed</p>
+                <p className="text-xl sm:text-2xl font-bold text-green-600 dark:text-green-400">
                   {isLoading ? '...' : stats.completed}
                 </p>
               </div>
@@ -221,8 +221,8 @@ export default function ProfilePage() {
           </div>
 
           {/* Failed Requests */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-            <div className="flex items-center gap-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
               <div className="flex-shrink-0">
                 <div className="w-12 h-12 bg-red-100 dark:bg-red-900 rounded-lg flex items-center justify-center">
                   <svg className="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -231,8 +231,8 @@ export default function ProfilePage() {
                 </div>
               </div>
               <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">Failed</p>
-                <p className="text-2xl font-bold text-red-600 dark:text-red-400">
+                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Failed</p>
+                <p className="text-xl sm:text-2xl font-bold text-red-600 dark:text-red-400">
                   {isLoading ? '...' : stats.failed}
                 </p>
               </div>
@@ -240,8 +240,8 @@ export default function ProfilePage() {
           </div>
 
           {/* Cancelled Requests */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-            <div className="flex items-center gap-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
               <div className="flex-shrink-0">
                 <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center">
                   <svg className="w-6 h-6 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -250,8 +250,8 @@ export default function ProfilePage() {
                 </div>
               </div>
               <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">Cancelled</p>
-                <p className="text-2xl font-bold text-gray-600 dark:text-gray-400">
+                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">Cancelled</p>
+                <p className="text-xl sm:text-2xl font-bold text-gray-600 dark:text-gray-400">
                   {isLoading ? '...' : stats.cancelled}
                 </p>
               </div>

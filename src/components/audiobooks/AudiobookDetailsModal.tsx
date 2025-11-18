@@ -100,11 +100,11 @@ export function AudiobookDetailsModal({
 
   const modalContent = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/50 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-lg shadow-2xl"
+        className="relative w-full max-w-4xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-900 rounded-lg shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Close Button */}
@@ -151,12 +151,12 @@ export function AudiobookDetailsModal({
 
         {/* Content */}
         {audiobook && !isLoading && (
-          <div className="p-6 md:p-8 space-y-6">
+          <div className="p-4 sm:p-6 md:p-8 space-y-4 sm:space-y-6">
             {/* Header Section */}
-            <div className="flex flex-col md:flex-row gap-6">
+            <div className="flex flex-col md:flex-row gap-4 sm:gap-6">
               {/* Cover Art */}
-              <div className="flex-shrink-0">
-                <div className="relative w-48 aspect-[2/3] bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden shadow-lg">
+              <div className="flex-shrink-0 mx-auto md:mx-0">
+                <div className="relative w-32 sm:w-40 md:w-48 aspect-[2/3] bg-gray-200 dark:bg-gray-700 rounded-lg overflow-hidden shadow-lg">
                   {audiobook.coverArtUrl ? (
                     <Image
                       src={audiobook.coverArtUrl}
@@ -187,18 +187,18 @@ export function AudiobookDetailsModal({
               </div>
 
               {/* Metadata */}
-              <div className="flex-1 space-y-4">
+              <div className="flex-1 space-y-3 sm:space-y-4 text-center md:text-left">
                 {/* Title */}
                 <div>
-                  <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+                  <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">
                     {audiobook.title}
                   </h2>
                 </div>
 
                 {/* Author */}
                 <div className="space-y-1">
-                  <p className="text-sm text-gray-500 dark:text-gray-400">By</p>
-                  <p className="text-lg text-gray-700 dark:text-gray-300 font-medium">
+                  <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">By</p>
+                  <p className="text-base sm:text-lg text-gray-700 dark:text-gray-300 font-medium">
                     {audiobook.author}
                   </p>
                 </div>
@@ -206,8 +206,8 @@ export function AudiobookDetailsModal({
                 {/* Narrator */}
                 {audiobook.narrator && (
                   <div className="space-y-1">
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Narrated by</p>
-                    <p className="text-lg text-gray-700 dark:text-gray-300">
+                    <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Narrated by</p>
+                    <p className="text-base sm:text-lg text-gray-700 dark:text-gray-300">
                       {audiobook.narrator}
                     </p>
                   </div>
@@ -301,18 +301,18 @@ export function AudiobookDetailsModal({
 
             {/* Description */}
             {audiobook.description && (
-              <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-4 sm:pt-6">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2 sm:mb-3">
                   Publisher's Summary
                 </h3>
-                <div className="text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
+                <div className="text-sm sm:text-base text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
                   {audiobook.description}
                 </div>
               </div>
             )}
 
             {/* Action Buttons */}
-            <div className="border-t border-gray-200 dark:border-gray-700 pt-6 flex flex-col sm:flex-row gap-3">
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-4 sm:pt-6 flex flex-col sm:flex-row gap-2 sm:gap-3">
               {(() => {
                 // Use props from card instead of fetched audiobook data for request status
                 // Check if book is already available in Plex or completed status

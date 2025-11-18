@@ -29,6 +29,15 @@ function LoginContent() {
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [bookCovers, setBookCovers] = useState<BookCover[]>([]);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile viewport
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Fetch random popular book covers
   useEffect(() => {
@@ -195,8 +204,8 @@ function LoginContent() {
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         {bookCovers.length > 0 ? (
           <>
-            {/* Floating real book covers - use up to 100 for immersive effect */}
-            {bookCovers.slice(0, 100).map((book, index) => {
+            {/* Floating real book covers - use fewer on mobile (30) vs desktop (100) for better performance */}
+            {bookCovers.slice(0, isMobile ? 30 : 100).map((book, index) => {
               const pos = generateCoverPosition(index, bookCovers.length);
               const style: React.CSSProperties = {
                 animationDelay: pos.delay,
@@ -246,23 +255,23 @@ function LoginContent() {
       </div>
 
       {/* Main content - high z-index to appear above all floating covers */}
-      <main className="relative z-50 min-h-screen flex items-center justify-center px-4">
+      <main className="relative z-50 min-h-screen flex items-center justify-center px-4 py-8">
         <div className="max-w-md w-full">
           {/* Login card */}
-          <div className="bg-gray-900/80 backdrop-blur-md rounded-2xl shadow-2xl p-8 md:p-12 border border-gray-700/50">
+          <div className="bg-gray-900/80 backdrop-blur-md rounded-2xl shadow-2xl p-6 sm:p-8 md:p-12 border border-gray-700/50">
             {/* Logo/Title */}
-            <div className="text-center mb-8">
-              <h1 className="text-4xl md:text-5xl font-bold text-white mb-3">
+            <div className="text-center mb-6 sm:mb-8">
+              <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-2 sm:mb-3">
                 ReadMeABook
               </h1>
-              <p className="text-gray-300 text-lg">
+              <p className="text-gray-300 text-base sm:text-lg">
                 Your Personal Audiobook Library Manager
               </p>
             </div>
 
             {/* Description */}
-            <div className="mb-8 text-center">
-              <p className="text-gray-400">
+            <div className="mb-6 sm:mb-8 text-center">
+              <p className="text-gray-400 text-sm sm:text-base">
                 Request audiobooks and they'll automatically download and appear in your Plex library
               </p>
             </div>
@@ -279,18 +288,18 @@ function LoginContent() {
               onClick={handlePlexLogin}
               disabled={isLoggingIn}
               loading={isLoggingIn}
-              className="w-full text-lg py-4 bg-orange-600 hover:bg-orange-700 text-white font-semibold"
+              className="w-full text-base sm:text-lg py-3 sm:py-4 bg-orange-600 hover:bg-orange-700 text-white font-semibold"
             >
               {isLoggingIn ? 'Connecting to Plex...' : 'Login with Plex'}
             </Button>
 
             {/* Info text */}
-            <div className="mt-6 text-center text-sm text-gray-500">
+            <div className="mt-4 sm:mt-6 text-center text-xs sm:text-sm text-gray-500">
               <p>You'll be redirected to Plex to authorize this application</p>
             </div>
 
             {/* Divider */}
-            <div className="relative my-8">
+            <div className="relative my-6 sm:my-8">
               <div className="absolute inset-0 flex items-center">
                 <div className="w-full border-t border-gray-700"></div>
               </div>
