@@ -50,6 +50,8 @@ export function FinalizeStep({ onComplete, onBack }: FinalizeStepProps) {
   }, [hasStarted]);
 
   const pollJobStatus = async (jobId: string, accessToken: string): Promise<'completed' | 'failed'> => {
+    console.log(`[Setup] Starting to poll job status for jobId: ${jobId}`);
+
     return new Promise((resolve) => {
       const pollInterval = setInterval(async () => {
         try {
@@ -60,22 +62,27 @@ export function FinalizeStep({ onComplete, onBack }: FinalizeStepProps) {
           });
 
           if (!response.ok) {
+            console.error(`[Setup] Failed to fetch job status: ${response.status} ${response.statusText}`);
             throw new Error('Failed to fetch job status');
           }
 
           const data = await response.json();
           const jobStatus = data.job.status;
 
+          console.log(`[Setup] Job ${jobId} status: ${jobStatus}`);
+
           if (jobStatus === 'completed') {
+            console.log(`[Setup] Job ${jobId} completed successfully`);
             clearInterval(pollInterval);
             resolve('completed');
           } else if (jobStatus === 'failed') {
+            console.log(`[Setup] Job ${jobId} failed`);
             clearInterval(pollInterval);
             resolve('failed');
           }
           // Otherwise keep polling (pending, active, stuck)
         } catch (error) {
-          console.error('Failed to poll job status:', error);
+          console.error('[Setup] Error polling job status:', error);
           clearInterval(pollInterval);
           resolve('failed');
         }
@@ -158,8 +165,17 @@ export function FinalizeStep({ onComplete, onBack }: FinalizeStepProps) {
         const triggerData = await response.json();
         const jobId = triggerData.jobId;
 
+        console.log(`[Setup] Job triggered: ${job.name}, jobId: ${jobId}`);
+
+        // Validate we received a jobId
+        if (!jobId) {
+          throw new Error('No job ID returned from trigger endpoint');
+        }
+
         // Poll job status until completed or failed
         const finalStatus = await pollJobStatus(jobId, accessToken);
+
+        console.log(`[Setup] Job ${job.name} finished with status: ${finalStatus}`);
 
         // Update job status based on polling result
         if (finalStatus === 'completed') {

@@ -30,12 +30,17 @@ export async function GET(
     // Await params in Next.js 15+
     const { id } = await params;
 
+    console.log(`[JobStatus] Fetching status for job ID: ${id}`);
+
     const jobQueueService = getJobQueueService();
     const job = await jobQueueService.getJob(id);
 
     if (!job) {
+      console.log(`[JobStatus] Job not found: ${id}`);
       return NextResponse.json({ error: 'Job not found' }, { status: 404 });
     }
+
+    console.log(`[JobStatus] Job ${id} status: ${job.status}, type: ${job.type}`);
 
     return NextResponse.json({
       success: true,
