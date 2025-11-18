@@ -48,7 +48,8 @@
 - **Jobs management UI** → [backend/services/scheduler.md](backend/services/scheduler.md)
 
 ## Deployment
-- **Docker Compose setup** → [deployment/docker.md](deployment/docker.md)
+- **Docker Compose setup (multi-container)** → [deployment/docker.md](deployment/docker.md)
+- **Unified container (all-in-one)** → [deployment/unified.md](deployment/unified.md)
 - **Environment variables, volumes** → [deployment/docker.md](deployment/docker.md)
 - **Database setup (Prisma), migrations** → [deployment/docker.md](deployment/docker.md)
 
@@ -61,4 +62,5 @@
 **"What's the database schema?"** → [backend/database.md](backend/database.md)
 **"How does authentication work?"** → [backend/services/auth.md](backend/services/auth.md)
 **"How do I change the admin password?"** → [settings-pages.md](settings-pages.md), [backend/services/auth.md](backend/services/auth.md)
-**"How do I deploy?"** → [deployment/docker.md](deployment/docker.md)
+**"How do I deploy?"** → [deployment/docker.md](deployment/docker.md) (multi-container), [deployment/unified.md](deployment/unified.md) (all-in-one)
+**"How do I use the unified container?"** → [deployment/unified.md](deployment/unified.md)
