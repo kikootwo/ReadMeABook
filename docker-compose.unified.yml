@@ -1,0 +1,61 @@
+version: '3.9'
+
+services:
+  readmeabook:
+    image: ghcr.io/kikootwo/readmeabook:latest
+    container_name: readmeabook-unified
+    restart: unless-stopped
+    ports:
+      - "3030:3030"
+    volumes:
+      # Application config and cache
+      - ./config:/app/config
+
+      # Downloads and media directories
+      - ./downloads:/downloads
+      - ./media:/media
+
+      # PostgreSQL data persistence
+      - readmeabook-pgdata:/var/lib/postgresql/data
+
+      # Redis data persistence
+      - readmeabook-redis:/var/lib/redis
+
+    environment:
+      # ========================================================================
+      # OPTIONAL: Secrets (auto-generated on first run if not provided)
+      # ========================================================================
+      # Uncomment and set these if you want to use custom secrets:
+      # JWT_SECRET: "your-custom-jwt-secret-here"
+      # JWT_REFRESH_SECRET: "your-custom-jwt-refresh-secret-here"
+      # CONFIG_ENCRYPTION_KEY: "your-custom-encryption-key-here"
+      # POSTGRES_PASSWORD: "your-custom-postgres-password-here"
+
+      # ========================================================================
+      # OPTIONAL: Application Configuration
+      # ========================================================================
+      # Only set these if you need non-default values:
+      # POSTGRES_USER: "readmeabook"
+      # POSTGRES_DB: "readmeabook"
+      # PLEX_CLIENT_IDENTIFIER: "readmeabook-custom-id"
+      # PLEX_PRODUCT_NAME: "ReadMeABook"
+      # LOG_LEVEL: "info"
+
+      # ========================================================================
+      # IMPORTANT: Public URL Configuration
+      # ========================================================================
+      # Set this to your public URL if accessing from outside localhost:
+      # PUBLIC_URL: "https://readmeabook.yourdomain.com"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3030/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  readmeabook-pgdata:
+    driver: local
+  readmeabook-redis:
+    driver: local
