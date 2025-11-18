@@ -14,7 +14,8 @@ import { cn } from '@/lib/utils/cn';
 
 export default function ProfilePage() {
   const { user } = useAuth();
-  const { requests, isLoading } = useRequests();
+  // Always show only the current user's own requests (even for admins)
+  const { requests, isLoading } = useRequests(undefined, 50, true);
 
   // Calculate statistics
   const stats = useMemo(() => {
@@ -31,7 +32,7 @@ export default function ProfilePage() {
 
     return {
       total: requests.length,
-      completed: requests.filter((r: any) => r.status === 'completed').length,
+      completed: requests.filter((r: any) => ['available', 'downloaded'].includes(r.status)).length,
       active: requests.filter((r: any) =>
         ['pending', 'searching', 'downloading', 'processing'].includes(r.status)
       ).length,

@@ -24,6 +24,7 @@
 ## Audible Integration
 - **Web scraping (popular, new releases)** → [integrations/audible.md](integrations/audible.md)
 - **Database caching, real-time matching** → [integrations/audible.md](integrations/audible.md)
+- **Book covers API for login page** → [frontend/pages/login.md](frontend/pages/login.md)
 
 ## Automation Pipeline
 - **Full pipeline overview** → [phase3/README.md](phase3/README.md)

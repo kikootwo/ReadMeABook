@@ -255,38 +255,103 @@ export class JobQueueService {
     this.queue.process('plex_library_scan', 1, async (job: BullJob) => {
       // plex_library_scan is just an alias for scan_plex
       const { processScanPlex } = await import('../processors/scan-plex.processor');
-      return await processScanPlex(job.data);
+      const payloadWithJobId = await this.ensureJobRecord(job, 'plex_library_scan');
+      return await processScanPlex(payloadWithJobId);
     });
 
     this.queue.process('plex_recently_added_check', 1, async (job: BullJob<PlexRecentlyAddedPayload>) => {
       const { processPlexRecentlyAddedCheck } = await import('../processors/plex-recently-added.processor');
-      return await processPlexRecentlyAddedCheck(job.data);
+      const payloadWithJobId = await this.ensureJobRecord(job, 'plex_recently_added_check');
+      return await processPlexRecentlyAddedCheck(payloadWithJobId);
     });
 
     this.queue.process('monitor_rss_feeds', 1, async (job: BullJob<MonitorRssFeedsPayload>) => {
       const { processMonitorRssFeeds } = await import('../processors/monitor-rss-feeds.processor');
-      return await processMonitorRssFeeds(job.data);
+      const payloadWithJobId = await this.ensureJobRecord(job, 'monitor_rss_feeds');
+      return await processMonitorRssFeeds(payloadWithJobId);
     });
 
     this.queue.process('audible_refresh', 1, async (job: BullJob<AudibleRefreshPayload>) => {
       const { processAudibleRefresh } = await import('../processors/audible-refresh.processor');
-      return await processAudibleRefresh(job.data);
+      const payloadWithJobId = await this.ensureJobRecord(job, 'audible_refresh');
+      return await processAudibleRefresh(payloadWithJobId);
     });
 
     this.queue.process('retry_missing_torrents', 1, async (job: BullJob<RetryMissingTorrentsPayload>) => {
       const { processRetryMissingTorrents } = await import('../processors/retry-missing-torrents.processor');
-      return await processRetryMissingTorrents(job.data);
+      const payloadWithJobId = await this.ensureJobRecord(job, 'retry_missing_torrents');
+      return await processRetryMissingTorrents(payloadWithJobId);
     });
 
     this.queue.process('retry_failed_imports', 1, async (job: BullJob<RetryFailedImportsPayload>) => {
       const { processRetryFailedImports } = await import('../processors/retry-failed-imports.processor');
-      return await processRetryFailedImports(job.data);
+      const payloadWithJobId = await this.ensureJobRecord(job, 'retry_failed_imports');
+      return await processRetryFailedImports(payloadWithJobId);
     });
 
     this.queue.process('cleanup_seeded_torrents', 1, async (job: BullJob<CleanupSeededTorrentsPayload>) => {
       const { processCleanupSeededTorrents } = await import('../processors/cleanup-seeded-torrents.processor');
-      return await processCleanupSeededTorrents(job.data);
+      const payloadWithJobId = await this.ensureJobRecord(job, 'cleanup_seeded_torrents');
+      return await processCleanupSeededTorrents(payloadWithJobId);
     });
+  }
+
+  /**
+   * Ensure a database Job record exists for scheduled jobs
+   * If jobId is already in payload (manual trigger), return as-is
+   * Otherwise, create a Job record for timer-triggered scheduled jobs
+   * Also updates the lastRun timestamp for timer-triggered scheduled jobs
+   */
+  private async ensureJobRecord(job: BullJob, jobType: JobType): Promise<any> {
+    const payload = job.data;
+
+    // If jobId already exists (manual trigger via addJob), return payload as-is
+    if (payload.jobId) {
+      return payload;
+    }
+
+    // Check if a Job record already exists for this Bull job
+    const existingJob = await prisma.job.findFirst({
+      where: { bullJobId: job.id as string },
+    });
+
+    if (existingJob) {
+      // Update lastRun for the scheduled job if this is a timer-triggered job
+      if (payload.scheduledJobId) {
+        await prisma.scheduledJob.update({
+          where: { id: payload.scheduledJobId },
+          data: { lastRun: new Date() },
+        }).catch(err => {
+          console.error(`[JobQueue] Failed to update lastRun for scheduled job ${payload.scheduledJobId}:`, err);
+        });
+      }
+      return { ...payload, jobId: existingJob.id };
+    }
+
+    // Create a new Job record for this scheduled job
+    const dbJob = await prisma.job.create({
+      data: {
+        bullJobId: job.id as string,
+        requestId: payload.requestId || null,
+        type: jobType,
+        status: 'pending',
+        priority: 0,
+        payload,
+        maxAttempts: 3,
+      },
+    });
+
+    // Update lastRun for the scheduled job if this is a timer-triggered job
+    if (payload.scheduledJobId) {
+      await prisma.scheduledJob.update({
+        where: { id: payload.scheduledJobId },
+        data: { lastRun: new Date() },
+      }).catch(err => {
+        console.error(`[JobQueue] Failed to update lastRun for scheduled job ${payload.scheduledJobId}:`, err);
+      });
+    }
+
+    return { ...payload, jobId: dbJob.id };
   }
 
   /**

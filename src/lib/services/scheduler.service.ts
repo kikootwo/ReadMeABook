@@ -452,11 +452,6 @@ export class SchedulerService {
 
     const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
 
-    // Daily: "0 0 * * *"
-    if (minute === '0' && hour === '0' && dayOfMonth === '*' && month === '*') {
-      return 24 * 60 * 60 * 1000; // 24 hours
-    }
-
     // Every N hours: "0 */N * * *"
     const hourMatch = hour.match(/^\*\/(\d+)$/);
     if (minute === '0' && hourMatch && dayOfMonth === '*' && month === '*') {
@@ -476,9 +471,23 @@ export class SchedulerService {
       return minutes * 60 * 1000;
     }
 
-    // Weekly: "0 0 * * 0" (Sunday at midnight)
-    if (minute === '0' && hour === '0' && dayOfMonth === '*' && month === '*' && dayOfWeek === '0') {
-      return 7 * 24 * 60 * 60 * 1000; // 7 days
+    // Weekly: "M H * * D" where D is day of week (0-7)
+    if (dayOfMonth === '*' && month === '*' && dayOfWeek !== '*') {
+      const hourNum = parseInt(hour, 10);
+      const minuteNum = parseInt(minute, 10);
+      const dayNum = parseInt(dayOfWeek, 10);
+      if (!isNaN(hourNum) && !isNaN(minuteNum) && !isNaN(dayNum)) {
+        return 7 * 24 * 60 * 60 * 1000; // 7 days
+      }
+    }
+
+    // Daily at specific time: "M H * * *" where H is 0-23, M is 0-59
+    if (dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
+      const hourNum = parseInt(hour, 10);
+      const minuteNum = parseInt(minute, 10);
+      if (!isNaN(hourNum) && !isNaN(minuteNum) && hourNum >= 0 && hourNum <= 23 && minuteNum >= 0 && minuteNum <= 59) {
+        return 24 * 60 * 60 * 1000; // 24 hours
+      }
     }
 
     // For other patterns, return a conservative default (24 hours)

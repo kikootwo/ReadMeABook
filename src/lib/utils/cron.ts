@@ -194,7 +194,12 @@ export function customScheduleToCron(schedule: CustomSchedule): string {
       return `*/${schedule.interval || 15} * * * *`;
 
     case 'hours':
-      return `0 */${schedule.interval || 1} * * *`;
+      const hourInterval = schedule.interval || 1;
+      // If interval is 24 or more hours, convert to daily at midnight
+      if (hourInterval >= 24) {
+        return `0 0 * * *`; // Daily at midnight
+      }
+      return `0 */${hourInterval} * * *`;
 
     case 'daily':
       const dailyHour = schedule.time?.hour || 0;

@@ -34,12 +34,13 @@ export interface Request {
 const fetcher = (url: string) =>
   fetchWithAuth(url).then((res) => res.json());
 
-export function useRequests(status?: string, limit: number = 50) {
+export function useRequests(status?: string, limit: number = 50, myOnly: boolean = false) {
   const { accessToken } = useAuth();
 
   const params = new URLSearchParams();
   if (status) params.append('status', status);
   if (limit) params.append('limit', limit.toString());
+  if (myOnly) params.append('myOnly', 'true');
 
   const endpoint = accessToken ? `/api/requests?${params.toString()}` : null;
 

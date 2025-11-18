@@ -16,11 +16,13 @@ interface WizardLayoutProps {
 export function WizardLayout({ currentStep, totalSteps, children }: WizardLayoutProps) {
   const steps = [
     { number: 1, title: 'Welcome' },
-    { number: 2, title: 'Plex' },
-    { number: 3, title: 'Prowlarr' },
-    { number: 4, title: 'Download Client' },
-    { number: 5, title: 'Paths' },
-    { number: 6, title: 'Review' },
+    { number: 2, title: 'Admin Account' },
+    { number: 3, title: 'Plex' },
+    { number: 4, title: 'Prowlarr' },
+    { number: 5, title: 'Download Client' },
+    { number: 6, title: 'Paths' },
+    { number: 7, title: 'Review' },
+    { number: 8, title: 'Finalize' },
   ];
 
   return (

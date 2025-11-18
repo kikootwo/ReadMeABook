@@ -33,7 +33,8 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 
 ### Requests
 - `id` (UUID PK), `user_id` (FK), `audiobook_id` (FK)
-- `status` ('pending'|'searching'|'downloading'|'processing'|'completed'|'failed'|'cancelled'|'awaiting_search'|'awaiting_import'|'warn')
+- `status` ('pending'|'searching'|'downloading'|'processing'|'downloaded'|'available'|'failed'|'cancelled'|'awaiting_search'|'awaiting_import'|'warn')
+  - Flow: pending → searching → downloading → processing → downloaded → available (when matched in Plex)
 - `progress` (0-100), `priority`, `error_message`
 - `search_attempts`, `download_attempts`, `import_attempts`, `max_import_retries` (default 5)
 - `last_search_at`, `last_import_at`, `created_at`, `updated_at`, `completed_at`

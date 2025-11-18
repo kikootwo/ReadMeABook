@@ -107,6 +107,19 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload) {
 }
 ```
 
+## Scheduled Job Tracking
+
+**Timer-triggered scheduled jobs** automatically:
+- Create Job records in database (via `ensureJobRecord()`)
+- Update `lastRun` timestamp in `scheduled_jobs` table
+- Generate JobEvent logs with full context
+- Display in system logs page
+
+**Manual-triggered jobs** (via "Trigger Now" button):
+- Go through `triggerJobNow()` → job queue methods → `addJob()`
+- Update `lastRun` timestamp in scheduler service
+- Create Job records with full tracking
+
 ## Event Handling
 
 ```typescript
@@ -141,6 +154,8 @@ queue.on('stalled', async (job) => {
 - ✅ Transient failures marking requests as "failed" prematurely → Distinguish transient vs permanent errors, only mark failed after all retries exhausted
 - ✅ Plex search error (400) immediately after file organization → Changed workflow: organize_files sets 'downloaded' status, scan_plex job handles matching during scheduled scans
 - ✅ System logs page incomplete and missing detailed events → Added JobEvent table, JobLogger utility, comprehensive event logging with timestamps and metadata
+- ✅ Scheduled jobs triggered by timer not appearing in system logs → Added ensureJobRecord() to create Job records for timer-triggered scheduled jobs
+- ✅ Scheduled jobs triggered by timer not updating lastRun timestamp → ensureJobRecord() now updates lastRun for timer-triggered jobs
 
 ## Tech Stack
 

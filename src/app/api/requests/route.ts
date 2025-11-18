@@ -184,10 +184,13 @@ export async function GET(request: NextRequest) {
       const searchParams = req.nextUrl.searchParams;
       const status = searchParams.get('status');
       const limit = parseInt(searchParams.get('limit') || '50', 10);
+      const myOnly = searchParams.get('myOnly') === 'true';
       const isAdmin = req.user.role === 'admin';
 
       // Build query
-      const where: any = isAdmin ? {} : { userId: req.user.id };
+      // If myOnly=true, always filter by current user (even for admins)
+      // Otherwise, admins see all requests, users see only their own
+      const where: any = myOnly || !isAdmin ? { userId: req.user.id } : {};
       if (status) {
         where.status = status;
       }

@@ -167,7 +167,8 @@ model Request {
   userId           String    @map("user_id")
   audiobookId      String    @map("audiobook_id")
   status           String    @default("pending")
-  // Status values: pending, searching, downloading, processing, completed, failed, cancelled, awaiting_search, awaiting_import, warn
+  // Status values: pending, searching, downloading, processing, downloaded, available, failed, cancelled, awaiting_search, awaiting_import, warn
+  // Flow: pending → searching → downloading → processing → downloaded → available (when matched in Plex)
   progress         Int       @default(0) // 0-100
   priority         Int       @default(0)
   errorMessage     String?   @map("error_message") @db.Text

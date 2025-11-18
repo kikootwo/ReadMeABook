@@ -9,6 +9,14 @@ import { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/Button';
+import Image from 'next/image';
+
+interface BookCover {
+  asin: string;
+  title: string;
+  author: string;
+  coverUrl: string;
+}
 
 function LoginContent() {
   const router = useRouter();
@@ -20,6 +28,27 @@ function LoginContent() {
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+  const [bookCovers, setBookCovers] = useState<BookCover[]>([]);
+
+  // Fetch random popular book covers
+  useEffect(() => {
+    const fetchCovers = async () => {
+      try {
+        const response = await fetch('/api/audiobooks/covers');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.covers.length > 0) {
+            setBookCovers(data.covers);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch book covers:', err);
+        // Silently fail - page will show without covers
+      }
+    };
+
+    fetchCovers();
+  }, []);
 
   // Redirect if already logged in
   useEffect(() => {
@@ -121,20 +150,103 @@ function LoginContent() {
     );
   }
 
+  // Generate random positions for covers
+  const generateCoverPosition = (index: number, total: number) => {
+    // Create a seeded random for consistent positions per index
+    const random = (seed: number) => {
+      const x = Math.sin(seed) * 10000;
+      return x - Math.floor(x);
+    };
+
+    // Different animation types
+    const animations = ['animate-float-slow', 'animate-float-medium', 'animate-float-fast'];
+    const animation = animations[index % 3];
+
+    // Random size between 80-160px
+    const size = 80 + random(index * 7) * 80;
+
+    // Random position (0-100% for both axes)
+    const top = random(index * 13) * 100;
+    const left = random(index * 17) * 100;
+
+    // Random opacity (0.15-0.35 for subtle layering)
+    const opacity = 0.15 + random(index * 23) * 0.2;
+
+    // Random delay (0-10s)
+    const delay = random(index * 29) * 10;
+
+    // Layer depth (z-index) - some in front, some behind
+    const zIndex = Math.floor(random(index * 31) * 20);
+
+    return {
+      top: `${top}%`,
+      left: `${left}%`,
+      size: Math.floor(size),
+      animation,
+      delay: `${delay.toFixed(1)}s`,
+      opacity: parseFloat(opacity.toFixed(2)),
+      zIndex,
+    };
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 relative overflow-hidden">
       {/* Floating audiobook covers background */}
-      <div className="absolute inset-0 overflow-hidden">
-        {/* Decorative floating elements */}
-        <div className="absolute top-10 left-10 w-32 h-48 bg-blue-500/10 rounded-lg animate-float-slow" />
-        <div className="absolute top-40 right-20 w-28 h-40 bg-purple-500/10 rounded-lg animate-float-medium" />
-        <div className="absolute bottom-20 left-1/4 w-36 h-52 bg-indigo-500/10 rounded-lg animate-float-fast" />
-        <div className="absolute top-1/3 right-1/3 w-24 h-36 bg-pink-500/10 rounded-lg animate-float-slow" />
-        <div className="absolute bottom-40 right-10 w-30 h-44 bg-cyan-500/10 rounded-lg animate-float-medium" />
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {bookCovers.length > 0 ? (
+          <>
+            {/* Floating real book covers - use up to 100 for immersive effect */}
+            {bookCovers.slice(0, 100).map((book, index) => {
+              const pos = generateCoverPosition(index, bookCovers.length);
+              const style: React.CSSProperties = {
+                animationDelay: pos.delay,
+                opacity: pos.opacity,
+                zIndex: pos.zIndex,
+              };
+
+              return (
+                <div
+                  key={book.asin}
+                  className={`absolute ${pos.animation}`}
+                  style={{
+                    ...style,
+                    top: pos.top,
+                    left: pos.left,
+                    width: `${pos.size}px`,
+                    height: `${pos.size * 1.5}px`,
+                  }}
+                >
+                  <div className="relative w-full h-full rounded-lg shadow-2xl overflow-hidden transform hover:scale-105 transition-transform duration-300">
+                    <Image
+                      src={book.coverUrl}
+                      alt={book.title}
+                      fill
+                      className="object-cover"
+                      sizes={`${pos.size}px`}
+                      quality={70}
+                      priority={index < 10}
+                      loading={index < 10 ? 'eager' : 'lazy'}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        ) : (
+          <>
+            {/* Fallback decorative floating elements if covers don't load */}
+            <div className="absolute top-10 left-10 w-32 h-48 bg-blue-500/10 rounded-lg animate-float-slow" />
+            <div className="absolute top-40 right-20 w-28 h-40 bg-purple-500/10 rounded-lg animate-float-medium" />
+            <div className="absolute bottom-20 left-1/4 w-36 h-52 bg-indigo-500/10 rounded-lg animate-float-fast" />
+            <div className="absolute top-1/3 right-1/3 w-24 h-36 bg-pink-500/10 rounded-lg animate-float-slow" />
+            <div className="absolute bottom-40 right-10 w-30 h-44 bg-cyan-500/10 rounded-lg animate-float-medium" />
+          </>
+        )}
       </div>
 
-      {/* Main content */}
-      <main className="relative z-10 min-h-screen flex items-center justify-center px-4">
+      {/* Main content - high z-index to appear above all floating covers */}
+      <main className="relative z-50 min-h-screen flex items-center justify-center px-4">
         <div className="max-w-md w-full">
           {/* Login card */}
           <div className="bg-gray-900/80 backdrop-blur-md rounded-2xl shadow-2xl p-8 md:p-12 border border-gray-700/50">
@@ -280,48 +392,67 @@ function LoginContent() {
         </div>
       </main>
 
-      {/* CSS animations - add to globals.css or tailwind config */}
+      {/* CSS animations for floating book covers */}
       <style jsx>{`
         @keyframes float-slow {
           0%, 100% {
-            transform: translateY(0px) translateX(0px) rotate(0deg);
+            transform: translateY(0px) translateX(0px) rotate(0deg) scale(1);
           }
-          33% {
-            transform: translateY(-30px) translateX(20px) rotate(3deg);
+          25% {
+            transform: translateY(-25px) translateX(15px) rotate(2deg) scale(1.03);
           }
-          66% {
-            transform: translateY(-15px) translateX(-10px) rotate(-2deg);
+          50% {
+            transform: translateY(-35px) translateX(25px) rotate(4deg) scale(1.05);
+          }
+          75% {
+            transform: translateY(-20px) translateX(-10px) rotate(-2deg) scale(1.02);
           }
         }
 
         @keyframes float-medium {
           0%, 100% {
-            transform: translateY(0px) translateX(0px) rotate(0deg);
+            transform: translateY(0px) translateX(0px) rotate(0deg) scale(1);
           }
-          50% {
-            transform: translateY(-25px) translateX(-15px) rotate(-4deg);
+          33% {
+            transform: translateY(-30px) translateX(-20px) rotate(-3deg) scale(1.04);
+          }
+          66% {
+            transform: translateY(-15px) translateX(10px) rotate(3deg) scale(1.02);
           }
         }
 
         @keyframes float-fast {
           0%, 100% {
-            transform: translateY(0px) translateX(0px) rotate(0deg);
+            transform: translateY(0px) translateX(0px) rotate(0deg) scale(1);
           }
           50% {
-            transform: translateY(-20px) translateX(15px) rotate(5deg);
+            transform: translateY(-28px) translateX(18px) rotate(5deg) scale(1.06);
           }
         }
 
         .animate-float-slow {
-          animation: float-slow 20s ease-in-out infinite;
+          animation: float-slow 22s ease-in-out infinite;
+          filter: blur(0px);
+          transition: filter 0.3s ease, transform 0.3s ease;
         }
 
         .animate-float-medium {
-          animation: float-medium 15s ease-in-out infinite;
+          animation: float-medium 16s ease-in-out infinite;
+          filter: blur(0px);
+          transition: filter 0.3s ease, transform 0.3s ease;
         }
 
         .animate-float-fast {
-          animation: float-fast 10s ease-in-out infinite;
+          animation: float-fast 12s ease-in-out infinite;
+          filter: blur(0px);
+          transition: filter 0.3s ease, transform 0.3s ease;
+        }
+
+        .animate-float-slow:hover,
+        .animate-float-medium:hover,
+        .animate-float-fast:hover {
+          animation-play-state: paused;
+          filter: blur(0px);
         }
       `}</style>
     </div>

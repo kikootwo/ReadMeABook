@@ -18,19 +18,21 @@ export default function RequestsPage() {
   const { user } = useAuth();
   const [filter, setFilter] = useState<FilterStatus>('all');
 
-  // Determine which status to pass to the API
-  const apiStatus = filter === 'all' ? undefined : filter === 'active' || filter === 'waiting'
-    ? undefined // We'll filter client-side for 'active' and 'waiting'
-    : filter;
+  // Always fetch only the current user's requests (even for admins)
+  // This ensures "My Requests" truly shows only the user's own requests
+  // Admins can see all requests in the admin panel
+  const { requests, isLoading } = useRequests(undefined, 50, true);
 
-  const { requests, isLoading } = useRequests(apiStatus);
-
-  // Filter requests client-side for 'active' and 'waiting' statuses
-  const filteredRequests = filter === 'active'
+  // Filter requests client-side based on selected filter
+  const filteredRequests = filter === 'all'
+    ? requests
+    : filter === 'active'
     ? requests.filter((r: any) => ['pending', 'searching', 'downloading', 'processing'].includes(r.status))
     : filter === 'waiting'
     ? requests.filter((r: any) => ['awaiting_search', 'awaiting_import'].includes(r.status))
-    : requests;
+    : filter === 'completed'
+    ? requests.filter((r: any) => ['available', 'downloaded'].includes(r.status))
+    : requests.filter((r: any) => r.status === filter);
 
   const filterOptions: { value: FilterStatus; label: string }[] = [
     { value: 'all', label: 'All' },
@@ -111,6 +113,8 @@ export default function RequestsPage() {
                       ? requests.filter((r: any) => ['pending', 'searching', 'downloading', 'processing'].includes(r.status)).length
                       : option.value === 'waiting'
                       ? requests.filter((r: any) => ['awaiting_search', 'awaiting_import'].includes(r.status)).length
+                      : option.value === 'completed'
+                      ? requests.filter((r: any) => ['available', 'downloaded'].includes(r.status)).length
                       : requests.filter((r: any) => r.status === option.value).length
                     })
                   </span>

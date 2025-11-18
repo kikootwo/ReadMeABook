@@ -48,7 +48,7 @@ Manages recurring/scheduled jobs providing automated tasks (Plex scans, Audible 
 
 **Utility Functions** (`src/lib/utils/cron.ts`):
 - `cronToHuman(cron)` - Converts cron to readable text
-- `customScheduleToCron(schedule)` - Builds cron from visual inputs
+- `customScheduleToCron(schedule)` - Builds cron from visual inputs (auto-converts 24+ hour intervals to daily)
 - `cronToCustomSchedule(cron)` - Parses cron to visual inputs
 - `isValidCron(cron)` - Validates cron expression
 
@@ -158,6 +158,10 @@ interface ScheduledJob {
 - ✅ Scheduled jobs not running on schedule → implemented Bull repeatable jobs with cron scheduling
 - ✅ MaxListenersExceededWarning → increased maxListeners to 20 on both Redis client and Bull queue
 - ✅ Cron expressions not user-friendly → added human-readable descriptions and visual schedule builder
+- ✅ Scheduled jobs triggered by timer not appearing in system logs → Job records now created automatically for timer-triggered jobs
+- ✅ Scheduled jobs triggered by timer not updating lastRun timestamp → Job queue now updates lastRun when processing timer-triggered jobs
+- ✅ Daily cron patterns at non-midnight hours not recognized → Fixed `getIntervalFromCron` to parse any daily time (e.g., "0 4 * * *")
+- ✅ "Every 24 hours" interval validation error → Auto-converts 24+ hour intervals to daily schedule (0 0 * * *)
 
 ## Tech Stack
 

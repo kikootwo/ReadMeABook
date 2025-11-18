@@ -16,7 +16,10 @@ export function WelcomeStep({ onNext }: WelcomeStepProps) {
     <div className="space-y-6">
       <div className="text-center space-y-4">
         <div className="flex justify-center">
-          <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center p-4">
+          <div
+            className="w-20 h-20 rounded-full flex items-center justify-center p-4"
+            style={{ backgroundColor: '#f7f4f3' }}
+          >
             <img
               src="/rmab_32x32.png"
               alt="ReadMeABook Logo"
