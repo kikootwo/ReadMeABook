@@ -93,12 +93,11 @@ interface SetupState {
 
 **5. Initial Job Execution**
 - Feature: Added FinalizeStep (step 8)
-- Jobs auto-triggered by scheduler when enabled (lastRun = null marks as "overdue")
-- FinalizeStep queries for most recent job executions via `/api/admin/jobs/latest-setup`
-- Polls job status every 2s until actual completion via `/api/admin/job-status/:id`
+- Automatically runs Audible refresh + Plex scan
+- Polls job status every 2s until actual completion
 - Shows real-time execution status (pending → running → completed/failed)
 - Prevents navigation until all jobs complete
-- Handles jobs that complete before FinalizeStep loads (immediate completion)
+- Uses `/api/admin/job-status/:id` endpoint for status polling
 
 ## Related Files
 

@@ -165,12 +165,6 @@ queue.on('stalled', async (job) => {
 - Used by setup wizard to poll job completion
 - Requires admin auth
 
-**GET /api/admin/jobs/latest-setup**
-- Get most recent audible_refresh and plex_library_scan jobs
-- Returns: job IDs and statuses for both job types
-- Used by setup wizard to find jobs triggered by scheduler
-- Requires admin auth
-
 ## Tech Stack
 
 - Bull (npm)

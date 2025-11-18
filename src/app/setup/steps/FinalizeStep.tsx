@@ -94,7 +94,7 @@ export function FinalizeStep({ onComplete, onBack }: FinalizeStepProps) {
     const accessToken = localStorage.getItem('accessToken');
 
     if (!accessToken) {
-      console.error('[Setup] No access token found');
+      console.error('No access token found');
       setJobs(prev => prev.map(job => ({
         ...job,
         status: 'error',
@@ -103,85 +103,77 @@ export function FinalizeStep({ onComplete, onBack }: FinalizeStepProps) {
       return;
     }
 
-    console.log('[Setup] Fetching latest setup jobs...');
-
-    // Get the most recent audible_refresh and plex_library_scan jobs
-    let latestJobs: any;
+    // Get all scheduled jobs to find the IDs
+    let scheduledJobs: any[] = [];
     try {
-      const response = await fetch('/api/admin/jobs/latest-setup', {
+      const response = await fetch('/api/admin/jobs', {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
         },
       });
 
       if (!response.ok) {
-        throw new Error('Failed to fetch latest jobs');
+        throw new Error('Failed to fetch scheduled jobs');
       }
 
       const data = await response.json();
-      latestJobs = data.jobs;
-
-      console.log('[Setup] Latest jobs:', latestJobs);
+      scheduledJobs = data.jobs;
     } catch (error) {
-      console.error('[Setup] Failed to fetch latest jobs:', error);
+      console.error('Failed to fetch scheduled jobs:', error);
       setJobs(prev => prev.map(job => ({
         ...job,
         status: 'error',
-        error: 'Failed to fetch job status',
+        error: 'Failed to fetch job configuration',
       })));
       return;
     }
 
-    // Map our job types to the database job types
-    const jobTypeMap: Record<string, string> = {
-      'audible_refresh': 'audible_refresh',
-      'plex_library_scan': 'plex_library_scan',
-    };
-
-    // Poll each job until completion
+    // Run each job sequentially
     for (let i = 0; i < jobs.length; i++) {
       const job = jobs[i];
-      const dbJobType = jobTypeMap[job.id];
-      const latestJob = latestJobs[dbJobType];
-
-      console.log(`[Setup] Processing job ${job.name} (${dbJobType}):`, latestJob);
-
-      if (!latestJob || !latestJob.id) {
-        console.error(`[Setup] No job found for type: ${job.id}`);
-        setJobs(prev => prev.map((j, idx) =>
-          idx === i ? { ...j, status: 'error', error: 'Job not found' } : j
-        ));
-        continue;
-      }
-
-      // Check if job is already completed
-      if (latestJob.status === 'completed') {
-        console.log(`[Setup] Job ${job.name} already completed`);
-        setJobs(prev => prev.map((j, idx) =>
-          idx === i ? { ...j, status: 'completed' } : j
-        ));
-        continue;
-      }
-
-      // Check if job is already failed
-      if (latestJob.status === 'failed') {
-        console.log(`[Setup] Job ${job.name} already failed`);
-        setJobs(prev => prev.map((j, idx) =>
-          idx === i ? { ...j, status: 'error', error: 'Job failed' } : j
-        ));
-        continue;
-      }
 
       // Update status to running
       setJobs(prev => prev.map((j, idx) =>
         idx === i ? { ...j, status: 'running' } : j
       ));
 
+      // Find the scheduled job by type
+      const scheduledJob = scheduledJobs.find((sj: any) => sj.type === job.id);
+
+      if (!scheduledJob) {
+        console.error(`Scheduled job not found for type: ${job.id}`);
+        setJobs(prev => prev.map((j, idx) =>
+          idx === i ? { ...j, status: 'error', error: 'Job configuration not found' } : j
+        ));
+        continue;
+      }
+
       try {
-        console.log(`[Setup] Starting to poll job ${job.name}, jobId: ${latestJob.id}, current status: ${latestJob.status}`);
+        // Trigger the job
+        const response = await fetch(`/api/admin/jobs/${scheduledJob.id}/trigger`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        });
+
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.message || 'Failed to trigger job');
+        }
+
+        const triggerData = await response.json();
+        const jobId = triggerData.jobId;
+
+        console.log(`[Setup] Job triggered: ${job.name}, jobId: ${jobId}`);
+
+        // Validate we received a jobId
+        if (!jobId) {
+          throw new Error('No job ID returned from trigger endpoint');
+        }
 
         // Poll job status until completed or failed
-        const finalStatus = await pollJobStatus(latestJob.id, accessToken);
+        const finalStatus = await pollJobStatus(jobId, accessToken);
 
         console.log(`[Setup] Job ${job.name} finished with status: ${finalStatus}`);
 
@@ -195,13 +187,18 @@ export function FinalizeStep({ onComplete, onBack }: FinalizeStepProps) {
             idx === i ? { ...j, status: 'error', error: 'Job failed to complete' } : j
           ));
         }
+
+        // Add a small delay between jobs
+        if (i < jobs.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
       } catch (error) {
-        console.error(`[Setup] Failed to monitor job ${job.name}:`, error);
+        console.error(`Failed to run job ${job.name}:`, error);
         setJobs(prev => prev.map((j, idx) =>
           idx === i ? {
             ...j,
             status: 'error',
-            error: error instanceof Error ? error.message : 'Failed to monitor job'
+            error: error instanceof Error ? error.message : 'Failed to run job'
           } : j
         ));
       }
