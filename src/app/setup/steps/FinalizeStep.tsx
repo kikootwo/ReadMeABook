@@ -46,7 +46,49 @@ export function FinalizeStep({ onComplete, onBack }: FinalizeStepProps) {
       setHasStarted(true);
       runJobs();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasStarted]);
+
+  const pollJobStatus = async (jobId: string, accessToken: string): Promise<'completed' | 'failed'> => {
+    console.log(`[Setup] Starting to poll job status for jobId: ${jobId}`);
+
+    return new Promise((resolve) => {
+      const pollInterval = setInterval(async () => {
+        try {
+          const response = await fetch(`/api/admin/job-status/${jobId}`, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+            },
+          });
+
+          if (!response.ok) {
+            console.error(`[Setup] Failed to fetch job status: ${response.status} ${response.statusText}`);
+            throw new Error('Failed to fetch job status');
+          }
+
+          const data = await response.json();
+          const jobStatus = data.job.status;
+
+          console.log(`[Setup] Job ${jobId} status: ${jobStatus}`);
+
+          if (jobStatus === 'completed') {
+            console.log(`[Setup] Job ${jobId} completed successfully`);
+            clearInterval(pollInterval);
+            resolve('completed');
+          } else if (jobStatus === 'failed') {
+            console.log(`[Setup] Job ${jobId} failed`);
+            clearInterval(pollInterval);
+            resolve('failed');
+          }
+          // Otherwise keep polling (pending, active, stuck)
+        } catch (error) {
+          console.error('[Setup] Error polling job status:', error);
+          clearInterval(pollInterval);
+          resolve('failed');
+        }
+      }, 2000); // Poll every 2 seconds
+    });
+  };
 
   const runJobs = async () => {
     const accessToken = localStorage.getItem('accessToken');
@@ -107,6 +149,7 @@ export function FinalizeStep({ onComplete, onBack }: FinalizeStepProps) {
       }
 
       try {
+        // Trigger the job
         const response = await fetch(`/api/admin/jobs/${scheduledJob.id}/trigger`, {
           method: 'POST',
           headers: {
@@ -119,10 +162,31 @@ export function FinalizeStep({ onComplete, onBack }: FinalizeStepProps) {
           throw new Error(data.message || 'Failed to trigger job');
         }
 
-        // Update status to completed
-        setJobs(prev => prev.map((j, idx) =>
-          idx === i ? { ...j, status: 'completed' } : j
-        ));
+        const triggerData = await response.json();
+        const jobId = triggerData.jobId;
+
+        console.log(`[Setup] Job triggered: ${job.name}, jobId: ${jobId}`);
+
+        // Validate we received a jobId
+        if (!jobId) {
+          throw new Error('No job ID returned from trigger endpoint');
+        }
+
+        // Poll job status until completed or failed
+        const finalStatus = await pollJobStatus(jobId, accessToken);
+
+        console.log(`[Setup] Job ${job.name} finished with status: ${finalStatus}`);
+
+        // Update job status based on polling result
+        if (finalStatus === 'completed') {
+          setJobs(prev => prev.map((j, idx) =>
+            idx === i ? { ...j, status: 'completed' } : j
+          ));
+        } else {
+          setJobs(prev => prev.map((j, idx) =>
+            idx === i ? { ...j, status: 'error', error: 'Job failed to complete' } : j
+          ));
+        }
 
         // Add a small delay between jobs
         if (i < jobs.length - 1) {
