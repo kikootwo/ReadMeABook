@@ -198,7 +198,44 @@ export async function GET(request: NextRequest) {
       console.log('[Plex OAuth] Setting cookies for mobile auth...');
       console.log('[Plex OAuth] Redirect URL:', redirectUrl);
 
-      const response = NextResponse.redirect(redirectUrl);
+      // Prepare user data
+      const userDataJson = JSON.stringify({
+        id: user.id,
+        plexId: user.plexId,
+        username: user.plexUsername,
+        email: user.plexEmail,
+        role: user.role,
+        avatarUrl: user.avatarUrl,
+      });
+      console.log('[Plex OAuth] Setting userData cookie:', userDataJson);
+
+      // Return HTML page with cookies set and meta refresh redirect
+      // This ensures cookies are properly set before redirecting
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta http-equiv="refresh" content="0;url=${redirectUrl}">
+            <title>Login Successful</title>
+          </head>
+          <body>
+            <p>Login successful. Redirecting...</p>
+            <script>
+              // Fallback redirect if meta refresh doesn't work
+              setTimeout(() => {
+                window.location.href = '${redirectUrl}';
+              }, 100);
+            </script>
+          </body>
+        </html>
+      `;
+
+      const response = new NextResponse(html, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html',
+        },
+      });
 
       // Set tokens in cookies
       response.cookies.set('accessToken', accessToken, {
@@ -217,17 +254,6 @@ export async function GET(request: NextRequest) {
         path: '/',
       });
 
-      // Also set user data as cookie for immediate access
-      const userDataJson = JSON.stringify({
-        id: user.id,
-        plexId: user.plexId,
-        username: user.plexUsername,
-        email: user.plexEmail,
-        role: user.role,
-        avatarUrl: user.avatarUrl,
-      });
-      console.log('[Plex OAuth] Setting userData cookie:', userDataJson);
-
       response.cookies.set('userData', encodeURIComponent(userDataJson), {
         httpOnly: false,
         secure: process.env.NODE_ENV === 'production',
@@ -236,7 +262,7 @@ export async function GET(request: NextRequest) {
         path: '/',
       });
 
-      console.log('[Plex OAuth] Cookies set successfully, redirecting to:', redirectUrl);
+      console.log('[Plex OAuth] Cookies set successfully, returning HTML redirect to:', redirectUrl);
       return response;
     }
 
