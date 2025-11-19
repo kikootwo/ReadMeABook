@@ -21,8 +21,8 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY prisma ./prisma/
 
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
+# Install ALL dependencies (including dev dependencies needed for build)
+RUN npm ci && npm cache clean --force
 
 # Generate Prisma client (with dummy URL)
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy?schema=public"
@@ -36,6 +36,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 ENV TURBOPACK=0
 RUN npm run build
+
+# Remove dev dependencies to reduce image size
+RUN npm prune --production
 
 # Create necessary directories
 RUN mkdir -p \
