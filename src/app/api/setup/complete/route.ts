@@ -132,37 +132,46 @@ export async function POST(request: NextRequest) {
       create: { key: 'media_dir', value: paths.media_dir },
     });
 
-    // BookDate configuration (optional)
+    // BookDate configuration (optional, global for all users)
     if (bookdate && bookdate.provider && bookdate.apiKey && bookdate.model && bookdate.libraryScope) {
-      console.log('[Setup] Saving BookDate configuration');
+      console.log('[Setup] Saving global BookDate configuration');
 
       const encryptionService = getEncryptionService();
       const encryptedApiKey = encryptionService.encrypt(bookdate.apiKey);
 
-      await prisma.bookDateConfig.upsert({
-        where: { userId: adminUser.id },
-        update: {
-          provider: bookdate.provider,
-          apiKey: encryptedApiKey,
-          model: bookdate.model,
-          libraryScope: bookdate.libraryScope,
-          customPrompt: bookdate.customPrompt || null,
-          isVerified: true,
-          isEnabled: true,
-        },
-        create: {
-          userId: adminUser.id,
-          provider: bookdate.provider,
-          apiKey: encryptedApiKey,
-          model: bookdate.model,
-          libraryScope: bookdate.libraryScope,
-          customPrompt: bookdate.customPrompt || null,
-          isVerified: true,
-          isEnabled: true,
-        },
-      });
+      // Check if global config already exists
+      const existingConfig = await prisma.bookDateConfig.findFirst();
 
-      console.log('[Setup] BookDate configuration saved');
+      if (existingConfig) {
+        // Update existing global config
+        await prisma.bookDateConfig.update({
+          where: { id: existingConfig.id },
+          data: {
+            provider: bookdate.provider,
+            apiKey: encryptedApiKey,
+            model: bookdate.model,
+            libraryScope: bookdate.libraryScope,
+            customPrompt: bookdate.customPrompt || null,
+            isVerified: true,
+            isEnabled: true,
+          },
+        });
+      } else {
+        // Create new global config
+        await prisma.bookDateConfig.create({
+          data: {
+            provider: bookdate.provider,
+            apiKey: encryptedApiKey,
+            model: bookdate.model,
+            libraryScope: bookdate.libraryScope,
+            customPrompt: bookdate.customPrompt || null,
+            isVerified: true,
+            isEnabled: true,
+          },
+        });
+      }
+
+      console.log('[Setup] Global BookDate configuration saved');
     } else {
       console.log('[Setup] BookDate configuration skipped');
     }
