@@ -189,7 +189,13 @@ export async function GET(request: NextRequest) {
 
     // For browser requests (mobile), set cookies and redirect to login page
     if (isBrowserRequest) {
-      const response = NextResponse.redirect(new URL('/login?auth=success', request.url));
+      // Construct the redirect URL from headers (not request.url which may be 0.0.0.0)
+      const host = request.headers.get('host') || 'localhost:3030';
+      const protocol = request.headers.get('x-forwarded-proto') ||
+                      (process.env.NODE_ENV === 'production' ? 'https' : 'http');
+      const redirectUrl = `${protocol}://${host}/login?auth=success`;
+
+      const response = NextResponse.redirect(redirectUrl);
 
       // Set tokens in cookies
       response.cookies.set('accessToken', accessToken, {
