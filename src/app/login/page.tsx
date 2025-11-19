@@ -67,6 +67,37 @@ function LoginContent() {
     }
   }, [user, authLoading, router, searchParams]);
 
+  // Handle Plex OAuth callback on mobile
+  useEffect(() => {
+    const completeMobileLogin = async () => {
+      const pinId = sessionStorage.getItem('plexPinId');
+      const redirect = sessionStorage.getItem('plexRedirect');
+
+      if (pinId && !user && !authLoading) {
+        setIsLoggingIn(true);
+        try {
+          // Complete login with stored pinId
+          await login(pinId);
+
+          // Clear sessionStorage
+          sessionStorage.removeItem('plexPinId');
+          sessionStorage.removeItem('plexRedirect');
+
+          // Redirect to intended page
+          router.push(redirect || '/');
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
+          sessionStorage.removeItem('plexPinId');
+          sessionStorage.removeItem('plexRedirect');
+        } finally {
+          setIsLoggingIn(false);
+        }
+      }
+    };
+
+    completeMobileLogin();
+  }, [user, authLoading, login, router]);
+
   const handlePlexLogin = async () => {
     setIsLoggingIn(true);
     setError(null);
@@ -83,7 +114,18 @@ function LoginContent() {
 
       const { pinId, authUrl } = await response.json();
 
-      // Open Plex OAuth in popup
+      // On mobile, redirect to Plex OAuth instead of using popup
+      if (isMobile) {
+        // Store pinId in sessionStorage for callback
+        sessionStorage.setItem('plexPinId', pinId);
+        sessionStorage.setItem('plexRedirect', searchParams.get('redirect') || '/');
+
+        // Redirect to Plex OAuth
+        window.location.href = authUrl;
+        return;
+      }
+
+      // Desktop: Open Plex OAuth in popup
       const authWindow = window.open(
         authUrl,
         'plex-auth',
