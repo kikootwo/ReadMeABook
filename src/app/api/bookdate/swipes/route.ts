@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
+import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 
 // DELETE: Clear all users' swipe history (Admin only)
@@ -33,5 +33,5 @@ async function clearSwipes(req: AuthenticatedRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  return requireAdmin(req, clearSwipes);
+  return requireAuth(req, async (authReq) => requireAdmin(authReq, clearSwipes));
 }

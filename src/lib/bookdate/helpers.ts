@@ -19,6 +19,7 @@ export interface SwipeHistory {
   title: string;
   author: string;
   action: string;
+  markedAsKnown: boolean;
 }
 
 export interface AIRecommendation {
@@ -104,6 +105,7 @@ export async function getUserRecentSwipes(
         bookTitle: true,
         bookAuthor: true,
         action: true,
+        markedAsKnown: true,
       },
     });
 
@@ -111,6 +113,7 @@ export async function getUserRecentSwipes(
       title: s.bookTitle,
       author: s.bookAuthor,
       action: s.action,
+      markedAsKnown: s.markedAsKnown,
     }));
 
   } catch (error) {
@@ -149,7 +152,9 @@ export async function buildAIPrompt(
       swipe_history: swipeHistory.map(s => ({
         title: s.title,
         author: s.author,
-        user_action: s.action === 'right' ? 'requested' : s.action === 'left' ? 'rejected' : 'dismissed',
+        user_action: s.action === 'right'
+          ? (s.markedAsKnown ? 'marked_as_liked' : 'requested')
+          : s.action === 'left' ? 'rejected' : 'dismissed',
       })),
       custom_preferences: config.customPrompt || null,
     },
@@ -157,11 +162,12 @@ export async function buildAIPrompt(
       'Based on the user\'s library and swipe history, recommend 20 audiobooks they would enjoy. ' +
       'Important rules:\n' +
       '1. DO NOT recommend any books already in the user\'s library\n' +
-      '2. DO NOT recommend any books from the swipe history (whether requested, rejected, or dismissed)\n' +
+      '2. DO NOT recommend any books from the swipe history (whether requested, rejected, dismissed, or marked_as_liked)\n' +
       '3. Focus on variety and quality\n' +
       '4. Consider user ratings if available (0-10 scale, higher = liked more)\n' +
       '5. Learn from rejected books to avoid similar recommendations\n' +
       '6. Learn from requested books to find similar ones\n' +
+      '7. Pay special attention to "marked_as_liked" books - these are books the user has already read/listened to elsewhere and enjoyed. Find similar books to these.\n' +
       'Return ONLY valid JSON with no additional text or formatting.',
     response_format: {
       recommendations: [
