@@ -88,8 +88,9 @@ export function RecommendationCard({
             className="absolute inset-0 bg-green-500 flex items-center justify-center pointer-events-none z-10"
             style={{ opacity: getOverlayOpacity(150, dragOffset.x) * 0.4 }}
           >
-            <div className="bg-white rounded-full p-6 shadow-lg">
+            <div className="bg-white rounded-full p-6 shadow-lg flex flex-col items-center gap-2">
               <span className="text-6xl">✅</span>
+              <span className="text-xl font-bold text-green-600">Request</span>
             </div>
           </div>
         )}
@@ -98,8 +99,9 @@ export function RecommendationCard({
             className="absolute inset-0 bg-red-500 flex items-center justify-center pointer-events-none z-10"
             style={{ opacity: getOverlayOpacity(150, dragOffset.x) * 0.4 }}
           >
-            <div className="bg-white rounded-full p-6 shadow-lg">
+            <div className="bg-white rounded-full p-6 shadow-lg flex flex-col items-center gap-2">
               <span className="text-6xl">❌</span>
+              <span className="text-xl font-bold text-red-600">Dislike</span>
             </div>
           </div>
         )}
@@ -108,8 +110,9 @@ export function RecommendationCard({
             className="absolute inset-0 bg-blue-500 flex items-center justify-center pointer-events-none z-10"
             style={{ opacity: getOverlayOpacity(150, dragOffset.y) * 0.4 }}
           >
-            <div className="bg-white rounded-full p-6 shadow-lg">
+            <div className="bg-white rounded-full p-6 shadow-lg flex flex-col items-center gap-2">
               <span className="text-6xl">⬆️</span>
+              <span className="text-xl font-bold text-blue-600">Dismiss</span>
             </div>
           </div>
         )}
