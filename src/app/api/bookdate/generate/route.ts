@@ -19,15 +19,13 @@ async function handler(req: AuthenticatedRequest) {
   try {
     const userId = req.user!.id;
 
-    // Get config
-    const config = await prisma.bookDateConfig.findUnique({
-      where: { userId },
-    });
+    // Get global config
+    const config = await prisma.bookDateConfig.findFirst();
 
     if (!config || !config.isVerified || !config.isEnabled) {
       return NextResponse.json(
         {
-          error: 'BookDate is not configured or has been disabled. Please check your settings.',
+          error: 'BookDate is not configured or has been disabled. Please contact your administrator.',
         },
         { status: 400 }
       );
