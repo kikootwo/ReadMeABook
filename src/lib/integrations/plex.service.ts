@@ -43,6 +43,7 @@ export interface PlexAudiobook {
   narrator?: string;
   duration?: number;
   year?: number;
+  userRating?: number;
   summary?: string;
   thumb?: string;
   addedAt: number;
@@ -450,6 +451,7 @@ export class PlexService {
         thumb: item.thumb || item.$?.thumb,
         addedAt: item.addedAt ? parseInt(item.addedAt) : Date.now(),
         updatedAt: item.updatedAt ? parseInt(item.updatedAt) : Date.now(),
+        userRating: item.userRating ? parseFloat(item.userRating) : (item.$?.userRating ? parseFloat(item.$?.userRating) : undefined),
       }));
     } catch (error) {
       console.error('Failed to get recently added content:', error);
@@ -518,6 +520,7 @@ export class PlexService {
         thumb: item.thumb || item.$?.thumb,
         addedAt: item.addedAt ? parseInt(item.addedAt) : Date.now(),
         updatedAt: item.updatedAt ? parseInt(item.updatedAt) : Date.now(),
+        userRating: item.userRating ? parseFloat(item.userRating) : (item.$?.userRating ? parseFloat(item.$?.userRating) : undefined),
       }));
     } catch (error) {
       console.error('Failed to get library content:', error);
