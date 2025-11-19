@@ -183,7 +183,106 @@ export async function GET(request: NextRequest) {
 
     const refreshToken = generateRefreshToken(user.id);
 
-    // Return tokens and user info
+    // Detect if this is a browser request (mobile redirect) vs AJAX (desktop popup polling)
+    const accept = request.headers.get('accept') || '';
+    const isBrowserRequest = accept.includes('text/html');
+
+    // For browser requests (mobile), set cookies and redirect to login page
+    if (isBrowserRequest) {
+      // Construct the redirect URL from headers (not request.url which may be 0.0.0.0)
+      const host = request.headers.get('host') || 'localhost:3030';
+      const protocol = request.headers.get('x-forwarded-proto') ||
+                      (process.env.NODE_ENV === 'production' ? 'https' : 'http');
+      const redirectUrl = `${protocol}://${host}/login?auth=success`;
+
+      console.log('[Plex OAuth] Setting cookies for mobile auth...');
+      console.log('[Plex OAuth] Redirect URL:', redirectUrl);
+
+      // Prepare user data
+      const userDataJson = JSON.stringify({
+        id: user.id,
+        plexId: user.plexId,
+        username: user.plexUsername,
+        email: user.plexEmail,
+        role: user.role,
+        avatarUrl: user.avatarUrl,
+      });
+      console.log('[Plex OAuth] Setting userData cookie:', userDataJson);
+
+      // Prepare auth data to pass via URL hash (fallback for mobile browsers that block cookies)
+      const authData = {
+        accessToken,
+        refreshToken,
+        user: {
+          id: user.id,
+          plexId: user.plexId,
+          username: user.plexUsername,
+          email: user.plexEmail,
+          role: user.role,
+          avatarUrl: user.avatarUrl,
+        },
+      };
+      const authDataEncoded = encodeURIComponent(JSON.stringify(authData));
+
+      // Return HTML page with cookies set and JavaScript redirect with hash
+      // This ensures cookies are properly set before redirecting
+      // The hash also provides a fallback for mobile browsers that block cookies on redirects
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Login Successful</title>
+          </head>
+          <body>
+            <p>Login successful. Redirecting...</p>
+            <script>
+              // Use JavaScript redirect with hash parameter for mobile compatibility
+              // Hash params aren't sent to server, so tokens stay client-side
+              setTimeout(() => {
+                window.location.href = '${redirectUrl}#authData=${authDataEncoded}';
+              }, 100);
+            </script>
+          </body>
+        </html>
+      `;
+
+      const response = new NextResponse(html, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html',
+        },
+      });
+
+      // Set tokens in cookies
+      response.cookies.set('accessToken', accessToken, {
+        httpOnly: false, // Need to be accessible to JavaScript
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60, // 1 hour
+        path: '/',
+      });
+
+      response.cookies.set('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 7, // 7 days
+        path: '/',
+      });
+
+      response.cookies.set('userData', encodeURIComponent(userDataJson), {
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60, // 1 hour
+        path: '/',
+      });
+
+      console.log('[Plex OAuth] Cookies set successfully, returning HTML redirect to:', redirectUrl);
+      return response;
+    }
+
+    // Return tokens and user info (for AJAX requests from desktop popup)
     return NextResponse.json({
       success: true,
       authorized: true,

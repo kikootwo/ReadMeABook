@@ -29,6 +29,15 @@ function LoginContent() {
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [bookCovers, setBookCovers] = useState<BookCover[]>([]);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile viewport
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Fetch random popular book covers
   useEffect(() => {
@@ -58,6 +67,106 @@ function LoginContent() {
     }
   }, [user, authLoading, router, searchParams]);
 
+  // Handle Plex OAuth callback (mobile redirect with cookies or URL hash)
+  useEffect(() => {
+    const authSuccess = searchParams.get('auth');
+    console.log('[Mobile Auth] useEffect triggered:', { authSuccess, hasUser: !!user, authLoading });
+
+    if (authSuccess === 'success' && !user && !authLoading) {
+      console.log('[Mobile Auth] Processing auth success...');
+
+      // First, try to read from URL hash (more reliable for mobile)
+      const hash = window.location.hash;
+      console.log('[Mobile Auth] URL hash:', hash);
+
+      if (hash && hash.includes('authData=')) {
+        try {
+          const authDataMatch = hash.match(/authData=([^&]+)/);
+          if (authDataMatch) {
+            const authDataStr = decodeURIComponent(authDataMatch[1]);
+            const authData = JSON.parse(authDataStr);
+            console.log('[Mobile Auth] Successfully parsed authData from URL hash:', authData.user);
+
+            // Store in localStorage
+            localStorage.setItem('accessToken', authData.accessToken);
+            localStorage.setItem('refreshToken', authData.refreshToken);
+            localStorage.setItem('user', JSON.stringify(authData.user));
+            console.log('[Mobile Auth] Stored tokens in localStorage from hash');
+
+            // Update auth context
+            setAuthData(authData.user, authData.accessToken);
+            console.log('[Mobile Auth] Updated AuthContext from hash');
+
+            // Clear the hash from URL for security
+            window.history.replaceState(null, '', window.location.pathname + window.location.search);
+
+            // Redirect to home
+            const redirect = searchParams.get('redirect') || '/';
+            console.log('[Mobile Auth] Redirecting to:', redirect);
+            router.push(redirect);
+            return;
+          }
+        } catch (err) {
+          console.error('[Mobile Auth] Failed to parse auth data from URL hash:', err);
+        }
+      }
+
+      // Fallback: Try to read from cookies
+      console.log('[Mobile Auth] No hash data, trying cookies...');
+      console.log('[Mobile Auth] All cookies:', document.cookie);
+
+      const getCookie = (name: string) => {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop()?.split(';').shift();
+        return null;
+      };
+
+      const accessToken = getCookie('accessToken');
+      const userDataStr = getCookie('userData');
+
+      console.log('[Mobile Auth] Cookie values:', {
+        hasAccessToken: !!accessToken,
+        accessTokenLength: accessToken?.length,
+        hasUserData: !!userDataStr,
+        userDataLength: userDataStr?.length,
+      });
+
+      if (accessToken && userDataStr) {
+        try {
+          console.log('[Mobile Auth] Attempting to parse userData from cookies...');
+          const userData = JSON.parse(decodeURIComponent(userDataStr));
+          console.log('[Mobile Auth] Successfully parsed userData:', userData);
+
+          // Store in localStorage for AuthContext
+          localStorage.setItem('accessToken', accessToken);
+          const refreshToken = getCookie('refreshToken');
+          if (refreshToken) {
+            localStorage.setItem('refreshToken', refreshToken);
+          }
+          localStorage.setItem('user', JSON.stringify(userData));
+          console.log('[Mobile Auth] Stored tokens in localStorage from cookies');
+
+          // Update auth context
+          setAuthData(userData, accessToken);
+          console.log('[Mobile Auth] Updated AuthContext from cookies');
+
+          // Redirect to home
+          const redirect = searchParams.get('redirect') || '/';
+          console.log('[Mobile Auth] Redirecting to:', redirect);
+          router.push(redirect);
+        } catch (err) {
+          console.error('[Mobile Auth] Failed to parse auth data from cookies:', err);
+          console.error('[Mobile Auth] userDataStr was:', userDataStr);
+          setError('Login failed. Please try again.');
+        }
+      } else {
+        console.warn('[Mobile Auth] Missing required cookies and hash data');
+        setError('Authentication failed. Please try again.');
+      }
+    }
+  }, [searchParams, user, authLoading, setAuthData, router]);
+
   const handlePlexLogin = async () => {
     setIsLoggingIn(true);
     setError(null);
@@ -74,7 +183,14 @@ function LoginContent() {
 
       const { pinId, authUrl } = await response.json();
 
-      // Open Plex OAuth in popup
+      // On mobile, redirect to Plex OAuth instead of using popup
+      // The callback route will set cookies and redirect back to /login?auth=success
+      if (isMobile) {
+        window.location.href = authUrl;
+        return;
+      }
+
+      // Desktop: Open Plex OAuth in popup
       const authWindow = window.open(
         authUrl,
         'plex-auth',
@@ -195,8 +311,8 @@ function LoginContent() {
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         {bookCovers.length > 0 ? (
           <>
-            {/* Floating real book covers - use up to 100 for immersive effect */}
-            {bookCovers.slice(0, 100).map((book, index) => {
+            {/* Floating real book covers - use fewer on mobile (30) vs desktop (100) for better performance */}
+            {bookCovers.slice(0, isMobile ? 30 : 100).map((book, index) => {
               const pos = generateCoverPosition(index, bookCovers.length);
               const style: React.CSSProperties = {
                 animationDelay: pos.delay,
@@ -246,23 +362,23 @@ function LoginContent() {
       </div>
 
       {/* Main content - high z-index to appear above all floating covers */}
-      <main className="relative z-50 min-h-screen flex items-center justify-center px-4">
+      <main className="relative z-50 min-h-screen flex items-center justify-center px-4 py-8">
         <div className="max-w-md w-full">
           {/* Login card */}
-          <div className="bg-gray-900/80 backdrop-blur-md rounded-2xl shadow-2xl p-8 md:p-12 border border-gray-700/50">
+          <div className="bg-gray-900/80 backdrop-blur-md rounded-2xl shadow-2xl p-6 sm:p-8 md:p-12 border border-gray-700/50">
             {/* Logo/Title */}
-            <div className="text-center mb-8">
-              <h1 className="text-4xl md:text-5xl font-bold text-white mb-3">
+            <div className="text-center mb-6 sm:mb-8">
+              <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-2 sm:mb-3">
                 ReadMeABook
               </h1>
-              <p className="text-gray-300 text-lg">
+              <p className="text-gray-300 text-base sm:text-lg">
                 Your Personal Audiobook Library Manager
               </p>
             </div>
 
             {/* Description */}
-            <div className="mb-8 text-center">
-              <p className="text-gray-400">
+            <div className="mb-6 sm:mb-8 text-center">
+              <p className="text-gray-400 text-sm sm:text-base">
                 Request audiobooks and they'll automatically download and appear in your Plex library
               </p>
             </div>
@@ -279,18 +395,18 @@ function LoginContent() {
               onClick={handlePlexLogin}
               disabled={isLoggingIn}
               loading={isLoggingIn}
-              className="w-full text-lg py-4 bg-orange-600 hover:bg-orange-700 text-white font-semibold"
+              className="w-full text-base sm:text-lg py-3 sm:py-4 bg-orange-600 hover:bg-orange-700 text-white font-semibold"
             >
               {isLoggingIn ? 'Connecting to Plex...' : 'Login with Plex'}
             </Button>
 
             {/* Info text */}
-            <div className="mt-6 text-center text-sm text-gray-500">
+            <div className="mt-4 sm:mt-6 text-center text-xs sm:text-sm text-gray-500">
               <p>You'll be redirected to Plex to authorize this application</p>
             </div>
 
             {/* Divider */}
-            <div className="relative my-8">
+            <div className="relative my-6 sm:my-8">
               <div className="absolute inset-0 flex items-center">
                 <div className="w-full border-t border-gray-700"></div>
               </div>

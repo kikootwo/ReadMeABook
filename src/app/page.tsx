@@ -35,11 +35,11 @@ export default function HomePage() {
       <div className="min-h-screen">
         <Header />
 
-      <main className="container mx-auto px-4 py-8 max-w-7xl space-y-12">
+      <main className="container mx-auto px-4 py-6 sm:py-8 max-w-7xl space-y-8 sm:space-y-12">
         {/* Popular Audiobooks */}
         <section>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">
+          <div className="flex items-center justify-between mb-4 sm:mb-6">
+            <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">
               Popular Audiobooks
             </h2>
           </div>
@@ -73,8 +73,8 @@ export default function HomePage() {
 
         {/* New Releases */}
         <section>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">
+          <div className="flex items-center justify-between mb-4 sm:mb-6">
+            <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">
               New Releases
             </h2>
           </div>
@@ -107,8 +107,8 @@ export default function HomePage() {
         </section>
 
         {/* Call to Action */}
-        <section className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-8 text-center">
-          <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+        <section className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-6 sm:p-8 text-center">
+          <h3 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
             Can't find what you're looking for?
           </h3>
           <p className="text-gray-600 dark:text-gray-400 mb-4">
