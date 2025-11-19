@@ -21,7 +21,7 @@ services:
       # Redis data persistence
       - readmeabook-redis:/var/lib/redis
 
-    environment:
+#    environment:
       # ========================================================================
       # OPTIONAL: Secrets (auto-generated on first run if not provided)
       # ========================================================================

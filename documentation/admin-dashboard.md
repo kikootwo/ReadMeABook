@@ -15,8 +15,9 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 
 **GET /api/admin/metrics**
 - Total requests (all time)
-- Active downloads (current)
-- Completed/failed requests (last 30 days)
+- Active downloads (status: 'downloading')
+- Completed requests (status: 'downloaded' or 'available', last 30 days)
+- Failed requests (status: 'failed', last 30 days)
 - Total users
 - System health indicators
 

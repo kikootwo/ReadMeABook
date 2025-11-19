@@ -32,10 +32,12 @@ export async function GET(request: NextRequest) {
         },
       }),
 
-      // Completed requests (last 30 days)
+      // Completed requests (last 30 days) - 'downloaded' and 'available' statuses
       prisma.request.count({
         where: {
-          status: 'completed',
+          status: {
+            in: ['downloaded', 'available'],
+          },
           completedAt: {
             gte: thirtyDaysAgo,
           },
