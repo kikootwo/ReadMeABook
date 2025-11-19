@@ -28,7 +28,7 @@ Copies completed downloads to standardized directory structure for Plex. Origina
 **Config:** `seeding_time_minutes` (0 = unlimited, never cleanup)
 
 **Cleanup Job:** `cleanup_seeded_torrents` (every 30 mins)
-1. Check completed requests with download history
+1. Check 'available' and 'downloaded' status requests with download history
 2. Query qBittorrent for actual `seeding_time` field
 3. Delete torrent + files only after requirement met
 4. Respects config (0 = never cleanup)

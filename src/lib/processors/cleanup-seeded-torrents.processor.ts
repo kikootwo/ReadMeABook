@@ -47,7 +47,7 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
     // Find all completed requests that have download history
     const completedRequests = await prisma.request.findMany({
       where: {
-        status: 'completed',
+        status: { in: ['available', 'downloaded'] },
       },
       include: {
         downloadHistory: {
