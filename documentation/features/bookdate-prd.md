@@ -76,7 +76,6 @@ UI Elements:
 6. **Library Scope:**
    - Radio buttons:
      - "Full Plex Library" (all audiobooks)
-     - "Listened Books Only" (>25% completion)
      - "Rated Books Only" (user-rated books)
    - Label: "Base Recommendations On"
 7. **Custom Prompt (Optional):**
@@ -147,9 +146,7 @@ UI Elements:
         "title": "Project Hail Mary",
         "author": "Andy Weir",
         "narrator": "Ray Porter",
-        "genres": ["Science Fiction", "Adventure"],
-        "rating": 5,
-        "listen_status": "completed"
+        "rating": 5
       }
       // ... up to 40 books
     ],
@@ -157,18 +154,18 @@ UI Elements:
       {
         "title": "The Martian",
         "author": "Andy Weir",
-        "action": "right"
+        "user_action": "requested"
       },
       {
         "title": "Twilight",
         "author": "Stephenie Meyer",
-        "action": "left"
+        "user_action": "rejected"
       }
       // ... up to 10 swipes
     ],
     "custom_preferences": "User's custom prompt text here (if provided)"
   },
-  "instructions": "Based on the user's library and swipe history, recommend 20 audiobooks they would enjoy. Exclude books already in their library. Return ONLY valid JSON.",
+  "instructions": "Based on the user's library and swipe history, recommend 20 audiobooks they would enjoy. Important rules:\n1. DO NOT recommend any books already in the user's library\n2. DO NOT recommend any books from the swipe history (whether requested, rejected, or dismissed)\n3. Focus on variety and quality\n4. Consider user ratings if available (0-10 scale, higher = liked more)\n5. Learn from rejected books to avoid similar recommendations\n6. Learn from requested books to find similar ones\nReturn ONLY valid JSON with no additional text or formatting.",
   "response_format": {
     "recommendations": [
       {
@@ -355,7 +352,7 @@ UI Elements:
   provider: 'openai' | 'claude';
   apiKey: string; // Encrypted at rest
   model: string; // e.g., 'gpt-4o', 'claude-sonnet-4-5'
-  libraryScope: 'full' | 'listened' | 'rated';
+  libraryScope: 'full' | 'rated';
   customPrompt?: string;
   isVerified: boolean;
   isEnabled: boolean; // Admin-controlled global toggle
@@ -446,15 +443,10 @@ UI Elements:
 
 ### 8.5 Plex Library Integration
 
-**Listened Books Detection:**
-- Query Plex API for audiobooks with `viewOffset > 0`
-- Calculate listen percentage: `(viewOffset / duration) * 100`
-- Filter: Only books with listen percentage >25%
-- Fallback: If Plex API doesn't provide `viewOffset`, exclude "Listened Only" option from UI
-
 **Rated Books Detection:**
-- Query Plex API for audiobooks with user ratings
-- Filter: Only books with ratings >0
+- Query Plex API for audiobooks with user ratings (`userRating` field)
+- Filter: Only books with `userRating NOT NULL`
+- User ratings in Plex use a 0-10 scale
 
 **Full Library:**
 - Query all audiobooks (no filter)

@@ -43,6 +43,11 @@
 - **RequestCard, StatusBadge, ProgressBar** → [frontend/components.md](frontend/components.md)
 - **Pages: home, search, requests, profile** → [frontend/components.md](frontend/components.md)
 
+## BookDate (AI Recommendations)
+- **AI-powered recommendations, swipe interface** → [features/bookdate.md](features/bookdate.md)
+- **Configuration, OpenAI/Claude integration** → [features/bookdate.md](features/bookdate.md)
+- **Setup wizard integration, settings** → [features/bookdate.md](features/bookdate.md)
+
 ## Admin Features
 - **Dashboard (metrics, downloads, requests)** → [admin-dashboard.md](admin-dashboard.md)
 - **Jobs management UI** → [backend/services/scheduler.md](backend/services/scheduler.md)

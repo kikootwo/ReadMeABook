@@ -14,6 +14,7 @@ import { PlexStep } from './steps/PlexStep';
 import { ProwlarrStep } from './steps/ProwlarrStep';
 import { DownloadClientStep } from './steps/DownloadClientStep';
 import { PathsStep } from './steps/PathsStep';
+import { BookDateStep } from './steps/BookDateStep';
 import { ReviewStep } from './steps/ReviewStep';
 import { FinalizeStep } from './steps/FinalizeStep';
 
@@ -39,6 +40,12 @@ interface SetupState {
   downloadClientPassword: string;
   downloadDir: string;
   mediaDir: string;
+  bookdateProvider: string;
+  bookdateApiKey: string;
+  bookdateModel: string;
+  bookdateLibraryScope: string;
+  bookdateCustomPrompt: string;
+  bookdateConfigured: boolean;
   validated: {
     plex: boolean;
     prowlarr: boolean;
@@ -65,6 +72,12 @@ export default function SetupWizard() {
     downloadClientPassword: '',
     downloadDir: '/downloads',
     mediaDir: '/media/audiobooks',
+    bookdateProvider: 'openai',
+    bookdateApiKey: '',
+    bookdateModel: '',
+    bookdateLibraryScope: 'full',
+    bookdateCustomPrompt: '',
+    bookdateConfigured: false,
     validated: {
       plex: false,
       prowlarr: false,
@@ -76,7 +89,7 @@ export default function SetupWizard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const totalSteps = 8;
+  const totalSteps = 9;
 
   const updateState = (updates: Partial<SetupState>) => {
     setState((prev) => ({ ...prev, ...updates }));
@@ -124,6 +137,13 @@ export default function SetupWizard() {
             download_dir: state.downloadDir,
             media_dir: state.mediaDir,
           },
+          bookdate: state.bookdateConfigured ? {
+            provider: state.bookdateProvider,
+            apiKey: state.bookdateApiKey,
+            model: state.bookdateModel,
+            libraryScope: state.bookdateLibraryScope,
+            customPrompt: state.bookdateCustomPrompt || null,
+          } : null,
         }),
       });
 
@@ -141,10 +161,10 @@ export default function SetupWizard() {
         localStorage.setItem('user', JSON.stringify(data.user));
 
         // Go to finalize step to run initial jobs
-        goToStep(8);
+        goToStep(9);
       } else {
         // Fallback if no tokens returned
-        goToStep(8);
+        goToStep(9);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Setup failed');
@@ -218,23 +238,39 @@ export default function SetupWizard() {
 
       case 7:
         return (
-          <ReviewStep
-            config={state}
-            loading={loading}
-            error={error}
-            onComplete={completeSetup}
+          <BookDateStep
+            bookdateProvider={state.bookdateProvider}
+            bookdateApiKey={state.bookdateApiKey}
+            bookdateModel={state.bookdateModel}
+            bookdateLibraryScope={state.bookdateLibraryScope}
+            bookdateCustomPrompt={state.bookdateCustomPrompt}
+            bookdateConfigured={state.bookdateConfigured}
+            onUpdate={updateField}
+            onNext={() => goToStep(8)}
+            onSkip={() => goToStep(8)}
             onBack={() => goToStep(6)}
           />
         );
 
       case 8:
         return (
+          <ReviewStep
+            config={state}
+            loading={loading}
+            error={error}
+            onComplete={completeSetup}
+            onBack={() => goToStep(7)}
+          />
+        );
+
+      case 9:
+        return (
           <FinalizeStep
             onComplete={() => {
               // Force full page reload to initialize auth context with new tokens
               window.location.href = '/';
             }}
-            onBack={() => goToStep(7)}
+            onBack={() => goToStep(8)}
           />
         );
 
