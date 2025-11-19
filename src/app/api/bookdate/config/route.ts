@@ -75,7 +75,25 @@ async function saveConfig(req: AuthenticatedRequest) {
       );
     }
 
-    // Build update/create data
+    // Determine which API key to use
+    let encryptedApiKeyToUse: string;
+
+    if (apiKey) {
+      // New API key provided - encrypt it
+      const encryptionService = getEncryptionService();
+      encryptedApiKeyToUse = encryptionService.encrypt(apiKey);
+    } else if (existingConfig) {
+      // No new API key, use existing one
+      encryptedApiKeyToUse = existingConfig.apiKey;
+    } else {
+      // This shouldn't happen due to validation above, but just in case
+      return NextResponse.json(
+        { error: 'API key is required for new configuration' },
+        { status: 400 }
+      );
+    }
+
+    // Build update data (only include apiKey if a new one was provided)
     const updateData: any = {
       provider,
       model,
@@ -86,6 +104,12 @@ async function saveConfig(req: AuthenticatedRequest) {
       updatedAt: new Date(),
     };
 
+    // Only update API key if a new one was provided
+    if (apiKey) {
+      updateData.apiKey = encryptedApiKeyToUse;
+    }
+
+    // Create data must always include apiKey (for upsert validation)
     const createData: any = {
       userId,
       provider,
@@ -94,21 +118,8 @@ async function saveConfig(req: AuthenticatedRequest) {
       customPrompt: customPrompt || null,
       isEnabled: isEnabled !== undefined ? isEnabled : true,
       isVerified: true,
+      apiKey: encryptedApiKeyToUse,
     };
-
-    // Only encrypt and update API key if a new one was provided
-    if (apiKey) {
-      const encryptionService = getEncryptionService();
-      const encryptedApiKey = encryptionService.encrypt(apiKey);
-      updateData.apiKey = encryptedApiKey;
-      createData.apiKey = encryptedApiKey;
-    } else if (!existingConfig) {
-      // This shouldn't happen due to validation above, but just in case
-      return NextResponse.json(
-        { error: 'API key is required for new configuration' },
-        { status: 400 }
-      );
-    }
 
     // Upsert configuration
     const config = await prisma.bookDateConfig.upsert({
