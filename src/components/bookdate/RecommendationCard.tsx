@@ -35,19 +35,37 @@ export function RecommendationCard({
   };
 
   const swipeHandlers = useSwipeable({
-    onSwipedLeft: () => onSwipe('left'),
-    onSwipedRight: handleSwipeRight,
-    onSwipedUp: () => onSwipe('up'),
     onSwiping: (eventData) => {
       setDragOffset({ x: eventData.deltaX, y: eventData.deltaY });
     },
-    onSwiped: () => {
+    onSwiped: (eventData) => {
+      // Check final position when user releases - must be at 150px threshold
+      const finalX = eventData.deltaX;
+      const finalY = eventData.deltaY;
+      const threshold = 150;
+
+      // Determine which direction had the strongest swipe at release
+      if (Math.abs(finalX) > Math.abs(finalY)) {
+        // Horizontal swipe
+        if (finalX > threshold) {
+          handleSwipeRight();
+        } else if (finalX < -threshold) {
+          onSwipe('left');
+        }
+      } else {
+        // Vertical swipe
+        if (finalY < -threshold) {
+          onSwipe('up');
+        }
+      }
+
+      // Reset drag offset
       setDragOffset({ x: 0, y: 0 });
     },
     trackMouse: true,
     preventScrollOnSwipe: true,
-    // Require user to swipe at least 150px before triggering action
-    delta: 150,
+    // Don't use built-in delta threshold - we'll check manually in onSwiped
+    delta: 0,
   });
 
   const getOverlayOpacity = (threshold: number, value: number) => {
@@ -181,7 +199,7 @@ export function RecommendationCard({
               Request "{recommendation.title}"?
             </h3>
             <p className="text-gray-600 dark:text-gray-400 mb-6">
-              Do you want to request this audiobook, or have you already read/listened to it elsewhere?
+              Do you want to request this audiobook, or have you already read/listened to and enjoyed it?
             </p>
             <div className="flex gap-3">
               <button
@@ -194,7 +212,7 @@ export function RecommendationCard({
                 onClick={() => handleToastAction('known')}
                 className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
-                Mark as Known
+                Mark as Liked
               </button>
               <button
                 onClick={() => handleToastAction('request')}

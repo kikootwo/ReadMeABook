@@ -263,7 +263,7 @@ export default function BookDatePage() {
             onClick={handleUndo}
             className="fixed bottom-8 left-8 px-6 py-3 bg-gray-800 hover:bg-gray-900 text-white rounded-lg font-medium shadow-lg transition-all animate-fade-in"
           >
-            ↩️ Undo
+            ↩️ {lastSwipe.action === 'left' ? 'Undo Dislike' : 'Undo Dismiss'}
           </button>
         )}
 

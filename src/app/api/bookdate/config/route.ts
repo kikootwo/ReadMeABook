@@ -183,9 +183,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  return requireAdmin(req, saveConfig);
+  return requireAuth(req, async (authReq) => requireAdmin(authReq, saveConfig));
 }
 
 export async function DELETE(req: NextRequest) {
-  return requireAdmin(req, deleteConfig);
+  return requireAuth(req, async (authReq) => requireAdmin(authReq, deleteConfig));
 }
