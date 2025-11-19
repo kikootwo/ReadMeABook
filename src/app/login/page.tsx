@@ -67,37 +67,48 @@ function LoginContent() {
     }
   }, [user, authLoading, router, searchParams]);
 
-  // Handle Plex OAuth callback on mobile
+  // Handle Plex OAuth callback (mobile redirect with cookies)
   useEffect(() => {
-    const completeMobileLogin = async () => {
-      const pinIdString = sessionStorage.getItem('plexPinId');
-      const redirect = sessionStorage.getItem('plexRedirect');
+    const authSuccess = searchParams.get('auth');
 
-      if (pinIdString && !user && !authLoading) {
-        setIsLoggingIn(true);
+    if (authSuccess === 'success' && !user && !authLoading) {
+      // Tokens are already set in cookies by the callback route
+      // Read them and store in localStorage for the auth context
+      const getCookie = (name: string) => {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop()?.split(';').shift();
+        return null;
+      };
+
+      const accessToken = getCookie('accessToken');
+      const userDataStr = getCookie('userData');
+
+      if (accessToken && userDataStr) {
         try {
-          // Complete login with stored pinId (parse as number)
-          const pinId = parseInt(pinIdString, 10);
-          await login(pinId);
+          const userData = JSON.parse(decodeURIComponent(userDataStr));
 
-          // Clear sessionStorage
-          sessionStorage.removeItem('plexPinId');
-          sessionStorage.removeItem('plexRedirect');
+          // Store in localStorage for AuthContext
+          localStorage.setItem('accessToken', accessToken);
+          const refreshToken = getCookie('refreshToken');
+          if (refreshToken) {
+            localStorage.setItem('refreshToken', refreshToken);
+          }
+          localStorage.setItem('user', JSON.stringify(userData));
 
-          // Redirect to intended page
-          router.push(redirect || '/');
+          // Update auth context
+          setAuthData(userData, accessToken);
+
+          // Redirect to home
+          const redirect = searchParams.get('redirect') || '/';
+          router.push(redirect);
         } catch (err) {
-          setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
-          sessionStorage.removeItem('plexPinId');
-          sessionStorage.removeItem('plexRedirect');
-        } finally {
-          setIsLoggingIn(false);
+          console.error('Failed to parse auth data from cookies:', err);
+          setError('Login failed. Please try again.');
         }
       }
-    };
-
-    completeMobileLogin();
-  }, [user, authLoading, login, router]);
+    }
+  }, [searchParams, user, authLoading, setAuthData, router]);
 
   const handlePlexLogin = async () => {
     setIsLoggingIn(true);
@@ -116,12 +127,8 @@ function LoginContent() {
       const { pinId, authUrl } = await response.json();
 
       // On mobile, redirect to Plex OAuth instead of using popup
+      // The callback route will set cookies and redirect back to /login?auth=success
       if (isMobile) {
-        // Store pinId in sessionStorage for callback
-        sessionStorage.setItem('plexPinId', pinId);
-        sessionStorage.setItem('plexRedirect', searchParams.get('redirect') || '/');
-
-        // Redirect to Plex OAuth
         window.location.href = authUrl;
         return;
       }

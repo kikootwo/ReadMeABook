@@ -183,7 +183,51 @@ export async function GET(request: NextRequest) {
 
     const refreshToken = generateRefreshToken(user.id);
 
-    // Return tokens and user info
+    // Detect if this is a browser request (mobile redirect) vs AJAX (desktop popup polling)
+    const accept = request.headers.get('accept') || '';
+    const isBrowserRequest = accept.includes('text/html');
+
+    // For browser requests (mobile), set cookies and redirect to login page
+    if (isBrowserRequest) {
+      const response = NextResponse.redirect(new URL('/login?auth=success', request.url));
+
+      // Set tokens in cookies
+      response.cookies.set('accessToken', accessToken, {
+        httpOnly: false, // Need to be accessible to JavaScript
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60, // 1 hour
+        path: '/',
+      });
+
+      response.cookies.set('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 7, // 7 days
+        path: '/',
+      });
+
+      // Also set user data as cookie for immediate access
+      response.cookies.set('userData', JSON.stringify({
+        id: user.id,
+        plexId: user.plexId,
+        username: user.plexUsername,
+        email: user.plexEmail,
+        role: user.role,
+        avatarUrl: user.avatarUrl,
+      }), {
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60, // 1 hour
+        path: '/',
+      });
+
+      return response;
+    }
+
+    // Return tokens and user info (for AJAX requests from desktop popup)
     return NextResponse.json({
       success: true,
       authorized: true,
