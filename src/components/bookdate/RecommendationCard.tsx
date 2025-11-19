@@ -39,10 +39,10 @@ export function RecommendationCard({
       setDragOffset({ x: eventData.deltaX, y: eventData.deltaY });
     },
     onSwiped: (eventData) => {
-      // Check final position when user releases - must be at 150px threshold
+      // Check final position when user releases - must be at 100px threshold
       const finalX = eventData.deltaX;
       const finalY = eventData.deltaY;
-      const threshold = 150;
+      const threshold = 100;
 
       // Determine which direction had the strongest swipe at release
       if (Math.abs(finalX) > Math.abs(finalY)) {
@@ -72,6 +72,22 @@ export function RecommendationCard({
     return Math.min(Math.abs(value) / threshold, 1);
   };
 
+  // Determine which overlay to show based on dominant direction
+  const getDominantDirection = () => {
+    const absX = Math.abs(dragOffset.x);
+    const absY = Math.abs(dragOffset.y);
+
+    if (absX < 50 && absY < 50) return null; // No overlay if not dragged enough
+
+    if (absX > absY) {
+      return dragOffset.x > 0 ? 'right' : 'left';
+    } else {
+      return dragOffset.y < 0 ? 'up' : null; // Only up swipe for vertical
+    }
+  };
+
+  const dominantDirection = getDominantDirection();
+
   return (
     <>
       <div
@@ -82,11 +98,11 @@ export function RecommendationCard({
           transition: dragOffset.x === 0 && dragOffset.y === 0 ? 'transform 0.3s ease-out' : 'none',
         }}
       >
-        {/* Drag overlay indicators */}
-        {dragOffset.x > 50 && (
+        {/* Drag overlay indicators - show only dominant direction */}
+        {dominantDirection === 'right' && (
           <div
             className="absolute inset-0 bg-green-500 flex items-center justify-center pointer-events-none z-10"
-            style={{ opacity: getOverlayOpacity(150, dragOffset.x) * 0.4 }}
+            style={{ opacity: getOverlayOpacity(100, dragOffset.x) * 0.4 }}
           >
             <div className="bg-white rounded-full p-6 shadow-lg flex flex-col items-center gap-2">
               <span className="text-6xl">✅</span>
@@ -94,10 +110,10 @@ export function RecommendationCard({
             </div>
           </div>
         )}
-        {dragOffset.x < -50 && (
+        {dominantDirection === 'left' && (
           <div
             className="absolute inset-0 bg-red-500 flex items-center justify-center pointer-events-none z-10"
-            style={{ opacity: getOverlayOpacity(150, dragOffset.x) * 0.4 }}
+            style={{ opacity: getOverlayOpacity(100, dragOffset.x) * 0.4 }}
           >
             <div className="bg-white rounded-full p-6 shadow-lg flex flex-col items-center gap-2">
               <span className="text-6xl">❌</span>
@@ -105,10 +121,10 @@ export function RecommendationCard({
             </div>
           </div>
         )}
-        {dragOffset.y < -50 && (
+        {dominantDirection === 'up' && (
           <div
             className="absolute inset-0 bg-blue-500 flex items-center justify-center pointer-events-none z-10"
-            style={{ opacity: getOverlayOpacity(150, dragOffset.y) * 0.4 }}
+            style={{ opacity: getOverlayOpacity(100, dragOffset.y) * 0.4 }}
           >
             <div className="bg-white rounded-full p-6 shadow-lg flex flex-col items-center gap-2">
               <span className="text-6xl">⬆️</span>
