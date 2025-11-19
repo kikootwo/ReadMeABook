@@ -7,10 +7,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import bcrypt from 'bcrypt';
 import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
+import { getEncryptionService } from '@/lib/services/encryption.service';
 
 export async function POST(request: NextRequest) {
   try {
-    const { admin, plex, prowlarr, downloadClient, paths } = await request.json();
+    const { admin, plex, prowlarr, downloadClient, paths, bookdate } = await request.json();
 
     // Validate required fields
     if (
@@ -130,6 +131,41 @@ export async function POST(request: NextRequest) {
       update: { value: paths.media_dir },
       create: { key: 'media_dir', value: paths.media_dir },
     });
+
+    // BookDate configuration (optional)
+    if (bookdate && bookdate.provider && bookdate.apiKey && bookdate.model && bookdate.libraryScope) {
+      console.log('[Setup] Saving BookDate configuration');
+
+      const encryptionService = getEncryptionService();
+      const encryptedApiKey = encryptionService.encrypt(bookdate.apiKey);
+
+      await prisma.bookDateConfig.upsert({
+        where: { userId: adminUser.id },
+        update: {
+          provider: bookdate.provider,
+          apiKey: encryptedApiKey,
+          model: bookdate.model,
+          libraryScope: bookdate.libraryScope,
+          customPrompt: bookdate.customPrompt || null,
+          isVerified: true,
+          isEnabled: true,
+        },
+        create: {
+          userId: adminUser.id,
+          provider: bookdate.provider,
+          apiKey: encryptedApiKey,
+          model: bookdate.model,
+          libraryScope: bookdate.libraryScope,
+          customPrompt: bookdate.customPrompt || null,
+          isVerified: true,
+          isEnabled: true,
+        },
+      });
+
+      console.log('[Setup] BookDate configuration saved');
+    } else {
+      console.log('[Setup] BookDate configuration skipped');
+    }
 
     // Mark setup as complete
     await prisma.configuration.upsert({

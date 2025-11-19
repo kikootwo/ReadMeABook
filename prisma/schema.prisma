@@ -37,7 +37,10 @@ model User {
   lastLoginAt   DateTime? @map("last_login_at")
 
   // Relations
-  requests Request[]
+  requests                Request[]
+  bookDateConfig          BookDateConfig?
+  bookDateRecommendations BookDateRecommendation[]
+  bookDateSwipes          BookDateSwipe[]
 
   @@index([plexId])
   @@index([role])
@@ -99,6 +102,7 @@ model PlexLibrary {
   summary       String?   @db.Text
   duration      Int?      // Duration in milliseconds (Plex format)
   year          Int?
+  userRating    Decimal?  @map("user_rating") @db.Decimal(3, 1) // User's rating (0-10 scale from Plex)
 
   // File information
   filePath      String?   @map("file_path") @db.Text
@@ -305,4 +309,72 @@ model ScheduledJob {
   @@index([type])
   @@index([enabled])
   @@map("scheduled_jobs")
+}
+
+// ============================================================================
+// BOOKDATE TABLES
+// AI-powered audiobook recommendation system
+// Documentation: documentation/features/bookdate-prd.md
+// ============================================================================
+
+model BookDateConfig {
+  id            String   @id @default(uuid())
+  userId        String   @unique @map("user_id")
+  provider      String   // 'openai' | 'claude'
+  apiKey        String   @map("api_key") @db.Text // Encrypted at rest (AES-256)
+  model         String   // e.g., 'gpt-4o', 'claude-sonnet-4-5-20250929'
+  libraryScope  String   @map("library_scope") // 'full' | 'listened' | 'rated'
+  customPrompt  String?  @map("custom_prompt") @db.Text
+  isVerified    Boolean  @default(false) @map("is_verified")
+  isEnabled     Boolean  @default(true) @map("is_enabled") // Admin toggle (global)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("bookdate_config")
+}
+
+model BookDateRecommendation {
+  id             String    @id @default(uuid())
+  userId         String    @map("user_id")
+  batchId        String    @map("batch_id") // Group recommendations from same AI call
+  title          String
+  author         String
+  narrator       String?
+  rating         Decimal?  @db.Decimal(3, 2)
+  description    String?   @db.Text
+  coverUrl       String?   @map("cover_url") @db.Text
+  audnexusAsin   String?   @map("audnexus_asin") // For matching
+  aiReason       String    @map("ai_reason") @db.Text // Why AI recommended this
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  swipes BookDateSwipe[]
+
+  @@index([userId, batchId])
+  @@index([userId, createdAt])
+  @@map("bookdate_recommendations")
+}
+
+model BookDateSwipe {
+  id               String    @id @default(uuid())
+  userId           String    @map("user_id")
+  recommendationId String?   @map("recommendation_id") // NULL if book not from BookDate
+  bookTitle        String    @map("book_title")
+  bookAuthor       String    @map("book_author")
+  action           String    // 'left' | 'right' | 'up'
+  markedAsKnown    Boolean   @default(false) @map("marked_as_known") // True if "Mark as Known"
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  user           User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recommendation BookDateRecommendation? @relation(fields: [recommendationId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([recommendationId])
+  @@map("bookdate_swipes")
 }

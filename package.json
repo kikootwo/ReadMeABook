@@ -32,6 +32,7 @@
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-hook-form": "^7.66.0",
+    "react-swipeable": "^7.0.1",
     "string-similarity": "^4.0.4",
     "swr": "^2.3.6",
     "xml2js": "^0.6.2",

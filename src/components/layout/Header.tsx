@@ -5,7 +5,7 @@
 
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/Button';
@@ -14,6 +14,43 @@ export function Header() {
   const { user, logout } = useAuth();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [showBookDate, setShowBookDate] = useState(false);
+
+  // Check if BookDate is configured
+  useEffect(() => {
+    async function checkBookDate() {
+      if (!user) {
+        setShowBookDate(false);
+        return;
+      }
+
+      try {
+        const accessToken = localStorage.getItem('accessToken');
+        if (!accessToken) {
+          setShowBookDate(false);
+          return;
+        }
+
+        const response = await fetch('/api/bookdate/config', {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        });
+
+        const data = await response.json();
+        setShowBookDate(
+          data.config &&
+          data.config.isVerified &&
+          data.config.isEnabled
+        );
+      } catch (error) {
+        console.error('Failed to check BookDate config:', error);
+        setShowBookDate(false);
+      }
+    }
+
+    checkBookDate();
+  }, [user]);
 
   const handleLogin = async () => {
     try {
@@ -59,6 +96,14 @@ export function Header() {
             >
               Search
             </Link>
+            {showBookDate && (
+              <Link
+                href="/bookdate"
+                className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              >
+                BookDate
+              </Link>
+            )}
             {user && (
               <Link
                 href="/requests"
@@ -176,6 +221,15 @@ export function Header() {
               >
                 Search
               </Link>
+              {showBookDate && (
+                <Link
+                  href="/bookdate"
+                  onClick={() => setShowMobileMenu(false)}
+                  className="px-3 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors"
+                >
+                  BookDate
+                </Link>
+              )}
               {user && (
                 <Link
                   href="/requests"

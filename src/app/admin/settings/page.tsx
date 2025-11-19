@@ -72,7 +72,7 @@ export default function AdminSettings() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
-  const [activeTab, setActiveTab] = useState<'plex' | 'prowlarr' | 'download' | 'paths' | 'account'>('plex');
+  const [activeTab, setActiveTab] = useState<'plex' | 'prowlarr' | 'download' | 'paths' | 'account' | 'bookdate'>('plex');
 
   // Password change form state
   const [passwordForm, setPasswordForm] = useState({
@@ -81,6 +81,17 @@ export default function AdminSettings() {
     confirmPassword: '',
   });
   const [changingPassword, setChangingPassword] = useState(false);
+
+  // BookDate configuration state
+  const [bookdateProvider, setBookdateProvider] = useState<string>('openai');
+  const [bookdateApiKey, setBookdateApiKey] = useState<string>('');
+  const [bookdateModel, setBookdateModel] = useState<string>('');
+  const [bookdateLibraryScope, setBookdateLibraryScope] = useState<string>('full');
+  const [bookdateCustomPrompt, setBookdateCustomPrompt] = useState<string>('');
+  const [bookdateConfigured, setBookdateConfigured] = useState<boolean>(false);
+  const [bookdateModels, setBookdateModels] = useState<{ id: string; name: string }[]>([]);
+  const [testingBookdate, setTestingBookdate] = useState(false);
+  const [clearingBookdateSwipes, setClearingBookdateSwipes] = useState(false);
 
   useEffect(() => {
     fetchSettings();
@@ -115,6 +126,12 @@ export default function AdminSettings() {
       fetchIndexers();
     }
   }, [activeTab, settings?.prowlarr.url, settings?.prowlarr.apiKey]);
+
+  useEffect(() => {
+    if (activeTab === 'bookdate') {
+      fetchBookdateConfig();
+    }
+  }, [activeTab]);
 
   const fetchSettings = async () => {
     try {
@@ -178,6 +195,127 @@ export default function AdminSettings() {
       }
     } finally {
       setLoadingIndexers(false);
+    }
+  };
+
+  const fetchBookdateConfig = async () => {
+    try {
+      const response = await fetchWithAuth('/api/bookdate/config');
+      const data = await response.json();
+
+      if (data.config) {
+        setBookdateProvider(data.config.provider || 'openai');
+        setBookdateModel(data.config.model || '');
+        setBookdateLibraryScope(data.config.libraryScope || 'full');
+        setBookdateCustomPrompt(data.config.customPrompt || '');
+        setBookdateConfigured(data.config.isVerified || false);
+      }
+    } catch (error) {
+      console.error('Failed to load BookDate config:', error);
+    }
+  };
+
+  const handleTestBookdateConnection = async () => {
+    if (!bookdateApiKey.trim()) {
+      setMessage({ type: 'error', text: 'Please enter an API key' });
+      return;
+    }
+
+    setTestingBookdate(true);
+    setMessage(null);
+
+    try {
+      const response = await fetchWithAuth('/api/bookdate/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: bookdateProvider,
+          apiKey: bookdateApiKey,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Connection test failed');
+      }
+
+      setBookdateModels(data.models || []);
+      setMessage({ type: 'success', text: 'Connection successful! Please select a model.' });
+
+      // Auto-select first model if none selected
+      if (!bookdateModel && data.models?.length > 0) {
+        setBookdateModel(data.models[0].id);
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Connection test failed' });
+    } finally {
+      setTestingBookdate(false);
+    }
+  };
+
+  const handleSaveBookdateConfig = async () => {
+    if (!bookdateApiKey.trim() || !bookdateModel || !bookdateLibraryScope) {
+      setMessage({ type: 'error', text: 'Please fill in all required fields and test your connection' });
+      return;
+    }
+
+    setSaving(true);
+    setMessage(null);
+
+    try {
+      const response = await fetchWithAuth('/api/bookdate/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: bookdateProvider,
+          apiKey: bookdateApiKey,
+          model: bookdateModel,
+          libraryScope: bookdateLibraryScope,
+          customPrompt: bookdateCustomPrompt || null,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to save configuration');
+      }
+
+      setMessage({ type: 'success', text: 'BookDate configuration saved successfully!' });
+      setBookdateConfigured(true);
+      setBookdateApiKey(''); // Clear API key from UI after save
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Failed to save configuration' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClearBookdateSwipes = async () => {
+    if (!confirm('This will clear all swipe history. Continue?')) {
+      return;
+    }
+
+    setClearingBookdateSwipes(true);
+    setMessage(null);
+
+    try {
+      const response = await fetchWithAuth('/api/bookdate/swipes', {
+        method: 'DELETE',
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to clear swipe history');
+      }
+
+      setMessage({ type: 'success', text: 'Swipe history cleared successfully!' });
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Failed to clear swipe history' });
+    } finally {
+      setClearingBookdateSwipes(false);
     }
   };
 
@@ -476,6 +614,7 @@ export default function AdminSettings() {
     { id: 'prowlarr', label: 'Indexers', icon: '🔍' },
     { id: 'download', label: 'Download Client', icon: '⬇️' },
     { id: 'paths', label: 'Paths', icon: '📁' },
+    { id: 'bookdate', label: 'BookDate', icon: '📚' },
     ...(isLocalAdmin ? [{ id: 'account', label: 'Account', icon: '🔒' }] : []),
   ];
 
@@ -1078,6 +1217,184 @@ export default function AdminSettings() {
               </div>
             )}
 
+            {/* BookDate Tab */}
+            {activeTab === 'bookdate' && (
+              <div className="space-y-6 max-w-2xl">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                    BookDate Configuration
+                  </h2>
+                  <p className="text-gray-600 dark:text-gray-400 mb-6">
+                    Configure AI-powered audiobook recommendations. Users can set up their own API keys for personalized recommendations.
+                  </p>
+                </div>
+
+                {/* AI Provider */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    AI Provider
+                  </label>
+                  <select
+                    value={bookdateProvider}
+                    onChange={(e) => {
+                      setBookdateProvider(e.target.value);
+                      setBookdateModels([]);
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="openai">OpenAI</option>
+                    <option value="claude">Claude (Anthropic)</option>
+                  </select>
+                </div>
+
+                {/* API Key */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    API Key
+                  </label>
+                  <Input
+                    type="password"
+                    value={bookdateApiKey}
+                    onChange={(e) => {
+                      setBookdateApiKey(e.target.value);
+                      setBookdateModels([]);
+                    }}
+                    placeholder={
+                      bookdateConfigured
+                        ? '••••••••••••••••'
+                        : (bookdateProvider === 'openai' ? 'sk-...' : 'sk-ant-...')
+                    }
+                  />
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Your API key is stored securely and encrypted. Leave blank to keep existing key.
+                  </p>
+                </div>
+
+                {/* Test Connection Button */}
+                <Button
+                  onClick={handleTestBookdateConnection}
+                  loading={testingBookdate}
+                  disabled={!bookdateApiKey.trim()}
+                  variant="outline"
+                  className="w-full"
+                >
+                  Test Connection & Fetch Models
+                </Button>
+
+                {/* Model Selection */}
+                {bookdateModels.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Select Model
+                    </label>
+                    <select
+                      value={bookdateModel}
+                      onChange={(e) => setBookdateModel(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">-- Choose a model --</option>
+                      {bookdateModels.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Library Scope */}
+                {(bookdateModels.length > 0 || bookdateConfigured) && bookdateModel && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Base Recommendations On
+                    </label>
+                    <div className="space-y-3">
+                      <label className="flex items-start cursor-pointer">
+                        <input
+                          type="radio"
+                          value="full"
+                          checked={bookdateLibraryScope === 'full'}
+                          onChange={(e) => setBookdateLibraryScope(e.target.value)}
+                          className="mt-1 mr-3"
+                        />
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white">Full Plex Library</div>
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            All audiobooks in your Plex library
+                          </p>
+                        </div>
+                      </label>
+                      <label className="flex items-start cursor-pointer">
+                        <input
+                          type="radio"
+                          value="rated"
+                          checked={bookdateLibraryScope === 'rated'}
+                          onChange={(e) => setBookdateLibraryScope(e.target.value)}
+                          className="mt-1 mr-3"
+                        />
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-white">Rated Books Only</div>
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            Books you've rated in Plex
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {/* Custom Prompt */}
+                {(bookdateModels.length > 0 || bookdateConfigured) && bookdateModel && bookdateLibraryScope && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Additional Preferences (Optional)
+                    </label>
+                    <textarea
+                      value={bookdateCustomPrompt}
+                      onChange={(e) => setBookdateCustomPrompt(e.target.value)}
+                      placeholder="e.g., 'I prefer sci-fi with strong female leads' or 'No romance novels'"
+                      rows={3}
+                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                )}
+
+                {/* Save Button */}
+                {bookdateModel && bookdateLibraryScope && (
+                  <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+                    <Button
+                      onClick={handleSaveBookdateConfig}
+                      loading={saving}
+                      disabled={!bookdateModel || !bookdateLibraryScope}
+                      className="w-full"
+                    >
+                      Save BookDate Configuration
+                    </Button>
+                  </div>
+                )}
+
+                {/* Clear Swipe History */}
+                {bookdateConfigured && (
+                  <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                      Clear Swipe History
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                      Remove all your swipe history and cached recommendations. This will reset your recommendations.
+                    </p>
+                    <Button
+                      onClick={handleClearBookdateSwipes}
+                      loading={clearingBookdateSwipes}
+                      variant="outline"
+                      className="border-red-300 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
+                    >
+                      Clear Swipe History
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Account Tab - Only visible to local admin */}
             {activeTab === 'account' && isLocalAdmin && (
               <div className="space-y-6 max-w-2xl">
@@ -1177,7 +1494,7 @@ export default function AdminSettings() {
           </div>
 
           {/* Footer - Hide for Account tab */}
-          {activeTab !== 'account' && (
+          {activeTab !== 'account' && activeTab !== 'bookdate' && (
             <div className="bg-gray-50 dark:bg-gray-900 px-8 py-4 border-t border-gray-200 dark:border-gray-700">
               <div className="flex justify-end gap-4">
                 <Button variant="outline" onClick={() => window.location.reload()}>

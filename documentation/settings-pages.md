@@ -10,7 +10,8 @@ Single tabbed interface for admins to view/modify system configuration post-setu
 2. **Prowlarr** - URL, API key (masked), indexer selection with priority, seeding time, RSS monitoring toggle
 3. **Download Client** - Type, URL, credentials (masked)
 4. **Paths** - Download + media directories
-5. **Account** - Local admin password change (only visible to setup admin)
+5. **BookDate** - AI provider, API key (encrypted), model selection, library scope, custom prompt, swipe history
+6. **Account** - Local admin password change (only visible to setup admin)
 
 ## Validation Flow
 
@@ -33,6 +34,16 @@ Single tabbed interface for admins to view/modify system configuration post-setu
 4. **Button text adapts:**
    - "Test Connection" when URL/API key changed
    - "Refresh Indexers" when connection info unchanged
+
+**BookDate:**
+1. **On tab load:** Current BookDate configuration loaded from database automatically
+2. **Changing AI provider:** Resets model selection
+3. **Test connection:** Required to fetch available models before saving
+4. **Changing API key:** Must test connection to verify and fetch models
+5. **Saving configuration:** Validates all fields (provider, API key, model, library scope)
+6. **Clear swipe history:** Confirmation dialog, removes all swipes and cached recommendations
+7. No "Save Changes" button - uses dedicated "Save BookDate Configuration" button
+8. Accessible to all authenticated users (not just admins)
 
 **Account (local admin only):**
 1. Local admin can change password
@@ -86,6 +97,12 @@ Single tabbed interface for admins to view/modify system configuration post-setu
 - POST /api/admin/settings/test-prowlarr - Tests connection, uses stored API key if masked, returns indexers
 - POST /api/admin/settings/test-download-client - Tests qBittorrent/Transmission, uses stored password if masked
 - POST /api/setup/test-paths - Validates paths writable (no sensitive data, reuses wizard endpoint)
+
+**BookDate Endpoints:**
+- GET /api/bookdate/config - Get user's BookDate configuration (API key excluded)
+- POST /api/bookdate/config - Save/update BookDate configuration (validates and encrypts API key)
+- POST /api/bookdate/test-connection - Test AI provider connection and fetch available models
+- DELETE /api/bookdate/swipes - Clear user's swipe history and cached recommendations
 
 **Account Endpoints:**
 - POST /api/admin/settings/change-password - Change local admin password (local admin only)
