@@ -39,12 +39,24 @@ async function saveConfig(req: AuthenticatedRequest) {
   try {
     const userId = req.user!.id;
     const body = await req.json();
-    const { provider, apiKey, model, libraryScope, customPrompt } = body;
+    const { provider, apiKey, model, libraryScope, customPrompt, isEnabled } = body;
 
-    // Validation
-    if (!provider || !apiKey || !model || !libraryScope) {
+    // Check if config exists
+    const existingConfig = await prisma.bookDateConfig.findUnique({
+      where: { userId },
+    });
+
+    // Validation - API key only required for new configs
+    if (!existingConfig && !apiKey) {
       return NextResponse.json(
-        { error: 'Missing required fields: provider, apiKey, model, libraryScope' },
+        { error: 'API key is required for initial setup' },
+        { status: 400 }
+      );
+    }
+
+    if (!provider || !model || !libraryScope) {
+      return NextResponse.json(
+        { error: 'Missing required fields: provider, model, libraryScope' },
         { status: 400 }
       );
     }
@@ -63,31 +75,46 @@ async function saveConfig(req: AuthenticatedRequest) {
       );
     }
 
-    // Encrypt API key
-    const encryptionService = getEncryptionService();
-    const encryptedApiKey = encryptionService.encrypt(apiKey);
+    // Build update/create data
+    const updateData: any = {
+      provider,
+      model,
+      libraryScope,
+      customPrompt: customPrompt || null,
+      isEnabled: isEnabled !== undefined ? isEnabled : true,
+      isVerified: true,
+      updatedAt: new Date(),
+    };
+
+    const createData: any = {
+      userId,
+      provider,
+      model,
+      libraryScope,
+      customPrompt: customPrompt || null,
+      isEnabled: isEnabled !== undefined ? isEnabled : true,
+      isVerified: true,
+    };
+
+    // Only encrypt and update API key if a new one was provided
+    if (apiKey) {
+      const encryptionService = getEncryptionService();
+      const encryptedApiKey = encryptionService.encrypt(apiKey);
+      updateData.apiKey = encryptedApiKey;
+      createData.apiKey = encryptedApiKey;
+    } else if (!existingConfig) {
+      // This shouldn't happen due to validation above, but just in case
+      return NextResponse.json(
+        { error: 'API key is required for new configuration' },
+        { status: 400 }
+      );
+    }
 
     // Upsert configuration
     const config = await prisma.bookDateConfig.upsert({
       where: { userId },
-      update: {
-        provider,
-        apiKey: encryptedApiKey,
-        model,
-        libraryScope,
-        customPrompt: customPrompt || null,
-        isVerified: true,
-        updatedAt: new Date(),
-      },
-      create: {
-        userId,
-        provider,
-        apiKey: encryptedApiKey,
-        model,
-        libraryScope,
-        customPrompt: customPrompt || null,
-        isVerified: true,
-      },
+      update: updateData,
+      create: createData,
     });
 
     // Clear cached recommendations when config changes

@@ -89,7 +89,7 @@ async function handler(req: AuthenticatedRequest) {
         });
 
         if (!existingRequest) {
-          await prisma.request.create({
+          const newRequest = await prisma.request.create({
             data: {
               userId,
               audiobookId: audiobook.id,
@@ -99,6 +99,17 @@ async function handler(req: AuthenticatedRequest) {
           });
 
           console.log(`[BookDate] Created request for "${recommendation.title}"`);
+
+          // Trigger search job (same as regular request creation)
+          const { getJobQueueService } = await import('@/lib/services/job-queue.service');
+          const jobQueue = getJobQueueService();
+          await jobQueue.addSearchJob(newRequest.id, {
+            id: audiobook.id,
+            title: audiobook.title,
+            author: audiobook.author,
+          });
+
+          console.log(`[BookDate] Triggered search job for request ${newRequest.id}`);
         }
 
       } catch (error) {

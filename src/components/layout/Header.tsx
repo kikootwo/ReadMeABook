@@ -38,10 +38,10 @@ export function Header() {
         });
 
         const data = await response.json();
+        // Show BookDate to any user with verified configuration
         setShowBookDate(
           data.config &&
-          data.config.isVerified &&
-          data.config.isEnabled
+          data.config.isVerified
         );
       } catch (error) {
         console.error('Failed to check BookDate config:', error);
