@@ -70,8 +70,12 @@ function LoginContent() {
   // Handle Plex OAuth callback (mobile redirect with cookies)
   useEffect(() => {
     const authSuccess = searchParams.get('auth');
+    console.log('[Mobile Auth] useEffect triggered:', { authSuccess, hasUser: !!user, authLoading });
 
     if (authSuccess === 'success' && !user && !authLoading) {
+      console.log('[Mobile Auth] Processing auth success...');
+      console.log('[Mobile Auth] All cookies:', document.cookie);
+
       // Tokens are already set in cookies by the callback route
       // Read them and store in localStorage for the auth context
       const getCookie = (name: string) => {
@@ -84,9 +88,19 @@ function LoginContent() {
       const accessToken = getCookie('accessToken');
       const userDataStr = getCookie('userData');
 
+      console.log('[Mobile Auth] Cookie values:', {
+        hasAccessToken: !!accessToken,
+        accessTokenLength: accessToken?.length,
+        hasUserData: !!userDataStr,
+        userDataLength: userDataStr?.length,
+        userDataRaw: userDataStr?.substring(0, 100), // First 100 chars
+      });
+
       if (accessToken && userDataStr) {
         try {
+          console.log('[Mobile Auth] Attempting to parse userData...');
           const userData = JSON.parse(decodeURIComponent(userDataStr));
+          console.log('[Mobile Auth] Successfully parsed userData:', userData);
 
           // Store in localStorage for AuthContext
           localStorage.setItem('accessToken', accessToken);
@@ -95,17 +109,27 @@ function LoginContent() {
             localStorage.setItem('refreshToken', refreshToken);
           }
           localStorage.setItem('user', JSON.stringify(userData));
+          console.log('[Mobile Auth] Stored tokens in localStorage');
 
           // Update auth context
           setAuthData(userData, accessToken);
+          console.log('[Mobile Auth] Updated AuthContext');
 
           // Redirect to home
           const redirect = searchParams.get('redirect') || '/';
+          console.log('[Mobile Auth] Redirecting to:', redirect);
           router.push(redirect);
         } catch (err) {
-          console.error('Failed to parse auth data from cookies:', err);
+          console.error('[Mobile Auth] Failed to parse auth data from cookies:', err);
+          console.error('[Mobile Auth] userDataStr was:', userDataStr);
           setError('Login failed. Please try again.');
         }
+      } else {
+        console.warn('[Mobile Auth] Missing required cookies:', {
+          hasAccessToken: !!accessToken,
+          hasUserData: !!userDataStr,
+        });
+        setError('Authentication failed. Cookies not found. Please try again.');
       }
     }
   }, [searchParams, user, authLoading, setAuthData, router]);

@@ -195,6 +195,9 @@ export async function GET(request: NextRequest) {
                       (process.env.NODE_ENV === 'production' ? 'https' : 'http');
       const redirectUrl = `${protocol}://${host}/login?auth=success`;
 
+      console.log('[Plex OAuth] Setting cookies for mobile auth...');
+      console.log('[Plex OAuth] Redirect URL:', redirectUrl);
+
       const response = NextResponse.redirect(redirectUrl);
 
       // Set tokens in cookies
@@ -215,14 +218,17 @@ export async function GET(request: NextRequest) {
       });
 
       // Also set user data as cookie for immediate access
-      response.cookies.set('userData', JSON.stringify({
+      const userDataJson = JSON.stringify({
         id: user.id,
         plexId: user.plexId,
         username: user.plexUsername,
         email: user.plexEmail,
         role: user.role,
         avatarUrl: user.avatarUrl,
-      }), {
+      });
+      console.log('[Plex OAuth] Setting userData cookie:', userDataJson);
+
+      response.cookies.set('userData', encodeURIComponent(userDataJson), {
         httpOnly: false,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
@@ -230,6 +236,7 @@ export async function GET(request: NextRequest) {
         path: '/',
       });
 
+      console.log('[Plex OAuth] Cookies set successfully, redirecting to:', redirectUrl);
       return response;
     }
 
