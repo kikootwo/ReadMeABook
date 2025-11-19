@@ -209,21 +209,37 @@ export async function GET(request: NextRequest) {
       });
       console.log('[Plex OAuth] Setting userData cookie:', userDataJson);
 
-      // Return HTML page with cookies set and meta refresh redirect
+      // Prepare auth data to pass via URL hash (fallback for mobile browsers that block cookies)
+      const authData = {
+        accessToken,
+        refreshToken,
+        user: {
+          id: user.id,
+          plexId: user.plexId,
+          username: user.plexUsername,
+          email: user.plexEmail,
+          role: user.role,
+          avatarUrl: user.avatarUrl,
+        },
+      };
+      const authDataEncoded = encodeURIComponent(JSON.stringify(authData));
+
+      // Return HTML page with cookies set and JavaScript redirect with hash
       // This ensures cookies are properly set before redirecting
+      // The hash also provides a fallback for mobile browsers that block cookies on redirects
       const html = `
         <!DOCTYPE html>
         <html>
           <head>
-            <meta http-equiv="refresh" content="0;url=${redirectUrl}">
             <title>Login Successful</title>
           </head>
           <body>
             <p>Login successful. Redirecting...</p>
             <script>
-              // Fallback redirect if meta refresh doesn't work
+              // Use JavaScript redirect with hash parameter for mobile compatibility
+              // Hash params aren't sent to server, so tokens stay client-side
               setTimeout(() => {
-                window.location.href = '${redirectUrl}';
+                window.location.href = '${redirectUrl}#authData=${authDataEncoded}';
               }, 100);
             </script>
           </body>

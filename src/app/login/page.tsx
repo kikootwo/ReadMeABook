@@ -67,17 +67,54 @@ function LoginContent() {
     }
   }, [user, authLoading, router, searchParams]);
 
-  // Handle Plex OAuth callback (mobile redirect with cookies)
+  // Handle Plex OAuth callback (mobile redirect with cookies or URL hash)
   useEffect(() => {
     const authSuccess = searchParams.get('auth');
     console.log('[Mobile Auth] useEffect triggered:', { authSuccess, hasUser: !!user, authLoading });
 
     if (authSuccess === 'success' && !user && !authLoading) {
       console.log('[Mobile Auth] Processing auth success...');
+
+      // First, try to read from URL hash (more reliable for mobile)
+      const hash = window.location.hash;
+      console.log('[Mobile Auth] URL hash:', hash);
+
+      if (hash && hash.includes('authData=')) {
+        try {
+          const authDataMatch = hash.match(/authData=([^&]+)/);
+          if (authDataMatch) {
+            const authDataStr = decodeURIComponent(authDataMatch[1]);
+            const authData = JSON.parse(authDataStr);
+            console.log('[Mobile Auth] Successfully parsed authData from URL hash:', authData.user);
+
+            // Store in localStorage
+            localStorage.setItem('accessToken', authData.accessToken);
+            localStorage.setItem('refreshToken', authData.refreshToken);
+            localStorage.setItem('user', JSON.stringify(authData.user));
+            console.log('[Mobile Auth] Stored tokens in localStorage from hash');
+
+            // Update auth context
+            setAuthData(authData.user, authData.accessToken);
+            console.log('[Mobile Auth] Updated AuthContext from hash');
+
+            // Clear the hash from URL for security
+            window.history.replaceState(null, '', window.location.pathname + window.location.search);
+
+            // Redirect to home
+            const redirect = searchParams.get('redirect') || '/';
+            console.log('[Mobile Auth] Redirecting to:', redirect);
+            router.push(redirect);
+            return;
+          }
+        } catch (err) {
+          console.error('[Mobile Auth] Failed to parse auth data from URL hash:', err);
+        }
+      }
+
+      // Fallback: Try to read from cookies
+      console.log('[Mobile Auth] No hash data, trying cookies...');
       console.log('[Mobile Auth] All cookies:', document.cookie);
 
-      // Tokens are already set in cookies by the callback route
-      // Read them and store in localStorage for the auth context
       const getCookie = (name: string) => {
         const value = `; ${document.cookie}`;
         const parts = value.split(`; ${name}=`);
@@ -93,12 +130,11 @@ function LoginContent() {
         accessTokenLength: accessToken?.length,
         hasUserData: !!userDataStr,
         userDataLength: userDataStr?.length,
-        userDataRaw: userDataStr?.substring(0, 100), // First 100 chars
       });
 
       if (accessToken && userDataStr) {
         try {
-          console.log('[Mobile Auth] Attempting to parse userData...');
+          console.log('[Mobile Auth] Attempting to parse userData from cookies...');
           const userData = JSON.parse(decodeURIComponent(userDataStr));
           console.log('[Mobile Auth] Successfully parsed userData:', userData);
 
@@ -109,11 +145,11 @@ function LoginContent() {
             localStorage.setItem('refreshToken', refreshToken);
           }
           localStorage.setItem('user', JSON.stringify(userData));
-          console.log('[Mobile Auth] Stored tokens in localStorage');
+          console.log('[Mobile Auth] Stored tokens in localStorage from cookies');
 
           // Update auth context
           setAuthData(userData, accessToken);
-          console.log('[Mobile Auth] Updated AuthContext');
+          console.log('[Mobile Auth] Updated AuthContext from cookies');
 
           // Redirect to home
           const redirect = searchParams.get('redirect') || '/';
@@ -125,11 +161,8 @@ function LoginContent() {
           setError('Login failed. Please try again.');
         }
       } else {
-        console.warn('[Mobile Auth] Missing required cookies:', {
-          hasAccessToken: !!accessToken,
-          hasUserData: !!userDataStr,
-        });
-        setError('Authentication failed. Cookies not found. Please try again.');
+        console.warn('[Mobile Auth] Missing required cookies and hash data');
+        setError('Authentication failed. Please try again.');
       }
     }
   }, [searchParams, user, authLoading, setAuthData, router]);
