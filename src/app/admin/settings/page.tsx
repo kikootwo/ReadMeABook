@@ -88,6 +88,7 @@ export default function AdminSettings() {
   const [bookdateModel, setBookdateModel] = useState<string>('');
   const [bookdateLibraryScope, setBookdateLibraryScope] = useState<string>('full');
   const [bookdateCustomPrompt, setBookdateCustomPrompt] = useState<string>('');
+  const [bookdateEnabled, setBookdateEnabled] = useState<boolean>(true);
   const [bookdateConfigured, setBookdateConfigured] = useState<boolean>(false);
   const [bookdateModels, setBookdateModels] = useState<{ id: string; name: string }[]>([]);
   const [testingBookdate, setTestingBookdate] = useState(false);
@@ -208,6 +209,7 @@ export default function AdminSettings() {
         setBookdateModel(data.config.model || '');
         setBookdateLibraryScope(data.config.libraryScope || 'full');
         setBookdateCustomPrompt(data.config.customPrompt || '');
+        setBookdateEnabled(data.config.isEnabled !== false); // Default to true
         setBookdateConfigured(data.config.isVerified || false);
       }
     } catch (error) {
@@ -216,7 +218,10 @@ export default function AdminSettings() {
   };
 
   const handleTestBookdateConnection = async () => {
-    if (!bookdateApiKey.trim()) {
+    const hasApiKey = bookdateApiKey.trim().length > 0;
+
+    // Allow testing with saved API key if already configured
+    if (!hasApiKey && !bookdateConfigured) {
       setMessage({ type: 'error', text: 'Please enter an API key' });
       return;
     }
@@ -225,13 +230,21 @@ export default function AdminSettings() {
     setMessage(null);
 
     try {
+      const payload: any = {
+        provider: bookdateProvider,
+      };
+
+      // Include API key if user entered a new one, otherwise use saved key
+      if (hasApiKey) {
+        payload.apiKey = bookdateApiKey;
+      } else {
+        payload.useSavedKey = true;
+      }
+
       const response = await fetchWithAuth('/api/bookdate/test-connection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: bookdateProvider,
-          apiKey: bookdateApiKey,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await response.json();
@@ -255,8 +268,16 @@ export default function AdminSettings() {
   };
 
   const handleSaveBookdateConfig = async () => {
-    if (!bookdateApiKey.trim() || !bookdateModel || !bookdateLibraryScope) {
-      setMessage({ type: 'error', text: 'Please fill in all required fields and test your connection' });
+    // Validate: model and scope are always required
+    if (!bookdateModel || !bookdateLibraryScope) {
+      setMessage({ type: 'error', text: 'Please select a model and library scope' });
+      return;
+    }
+
+    // Only require API key if not already configured OR if user entered one
+    const hasApiKey = bookdateApiKey.trim().length > 0;
+    if (!bookdateConfigured && !hasApiKey) {
+      setMessage({ type: 'error', text: 'Please enter an API key for initial setup' });
       return;
     }
 
@@ -264,16 +285,23 @@ export default function AdminSettings() {
     setMessage(null);
 
     try {
+      const payload: any = {
+        provider: bookdateProvider,
+        model: bookdateModel,
+        libraryScope: bookdateLibraryScope,
+        customPrompt: bookdateCustomPrompt || null,
+        isEnabled: bookdateEnabled,
+      };
+
+      // Only include API key if user entered a new one
+      if (hasApiKey) {
+        payload.apiKey = bookdateApiKey;
+      }
+
       const response = await fetchWithAuth('/api/bookdate/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: bookdateProvider,
-          apiKey: bookdateApiKey,
-          model: bookdateModel,
-          libraryScope: bookdateLibraryScope,
-          customPrompt: bookdateCustomPrompt || null,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await response.json();
@@ -1225,9 +1253,34 @@ export default function AdminSettings() {
                     BookDate Configuration
                   </h2>
                   <p className="text-gray-600 dark:text-gray-400 mb-6">
-                    Configure AI-powered audiobook recommendations. Users can set up their own API keys for personalized recommendations.
+                    Configure global AI-powered audiobook recommendations. All users share this API key, but receive personalized recommendations based on their individual library and ratings.
                   </p>
                 </div>
+
+                {/* Enable/Disable Toggle */}
+                {bookdateConfigured && (
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-medium text-gray-900 dark:text-white mb-1">
+                          BookDate Feature
+                        </h3>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                          {bookdateEnabled ? 'Feature is currently enabled' : 'Feature is currently disabled'}
+                        </p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={bookdateEnabled}
+                          onChange={(e) => setBookdateEnabled(e.target.checked)}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                      </label>
+                    </div>
+                  </div>
+                )}
 
                 {/* AI Provider */}
                 <div>
@@ -1266,7 +1319,7 @@ export default function AdminSettings() {
                     }
                   />
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Your API key is stored securely and encrypted. Leave blank to keep existing key.
+                    The API key is stored securely and encrypted. Leave blank to keep existing key.
                   </p>
                 </div>
 
@@ -1274,11 +1327,13 @@ export default function AdminSettings() {
                 <Button
                   onClick={handleTestBookdateConnection}
                   loading={testingBookdate}
-                  disabled={!bookdateApiKey.trim()}
+                  disabled={!bookdateApiKey.trim() && !bookdateConfigured}
                   variant="outline"
                   className="w-full"
                 >
-                  Test Connection & Fetch Models
+                  {bookdateConfigured && !bookdateApiKey.trim()
+                    ? 'Test Connection & Fetch Models (using saved API key)'
+                    : 'Test Connection & Fetch Models'}
                 </Button>
 
                 {/* Model Selection */}
@@ -1377,10 +1432,10 @@ export default function AdminSettings() {
                 {bookdateConfigured && (
                   <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-                      Clear Swipe History
+                      Clear All Swipe History
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                      Remove all your swipe history and cached recommendations. This will reset your recommendations.
+                      Remove all swipe history and cached recommendations for ALL users. This will reset everyone's BookDate recommendations.
                     </p>
                     <Button
                       onClick={handleClearBookdateSwipes}

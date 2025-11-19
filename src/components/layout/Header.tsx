@@ -38,6 +38,7 @@ export function Header() {
         });
 
         const data = await response.json();
+        // Show BookDate to any user with verified and enabled configuration
         setShowBookDate(
           data.config &&
           data.config.isVerified &&

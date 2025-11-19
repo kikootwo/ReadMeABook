@@ -38,7 +38,6 @@ model User {
 
   // Relations
   requests                Request[]
-  bookDateConfig          BookDateConfig?
   bookDateRecommendations BookDateRecommendation[]
   bookDateSwipes          BookDateSwipe[]
 
@@ -319,23 +318,22 @@ model ScheduledJob {
 
 model BookDateConfig {
   id            String   @id @default(uuid())
-  userId        String   @unique @map("user_id")
   provider      String   // 'openai' | 'claude'
   apiKey        String   @map("api_key") @db.Text // Encrypted at rest (AES-256)
   model         String   // e.g., 'gpt-4o', 'claude-sonnet-4-5-20250929'
   libraryScope  String   @map("library_scope") // 'full' | 'listened' | 'rated'
   customPrompt  String?  @map("custom_prompt") @db.Text
   isVerified    Boolean  @default(false) @map("is_verified")
-  isEnabled     Boolean  @default(true) @map("is_enabled") // Admin toggle (global)
+  isEnabled     Boolean  @default(true) @map("is_enabled") // Admin toggle (global feature)
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  // Relations
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
   @@map("bookdate_config")
 }
+
+// Note: BookDateConfig is now a singleton - only ONE record exists globally.
+// Admin configures this in settings, and all users share the same API key.
+// Individual users still have their own recommendations and swipe history.
 
 model BookDateRecommendation {
   id             String    @id @default(uuid())

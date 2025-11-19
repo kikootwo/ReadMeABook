@@ -9,12 +9,12 @@ import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 async function handler(req: AuthenticatedRequest) {
   try {
     const body = await req.json();
-    const { provider, apiKey } = body;
+    const { provider, apiKey, useSavedKey } = body;
 
-    // Validate inputs
-    if (!provider || !apiKey) {
+    // Validate provider
+    if (!provider) {
       return NextResponse.json(
-        { error: 'Provider and API key are required' },
+        { error: 'Provider is required' },
         { status: 400 }
       );
     }
@@ -26,13 +26,39 @@ async function handler(req: AuthenticatedRequest) {
       );
     }
 
+    // Get API key from saved global config if useSavedKey is true
+    let testApiKey = apiKey;
+    if (useSavedKey && !testApiKey) {
+      const { prisma } = await import('@/lib/db');
+      const { getEncryptionService } = await import('@/lib/services/encryption.service');
+
+      const config = await prisma.bookDateConfig.findFirst();
+
+      if (!config || !config.apiKey) {
+        return NextResponse.json(
+          { error: 'No saved API key found' },
+          { status: 400 }
+        );
+      }
+
+      const encryptionService = getEncryptionService();
+      testApiKey = encryptionService.decrypt(config.apiKey);
+    }
+
+    if (!testApiKey) {
+      return NextResponse.json(
+        { error: 'API key is required' },
+        { status: 400 }
+      );
+    }
+
     let models = [];
 
     if (provider === 'openai') {
       // OpenAI: Fetch models from API
       const response = await fetch('https://api.openai.com/v1/models', {
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${testApiKey}`,
         },
       });
 
@@ -69,7 +95,7 @@ async function handler(req: AuthenticatedRequest) {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
-          'x-api-key': apiKey,
+          'x-api-key': testApiKey,
           'anthropic-version': '2023-06-01',
           'content-type': 'application/json',
         },

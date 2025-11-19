@@ -46,6 +46,8 @@ export function RecommendationCard({
     },
     trackMouse: true,
     preventScrollOnSwipe: true,
+    // Require user to swipe at least 150px before triggering action
+    delta: 150,
   });
 
   const getOverlayOpacity = (threshold: number, value: number) => {
@@ -56,7 +58,7 @@ export function RecommendationCard({
     <>
       <div
         {...swipeHandlers}
-        className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-2xl shadow-2xl overflow-hidden select-none"
+        className="relative w-full max-w-md bg-white dark:bg-gray-800 rounded-2xl shadow-2xl overflow-hidden select-none max-h-[85vh] flex flex-col"
         style={{
           transform: `translate(${dragOffset.x}px, ${dragOffset.y}px) rotate(${dragOffset.x * 0.05}deg)`,
           transition: dragOffset.x === 0 && dragOffset.y === 0 ? 'transform 0.3s ease-out' : 'none',
@@ -95,24 +97,26 @@ export function RecommendationCard({
         )}
 
         {/* Cover image */}
-        <div className="w-full h-96 relative bg-gray-200 dark:bg-gray-700">
+        <div className="w-full relative bg-gray-200 dark:bg-gray-700 flex-shrink-0" style={{ maxHeight: '40vh' }}>
           {recommendation.coverUrl ? (
             <Image
               src={recommendation.coverUrl}
               alt={recommendation.title}
-              fill
-              className="object-cover"
+              width={400}
+              height={400}
+              className="object-contain w-full h-auto"
+              style={{ maxHeight: '40vh' }}
               unoptimized
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center">
+            <div className="w-full h-64 flex items-center justify-center">
               <span className="text-6xl">📚</span>
             </div>
           )}
         </div>
 
         {/* Book info */}
-        <div className="p-6">
+        <div className="p-6 overflow-y-auto flex-1">
           <h3 className="text-2xl font-bold mb-2 text-gray-900 dark:text-white line-clamp-2">
             {recommendation.title}
           </h3>

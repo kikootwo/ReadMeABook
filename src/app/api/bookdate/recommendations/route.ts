@@ -19,29 +19,28 @@ async function handler(req: AuthenticatedRequest) {
   try {
     const userId = req.user!.id;
 
-    // Check for cached recommendations
+    // Check for cached recommendations (return any that exist)
     const cached = await prisma.bookDateRecommendation.findMany({
       where: { userId },
       orderBy: { createdAt: 'asc' },
-      take: 10,
     });
 
-    if (cached.length >= 10) {
+    // If there are any cached recommendations, return them first
+    if (cached.length > 0) {
       return NextResponse.json({
         recommendations: cached,
         source: 'cache',
+        remaining: cached.length,
       });
     }
 
-    // Need to generate new recommendations
-    const config = await prisma.bookDateConfig.findUnique({
-      where: { userId },
-    });
+    // Need to generate new recommendations - fetch global config
+    const config = await prisma.bookDateConfig.findFirst();
 
     if (!config || !config.isVerified || !config.isEnabled) {
       return NextResponse.json(
         {
-          error: 'BookDate is not configured or has been disabled. Please check your settings.',
+          error: 'BookDate is not configured or has been disabled. Please contact your administrator.',
         },
         { status: 400 }
       );
