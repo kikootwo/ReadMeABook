@@ -70,13 +70,14 @@ function LoginContent() {
   // Handle Plex OAuth callback on mobile
   useEffect(() => {
     const completeMobileLogin = async () => {
-      const pinId = sessionStorage.getItem('plexPinId');
+      const pinIdString = sessionStorage.getItem('plexPinId');
       const redirect = sessionStorage.getItem('plexRedirect');
 
-      if (pinId && !user && !authLoading) {
+      if (pinIdString && !user && !authLoading) {
         setIsLoggingIn(true);
         try {
-          // Complete login with stored pinId
+          // Complete login with stored pinId (parse as number)
+          const pinId = parseInt(pinIdString, 10);
           await login(pinId);
 
           // Clear sessionStorage
