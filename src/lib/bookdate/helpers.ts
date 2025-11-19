@@ -7,12 +7,20 @@ import { prisma } from '@/lib/db';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { getConfigService } from '@/lib/services/config.service';
 import { AudibleService } from '@/lib/integrations/audible.service';
+import { getPlexService } from '@/lib/integrations/plex.service';
 
 export interface LibraryBook {
   title: string;
   author: string;
   narrator?: string | null;
   rating?: number | null;
+}
+
+interface CachedLibraryBook {
+  title: string;
+  author: string;
+  narrator: string | null;
+  plexRatingKey: string | null;
 }
 
 export interface SwipeHistory {
@@ -26,6 +34,98 @@ export interface AIRecommendation {
   title: string;
   author: string;
   reason: string;
+}
+
+/**
+ * Enrich cached library books with user's personal ratings from Plex
+ * @param userId - User ID (to fetch their Plex token)
+ * @param cachedBooks - Books from PlexLibrary table cache
+ * @returns Books enriched with user's personal ratings
+ */
+async function enrichWithUserRatings(
+  userId: string,
+  cachedBooks: CachedLibraryBook[]
+): Promise<LibraryBook[]> {
+  try {
+    // Get user's Plex token
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { authToken: true },
+    });
+
+    if (!user?.authToken) {
+      console.warn('[BookDate] User has no Plex auth token, using cached ratings');
+      return cachedBooks.map(book => ({
+        title: book.title,
+        author: book.author,
+        narrator: book.narrator || undefined,
+        rating: undefined, // No ratings without token
+      }));
+    }
+
+    // Get Plex configuration
+    const configService = getConfigService();
+    const plexConfig = await configService.getPlexConfig();
+
+    if (!plexConfig.serverUrl) {
+      console.warn('[BookDate] No Plex server URL configured, using cached ratings');
+      return cachedBooks.map(book => ({
+        title: book.title,
+        author: book.author,
+        narrator: book.narrator || undefined,
+        rating: undefined,
+      }));
+    }
+
+    // Decrypt user's Plex token
+    const encryptionService = getEncryptionService();
+    const userPlexToken = encryptionService.decrypt(user.authToken);
+
+    // Get rating keys from cached books
+    const ratingKeys = cachedBooks
+      .filter(book => book.plexRatingKey)
+      .map(book => book.plexRatingKey as string);
+
+    if (ratingKeys.length === 0) {
+      console.warn('[BookDate] No rating keys found in cached books');
+      return cachedBooks.map(book => ({
+        title: book.title,
+        author: book.author,
+        narrator: book.narrator || undefined,
+        rating: undefined,
+      }));
+    }
+
+    console.log(`[BookDate] Fetching live ratings for ${ratingKeys.length} books using user's token`);
+
+    // Fetch user's personal ratings from Plex
+    const plexService = getPlexService();
+    const ratingsMap = await plexService.batchGetUserRatings(
+      plexConfig.serverUrl,
+      userPlexToken,
+      ratingKeys
+    );
+
+    console.log(`[BookDate] Successfully fetched ${ratingsMap.size} user ratings from Plex`);
+
+    // Enrich books with user's ratings
+    return cachedBooks.map(book => ({
+      title: book.title,
+      author: book.author,
+      narrator: book.narrator || undefined,
+      rating: book.plexRatingKey ? ratingsMap.get(book.plexRatingKey) || undefined : undefined,
+    }));
+
+  } catch (error) {
+    console.error('[BookDate] Error enriching books with user ratings:', error);
+    // Fallback: return books without ratings on error
+    return cachedBooks.map(book => ({
+      title: book.title,
+      author: book.author,
+      narrator: book.narrator || undefined,
+      rating: undefined,
+    }));
+  }
 }
 
 /**
@@ -55,11 +155,13 @@ export async function getUserLibraryBooks(
 
     if (scope === 'rated') {
       // Only include books that have a user rating
+      // Note: This checks cached ratings, which may be admin's ratings
+      // We'll filter again after fetching live user ratings
       whereClause.userRating = { not: null };
     }
 
-    // Query Plex library from database
-    let libraryBooks = await prisma.plexLibrary.findMany({
+    // Query Plex library from database (cached structure, no user-specific ratings yet)
+    let cachedBooks = await prisma.plexLibrary.findMany({
       where: whereClause,
       orderBy: {
         addedAt: 'desc',
@@ -69,16 +171,19 @@ export async function getUserLibraryBooks(
         title: true,
         author: true,
         narrator: true,
-        userRating: true,
+        plexRatingKey: true,
       },
     });
 
-    return libraryBooks.map((book) => ({
-      title: book.title,
-      author: book.author,
-      narrator: book.narrator || undefined,
-      rating: book.userRating ? parseFloat(book.userRating.toString()) : undefined,
-    }));
+    // Enrich with user's personal ratings from Plex
+    const enrichedBooks = await enrichWithUserRatings(userId, cachedBooks);
+
+    // If scope is 'rated', filter to only books the user has actually rated
+    if (scope === 'rated') {
+      return enrichedBooks.filter(book => book.rating != null);
+    }
+
+    return enrichedBooks;
 
   } catch (error) {
     console.error('[BookDate] Error fetching library books:', error);

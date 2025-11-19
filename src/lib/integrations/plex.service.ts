@@ -592,6 +592,86 @@ export class PlexService {
       return [];
     }
   }
+
+  /**
+   * Get metadata for a specific item (by ratingKey) with user's personal rating
+   * This fetches the item with the user's auth token, which includes their personal rating
+   */
+  async getItemMetadata(
+    serverUrl: string,
+    authToken: string,
+    ratingKey: string
+  ): Promise<{ userRating?: number } | null> {
+    try {
+      const response = await this.client.get(
+        `${serverUrl}/library/metadata/${ratingKey}`,
+        {
+          headers: {
+            'X-Plex-Token': authToken,
+            'Accept': 'application/json',
+          },
+        }
+      );
+
+      let data = response.data;
+
+      // Handle different response formats
+      if (typeof data === 'string') {
+        const parsed = await parseStringPromise(data);
+        data = parsed.MediaContainer;
+      } else if (data && typeof data === 'object') {
+        if (data.MediaContainer) {
+          data = data.MediaContainer;
+        }
+      }
+
+      // Extract first metadata item
+      const items = data.Metadata || [];
+      if (!Array.isArray(items) || items.length === 0) {
+        return null;
+      }
+
+      const item = items[0];
+      return {
+        userRating: item.userRating
+          ? parseFloat(item.userRating)
+          : (item.$?.userRating ? parseFloat(item.$?.userRating) : undefined),
+      };
+    } catch (error) {
+      console.error(`Failed to get metadata for ratingKey ${ratingKey}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Batch fetch ratings for multiple items using user's token
+   * Returns a map of ratingKey -> userRating
+   */
+  async batchGetUserRatings(
+    serverUrl: string,
+    authToken: string,
+    ratingKeys: string[]
+  ): Promise<Map<string, number>> {
+    const ratingsMap = new Map<string, number>();
+
+    // Fetch ratings in parallel (limit concurrency to avoid overwhelming Plex)
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < ratingKeys.length; i += BATCH_SIZE) {
+      const batch = ratingKeys.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(ratingKey => this.getItemMetadata(serverUrl, authToken, ratingKey))
+      );
+
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value?.userRating) {
+          const ratingKey = batch[index];
+          ratingsMap.set(ratingKey, result.value.userRating);
+        }
+      });
+    }
+
+    return ratingsMap;
+  }
 }
 
 // Singleton instance

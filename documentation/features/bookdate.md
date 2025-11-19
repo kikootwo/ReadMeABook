@@ -83,6 +83,9 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 
 1. **Context Gathering:**
    - Get user's library books (max 40, filtered by scope)
+     - **Per-User Ratings:** Cached library structure enriched with live per-user ratings from Plex API
+     - Uses user's Plex token to fetch their personal ratings (not admin's ratings)
+     - Fallback to no ratings if API fails
    - Get recent swipes (max 10)
    - Add custom prompt if provided
 
@@ -191,6 +194,7 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - **Cost Estimate:** ~$0.04 per batch (GPT-4o), varies by model
 - **Cache Hit Rate:** High (only generates when needed)
 - **API Rate Limits:** OpenAI ~3500 RPM, Claude ~4000 RPM
+- **Rating Fetch:** ~1-2s to fetch per-user ratings for 40 books (batched in groups of 10)
 
 ## Dependencies
 

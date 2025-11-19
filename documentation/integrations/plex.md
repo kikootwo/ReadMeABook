@@ -19,7 +19,7 @@ Connectivity to Plex for OAuth, library management, content detection, and autom
 **GET {server_url}/library/sections/{id}/all?type=9** - All albums (type 9 = audiobooks)
 **GET {server_url}/library/sections/{id}/all?type=9&sort=addedAt:desc&X-Plex-Container-Start=0&X-Plex-Container-Size=10** - Recently added (lightweight polling)
 **GET {server_url}/library/sections/{id}/refresh** - Trigger async scan
-**GET {server_url}/library/metadata/{rating_key}** - Item metadata
+**GET {server_url}/library/metadata/{rating_key}** - Item metadata (includes user's personal rating)
 **GET {server_url}/library/sections/{id}/search?title={query}** - Search
 
 Auth: `X-Plex-Token` header
@@ -106,6 +106,26 @@ interface PlexLibrary {
   itemCount: number;
 }
 ```
+
+## Per-User Ratings
+
+**Problem:** Library scan runs as admin, storing admin's ratings in cache. All users see admin's ratings in BookDate recommendations.
+
+**Solution (Hybrid Approach):**
+1. Cache structure (title, author, metadata) remains admin-populated
+2. **Per-user ratings fetched live** when building BookDate AI prompt
+3. Uses `batchGetUserRatings()` to fetch user's personal ratings via their Plex token
+4. Batched in groups of 10, parallel requests (~1-2s for 40 books)
+5. Graceful fallback: no ratings if API fails
+
+**Methods:**
+- `getItemMetadata(serverUrl, userToken, ratingKey)` - Fetch single item's user rating
+- `batchGetUserRatings(serverUrl, userToken, ratingKeys[])` - Batch fetch multiple ratings (Map<ratingKey, rating>)
+
+**BookDate Integration:**
+- `enrichWithUserRatings(userId, cachedBooks)` - Enriches cached books with live per-user ratings
+- Called by `getUserLibraryBooks()` before building AI prompt
+- Ensures AI receives accurate per-user preferences
 
 ## Fixed Issues ✅
 
