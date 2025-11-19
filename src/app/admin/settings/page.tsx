@@ -1253,7 +1253,7 @@ export default function AdminSettings() {
                     BookDate Configuration
                   </h2>
                   <p className="text-gray-600 dark:text-gray-400 mb-6">
-                    Configure AI-powered audiobook recommendations. Users can set up their own API keys for personalized recommendations.
+                    Configure global AI-powered audiobook recommendations. All users share this API key, but receive personalized recommendations based on their individual library and ratings.
                   </p>
                 </div>
 
@@ -1319,7 +1319,7 @@ export default function AdminSettings() {
                     }
                   />
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Your API key is stored securely and encrypted. Leave blank to keep existing key.
+                    The API key is stored securely and encrypted. Leave blank to keep existing key.
                   </p>
                 </div>
 
@@ -1432,10 +1432,10 @@ export default function AdminSettings() {
                 {bookdateConfigured && (
                   <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-                      Clear Swipe History
+                      Clear All Swipe History
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                      Remove all your swipe history and cached recommendations. This will reset your recommendations.
+                      Remove all swipe history and cached recommendations for ALL users. This will reset everyone's BookDate recommendations.
                     </p>
                     <Button
                       onClick={handleClearBookdateSwipes}

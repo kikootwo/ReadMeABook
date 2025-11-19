@@ -4,18 +4,16 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
+import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 
-// GET: Fetch user's BookDate configuration (excluding API key)
+// GET: Fetch global BookDate configuration (excluding API key)
+// Any authenticated user can check if BookDate is configured
 async function getConfig(req: AuthenticatedRequest) {
   try {
-    const userId = req.user!.id;
-
-    const config = await prisma.bookDateConfig.findUnique({
-      where: { userId },
-    });
+    // Get the single global config (there should only be one record)
+    const config = await prisma.bookDateConfig.findFirst();
 
     if (!config) {
       return NextResponse.json({ config: null });
@@ -34,17 +32,14 @@ async function getConfig(req: AuthenticatedRequest) {
   }
 }
 
-// POST: Create or update user's BookDate configuration
+// POST: Create or update global BookDate configuration (Admin only)
 async function saveConfig(req: AuthenticatedRequest) {
   try {
-    const userId = req.user!.id;
     const body = await req.json();
     const { provider, apiKey, model, libraryScope, customPrompt, isEnabled } = body;
 
     // Check if config exists
-    const existingConfig = await prisma.bookDateConfig.findUnique({
-      where: { userId },
-    });
+    const existingConfig = await prisma.bookDateConfig.findFirst();
 
     // Validation - API key only required for new configs
     if (!existingConfig && !apiKey) {
@@ -93,45 +88,45 @@ async function saveConfig(req: AuthenticatedRequest) {
       );
     }
 
-    // Build update data (only include apiKey if a new one was provided)
-    const updateData: any = {
-      provider,
-      model,
-      libraryScope,
-      customPrompt: customPrompt || null,
-      isEnabled: isEnabled !== undefined ? isEnabled : true,
-      isVerified: true,
-      updatedAt: new Date(),
-    };
+    let config;
+    if (existingConfig) {
+      // Update existing config
+      const updateData: any = {
+        provider,
+        model,
+        libraryScope,
+        customPrompt: customPrompt || null,
+        isEnabled: isEnabled !== undefined ? isEnabled : true,
+        isVerified: true,
+        updatedAt: new Date(),
+      };
 
-    // Only update API key if a new one was provided
-    if (apiKey) {
-      updateData.apiKey = encryptedApiKeyToUse;
+      // Only update API key if a new one was provided
+      if (apiKey) {
+        updateData.apiKey = encryptedApiKeyToUse;
+      }
+
+      config = await prisma.bookDateConfig.update({
+        where: { id: existingConfig.id },
+        data: updateData,
+      });
+    } else {
+      // Create new global config
+      config = await prisma.bookDateConfig.create({
+        data: {
+          provider,
+          model,
+          libraryScope,
+          customPrompt: customPrompt || null,
+          isEnabled: isEnabled !== undefined ? isEnabled : true,
+          isVerified: true,
+          apiKey: encryptedApiKeyToUse,
+        },
+      });
     }
 
-    // Create data must always include apiKey (for upsert validation)
-    const createData: any = {
-      userId,
-      provider,
-      model,
-      libraryScope,
-      customPrompt: customPrompt || null,
-      isEnabled: isEnabled !== undefined ? isEnabled : true,
-      isVerified: true,
-      apiKey: encryptedApiKeyToUse,
-    };
-
-    // Upsert configuration
-    const config = await prisma.bookDateConfig.upsert({
-      where: { userId },
-      update: updateData,
-      create: createData,
-    });
-
-    // Clear cached recommendations when config changes
-    await prisma.bookDateRecommendation.deleteMany({
-      where: { userId },
-    });
+    // Clear ALL users' cached recommendations when global config changes
+    await prisma.bookDateRecommendation.deleteMany({});
 
     // Return config without API key
     const { apiKey: _, ...safeConfig } = config;
@@ -150,15 +145,11 @@ async function saveConfig(req: AuthenticatedRequest) {
   }
 }
 
-// DELETE: Remove user's BookDate configuration
+// DELETE: Remove global BookDate configuration (Admin only)
 async function deleteConfig(req: AuthenticatedRequest) {
   try {
-    const userId = req.user!.id;
-
-    // Check if config exists
-    const config = await prisma.bookDateConfig.findUnique({
-      where: { userId },
-    });
+    // Get the global config
+    const config = await prisma.bookDateConfig.findFirst();
 
     if (!config) {
       return NextResponse.json(
@@ -167,19 +158,14 @@ async function deleteConfig(req: AuthenticatedRequest) {
       );
     }
 
-    // Delete configuration
+    // Delete global configuration
     await prisma.bookDateConfig.delete({
-      where: { userId },
+      where: { id: config.id },
     });
 
-    // Also delete cached recommendations and swipe history
-    await prisma.bookDateRecommendation.deleteMany({
-      where: { userId },
-    });
-
-    await prisma.bookDateSwipe.deleteMany({
-      where: { userId },
-    });
+    // Also delete ALL cached recommendations and swipe history
+    await prisma.bookDateRecommendation.deleteMany({});
+    await prisma.bookDateSwipe.deleteMany({});
 
     return NextResponse.json({ success: true });
 
@@ -197,9 +183,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  return requireAuth(req, saveConfig);
+  return requireAdmin(req, saveConfig);
 }
 
 export async function DELETE(req: NextRequest) {
-  return requireAuth(req, deleteConfig);
+  return requireAdmin(req, deleteConfig);
 }

@@ -3,32 +3,33 @@
 **Status:** ✅ Implemented | AI-powered audiobook recommendations with Tinder-style swipe interface
 
 ## Overview
-Personalized audiobook discovery using OpenAI/Claude APIs. Users swipe through recommendations based on Plex library + preferences. Right swipe creates request, left rejects, up dismisses.
+Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI provider globally. Users swipe through recommendations based on their individual Plex library + swipe history. Right swipe creates request, left rejects, up dismisses.
 
 ## Key Details
 - **AI Providers:** OpenAI (GPT-4o+), Claude (Sonnet 4.5, Opus 4, Haiku)
-- **Configuration:** Per-user, encrypted API keys (AES-256), stored in database
-- **Library Scopes:** Full library | Listened (>25%) | Rated only
-- **Context Window:** Max 50 books (40 library + 10 swipe history)
-- **Cache:** All unswiped recommendations persisted, shown on return
+- **Configuration:** Global admin-managed, single encrypted API key (AES-256) shared by all users
+- **Personalization:** Each user receives recommendations based on their own library, ratings, and swipe history
+- **Library Scopes:** Full library | Rated only
+- **Context Window:** Max 50 books (40 library + 10 swipe history) per user
+- **Cache:** All unswiped recommendations persisted per user, shown on return
 - **Actions:**
   - Left swipe: Reject (can undo) - requires 150px swipe distance
   - Right swipe: Request (shows confirmation toast: "Request" or "Mark as Known", triggers search job)
   - Up swipe: Dismiss (can undo) - requires 150px swipe distance
-- **Enable/Disable:** Per-user toggle to enable/disable feature while preserving settings
-- **Visibility:** Tab shown to any user with verified configuration
+- **Enable/Disable:** Admin global toggle to enable/disable feature for all users
+- **Visibility:** Tab shown to any authenticated user when admin has configured and enabled BookDate
 
 ## Database Models
 
-### BookDateConfig (per user)
+### BookDateConfig (global singleton - one record)
 ```prisma
-- userId (unique)
+- id (single record)
 - provider ('openai' | 'claude')
-- apiKey (encrypted)
+- apiKey (encrypted, shared by all users)
 - model (e.g., 'gpt-4o', 'claude-sonnet-4-5-20250929')
-- libraryScope ('full' | 'listened' | 'rated')
+- libraryScope ('full' | 'rated')
 - customPrompt (optional)
-- isVerified, isEnabled
+- isVerified (admin tested connection), isEnabled (admin toggle)
 ```
 
 ### BookDateRecommendation (cached)
@@ -50,25 +51,27 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Users swipe through r
 ## API Endpoints
 
 **Configuration:**
-- POST `/api/bookdate/test-connection` - Validate API key (saved or new), fetch models
+- POST `/api/bookdate/test-connection` - Validate API key (saved or new), fetch models (All authenticated)
   - Supports `useSavedKey: true` to test with encrypted saved API key
-- GET/POST/DELETE `/api/bookdate/config` - User config management
-  - POST accepts optional `apiKey` (only required for initial setup)
-  - POST includes `isEnabled` field for per-user toggle
-- DELETE `/api/bookdate/swipes` - Clear swipe history
+- GET `/api/bookdate/config` - Get global config (excluding API key) (All authenticated)
+- POST `/api/bookdate/config` - Create/update global config (Admin only)
+  - Accepts optional `apiKey` (only required for initial setup)
+  - Includes `isEnabled` field for global admin toggle
+- DELETE `/api/bookdate/config` - Delete global config (Admin only)
+- DELETE `/api/bookdate/swipes` - Clear ALL users' swipe history (Admin only)
 
 **Recommendations:**
-- GET `/api/bookdate/recommendations` - Return all cached unswiped recommendations
-- POST `/api/bookdate/swipe` - Record swipe, create request + trigger search job if right+confirm
-- POST `/api/bookdate/undo` - Undo last swipe (left/up only)
-- POST `/api/bookdate/generate` - Force generate new batch
+- GET `/api/bookdate/recommendations` - Return user's cached unswiped recommendations (All authenticated)
+- POST `/api/bookdate/swipe` - Record user's swipe, create request + trigger search job if right+confirm (All authenticated)
+- POST `/api/bookdate/undo` - Undo last swipe (left/up only) (All authenticated)
+- POST `/api/bookdate/generate` - Force generate new batch (All authenticated)
 
 ## UI Components
 
 **Pages:**
-- `/bookdate` - Main swipe interface (mobile gestures + desktop buttons)
-- `/admin/settings` - BookDate configuration tab (all users can access)
-- `/setup` - Step 7 in setup wizard (optional, skip-able)
+- `/bookdate` - Main swipe interface (mobile gestures + desktop buttons) (All authenticated users)
+- `/admin/settings` - BookDate configuration tab (Admin only)
+- Header navigation - BookDate tab visible to all authenticated users when admin has configured and enabled
 
 **Components:**
 - `RecommendationCard` - Swipeable card with 150px delta threshold, responsive height (max 85vh)

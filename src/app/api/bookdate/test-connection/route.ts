@@ -8,7 +8,6 @@ import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 
 async function handler(req: AuthenticatedRequest) {
   try {
-    const userId = req.user!.id;
     const body = await req.json();
     const { provider, apiKey, useSavedKey } = body;
 
@@ -27,15 +26,13 @@ async function handler(req: AuthenticatedRequest) {
       );
     }
 
-    // Get API key from saved config if useSavedKey is true
+    // Get API key from saved global config if useSavedKey is true
     let testApiKey = apiKey;
     if (useSavedKey && !testApiKey) {
       const { prisma } = await import('@/lib/db');
       const { getEncryptionService } = await import('@/lib/services/encryption.service');
 
-      const config = await prisma.bookDateConfig.findUnique({
-        where: { userId },
-      });
+      const config = await prisma.bookDateConfig.findFirst();
 
       if (!config || !config.apiKey) {
         return NextResponse.json(

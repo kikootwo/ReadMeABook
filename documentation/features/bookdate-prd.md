@@ -13,23 +13,23 @@
 
 **Why:** Current audiobook discovery relies on manual browsing. BookDate leverages AI and user listening history to surface relevant audiobooks users might not discover otherwise, increasing engagement and library utilization.
 
-**Target Users:** All ReadMeABook users (per-user personalization)
+**Target Users:** All ReadMeABook users (global admin-managed AI, per-user personalization based on individual library and swipe history)
 
 ---
 
 ## 2. Feature Overview
 
 ### Core Experience
-1. **Setup:** User configures AI provider, API key, model, library scope, and custom prompt
-2. **Discovery:** AI generates personalized audiobook recommendations based on user's Plex library and preferences
+1. **Setup:** Admin configures AI provider, API key, model, library scope, and custom prompt (global for all users)
+2. **Discovery:** AI generates personalized audiobook recommendations based on each user's individual Plex library, ratings, and swipe history
 3. **Interaction:** Swipe right (request), left (not interested), or up (neutral) on recommendations
-4. **Learning:** AI refines future recommendations based on swipe history
+4. **Learning:** AI refines future recommendations based on individual swipe history
 
 ### Key Differentiation
-- **Personalized:** Recommendations based on individual user's library, listening history, and ratings
+- **Personalized:** Recommendations based on each individual user's library, listening history, ratings, and swipe patterns
 - **AI-Powered:** Leverages LLMs (OpenAI, Claude) for sophisticated matching
 - **Engaging:** Tinder-style interface makes discovery fun and frictionless
-- **Privacy-First:** User provides their own AI API key (no centralized cost/data)
+- **Centrally Managed:** Admin configures AI once, all users benefit with personalized recommendations
 
 ---
 
@@ -49,23 +49,29 @@
 
 ## 4. Configuration Flow
 
-### 4.1 Wizard Integration
+### 4.1 Admin Settings Page
 
-**Location:** New optional step after path validation step
+**Location:** /admin/settings → BookDate tab (Admin only)
 
-**Step: "BookDate Setup (Optional)"**
+**Access Control:** Only users with admin role can access and configure BookDate
 
 UI Elements:
-1. **Skip Button:** Prominent "Skip for now" option (can configure later)
+1. **Enable/Disable Toggle:** (visible when configured)
+   - Toggle switch: Enable/Disable BookDate Feature
+   - Label: "BookDate Feature"
+   - Help text: "When enabled, all users can access BookDate recommendations. When disabled, the BookDate tab is hidden for all users."
 2. **AI Provider Selection:**
    - Dropdown: OpenAI, Claude (Anthropic)
    - Label: "Choose AI Provider"
 3. **API Key Input:**
    - Text field (password-style masking)
    - Label: "API Key"
-   - Help text: "Your API key is stored securely and only used for recommendations"
+   - Help text: "The API key is stored securely and encrypted. All users share this API key but receive personalized recommendations."
+   - Placeholder: "sk-..." (OpenAI) or "sk-ant-..." (Claude)
+   - Can leave blank to keep existing key when updating other settings
 4. **Test Connection Button:**
    - Label: "Test Connection & Fetch Models"
+   - Can test with saved API key or newly entered key
    - Action: Validates API key, fetches available models
    - Success: Enables model selection dropdown
    - Failure: Shows error message
@@ -83,40 +89,31 @@ UI Elements:
    - Label: "Additional Preferences (Optional)"
    - Placeholder: "e.g., 'I prefer sci-fi with strong female leads' or 'No romance novels'"
    - Help text: "Provide any additional context to personalize recommendations"
+8. **Clear All Swipe History:** (visible when configured)
+   - Button: "Clear Swipe History"
+   - Confirmation dialog: "This will clear all swipe history and cached recommendations for ALL users. Continue?"
+   - Action: Clears all users' swipes and recommendations
 
 **Validation:**
-- API key required if provider selected
-- Model required if API key provided
-- Library scope required if model selected
-- Can skip entire step (all fields optional)
+- API key required for initial setup
+- Model and library scope always required
+- API key optional when updating existing configuration (uses saved key)
 
-### 4.2 Settings Page
-
-**Location:** New "BookDate" section in Settings page
-
-**Fields:** Identical to wizard setup, with additions:
-- **Enable/Disable Toggle:** (Admin only) "Enable BookDate Feature"
-  - When disabled: Hides BookDate tab for all users, preserves configuration
-  - Label: "Enable BookDate for all users"
-- **Clear Swipe History:** Button to reset user's swipe history
-  - Confirmation dialog: "This will clear your recommendation history. Continue?"
-- **Reconfigure:** Allows changing any setting
-- **Test Connection:** Re-validates API key and fetches models
-
-**Visibility:** BookDate settings section always visible in settings (allows configuration after skipping wizard)
+**Visibility:** BookDate tab visible to all admins in /admin/settings
 
 ---
 
 ## 5. BookDate Tab Visibility
 
 ### Display Rules
-- **Show Tab:** All BookDate settings configured AND verified
-  - Required: Provider, API key, model, library scope
+- **Show Tab:** Global BookDate configuration exists AND is verified AND is enabled
+  - Required: Provider, API key, model, library scope configured by admin
   - Optional: Custom prompt (can be empty)
-- **Hide Tab:** Any required setting missing or unverified
+  - All authenticated users see the tab when these conditions are met
+- **Hide Tab:** Configuration missing, unverified, or disabled by admin
 
 ### Verification Status
-- Stored per-user in database
+- Stored globally in database (single configuration for all users)
 - Re-verification not required on subsequent visits (trust stored config)
 - If API call fails during use, show error (don't hide tab)
 
@@ -345,20 +342,21 @@ UI Elements:
 
 ### 8.1 Data Models
 
-**BookDateConfig (per user):**
+**BookDateConfig (global singleton - one record for entire system):**
 ```typescript
 {
-  userId: string;
+  id: string; // Single record
   provider: 'openai' | 'claude';
-  apiKey: string; // Encrypted at rest
+  apiKey: string; // Encrypted at rest (AES-256), shared by all users
   model: string; // e.g., 'gpt-4o', 'claude-sonnet-4-5'
   libraryScope: 'full' | 'rated';
   customPrompt?: string;
-  isVerified: boolean;
+  isVerified: boolean; // Admin has tested connection
   isEnabled: boolean; // Admin-controlled global toggle
   createdAt: Date;
   updatedAt: Date;
 }
+// Note: No userId - this is a global configuration managed by admins
 ```
 
 **BookDateRecommendation (cached):**
@@ -396,23 +394,21 @@ UI Elements:
 
 ### 8.2 API Endpoints
 
-**Configuration:**
-- `POST /api/bookdate/config` - Create/update user's BookDate config
-- `GET /api/bookdate/config` - Get user's BookDate config (excluding API key)
-- `POST /api/bookdate/test-connection` - Validate API key, return available models
-- `DELETE /api/bookdate/config` - Delete user's BookDate config
-- `DELETE /api/bookdate/swipes` - Clear user's swipe history
+**Configuration (Admin only - except GET):**
+- `POST /api/bookdate/config` - Create/update global BookDate config (Admin only)
+- `GET /api/bookdate/config` - Get global BookDate config (excluding API key) (All authenticated users)
+- `POST /api/bookdate/test-connection` - Validate API key, return available models (All authenticated users - admins use for setup)
+- `DELETE /api/bookdate/config` - Delete global BookDate config (Admin only)
+- `DELETE /api/bookdate/swipes` - Clear ALL users' swipe history (Admin only)
 
-**Recommendations:**
-- `GET /api/bookdate/recommendations` - Get current recommendations (cached or generate)
+**Recommendations (All authenticated users):**
+- `GET /api/bookdate/recommendations` - Get current recommendations for user (cached or generate)
+  - Uses global config but returns personalized recommendations based on user's library/swipes
   - Response: Array of 10 recommendations
-- `POST /api/bookdate/swipe` - Record swipe action
+- `POST /api/bookdate/swipe` - Record swipe action for current user
   - Body: `{ recommendationId, action, markedAsKnown? }`
 - `POST /api/bookdate/undo` - Undo last swipe (left/up only)
 - `POST /api/bookdate/generate` - Force generate new batch (for "Get More" button)
-
-**Admin:**
-- `PATCH /api/admin/bookdate/toggle` - Enable/disable BookDate globally
 
 ### 8.3 AI Provider Integration
 
@@ -523,18 +519,23 @@ UI Elements:
 ## 10. Security & Privacy
 
 ### 10.1 API Key Storage
-- **Encryption at rest:** API keys encrypted in database
+- **Encryption at rest:** API key encrypted in database using AES-256
 - **No logging:** Never log API keys (even in error logs)
-- **User-owned:** Each user provides their own key (no shared keys)
+- **Admin-managed:** Single global API key configured by admin, shared by all users
+- **Secure transmission:** API key never sent to client (stored server-side only)
 
 ### 10.2 Per-User Isolation
-- All queries filtered by `userId`
+- All recommendation queries filtered by `userId`
 - Users never see other users' swipes, ratings, or recommendations
-- Cache is per-user
+- Cache is per-user (each user has their own cached recommendations)
+- Swipe history is per-user (AI uses individual swipe patterns for personalization)
+- Plex library data is per-user (AI sees only the requesting user's library)
 
 ### 10.3 Admin Controls
-- Global enable/disable toggle (preserves user configs)
-- Admin can't see user API keys (encrypted, write-only)
+- Global enable/disable toggle (hides BookDate tab for all users when disabled)
+- Admin configures single global AI provider/key/model
+- Admin can clear all users' swipe history (affects everyone's recommendations)
+- Admin can't see decrypted API key after initial save (write-only)
 
 ---
 
