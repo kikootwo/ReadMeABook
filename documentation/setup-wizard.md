@@ -94,8 +94,10 @@ interface SetupState {
 **5. Initial Job Execution**
 - Feature: Added FinalizeStep (step 8)
 - Automatically runs Audible refresh + Plex scan
-- Shows real-time execution status
-- Prevents navigation until complete
+- Polls job status every 2s until actual completion
+- Shows real-time execution status (pending → running → completed/failed)
+- Prevents navigation until all jobs complete
+- Uses `/api/admin/job-status/:id` endpoint for status polling
 
 ## Related Files
 

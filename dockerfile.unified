@@ -1,0 +1,81 @@
+# ReadMeABook - Unified Dockerfile
+# Single container with PostgreSQL, Redis, and Next.js app
+# Designed for easy deployment with minimal configuration
+
+# Start from debian base with node preinstalled
+FROM node:20-bookworm AS base
+
+# Install PostgreSQL, Redis, and supervisord
+RUN apt-get update && apt-get install -y \
+    postgresql-15 \
+    postgresql-client-15 \
+    redis-server \
+    supervisor \
+    curl \
+    openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json package-lock.json* ./
+COPY prisma ./prisma/
+
+# Install ALL dependencies (including dev dependencies needed for build)
+RUN npm ci && npm cache clean --force
+
+# Generate Prisma client (with dummy URL)
+ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy?schema=public"
+RUN npx prisma generate
+
+# Copy application code
+COPY . .
+
+# Build Next.js application
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+ENV TURBOPACK=0
+RUN npm run build
+
+# Remove dev dependencies to reduce image size
+RUN npm prune --production
+
+# Create necessary directories
+RUN mkdir -p \
+    /var/run/postgresql \
+    /var/lib/postgresql/data \
+    /var/lib/redis \
+    /app/config \
+    /app/cache \
+    /downloads \
+    /media \
+    /app/.next/cache \
+    /var/log/supervisor
+
+# Setup PostgreSQL
+RUN chown -R postgres:postgres /var/lib/postgresql /var/run/postgresql && \
+    chmod 2777 /var/run/postgresql
+
+# Setup Redis data directory
+RUN chown -R redis:redis /var/lib/redis
+
+# Setup app directories (node user)
+RUN chown -R node:node /app/config /app/cache /downloads /media /app/.next/cache
+
+# Copy supervisord configuration
+COPY --chown=root:root docker/unified/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Copy entrypoint script
+COPY --chown=root:root docker/unified/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Expose app port
+EXPOSE 3030
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:3030/api/health || exit 1
+
+# Set entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

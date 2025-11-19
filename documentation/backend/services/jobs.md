@@ -157,6 +157,14 @@ queue.on('stalled', async (job) => {
 - ✅ Scheduled jobs triggered by timer not appearing in system logs → Added ensureJobRecord() to create Job records for timer-triggered scheduled jobs
 - ✅ Scheduled jobs triggered by timer not updating lastRun timestamp → ensureJobRecord() now updates lastRun for timer-triggered jobs
 
+## API Endpoints
+
+**GET /api/admin/job-status/:id**
+- Get execution status of a specific job by database job ID
+- Returns: job status (pending, active, completed, failed, stuck)
+- Used by setup wizard to poll job completion
+- Requires admin auth
+
 ## Tech Stack
 
 - Bull (npm)

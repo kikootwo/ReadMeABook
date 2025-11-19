@@ -30,8 +30,12 @@ export async function POST(
     // Await params in Next.js 15+
     const { id } = await params;
 
+    console.log(`[JobTrigger] Triggering scheduled job: ${id}`);
+
     const schedulerService = getSchedulerService();
     const jobId = await schedulerService.triggerJobNow(id);
+
+    console.log(`[JobTrigger] Job triggered successfully, database job ID: ${jobId}`);
 
     return NextResponse.json({
       success: true,
