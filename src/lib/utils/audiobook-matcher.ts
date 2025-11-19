@@ -255,59 +255,75 @@ export async function enrichAudiobooksWithMatches(
 ) {
   const results = await Promise.all(audiobooks.map((book) => enrichAudiobookWithMatch(book)));
 
-  // If userId is provided, enrich with request status
-  if (userId) {
-    const asins = audiobooks.map(book => book.asin);
+  // Always enrich with request status (check ANY user's requests)
+  const asins = audiobooks.map(book => book.asin);
 
-    // Get all audiobook records for these ASINs
-    const audiobookRecords = await prisma.audiobook.findMany({
-      where: {
-        audibleAsin: { in: asins },
-      },
-      select: {
-        id: true,
-        audibleAsin: true,
-        requests: {
-          where: {
-            userId: userId,
+  // Get all audiobook records for these ASINs with ALL requests
+  const audiobookRecords = await prisma.audiobook.findMany({
+    where: {
+      audibleAsin: { in: asins },
+    },
+    select: {
+      id: true,
+      audibleAsin: true,
+      requests: {
+        select: {
+          id: true,
+          status: true,
+          userId: true,
+          user: {
+            select: {
+              plexUsername: true,
+            },
           },
-          select: {
-            id: true,
-            status: true,
-          },
-          orderBy: {
-            createdAt: 'desc',
-          },
-          take: 1,
         },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: 1,
       },
-    });
+    },
+  });
 
-    // Create a map of ASIN -> request status
-    const requestMap = new Map<string, { requestId: string; requestStatus: string }>();
-    for (const record of audiobookRecords) {
-      if (record.requests.length > 0 && record.audibleAsin) {
-        const request = record.requests[0];
-        requestMap.set(record.audibleAsin, {
-          requestId: request.id,
-          requestStatus: request.status,
-        });
-      }
+  // Create a map of ASIN -> request info
+  const requestMap = new Map<string, {
+    requestId: string;
+    requestStatus: string;
+    requestedByUserId: string;
+    requestedByUsername: string;
+  }>();
+
+  for (const record of audiobookRecords) {
+    if (record.requests.length > 0 && record.audibleAsin) {
+      const request = record.requests[0];
+      requestMap.set(record.audibleAsin, {
+        requestId: request.id,
+        requestStatus: request.status,
+        requestedByUserId: request.userId,
+        requestedByUsername: request.user.plexUsername,
+      });
     }
+  }
 
-    // Add request status to results
-    for (const result of results) {
-      const requestInfo = requestMap.get(result.asin);
-      const enrichedResult = result as any;
-      if (requestInfo) {
-        enrichedResult.isRequested = true;
-        enrichedResult.requestStatus = requestInfo.requestStatus;
-        enrichedResult.requestId = requestInfo.requestId;
-      } else {
-        enrichedResult.isRequested = false;
-        enrichedResult.requestStatus = null;
-        enrichedResult.requestId = null;
+  // Add request status to results
+  for (const result of results) {
+    const requestInfo = requestMap.get(result.asin);
+    const enrichedResult = result as any;
+    if (requestInfo) {
+      enrichedResult.isRequested = true;
+      enrichedResult.requestStatus = requestInfo.requestStatus;
+      enrichedResult.requestId = requestInfo.requestId;
+      enrichedResult.requestedByUserId = requestInfo.requestedByUserId;
+      // Only include username if it's not the current user
+      if (userId && requestInfo.requestedByUserId !== userId) {
+        enrichedResult.requestedByUsername = requestInfo.requestedByUsername;
       }
+    } else {
+      enrichedResult.isRequested = false;
+      enrichedResult.requestStatus = null;
+      enrichedResult.requestId = null;
+      enrichedResult.requestedByUserId = null;
+      enrichedResult.requestedByUsername = null;
     }
   }
 

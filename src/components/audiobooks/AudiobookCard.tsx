@@ -166,6 +166,11 @@ export function AudiobookCard({
             // Check if book is requested and in progress (non-re-requestable statuses)
             const inProgressStatuses = ['pending', 'awaiting_search', 'searching', 'downloading', 'processing', 'awaiting_import'];
             if (audiobook.isRequested && audiobook.requestStatus && inProgressStatuses.includes(audiobook.requestStatus)) {
+              // Show who requested it
+              const buttonText = audiobook.requestedByUsername
+                ? `Requested by ${audiobook.requestedByUsername}`
+                : 'Requested';
+
               return (
                 <Button
                   onClick={() => {}}
@@ -174,7 +179,7 @@ export function AudiobookCard({
                   size="md"
                   className="w-full cursor-not-allowed opacity-75"
                 >
-                  Requested
+                  {buttonText}
                 </Button>
               );
             }
@@ -218,6 +223,7 @@ export function AudiobookCard({
       isRequested={audiobook.isRequested}
       requestStatus={audiobook.requestStatus}
       isAvailable={audiobook.isAvailable}
+      requestedByUsername={audiobook.requestedByUsername}
     />
     </>
   );

@@ -22,6 +22,7 @@ interface AudiobookDetailsModalProps {
   isRequested?: boolean;
   requestStatus?: string | null;
   isAvailable?: boolean;
+  requestedByUsername?: string | null;
 }
 
 export function AudiobookDetailsModal({
@@ -32,6 +33,7 @@ export function AudiobookDetailsModal({
   isRequested = false,
   requestStatus = null,
   isAvailable = false,
+  requestedByUsername = null,
 }: AudiobookDetailsModalProps) {
   const { user } = useAuth();
   const { audiobook, isLoading, error } = useAudiobookDetails(isOpen ? asin : null);
@@ -342,6 +344,11 @@ export function AudiobookDetailsModal({
                   requestStatus &&
                   inProgressStatuses.includes(requestStatus)
                 ) {
+                  // Show who requested it
+                  const buttonText = requestedByUsername
+                    ? `Requested by ${requestedByUsername}`
+                    : 'Already Requested';
+
                   return (
                     <div className="flex-1">
                       <Button
@@ -351,7 +358,7 @@ export function AudiobookDetailsModal({
                         size="lg"
                         className="w-full cursor-not-allowed opacity-75"
                       >
-                        Already Requested
+                        {buttonText}
                       </Button>
                     </div>
                   );

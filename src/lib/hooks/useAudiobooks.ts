@@ -22,9 +22,10 @@ export interface Audiobook {
   isAvailable?: boolean;  // Set by real-time matching against plex_library
   plexGuid?: string | null;
   dbId?: string | null;
-  isRequested?: boolean;  // Set if user has requested this audiobook
-  requestStatus?: string | null;  // Status of user's request (if any)
-  requestId?: string | null;  // ID of user's request (if any)
+  isRequested?: boolean;  // Set if ANY user has requested this audiobook
+  requestStatus?: string | null;  // Status of request (if any)
+  requestId?: string | null;  // ID of request (if any)
+  requestedByUsername?: string | null;  // Username who requested (only if not current user)
 }
 
 export function useAudiobooks(type: 'popular' | 'new-releases', limit: number = 20, page: number = 1) {

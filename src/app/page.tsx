@@ -5,16 +5,20 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Header } from '@/components/layout/Header';
 import { AudiobookGrid } from '@/components/audiobooks/AudiobookGrid';
 import { useAudiobooks } from '@/lib/hooks/useAudiobooks';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-import { Pagination } from '@/components/ui/Pagination';
+import { StickyPagination } from '@/components/ui/StickyPagination';
 
 export default function HomePage() {
   const [popularPage, setPopularPage] = useState(1);
   const [newReleasesPage, setNewReleasesPage] = useState(1);
+
+  // Refs for auto-scrolling to section tops
+  const popularSectionRef = useRef<HTMLElement>(null);
+  const newReleasesSectionRef = useRef<HTMLElement>(null);
 
   const {
     audiobooks: popular,
@@ -30,6 +34,17 @@ export default function HomePage() {
     message: newReleasesMessage,
   } = useAudiobooks('new-releases', 20, newReleasesPage);
 
+  // Handle page changes with auto-scroll to section top
+  const handlePopularPageChange = (page: number) => {
+    setPopularPage(page);
+    popularSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const handleNewReleasesPageChange = (page: number) => {
+    setNewReleasesPage(page);
+    newReleasesSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   return (
     <ProtectedRoute>
       <div className="min-h-screen">
@@ -37,8 +52,8 @@ export default function HomePage() {
 
       <main className="container mx-auto px-4 py-6 sm:py-8 max-w-7xl space-y-8 sm:space-y-12">
         {/* Popular Audiobooks */}
-        <section>
-          <div className="flex items-center justify-between mb-4 sm:mb-6">
+        <section ref={popularSectionRef}>
+          <div className="mb-4 sm:mb-6">
             <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">
               Popular Audiobooks
             </h2>
@@ -54,26 +69,17 @@ export default function HomePage() {
               </p>
             </div>
           ) : (
-            <>
-              <AudiobookGrid
-                audiobooks={popular}
-                isLoading={loadingPopular}
-                emptyMessage="No popular audiobooks available"
-              />
-
-              <Pagination
-                currentPage={popularPage}
-                totalPages={popularTotalPages}
-                onPageChange={setPopularPage}
-                className="mt-8"
-              />
-            </>
+            <AudiobookGrid
+              audiobooks={popular}
+              isLoading={loadingPopular}
+              emptyMessage="No popular audiobooks available"
+            />
           )}
         </section>
 
         {/* New Releases */}
-        <section>
-          <div className="flex items-center justify-between mb-4 sm:mb-6">
+        <section ref={newReleasesSectionRef}>
+          <div className="mb-4 sm:mb-6">
             <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100">
               New Releases
             </h2>
@@ -89,20 +95,11 @@ export default function HomePage() {
               </p>
             </div>
           ) : (
-            <>
-              <AudiobookGrid
-                audiobooks={newReleases}
-                isLoading={loadingNewReleases}
-                emptyMessage="No new releases available"
-              />
-
-              <Pagination
-                currentPage={newReleasesPage}
-                totalPages={newReleasesTotalPages}
-                onPageChange={setNewReleasesPage}
-                className="mt-8"
-              />
-            </>
+            <AudiobookGrid
+              audiobooks={newReleases}
+              isLoading={loadingNewReleases}
+              emptyMessage="No new releases available"
+            />
           )}
         </section>
 
@@ -151,6 +148,22 @@ export default function HomePage() {
           </div>
         </div>
       </footer>
+
+      {/* Sticky Pagination Controls */}
+      <StickyPagination
+        currentPage={popularPage}
+        totalPages={popularTotalPages}
+        onPageChange={handlePopularPageChange}
+        sectionRef={popularSectionRef}
+        label="Popular Audiobooks"
+      />
+      <StickyPagination
+        currentPage={newReleasesPage}
+        totalPages={newReleasesTotalPages}
+        onPageChange={handleNewReleasesPageChange}
+        sectionRef={newReleasesSectionRef}
+        label="New Releases"
+      />
       </div>
     </ProtectedRoute>
   );

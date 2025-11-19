@@ -28,9 +28,9 @@ src/components/
 - **Footer** - Version, links
 
 **Audiobooks**
-- **AudiobookCard** ✅ - Cover, title, author, narrator, duration, request button, clickable to open details modal
+- **AudiobookCard** ✅ - Cover, title, author, narrator, duration, request button, clickable to open details modal. Shows "Requested by [username]" when someone else has requested the book, "Requested" when current user has requested it
 - **AudiobookGrid** - Responsive grid (1/2/3/4 cols)
-- **AudiobookDetailsModal** ✅ - Full-screen modal with comprehensive metadata (description, genres, rating, release date, narrator, request functionality)
+- **AudiobookDetailsModal** ✅ - Full-screen modal with comprehensive metadata (description, genres, rating, release date, narrator, request functionality). Shows requesting user's name when applicable
 
 **Requests**
 - **RequestCard** ✅ - Cover, title, author, status badge, progress bar, timestamps, action buttons (cancel, manual search, interactive search)
@@ -46,6 +46,8 @@ src/components/
 - **Select** - Custom styling, search/filter
 - **Modal** ✅ - Dialog overlay with backdrop, sizes (sm/md/lg/xl/full), ESC to close, body scroll lock
 - **ConfirmModal** ✅ - Confirmation dialog with customizable title, message, buttons, loading state, and variant (primary/danger)
+- **Pagination** ✅ - Traditional page navigation with prev/next buttons, smart ellipsis (shows 1...4 5 6...10)
+- **StickyPagination** ✅ - Minimal floating pill at bottom center with prev/next arrows, quick jump input, section label. Shows/hides based on section visibility (IntersectionObserver). Rounded-full design, backdrop blur, subtle shadow, auto-scroll on page change
 
 **Auth**
 - **ProtectedRoute** ✅ - Auth check, loading state, redirects, admin role support
@@ -57,6 +59,16 @@ src/components/
 - **Chart** - Line/bar/pie
 
 ## Pages Implemented ✅
+
+**Homepage** (`/`)
+- Popular Audiobooks and New Releases sections
+- Floating pagination pill at bottom center of viewport
+- Minimal design: section label | ← | Page X of Y | →
+- Quick jump input (type page number + Enter)
+- Auto-shows when scrolling through a section (IntersectionObserver)
+- Auto-scrolls to section top on page change
+- Rounded-full design with backdrop blur and subtle shadow
+- Responsive grid layouts (1/2/3/4 cols)
 
 **Requests Page** (`/requests`)
 - Filter tabs: All, Active, Waiting, Completed, Failed, Cancelled
@@ -78,7 +90,7 @@ src/components/
 
 ```typescript
 interface AudiobookCardProps {
-  audiobook: {asin, title, author, narrator?, coverArtUrl?, rating?, durationMinutes?};
+  audiobook: {asin, title, author, narrator?, coverArtUrl?, rating?, durationMinutes?, isRequested?, requestStatus?, requestedByUsername?};
   onRequest?: (asin: string) => void;
   isRequested?: boolean;
   requestStatus?: string;
@@ -93,6 +105,7 @@ interface AudiobookDetailsModalProps {
   isRequested?: boolean;
   requestStatus?: string | null;
   isAvailable?: boolean;
+  requestedByUsername?: string | null;
 }
 
 interface RequestCardProps {
@@ -126,6 +139,21 @@ interface ConfirmModalProps {
   cancelText?: string;
   isLoading?: boolean;
   variant?: 'danger' | 'primary';
+}
+
+interface PaginationProps {
+  currentPage: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  className?: string;
+}
+
+interface StickyPaginationProps {
+  currentPage: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+  sectionRef: React.RefObject<HTMLElement | null>;
+  label: string;
 }
 ```
 
