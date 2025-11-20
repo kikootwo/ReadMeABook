@@ -189,6 +189,15 @@ interface PlexLibrary {
   - ASIN filtering: Rejects candidates with wrong ASINs in plexGuid
   - Consistent 70% weighted threshold everywhere
 
+**8. BookDate Token Decryption Failures**
+- Issue: Decryption errors when fetching user ratings for BookDate recommendations
+- User Experience: "Failed to decrypt user authToken" / "Failed to decrypt system Plex token"
+- Cause: Tokens may be stored as plain text (from before encryption implementation or different encryption key)
+- Fix: Added fallback to use tokens as plain text if decryption fails
+  - User Plex token: Try decrypt, fallback to plain text
+  - System Plex token: Try decrypt, fallback to plain text
+  - Allows BookDate to function with both encrypted and plain text tokens
+
 ## Availability Checking
 
 1. **DB Population:** Plex scan creates/updates records with `plexGuid` + `availabilityStatus: 'available'`
