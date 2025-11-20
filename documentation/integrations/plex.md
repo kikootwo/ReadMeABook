@@ -136,11 +136,12 @@ interface PlexLibrary {
 - System Plex token (configured during setup) is used for library scanning
 - Cached ratings reflect whoever owns that system token
 - Local admins use cached ratings because they don't have Plex accounts (user.authToken is bcrypt hash)
-- Plex-authenticated admins attempt to fetch personal ratings, may fail with 401 for shared users
-- **Known limitation:** Shared users' plex.tv OAuth tokens may not have direct server API access
-  - plex.tv OAuth tokens work for plex.tv services but may not grant server library access
-  - Server API access typically requires server owner permissions or specific access tokens
-  - When 401 occurs, BookDate falls back to recommendations without ratings (still functional)
+- **Token types:** Plex uses two token types per the API documentation
+  - plex.tv OAuth tokens: For authenticating to plex.tv services
+  - Server access tokens: For talking to individual PMS instances
+  - Must call `/api/v2/resources` with plex.tv token to get server-specific access tokens
+  - Each server in user's resources list has its own `accessToken`
+- BookDate now correctly fetches server-specific access tokens for Plex-authenticated users
 
 ## Fixed Issues ✅
 
