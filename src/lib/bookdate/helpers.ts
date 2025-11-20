@@ -123,9 +123,9 @@ async function enrichWithUserRatings(
       // server-specific access tokens from /api/v2/resources to talk to PMS
       const plexService = getPlexService();
 
-      // Get server machine ID from config
-      if (!plexConfig.authToken) {
-        console.error('[BookDate] System Plex token not configured');
+      // Get server machine ID from stored config (no need to access system token)
+      if (!plexConfig.machineIdentifier) {
+        console.error('[BookDate] Server machine identifier not configured');
         return cachedBooks.map(book => ({
           title: book.title,
           author: book.author,
@@ -134,29 +134,7 @@ async function enrichWithUserRatings(
         }));
       }
 
-      let systemPlexToken: string;
-      try {
-        systemPlexToken = encryptionService.decrypt(plexConfig.authToken);
-      } catch (decryptError) {
-        // Token might be stored as plain text (from before encryption or different implementation)
-        // Try using it as-is
-        console.warn('[BookDate] Failed to decrypt system Plex token, trying as plain text');
-        systemPlexToken = plexConfig.authToken;
-      }
-
-      const serverInfo = await plexService.testConnection(plexConfig.serverUrl, systemPlexToken);
-
-      if (!serverInfo.success || !serverInfo.info?.machineIdentifier) {
-        console.error('[BookDate] Cannot get server machine ID');
-        return cachedBooks.map(book => ({
-          title: book.title,
-          author: book.author,
-          narrator: book.narrator || undefined,
-          rating: undefined,
-        }));
-      }
-
-      const serverMachineId = serverInfo.info.machineIdentifier;
+      const serverMachineId = plexConfig.machineIdentifier;
       const serverAccessToken = await plexService.getServerAccessToken(
         serverMachineId,
         userPlexToken

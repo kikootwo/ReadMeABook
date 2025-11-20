@@ -24,6 +24,7 @@ export interface PlexConfig {
   serverUrl: string | null;
   authToken: string | null;
   libraryId: string | null;
+  machineIdentifier: string | null;
 }
 
 /**
@@ -198,12 +199,14 @@ export class ConfigurationService {
       'plex_url',
       'plex_token',
       'plex_audiobook_library_id',
+      'plex_machine_identifier',
     ]);
 
     return {
       serverUrl: config.plex_url,
       authToken: config.plex_token,
       libraryId: config.plex_audiobook_library_id,
+      machineIdentifier: config.plex_machine_identifier || null,
     };
   }
 

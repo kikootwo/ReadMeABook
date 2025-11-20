@@ -75,6 +75,15 @@ export async function POST(request: NextRequest) {
       create: { key: 'plex_audiobook_library_id', value: plex.audiobook_library_id },
     });
 
+    // Save machine identifier (for server-specific access tokens)
+    if (plex.machine_identifier) {
+      await prisma.configuration.upsert({
+        where: { key: 'plex_machine_identifier' },
+        update: { value: plex.machine_identifier },
+        create: { key: 'plex_machine_identifier', value: plex.machine_identifier },
+      });
+    }
+
     // Prowlarr configuration
     await prisma.configuration.upsert({
       where: { key: 'prowlarr_url' },
