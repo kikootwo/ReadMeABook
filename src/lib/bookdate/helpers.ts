@@ -20,6 +20,7 @@ interface CachedLibraryBook {
   title: string;
   author: string;
   narrator: string | null;
+  plexGuid: string;
   plexRatingKey: string | null;
   userRating?: any; // Admin's cached rating
 }
@@ -86,17 +87,106 @@ async function enrichWithUserRatings(
       }));
     }
 
-    // Non-admin users: Skip rating enrichment for now
-    // Note: Plex shared users don't have permission to fetch metadata by ratingKey
-    // This causes 401 errors. For now, non-admin users get no ratings in recommendations.
-    // TODO: Investigate alternative Plex API endpoints for shared user ratings
-    console.log('[BookDate] User is non-admin, skipping per-user ratings (Plex API limitation for shared users)');
-    return cachedBooks.map(book => ({
-      title: book.title,
-      author: book.author,
-      narrator: book.narrator || undefined,
-      rating: undefined, // Non-admin users don't get ratings (Plex API limitation)
-    }));
+    // Non-admin users: Fetch library with their token to get their personal ratings
+    // Note: /library/sections/{id}/all returns items with the authenticated user's ratings
+    console.log('[BookDate] User is non-admin, fetching library with user token to get personal ratings');
+
+    if (!user.authToken) {
+      console.warn('[BookDate] User has no Plex auth token');
+      return cachedBooks.map(book => ({
+        title: book.title,
+        author: book.author,
+        narrator: book.narrator || undefined,
+        rating: undefined,
+      }));
+    }
+
+    // Get Plex configuration
+    const configService = getConfigService();
+    const plexConfig = await configService.getPlexConfig();
+
+    if (!plexConfig.serverUrl || !plexConfig.libraryId) {
+      console.warn('[BookDate] No Plex server URL or library ID configured');
+      return cachedBooks.map(book => ({
+        title: book.title,
+        author: book.author,
+        narrator: book.narrator || undefined,
+        rating: undefined,
+      }));
+    }
+
+    // Decrypt user's Plex token
+    let userPlexToken: string;
+    try {
+      const encryptionService = getEncryptionService();
+      userPlexToken = encryptionService.decrypt(user.authToken);
+    } catch (decryptError) {
+      console.error('[BookDate] Failed to decrypt user authToken:', decryptError);
+      return cachedBooks.map(book => ({
+        title: book.title,
+        author: book.author,
+        narrator: book.narrator || undefined,
+        rating: undefined,
+      }));
+    }
+
+    try {
+      // Fetch library content with user's token to get their personal ratings
+      const plexService = getPlexService();
+      const userLibrary = await plexService.getLibraryContent(
+        plexConfig.serverUrl,
+        userPlexToken,
+        plexConfig.libraryId
+      );
+
+      console.log(`[BookDate] Fetched ${userLibrary.length} items from Plex with user's token`);
+
+      // Create a map of guid/ratingKey -> userRating for quick lookup
+      const ratingsMap = new Map<string, number>();
+      userLibrary.forEach(item => {
+        if (item.userRating) {
+          // Try to match by guid first (most reliable)
+          if (item.guid) {
+            ratingsMap.set(item.guid, item.userRating);
+          }
+          // Also store by ratingKey as fallback
+          if (item.ratingKey) {
+            ratingsMap.set(item.ratingKey, item.userRating);
+          }
+        }
+      });
+
+      console.log(`[BookDate] Found ${ratingsMap.size} rated items for non-admin user`);
+
+      // Enrich cached books with user's ratings from the fetched library
+      return cachedBooks.map(book => {
+        // Try to find rating by guid first (most reliable), then ratingKey
+        let rating: number | undefined;
+        if (book.plexGuid) {
+          rating = ratingsMap.get(book.plexGuid);
+        }
+        if (!rating && book.plexRatingKey) {
+          rating = ratingsMap.get(book.plexRatingKey);
+        }
+
+        return {
+          title: book.title,
+          author: book.author,
+          narrator: book.narrator || undefined,
+          rating: rating,
+        };
+      });
+
+    } catch (fetchError) {
+      console.error('[BookDate] Failed to fetch library with user token:', fetchError);
+      // Fallback: return books without ratings
+      return cachedBooks.map(book => ({
+        title: book.title,
+        author: book.author,
+        narrator: book.narrator || undefined,
+        rating: undefined,
+      }));
+    }
 
   } catch (error) {
     console.error('[BookDate] Error enriching books with user ratings:', error);
@@ -153,6 +243,7 @@ export async function getUserLibraryBooks(
         title: true,
         author: true,
         narrator: true,
+        plexGuid: true,
         plexRatingKey: true,
         userRating: true, // Admin's cached ratings from scan
       },

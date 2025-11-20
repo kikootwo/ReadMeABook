@@ -85,7 +85,7 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
    - Get user's library books (max 40, filtered by scope)
      - **Admin Users:** Use cached ratings (scanned with admin's Plex token)
      - **Local Admin Users:** No ratings (no Plex token)
-     - **Non-Admin Users:** No ratings (Plex API limitation - shared users can't fetch metadata by ratingKey)
+     - **Non-Admin Users:** Fetch library with user's token to get personal ratings
    - Get recent swipes (max 10)
    - Add custom prompt if provided
 
@@ -162,7 +162,10 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 **Per-User Rating Handling:**
 - **Admin users:** Use cached ratings from library scan (these are the admin's own ratings)
 - **Local admin users:** No ratings (authToken contains bcrypt password hash, not Plex token)
-- **Non-admin users:** No ratings (Plex API limitation - shared users don't have permission to fetch metadata by ratingKey, causes 401 errors)
+- **Non-admin users:** Fetch full library with user's token to get personal ratings
+  - Uses `/library/sections/{id}/all` endpoint which returns items with authenticated user's ratings
+  - Matches by plexGuid/ratingKey against cached library structure
+  - ~1-2s fetch time for full library (only happens when generating recommendations)
 
 **Graceful Degradation:**
 - Audnexus API down → Skip failed matches, show what matched
@@ -200,6 +203,10 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - **Cost Estimate:** ~$0.04 per batch (GPT-4o), varies by model
 - **Cache Hit Rate:** High (only generates when needed)
 - **API Rate Limits:** OpenAI ~3500 RPM, Claude ~4000 RPM
+- **Per-User Rating Fetch:**
+  - Admin users: No additional API calls (use cached ratings)
+  - Non-admin users: 1 library fetch (~1-2s for full library)
+  - Only happens when generating recommendations (not frequently)
 
 ## Dependencies
 

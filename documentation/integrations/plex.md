@@ -111,26 +111,28 @@ interface PlexLibrary {
 
 **Problem:** Library scan runs as admin, storing admin's ratings in cache. Different users need different ratings for recommendations.
 
-**Current Solution:**
+**Solution:**
 1. **Admin users:** Use cached ratings from library scan (these are their own ratings)
 2. **Local admin users:** No ratings (authToken contains bcrypt hash, not Plex token)
-3. **Non-admin users:** No ratings (Plex API limitation)
+3. **Non-admin users:** Fetch library with user's token to get personal ratings
 
-**Plex API Limitation:**
-- Shared/non-admin Plex users don't have permission to fetch metadata by `ratingKey`
-- API returns 401 Unauthorized when non-admin users try to fetch individual item metadata
-- This is a Plex server permission restriction, not a token expiration issue
-- Currently unsolved: No known alternative Plex API endpoint for shared user ratings
+**How Per-User Ratings Work:**
+- **Key insight:** `/library/sections/{id}/all` returns items with the **authenticated user's ratings**
+- Plex ratings are tied to user accounts (stored on plex.tv), not the server
+- When fetched with a user's token, each item includes that user's personal `userRating`
+- No special permissions needed - works for all authenticated users (admin and non-admin)
 
-**Methods (for potential future use):**
-- `getItemMetadata(serverUrl, userToken, ratingKey)` - Fetch single item's user rating (only works for server owners)
-- `batchGetUserRatings(serverUrl, userToken, ratingKeys[])` - Batch fetch multiple ratings (only works for server owners)
+**Implementation:**
+- `getLibraryContent(serverUrl, userToken, libraryId)` - Fetches library with user-specific ratings
+- Returns `PlexAudiobook[]` with `userRating` field specific to the authenticated user
+- Non-admin users: Fetch full library (~1-2s), match by plexGuid/ratingKey against cached structure
+- Admin users: Use cached ratings (skip API call, already have their ratings)
 
 **BookDate Integration:**
 - `enrichWithUserRatings(userId, cachedBooks)` - Determines user type and returns appropriate ratings
-  - Admin → cached ratings from scan
-  - Local admin → no ratings
-  - Non-admin → no ratings (Plex API limitation)
+  - Admin → cached ratings from scan (no API call)
+  - Local admin → no ratings (no Plex token)
+  - Non-admin → fetch library with user token, extract ratings, match against cached books
 
 ## Fixed Issues ✅
 
