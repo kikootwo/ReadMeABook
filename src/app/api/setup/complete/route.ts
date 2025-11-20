@@ -8,6 +8,7 @@ import { prisma } from '@/lib/db';
 import bcrypt from 'bcrypt';
 import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
 import { getEncryptionService } from '@/lib/services/encryption.service';
+import { getPlexService } from '@/lib/integrations/plex.service';
 
 export async function POST(request: NextRequest) {
   try {
@@ -75,12 +76,29 @@ export async function POST(request: NextRequest) {
       create: { key: 'plex_audiobook_library_id', value: plex.audiobook_library_id },
     });
 
-    // Save machine identifier (for server-specific access tokens)
-    if (plex.machine_identifier) {
+    // Get and save machine identifier (for server-specific access tokens)
+    // Fetch from Plex if not provided by frontend
+    let machineIdentifier = plex.machine_identifier;
+    if (!machineIdentifier) {
+      try {
+        const plexService = getPlexService();
+        const serverInfo = await plexService.testConnection(plex.url, plex.token);
+        if (serverInfo.success && serverInfo.info?.machineIdentifier) {
+          machineIdentifier = serverInfo.info.machineIdentifier;
+          console.log('[Setup] Fetched machineIdentifier:', machineIdentifier);
+        } else {
+          console.warn('[Setup] Could not fetch machineIdentifier');
+        }
+      } catch (error) {
+        console.error('[Setup] Error fetching machineIdentifier:', error);
+      }
+    }
+
+    if (machineIdentifier) {
       await prisma.configuration.upsert({
         where: { key: 'plex_machine_identifier' },
-        update: { value: plex.machine_identifier },
-        create: { key: 'plex_machine_identifier', value: plex.machine_identifier },
+        update: { value: machineIdentifier },
+        create: { key: 'plex_machine_identifier', value: machineIdentifier },
       });
     }
 
