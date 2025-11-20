@@ -8,6 +8,7 @@ import { getEncryptionService } from '@/lib/services/encryption.service';
 import { getConfigService } from '@/lib/services/config.service';
 import { AudibleService } from '@/lib/integrations/audible.service';
 import { getPlexService } from '@/lib/integrations/plex.service';
+import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 
 export interface LibraryBook {
   title: string;
@@ -614,38 +615,37 @@ export async function matchToAudnexus(
 
 /**
  * Check if book is already in user's library
+ * Uses the same matching algorithm as homepage (audiobook-matcher.ts)
  * @param userId - User ID
  * @param title - Book title
  * @param author - Book author
+ * @param asin - Optional ASIN for exact matching
  * @returns true if book is in library
  */
 export async function isInLibrary(
   userId: string,
   title: string,
-  author: string
+  author: string,
+  asin?: string
 ): Promise<boolean> {
-  const configService = getConfigService();
-  const plexConfig = await configService.getPlexConfig();
+  try {
+    // Use the centralized matching algorithm from audiobook-matcher.ts
+    // This ensures consistent matching behavior across the application
+    const match = await findPlexMatch({
+      asin: asin || '', // Empty ASIN will skip exact ASIN matching but still do fuzzy matching
+      title,
+      author,
+    });
 
-  if (!plexConfig.libraryId) {
+    if (match) {
+      console.log(`[BookDate] Book "${title}" by ${author} found in library (matched to: "${match.title}")`);
+    }
+
+    return !!match;
+  } catch (error) {
+    console.error(`[BookDate] Error checking library for "${title}":`, error);
     return false;
   }
-
-  const match = await prisma.plexLibrary.findFirst({
-    where: {
-      plexLibraryId: plexConfig.libraryId,
-      title: {
-        contains: title,
-        mode: 'insensitive',
-      },
-      author: {
-        contains: author,
-        mode: 'insensitive',
-      },
-    },
-  });
-
-  return !!match;
 }
 
 /**

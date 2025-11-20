@@ -7,13 +7,14 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 
 ## Key Details
 - **AI Providers:** OpenAI (GPT-4o+), Claude (Sonnet 4.5, Opus 4, Haiku)
-- **Configuration:** Global admin-managed, single encrypted API key (AES-256) shared by all users
-- **Personalization:** Each user receives recommendations based on their own library, ratings, and swipe history
-- **Library Scopes:**
+- **Configuration:** Global admin-managed (provider, model, API key), per-user preferences (library scope, custom prompt)
+- **Personalization:** Each user receives recommendations based on their own library, ratings, swipe history, and custom preferences
+- **Library Scopes (per-user):**
   - Full library: All books in library (max 40 most recent)
   - Rated only: Only books the user has rated
     - Local admin: Uses cached ratings from system token
     - Plex users: Fetches 100 books, filters to user's rated books, returns top 40
+- **Custom Prompt (per-user):** Optional preferences (max 1000 chars) to guide recommendations
 - **Context Window:** Max 50 books (40 library + 10 swipe history) per user
 - **Cache:** All unswiped recommendations persisted per user, shown on return
 - **Actions:**
@@ -31,9 +32,16 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - provider ('openai' | 'claude')
 - apiKey (encrypted, shared by all users)
 - model (e.g., 'gpt-4o', 'claude-sonnet-4-5-20250929')
-- libraryScope ('full' | 'rated')
-- customPrompt (optional)
+- libraryScope (DEPRECATED: now per-user in User model)
+- customPrompt (DEPRECATED: now per-user in User model)
 - isVerified (admin tested connection), isEnabled (admin toggle)
+```
+
+### User (per-user preferences)
+```prisma
+- bookDateLibraryScope ('full' | 'rated', default: 'full')
+- bookDateCustomPrompt (optional, max 1000 chars)
+- bookDateOnboardingComplete (boolean, default: false)
 ```
 
 ### BookDateRecommendation (cached)
@@ -54,15 +62,21 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 
 ## API Endpoints
 
-**Configuration:**
-- POST `/api/bookdate/test-connection` - Validate API key (saved or new), fetch models (All authenticated)
-  - Supports `useSavedKey: true` to test with encrypted saved API key
+**Global Configuration (Admin):**
+- POST `/api/bookdate/test-connection` - Validate API key (saved or new), fetch models
+  - **Auth:** Optional (unauthenticated during setup wizard, authenticated for saved keys in settings)
+  - Supports `useSavedKey: true` to test with encrypted saved API key (requires authentication)
 - GET `/api/bookdate/config` - Get global config (excluding API key) (All authenticated)
 - POST `/api/bookdate/config` - Create/update global config (Admin only)
   - Accepts optional `apiKey` (only required for initial setup)
   - Includes `isEnabled` field for global admin toggle
 - DELETE `/api/bookdate/config` - Delete global config (Admin only)
 - DELETE `/api/bookdate/swipes` - Clear ALL users' swipe history (Admin only)
+
+**User Preferences:**
+- GET `/api/bookdate/preferences` - Get user's BookDate preferences (libraryScope, customPrompt, onboardingComplete) (All authenticated)
+- PUT `/api/bookdate/preferences` - Update user's preferences (All authenticated)
+  - Accepts `libraryScope` ('full' | 'rated'), `customPrompt` (max 1000 chars), and `onboardingComplete` (boolean)
 
 **Recommendations:**
 - GET `/api/bookdate/recommendations` - Return user's cached unswiped recommendations (All authenticated)
@@ -73,15 +87,30 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 ## UI Components
 
 **Pages:**
-- `/bookdate` - Main swipe interface (mobile gestures + desktop buttons) (All authenticated users)
-- `/admin/settings` - BookDate configuration tab (Admin only)
+- `/bookdate` - Main swipe interface (mobile gestures + desktop buttons) + user preferences settings (All authenticated users)
+  - **Onboarding Flow:** First-time users see settings modal before recommendations
+- `/admin/settings` - BookDate global configuration tab (Admin only)
 - Header navigation - BookDate tab visible to all authenticated users when admin has configured and enabled
 
 **Components:**
 - `RecommendationCard` - Swipeable card with 150px delta threshold, responsive height (max 85vh)
   - Cover image scales dynamically (max 40vh) to fit on screen
+- `SettingsWidget` - Per-user preferences modal (library scope, custom prompt) in `/bookdate` page
+  - Supports onboarding mode with "Welcome" header and "Let's Go!" button
+  - Cannot be closed during onboarding (no X button)
 - `LoadingScreen` - Animated loading state
 - Navigation tab - Shows to any user with verified configuration
+
+## First-Time User Experience
+
+**Onboarding Flow:**
+1. User visits `/bookdate` for first time (bookDateOnboardingComplete=false)
+2. Settings modal opens automatically with welcome message
+3. User configures library scope and custom prompt preferences
+4. User clicks "Let's Go!" button
+5. Preferences saved with onboardingComplete=true
+6. Modal closes, recommendations begin generating
+7. Subsequent visits skip onboarding, load recommendations directly
 
 ## AI Prompt Flow
 
@@ -99,7 +128,11 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 
 3. **Post-Processing:**
    - Match to Audnexus (database cache first, API fallback)
-   - Filter: Already in library, already requested, already swiped
+   - Filter: Already in library (uses centralized audiobook-matcher.ts - same as homepage), already requested, already swiped
+   - Two-stage library filtering:
+     - Stage 1: Fuzzy match with AI-provided title/author (before Audnexus)
+     - Stage 2: ASIN + fuzzy match with Audnexus title/author (after Audnexus lookup)
+   - Matching algorithm: Title normalization, ASIN matching, weighted scoring (title 70% + author 30%), 70% threshold
    - Store top 10 in cache
 
 4. **Response:**
@@ -120,27 +153,31 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - API key input (password-masked)
 - "Test Connection & Fetch Models" button
 - Model dropdown (populated after successful test)
-- Library scope radio buttons
-- Custom prompt textarea
+- Note: Library scope and custom prompt configured per-user after setup
 - "Skip for now" + "Next" buttons
 - Config saved in `/api/setup/complete` (optional, only if filled)
 
-## Settings Page
+## Settings Pages
 
-**Settings (`/admin/settings` - BookDate Tab):**
-- **Enable/Disable Toggle:** Per-user feature toggle (preserves all settings)
+**Admin Settings (`/admin/settings` - BookDate Tab):**
+- **Enable/Disable Toggle:** Global feature toggle (preserves all settings)
 - **Provider Selection:** OpenAI or Claude
 - **API Key:** Optional re-entry (leave blank to keep existing, required for initial setup)
   - Shows placeholder "••••••••" if already configured
 - **Test Connection:** Uses saved API key if no new key entered
   - Button text changes to indicate using saved key
 - **Model Selection:** Populated after successful test
-- **Library Scope:** Full library | Rated only
-- **Custom Prompt:** Optional preferences
-- **Save:** Can save scope/prompt/enabled without re-testing
+- **Save:** Can save provider/model/enabled without re-testing
   - Testing only required when changing provider/API key/model
-- **Clear Swipe History:** Button with confirmation dialog
-- **Accessible to all authenticated users** (not just admins)
+- **Clear Swipe History:** Button with confirmation dialog (clears ALL users' history)
+- **Note:** Library scope and custom prompt are now per-user settings
+- **Accessible to admins only**
+
+**User Preferences (`/bookdate` page - Settings Icon):**
+- **Library Scope:** Full library | Rated only (default: full)
+- **Custom Prompt:** Optional preferences (max 1000 chars, default: blank)
+- **Save:** Updates user's preferences immediately
+- **Accessible to all authenticated users**
 
 ## Security
 
@@ -227,17 +264,89 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 ## File Locations
 
 **Backend:**
-- `prisma/schema.prisma` - Database models (BookDateConfig, BookDateRecommendation, BookDateSwipe)
+- `prisma/schema.prisma` - Database models (User.bookDateOnboardingComplete, BookDateConfig, BookDateRecommendation, BookDateSwipe)
 - `src/lib/bookdate/helpers.ts` - Helper functions (AI calling, matching, filtering)
-- `src/app/api/bookdate/` - API routes (9 endpoints)
+- `src/app/api/bookdate/` - API routes (config, preferences, recommendations, swipe, undo, generate)
+- `src/app/api/bookdate/preferences/route.ts` - User preferences API (GET, PUT with onboarding tracking)
 
 **Frontend:**
-- `src/app/bookdate/page.tsx` - Main swipe interface
+- `src/app/bookdate/page.tsx` - Main swipe interface + onboarding flow + settings button
 - `src/components/bookdate/RecommendationCard.tsx` - Swipeable card
+- `src/components/bookdate/SettingsWidget.tsx` - Per-user preferences modal (supports onboarding mode)
 - `src/components/bookdate/LoadingScreen.tsx` - Loading animation
 - `src/app/admin/settings/page.tsx` - Admin settings (BookDate tab)
 - `src/app/setup/steps/BookDateStep.tsx` - Setup wizard step
 - `src/components/layout/Header.tsx` - Navigation (conditional BookDate tab)
+
+## Fixed Issues ✅
+
+**1. Setup Wizard Not Saving BookDate Configuration**
+- Issue: After configuring BookDate in setup wizard, tab doesn't appear; must re-configure in settings
+- User Experience: "I set it up in wizard, but have to go back to settings and re-enter everything"
+- Cause: Setup completion route required `bookdate.libraryScope` field, but wizard step doesn't collect it (now per-user)
+  - Condition: `if (bookdate && bookdate.provider && bookdate.apiKey && bookdate.model && bookdate.libraryScope)`
+  - Wizard only collects: provider, apiKey, model (libraryScope/customPrompt are per-user preferences)
+  - Config never saved, BookDate tab never appeared
+- Fix: Removed `libraryScope` from required condition in setup completion route
+  - Now checks: `if (bookdate && bookdate.provider && bookdate.apiKey && bookdate.model)`
+  - Sets `libraryScope: 'full'` and `customPrompt: null` as defaults (backwards compatibility)
+  - Config saves with `isVerified: true, isEnabled: true` → BookDate tab appears immediately
+- Files updated: `src/app/api/setup/complete/route.ts:163-205`
+
+**2. Onboarding Modal Showing After Empty State**
+- Issue: First-time users saw empty state with "Generate More Recommendations" button instead of onboarding settings
+- User Experience: "Didn't see onboarding, just empty state buttons. After generating, onboarding finally showed"
+- Cause: Render logic checked empty recommendations before checking onboarding status
+  - When `onboardingComplete=false`, page set `isOnboarding=true` but `recommendations.length === 0`
+  - Empty state check ran before onboarding check, rendered "Get More Recommendations"
+- Fix: Added dedicated onboarding state check before empty state check
+  - New render order: Loading → Onboarding → Error → Empty → Normal
+  - Onboarding state shows welcome message + settings modal immediately
+  - After completion, modal closes and recommendations generate
+- Files updated: `src/app/bookdate/page.tsx:233-258`
+
+**3. Undo Restores Card at Front with Full Information**
+- Issue: When undoing a dismiss/dislike, card appeared at back of stack with "Previously dismissed" and lost data
+- User Experience: "When I undo, it gets added to the back of the stack and loses all info"
+- Cause: Original implementation deleted recommendation on swipe, then recreated it with new timestamp
+  - Swipe endpoint deleted BookDateRecommendation after creating swipe record
+  - Undo endpoint tried to recreate from swipe data (only had title/author)
+  - New createdAt timestamp put card at end when ordered by 'asc'
+- Fix: Keep recommendations in database, filter by swipe status
+  - Swipe endpoint no longer deletes recommendations (just creates swipe record)
+  - Recommendations endpoint filters out any with associated swipes (`swipes: { none: {} }`)
+  - Undo endpoint deletes swipe + updates createdAt to front of stack
+  - All original data preserved (narrator, rating, description, coverUrl, aiReason, etc.)
+- Files updated: `src/app/api/bookdate/swipe/route.ts`, `src/app/api/bookdate/undo/route.ts`, `src/app/api/bookdate/recommendations/route.ts`, `src/app/bookdate/page.tsx`
+
+**4. Setup Wizard Auth Error on Test Connection**
+- Issue: "Test Connection" in setup wizard fails with auth error, but works in settings with same API key
+- User Experience: Unable to configure BookDate during initial setup wizard
+- Cause: `/api/bookdate/test-connection` required authentication, but setup wizard runs before user login
+  - Wizard tried to send Authorization header from localStorage (doesn't exist during setup)
+  - Settings page works because user is already authenticated
+- Fix: Modified endpoint to support optional authentication
+  - Unauthenticated: Allowed during setup wizard (tests provided API key only)
+  - Authenticated: Required when using `useSavedKey: true` in settings (accesses saved encrypted key)
+  - Route checks for Authorization header presence to determine flow
+  - Files updated: `src/app/api/bookdate/test-connection/route.ts`, `src/app/setup/steps/BookDateStep.tsx`
+
+**5. Library Books Appearing in Recommendations**
+- Issue: Books already in Plex library were being recommended despite filtering
+- User Experience: "Getting books recommended by BookDate that are already in my library"
+- Cause: `isInLibrary` used weak string `contains` matching instead of robust fuzzy matching
+  - Didn't match title variations (e.g., "The Tenant" vs "The Tenant (Unabridged)")
+  - Didn't support ASIN matching for exact identification
+  - Didn't normalize titles (remove "(Unabridged)", "(Abridged)", etc.)
+  - Used AND logic (both title and author must contain) instead of weighted scoring
+- Fix: Updated BookDate filtering to use centralized `audiobook-matcher.ts` (same as homepage)
+  - `isInLibrary()` now calls `findPlexMatch()` for consistent matching behavior
+  - Two-stage filtering: fuzzy match before Audnexus, then ASIN + fuzzy match after
+  - Title normalization: Removes "(Unabridged)", "(Abridged)", series numbers, etc.
+  - ASIN exact matching: Checks plexGuid for exact ASIN (100% confidence)
+  - Weighted scoring: title * 0.7 + author * 0.3 >= 0.7 threshold
+  - Narrator support: Can match narrator to Plex author field
+  - Files updated: `src/lib/bookdate/helpers.ts`, `src/app/api/bookdate/generate/route.ts`, `src/app/api/bookdate/recommendations/route.ts`
 
 ## Related
 
@@ -245,3 +354,4 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - Authentication: [backend/services/auth.md](../backend/services/auth.md)
 - Database: [backend/database.md](../backend/database.md)
 - Setup wizard: [setup-wizard.md](../setup-wizard.md)
+- Matching algorithm: [../integrations/plex.md](../integrations/plex.md) (Fixed Issues #7)

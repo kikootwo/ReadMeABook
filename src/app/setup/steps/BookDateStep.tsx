@@ -11,8 +11,6 @@ interface BookDateStepProps {
   bookdateProvider: string;
   bookdateApiKey: string;
   bookdateModel: string;
-  bookdateLibraryScope: string;
-  bookdateCustomPrompt: string;
   bookdateConfigured: boolean;
   onUpdate: (field: string, value: any) => void;
   onNext: () => void;
@@ -29,8 +27,6 @@ export function BookDateStep({
   bookdateProvider,
   bookdateApiKey,
   bookdateModel,
-  bookdateLibraryScope,
-  bookdateCustomPrompt,
   bookdateConfigured,
   onUpdate,
   onNext,
@@ -56,7 +52,6 @@ export function BookDateStep({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
         },
         body: JSON.stringify({
           provider: bookdateProvider,
@@ -89,14 +84,14 @@ export function BookDateStep({
   };
 
   const handleNext = () => {
-    if (tested && bookdateModel && bookdateLibraryScope) {
+    if (tested && bookdateModel) {
       onNext();
     } else {
-      setError('Please test connection and select a model and library scope');
+      setError('Please test connection and select a model');
     }
   };
 
-  const canProceed = tested && bookdateModel && bookdateLibraryScope;
+  const canProceed = tested && bookdateModel;
 
   return (
     <div className="space-y-6">
@@ -188,60 +183,13 @@ export function BookDateStep({
         </div>
       )}
 
-      {/* Library Scope */}
+      {/* Info about per-user preferences */}
       {tested && bookdateModel && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Base Recommendations On
-          </label>
-          <div className="space-y-3">
-            <label className="flex items-start">
-              <input
-                type="radio"
-                value="full"
-                checked={bookdateLibraryScope === 'full'}
-                onChange={(e) => onUpdate('bookdateLibraryScope', e.target.value)}
-                className="mt-1 mr-3"
-              />
-              <div>
-                <div className="font-medium text-gray-900 dark:text-white">Full Plex Library</div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  All audiobooks in your Plex library
-                </p>
-              </div>
-            </label>
-            <label className="flex items-start">
-              <input
-                type="radio"
-                value="rated"
-                checked={bookdateLibraryScope === 'rated'}
-                onChange={(e) => onUpdate('bookdateLibraryScope', e.target.value)}
-                className="mt-1 mr-3"
-              />
-              <div>
-                <div className="font-medium text-gray-900 dark:text-white">Rated Books Only</div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Books you've rated in Plex
-                </p>
-              </div>
-            </label>
-          </div>
-        </div>
-      )}
-
-      {/* Custom Prompt (Optional) */}
-      {tested && bookdateModel && bookdateLibraryScope && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Additional Preferences (Optional)
-          </label>
-          <textarea
-            value={bookdateCustomPrompt}
-            onChange={(e) => onUpdate('bookdateCustomPrompt', e.target.value)}
-            placeholder="e.g., 'I prefer sci-fi with strong female leads' or 'No romance novels'"
-            rows={3}
-            className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-          />
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+          <p className="text-sm text-blue-800 dark:text-blue-300">
+            <strong>Note:</strong> Library scope and custom prompt preferences can be configured per-user after setup.
+            Users can adjust these in their BookDate preferences (settings icon on the BookDate page).
+          </p>
         </div>
       )}
 

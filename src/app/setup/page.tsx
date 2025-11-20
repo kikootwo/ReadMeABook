@@ -43,8 +43,6 @@ interface SetupState {
   bookdateProvider: string;
   bookdateApiKey: string;
   bookdateModel: string;
-  bookdateLibraryScope: string;
-  bookdateCustomPrompt: string;
   bookdateConfigured: boolean;
   validated: {
     plex: boolean;
@@ -75,8 +73,6 @@ export default function SetupWizard() {
     bookdateProvider: 'openai',
     bookdateApiKey: '',
     bookdateModel: '',
-    bookdateLibraryScope: 'full',
-    bookdateCustomPrompt: '',
     bookdateConfigured: false,
     validated: {
       plex: false,
@@ -141,8 +137,6 @@ export default function SetupWizard() {
             provider: state.bookdateProvider,
             apiKey: state.bookdateApiKey,
             model: state.bookdateModel,
-            libraryScope: state.bookdateLibraryScope,
-            customPrompt: state.bookdateCustomPrompt || null,
           } : null,
         }),
       });
@@ -242,8 +236,6 @@ export default function SetupWizard() {
             bookdateProvider={state.bookdateProvider}
             bookdateApiKey={state.bookdateApiKey}
             bookdateModel={state.bookdateModel}
-            bookdateLibraryScope={state.bookdateLibraryScope}
-            bookdateCustomPrompt={state.bookdateCustomPrompt}
             bookdateConfigured={state.bookdateConfigured}
             onUpdate={updateField}
             onNext={() => goToStep(8)}

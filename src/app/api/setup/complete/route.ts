@@ -160,7 +160,8 @@ export async function POST(request: NextRequest) {
     });
 
     // BookDate configuration (optional, global for all users)
-    if (bookdate && bookdate.provider && bookdate.apiKey && bookdate.model && bookdate.libraryScope) {
+    // Note: libraryScope and customPrompt are now per-user settings, not required here
+    if (bookdate && bookdate.provider && bookdate.apiKey && bookdate.model) {
       console.log('[Setup] Saving global BookDate configuration');
 
       const encryptionService = getEncryptionService();
@@ -177,8 +178,8 @@ export async function POST(request: NextRequest) {
             provider: bookdate.provider,
             apiKey: encryptedApiKey,
             model: bookdate.model,
-            libraryScope: bookdate.libraryScope,
-            customPrompt: bookdate.customPrompt || null,
+            libraryScope: 'full', // Default value for backwards compatibility
+            customPrompt: null,
             isVerified: true,
             isEnabled: true,
           },
@@ -190,8 +191,8 @@ export async function POST(request: NextRequest) {
             provider: bookdate.provider,
             apiKey: encryptedApiKey,
             model: bookdate.model,
-            libraryScope: bookdate.libraryScope,
-            customPrompt: bookdate.customPrompt || null,
+            libraryScope: 'full', // Default value for backwards compatibility
+            customPrompt: null,
             isVerified: true,
             isEnabled: true,
           },
@@ -200,7 +201,7 @@ export async function POST(request: NextRequest) {
 
       console.log('[Setup] Global BookDate configuration saved');
     } else {
-      console.log('[Setup] BookDate configuration skipped');
+      console.log('[Setup] BookDate configuration skipped (missing provider, apiKey, or model)');
     }
 
     // Mark setup as complete

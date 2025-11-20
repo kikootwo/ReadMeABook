@@ -90,16 +90,24 @@ const data = await fetchJSON('/api/requests', {
 **401 Unauthorized:**
 1. Attempt token refresh automatically
 2. Retry original request with new token
-3. If still 401 or refresh fails → logout + redirect to login
+3. If still 401 or refresh fails → logout (clears storage + redirects to /login)
 
 **403 Forbidden:**
 - Valid token but insufficient permissions
 - Return error, don't logout
 
+## Logout Behavior
+
+**Global redirect on logout:**
+- `logout()` from AuthContext → clears storage + redirects to /login
+- API 401 errors → `performLogout()` → clears storage + redirects to /login
+- Cross-tab logout → storage event triggers redirect to /login
+- Ensures user never remains on authenticated pages after logout
+
 ## Cross-Tab Sync
 
 **Storage Events:**
-- Logout in one tab → logout in all tabs
+- Logout in one tab → logout + redirect to login in all tabs
 - Login in one tab → sync auth state to all tabs
 - Prevents stale sessions across browser tabs
 
@@ -120,6 +128,7 @@ const data = await fetchJSON('/api/requests', {
 - **No auto-refresh:** Scheduled refresh 5 mins before token expires
 - **401 errors not handled:** Added global 401 interceptor with token refresh
 - **Logged-out sessions persisting:** Token validation clears expired sessions immediately
+- **Logout not redirecting:** Added automatic redirect to /login on all logout scenarios (manual, API 401, cross-tab)
 
 ## Tech Stack
 

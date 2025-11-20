@@ -10,6 +10,7 @@ import { useRouter } from 'next/navigation';
 import { Header } from '@/components/layout/Header';
 import { RecommendationCard } from '@/components/bookdate/RecommendationCard';
 import { LoadingScreen } from '@/components/bookdate/LoadingScreen';
+import { SettingsWidget } from '@/components/bookdate/SettingsWidget';
 
 export default function BookDatePage() {
   const [recommendations, setRecommendations] = useState<any[]>([]);
@@ -18,11 +19,67 @@ export default function BookDatePage() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [lastSwipe, setLastSwipe] = useState<any>(null);
   const [showUndo, setShowUndo] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [isOnboarding, setIsOnboarding] = useState(false);
+  const [checkingOnboarding, setCheckingOnboarding] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
-    loadRecommendations();
+    checkOnboardingStatus();
   }, []);
+
+  const checkOnboardingStatus = async () => {
+    setCheckingOnboarding(true);
+
+    try {
+      const accessToken = localStorage.getItem('accessToken');
+
+      if (!accessToken) {
+        router.push('/login');
+        return;
+      }
+
+      const response = await fetch('/api/bookdate/preferences', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error('Failed to check onboarding status:', data.error);
+        // Continue to recommendations anyway on error
+        loadRecommendations();
+        return;
+      }
+
+      // Check if user has completed onboarding
+      if (!data.onboardingComplete) {
+        // First time user - show onboarding settings
+        setIsOnboarding(true);
+        setShowSettings(true);
+        setLoading(false);
+      } else {
+        // Existing user - load recommendations normally
+        loadRecommendations();
+      }
+
+    } catch (error: any) {
+      console.error('Check onboarding error:', error);
+      // Continue to recommendations anyway on error
+      loadRecommendations();
+    } finally {
+      setCheckingOnboarding(false);
+    }
+  };
+
+  const handleOnboardingComplete = () => {
+    // Onboarding is done, now load recommendations
+    setIsOnboarding(false);
+    setShowSettings(false);
+    loadRecommendations();
+  };
 
   const loadRecommendations = async () => {
     setLoading(true);
@@ -123,13 +180,13 @@ export default function BookDatePage() {
       });
 
       if (response.ok) {
-        // Move back to previous card
-        setCurrentIndex(Math.max(0, currentIndex - 1));
         setLastSwipe(null);
         setShowUndo(false);
 
-        // Reload recommendations to include restored card
+        // Reload recommendations to include restored card (which will be at index 0)
         await loadRecommendations();
+        // Reset to first card (the restored card is now at the front)
+        setCurrentIndex(0);
       }
     } catch (error) {
       console.error('Undo error:', error);
@@ -168,9 +225,36 @@ export default function BookDatePage() {
     }
   };
 
-  // Loading state
-  if (loading) {
+  // Loading state (checking onboarding or loading recommendations)
+  if (loading || checkingOnboarding) {
     return <LoadingScreen />;
+  }
+
+  // Onboarding state - show settings modal only
+  if (isOnboarding) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+        <Header />
+        <div className="flex flex-col items-center justify-center min-h-[80vh] px-4">
+          <div className="text-center max-w-md">
+            <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+              Welcome to BookDate!
+            </h2>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
+              Let's customize your recommendations to get started
+            </p>
+          </div>
+        </div>
+
+        {/* Settings Widget */}
+        <SettingsWidget
+          isOpen={showSettings}
+          onClose={() => setShowSettings(false)}
+          isOnboarding={isOnboarding}
+          onOnboardingComplete={handleOnboardingComplete}
+        />
+      </div>
+    );
   }
 
   // Error state
@@ -246,6 +330,18 @@ export default function BookDatePage() {
       <Header />
 
       <main className="flex flex-col items-center justify-center min-h-[calc(100vh-80px)] p-4">
+        {/* Settings button */}
+        <button
+          onClick={() => setShowSettings(true)}
+          className="fixed top-20 right-4 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 shadow-lg transition-all z-10"
+          aria-label="Open settings"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </button>
+
         {/* Progress indicator */}
         <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
           {currentIndex + 1} / {recommendations.length}
@@ -272,6 +368,14 @@ export default function BookDatePage() {
           <p>Swipe left to reject, right to request, up to dismiss</p>
         </div>
       </main>
+
+      {/* Settings Widget */}
+      <SettingsWidget
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        isOnboarding={isOnboarding}
+        onOnboardingComplete={handleOnboardingComplete}
+      />
     </div>
   );
 }

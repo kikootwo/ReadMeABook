@@ -21,8 +21,9 @@ export function WizardLayout({ currentStep, totalSteps, children }: WizardLayout
     { number: 4, title: 'Prowlarr' },
     { number: 5, title: 'Download Client' },
     { number: 6, title: 'Paths' },
-    { number: 7, title: 'Review' },
-    { number: 8, title: 'Finalize' },
+    { number: 7, title: 'BookDate' },
+    { number: 8, title: 'Review' },
+    { number: 9, title: 'Finalize' },
   ];
 
   return (

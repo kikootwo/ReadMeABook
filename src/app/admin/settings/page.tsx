@@ -86,8 +86,6 @@ export default function AdminSettings() {
   const [bookdateProvider, setBookdateProvider] = useState<string>('openai');
   const [bookdateApiKey, setBookdateApiKey] = useState<string>('');
   const [bookdateModel, setBookdateModel] = useState<string>('');
-  const [bookdateLibraryScope, setBookdateLibraryScope] = useState<string>('full');
-  const [bookdateCustomPrompt, setBookdateCustomPrompt] = useState<string>('');
   const [bookdateEnabled, setBookdateEnabled] = useState<boolean>(true);
   const [bookdateConfigured, setBookdateConfigured] = useState<boolean>(false);
   const [bookdateModels, setBookdateModels] = useState<{ id: string; name: string }[]>([]);
@@ -207,8 +205,6 @@ export default function AdminSettings() {
       if (data.config) {
         setBookdateProvider(data.config.provider || 'openai');
         setBookdateModel(data.config.model || '');
-        setBookdateLibraryScope(data.config.libraryScope || 'full');
-        setBookdateCustomPrompt(data.config.customPrompt || '');
         setBookdateEnabled(data.config.isEnabled !== false); // Default to true
         setBookdateConfigured(data.config.isVerified || false);
       }
@@ -268,9 +264,9 @@ export default function AdminSettings() {
   };
 
   const handleSaveBookdateConfig = async () => {
-    // Validate: model and scope are always required
-    if (!bookdateModel || !bookdateLibraryScope) {
-      setMessage({ type: 'error', text: 'Please select a model and library scope' });
+    // Validate: model is required
+    if (!bookdateModel) {
+      setMessage({ type: 'error', text: 'Please select a model' });
       return;
     }
 
@@ -288,8 +284,6 @@ export default function AdminSettings() {
       const payload: any = {
         provider: bookdateProvider,
         model: bookdateModel,
-        libraryScope: bookdateLibraryScope,
-        customPrompt: bookdateCustomPrompt || null,
         isEnabled: bookdateEnabled,
       };
 
@@ -1357,70 +1351,23 @@ export default function AdminSettings() {
                   </div>
                 )}
 
-                {/* Library Scope */}
+                {/* Note about per-user settings */}
                 {(bookdateModels.length > 0 || bookdateConfigured) && bookdateModel && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Base Recommendations On
-                    </label>
-                    <div className="space-y-3">
-                      <label className="flex items-start cursor-pointer">
-                        <input
-                          type="radio"
-                          value="full"
-                          checked={bookdateLibraryScope === 'full'}
-                          onChange={(e) => setBookdateLibraryScope(e.target.value)}
-                          className="mt-1 mr-3"
-                        />
-                        <div>
-                          <div className="font-medium text-gray-900 dark:text-white">Full Plex Library</div>
-                          <p className="text-sm text-gray-600 dark:text-gray-400">
-                            All audiobooks in your Plex library
-                          </p>
-                        </div>
-                      </label>
-                      <label className="flex items-start cursor-pointer">
-                        <input
-                          type="radio"
-                          value="rated"
-                          checked={bookdateLibraryScope === 'rated'}
-                          onChange={(e) => setBookdateLibraryScope(e.target.value)}
-                          className="mt-1 mr-3"
-                        />
-                        <div>
-                          <div className="font-medium text-gray-900 dark:text-white">Rated Books Only</div>
-                          <p className="text-sm text-gray-600 dark:text-gray-400">
-                            Books you've rated in Plex
-                          </p>
-                        </div>
-                      </label>
-                    </div>
-                  </div>
-                )}
-
-                {/* Custom Prompt */}
-                {(bookdateModels.length > 0 || bookdateConfigured) && bookdateModel && bookdateLibraryScope && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Additional Preferences (Optional)
-                    </label>
-                    <textarea
-                      value={bookdateCustomPrompt}
-                      onChange={(e) => setBookdateCustomPrompt(e.target.value)}
-                      placeholder="e.g., 'I prefer sci-fi with strong female leads' or 'No romance novels'"
-                      rows={3}
-                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-                    />
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    <p className="text-sm text-blue-800 dark:text-blue-300">
+                      <strong>Note:</strong> Library scope and custom prompt preferences are now configured per-user.
+                      Users can adjust these settings in their BookDate preferences (settings icon on the BookDate page).
+                    </p>
                   </div>
                 )}
 
                 {/* Save Button */}
-                {bookdateModel && bookdateLibraryScope && (
+                {bookdateModel && (
                   <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
                     <Button
                       onClick={handleSaveBookdateConfig}
                       loading={saving}
-                      disabled={!bookdateModel || !bookdateLibraryScope}
+                      disabled={!bookdateModel}
                       className="w-full"
                     >
                       Save BookDate Configuration

@@ -2,11 +2,11 @@
 
 **Status:** ✅ Implemented
 
-8-step wizard for first-time configuration with connection testing, validation, database persistence, and automated initial job execution.
+9-step wizard for first-time configuration with connection testing, validation, database persistence, BookDate AI setup, and automated initial job execution.
 
 ## Features
 
-- 8 steps with progress indicator
+- 9 steps with progress indicator
 - Connection testing for Plex, Prowlarr, qBittorrent
 - Path validation with write permission checking
 - Automated initial jobs (Audible refresh, Plex scan)
@@ -21,8 +21,9 @@
 4. Prowlarr - URL, API key, indexer selection with priorities (1-25), seeding time, RSS monitoring
 5. Download Client - qBittorrent/Transmission config
 6. Paths - Download + media directories with validation
-7. Review - Summary of all configs
-8. Finalize - Run initial Audible refresh + Plex scan, enable scheduled jobs
+7. BookDate - AI-powered recommendations config (OpenAI/Claude, optional)
+8. Review - Summary of all configs
+9. Finalize - Run initial Audible refresh + Plex scan, enable scheduled jobs
 
 ## API Endpoints
 

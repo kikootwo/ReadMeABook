@@ -32,7 +32,7 @@ Handles authentication and authorization: Plex OAuth integration, JWT session ma
 4. Redirect back with code
 5. Exchange code for token
 6. Get Plex user info
-7. **Verify user has access to configured Plex server** (security check)
+7. **Verify user has access to configured Plex server** (uses stored machineIdentifier from config)
 8. Create/update user in DB
 9. Generate JWT
 10. Return JWT to client
@@ -112,7 +112,10 @@ Handles authentication and authorization: Plex OAuth integration, JWT session ma
 - Short access token expiry (1hr)
 - Optional refresh token rotation
 - Track valid tokens for revocation
-- **Server access verification**: Only users with access to the configured Plex server can authenticate (prevents any Plex user from accessing the instance)
+- **Server access verification**: Uses stored `machineIdentifier` from config (no API call needed)
+  - Only users with access to the configured Plex server can authenticate
+  - Prevents any Plex user from accessing the instance
+  - machineIdentifier stored during setup/settings configuration (architectural optimization)
 
 ## Tech Stack
 

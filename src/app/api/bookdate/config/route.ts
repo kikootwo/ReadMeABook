@@ -49,9 +49,9 @@ async function saveConfig(req: AuthenticatedRequest) {
       );
     }
 
-    if (!provider || !model || !libraryScope) {
+    if (!provider || !model) {
       return NextResponse.json(
-        { error: 'Missing required fields: provider, model, libraryScope' },
+        { error: 'Missing required fields: provider, model' },
         { status: 400 }
       );
     }
@@ -59,13 +59,6 @@ async function saveConfig(req: AuthenticatedRequest) {
     if (!['openai', 'claude'].includes(provider)) {
       return NextResponse.json(
         { error: 'Invalid provider. Must be "openai" or "claude"' },
-        { status: 400 }
-      );
-    }
-
-    if (!['full', 'listened', 'rated'].includes(libraryScope)) {
-      return NextResponse.json(
-        { error: 'Invalid library scope. Must be "full", "listened", or "rated"' },
         { status: 400 }
       );
     }
@@ -94,8 +87,6 @@ async function saveConfig(req: AuthenticatedRequest) {
       const updateData: any = {
         provider,
         model,
-        libraryScope,
-        customPrompt: customPrompt || null,
         isEnabled: isEnabled !== undefined ? isEnabled : true,
         isVerified: true,
         updatedAt: new Date(),
@@ -112,12 +103,13 @@ async function saveConfig(req: AuthenticatedRequest) {
       });
     } else {
       // Create new global config
+      // Note: libraryScope and customPrompt are now per-user settings (deprecated in global config)
       config = await prisma.bookDateConfig.create({
         data: {
           provider,
           model,
-          libraryScope,
-          customPrompt: customPrompt || null,
+          libraryScope: 'full', // Default value for backwards compatibility
+          customPrompt: null,
           isEnabled: isEnabled !== undefined ? isEnabled : true,
           isVerified: true,
           apiKey: encryptedApiKeyToUse,

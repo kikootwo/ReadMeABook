@@ -196,6 +196,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Call logout endpoint
     fetch('/api/auth/logout', { method: 'POST' });
+
+    // Redirect to login page
+    window.location.href = '/login';
   };
 
   const refreshToken = async () => {
@@ -223,6 +226,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clearRefreshTimer();
         setUser(null);
         setAccessToken(null);
+        // Redirect to login when logged out in another tab
+        window.location.href = '/login';
       }
       // If access token was added in another tab, sync it
       else if (e.key === 'accessToken' && e.newValue) {

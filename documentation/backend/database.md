@@ -12,6 +12,9 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - `id` (UUID PK), `plex_id` (unique), `plex_username`, `plex_email`, `role` ('user'|'admin')
 - `is_setup_admin` (bool, default false) - First admin created during setup, role protected from changes
 - `avatar_url`, `auth_token` (encrypted), `created_at`, `updated_at`, `last_login_at`
+- **BookDate per-user preferences:**
+  - `bookdate_library_scope` ('full'|'rated', default 'full') - Library scope for recommendations
+  - `bookdate_custom_prompt` (text, optional, max 1000 chars) - Custom preferences for AI
 - Indexes: `plex_id`, `role`
 
 ### Audible_Cache

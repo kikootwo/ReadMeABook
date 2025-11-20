@@ -19,13 +19,19 @@ async function handler(req: AuthenticatedRequest) {
   try {
     const userId = req.user!.id;
 
-    // Check for cached recommendations (return any that exist)
+    // Check for cached recommendations (exclude any that have been swiped)
     const cached = await prisma.bookDateRecommendation.findMany({
-      where: { userId },
+      where: {
+        userId,
+        // Exclude recommendations that have associated swipes
+        swipes: {
+          none: {},
+        },
+      },
       orderBy: { createdAt: 'asc' },
     });
 
-    // If there are any cached recommendations, return them first
+    // If there are any cached unswiped recommendations, return them
     if (cached.length > 0) {
       return NextResponse.json({
         recommendations: cached,
@@ -46,9 +52,31 @@ async function handler(req: AuthenticatedRequest) {
       );
     }
 
+    // Get user's preferences
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        bookDateLibraryScope: true,
+        bookDateCustomPrompt: true,
+      },
+    });
+
+    if (!user) {
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      );
+    }
+
+    // Build user preferences object
+    const userPreferences = {
+      libraryScope: user.bookDateLibraryScope || 'full',
+      customPrompt: user.bookDateCustomPrompt || null,
+    };
+
     // Build prompt and call AI
     console.log('[BookDate] Generating new recommendations for user:', userId);
-    const prompt = await buildAIPrompt(userId, config);
+    const prompt = await buildAIPrompt(userId, userPreferences);
     const aiResponse = await callAI(config.provider, config.model, config.apiKey, prompt);
 
     if (!aiResponse.recommendations || !Array.isArray(aiResponse.recommendations)) {
@@ -85,6 +113,13 @@ async function handler(req: AuthenticatedRequest) {
 
         if (!audnexusMatch) {
           console.warn(`[BookDate] No Audnexus match: "${rec.title}" by ${rec.author}`);
+          continue;
+        }
+
+        // Check again if in library with ASIN for exact matching
+        // This catches books that might have different titles (e.g., "The Tenant" vs "The Tenant (Unabridged)")
+        if (await isInLibrary(userId, audnexusMatch.title, audnexusMatch.author, audnexusMatch.asin)) {
+          console.log(`[BookDate] Book "${audnexusMatch.title}" (ASIN: ${audnexusMatch.asin}) is in library, skipping`);
           continue;
         }
 
@@ -126,9 +161,14 @@ async function handler(req: AuthenticatedRequest) {
       });
     }
 
-    // Combine with existing cache
+    // Combine with existing cache (exclude swiped recommendations)
     const allRecommendations = await prisma.bookDateRecommendation.findMany({
-      where: { userId },
+      where: {
+        userId,
+        swipes: {
+          none: {},
+        },
+      },
       orderBy: { createdAt: 'asc' },
       take: 10,
     });

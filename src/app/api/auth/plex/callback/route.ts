@@ -94,32 +94,22 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get server machine identifier for access verification
-    let serverMachineId: string;
-    try {
-      const serverInfo = await plexService.testConnection(plexConfig.serverUrl, plexConfig.authToken);
-      if (!serverInfo.success || !serverInfo.info?.machineIdentifier) {
-        console.error('[Plex OAuth] Could not get server machine ID');
-        return NextResponse.json(
-          {
-            error: 'ConfigurationError',
-            message: 'Server configuration error. Please contact your administrator.',
-          },
-          { status: 503 }
-        );
-      }
-      serverMachineId = serverInfo.info.machineIdentifier;
-      console.log('[Plex OAuth] Server machine ID:', serverMachineId);
-    } catch (error) {
-      console.error('[Plex OAuth] Failed to get server info:', error);
+    // Get server machine identifier from stored configuration
+    // Note: machineIdentifier is stored during setup/settings configuration
+    const serverMachineId = plexConfig.machineIdentifier;
+
+    if (!serverMachineId) {
+      console.error('[Plex OAuth] machineIdentifier not found in configuration');
       return NextResponse.json(
         {
           error: 'ConfigurationError',
-          message: 'Could not verify server configuration. Please contact your administrator.',
+          message: 'Server configuration incomplete. Please contact your administrator to re-configure Plex settings.',
         },
         { status: 503 }
       );
     }
+
+    console.log('[Plex OAuth] Using stored machineIdentifier:', serverMachineId);
 
     // SECURITY: Verify user has access to the configured Plex server
     // This checks if the server appears in the user's list of accessible servers from plex.tv

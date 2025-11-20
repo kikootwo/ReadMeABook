@@ -212,6 +212,16 @@ interface PlexLibrary {
   - User flow: user's plex.tv token + stored machineIdentifier → server access token
 - Security: Users never access or decrypt the system Plex token
 
+**10. OAuth Callback Re-fetching machineIdentifier** ⚡ **ARCHITECTURAL FIX**
+- Issue: auth/plex/callback route was calling testConnection() to fetch machineIdentifier on every user login
+- User Experience: Unnecessary Plex API call on every authentication (adds latency, wastes resources)
+- Cause: Inconsistent architecture - setup/settings save machineIdentifier, but callback re-fetched it
+- Fix: Use stored machineIdentifier from config (via getPlexConfig().machineIdentifier)
+  - auth/plex/callback now reads from database instead of API call
+  - Consistent with BookDate and other user operations
+  - testConnection() only used for: testing connections, initial fetching during setup/settings
+- Result: Faster authentication, no unnecessary API calls, consistent architecture
+
 ## Availability Checking
 
 1. **DB Population:** Plex scan creates/updates records with `plexGuid` + `availabilityStatus: 'available'`

@@ -36,6 +36,11 @@ model User {
   updatedAt     DateTime  @updatedAt @map("updated_at")
   lastLoginAt   DateTime? @map("last_login_at")
 
+  // BookDate per-user preferences
+  bookDateLibraryScope         String?  @default("full") @map("bookdate_library_scope") // 'full' | 'rated'
+  bookDateCustomPrompt         String?  @map("bookdate_custom_prompt") @db.Text
+  bookDateOnboardingComplete   Boolean  @default(false) @map("bookdate_onboarding_complete")
+
   // Relations
   requests                Request[]
   bookDateRecommendations BookDateRecommendation[]
@@ -321,8 +326,8 @@ model BookDateConfig {
   provider      String   // 'openai' | 'claude'
   apiKey        String   @map("api_key") @db.Text // Encrypted at rest (AES-256)
   model         String   // e.g., 'gpt-4o', 'claude-sonnet-4-5-20250929'
-  libraryScope  String   @map("library_scope") // 'full' | 'listened' | 'rated'
-  customPrompt  String?  @map("custom_prompt") @db.Text
+  libraryScope  String?  @map("library_scope") // DEPRECATED: Now per-user (User.bookDateLibraryScope)
+  customPrompt  String?  @map("custom_prompt") @db.Text // DEPRECATED: Now per-user (User.bookDateCustomPrompt)
   isVerified    Boolean  @default(false) @map("is_verified")
   isEnabled     Boolean  @default(true) @map("is_enabled") // Admin toggle (global feature)
   createdAt     DateTime @default(now()) @map("created_at")

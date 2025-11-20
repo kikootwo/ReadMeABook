@@ -34,56 +34,40 @@ async function handler(req: AuthenticatedRequest) {
       );
     }
 
-    // Restore recommendation to cache (if original recommendation still exists)
-    if (lastSwipe.recommendation) {
-      // Re-create the recommendation
-      await prisma.bookDateRecommendation.create({
-        data: {
-          userId: lastSwipe.recommendation.userId,
-          batchId: lastSwipe.recommendation.batchId,
-          title: lastSwipe.recommendation.title,
-          author: lastSwipe.recommendation.author,
-          narrator: lastSwipe.recommendation.narrator,
-          rating: lastSwipe.recommendation.rating,
-          description: lastSwipe.recommendation.description,
-          coverUrl: lastSwipe.recommendation.coverUrl,
-          audnexusAsin: lastSwipe.recommendation.audnexusAsin,
-          aiReason: lastSwipe.recommendation.aiReason,
-        },
-      });
-    } else {
-      // If recommendation doesn't exist (e.g., was manually deleted),
-      // recreate a basic recommendation from swipe data
-      await prisma.bookDateRecommendation.create({
-        data: {
-          userId,
-          batchId: `undo_${Date.now()}`,
-          title: lastSwipe.bookTitle,
-          author: lastSwipe.bookAuthor,
-          narrator: null,
-          rating: null,
-          description: null,
-          coverUrl: null,
-          audnexusAsin: null,
-          aiReason: 'Previously dismissed',
-        },
-      });
+    if (!lastSwipe.recommendation) {
+      return NextResponse.json(
+        { error: 'Recommendation no longer exists' },
+        { status: 404 }
+      );
     }
 
-    // Delete the swipe
+    // Find the oldest existing unswiped recommendation to determine where to insert
+    const oldestRecommendation = await prisma.bookDateRecommendation.findFirst({
+      where: {
+        userId,
+        swipes: {
+          none: {},
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // Set createdAt to be before the oldest recommendation (so it appears at the front)
+    // If no recommendations exist, set it to 1 day ago
+    const undoCreatedAt = oldestRecommendation
+      ? new Date(oldestRecommendation.createdAt.getTime() - 1000) // 1 second before oldest
+      : new Date(Date.now() - 24 * 60 * 60 * 1000); // 1 day ago if none exist
+
+    // Delete the swipe (this makes the recommendation visible again)
     await prisma.bookDateSwipe.delete({
       where: { id: lastSwipe.id },
     });
 
-    // Get the restored recommendation
-    const restoredRecommendation = await prisma.bookDateRecommendation.findFirst({
-      where: {
-        userId,
-        title: lastSwipe.bookTitle,
-        author: lastSwipe.bookAuthor,
-      },
-      orderBy: {
-        createdAt: 'desc',
+    // Update the recommendation's createdAt to put it at the front of the stack
+    const restoredRecommendation = await prisma.bookDateRecommendation.update({
+      where: { id: lastSwipe.recommendation.id },
+      data: {
+        createdAt: undoCreatedAt,
       },
     });
 

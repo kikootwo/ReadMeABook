@@ -35,15 +35,23 @@ Single tabbed interface for admins to view/modify system configuration post-setu
    - "Test Connection" when URL/API key changed
    - "Refresh Indexers" when connection info unchanged
 
-**BookDate:**
-1. **On tab load:** Current BookDate configuration loaded from database automatically
+**BookDate (Admin Settings):**
+1. **On tab load:** Current BookDate global configuration loaded from database automatically
 2. **Changing AI provider:** Resets model selection
 3. **Test connection:** Required to fetch available models before saving
 4. **Changing API key:** Must test connection to verify and fetch models
-5. **Saving configuration:** Validates all fields (provider, API key, model, library scope)
-6. **Clear swipe history:** Confirmation dialog, removes all swipes and cached recommendations
-7. No "Save Changes" button - uses dedicated "Save BookDate Configuration" button
-8. Accessible to all authenticated users (not just admins)
+5. **Saving configuration:** Validates all fields (provider, API key, model)
+6. **Note:** Library scope and custom prompt are now per-user settings (configured in BookDate page)
+7. **Clear swipe history:** Confirmation dialog, removes ALL users' swipes and cached recommendations
+8. No "Save Changes" button - uses dedicated "Save BookDate Configuration" button
+9. Accessible to admins only
+
+**BookDate (User Preferences - in `/bookdate` page):**
+1. **Settings icon:** Opens modal with per-user preferences
+2. **Library scope:** Full library or rated books only (default: full)
+3. **Custom prompt:** Optional text (max 1000 chars, default: blank)
+4. **Save:** Updates user preferences immediately
+5. Accessible to all authenticated users
 
 **Account (local admin only):**
 1. Local admin can change password
@@ -99,10 +107,12 @@ Single tabbed interface for admins to view/modify system configuration post-setu
 - POST /api/setup/test-paths - Validates paths writable (no sensitive data, reuses wizard endpoint)
 
 **BookDate Endpoints:**
-- GET /api/bookdate/config - Get user's BookDate configuration (API key excluded)
-- POST /api/bookdate/config - Save/update BookDate configuration (validates and encrypts API key)
+- GET /api/bookdate/config - Get global BookDate configuration (API key excluded, admin only)
+- POST /api/bookdate/config - Save/update global BookDate configuration (admin only)
 - POST /api/bookdate/test-connection - Test AI provider connection and fetch available models
-- DELETE /api/bookdate/swipes - Clear user's swipe history and cached recommendations
+- DELETE /api/bookdate/swipes - Clear ALL users' swipe history and cached recommendations (admin only)
+- GET /api/bookdate/preferences - Get user's preferences (libraryScope, customPrompt)
+- PUT /api/bookdate/preferences - Update user's preferences (all authenticated users)
 
 **Account Endpoints:**
 - POST /api/admin/settings/change-password - Change local admin password (local admin only)

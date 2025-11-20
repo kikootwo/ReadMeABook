@@ -40,7 +40,7 @@ async function handler(req: AuthenticatedRequest) {
       );
     }
 
-    // Record swipe
+    // Record swipe (keep recommendation in database for undo functionality)
     await prisma.bookDateSwipe.create({
       data: {
         userId,
@@ -52,11 +52,9 @@ async function handler(req: AuthenticatedRequest) {
       },
     });
 
-    // Remove from cache (use deleteMany to avoid race condition errors)
-    // deleteMany doesn't error if record doesn't exist (idempotent)
-    await prisma.bookDateRecommendation.deleteMany({
-      where: { id: recommendationId },
-    });
+    // NOTE: We no longer delete the recommendation here.
+    // This allows undo to work properly by keeping all the original data.
+    // The recommendations endpoint filters out swiped cards.
 
     // If swiped right and not marked as known, create request
     if (action === 'right' && !markedAsKnown && recommendation.audnexusAsin) {
