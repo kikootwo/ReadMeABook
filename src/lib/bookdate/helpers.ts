@@ -127,6 +127,16 @@ async function enrichWithUserRatings(
       const plexService = getPlexService();
 
       // Get server machine ID from config
+      if (!plexConfig.authToken) {
+        console.error('[BookDate] System Plex token not configured');
+        return cachedBooks.map(book => ({
+          title: book.title,
+          author: book.author,
+          narrator: book.narrator || undefined,
+          rating: undefined,
+        }));
+      }
+
       const systemPlexToken = encryptionService.decrypt(plexConfig.authToken);
       const serverInfo = await plexService.testConnection(plexConfig.serverUrl, systemPlexToken);
 
