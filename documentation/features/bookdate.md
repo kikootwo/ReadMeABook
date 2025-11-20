@@ -168,13 +168,14 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
   - No additional API calls needed
   - scope='rated': Filters cached library by cached ratings (40 most recent rated books)
 - **Plex-authenticated users (including admins):** Fetch library with server-specific access token
-  - Converts plex.tv OAuth token → server access token via `/api/v2/resources`
+  - User's plex.tv OAuth token (from authToken) → `/api/v2/resources` with stored machineIdentifier → server access token
   - Per Plex API docs: plex.tv tokens are for plex.tv, server tokens are for PMS
   - Uses server access token to call `/library/sections/{id}/all` with user's personal ratings
   - Matches by plexGuid/ratingKey against cached library structure
   - ~1-2s fetch time for full library (only happens when generating recommendations)
   - scope='rated': Fetches 100 books, enriches with user ratings, filters to rated, returns top 40
     - Ensures user sees books THEY rated
+  - **Security:** Users never access or decrypt the system Plex token (machineIdentifier stored in config)
 
 **Graceful Degradation:**
 - Audnexus API down → Skip failed matches, show what matched
