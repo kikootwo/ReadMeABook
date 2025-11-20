@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
+import { getPlexService } from '@/lib/integrations/plex.service';
 
 export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
@@ -41,6 +42,35 @@ export async function PUT(request: NextRequest) {
       update: { value: libraryId },
       create: { key: 'plex_audiobook_library_id', value: libraryId },
     });
+
+    // Fetch and save machine identifier (for server-specific access tokens)
+    // This is needed for BookDate per-user rating functionality
+    try {
+      const plexService = getPlexService();
+      const actualToken = token.startsWith('••••') ? null : token;
+
+      // Get token from DB if it was masked
+      const tokenToUse = actualToken || (await prisma.configuration.findUnique({
+        where: { key: 'plex_token' },
+      }))?.value;
+
+      if (tokenToUse) {
+        const serverInfo = await plexService.testConnection(url, tokenToUse);
+        if (serverInfo.success && serverInfo.info?.machineIdentifier) {
+          await prisma.configuration.upsert({
+            where: { key: 'plex_machine_identifier' },
+            update: { value: serverInfo.info.machineIdentifier },
+            create: { key: 'plex_machine_identifier', value: serverInfo.info.machineIdentifier },
+          });
+          console.log('[Admin] machineIdentifier updated:', serverInfo.info.machineIdentifier);
+        } else {
+          console.warn('[Admin] Could not fetch machineIdentifier');
+        }
+      }
+    } catch (error) {
+      console.error('[Admin] Error fetching machineIdentifier:', error);
+      // Don't fail the request if machineIdentifier fetch fails
+    }
 
     console.log('[Admin] Plex settings updated');
 
