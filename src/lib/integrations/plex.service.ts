@@ -522,8 +522,12 @@ export class PlexService {
         updatedAt: item.updatedAt ? parseInt(item.updatedAt) : Date.now(),
         userRating: item.userRating ? parseFloat(item.userRating) : (item.$?.userRating ? parseFloat(item.$?.userRating) : undefined),
       }));
-    } catch (error) {
-      console.error('Failed to get library content:', error);
+    } catch (error: any) {
+      if (error?.response?.status === 401) {
+        console.error('[Plex] 401 Unauthorized when fetching library content - token may not have server access permissions');
+      } else {
+        console.error('[Plex] Failed to get library content:', error);
+      }
       throw new Error('Failed to retrieve content from Plex library');
     }
   }

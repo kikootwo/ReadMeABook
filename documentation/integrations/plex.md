@@ -136,7 +136,11 @@ interface PlexLibrary {
 - System Plex token (configured during setup) is used for library scanning
 - Cached ratings reflect whoever owns that system token
 - Local admins use cached ratings because they don't have Plex accounts (user.authToken is bcrypt hash)
-- Plex-authenticated admins fetch their personal ratings like any other Plex user
+- Plex-authenticated admins attempt to fetch personal ratings, may fail with 401 for shared users
+- **Known limitation:** Shared users' plex.tv OAuth tokens may not have direct server API access
+  - plex.tv OAuth tokens work for plex.tv services but may not grant server library access
+  - Server API access typically requires server owner permissions or specific access tokens
+  - When 401 occurs, BookDate falls back to recommendations without ratings (still functional)
 
 ## Fixed Issues ✅
 

@@ -167,8 +167,13 @@ async function enrichWithUserRatings(
         };
       });
 
-    } catch (fetchError) {
-      console.error('[BookDate] Failed to fetch library with user token:', fetchError);
+    } catch (fetchError: any) {
+      if (fetchError?.response?.status === 401 || fetchError?.message?.includes('401')) {
+        console.warn('[BookDate] User token unauthorized for library access (shared users may not have direct API access)');
+        console.warn('[BookDate] Falling back to recommendations without user ratings');
+      } else {
+        console.error('[BookDate] Failed to fetch library with user token:', fetchError);
+      }
       // Fallback: return books without ratings
       return cachedBooks.map(book => ({
         title: book.title,
