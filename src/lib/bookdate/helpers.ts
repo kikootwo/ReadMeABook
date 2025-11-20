@@ -141,13 +141,10 @@ async function enrichWithUserRatings(
       try {
         systemPlexToken = encryptionService.decrypt(plexConfig.authToken);
       } catch (decryptError) {
-        console.error('[BookDate] Failed to decrypt system Plex token (may not be encrypted or key mismatch):', decryptError);
-        return cachedBooks.map(book => ({
-          title: book.title,
-          author: book.author,
-          narrator: book.narrator || undefined,
-          rating: undefined,
-        }));
+        // Token might be stored as plain text (from before encryption or different implementation)
+        // Try using it as-is
+        console.warn('[BookDate] Failed to decrypt system Plex token, trying as plain text');
+        systemPlexToken = plexConfig.authToken;
       }
 
       const serverInfo = await plexService.testConnection(plexConfig.serverUrl, systemPlexToken);
