@@ -111,13 +111,10 @@ async function enrichWithUserRatings(
     try {
       userPlexToken = encryptionService.decrypt(user.authToken);
     } catch (decryptError) {
-      console.error('[BookDate] Failed to decrypt user authToken:', decryptError);
-      return cachedBooks.map(book => ({
-        title: book.title,
-        author: book.author,
-        narrator: book.narrator || undefined,
-        rating: undefined,
-      }));
+      // Token might be stored as plain text (from before encryption or different implementation)
+      // Try using it as-is
+      console.warn('[BookDate] Failed to decrypt user Plex token, trying as plain text');
+      userPlexToken = user.authToken;
     }
 
     try {
