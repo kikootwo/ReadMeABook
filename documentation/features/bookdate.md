@@ -83,8 +83,8 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 
 1. **Context Gathering:**
    - Get user's library books (max 40, filtered by scope)
-     - **Admin Users (Plex-authenticated or local):** Use cached ratings (from system Plex token configured during setup)
-     - **Non-Admin Users:** Fetch library with user's token to get personal ratings
+     - **Local Admin Users:** Use cached ratings (from system Plex token configured during setup)
+     - **Plex-Authenticated Users (including admins):** Fetch library with user's token to get personal ratings
    - Get recent swipes (max 10)
    - Add custom prompt if provided
 
@@ -159,10 +159,10 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - No Audnexus match → Skip silently, log warning, continue with next
 
 **Per-User Rating Handling:**
-- **Admin users (both Plex-authenticated and local):** Use cached ratings from library scan
+- **Local admin users:** Use cached ratings from library scan
   - Cached ratings are from the system Plex token (configured during setup)
   - No additional API calls needed
-- **Non-admin users:** Fetch full library with user's token to get personal ratings
+- **Plex-authenticated users (including admins):** Fetch full library with user's token to get personal ratings
   - Uses `/library/sections/{id}/all` endpoint which returns items with authenticated user's ratings
   - Matches by plexGuid/ratingKey against cached library structure
   - ~1-2s fetch time for full library (only happens when generating recommendations)
@@ -204,8 +204,8 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - **Cache Hit Rate:** High (only generates when needed)
 - **API Rate Limits:** OpenAI ~3500 RPM, Claude ~4000 RPM
 - **Per-User Rating Fetch:**
-  - Admin users: No additional API calls (use cached ratings)
-  - Non-admin users: 1 library fetch (~1-2s for full library)
+  - Local admin users: No additional API calls (use cached ratings)
+  - Plex-authenticated users: 1 library fetch (~1-2s for full library)
   - Only happens when generating recommendations (not frequently)
 
 ## Dependencies

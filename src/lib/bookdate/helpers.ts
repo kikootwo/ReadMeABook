@@ -65,10 +65,10 @@ async function enrichWithUserRatings(
       }));
     }
 
-    // Admin users (both Plex-authenticated and local): Use cached ratings
-    // Cached ratings are from the system Plex token (configured during setup)
-    if (user.role === 'admin') {
-      console.log('[BookDate] User is admin, using cached ratings (from system Plex token)');
+    // Local admin users: Use cached ratings (from system Plex token)
+    // Local admins authenticate with username/password, not Plex OAuth
+    if (user.plexId.startsWith('local-')) {
+      console.log('[BookDate] User is local admin, using cached ratings (from system Plex token)');
       return cachedBooks.map(book => ({
         title: book.title,
         author: book.author,
@@ -77,9 +77,9 @@ async function enrichWithUserRatings(
       }));
     }
 
-    // Non-admin users: Fetch library with their token to get their personal ratings
+    // Plex-authenticated users (including admins): Fetch library with their token to get personal ratings
     // Note: /library/sections/{id}/all returns items with the authenticated user's ratings
-    console.log('[BookDate] User is non-admin, fetching library with user token to get personal ratings');
+    console.log('[BookDate] User is Plex-authenticated, fetching library with user token to get personal ratings');
 
     if (!user.authToken) {
       console.warn('[BookDate] User has no Plex auth token');

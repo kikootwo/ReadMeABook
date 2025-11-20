@@ -112,8 +112,8 @@ interface PlexLibrary {
 **Problem:** Library scan runs with system Plex token, storing those ratings in cache. Different users need different ratings for recommendations.
 
 **Solution:**
-1. **Admin users (Plex-authenticated or local):** Use cached ratings (from system Plex token)
-2. **Non-admin users:** Fetch library with user's token to get personal ratings
+1. **Local admin users:** Use cached ratings (from system Plex token)
+2. **Plex-authenticated users (including admins):** Fetch library with user's token to get personal ratings
 
 **How Per-User Ratings Work:**
 - **Key insight:** `/library/sections/{id}/all` returns items with the **authenticated user's ratings**
@@ -124,18 +124,19 @@ interface PlexLibrary {
 **Implementation:**
 - `getLibraryContent(serverUrl, userToken, libraryId)` - Fetches library with user-specific ratings
 - Returns `PlexAudiobook[]` with `userRating` field specific to the authenticated user
-- Non-admin users: Fetch full library (~1-2s), match by plexGuid/ratingKey against cached structure
-- Admin users: Use cached ratings (skip API call, already have their ratings)
+- Plex-authenticated users: Fetch full library (~1-2s), match by plexGuid/ratingKey against cached structure
+- Local admin: Use cached ratings (skip API call, user has no Plex account)
 
 **BookDate Integration:**
 - `enrichWithUserRatings(userId, cachedBooks)` - Determines user type and returns appropriate ratings
-  - Admin (Plex-authenticated or local) → cached ratings from system token (no API call)
-  - Non-admin → fetch library with user token, extract ratings, match against cached books
+  - Local admin (plexId starts with 'local-') → cached ratings from system token (no API call)
+  - Plex-authenticated (everyone else) → fetch library with user token, extract ratings, match against cached books
 
 **Notes:**
 - System Plex token (configured during setup) is used for library scanning
 - Cached ratings reflect whoever owns that system token
-- Local admins use cached ratings even though their user.authToken is a bcrypt hash (not a Plex token)
+- Local admins use cached ratings because they don't have Plex accounts (user.authToken is bcrypt hash)
+- Plex-authenticated admins fetch their personal ratings like any other Plex user
 
 ## Fixed Issues ✅
 
