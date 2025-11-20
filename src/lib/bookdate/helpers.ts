@@ -137,7 +137,19 @@ async function enrichWithUserRatings(
         }));
       }
 
-      const systemPlexToken = encryptionService.decrypt(plexConfig.authToken);
+      let systemPlexToken: string;
+      try {
+        systemPlexToken = encryptionService.decrypt(plexConfig.authToken);
+      } catch (decryptError) {
+        console.error('[BookDate] Failed to decrypt system Plex token (may not be encrypted or key mismatch):', decryptError);
+        return cachedBooks.map(book => ({
+          title: book.title,
+          author: book.author,
+          narrator: book.narrator || undefined,
+          rating: undefined,
+        }));
+      }
+
       const serverInfo = await plexService.testConnection(plexConfig.serverUrl, systemPlexToken);
 
       if (!serverInfo.success || !serverInfo.info?.machineIdentifier) {
