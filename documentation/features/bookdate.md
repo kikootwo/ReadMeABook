@@ -9,7 +9,11 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - **AI Providers:** OpenAI (GPT-4o+), Claude (Sonnet 4.5, Opus 4, Haiku)
 - **Configuration:** Global admin-managed, single encrypted API key (AES-256) shared by all users
 - **Personalization:** Each user receives recommendations based on their own library, ratings, and swipe history
-- **Library Scopes:** Full library | Rated only
+- **Library Scopes:**
+  - Full library: All books in library (max 40 most recent)
+  - Rated only: Only books the user has rated
+    - Local admin: Uses cached ratings from system token
+    - Plex users: Fetches 100 books, filters to user's rated books, returns top 40
 - **Context Window:** Max 50 books (40 library + 10 swipe history) per user
 - **Cache:** All unswiped recommendations persisted per user, shown on return
 - **Actions:**
@@ -162,10 +166,13 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - **Local admin users:** Use cached ratings from library scan
   - Cached ratings are from the system Plex token (configured during setup)
   - No additional API calls needed
+  - scope='rated': Filters cached library by cached ratings (40 most recent rated books)
 - **Plex-authenticated users (including admins):** Fetch full library with user's token to get personal ratings
   - Uses `/library/sections/{id}/all` endpoint which returns items with authenticated user's ratings
   - Matches by plexGuid/ratingKey against cached library structure
   - ~1-2s fetch time for full library (only happens when generating recommendations)
+  - scope='rated': Fetches 100 books, enriches with user ratings, filters to rated, returns top 40
+    - Ensures user sees books THEY rated, not just books the system token rated
 
 **Graceful Degradation:**
 - Audnexus API down → Skip failed matches, show what matched

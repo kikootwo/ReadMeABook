@@ -212,30 +212,43 @@ export async function getUserLibraryBooks(
 
     const plexLibraryId = plexConfig.libraryId;
 
-    // Build query filters based on scope
+    // Check user type to determine query strategy for 'rated' scope
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { plexId: true },
+    });
+
+    const isLocalAdmin = user?.plexId.startsWith('local-') ?? false;
+
+    // Build query filters based on scope and user type
     let whereClause: any = { plexLibraryId };
+    let takeLimit = 40;
 
     if (scope === 'rated') {
-      // Only include books that have a user rating
-      // Note: This checks cached ratings, which may be admin's ratings
-      // We'll filter again after fetching live user ratings
-      whereClause.userRating = { not: null };
+      if (isLocalAdmin) {
+        // Local admin: Filter by cached ratings (these are their ratings)
+        whereClause.userRating = { not: null };
+      } else {
+        // Plex-authenticated: Fetch more books to ensure we get 40 rated ones
+        // Don't filter by cached ratings - user's ratings may differ from system token
+        takeLimit = 100;
+      }
     }
 
-    // Query Plex library from database (cached structure, includes admin's cached ratings)
+    // Query Plex library from database (cached structure, includes system token's cached ratings)
     let cachedBooks = await prisma.plexLibrary.findMany({
       where: whereClause,
       orderBy: {
         addedAt: 'desc',
       },
-      take: 40,
+      take: takeLimit,
       select: {
         title: true,
         author: true,
         narrator: true,
         plexGuid: true,
         plexRatingKey: true,
-        userRating: true, // Admin's cached ratings from scan
+        userRating: true, // System token's cached ratings from scan
       },
     });
 
@@ -244,7 +257,9 @@ export async function getUserLibraryBooks(
 
     // If scope is 'rated', filter to only books the user has actually rated
     if (scope === 'rated') {
-      return enrichedBooks.filter(book => book.rating != null);
+      const ratedBooks = enrichedBooks.filter(book => book.rating != null);
+      // Limit to 40 for Plex users (local admin already limited in query)
+      return isLocalAdmin ? ratedBooks : ratedBooks.slice(0, 40);
     }
 
     return enrichedBooks;
