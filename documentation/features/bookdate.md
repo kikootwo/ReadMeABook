@@ -83,9 +83,9 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 
 1. **Context Gathering:**
    - Get user's library books (max 40, filtered by scope)
-     - **Per-User Ratings:** Cached library structure enriched with live per-user ratings from Plex API
-     - Uses user's Plex token to fetch their personal ratings (not admin's ratings)
-     - Fallback to no ratings if API fails
+     - **Admin Users:** Use cached ratings (scanned with admin's Plex token)
+     - **Local Admin Users:** No ratings (no Plex token)
+     - **Non-Admin Users:** No ratings (Plex API limitation - shared users can't fetch metadata by ratingKey)
    - Get recent swipes (max 10)
    - Add custom prompt if provided
 
@@ -159,12 +159,10 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - All recommendations filtered out → Show message: "Couldn't find new recommendations. Try adjusting settings."
 - No Audnexus match → Skip silently, log warning, continue with next
 
-**Per-User Rating Errors:**
-- Local admin user → Skip rating enrichment (no Plex token, uses bcrypt password hash)
-- Decryption failed → Log error, return books without ratings
-- Plex API 401 (unauthorized) → User's Plex token expired/invalid, user should re-authenticate
-- Plex API 404 (not found) → Item doesn't exist or user lacks access, skip silently
-- All rating requests fail → Log warning, continue with recommendations (no ratings)
+**Per-User Rating Handling:**
+- **Admin users:** Use cached ratings from library scan (these are the admin's own ratings)
+- **Local admin users:** No ratings (authToken contains bcrypt password hash, not Plex token)
+- **Non-admin users:** No ratings (Plex API limitation - shared users don't have permission to fetch metadata by ratingKey, causes 401 errors)
 
 **Graceful Degradation:**
 - Audnexus API down → Skip failed matches, show what matched
@@ -202,7 +200,6 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - **Cost Estimate:** ~$0.04 per batch (GPT-4o), varies by model
 - **Cache Hit Rate:** High (only generates when needed)
 - **API Rate Limits:** OpenAI ~3500 RPM, Claude ~4000 RPM
-- **Rating Fetch:** ~1-2s to fetch per-user ratings for 40 books (batched in groups of 10)
 
 ## Dependencies
 

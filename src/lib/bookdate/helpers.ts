@@ -21,6 +21,7 @@ interface CachedLibraryBook {
   author: string;
   narrator: string | null;
   plexRatingKey: string | null;
+  userRating?: any; // Admin's cached rating
 }
 
 export interface SwipeHistory {
@@ -47,10 +48,10 @@ async function enrichWithUserRatings(
   cachedBooks: CachedLibraryBook[]
 ): Promise<LibraryBook[]> {
   try {
-    // Get user's Plex token and plexId
+    // Get user's Plex token, plexId, and role
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { authToken: true, plexId: true },
+      select: { authToken: true, plexId: true, role: true },
     });
 
     if (!user) {
@@ -74,78 +75,27 @@ async function enrichWithUserRatings(
       }));
     }
 
-    if (!user.authToken) {
-      console.warn('[BookDate] User has no Plex auth token');
+    // Admin users: Use cached ratings (these are the admin's ratings from the scan)
+    if (user.role === 'admin') {
+      console.log('[BookDate] User is admin, using cached ratings (scanned with admin token)');
       return cachedBooks.map(book => ({
         title: book.title,
         author: book.author,
         narrator: book.narrator || undefined,
-        rating: undefined,
+        rating: book.userRating ? parseFloat(book.userRating.toString()) : undefined,
       }));
     }
 
-    // Get Plex configuration
-    const configService = getConfigService();
-    const plexConfig = await configService.getPlexConfig();
-
-    if (!plexConfig.serverUrl) {
-      console.warn('[BookDate] No Plex server URL configured');
-      return cachedBooks.map(book => ({
-        title: book.title,
-        author: book.author,
-        narrator: book.narrator || undefined,
-        rating: undefined,
-      }));
-    }
-
-    // Decrypt user's Plex token (only for Plex-authenticated users)
-    let userPlexToken: string;
-    try {
-      const encryptionService = getEncryptionService();
-      userPlexToken = encryptionService.decrypt(user.authToken);
-    } catch (decryptError) {
-      console.error('[BookDate] Failed to decrypt user authToken (corrupted or invalid format):', decryptError);
-      return cachedBooks.map(book => ({
-        title: book.title,
-        author: book.author,
-        narrator: book.narrator || undefined,
-        rating: undefined,
-      }));
-    }
-
-    // Get rating keys from cached books
-    const ratingKeys = cachedBooks
-      .filter(book => book.plexRatingKey)
-      .map(book => book.plexRatingKey as string);
-
-    if (ratingKeys.length === 0) {
-      console.warn('[BookDate] No rating keys found in cached books');
-      return cachedBooks.map(book => ({
-        title: book.title,
-        author: book.author,
-        narrator: book.narrator || undefined,
-        rating: undefined,
-      }));
-    }
-
-    console.log(`[BookDate] Fetching live ratings for ${ratingKeys.length} books using user's token`);
-
-    // Fetch user's personal ratings from Plex
-    const plexService = getPlexService();
-    const ratingsMap = await plexService.batchGetUserRatings(
-      plexConfig.serverUrl,
-      userPlexToken,
-      ratingKeys
-    );
-
-    console.log(`[BookDate] Successfully fetched ${ratingsMap.size} user ratings from Plex`);
-
-    // Enrich books with user's ratings
+    // Non-admin users: Skip rating enrichment for now
+    // Note: Plex shared users don't have permission to fetch metadata by ratingKey
+    // This causes 401 errors. For now, non-admin users get no ratings in recommendations.
+    // TODO: Investigate alternative Plex API endpoints for shared user ratings
+    console.log('[BookDate] User is non-admin, skipping per-user ratings (Plex API limitation for shared users)');
     return cachedBooks.map(book => ({
       title: book.title,
       author: book.author,
       narrator: book.narrator || undefined,
-      rating: book.plexRatingKey ? ratingsMap.get(book.plexRatingKey) || undefined : undefined,
+      rating: undefined, // Non-admin users don't get ratings (Plex API limitation)
     }));
 
   } catch (error) {
@@ -192,7 +142,7 @@ export async function getUserLibraryBooks(
       whereClause.userRating = { not: null };
     }
 
-    // Query Plex library from database (cached structure, no user-specific ratings yet)
+    // Query Plex library from database (cached structure, includes admin's cached ratings)
     let cachedBooks = await prisma.plexLibrary.findMany({
       where: whereClause,
       orderBy: {
@@ -204,6 +154,7 @@ export async function getUserLibraryBooks(
         author: true,
         narrator: true,
         plexRatingKey: true,
+        userRating: true, // Admin's cached ratings from scan
       },
     });
 

@@ -107,31 +107,30 @@ interface PlexLibrary {
 }
 ```
 
-## Per-User Ratings
+## BookDate Ratings
 
-**Problem:** Library scan runs as admin, storing admin's ratings in cache. All users see admin's ratings in BookDate recommendations.
+**Problem:** Library scan runs as admin, storing admin's ratings in cache. Different users need different ratings for recommendations.
 
-**Solution (Hybrid Approach):**
-1. Cache structure (title, author, metadata) remains admin-populated
-2. **Per-user ratings fetched live** when building BookDate AI prompt
-3. Uses `batchGetUserRatings()` to fetch user's personal ratings via their Plex token
-4. Batched in groups of 10, parallel requests (~1-2s for 40 books)
-5. Graceful fallback: no ratings if API fails
+**Current Solution:**
+1. **Admin users:** Use cached ratings from library scan (these are their own ratings)
+2. **Local admin users:** No ratings (authToken contains bcrypt hash, not Plex token)
+3. **Non-admin users:** No ratings (Plex API limitation)
 
-**Methods:**
-- `getItemMetadata(serverUrl, userToken, ratingKey)` - Fetch single item's user rating
-- `batchGetUserRatings(serverUrl, userToken, ratingKeys[])` - Batch fetch multiple ratings (Map<ratingKey, rating>)
+**Plex API Limitation:**
+- Shared/non-admin Plex users don't have permission to fetch metadata by `ratingKey`
+- API returns 401 Unauthorized when non-admin users try to fetch individual item metadata
+- This is a Plex server permission restriction, not a token expiration issue
+- Currently unsolved: No known alternative Plex API endpoint for shared user ratings
+
+**Methods (for potential future use):**
+- `getItemMetadata(serverUrl, userToken, ratingKey)` - Fetch single item's user rating (only works for server owners)
+- `batchGetUserRatings(serverUrl, userToken, ratingKeys[])` - Batch fetch multiple ratings (only works for server owners)
 
 **BookDate Integration:**
-- `enrichWithUserRatings(userId, cachedBooks)` - Enriches cached books with live per-user ratings
-- Called by `getUserLibraryBooks()` before building AI prompt
-- Ensures AI receives accurate per-user preferences
-- **Local admin users:** Skipped (authToken contains bcrypt password hash, not Plex token)
-- **Token expiration:** If user gets 401 errors, they need to log out and re-authenticate with Plex
-
-**Troubleshooting:**
-- 401 errors on rating fetch → User's Plex token expired, have user log out and log back in
-- Decryption errors → Local admin users don't have Plex tokens (expected behavior)
+- `enrichWithUserRatings(userId, cachedBooks)` - Determines user type and returns appropriate ratings
+  - Admin → cached ratings from scan
+  - Local admin → no ratings
+  - Non-admin → no ratings (Plex API limitation)
 
 ## Fixed Issues ✅
 
