@@ -246,6 +246,64 @@ export class PlexService {
   }
 
   /**
+   * Get server-specific access token for a user
+   *
+   * Per Plex API docs: plex.tv OAuth tokens are for talking to plex.tv,
+   * but you need server-specific access tokens from /api/v2/resources to talk to PMS.
+   *
+   * @param serverMachineId - The machine identifier of the PMS
+   * @param userPlexToken - The user's plex.tv OAuth token
+   * @returns The server-specific access token, or null if not found/no access
+   */
+  async getServerAccessToken(
+    serverMachineId: string,
+    userPlexToken: string
+  ): Promise<string | null> {
+    try {
+      console.log('[Plex] Fetching server access token for machineId:', serverMachineId);
+
+      // Get the list of servers/resources the user has access to
+      const response = await this.client.get('https://plex.tv/api/v2/resources', {
+        headers: {
+          'X-Plex-Token': userPlexToken,
+          'X-Plex-Client-Identifier': PLEX_CLIENT_IDENTIFIER,
+          'Accept': 'application/json',
+        },
+        params: {
+          includeHttps: 1,
+          includeRelay: 1,
+        },
+        timeout: 10000,
+      });
+
+      const resources = response.data || [];
+
+      // Find the server resource matching the machine ID
+      const serverResource = resources.find((r: any) => {
+        const resourceId = r.clientIdentifier || r.machineIdentifier;
+        return resourceId === serverMachineId;
+      });
+
+      if (!serverResource) {
+        console.warn('[Plex] User does not have access to server:', serverMachineId);
+        return null;
+      }
+
+      if (!serverResource.accessToken) {
+        console.error('[Plex] Server resource found but no accessToken provided');
+        return null;
+      }
+
+      console.log('[Plex] Found server access token for:', serverResource.name);
+      return serverResource.accessToken;
+
+    } catch (error) {
+      console.error('[Plex] Failed to fetch server access token:', error);
+      return null;
+    }
+  }
+
+  /**
    * Verify user has access to the configured Plex server
    * Returns true if user can access the server, false otherwise
    *

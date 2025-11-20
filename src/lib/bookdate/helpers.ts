@@ -105,10 +105,10 @@ async function enrichWithUserRatings(
       }));
     }
 
-    // Decrypt user's Plex token
+    // Decrypt user's plex.tv OAuth token
     let userPlexToken: string;
+    const encryptionService = getEncryptionService();
     try {
-      const encryptionService = getEncryptionService();
       userPlexToken = encryptionService.decrypt(user.authToken);
     } catch (decryptError) {
       console.error('[BookDate] Failed to decrypt user authToken:', decryptError);
@@ -121,11 +121,47 @@ async function enrichWithUserRatings(
     }
 
     try {
-      // Fetch library content with user's token to get their personal ratings
+      // Get server-specific access token
+      // Per Plex API: plex.tv OAuth tokens are for plex.tv, but we need
+      // server-specific access tokens from /api/v2/resources to talk to PMS
       const plexService = getPlexService();
+
+      // Get server machine ID from config
+      const systemPlexToken = encryptionService.decrypt(plexConfig.authToken);
+      const serverInfo = await plexService.testConnection(plexConfig.serverUrl, systemPlexToken);
+
+      if (!serverInfo.success || !serverInfo.info?.machineIdentifier) {
+        console.error('[BookDate] Cannot get server machine ID');
+        return cachedBooks.map(book => ({
+          title: book.title,
+          author: book.author,
+          narrator: book.narrator || undefined,
+          rating: undefined,
+        }));
+      }
+
+      const serverMachineId = serverInfo.info.machineIdentifier;
+      const serverAccessToken = await plexService.getServerAccessToken(
+        serverMachineId,
+        userPlexToken
+      );
+
+      if (!serverAccessToken) {
+        console.warn('[BookDate] Could not get server access token for user (may not have server access)');
+        return cachedBooks.map(book => ({
+          title: book.title,
+          author: book.author,
+          narrator: book.narrator || undefined,
+          rating: undefined,
+        }));
+      }
+
+      console.log('[BookDate] Successfully obtained server access token for user');
+
+      // Fetch library content with user's SERVER access token to get their personal ratings
       const userLibrary = await plexService.getLibraryContent(
         plexConfig.serverUrl,
-        userPlexToken,
+        serverAccessToken,
         plexConfig.libraryId
       );
 
