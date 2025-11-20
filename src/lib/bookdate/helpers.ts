@@ -47,28 +47,14 @@ async function enrichWithUserRatings(
   cachedBooks: CachedLibraryBook[]
 ): Promise<LibraryBook[]> {
   try {
-    // Get user's Plex token
+    // Get user's Plex token and plexId
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { authToken: true },
+      select: { authToken: true, plexId: true },
     });
 
-    if (!user?.authToken) {
-      console.warn('[BookDate] User has no Plex auth token, using cached ratings');
-      return cachedBooks.map(book => ({
-        title: book.title,
-        author: book.author,
-        narrator: book.narrator || undefined,
-        rating: undefined, // No ratings without token
-      }));
-    }
-
-    // Get Plex configuration
-    const configService = getConfigService();
-    const plexConfig = await configService.getPlexConfig();
-
-    if (!plexConfig.serverUrl) {
-      console.warn('[BookDate] No Plex server URL configured, using cached ratings');
+    if (!user) {
+      console.warn('[BookDate] User not found');
       return cachedBooks.map(book => ({
         title: book.title,
         author: book.author,
@@ -77,9 +63,55 @@ async function enrichWithUserRatings(
       }));
     }
 
-    // Decrypt user's Plex token
-    const encryptionService = getEncryptionService();
-    const userPlexToken = encryptionService.decrypt(user.authToken);
+    // Check if this is a local admin user (authToken contains bcrypt hash, not Plex token)
+    if (user.plexId.startsWith('local-')) {
+      console.log('[BookDate] User is local admin, skipping per-user ratings (no Plex token)');
+      return cachedBooks.map(book => ({
+        title: book.title,
+        author: book.author,
+        narrator: book.narrator || undefined,
+        rating: undefined, // Local admins don't have Plex tokens
+      }));
+    }
+
+    if (!user.authToken) {
+      console.warn('[BookDate] User has no Plex auth token');
+      return cachedBooks.map(book => ({
+        title: book.title,
+        author: book.author,
+        narrator: book.narrator || undefined,
+        rating: undefined,
+      }));
+    }
+
+    // Get Plex configuration
+    const configService = getConfigService();
+    const plexConfig = await configService.getPlexConfig();
+
+    if (!plexConfig.serverUrl) {
+      console.warn('[BookDate] No Plex server URL configured');
+      return cachedBooks.map(book => ({
+        title: book.title,
+        author: book.author,
+        narrator: book.narrator || undefined,
+        rating: undefined,
+      }));
+    }
+
+    // Decrypt user's Plex token (only for Plex-authenticated users)
+    let userPlexToken: string;
+    try {
+      const encryptionService = getEncryptionService();
+      userPlexToken = encryptionService.decrypt(user.authToken);
+    } catch (decryptError) {
+      console.error('[BookDate] Failed to decrypt user authToken (corrupted or invalid format):', decryptError);
+      return cachedBooks.map(book => ({
+        title: book.title,
+        author: book.author,
+        narrator: book.narrator || undefined,
+        rating: undefined,
+      }));
+    }
 
     // Get rating keys from cached books
     const ratingKeys = cachedBooks

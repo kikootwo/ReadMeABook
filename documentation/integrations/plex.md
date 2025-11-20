@@ -126,6 +126,12 @@ interface PlexLibrary {
 - `enrichWithUserRatings(userId, cachedBooks)` - Enriches cached books with live per-user ratings
 - Called by `getUserLibraryBooks()` before building AI prompt
 - Ensures AI receives accurate per-user preferences
+- **Local admin users:** Skipped (authToken contains bcrypt password hash, not Plex token)
+- **Token expiration:** If user gets 401 errors, they need to log out and re-authenticate with Plex
+
+**Troubleshooting:**
+- 401 errors on rating fetch → User's Plex token expired, have user log out and log back in
+- Decryption errors → Local admin users don't have Plex tokens (expected behavior)
 
 ## Fixed Issues ✅
 

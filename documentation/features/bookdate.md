@@ -159,10 +159,18 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - All recommendations filtered out → Show message: "Couldn't find new recommendations. Try adjusting settings."
 - No Audnexus match → Skip silently, log warning, continue with next
 
+**Per-User Rating Errors:**
+- Local admin user → Skip rating enrichment (no Plex token, uses bcrypt password hash)
+- Decryption failed → Log error, return books without ratings
+- Plex API 401 (unauthorized) → User's Plex token expired/invalid, user should re-authenticate
+- Plex API 404 (not found) → Item doesn't exist or user lacks access, skip silently
+- All rating requests fail → Log warning, continue with recommendations (no ratings)
+
 **Graceful Degradation:**
 - Audnexus API down → Skip failed matches, show what matched
 - Empty Plex library → Show warning, allow setup anyway
 - No recommendations → Show empty state with "Get More" button
+- Rating fetch fails → Continue with recommendations, no ratings included in AI prompt
 
 ## Cache Strategy
 

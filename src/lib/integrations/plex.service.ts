@@ -637,8 +637,18 @@ export class PlexService {
           ? parseFloat(item.userRating)
           : (item.$?.userRating ? parseFloat(item.$?.userRating) : undefined),
       };
-    } catch (error) {
-      console.error(`Failed to get metadata for ratingKey ${ratingKey}:`, error);
+    } catch (error: any) {
+      // Handle 401 specifically (expired or invalid token)
+      if (error.response?.status === 401) {
+        console.warn(`[Plex] User token unauthorized for ratingKey ${ratingKey} (token may be expired or invalid)`);
+        return null;
+      }
+      // Handle 404 (item not found or user doesn't have access)
+      if (error.response?.status === 404) {
+        console.warn(`[Plex] Item not found or no access: ratingKey ${ratingKey}`);
+        return null;
+      }
+      console.error(`[Plex] Failed to get metadata for ratingKey ${ratingKey}:`, error.message || error);
       return null;
     }
   }
@@ -653,6 +663,7 @@ export class PlexService {
     ratingKeys: string[]
   ): Promise<Map<string, number>> {
     const ratingsMap = new Map<string, number>();
+    let unauthorizedCount = 0;
 
     // Fetch ratings in parallel (limit concurrency to avoid overwhelming Plex)
     const BATCH_SIZE = 10;
@@ -666,8 +677,21 @@ export class PlexService {
         if (result.status === 'fulfilled' && result.value?.userRating) {
           const ratingKey = batch[index];
           ratingsMap.set(ratingKey, result.value.userRating);
+        } else if (result.status === 'rejected') {
+          // Count authorization failures
+          if (result.reason?.response?.status === 401) {
+            unauthorizedCount++;
+          }
         }
       });
+    }
+
+    // If we got many 401s, log a warning about token issues
+    if (unauthorizedCount > 0) {
+      console.warn(`[Plex] ${unauthorizedCount} of ${ratingKeys.length} items returned 401 (user token may be expired or invalid)`);
+      if (unauthorizedCount === ratingKeys.length) {
+        console.error('[Plex] All rating requests failed with 401 - user needs to re-authenticate with Plex');
+      }
     }
 
     return ratingsMap;
