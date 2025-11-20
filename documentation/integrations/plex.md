@@ -19,7 +19,7 @@ Connectivity to Plex for OAuth, library management, content detection, and autom
 **GET {server_url}/library/sections/{id}/all?type=9** - All albums (type 9 = audiobooks)
 **GET {server_url}/library/sections/{id}/all?type=9&sort=addedAt:desc&X-Plex-Container-Start=0&X-Plex-Container-Size=10** - Recently added (lightweight polling)
 **GET {server_url}/library/sections/{id}/refresh** - Trigger async scan
-**GET {server_url}/library/metadata/{rating_key}** - Item metadata
+**GET {server_url}/library/metadata/{rating_key}** - Item metadata (includes user's personal rating)
 **GET {server_url}/library/sections/{id}/search?title={query}** - Search
 
 Auth: `X-Plex-Token` header
@@ -107,6 +107,43 @@ interface PlexLibrary {
 }
 ```
 
+## BookDate Ratings
+
+**Problem:** Library scan runs with system Plex token, storing those ratings in cache. Different users need different ratings for recommendations.
+
+**Solution:**
+1. **Local admin users:** Use cached ratings (from system Plex token)
+2. **Plex-authenticated users (including admins):** Fetch library with user's token to get personal ratings
+
+**How Per-User Ratings Work:**
+- **Key insight:** `/library/sections/{id}/all` returns items with the **authenticated user's ratings**
+- Plex ratings are tied to user accounts (stored on plex.tv), not the server
+- When fetched with a user's token, each item includes that user's personal `userRating`
+- No special permissions needed - works for all authenticated users (admin and non-admin)
+
+**Implementation:**
+- `getLibraryContent(serverUrl, userToken, libraryId)` - Fetches library with user-specific ratings
+- Returns `PlexAudiobook[]` with `userRating` field specific to the authenticated user
+- Plex-authenticated users: Fetch full library (~1-2s), match by plexGuid/ratingKey against cached structure
+- Local admin: Use cached ratings (skip API call, user has no Plex account)
+
+**BookDate Integration:**
+- `enrichWithUserRatings(userId, cachedBooks)` - Determines user type and returns appropriate ratings
+  - Local admin (plexId starts with 'local-') → cached ratings from system token (no API call)
+  - Plex-authenticated (everyone else) → user's plex.tv token + stored machineIdentifier → server access token → fetch library with user's ratings
+
+**Notes:**
+- System Plex token (configured during setup) is used for library scanning, testing, admin operations only
+- Cached ratings reflect whoever owns that system token
+- Local admins use cached ratings because they don't have Plex accounts (user.authToken is bcrypt hash)
+- **Token types:** Plex uses two token types per the API documentation
+  - plex.tv OAuth tokens: For authenticating to plex.tv services
+  - Server access tokens: For talking to individual PMS instances
+  - Must call `/api/v2/resources` with plex.tv token + machineIdentifier to get server-specific access tokens
+  - Each server in user's resources list has its own `accessToken`
+- **Security:** machineIdentifier stored in Configuration during setup to avoid accessing system token for user operations
+- BookDate correctly fetches server-specific access tokens without touching the system Plex token
+
 ## Fixed Issues ✅
 
 **1. Response Format Handling**
@@ -152,6 +189,28 @@ interface PlexLibrary {
   - Narrator matching: Can match narrator to Plex author field
   - ASIN filtering: Rejects candidates with wrong ASINs in plexGuid
   - Consistent 70% weighted threshold everywhere
+
+**8. BookDate Token Decryption Failures**
+- Issue: Decryption errors when fetching user ratings for BookDate recommendations
+- User Experience: "Failed to decrypt user authToken" / "Failed to decrypt system Plex token"
+- Cause: Tokens may be stored as plain text (from before encryption implementation or different encryption key)
+- Fix: Added fallback to use tokens as plain text if decryption fails
+  - User Plex token: Try decrypt, fallback to plain text
+  - System Plex token: Try decrypt, fallback to plain text (before architectural fix)
+  - Allows BookDate to function with both encrypted and plain text tokens
+
+**9. BookDate Accessing System Token for User Operations** ⚡ **ARCHITECTURAL FIX**
+- Issue: Every BookDate user request was decrypting system Plex token to get machineIdentifier
+- User Experience: Unnecessary decryption operations, security concern (users shouldn't access admin token)
+- Cause: machineIdentifier was fetched via testConnection() using system token for each user request
+- Fix: Store machineIdentifier in Configuration during setup, use stored value for user operations
+  - Added `plex_machine_identifier` to Configuration table
+  - Setup/complete route saves machineIdentifier from test-plex response
+  - config.service.ts returns machineIdentifier from config
+  - enrichWithUserRatings() uses stored machineIdentifier (no system token access)
+  - System token now only used for: library scanning, setup, testing, admin operations
+  - User flow: user's plex.tv token + stored machineIdentifier → server access token
+- Security: Users never access or decrypt the system Plex token
 
 ## Availability Checking
 

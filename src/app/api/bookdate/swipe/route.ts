@@ -52,8 +52,9 @@ async function handler(req: AuthenticatedRequest) {
       },
     });
 
-    // Remove from cache
-    await prisma.bookDateRecommendation.delete({
+    // Remove from cache (use deleteMany to avoid race condition errors)
+    // deleteMany doesn't error if record doesn't exist (idempotent)
+    await prisma.bookDateRecommendation.deleteMany({
       where: { id: recommendationId },
     });
 

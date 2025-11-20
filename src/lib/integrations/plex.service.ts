@@ -246,6 +246,64 @@ export class PlexService {
   }
 
   /**
+   * Get server-specific access token for a user
+   *
+   * Per Plex API docs: plex.tv OAuth tokens are for talking to plex.tv,
+   * but you need server-specific access tokens from /api/v2/resources to talk to PMS.
+   *
+   * @param serverMachineId - The machine identifier of the PMS
+   * @param userPlexToken - The user's plex.tv OAuth token
+   * @returns The server-specific access token, or null if not found/no access
+   */
+  async getServerAccessToken(
+    serverMachineId: string,
+    userPlexToken: string
+  ): Promise<string | null> {
+    try {
+      console.log('[Plex] Fetching server access token for machineId:', serverMachineId);
+
+      // Get the list of servers/resources the user has access to
+      const response = await this.client.get('https://plex.tv/api/v2/resources', {
+        headers: {
+          'X-Plex-Token': userPlexToken,
+          'X-Plex-Client-Identifier': PLEX_CLIENT_IDENTIFIER,
+          'Accept': 'application/json',
+        },
+        params: {
+          includeHttps: 1,
+          includeRelay: 1,
+        },
+        timeout: 10000,
+      });
+
+      const resources = response.data || [];
+
+      // Find the server resource matching the machine ID
+      const serverResource = resources.find((r: any) => {
+        const resourceId = r.clientIdentifier || r.machineIdentifier;
+        return resourceId === serverMachineId;
+      });
+
+      if (!serverResource) {
+        console.warn('[Plex] User does not have access to server:', serverMachineId);
+        return null;
+      }
+
+      if (!serverResource.accessToken) {
+        console.error('[Plex] Server resource found but no accessToken provided');
+        return null;
+      }
+
+      console.log('[Plex] Found server access token for:', serverResource.name);
+      return serverResource.accessToken;
+
+    } catch (error) {
+      console.error('[Plex] Failed to fetch server access token:', error);
+      return null;
+    }
+  }
+
+  /**
    * Verify user has access to the configured Plex server
    * Returns true if user can access the server, false otherwise
    *
@@ -522,8 +580,12 @@ export class PlexService {
         updatedAt: item.updatedAt ? parseInt(item.updatedAt) : Date.now(),
         userRating: item.userRating ? parseFloat(item.userRating) : (item.$?.userRating ? parseFloat(item.$?.userRating) : undefined),
       }));
-    } catch (error) {
-      console.error('Failed to get library content:', error);
+    } catch (error: any) {
+      if (error?.response?.status === 401) {
+        console.error('[Plex] 401 Unauthorized when fetching library content - token may not have server access permissions');
+      } else {
+        console.error('[Plex] Failed to get library content:', error);
+      }
       throw new Error('Failed to retrieve content from Plex library');
     }
   }
@@ -591,6 +653,110 @@ export class PlexService {
       console.error('Failed to search Plex library:', error);
       return [];
     }
+  }
+
+  /**
+   * Get metadata for a specific item (by ratingKey) with user's personal rating
+   * This fetches the item with the user's auth token, which includes their personal rating
+   */
+  async getItemMetadata(
+    serverUrl: string,
+    authToken: string,
+    ratingKey: string
+  ): Promise<{ userRating?: number } | null> {
+    try {
+      const response = await this.client.get(
+        `${serverUrl}/library/metadata/${ratingKey}`,
+        {
+          headers: {
+            'X-Plex-Token': authToken,
+            'Accept': 'application/json',
+          },
+        }
+      );
+
+      let data = response.data;
+
+      // Handle different response formats
+      if (typeof data === 'string') {
+        const parsed = await parseStringPromise(data);
+        data = parsed.MediaContainer;
+      } else if (data && typeof data === 'object') {
+        if (data.MediaContainer) {
+          data = data.MediaContainer;
+        }
+      }
+
+      // Extract first metadata item
+      const items = data.Metadata || [];
+      if (!Array.isArray(items) || items.length === 0) {
+        return null;
+      }
+
+      const item = items[0];
+      return {
+        userRating: item.userRating
+          ? parseFloat(item.userRating)
+          : (item.$?.userRating ? parseFloat(item.$?.userRating) : undefined),
+      };
+    } catch (error: any) {
+      // Handle 401 specifically (expired or invalid token)
+      if (error.response?.status === 401) {
+        console.warn(`[Plex] User token unauthorized for ratingKey ${ratingKey} (token may be expired or invalid)`);
+        return null;
+      }
+      // Handle 404 (item not found or user doesn't have access)
+      if (error.response?.status === 404) {
+        console.warn(`[Plex] Item not found or no access: ratingKey ${ratingKey}`);
+        return null;
+      }
+      console.error(`[Plex] Failed to get metadata for ratingKey ${ratingKey}:`, error.message || error);
+      return null;
+    }
+  }
+
+  /**
+   * Batch fetch ratings for multiple items using user's token
+   * Returns a map of ratingKey -> userRating
+   */
+  async batchGetUserRatings(
+    serverUrl: string,
+    authToken: string,
+    ratingKeys: string[]
+  ): Promise<Map<string, number>> {
+    const ratingsMap = new Map<string, number>();
+    let unauthorizedCount = 0;
+
+    // Fetch ratings in parallel (limit concurrency to avoid overwhelming Plex)
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < ratingKeys.length; i += BATCH_SIZE) {
+      const batch = ratingKeys.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(ratingKey => this.getItemMetadata(serverUrl, authToken, ratingKey))
+      );
+
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value?.userRating) {
+          const ratingKey = batch[index];
+          ratingsMap.set(ratingKey, result.value.userRating);
+        } else if (result.status === 'rejected') {
+          // Count authorization failures
+          if (result.reason?.response?.status === 401) {
+            unauthorizedCount++;
+          }
+        }
+      });
+    }
+
+    // If we got many 401s, log a warning about token issues
+    if (unauthorizedCount > 0) {
+      console.warn(`[Plex] ${unauthorizedCount} of ${ratingKeys.length} items returned 401 (user token may be expired or invalid)`);
+      if (unauthorizedCount === ratingKeys.length) {
+        console.error('[Plex] All rating requests failed with 401 - user needs to re-authenticate with Plex');
+      }
+    }
+
+    return ratingsMap;
   }
 }
 
