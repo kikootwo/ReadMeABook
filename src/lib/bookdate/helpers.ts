@@ -65,20 +65,10 @@ async function enrichWithUserRatings(
       }));
     }
 
-    // Check if this is a local admin user (authToken contains bcrypt hash, not Plex token)
-    if (user.plexId.startsWith('local-')) {
-      console.log('[BookDate] User is local admin, skipping per-user ratings (no Plex token)');
-      return cachedBooks.map(book => ({
-        title: book.title,
-        author: book.author,
-        narrator: book.narrator || undefined,
-        rating: undefined, // Local admins don't have Plex tokens
-      }));
-    }
-
-    // Admin users: Use cached ratings (these are the admin's ratings from the scan)
+    // Admin users (both Plex-authenticated and local): Use cached ratings
+    // Cached ratings are from the system Plex token (configured during setup)
     if (user.role === 'admin') {
-      console.log('[BookDate] User is admin, using cached ratings (scanned with admin token)');
+      console.log('[BookDate] User is admin, using cached ratings (from system Plex token)');
       return cachedBooks.map(book => ({
         title: book.title,
         author: book.author,

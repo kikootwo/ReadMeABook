@@ -109,12 +109,11 @@ interface PlexLibrary {
 
 ## BookDate Ratings
 
-**Problem:** Library scan runs as admin, storing admin's ratings in cache. Different users need different ratings for recommendations.
+**Problem:** Library scan runs with system Plex token, storing those ratings in cache. Different users need different ratings for recommendations.
 
 **Solution:**
-1. **Admin users:** Use cached ratings from library scan (these are their own ratings)
-2. **Local admin users:** No ratings (authToken contains bcrypt hash, not Plex token)
-3. **Non-admin users:** Fetch library with user's token to get personal ratings
+1. **Admin users (Plex-authenticated or local):** Use cached ratings (from system Plex token)
+2. **Non-admin users:** Fetch library with user's token to get personal ratings
 
 **How Per-User Ratings Work:**
 - **Key insight:** `/library/sections/{id}/all` returns items with the **authenticated user's ratings**
@@ -130,9 +129,13 @@ interface PlexLibrary {
 
 **BookDate Integration:**
 - `enrichWithUserRatings(userId, cachedBooks)` - Determines user type and returns appropriate ratings
-  - Admin → cached ratings from scan (no API call)
-  - Local admin → no ratings (no Plex token)
+  - Admin (Plex-authenticated or local) → cached ratings from system token (no API call)
   - Non-admin → fetch library with user token, extract ratings, match against cached books
+
+**Notes:**
+- System Plex token (configured during setup) is used for library scanning
+- Cached ratings reflect whoever owns that system token
+- Local admins use cached ratings even though their user.authToken is a bcrypt hash (not a Plex token)
 
 ## Fixed Issues ✅
 

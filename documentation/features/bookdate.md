@@ -83,8 +83,7 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 
 1. **Context Gathering:**
    - Get user's library books (max 40, filtered by scope)
-     - **Admin Users:** Use cached ratings (scanned with admin's Plex token)
-     - **Local Admin Users:** No ratings (no Plex token)
+     - **Admin Users (Plex-authenticated or local):** Use cached ratings (from system Plex token configured during setup)
      - **Non-Admin Users:** Fetch library with user's token to get personal ratings
    - Get recent swipes (max 10)
    - Add custom prompt if provided
@@ -160,8 +159,9 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - No Audnexus match → Skip silently, log warning, continue with next
 
 **Per-User Rating Handling:**
-- **Admin users:** Use cached ratings from library scan (these are the admin's own ratings)
-- **Local admin users:** No ratings (authToken contains bcrypt password hash, not Plex token)
+- **Admin users (both Plex-authenticated and local):** Use cached ratings from library scan
+  - Cached ratings are from the system Plex token (configured during setup)
+  - No additional API calls needed
 - **Non-admin users:** Fetch full library with user's token to get personal ratings
   - Uses `/library/sections/{id}/all` endpoint which returns items with authenticated user's ratings
   - Matches by plexGuid/ratingKey against cached library structure
