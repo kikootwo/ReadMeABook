@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
       paths: {
         downloadDir: configMap.get('download_dir') || '/downloads',
         mediaDir: configMap.get('media_dir') || '/media/audiobooks',
+        metadataTaggingEnabled: configMap.get('metadata_tagging_enabled') === 'true',
       },
       general: {
         appName: configMap.get('app_name') || 'ReadMeABook',

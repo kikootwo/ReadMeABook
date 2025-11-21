@@ -2,7 +2,7 @@
 
 **Status:** ✅ Implemented
 
-Copies completed downloads to standardized directory structure for Plex. Originals kept for seeding, cleaned up by scheduled job after requirements met.
+Copies completed downloads to standardized directory structure for Plex. Automatically tags audio files with correct metadata. Originals kept for seeding, cleaned up by scheduled job after requirements met.
 
 ## Target Structure
 
@@ -20,8 +20,59 @@ Copies completed downloads to standardized directory structure for Plex. Origina
 2. Identify audiobook files (.m4b, .m4a, .mp3) - supports both directories and single files
 3. Create `/media/audiobooks/[Author]/[Title]/`
 4. **Copy** files (not move - originals stay for seeding)
-5. Copy cover art if found, else download from Audible
-6. Originals remain until seeding requirements met
+5. **Tag metadata** (if enabled) - writes correct title, author, narrator to audio files
+6. Copy cover art if found, else download from Audible
+7. Originals remain until seeding requirements met
+
+## Metadata Tagging
+
+**Status:** ✅ Implemented
+
+**Purpose:** Automatically writes correct metadata to audio files during file organization to improve Plex matching accuracy.
+
+**Supported Formats:**
+- m4b, m4a, mp4 (AAC audiobooks)
+- mp3 (ID3v2 tags)
+
+**Metadata Written:**
+- `title` - Book title
+- `album` - Book title (PRIMARY field for Plex matching)
+- `album_artist` - Author (PRIMARY field for Plex matching)
+- `artist` - Author (fallback)
+- `composer` - Narrator (standard audiobook field)
+- `date` - Year
+
+**Configuration:**
+- Key: `metadata_tagging_enabled` (Configuration table)
+- Default: `true`
+- Configurable in: Setup wizard (Paths step), Admin settings (Paths tab)
+
+**Implementation:**
+- Uses ffmpeg with `-codec copy` (no re-encoding, metadata only)
+- Fast (no audio transcoding)
+- Lossless (original audio preserved)
+- Runs after file copy, before cover art download
+- Non-blocking (errors don't fail file organization)
+- Logs success/failure per file
+
+**Benefits:**
+- Fixes torrents with missing/incorrect metadata
+- Ensures Plex can match audiobooks correctly
+- Writes metadata from Audible/Audnexus (known accurate)
+- Prevents "[Various Albums]" and other metadata issues
+
+**Tech Stack:**
+- ffmpeg (system dependency - included in Docker image)
+- `src/lib/utils/metadata-tagger.ts` - Tagging utility
+- Integrated into `src/lib/utils/file-organizer.ts`
+
+**Requirements:**
+- ffmpeg must be installed in the container
+- **Multi-container setup** (`Dockerfile`): Added at line 56 via `apk add ffmpeg`
+- **Unified setup** (`dockerfile.unified`): Added at line 16 via `apt-get install ffmpeg`
+- **Verify installation:**
+  - Multi-container: `docker exec readmeabook ffmpeg -version`
+  - Unified: `docker exec readmeabook-unified ffmpeg -version`
 
 ## Seeding Support
 

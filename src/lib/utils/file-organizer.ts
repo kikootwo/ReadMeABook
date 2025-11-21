@@ -7,6 +7,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import axios from 'axios';
 import { createJobLogger, JobLogger } from './job-logger';
+import { tagMultipleFiles, checkFfmpegAvailable } from './metadata-tagger';
+import { prisma } from '../db';
 
 export interface AudiobookMetadata {
   title: string;
@@ -165,6 +167,58 @@ export class FileOrganizer {
 
       result.targetPath = targetPath;
       result.success = true;
+
+      // Tag metadata if enabled
+      try {
+        const config = await prisma.configuration.findUnique({
+          where: { key: 'metadata_tagging_enabled' },
+        });
+
+        const metadataTaggingEnabled = config?.value === 'true';
+
+        if (metadataTaggingEnabled && result.audioFiles.length > 0) {
+          await logger?.info(`Metadata tagging enabled, checking ffmpeg availability...`);
+
+          const ffmpegAvailable = await checkFfmpegAvailable();
+
+          if (ffmpegAvailable) {
+            await logger?.info(`Tagging ${result.audioFiles.length} audio files with metadata...`);
+
+            const taggingResults = await tagMultipleFiles(result.audioFiles, {
+              title: audiobook.title,
+              author: audiobook.author,
+              narrator: audiobook.narrator,
+              year: audiobook.year,
+            });
+
+            const successCount = taggingResults.filter((r) => r.success).length;
+            const failCount = taggingResults.filter((r) => !r.success).length;
+
+            if (successCount > 0) {
+              await logger?.info(`Successfully tagged ${successCount} file(s) with metadata`);
+            }
+
+            if (failCount > 0) {
+              await logger?.warn(`Failed to tag ${failCount} file(s): ${
+                taggingResults
+                  .filter((r) => !r.success)
+                  .map((r) => `${path.basename(r.filePath)}: ${r.error}`)
+                  .join(', ')
+              }`);
+              result.errors.push(`Failed to tag ${failCount} file(s) with metadata`);
+            }
+          } else {
+            await logger?.warn(`Metadata tagging enabled but ffmpeg not available - skipping tagging`);
+            result.errors.push('Metadata tagging skipped: ffmpeg not available');
+          }
+        } else {
+          await logger?.info(`Metadata tagging disabled or no audio files to tag`);
+        }
+      } catch (error) {
+        await logger?.error(`Metadata tagging failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        result.errors.push(`Metadata tagging failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        // Don't fail the whole operation if metadata tagging fails
+      }
 
       // DO NOT clean up download directory - files needed for seeding
       // Cleanup will be handled by the seeding cleanup job after seeding requirements are met

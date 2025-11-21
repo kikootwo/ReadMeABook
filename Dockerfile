@@ -53,6 +53,7 @@ WORKDIR /app
 RUN apk add --no-cache \
     openssl \
     curl \
+    ffmpeg \
     && addgroup --system --gid 1001 nodejs \
     && adduser --system --uid 1001 nextjs
 

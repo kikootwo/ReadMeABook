@@ -40,6 +40,7 @@ interface SetupState {
   downloadClientPassword: string;
   downloadDir: string;
   mediaDir: string;
+  metadataTaggingEnabled: boolean;
   bookdateProvider: string;
   bookdateApiKey: string;
   bookdateModel: string;
@@ -70,6 +71,7 @@ export default function SetupWizard() {
     downloadClientPassword: '',
     downloadDir: '/downloads',
     mediaDir: '/media/audiobooks',
+    metadataTaggingEnabled: true,
     bookdateProvider: 'openai',
     bookdateApiKey: '',
     bookdateModel: '',
@@ -132,6 +134,7 @@ export default function SetupWizard() {
           paths: {
             download_dir: state.downloadDir,
             media_dir: state.mediaDir,
+            metadata_tagging_enabled: state.metadataTaggingEnabled,
           },
           bookdate: state.bookdateConfigured ? {
             provider: state.bookdateProvider,
@@ -224,6 +227,7 @@ export default function SetupWizard() {
           <PathsStep
             downloadDir={state.downloadDir}
             mediaDir={state.mediaDir}
+            metadataTaggingEnabled={state.metadataTaggingEnabled}
             onUpdate={updateField}
             onNext={() => goToStep(7)}
             onBack={() => goToStep(5)}

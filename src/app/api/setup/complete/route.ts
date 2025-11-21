@@ -159,6 +159,18 @@ export async function POST(request: NextRequest) {
       create: { key: 'media_dir', value: paths.media_dir },
     });
 
+    // Metadata tagging configuration
+    await prisma.configuration.upsert({
+      where: { key: 'metadata_tagging_enabled' },
+      update: { value: String(paths.metadata_tagging_enabled ?? true) },
+      create: {
+        key: 'metadata_tagging_enabled',
+        value: String(paths.metadata_tagging_enabled ?? true),
+        category: 'automation',
+        description: 'Automatically tag audio files with correct metadata during file organization'
+      },
+    });
+
     // BookDate configuration (optional, global for all users)
     // Note: libraryScope and customPrompt are now per-user settings, not required here
     if (bookdate && bookdate.provider && bookdate.apiKey && bookdate.model) {

@@ -11,7 +11,7 @@ export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { downloadDir, mediaDir } = await request.json();
+        const { downloadDir, mediaDir, metadataTaggingEnabled } = await request.json();
 
         if (!downloadDir || !mediaDir) {
           return NextResponse.json(
@@ -39,6 +39,18 @@ export async function PUT(request: NextRequest) {
           where: { key: 'media_dir' },
           update: { value: mediaDir },
           create: { key: 'media_dir', value: mediaDir },
+        });
+
+        // Update metadata tagging setting
+        await prisma.configuration.upsert({
+          where: { key: 'metadata_tagging_enabled' },
+          update: { value: String(metadataTaggingEnabled ?? true) },
+          create: {
+            key: 'metadata_tagging_enabled',
+            value: String(metadataTaggingEnabled ?? true),
+            category: 'automation',
+            description: 'Automatically tag audio files with correct metadata during file organization',
+          },
         });
 
         console.log('[Admin] Paths settings updated');
