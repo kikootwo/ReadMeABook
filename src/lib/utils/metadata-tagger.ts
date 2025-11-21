@@ -19,7 +19,8 @@ export interface MetadataTaggingOptions {
 
 export interface TaggingResult {
   success: boolean;
-  filePath: string;
+  filePath: string; // Original file path
+  taggedFilePath?: string; // Path to tagged file (if successful)
   error?: string;
 }
 
@@ -60,37 +61,43 @@ export async function tagAudioFileMetadata(
     // For m4b/m4a/mp4 files, use standard metadata tags
     if (['.m4b', '.m4a', '.mp4'].includes(ext)) {
       args.push(
-        '-metadata', `title=${escapeMetadata(metadata.title)}`,
-        '-metadata', `album=${escapeMetadata(metadata.title)}`, // Book title in Album field (Plex uses this)
-        '-metadata', `album_artist=${escapeMetadata(metadata.author)}`, // Author in Album Artist (PRIMARY for Plex)
-        '-metadata', `artist=${escapeMetadata(metadata.author)}` // Fallback
+        '-metadata', `title="${escapeMetadata(metadata.title)}"`,
+        '-metadata', `album="${escapeMetadata(metadata.title)}"`, // Book title in Album field (Plex uses this)
+        '-metadata', `album_artist="${escapeMetadata(metadata.author)}"`, // Author in Album Artist (PRIMARY for Plex)
+        '-metadata', `artist="${escapeMetadata(metadata.author)}"` // Fallback
       );
 
       if (metadata.narrator) {
-        args.push('-metadata', `composer=${escapeMetadata(metadata.narrator)}`); // Narrator in Composer
+        args.push('-metadata', `composer="${escapeMetadata(metadata.narrator)}"`); // Narrator in Composer
       }
 
       if (metadata.year) {
-        args.push('-metadata', `date=${metadata.year}`);
+        args.push('-metadata', `date="${metadata.year}"`);
       }
+
+      // Explicitly specify output format (fixes .tmp extension issue)
+      args.push('-f', 'mp4');
     }
     // For mp3 files, use ID3v2 tags
     else if (ext === '.mp3') {
       args.push(
-        '-metadata', `title=${escapeMetadata(metadata.title)}`,
-        '-metadata', `album=${escapeMetadata(metadata.title)}`,
-        '-metadata', `album_artist=${escapeMetadata(metadata.author)}`,
-        '-metadata', `artist=${escapeMetadata(metadata.author)}`
+        '-metadata', `title="${escapeMetadata(metadata.title)}"`,
+        '-metadata', `album="${escapeMetadata(metadata.title)}"`,
+        '-metadata', `album_artist="${escapeMetadata(metadata.author)}"`,
+        '-metadata', `artist="${escapeMetadata(metadata.author)}"`
       );
 
       if (metadata.narrator) {
         // For MP3, composer is also used for narrator
-        args.push('-metadata', `composer=${escapeMetadata(metadata.narrator)}`);
+        args.push('-metadata', `composer="${escapeMetadata(metadata.narrator)}"`);
       }
 
       if (metadata.year) {
-        args.push('-metadata', `date=${metadata.year}`);
+        args.push('-metadata', `date="${metadata.year}"`);
       }
+
+      // Explicitly specify output format (fixes .tmp extension issue)
+      args.push('-f', 'mp3');
     }
 
     // Output to temp file
@@ -112,12 +119,12 @@ export async function tagAudioFileMetadata(
       throw new Error(`ffmpeg failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 
-    // Replace original file with tagged file
-    await fs.rename(tempFile, filePath);
-
+    // DO NOT replace original file - return temp file path instead
+    // This preserves the original file for seeding
     return {
       success: true,
       filePath,
+      taggedFilePath: tempFile,
     };
   } catch (error) {
     return {
