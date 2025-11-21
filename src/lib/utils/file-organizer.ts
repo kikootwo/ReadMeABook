@@ -78,6 +78,76 @@ export class FileOrganizer {
 
       await logger?.info(`Found ${audioFiles.length} audio files`);
 
+      // Determine base path for source files
+      const baseSourcePath = isFile ? path.dirname(downloadPath) : downloadPath;
+
+      // Tag metadata BEFORE moving files (prevents Plex race condition)
+      // Map from original file path to tagged file path (for successful tags)
+      const taggedFileMap = new Map<string, string>();
+
+      try {
+        const config = await prisma.configuration.findUnique({
+          where: { key: 'metadata_tagging_enabled' },
+        });
+
+        const metadataTaggingEnabled = config?.value === 'true';
+
+        if (metadataTaggingEnabled && audioFiles.length > 0) {
+          await logger?.info(`Metadata tagging enabled, checking ffmpeg availability...`);
+
+          const ffmpegAvailable = await checkFfmpegAvailable();
+
+          if (ffmpegAvailable) {
+            await logger?.info(`Tagging ${audioFiles.length} audio files with metadata (before move)...`);
+
+            // Build full paths to source files for tagging
+            const sourceFilePaths = audioFiles.map((audioFile) =>
+              isFile ? downloadPath : path.join(downloadPath, audioFile)
+            );
+
+            const taggingResults = await tagMultipleFiles(sourceFilePaths, {
+              title: audiobook.title,
+              author: audiobook.author,
+              narrator: audiobook.narrator,
+              year: audiobook.year,
+            });
+
+            const successCount = taggingResults.filter((r) => r.success).length;
+            const failCount = taggingResults.filter((r) => !r.success).length;
+
+            if (successCount > 0) {
+              await logger?.info(`Successfully tagged ${successCount} file(s) with metadata`);
+            }
+
+            if (failCount > 0) {
+              await logger?.warn(`Failed to tag ${failCount} file(s): ${
+                taggingResults
+                  .filter((r) => !r.success)
+                  .map((r) => `${path.basename(r.filePath)}: ${r.error}`)
+                  .join(', ')
+              }`);
+              result.errors.push(`Failed to tag ${failCount} file(s) with metadata`);
+            }
+
+            // Build map of successfully tagged files
+            for (const tagResult of taggingResults) {
+              if (tagResult.success && tagResult.taggedFilePath) {
+                taggedFileMap.set(tagResult.filePath, tagResult.taggedFilePath);
+              }
+            }
+          } else {
+            await logger?.warn(`Metadata tagging enabled but ffmpeg not available - skipping tagging`);
+            result.errors.push('Metadata tagging skipped: ffmpeg not available');
+          }
+        } else {
+          await logger?.info(`Metadata tagging disabled or no audio files to tag`);
+        }
+      } catch (error) {
+        await logger?.error(`Metadata tagging failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        result.errors.push(`Metadata tagging failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        // Don't fail the whole operation if metadata tagging fails - continue with copying files
+      }
+
       // Build target directory
       const targetPath = this.buildTargetPath(
         this.mediaDir,
@@ -91,14 +161,15 @@ export class FileOrganizer {
       // Create target directory
       await fs.mkdir(targetPath, { recursive: true });
 
-      // Determine base path for source files
-      const baseSourcePath = isFile ? path.dirname(downloadPath) : downloadPath;
-
       // Copy audio files (do NOT delete originals - needed for seeding)
       for (const audioFile of audioFiles) {
-        const sourcePath = isFile ? downloadPath : path.join(downloadPath, audioFile);
+        const originalSourcePath = isFile ? downloadPath : path.join(downloadPath, audioFile);
         const filename = path.basename(audioFile);
         const targetFilePath = path.join(targetPath, filename);
+
+        // Check if we have a tagged version of this file
+        const taggedFilePath = taggedFileMap.get(originalSourcePath);
+        const sourcePath = taggedFilePath || originalSourcePath; // Use tagged version if available, otherwise use original
 
         // Check if source exists
         try {
@@ -114,6 +185,16 @@ export class FileOrganizer {
           await fs.access(targetFilePath);
           console.log(`[FileOrganizer] File already exists, skipping: ${filename}`);
           result.audioFiles.push(targetFilePath);
+
+          // Clean up tagged temp file if it exists
+          if (taggedFilePath) {
+            try {
+              await fs.unlink(taggedFilePath);
+              await logger?.info(`Cleaned up temp file: ${path.basename(taggedFilePath)}`);
+            } catch {
+              // Ignore cleanup errors
+            }
+          }
           continue;
         } catch {
           // File doesn't exist, continue with copy
@@ -121,14 +202,26 @@ export class FileOrganizer {
 
         // Copy file (do NOT delete original - needed for seeding)
         try {
-          // Read source file
+          // Read source file (either tagged version or original)
           const fileData = await fs.readFile(sourcePath);
           // Write to target with explicit permissions
           await fs.writeFile(targetFilePath, fileData, { mode: 0o644 });
 
           result.audioFiles.push(targetFilePath);
           result.filesMovedCount++;
-          await logger?.info(`Copied: ${filename}`);
+
+          if (taggedFilePath) {
+            await logger?.info(`Copied tagged file: ${filename}`);
+            // Clean up the tagged temp file after successful copy
+            try {
+              await fs.unlink(taggedFilePath);
+              await logger?.info(`Cleaned up temp file: ${path.basename(taggedFilePath)}`);
+            } catch (cleanupError) {
+              await logger?.warn(`Failed to clean up temp file: ${path.basename(taggedFilePath)}`);
+            }
+          } else {
+            await logger?.info(`Copied: ${filename}`);
+          }
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : 'Unknown error';
           await logger?.error(`Failed to copy ${filename}: ${errorMsg}`);
@@ -167,58 +260,6 @@ export class FileOrganizer {
 
       result.targetPath = targetPath;
       result.success = true;
-
-      // Tag metadata if enabled
-      try {
-        const config = await prisma.configuration.findUnique({
-          where: { key: 'metadata_tagging_enabled' },
-        });
-
-        const metadataTaggingEnabled = config?.value === 'true';
-
-        if (metadataTaggingEnabled && result.audioFiles.length > 0) {
-          await logger?.info(`Metadata tagging enabled, checking ffmpeg availability...`);
-
-          const ffmpegAvailable = await checkFfmpegAvailable();
-
-          if (ffmpegAvailable) {
-            await logger?.info(`Tagging ${result.audioFiles.length} audio files with metadata...`);
-
-            const taggingResults = await tagMultipleFiles(result.audioFiles, {
-              title: audiobook.title,
-              author: audiobook.author,
-              narrator: audiobook.narrator,
-              year: audiobook.year,
-            });
-
-            const successCount = taggingResults.filter((r) => r.success).length;
-            const failCount = taggingResults.filter((r) => !r.success).length;
-
-            if (successCount > 0) {
-              await logger?.info(`Successfully tagged ${successCount} file(s) with metadata`);
-            }
-
-            if (failCount > 0) {
-              await logger?.warn(`Failed to tag ${failCount} file(s): ${
-                taggingResults
-                  .filter((r) => !r.success)
-                  .map((r) => `${path.basename(r.filePath)}: ${r.error}`)
-                  .join(', ')
-              }`);
-              result.errors.push(`Failed to tag ${failCount} file(s) with metadata`);
-            }
-          } else {
-            await logger?.warn(`Metadata tagging enabled but ffmpeg not available - skipping tagging`);
-            result.errors.push('Metadata tagging skipped: ffmpeg not available');
-          }
-        } else {
-          await logger?.info(`Metadata tagging disabled or no audio files to tag`);
-        }
-      } catch (error) {
-        await logger?.error(`Metadata tagging failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        result.errors.push(`Metadata tagging failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        // Don't fail the whole operation if metadata tagging fails
-      }
 
       // DO NOT clean up download directory - files needed for seeding
       // Cleanup will be handled by the seeding cleanup job after seeding requirements are met
