@@ -376,6 +376,20 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
   - Result: All content (rating, description, AI reason) fits within single viewport without scrolling
   - Files updated: `src/components/bookdate/RecommendationCard.tsx`, `src/app/bookdate/page.tsx`
 
+**7. Generate Endpoint Returning Swiped Recommendations**
+- Issue: Users saw same 10 recommendations repeatedly after clicking "Get More Recommendations"
+- User Experience: "Seeing the same 10 recommendations over and over, but logs show different ones being generated"
+- Cause: `/api/bookdate/generate` endpoint generated new recommendations correctly but final query didn't filter out swiped items
+  - Line 147-151: `findMany({ where: { userId } })` returned ALL recommendations including swiped ones
+  - Since ordered by `createdAt: 'asc'`, old swiped recommendations appeared first
+  - New recommendations were generated but hidden behind old swiped ones
+  - Contrast with `/api/bookdate/recommendations` which correctly filtered: `where: { userId, swipes: { none: {} } }`
+- Fix: Added swipe filter to final query in generate endpoint
+  - Updated query: `where: { userId, swipes: { none: {} } }`
+  - Now returns only unswiped recommendations (including newly generated ones)
+  - Consistent with recommendations endpoint filtering behavior
+- Files updated: `src/app/api/bookdate/generate/route.ts:147-157`
+
 ## Related
 
 - Full requirements: [features/bookdate-prd.md](bookdate-prd.md)

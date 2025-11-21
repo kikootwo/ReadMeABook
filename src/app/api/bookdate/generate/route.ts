@@ -143,9 +143,15 @@ async function handler(req: AuthenticatedRequest) {
       data: matched,
     });
 
-    // Return all cached recommendations
+    // Return all cached recommendations (excluding swiped ones)
     const allRecommendations = await prisma.bookDateRecommendation.findMany({
-      where: { userId },
+      where: {
+        userId,
+        // Exclude recommendations that have associated swipes
+        swipes: {
+          none: {},
+        },
+      },
       orderBy: { createdAt: 'asc' },
       take: 10,
     });
