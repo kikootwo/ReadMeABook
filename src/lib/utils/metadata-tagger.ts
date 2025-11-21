@@ -19,7 +19,8 @@ export interface MetadataTaggingOptions {
 
 export interface TaggingResult {
   success: boolean;
-  filePath: string;
+  filePath: string; // Original file path
+  taggedFilePath?: string; // Path to tagged file (if successful)
   error?: string;
 }
 
@@ -118,12 +119,12 @@ export async function tagAudioFileMetadata(
       throw new Error(`ffmpeg failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 
-    // Replace original file with tagged file
-    await fs.rename(tempFile, filePath);
-
+    // DO NOT replace original file - return temp file path instead
+    // This preserves the original file for seeding
     return {
       success: true,
       filePath,
+      taggedFilePath: tempFile,
     };
   } catch (error) {
     return {

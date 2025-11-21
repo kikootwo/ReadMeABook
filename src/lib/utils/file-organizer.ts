@@ -82,6 +82,9 @@ export class FileOrganizer {
       const baseSourcePath = isFile ? path.dirname(downloadPath) : downloadPath;
 
       // Tag metadata BEFORE moving files (prevents Plex race condition)
+      // Map from original file path to tagged file path (for successful tags)
+      const taggedFileMap = new Map<string, string>();
+
       try {
         const config = await prisma.configuration.findUnique({
           where: { key: 'metadata_tagging_enabled' },
@@ -126,15 +129,10 @@ export class FileOrganizer {
               result.errors.push(`Failed to tag ${failCount} file(s) with metadata`);
             }
 
-            // Clean up any leftover .tmp files in download area
-            for (const sourceFilePath of sourceFilePaths) {
-              const tmpFile = `${sourceFilePath}.tmp`;
-              try {
-                await fs.access(tmpFile);
-                await fs.unlink(tmpFile);
-                await logger?.info(`Cleaned up temp file: ${path.basename(tmpFile)}`);
-              } catch {
-                // No temp file to clean up
+            // Build map of successfully tagged files
+            for (const tagResult of taggingResults) {
+              if (tagResult.success && tagResult.taggedFilePath) {
+                taggedFileMap.set(tagResult.filePath, tagResult.taggedFilePath);
               }
             }
           } else {
@@ -165,9 +163,13 @@ export class FileOrganizer {
 
       // Copy audio files (do NOT delete originals - needed for seeding)
       for (const audioFile of audioFiles) {
-        const sourcePath = isFile ? downloadPath : path.join(downloadPath, audioFile);
+        const originalSourcePath = isFile ? downloadPath : path.join(downloadPath, audioFile);
         const filename = path.basename(audioFile);
         const targetFilePath = path.join(targetPath, filename);
+
+        // Check if we have a tagged version of this file
+        const taggedFilePath = taggedFileMap.get(originalSourcePath);
+        const sourcePath = taggedFilePath || originalSourcePath; // Use tagged version if available, otherwise use original
 
         // Check if source exists
         try {
@@ -183,6 +185,16 @@ export class FileOrganizer {
           await fs.access(targetFilePath);
           console.log(`[FileOrganizer] File already exists, skipping: ${filename}`);
           result.audioFiles.push(targetFilePath);
+
+          // Clean up tagged temp file if it exists
+          if (taggedFilePath) {
+            try {
+              await fs.unlink(taggedFilePath);
+              await logger?.info(`Cleaned up temp file: ${path.basename(taggedFilePath)}`);
+            } catch {
+              // Ignore cleanup errors
+            }
+          }
           continue;
         } catch {
           // File doesn't exist, continue with copy
@@ -190,14 +202,26 @@ export class FileOrganizer {
 
         // Copy file (do NOT delete original - needed for seeding)
         try {
-          // Read source file
+          // Read source file (either tagged version or original)
           const fileData = await fs.readFile(sourcePath);
           // Write to target with explicit permissions
           await fs.writeFile(targetFilePath, fileData, { mode: 0o644 });
 
           result.audioFiles.push(targetFilePath);
           result.filesMovedCount++;
-          await logger?.info(`Copied: ${filename}`);
+
+          if (taggedFilePath) {
+            await logger?.info(`Copied tagged file: ${filename}`);
+            // Clean up the tagged temp file after successful copy
+            try {
+              await fs.unlink(taggedFilePath);
+              await logger?.info(`Cleaned up temp file: ${path.basename(taggedFilePath)}`);
+            } catch (cleanupError) {
+              await logger?.warn(`Failed to clean up temp file: ${path.basename(taggedFilePath)}`);
+            }
+          } else {
+            await logger?.info(`Copied: ${filename}`);
+          }
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : 'Unknown error';
           await logger?.error(`Failed to copy ${filename}: ${errorMsg}`);
