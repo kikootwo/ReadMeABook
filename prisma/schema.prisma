@@ -36,6 +36,9 @@ model User {
   updatedAt     DateTime  @updatedAt @map("updated_at")
   lastLoginAt   DateTime? @map("last_login_at")
 
+  // Plex Home profile tracking
+  plexHomeUserId String?  @map("plex_home_user_id") // Profile ID from Plex Home (null = main account, set = home profile)
+
   // BookDate per-user preferences
   bookDateLibraryScope         String?  @default("full") @map("bookdate_library_scope") // 'full' | 'rated'
   bookDateCustomPrompt         String?  @map("bookdate_custom_prompt") @db.Text

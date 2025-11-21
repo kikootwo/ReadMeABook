@@ -137,6 +137,69 @@ export async function GET(request: NextRequest) {
 
     console.log('[Plex OAuth] User verified with server access:', plexUser.username);
 
+    // Check for Plex Home profiles
+    const homeUsers = await plexService.getHomeUsers(authToken);
+    console.log('[Plex OAuth] Found home users:', homeUsers.length);
+
+    // If multiple home users exist, redirect to profile selection
+    // (Only show selection if there's more than just the main account)
+    if (homeUsers.length > 1) {
+      console.log('[Plex OAuth] Account has multiple home profiles, redirecting to profile selection');
+
+      // Detect if this is a browser request (mobile redirect) vs AJAX (desktop popup polling)
+      const accept = request.headers.get('accept') || '';
+      const isBrowserRequest = accept.includes('text/html');
+
+      if (isBrowserRequest) {
+        // For browser requests (mobile), construct redirect URL with session data
+        const host = request.headers.get('host') || 'localhost:3030';
+        const protocol = request.headers.get('x-forwarded-proto') ||
+                        (process.env.NODE_ENV === 'production' ? 'https' : 'http');
+        const selectProfileUrl = `${protocol}://${host}/auth/select-profile?pinId=${pinId}`;
+
+        console.log('[Plex OAuth] Redirecting to profile selection:', selectProfileUrl);
+
+        // Return HTML page with JavaScript to store token in sessionStorage and redirect
+        const html = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Select Profile</title>
+            </head>
+            <body>
+              <p>Loading profiles...</p>
+              <script>
+                // Store main account token in session storage for profile selection page
+                sessionStorage.setItem('plex_main_token', '${authToken}');
+                // Redirect to profile selection
+                window.location.href = '${selectProfileUrl}';
+              </script>
+            </body>
+          </html>
+        `;
+
+        return new NextResponse(html, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/html',
+          },
+        });
+      } else {
+        // For AJAX requests (desktop popup), return JSON with redirect instruction
+        return NextResponse.json({
+          success: true,
+          authorized: true,
+          requiresProfileSelection: true,
+          redirectUrl: `/auth/select-profile?pinId=${pinId}`,
+          mainAccountToken: authToken, // Client will store this temporarily
+          homeUsers: homeUsers.length,
+        });
+      }
+    }
+
+    console.log('[Plex OAuth] Single profile or no additional profiles, continuing with main account authentication');
+
+    // No home users - continue with normal authentication flow using main account
     // Check if this is the first user (should be promoted to admin)
     const userCount = await prisma.user.count();
     const isFirstUser = userCount === 0;

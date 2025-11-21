@@ -152,7 +152,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (data.success && data.authorized) {
-          // Login successful
+          // Check if profile selection is required (Plex Home accounts)
+          if (data.requiresProfileSelection) {
+            // Store main account token temporarily for profile selection
+            sessionStorage.setItem('plex_main_token', data.mainAccountToken);
+
+            // Redirect to profile selection page
+            window.location.href = data.redirectUrl;
+            return;
+          }
+
+          // Login successful (no profile selection needed)
           setAccessToken(data.accessToken);
           setUser(data.user);
 

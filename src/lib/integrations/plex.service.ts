@@ -58,6 +58,21 @@ export interface PlexServerInfo {
   platformVersion?: string;
 }
 
+export interface PlexHomeUser {
+  id: string;
+  uuid: string;
+  title: string;
+  friendlyName: string;
+  username: string;
+  email: string;
+  thumb: string;
+  hasPassword: boolean;
+  restricted: boolean;
+  admin: boolean;
+  guest: boolean;
+  protected: boolean;
+}
+
 export class PlexService {
   private client: AxiosInstance;
 
@@ -757,6 +772,206 @@ export class PlexService {
     }
 
     return ratingsMap;
+  }
+
+  /**
+   * Get list of Plex Home users/profiles
+   * Returns all managed users and home members for the authenticated account
+   */
+  async getHomeUsers(authToken: string): Promise<PlexHomeUser[]> {
+    try {
+      console.log('[Plex] Fetching home users from plex.tv/api/home/users');
+      const response = await this.client.get(
+        'https://plex.tv/api/home/users',
+        {
+          headers: {
+            'Accept': 'application/json',
+            'X-Plex-Token': authToken,
+            'X-Plex-Client-Identifier': PLEX_CLIENT_IDENTIFIER,
+          },
+        }
+      );
+
+      console.log('[Plex] Home users API response status:', response.status);
+      console.log('[Plex] Home users API response type:', typeof response.data);
+
+      // Handle XML response
+      let data = response.data;
+      if (typeof data === 'string') {
+        console.log('[Plex] Response is XML string, parsing...');
+        const parsed = await parseStringPromise(data);
+        data = parsed;
+        console.log('[Plex] Parsed XML structure:', JSON.stringify(data, null, 2));
+      } else {
+        console.log('[Plex] Response is JSON, structure:', JSON.stringify(data, null, 2));
+      }
+
+      // Extract users from response
+      // Response structure: { home: { users: [{ user: {...} }] } } or similar
+      const users: any[] = [];
+
+      console.log('[Plex] Checking for users in response...');
+      console.log('[Plex] data.MediaContainer exists?', !!data.MediaContainer);
+      console.log('[Plex] data.MediaContainer?.User exists?', !!data.MediaContainer?.User);
+      console.log('[Plex] data.home exists?', !!data.home);
+      console.log('[Plex] data.home?.users exists?', !!data.home?.users);
+      console.log('[Plex] data.users exists?', !!data.users);
+
+      // Check for users in MediaContainer.User (XML response structure)
+      if (data.MediaContainer?.User) {
+        console.log('[Plex] Found users in data.MediaContainer.User');
+        const usersList = Array.isArray(data.MediaContainer.User) ? data.MediaContainer.User : [data.MediaContainer.User];
+        console.log('[Plex] usersList length:', usersList.length);
+        usersList.forEach((item: any) => {
+          // XML parsed data has attributes in the $ property
+          if (item.$) {
+            users.push(item.$);
+          } else {
+            users.push(item);
+          }
+        });
+      } else if (data.home?.users) {
+        console.log('[Plex] Found users in data.home.users');
+        const usersList = Array.isArray(data.home.users) ? data.home.users : [data.home.users];
+        console.log('[Plex] usersList length:', usersList.length);
+        usersList.forEach((item: any) => {
+          if (item.user) {
+            users.push(item.user);
+          } else if (item.$) {
+            users.push(item.$);
+          } else {
+            users.push(item);
+          }
+        });
+      } else if (data.users) {
+        console.log('[Plex] Found users in data.users');
+        const usersList = Array.isArray(data.users) ? data.users : [data.users];
+        console.log('[Plex] usersList length:', usersList.length);
+        usersList.forEach((item: any) => {
+          if (item.user) {
+            users.push(item.user);
+          } else if (item.$) {
+            users.push(item.$);
+          } else {
+            users.push(item);
+          }
+        });
+      } else {
+        console.log('[Plex] No users found in expected locations. Full data structure:');
+        console.log(JSON.stringify(data, null, 2));
+      }
+
+      console.log('[Plex] Extracted', users.length, 'users from response');
+
+      if (users.length === 0) {
+        console.warn('[Plex] No home users found - this account may not have a Plex Home setup');
+        return [];
+      }
+
+      return users.map((user: any) => {
+        // Handle both direct properties and $ properties (from XML parsing)
+        const id = user.id || '';
+        const uuid = user.uuid || '';
+        const title = user.title || '';
+        const username = user.username || '';
+        const email = user.email || '';
+        const thumb = user.thumb || '';
+        const hasPassword = user.hasPassword === '1' || user.hasPassword === 'true' || user.hasPassword === true;
+        const restricted = user.restricted === '1' || user.restricted === 'true' || user.restricted === true;
+        const admin = user.admin === '1' || user.admin === 'true' || user.admin === true;
+        const guest = user.guest === '1' || user.guest === 'true' || user.guest === true;
+        const protectedUser = user.protected === '1' || user.protected === 'true' || user.protected === true;
+
+        return {
+          id,
+          uuid,
+          title,
+          friendlyName: title, // In Plex Home API, 'title' is the friendly display name
+          username,
+          email,
+          thumb,
+          hasPassword,
+          restricted,
+          admin,
+          guest,
+          protected: protectedUser,
+        };
+      });
+    } catch (error: any) {
+      console.error('[Plex] Failed to get home users:', error.message || error);
+      if (error.response) {
+        console.error('[Plex] Error response status:', error.response.status);
+        console.error('[Plex] Error response data:', error.response.data);
+      }
+      // Return empty array if no home users (not an error condition)
+      return [];
+    }
+  }
+
+  /**
+   * Switch to a specific Plex Home user/profile
+   * Returns the authentication token for the selected profile
+   */
+  async switchHomeUser(
+    userId: string,
+    authToken: string,
+    pin?: string
+  ): Promise<string | null> {
+    try {
+      const params: any = {};
+      if (pin) {
+        params.pin = pin;
+      }
+
+      const response = await this.client.post(
+        `https://plex.tv/api/home/users/${userId}/switch`,
+        null,
+        {
+          params,
+          headers: {
+            'Accept': 'application/json',
+            'X-Plex-Token': authToken,
+            'X-Plex-Client-Identifier': PLEX_CLIENT_IDENTIFIER,
+          },
+        }
+      );
+
+      // Handle XML response
+      let data = response.data;
+      if (typeof data === 'string') {
+        const parsed = await parseStringPromise(data);
+        data = parsed;
+      }
+
+      // Extract authenticationToken from response
+      // Response structure varies: could be in root, in user object, or in attributes
+      let authenticationToken: string | null = null;
+
+      if (data.authenticationToken) {
+        authenticationToken = data.authenticationToken;
+      } else if (data.user?.authenticationToken) {
+        authenticationToken = data.user.authenticationToken;
+      } else if (data.$?.authenticationToken) {
+        authenticationToken = data.$?.authenticationToken;
+      } else if (data.user?.$?.authenticationToken) {
+        authenticationToken = data.user.$?.authenticationToken;
+      }
+
+      if (!authenticationToken) {
+        console.error('[Plex] No authenticationToken found in switch response:', JSON.stringify(data, null, 2));
+        return null;
+      }
+
+      return authenticationToken;
+    } catch (error: any) {
+      // Handle PIN errors specifically
+      if (error.response?.status === 401) {
+        console.error('[Plex] Invalid PIN for profile');
+        throw new Error('Invalid PIN');
+      }
+      console.error('[Plex] Failed to switch home user:', error);
+      throw new Error('Failed to switch to selected profile');
+    }
   }
 }
 
