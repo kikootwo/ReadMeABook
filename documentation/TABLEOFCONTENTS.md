@@ -32,6 +32,7 @@
 - **Torrent ranking/selection** → [phase3/ranking-algorithm.md](phase3/ranking-algorithm.md)
 - **qBittorrent integration** → [phase3/qbittorrent.md](phase3/qbittorrent.md)
 - **File organization, seeding** → [phase3/file-organization.md](phase3/file-organization.md)
+- **Chapter merging (PRD, not implemented)** → [features/chapter-merging.md](features/chapter-merging.md)
 
 ## Background Jobs
 - **Bull queue, processors, retry logic** → [backend/services/jobs.md](backend/services/jobs.md)
@@ -69,3 +70,4 @@
 **"How do I change the admin password?"** → [settings-pages.md](settings-pages.md), [backend/services/auth.md](backend/services/auth.md)
 **"How do I deploy?"** → [deployment/docker.md](deployment/docker.md) (multi-container), [deployment/unified.md](deployment/unified.md) (all-in-one)
 **"How do I use the unified container?"** → [deployment/unified.md](deployment/unified.md)
+**"How does chapter merging work?"** → [features/chapter-merging.md](features/chapter-merging.md) (PRD only, not implemented)
