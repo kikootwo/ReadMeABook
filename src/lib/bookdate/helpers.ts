@@ -308,17 +308,23 @@ export async function getUserLibraryBooks(
 
 /**
  * Get user's recent swipes
+ * Prioritizes non-dismiss actions (likes/requests/dislikes) over dismissals
  * @param userId - User ID
  * @param limit - Max number of swipes to return
- * @returns Array of recent swipes
+ * @returns Array of recent swipes (prioritized: non-dismiss first, then dismissals)
  */
 export async function getUserRecentSwipes(
   userId: string,
   limit: number = 10
 ): Promise<SwipeHistory[]> {
   try {
-    const swipes = await prisma.bookDateSwipe.findMany({
-      where: { userId },
+    // First, get the most recent non-dismiss swipes (left=reject, right=like/request)
+    // These are most informative for AI recommendations
+    const nonDismissSwipes = await prisma.bookDateSwipe.findMany({
+      where: {
+        userId,
+        action: { in: ['left', 'right'] },
+      },
       orderBy: { createdAt: 'desc' },
       take: limit,
       select: {
@@ -326,10 +332,43 @@ export async function getUserRecentSwipes(
         bookAuthor: true,
         action: true,
         markedAsKnown: true,
+        createdAt: true,
       },
     });
 
-    return swipes.map((s) => ({
+    // Calculate remaining slots for dismissals
+    const remainingSlots = limit - nonDismissSwipes.length;
+
+    // If we have remaining slots, fill with dismiss swipes (up=dismiss)
+    let dismissSwipes: typeof nonDismissSwipes = [];
+    if (remainingSlots > 0) {
+      dismissSwipes = await prisma.bookDateSwipe.findMany({
+        where: {
+          userId,
+          action: 'up',
+        },
+        orderBy: { createdAt: 'desc' },
+        take: remainingSlots,
+        select: {
+          bookTitle: true,
+          bookAuthor: true,
+          action: true,
+          markedAsKnown: true,
+          createdAt: true,
+        },
+      });
+    }
+
+    // Combine both lists, maintaining chronological order (most recent first)
+    const allSwipes = [...nonDismissSwipes, ...dismissSwipes].sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+    );
+
+    console.log(
+      `[BookDate] Fetched ${allSwipes.length} swipes: ${nonDismissSwipes.length} non-dismiss, ${dismissSwipes.length} dismiss`
+    );
+
+    return allSwipes.map((s) => ({
       title: s.bookTitle,
       author: s.bookAuthor,
       action: s.action,

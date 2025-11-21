@@ -93,8 +93,9 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - Header navigation - BookDate tab visible to all authenticated users when admin has configured and enabled
 
 **Components:**
-- `RecommendationCard` - Swipeable card with 150px delta threshold, responsive height (max 85vh)
-  - Cover image scales dynamically (max 40vh) to fit on screen
+- `RecommendationCard` - Swipeable card with 150px delta threshold, responsive height (max 80vh mobile, 85vh desktop)
+  - Cover image scales dynamically (max 25vh mobile with 300px cap) to ensure all content fits
+  - Mobile-optimized: Reduced padding, smaller text, line-clamped AI reason
 - `SettingsWidget` - Per-user preferences modal (library scope, custom prompt) in `/bookdate` page
   - Supports onboarding mode with "Welcome" header and "Let's Go!" button
   - Cannot be closed during onboarding (no X button)
@@ -118,7 +119,10 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
    - Get user's library books (max 40, filtered by scope)
      - **Local Admin Users:** Use cached ratings (from system Plex token configured during setup)
      - **Plex-Authenticated Users (including admins):** Fetch library with user's token to get personal ratings
-   - Get recent swipes (max 10)
+   - Get recent swipes (max 10, prioritized: non-dismiss actions first, then dismissals)
+     - Prioritizes most informative swipes: up to 10 likes/requests/dislikes (left/right swipes)
+     - Fills remaining slots with most recent dismissals (up swipes)
+     - Rationale: Non-dismiss actions provide stronger preference signals for AI recommendations
    - Add custom prompt if provided
 
 2. **AI Call:**
@@ -235,7 +239,13 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
   - Overlay visible at 50px offset, full opacity at 150px
 - **Rotation:** Card rotates slightly during drag
 - **Snap Back:** Card returns if released before 150px threshold
-- **Card Height:** Dynamic scaling (max 85vh) to fit on screen, cover max 40vh
+- **Responsive Layout:** Optimized for mobile viewing
+  - Card max 80vh (mobile) vs 85vh (desktop)
+  - Cover image max 25vh (mobile, 300px cap) to fit all content on screen
+  - Reduced padding (1rem mobile vs 1.5rem desktop)
+  - Smaller text sizing on mobile
+  - AI reason line-clamped to 3 lines to prevent overflow
+  - Compact progress indicator and swipe hint spacing
 - **Undo:** Appears for 3 seconds after left/up swipe
 
 ## Desktop UX
@@ -347,6 +357,24 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
   - Weighted scoring: title * 0.7 + author * 0.3 >= 0.7 threshold
   - Narrator support: Can match narrator to Plex author field
   - Files updated: `src/lib/bookdate/helpers.ts`, `src/app/api/bookdate/generate/route.ts`, `src/app/api/bookdate/recommendations/route.ts`
+
+**6. Mobile Layout Cramped - AI Reason Overflow and Content Not Fitting**
+- Issue: On mobile, AI reason text fell off card, full page content didn't fit (had to scroll between rating and swipe instructions)
+- User Experience: "The AI 'reason' falls off the card and can't be read. The x/10 at top and swiping instructions at bottom don't fit, I have to scroll carefully to see them one at a time"
+- Cause: Card and cover image were sized for desktop (85vh card, 40vh cover), leaving insufficient space for all mobile content
+  - Cover image too large (40vh) consumed most of card height
+  - Fixed text sizes and padding didn't scale down for mobile
+  - AI reason box could overflow without line limiting
+  - Page elements (progress, card, swipe hint) exceeded viewport height
+- Fix: Implemented responsive mobile-first layout with dynamic scaling
+  - Card height: 80vh (mobile) vs 85vh (desktop) for more breathing room
+  - Cover image: 25vh max (mobile, 300px cap) vs 40vh (desktop) - 37.5% reduction
+  - Responsive padding: 1rem (mobile) vs 1.5rem (desktop) throughout card
+  - Responsive text sizing: smaller fonts on mobile (text-xs/sm/base vs text-sm/lg/xl)
+  - AI reason: Added line-clamp-3 to prevent overflow, always visible
+  - Page spacing: Reduced margins on progress indicator, swipe hint, undo button for mobile
+  - Result: All content (rating, description, AI reason) fits within single viewport without scrolling
+  - Files updated: `src/components/bookdate/RecommendationCard.tsx`, `src/app/bookdate/page.tsx`
 
 ## Related
 

@@ -16,10 +16,10 @@ interface WizardLayoutProps {
 export function WizardLayout({ currentStep, totalSteps, children }: WizardLayoutProps) {
   const steps = [
     { number: 1, title: 'Welcome' },
-    { number: 2, title: 'Admin Account' },
+    { number: 2, title: 'Admin' },
     { number: 3, title: 'Plex' },
     { number: 4, title: 'Prowlarr' },
-    { number: 5, title: 'Download Client' },
+    { number: 5, title: 'Download' },
     { number: 6, title: 'Paths' },
     { number: 7, title: 'BookDate' },
     { number: 8, title: 'Review' },
@@ -42,8 +42,8 @@ export function WizardLayout({ currentStep, totalSteps, children }: WizardLayout
 
       {/* Progress Bar */}
       <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <div className="container mx-auto px-4 max-w-4xl">
-          <div className="flex items-center justify-between py-4">
+        <div className="container mx-auto px-2 sm:px-4 max-w-4xl">
+          <div className="flex items-center justify-between py-4 overflow-x-auto">
             {steps.map((step, index) => (
               <React.Fragment key={step.number}>
                 {/* Step Circle */}
@@ -74,7 +74,7 @@ export function WizardLayout({ currentStep, totalSteps, children }: WizardLayout
                   </div>
                   <span
                     className={`
-                      text-xs mt-2 text-center
+                      text-xs mt-2 text-center whitespace-nowrap
                       ${
                         step.number === currentStep
                           ? 'text-blue-600 dark:text-blue-400 font-medium'
@@ -90,7 +90,7 @@ export function WizardLayout({ currentStep, totalSteps, children }: WizardLayout
                 {index < steps.length - 1 && (
                   <div
                     className={`
-                      h-1 flex-1 mx-2 rounded
+                      h-1 flex-1 mx-1 rounded
                       ${
                         step.number < currentStep
                           ? 'bg-green-500'

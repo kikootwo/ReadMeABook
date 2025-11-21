@@ -329,7 +329,7 @@ export default function BookDatePage() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Header />
 
-      <main className="flex flex-col items-center justify-center min-h-[calc(100vh-80px)] p-4">
+      <main className="flex flex-col items-center justify-center min-h-[calc(100vh-80px)] p-2 md:p-4">
         {/* Settings button */}
         <button
           onClick={() => setShowSettings(true)}
@@ -343,7 +343,7 @@ export default function BookDatePage() {
         </button>
 
         {/* Progress indicator */}
-        <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+        <div className="mb-2 md:mb-4 text-sm text-gray-600 dark:text-gray-400">
           {currentIndex + 1} / {recommendations.length}
         </div>
 
@@ -357,14 +357,14 @@ export default function BookDatePage() {
         {showUndo && lastSwipe && (
           <button
             onClick={handleUndo}
-            className="fixed bottom-8 left-8 px-6 py-3 bg-gray-800 hover:bg-gray-900 text-white rounded-lg font-medium shadow-lg transition-all animate-fade-in"
+            className="fixed bottom-4 md:bottom-8 left-4 md:left-8 px-4 md:px-6 py-2 md:py-3 bg-gray-800 hover:bg-gray-900 text-white rounded-lg font-medium shadow-lg transition-all animate-fade-in text-sm md:text-base"
           >
             ↩️ {lastSwipe.action === 'left' ? 'Undo Dislike' : 'Undo Dismiss'}
           </button>
         )}
 
-        {/* Mobile swipe hint */}
-        <div className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400 md:hidden">
+        {/* Mobile swipe hint - more compact on mobile */}
+        <div className="mt-2 md:mt-6 text-center text-xs md:text-sm text-gray-500 dark:text-gray-400 md:hidden">
           <p>Swipe left to reject, right to request, up to dismiss</p>
         </div>
       </main>

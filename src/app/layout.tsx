@@ -21,13 +21,21 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ReadMeABook - Audiobook Library Management",
   description: "Self-hosted audiobook library management system with Plex integration",
+  manifest: "/manifest.json",
   icons: {
     icon: [
       { url: "/rmab_icon.ico", sizes: "any" },
       { url: "/rmab_icon.ico", type: "image/x-icon" },
     ],
     shortcut: "/rmab_icon.ico",
-    apple: "/rmab_icon.ico",
+    apple: [
+      { url: "/RMAB_1024x1024.png", sizes: "1024x1024", type: "image/png" },
+    ],
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "ReadMeABook",
   },
 };
 

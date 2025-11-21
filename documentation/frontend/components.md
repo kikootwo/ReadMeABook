@@ -61,7 +61,12 @@ src/components/
 ## Pages Implemented ✅
 
 **Homepage** (`/`)
-- Popular Audiobooks and New Releases sections
+- Popular Audiobooks and New Releases sections with distinct visual separation
+- Sticky section headers with rounded-2xl design matching section card aesthetic
+- Gradient accent bars for each section (blue/purple for Popular, emerald/teal for New Releases)
+- Headers use rounded cards (bg-white/90 dark:bg-gray-800/90) with backdrop blur
+- Section content wrapped in semi-transparent rounded cards (bg-white/40 dark:bg-gray-800/40)
+- Cohesive rounded design language throughout (rounded-2xl on headers and containers)
 - Floating pagination pill at bottom center of viewport
 - Minimal design: section label | ← | Page X of Y | →
 - Quick jump input (type page number + Enter)
@@ -69,6 +74,7 @@ src/components/
 - Auto-scrolls to section top on page change
 - Rounded-full design with backdrop blur and subtle shadow
 - Responsive grid layouts (1/2/3/4 cols)
+- Enhanced CTA section with gradient background (blue-to-indigo)
 
 **Requests Page** (`/requests`)
 - Filter tabs: All, Active, Waiting, Completed, Failed, Cancelled
