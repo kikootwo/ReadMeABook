@@ -73,6 +73,9 @@ export async function tagAudioFileMetadata(
       if (metadata.year) {
         args.push('-metadata', `date="${metadata.year}"`);
       }
+
+      // Explicitly specify output format (fixes .tmp extension issue)
+      args.push('-f', 'mp4');
     }
     // For mp3 files, use ID3v2 tags
     else if (ext === '.mp3') {
@@ -91,6 +94,9 @@ export async function tagAudioFileMetadata(
       if (metadata.year) {
         args.push('-metadata', `date="${metadata.year}"`);
       }
+
+      // Explicitly specify output format (fixes .tmp extension issue)
+      args.push('-f', 'mp3');
     }
 
     // Output to temp file
