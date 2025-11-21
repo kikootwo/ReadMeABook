@@ -60,36 +60,36 @@ export async function tagAudioFileMetadata(
     // For m4b/m4a/mp4 files, use standard metadata tags
     if (['.m4b', '.m4a', '.mp4'].includes(ext)) {
       args.push(
-        '-metadata', `title=${escapeMetadata(metadata.title)}`,
-        '-metadata', `album=${escapeMetadata(metadata.title)}`, // Book title in Album field (Plex uses this)
-        '-metadata', `album_artist=${escapeMetadata(metadata.author)}`, // Author in Album Artist (PRIMARY for Plex)
-        '-metadata', `artist=${escapeMetadata(metadata.author)}` // Fallback
+        '-metadata', `title="${escapeMetadata(metadata.title)}"`,
+        '-metadata', `album="${escapeMetadata(metadata.title)}"`, // Book title in Album field (Plex uses this)
+        '-metadata', `album_artist="${escapeMetadata(metadata.author)}"`, // Author in Album Artist (PRIMARY for Plex)
+        '-metadata', `artist="${escapeMetadata(metadata.author)}"` // Fallback
       );
 
       if (metadata.narrator) {
-        args.push('-metadata', `composer=${escapeMetadata(metadata.narrator)}`); // Narrator in Composer
+        args.push('-metadata', `composer="${escapeMetadata(metadata.narrator)}"`); // Narrator in Composer
       }
 
       if (metadata.year) {
-        args.push('-metadata', `date=${metadata.year}`);
+        args.push('-metadata', `date="${metadata.year}"`);
       }
     }
     // For mp3 files, use ID3v2 tags
     else if (ext === '.mp3') {
       args.push(
-        '-metadata', `title=${escapeMetadata(metadata.title)}`,
-        '-metadata', `album=${escapeMetadata(metadata.title)}`,
-        '-metadata', `album_artist=${escapeMetadata(metadata.author)}`,
-        '-metadata', `artist=${escapeMetadata(metadata.author)}`
+        '-metadata', `title="${escapeMetadata(metadata.title)}"`,
+        '-metadata', `album="${escapeMetadata(metadata.title)}"`,
+        '-metadata', `album_artist="${escapeMetadata(metadata.author)}"`,
+        '-metadata', `artist="${escapeMetadata(metadata.author)}"`
       );
 
       if (metadata.narrator) {
         // For MP3, composer is also used for narrator
-        args.push('-metadata', `composer=${escapeMetadata(metadata.narrator)}`);
+        args.push('-metadata', `composer="${escapeMetadata(metadata.narrator)}"`);
       }
 
       if (metadata.year) {
-        args.push('-metadata', `date=${metadata.year}`);
+        args.push('-metadata', `date="${metadata.year}"`);
       }
     }
 
