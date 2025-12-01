@@ -63,6 +63,7 @@ export function SettingsWidget({ isOpen, onClose, isOnboarding = false, onOnboar
 
     try {
       const accessToken = localStorage.getItem('accessToken');
+      const trimmedPrompt = customPrompt.trim();
       const response = await fetch('/api/bookdate/preferences', {
         method: 'PUT',
         headers: {
@@ -71,7 +72,7 @@ export function SettingsWidget({ isOpen, onClose, isOnboarding = false, onOnboar
         },
         body: JSON.stringify({
           libraryScope,
-          customPrompt: customPrompt.trim(),
+          customPrompt: trimmedPrompt || null, // Send null if empty
           onboardingComplete: isOnboarding ? true : undefined,
         }),
       });

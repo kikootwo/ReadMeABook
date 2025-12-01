@@ -10,6 +10,7 @@ services:
     volumes:
       # Application config and cache
       - ./config:/app/config
+      - readmeabook-cache:/app/cache
 
       # Downloads and media directories
       - ./downloads:/downloads
@@ -58,4 +59,6 @@ volumes:
   readmeabook-pgdata:
     driver: local
   readmeabook-redis:
+    driver: local
+  readmeabook-cache:
     driver: local

@@ -27,6 +27,7 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 
 **Volumes:**
 - `/app/config` - App config/logs (bind mount)
+- `/app/cache` - Thumbnail cache (volume)
 - `/downloads` - Torrent downloads (bind mount)
 - `/media` - Plex library (bind mount)
 - `/var/lib/postgresql/data` - PostgreSQL data (volume)
@@ -84,6 +85,7 @@ services:
       - "3030:3030"
     volumes:
       - ./config:/app/config
+      - readmeabook-cache:/app/cache
       - ./downloads:/downloads
       - ./media:/media
       - readmeabook-pgdata:/var/lib/postgresql/data
@@ -92,6 +94,11 @@ services:
       # Optional overrides:
       # JWT_SECRET: "custom"
       # PUBLIC_URL: "https://example.com"
+
+volumes:
+  readmeabook-pgdata:
+  readmeabook-redis:
+  readmeabook-cache:
 ```
 
 **Docker Run:**
@@ -100,6 +107,7 @@ docker run -d \
   --name readmeabook \
   -p 3030:3030 \
   -v ./config:/app/config \
+  -v readmeabook-cache:/app/cache \
   -v ./downloads:/downloads \
   -v ./media:/media \
   -v readmeabook-data:/var/lib/postgresql/data \

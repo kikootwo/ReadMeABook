@@ -34,7 +34,7 @@ async function getPreferences(req: AuthenticatedRequest) {
 
     return NextResponse.json({
       libraryScope: user.bookDateLibraryScope || 'full',
-      customPrompt: user.bookDateCustomPrompt || '',
+      customPrompt: user.bookDateCustomPrompt || '', // Always return empty string for UI
       onboardingComplete: user.bookDateOnboardingComplete || false,
     });
 
@@ -67,8 +67,8 @@ async function updatePreferences(req: AuthenticatedRequest) {
       );
     }
 
-    // Validate custom prompt length
-    if (customPrompt && customPrompt.length > 1000) {
+    // Validate custom prompt length (only if provided and not empty)
+    if (customPrompt && typeof customPrompt === 'string' && customPrompt.trim() && customPrompt.length > 1000) {
       return NextResponse.json(
         { error: 'Custom prompt must be 1000 characters or less' },
         { status: 400 }
@@ -81,7 +81,9 @@ async function updatePreferences(req: AuthenticatedRequest) {
       updateData.bookDateLibraryScope = libraryScope || 'full';
     }
     if (customPrompt !== undefined) {
-      updateData.bookDateCustomPrompt = customPrompt || null;
+      // Normalize empty strings to null for consistency
+      const normalizedPrompt = (typeof customPrompt === 'string' && customPrompt.trim()) ? customPrompt.trim() : null;
+      updateData.bookDateCustomPrompt = normalizedPrompt;
     }
     if (onboardingComplete !== undefined) {
       updateData.bookDateOnboardingComplete = onboardingComplete;
@@ -101,7 +103,7 @@ async function updatePreferences(req: AuthenticatedRequest) {
     return NextResponse.json({
       success: true,
       libraryScope: updatedUser.bookDateLibraryScope || 'full',
-      customPrompt: updatedUser.bookDateCustomPrompt || '',
+      customPrompt: updatedUser.bookDateCustomPrompt || '', // Always return empty string for UI
       onboardingComplete: updatedUser.bookDateOnboardingComplete || false,
     });
 
