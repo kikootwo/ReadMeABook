@@ -45,16 +45,19 @@ export LOG_LEVEL="${LOG_LEVEL:-info}"
 # INITIALIZE POSTGRESQL
 # ============================================================================
 PGDATA="/var/lib/postgresql/data"
+PG_WAS_EMPTY=0
 
 # Ensure correct ownership of data directories (critical for bind mounts)
 echo "🔧 Setting up directory permissions..."
 chown -R postgres:postgres "$PGDATA" /var/run/postgresql
+chmod 700 "$PGDATA"
 chown -R redis:redis /var/lib/redis
 chown -R node:node /app/config /app/cache
 
 if [ ! -f "$PGDATA/PG_VERSION" ]; then
+    PG_WAS_EMPTY=1
     echo "📦 Initializing PostgreSQL database..."
-    su - postgres -c "/usr/lib/postgresql/15/bin/initdb -D $PGDATA"
+    su - postgres -c "/usr/lib/postgresql/16/bin/initdb -D $PGDATA"
 
     # Configure PostgreSQL for local access
     echo "host all all 127.0.0.1/32 trust" >> "$PGDATA/pg_hba.conf"
@@ -82,11 +85,11 @@ fi
 # START POSTGRESQL TEMPORARILY TO CREATE USER/DATABASE
 # ============================================================================
 echo "🔧 Starting PostgreSQL for setup..."
-su - postgres -c "/usr/lib/postgresql/15/bin/pg_ctl -D $PGDATA -w start -o '-c listen_addresses=127.0.0.1'"
+su - postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D $PGDATA -w start -o '-c listen_addresses=127.0.0.1'"
 
 # Wait for PostgreSQL to be ready
 for i in {1..30}; do
-    if su - postgres -c "psql -h 127.0.0.1 -U postgres -c 'SELECT 1'" > /dev/null 2>&1; then
+    if su - postgres -c "/usr/lib/postgresql/16/bin/pg_isready -h 127.0.0.1 -p 5432" > /dev/null 2>&1; then
         echo "✅ PostgreSQL is ready"
         break
     fi
@@ -94,9 +97,10 @@ for i in {1..30}; do
     sleep 1
 done
 
-# Create user and database if they don't exist
-echo "👤 Setting up database user and database..."
-su - postgres -c "psql -h 127.0.0.1 -U postgres" <<EOF
+if [ "$PG_WAS_EMPTY" -eq 1 ]; then
+    # Create user and database if they don't exist (fresh cluster)
+    echo "👤 Setting up database user and database..."
+    su - postgres -c "psql -h 127.0.0.1 -U postgres" <<EOF
 DO \$\$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_user WHERE usename = '$POSTGRES_USER') THEN
@@ -111,7 +115,10 @@ GRANT ALL PRIVILEGES ON DATABASE $POSTGRES_DB TO $POSTGRES_USER;
 ALTER DATABASE $POSTGRES_DB OWNER TO $POSTGRES_USER;
 EOF
 
-echo "✅ Database setup complete"
+    echo "✅ Database setup complete"
+else
+    echo "ℹ️ Existing PostgreSQL data detected, skipping user/database creation"
+fi
 
 # ============================================================================
 # SET ENVIRONMENT VARIABLES FOR APP
@@ -150,7 +157,7 @@ su - node -c "cd /app && DATABASE_URL='$DATABASE_URL' npx prisma db push --skip-
 
 # Stop PostgreSQL (supervisord will start it)
 echo "🔧 Stopping temporary PostgreSQL instance..."
-su - postgres -c "/usr/lib/postgresql/15/bin/pg_ctl -D $PGDATA stop -m fast"
+su - postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D $PGDATA stop -m fast"
 
 # ============================================================================
 # DISPLAY STARTUP INFO

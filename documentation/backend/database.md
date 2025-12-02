@@ -117,7 +117,7 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 
 ## Tech Stack
 
-- PostgreSQL 15+
+- PostgreSQL 16+
 - Prisma 6.x
 - `prisma db push` (schema sync)
 - Node.js crypto (encryption)

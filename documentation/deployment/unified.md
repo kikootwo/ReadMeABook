@@ -11,7 +11,7 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 ## Key Details
 
 **Architecture:**
-- PostgreSQL 15 (internal, 127.0.0.1:5432)
+- PostgreSQL 16 (internal, 127.0.0.1:5432)
 - Redis 7 (internal, 127.0.0.1:6379)
 - Next.js app (exposed, 0.0.0.0:3030)
 - Supervisord manages all processes
@@ -397,6 +397,11 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
 - Issue: Setup wizard shows "Job configuration not found" for Audible/Plex jobs
 - Cause: `/api/init` endpoint never called, so `schedulerService.start()` never runs and default jobs aren't created
 - Fix: Created `app-start.sh` wrapper script that starts server then calls `/api/init`, supervisord uses wrapper instead of direct node command
+
+**14. PostgreSQL binary mismatch in supervisord**
+- Issue: Container logs `spawnerr: can't find command '/usr/lib/postgresql/15/bin/postgres'` and app can't reach DB.
+- Cause: Base image upgraded to PostgreSQL 16 but supervisord still referenced `/usr/lib/postgresql/15/bin/postgres`.
+- Fix: Update `docker/unified/supervisord.conf` to call `/usr/lib/postgresql/16/bin/postgres`.
 
 ## Related
 

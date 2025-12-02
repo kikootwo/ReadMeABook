@@ -5,16 +5,29 @@
 # Start from debian base with node preinstalled
 FROM node:20-bookworm AS base
 
+# Install PostgreSQL 16 repository key
+RUN apt-get update && apt-get install -y curl gnupg && \
+    install -d /etc/apt/keyrings && \
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg && \
+    echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/postgresql.list
+
 # Install PostgreSQL, Redis, and supervisord
 RUN apt-get update && apt-get install -y \
-    postgresql-15 \
-    postgresql-client-15 \
+    postgresql-16 \
+    postgresql-client-16 \
     redis-server \
     supervisor \
     curl \
     openssl \
     ffmpeg \
+    locales \
+    && sed -i 's/^# \(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen \
+    && locale-gen en_US.UTF-8 \
+    && update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
 
 WORKDIR /app
 
