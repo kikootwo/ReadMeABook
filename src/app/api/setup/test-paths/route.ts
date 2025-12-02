@@ -9,10 +9,24 @@ import path from 'path';
 
 async function testPath(dirPath: string): Promise<boolean> {
   try {
-    // Check if path exists
-    await fs.access(dirPath);
+    // Try to access the path
+    try {
+      await fs.access(dirPath);
+      console.log(`[Setup] Path exists: ${dirPath}`);
+    } catch (accessError) {
+      // Path doesn't exist, try to create it
+      console.log(`[Setup] Path doesn't exist, creating: ${dirPath}`);
+      try {
+        await fs.mkdir(dirPath, { recursive: true });
+        console.log(`[Setup] Successfully created path: ${dirPath}`);
+      } catch (mkdirError) {
+        console.error(`[Setup] Failed to create path ${dirPath}:`, mkdirError);
+        // If mkdir fails, it means the parent mount doesn't exist or isn't writable
+        return false;
+      }
+    }
 
-    // Try to create a test file
+    // Test write permissions by creating a test file
     const testFile = path.join(dirPath, '.readmeabook-test');
     await fs.writeFile(testFile, 'test');
 
@@ -46,10 +60,10 @@ export async function POST(request: NextRequest) {
     if (!success) {
       const errors = [];
       if (!downloadDirValid) {
-        errors.push('Download directory is not accessible or writable');
+        errors.push('Download directory path is invalid or parent mount is not writable');
       }
       if (!mediaDirValid) {
-        errors.push('Media directory is not accessible or writable');
+        errors.push('Media directory path is invalid or parent mount is not writable');
       }
 
       return NextResponse.json({
@@ -64,7 +78,7 @@ export async function POST(request: NextRequest) {
       success: true,
       downloadDirValid,
       mediaDirValid,
-      message: 'Both directories are valid and writable',
+      message: 'Directories are ready and writable (created if needed)',
     });
   } catch (error) {
     console.error('[Setup] Path validation failed:', error);

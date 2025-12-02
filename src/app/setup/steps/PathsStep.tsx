@@ -53,7 +53,7 @@ export function PathsStep({
       if (response.ok && data.success) {
         setTestResult({
           success: true,
-          message: 'Both directories are valid and writable!',
+          message: data.message || 'Directories are ready and writable!',
           downloadDirValid: data.downloadDirValid,
           mediaDirValid: data.mediaDirValid,
         });
@@ -111,7 +111,7 @@ export function PathsStep({
             className="font-mono"
           />
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Where torrent files will be downloaded (must be writable)
+            Where torrent files will be downloaded (will be created if it doesn't exist)
           </p>
           {testResult && typeof testResult.downloadDirValid !== 'undefined' && (
             <div className="flex items-center gap-2 mt-2">
@@ -129,7 +129,7 @@ export function PathsStep({
                     />
                   </svg>
                   <span className="text-sm text-green-700 dark:text-green-300">
-                    Directory is valid and writable
+                    Directory is ready and writable
                   </span>
                 </>
               ) : (
@@ -146,7 +146,7 @@ export function PathsStep({
                     />
                   </svg>
                   <span className="text-sm text-red-700 dark:text-red-300">
-                    Directory is invalid or not writable
+                    Path invalid or parent mount not writable
                   </span>
                 </>
               )}
@@ -166,7 +166,7 @@ export function PathsStep({
             className="font-mono"
           />
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Where organized audiobooks will be stored (Plex will scan this directory)
+            Where organized audiobooks will be stored (will be created if it doesn't exist)
           </p>
           {testResult && typeof testResult.mediaDirValid !== 'undefined' && (
             <div className="flex items-center gap-2 mt-2">
@@ -184,7 +184,7 @@ export function PathsStep({
                     />
                   </svg>
                   <span className="text-sm text-green-700 dark:text-green-300">
-                    Directory is valid and writable
+                    Directory is ready and writable
                   </span>
                 </>
               ) : (
@@ -201,7 +201,7 @@ export function PathsStep({
                     />
                   </svg>
                   <span className="text-sm text-red-700 dark:text-red-300">
-                    Directory is invalid or not writable
+                    Path invalid or parent mount not writable
                   </span>
                 </>
               )}
@@ -321,7 +321,8 @@ export function PathsStep({
             </p>
             <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
               Audiobooks will be organized as: Media Directory / Author / Title / files.
-              Make sure both paths are accessible and have write permissions.
+              Directories will be created automatically if they don't exist. Validation ensures
+              the parent mount is accessible and writable.
             </p>
           </div>
         </div>

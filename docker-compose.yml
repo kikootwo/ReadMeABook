@@ -1,101 +1,56 @@
 version: '3.9'
 
 services:
-  # PostgreSQL Database
-  postgres:
-    image: postgres:16-alpine
-    container_name: readmeabook-postgres
-    restart: unless-stopped
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    environment:
-      POSTGRES_DB: readmeabook
-      POSTGRES_USER: readmeabook
-      POSTGRES_PASSWORD: readmeabook_password_change_me
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U readmeabook"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - readmeabook-network
-
-  # Redis Cache & Queue
-  redis:
-    image: redis:7-alpine
-    container_name: readmeabook-redis
-    restart: unless-stopped
-    command: redis-server --appendonly yes
-    volumes:
-      - redisdata:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - readmeabook-network
-
-  # ReadMeABook Application
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: readmeabook-app
+  readmeabook:
+    image: ghcr.io/kikootwo/readmeabook:latest
+    container_name: readmeabook-unified
     restart: unless-stopped
     ports:
       - "3030:3030"
     volumes:
+      # Application config and cache
       - ./config:/app/config
+      - ./cache:/app/cache
+
+      # Downloads and media directories
       - ./downloads:/downloads
       - ./media:/media
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    environment:
-      # Database Configuration
-      DATABASE_URL: postgresql://readmeabook:readmeabook_password_change_me@postgres:5432/readmeabook
 
-      # Redis Configuration
-      REDIS_URL: redis://redis:6379
+      # PostgreSQL data persistence
+      - ./pgdata:/var/lib/postgresql/data
 
-      # JWT Secrets
-      JWT_SECRET: XdiVg4yJjlabEGsJFfmRQoTTLfIWetvOsx2ToqYiUSg=
-      JWT_REFRESH_SECRET: pqj7mGktILiLYrMAJVNJ4NKz9gU2jX4oRcTlCgFyLrA=
+      # Redis data persistence
+      - ./redis:/var/lib/redis
 
-      # Encryption Key (for storing sensitive config in database)
-      CONFIG_ENCRYPTION_KEY: XKYTHVE1FST3LUycTmmrcnvFmJA+eFLzDNHiKb7Fqw0=
+#    environment:
+      # ========================================================================
+      # OPTIONAL: Secrets (auto-generated on first run if not provided)
+      # ========================================================================
+      # Uncomment and set these if you want to use custom secrets:
+      # JWT_SECRET: "your-custom-jwt-secret-here"
+      # JWT_REFRESH_SECRET: "your-custom-jwt-refresh-secret-here"
+      # CONFIG_ENCRYPTION_KEY: "your-custom-encryption-key-here"
+      # POSTGRES_PASSWORD: "your-custom-postgres-password-here"
 
-      # Plex Configuration
-      PLEX_CLIENT_IDENTIFIER: readmeabook-unique-client-id
-      PLEX_PRODUCT_NAME: ReadMeABook
+      # ========================================================================
+      # OPTIONAL: Application Configuration
+      # ========================================================================
+      # Only set these if you need non-default values:
+      # POSTGRES_USER: "readmeabook"
+      # POSTGRES_DB: "readmeabook"
+      # PLEX_CLIENT_IDENTIFIER: "readmeabook-custom-id"
+      # PLEX_PRODUCT_NAME: "ReadMeABook"
+      # LOG_LEVEL: "info"
 
-      # Node Environment
-      NODE_ENV: production
+      # ========================================================================
+      # IMPORTANT: Public URL Configuration
+      # ========================================================================
+      # Set this to your public URL if accessing from outside localhost:
+      # PUBLIC_URL: "https://readmeabook.yourdomain.com"
 
-      # Logging
-      LOG_LEVEL: info
-
-      # Application Settings
-      PORT: 3030
-      HOSTNAME: 0.0.0.0
-    networks:
-      - readmeabook-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3030/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
-
-networks:
-  readmeabook-network:
-    driver: bridge
-
-volumes:
-  pgdata:
-    driver: local
-  redisdata:
-    driver: local
+      start_period: 60s

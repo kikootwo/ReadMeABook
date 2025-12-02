@@ -1,0 +1,104 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: readmeabook-postgres
+    restart: unless-stopped
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: readmeabook
+      POSTGRES_USER: readmeabook
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U readmeabook"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - readmeabook-network
+
+  # Redis Cache & Queue
+  redis:
+    image: redis:7-alpine
+    container_name: readmeabook-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - readmeabook-network
+
+  # ReadMeABook Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: readmeabook-app
+    restart: unless-stopped
+    ports:
+      - "3030:3030"
+    volumes:
+      - ./config:/app/config
+      - cache:/app/cache
+      - ./downloads:/downloads
+      - ./media:/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Database Configuration
+      DATABASE_URL: postgresql://readmeabook:${POSTGRES_PASSWORD:-changeme}@postgres:5432/readmeabook
+
+      # Redis Configuration
+      REDIS_URL: redis://redis:6379
+
+      # JWT Secrets (generate with: openssl rand -base64 32)
+      JWT_SECRET: ${JWT_SECRET:-change-this-in-production}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-this-in-production}
+
+      # Encryption Key (for storing sensitive config in database)
+      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:-change-this-in-production}
+
+      # Plex Configuration
+      PLEX_CLIENT_IDENTIFIER: readmeabook-unique-client-id
+      PLEX_PRODUCT_NAME: ReadMeABook
+
+      # Node Environment
+      NODE_ENV: production
+
+      # Logging
+      LOG_LEVEL: debug
+
+      # Application Settings
+      PORT: 3030
+      HOSTNAME: 0.0.0.0
+    networks:
+      - readmeabook-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3030/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  readmeabook-network:
+    driver: bridge
+
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local
+  cache:
+    driver: local
