@@ -12,6 +12,7 @@
 - **First-time setup wizard** → [setup-wizard.md](setup-wizard.md)
 - **Settings management, encryption** → [backend/services/config.md](backend/services/config.md)
 - **Settings UI (Plex, Prowlarr, paths)** → [settings-pages.md](settings-pages.md)
+- **Setup middleware & status check** → [backend/middleware.md](backend/middleware.md)
 
 ## Database & Data Models
 - **PostgreSQL schema, tables, relationships** → [backend/database.md](backend/database.md)

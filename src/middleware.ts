@@ -27,31 +27,51 @@ export async function middleware(request: NextRequest) {
   }
 
   // Check setup status via API endpoint
-  try {
-    const checkUrl = new URL('/api/setup/status', request.url);
-    const response = await fetch(checkUrl, {
-      method: 'GET',
-      headers: {
-        'x-middleware-request': 'true',
-      },
-    });
+  const requestUrl = request.url;
+  const internalBaseUrl = process.env.SETUP_CHECK_BASE_URL?.trim();
+  const defaultPort = process.env.PORT || '3030';
+  const fallbackOrigin = `http://127.0.0.1:${defaultPort}`;
+  const candidateOrigins = [internalBaseUrl, request.nextUrl.origin, fallbackOrigin]
+    .filter((origin, index, list): origin is string => Boolean(origin) && list.indexOf(origin) === index);
 
-    if (response.ok) {
-      const { setupComplete } = await response.json();
+  let lastError: unknown = null;
+  for (const origin of candidateOrigins) {
+    try {
+      const checkUrl = new URL('/api/setup/status', origin);
+      const response = await fetch(checkUrl, {
+        method: 'GET',
+        headers: {
+          'x-middleware-request': 'true',
+        },
+        // Avoid caching to ensure we read latest setup status
+        cache: 'no-store',
+      });
 
-      if (!setupComplete && pathname !== '/setup') {
-        // Setup not complete - redirect to /setup
-        return NextResponse.redirect(new URL('/setup', request.url));
+      if (response.ok) {
+        const { setupComplete } = await response.json();
+
+        if (!setupComplete && pathname !== '/setup') {
+          // Setup not complete - redirect to /setup
+          return NextResponse.redirect(new URL('/setup', requestUrl));
+        }
+
+        if (setupComplete && pathname === '/setup') {
+          // Setup complete - block access to /setup
+          return NextResponse.redirect(new URL('/', requestUrl));
+        }
       }
 
-      if (setupComplete && pathname === '/setup') {
-        // Setup complete - block access to /setup
-        return NextResponse.redirect(new URL('/', request.url));
-      }
+      // Successful request (even if response not ok) means no need to try other origins
+      return NextResponse.next();
+    } catch (error) {
+      lastError = error;
+      continue;
     }
-  } catch (error) {
-    // If check fails, allow request through to avoid breaking the app
-    console.error('[Middleware] Setup check failed:', error);
+  }
+
+  if (lastError) {
+    // If all checks fail, allow request through but log the failure once per request
+    console.error('[Middleware] Setup check failed:', lastError, { candidateOrigins });
   }
 
   return NextResponse.next();

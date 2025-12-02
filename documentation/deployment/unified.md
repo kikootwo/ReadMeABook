@@ -403,6 +403,11 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
 - Cause: Base image upgraded to PostgreSQL 16 but supervisord still referenced `/usr/lib/postgresql/15/bin/postgres`.
 - Fix: Update `docker/unified/supervisord.conf` to call `/usr/lib/postgresql/16/bin/postgres`.
 
+**15. Setup middleware hairpin fetch failures**
+- Issue: Middleware logs `Setup check failed: Error: fetch failed` on every request when the container cannot resolve the public hostname.
+- Cause: Setup check used the incoming Host header only, so DNS hairpinning or air-gapped domains blocked loopback fetches.
+- Fix: Middleware now tries `SETUP_CHECK_BASE_URL` (optional), request origin, then `http://127.0.0.1:${PORT|3030}`; log noise eliminated once any origin succeeds.
+
 ## Related
 
 - [Multi-container deployment](docker.md)
