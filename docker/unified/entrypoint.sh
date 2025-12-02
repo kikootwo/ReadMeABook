@@ -10,6 +10,24 @@ generate_secret() {
     openssl rand -base64 32
 }
 
+# URL encode function for database password
+urlencode() {
+    local string="$1"
+    local strlen=${#string}
+    local encoded=""
+    local pos c o
+
+    for (( pos=0 ; pos<strlen ; pos++ )); do
+        c=${string:$pos:1}
+        case "$c" in
+            [-_.~a-zA-Z0-9] ) o="${c}" ;;
+            * ) printf -v o '%%%02x' "'$c"
+        esac
+        encoded+="${o}"
+    done
+    echo "${encoded}"
+}
+
 # Generate secrets only if not already set
 export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(generate_secret)}"
 export JWT_SECRET="${JWT_SECRET:-$(generate_secret)}"
@@ -95,13 +113,12 @@ EOF
 
 echo "✅ Database setup complete"
 
-# Stop PostgreSQL (supervisord will start it)
-su - postgres -c "/usr/lib/postgresql/15/bin/pg_ctl -D $PGDATA stop -m fast"
-
 # ============================================================================
 # SET ENVIRONMENT VARIABLES FOR APP
 # ============================================================================
-export DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@127.0.0.1:5432/$POSTGRES_DB"
+# URL-encode the password to handle special characters
+ENCODED_PASSWORD=$(urlencode "$POSTGRES_PASSWORD")
+export DATABASE_URL="postgresql://$POSTGRES_USER:$ENCODED_PASSWORD@127.0.0.1:5432/$POSTGRES_DB"
 export REDIS_URL="redis://127.0.0.1:6379"
 export NODE_ENV="production"
 export PORT="3030"
@@ -125,11 +142,15 @@ EOF
 echo "✅ Environment configured"
 
 # ============================================================================
-# RUN PRISMA MIGRATIONS
+# RUN PRISMA MIGRATIONS (while PostgreSQL is still running)
 # ============================================================================
 echo "🔄 Running Prisma migrations..."
 cd /app
 su - node -c "cd /app && DATABASE_URL='$DATABASE_URL' npx prisma db push --skip-generate --accept-data-loss" || echo "⚠️  Migrations may have failed, continuing..."
+
+# Stop PostgreSQL (supervisord will start it)
+echo "🔧 Stopping temporary PostgreSQL instance..."
+su - postgres -c "/usr/lib/postgresql/15/bin/pg_ctl -D $PGDATA stop -m fast"
 
 # ============================================================================
 # DISPLAY STARTUP INFO

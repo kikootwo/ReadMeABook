@@ -4,6 +4,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Generated Prisma client (will be regenerated in container)
+src/generated
+
 # Testing
 coverage
 .nyc_output

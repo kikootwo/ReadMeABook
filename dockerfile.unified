@@ -25,18 +25,25 @@ COPY prisma ./prisma/
 # Install ALL dependencies (including dev dependencies needed for build)
 RUN npm ci && npm cache clean --force
 
-# Generate Prisma client (with dummy URL)
+# Copy application code (before generating Prisma to avoid overwriting)
+COPY . .
+
+# Generate Prisma client AFTER copying code (prevents stale generated files from overwriting)
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy?schema=public"
 RUN npx prisma generate
-
-# Copy application code
-COPY . .
 
 # Build Next.js application
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 ENV TURBOPACK=0
 RUN npm run build
+
+# Reorganize for standalone output
+# Next.js standalone mode creates .next/standalone/ with server.js
+# We need to move files to root for supervisord to find server.js
+RUN cp -r .next/standalone/* . && \
+    cp -r .next/static ./.next/static && \
+    cp -r public ./public 2>/dev/null || true
 
 # Remove dev dependencies to reduce image size
 RUN npm prune --production
@@ -68,7 +75,13 @@ COPY --chown=root:root docker/unified/supervisord.conf /etc/supervisor/conf.d/su
 
 # Copy entrypoint script
 COPY --chown=root:root docker/unified/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Convert line endings (Windows CRLF -> Unix LF) and make executable
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
+
+# Copy app startup wrapper
+COPY --chown=root:root docker/unified/app-start.sh /app/app-start.sh
+# Convert line endings and make executable
+RUN sed -i 's/\r$//' /app/app-start.sh && chmod +x /app/app-start.sh
 
 # Expose app port
 EXPOSE 3030

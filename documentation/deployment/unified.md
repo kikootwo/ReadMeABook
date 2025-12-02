@@ -76,6 +76,8 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 
 ## Deployment
 
+### Production (Pre-built Image)
+
 **Docker Compose:**
 ```yaml
 services:
@@ -95,6 +97,34 @@ services:
       # JWT_SECRET: "custom"
       # PUBLIC_URL: "https://example.com"
 ```
+
+**Usage:**
+```bash
+docker compose -f docker-compose.unified.yml up -d
+docker logs -f readmeabook-unified
+```
+
+### Local Development (Build Locally)
+
+**For faster iteration without waiting for CI/CD:**
+
+```bash
+# Build and run locally (rebuilds on every up)
+docker compose -f docker-compose.local.yml up -d --build
+
+# View logs
+docker logs -f readmeabook-local
+
+# Rebuild after changes
+docker compose -f docker-compose.local.yml up -d --build
+
+# Stop
+docker compose -f docker-compose.local.yml down
+```
+
+**Build time:** ~2-3 minutes (vs 10 minutes on CI/CD)
+
+**Note:** `docker-compose.local.yml` uses `build:` instead of `image:` to build from `dockerfile.unified`
 
 **Docker Run:**
 ```bash
@@ -332,6 +362,41 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
 - Issue: Container fails with "Operation not permitted" when using bind mounts (./pgdata, ./redis, ./cache)
 - Cause: Docker creates bind mount directories with root ownership, postgres/redis/node users cannot write
 - Fix: Entrypoint sets correct ownership before initialization (chown postgres:postgres, redis:redis, node:node)
+
+**7. Missing server.js in standalone build**
+- Issue: App fails with "Cannot find module '/app/server.js'"
+- Cause: Next.js standalone output creates server.js in `.next/standalone/`, needs to be copied to `/app/`
+- Fix: Dockerfile copies standalone output to root: `cp -r .next/standalone/* .`
+
+**8. DATABASE_URL with special characters**
+- Issue: Prisma fails with "invalid port number in database URL" when password has special chars
+- Cause: Auto-generated passwords can contain characters that need URL encoding (@, #, $, etc.)
+- Fix: Entrypoint URL-encodes password before constructing DATABASE_URL
+
+**9. Stale Prisma client in Docker builds**
+- Issue: TypeScript errors about missing Prisma fields during build (e.g., `plexHomeUserId does not exist`)
+- Cause: `COPY . .` copies stale `src/generated/prisma` from local filesystem, overwriting fresh generation
+- Fix: Generate Prisma client AFTER copying code + add `src/generated` to `.dockerignore`
+
+**10. Entrypoint script line endings on Windows/WSL2**
+- Issue: Container fails with "exec /entrypoint.sh: no such file or directory"
+- Cause: Windows CRLF line endings in shell scripts are incompatible with Linux
+- Fix: Added `.gitattributes` rule (`*.sh text eol=lf`) + Dockerfile converts line endings (`sed -i 's/\r$//'`)
+
+**11. PostgreSQL config file mismatch**
+- Issue: App fails with "password authentication failed" / "Role 'readmeabook' does not exist"
+- Cause: supervisord used system config (`/etc/postgresql/15/main/postgresql.conf`) which overrides trust auth configured in data directory
+- Fix: Remove `-c config_file=` from supervisord.conf, use data directory's postgresql.conf (standard behavior)
+
+**12. Prisma migrations run before PostgreSQL available**
+- Issue: "P1001: Can't reach database server" during entrypoint migrations
+- Cause: Migrations ran after PostgreSQL was stopped, before supervisord started it
+- Fix: Run migrations while PostgreSQL is still running in entrypoint, then stop it
+
+**13. Scheduled jobs not initialized (setup wizard errors)**
+- Issue: Setup wizard shows "Job configuration not found" for Audible/Plex jobs
+- Cause: `/api/init` endpoint never called, so `schedulerService.start()` never runs and default jobs aren't created
+- Fix: Created `app-start.sh` wrapper script that starts server then calls `/api/init`, supervisord uses wrapper instead of direct node command
 
 ## Related
 

@@ -25,13 +25,14 @@ RUN apk add --no-cache libc6-compat openssl
 
 # Copy package files and install all dependencies (including dev)
 COPY package.json package-lock.json* ./
+COPY prisma ./prisma/
 RUN npm ci
 
 # Copy application source
 COPY . .
 COPY --from=deps /app/node_modules ./node_modules
 
-# Generate Prisma client
+# Generate Prisma client AFTER copying (ensures fresh generation from schema)
 # Prisma generate requires DATABASE_URL to be set, but doesn't actually connect
 # Provide a dummy URL for build time - actual URL comes from docker-compose.yml at runtime
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy?schema=public"
