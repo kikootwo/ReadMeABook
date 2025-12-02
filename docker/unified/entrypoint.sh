@@ -28,6 +28,12 @@ export LOG_LEVEL="${LOG_LEVEL:-info}"
 # ============================================================================
 PGDATA="/var/lib/postgresql/data"
 
+# Ensure correct ownership of data directories (critical for bind mounts)
+echo "🔧 Setting up directory permissions..."
+chown -R postgres:postgres "$PGDATA" /var/run/postgresql
+chown -R redis:redis /var/lib/redis
+chown -R node:node /app/config /app/cache
+
 if [ ! -f "$PGDATA/PG_VERSION" ]; then
     echo "📦 Initializing PostgreSQL database..."
     su - postgres -c "/usr/lib/postgresql/15/bin/initdb -D $PGDATA"

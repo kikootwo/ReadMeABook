@@ -26,12 +26,12 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - `PLEX_CLIENT_IDENTIFIER` - Random hex ID
 
 **Volumes:**
-- `/app/config` - App config/logs (bind mount)
-- `/app/cache` - Thumbnail cache (volume)
-- `/downloads` - Torrent downloads (bind mount)
-- `/media` - Plex library (bind mount)
-- `/var/lib/postgresql/data` - PostgreSQL data (volume)
-- `/var/lib/redis` - Redis data (volume)
+- `/app/config` - App config/logs (bind mount: ./config)
+- `/app/cache` - Thumbnail cache (bind mount: ./cache)
+- `/downloads` - Torrent downloads (bind mount: ./downloads)
+- `/media` - Plex library (bind mount: ./media)
+- `/var/lib/postgresql/data` - PostgreSQL data (bind mount: ./pgdata)
+- `/var/lib/redis` - Redis data (bind mount: ./redis)
 
 ## Dockerfile Structure
 
@@ -85,20 +85,15 @@ services:
       - "3030:3030"
     volumes:
       - ./config:/app/config
-      - readmeabook-cache:/app/cache
+      - ./cache:/app/cache
       - ./downloads:/downloads
       - ./media:/media
-      - readmeabook-pgdata:/var/lib/postgresql/data
-      - readmeabook-redis:/var/lib/redis
+      - ./pgdata:/var/lib/postgresql/data
+      - ./redis:/var/lib/redis
     environment:
       # Optional overrides:
       # JWT_SECRET: "custom"
       # PUBLIC_URL: "https://example.com"
-
-volumes:
-  readmeabook-pgdata:
-  readmeabook-redis:
-  readmeabook-cache:
 ```
 
 **Docker Run:**
@@ -107,11 +102,11 @@ docker run -d \
   --name readmeabook \
   -p 3030:3030 \
   -v ./config:/app/config \
-  -v readmeabook-cache:/app/cache \
+  -v ./cache:/app/cache \
   -v ./downloads:/downloads \
   -v ./media:/media \
-  -v readmeabook-data:/var/lib/postgresql/data \
-  -v readmeabook-redis:/var/lib/redis \
+  -v ./pgdata:/var/lib/postgresql/data \
+  -v ./redis:/var/lib/redis \
   ghcr.io/kikootwo/readmeabook:latest
 ```
 
@@ -183,6 +178,19 @@ docker logs readmeabook-unified 2>&1 | grep "app"
 
 ## Troubleshooting
 
+**Container keeps restarting - Permission errors:**
+```bash
+# Symptom: "could not change permissions" or "Operation not permitted" in logs
+# Note: This should not happen with current version (entrypoint fixes ownership automatically)
+# If using older image or encountering issues, manually fix ownership:
+docker compose -f docker-compose.unified.yml down
+sudo chown -R 103:107 ./pgdata
+sudo chown -R 102:106 ./redis
+sudo chown -R 1000:1000 ./cache ./config
+docker compose -f docker-compose.unified.yml pull  # Get latest image
+docker compose -f docker-compose.unified.yml up -d
+```
+
 **Database access:**
 ```bash
 docker exec -it readmeabook-unified \
@@ -203,7 +211,9 @@ docker exec readmeabook-unified \
 
 **Reset database:**
 ```bash
-docker volume rm readmeabook-pgdata
+# Stop container and remove database directory
+docker compose -f docker-compose.unified.yml down
+rm -rf ./pgdata
 docker compose -f docker-compose.unified.yml up -d
 ```
 
@@ -221,6 +231,55 @@ docker exec readmeabook-unified \
 cat backup.sql | docker exec -i readmeabook-unified \
   su - postgres -c "psql -h 127.0.0.1 -U readmeabook readmeabook"
 ```
+
+## Migration: Named Volumes → Bind Mounts
+
+**Migrating from Docker named volumes to local directories:**
+
+1. **Stop the container:**
+```bash
+docker compose -f docker-compose.unified.yml down
+```
+
+2. **Copy data from named volumes to local directories:**
+```bash
+# Create local directories
+mkdir -p ./pgdata ./redis ./cache
+
+# Copy PostgreSQL data
+docker run --rm -v readmeabook-pgdata:/source -v $(pwd)/pgdata:/dest alpine sh -c "cp -a /source/. /dest/"
+
+# Copy Redis data
+docker run --rm -v readmeabook-redis:/source -v $(pwd)/redis:/dest alpine sh -c "cp -a /source/. /dest/"
+
+# Copy cache data
+docker run --rm -v readmeabook-cache:/source -v $(pwd)/cache:/dest alpine sh -c "cp -a /source/. /dest/"
+```
+
+3. **Update docker-compose.unified.yml** (already updated to use bind mounts)
+
+4. **Start container with bind mounts:**
+```bash
+docker compose -f docker-compose.unified.yml up -d
+```
+
+5. **Verify data integrity:**
+```bash
+docker logs readmeabook-unified
+docker exec readmeabook-unified redis-cli ping
+```
+
+6. **Remove old named volumes (optional):**
+```bash
+docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
+```
+
+**Benefits of bind mounts:**
+- ✅ Easy backup/restore (standard filesystem tools)
+- ✅ Direct access to data files
+- ✅ Simpler migration between hosts
+- ✅ No hidden volume location
+- ✅ No manual ownership configuration needed (entrypoint handles it)
 
 ## vs Multi-Container
 
@@ -268,6 +327,11 @@ cat backup.sql | docker exec -i readmeabook-unified \
 **5. Prisma migrations**
 - Issue: Need to run migrations before app starts
 - Fix: Entrypoint runs `prisma db push` after DB init
+
+**6. Bind mount permissions**
+- Issue: Container fails with "Operation not permitted" when using bind mounts (./pgdata, ./redis, ./cache)
+- Cause: Docker creates bind mount directories with root ownership, postgres/redis/node users cannot write
+- Fix: Entrypoint sets correct ownership before initialization (chown postgres:postgres, redis:redis, node:node)
 
 ## Related
 

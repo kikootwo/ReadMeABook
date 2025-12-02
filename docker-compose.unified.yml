@@ -10,17 +10,17 @@ services:
     volumes:
       # Application config and cache
       - ./config:/app/config
-      - readmeabook-cache:/app/cache
+      - ./cache:/app/cache
 
       # Downloads and media directories
       - ./downloads:/downloads
       - ./media:/media
 
       # PostgreSQL data persistence
-      - readmeabook-pgdata:/var/lib/postgresql/data
+      - ./pgdata:/var/lib/postgresql/data
 
       # Redis data persistence
-      - readmeabook-redis:/var/lib/redis
+      - ./redis:/var/lib/redis
 
 #    environment:
       # ========================================================================
@@ -54,11 +54,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-
-volumes:
-  readmeabook-pgdata:
-    driver: local
-  readmeabook-redis:
-    driver: local
-  readmeabook-cache:
-    driver: local
