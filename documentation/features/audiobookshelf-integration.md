@@ -502,40 +502,38 @@ interface OIDCAdminConfig {
 
 **When Enabled:**
 - Registration form on login page
-- Email/username + password signup
-- Email verification (optional, configurable)
-- Admin approval (optional, configurable)
+- Username + password signup
+- Optional admin approval before access granted
 
 **Registration Config:**
 ```typescript
 interface RegistrationConfig {
   enabled: boolean;
-  require_email_verification: boolean;
-  require_admin_approval: boolean;
-  allowed_email_domains: string[];  // empty = all allowed
-  default_role: 'user';             // always 'user', admin promotes
+  require_admin_approval: boolean;  // if true, new users pending until approved
+  default_role: 'user';             // always 'user', admin promotes manually
 }
 ```
 
 **Registration Flow:**
 ```
-1. User fills registration form
-2. Validate email/username uniqueness
+1. User fills registration form (username, password)
+2. Validate username uniqueness
 3. Hash password (bcrypt)
-4. Create user (pending status if approval required)
-5. Send verification email (if enabled)
-6. User verifies email
-7. Admin approves (if required)
-8. User can login
+4. If admin approval required:
+   - Create user with status: 'pending_approval'
+   - User sees: "Account pending admin approval"
+   - Admin approves in admin panel
+5. If no approval required:
+   - Create user with status: 'approved'
+   - User can login immediately
 ```
 
 **User Table for Local Auth:**
 ```sql
 -- Uses existing authToken field (bcrypt hash)
--- New fields:
-ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT false;
+-- New field:
 ALTER TABLE users ADD COLUMN registration_status VARCHAR(50);
--- Values: 'pending_verification' | 'pending_approval' | 'approved' | 'rejected'
+-- Values: 'pending_approval' | 'approved' | 'rejected'
 ```
 
 ### 4.4 Login Page Changes
@@ -839,11 +837,9 @@ POST /api/requests      → Uses ILibraryService for duplicate check
 ### 10.2 Registration Security
 
 - Rate limit registration attempts (5 per hour per IP)
-- CAPTCHA for registration (optional, configurable)
-- Password requirements: min 8 chars, complexity optional
+- Password requirements: min 8 chars
 - Secure password hashing (bcrypt, 10+ rounds)
-- Email verification prevents disposable emails
-- Admin approval adds human review layer
+- Admin approval adds human review layer (optional)
 
 ### 10.3 Audiobookshelf API Security
 
@@ -952,8 +948,7 @@ src/lib/utils/
 - Implement `LocalAuthProvider`
 - Registration endpoint
 - Local login endpoint
-- Email verification (optional)
-- Admin approval workflow
+- Admin approval workflow (optional)
 
 **Files to Create:**
 ```
@@ -963,7 +958,6 @@ src/lib/services/auth/
 src/app/api/auth/
 ├── register/route.ts
 ├── local/login/route.ts
-├── verify-email/route.ts
 
 src/components/auth/
 ├── RegistrationForm.tsx
@@ -973,8 +967,7 @@ src/components/auth/
 **Tests:**
 - Registration flow
 - Password validation
-- Email verification
-- Admin approval
+- Admin approval workflow
 
 ### Phase 5: Setup Wizard Modifications
 
@@ -1062,7 +1055,6 @@ OIDC_CLIENT_SECRET=xxxx
 
 # Registration
 REGISTRATION_ENABLED=true
-REQUIRE_EMAIL_VERIFICATION=false
 REQUIRE_ADMIN_APPROVAL=true
 ```
 
@@ -1098,9 +1090,7 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 
 # Registration
 auth.registration_enabled           = 'false'
-auth.require_email_verification     = 'false'
 auth.require_admin_approval         = 'false'
-auth.allowed_email_domains          = '[]' (JSON array)
 ```
 
 ---
