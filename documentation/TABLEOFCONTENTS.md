@@ -24,6 +24,7 @@
 
 ## Audiobookshelf Integration (PRD - Not Implemented)
 - **Full PRD, architecture, implementation phases** → [features/audiobookshelf-integration.md](features/audiobookshelf-integration.md)
+- **Step-by-step implementation guide** → [features/audiobookshelf-implementation-guide.md](features/audiobookshelf-implementation-guide.md)
 - **OIDC authentication (Authentik, Keycloak)** → [features/audiobookshelf-integration.md](features/audiobookshelf-integration.md)
 - **Manual user registration** → [features/audiobookshelf-integration.md](features/audiobookshelf-integration.md)
 - **Backend mode selection (Plex vs ABS)** → [features/audiobookshelf-integration.md](features/audiobookshelf-integration.md)
