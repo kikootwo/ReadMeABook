@@ -374,6 +374,117 @@ interface OIDCUserInfo {
 - Subsequent users → User role
 - Optional: OIDC group/claim mapping for admin role
 
+### 4.2.1 OIDC Access Control (Authorization)
+
+**Problem:** OIDC only handles authentication ("who are you?"), not authorization ("can you use this app?"). Without access control, anyone with an account on your identity provider could access ReadMeABook.
+
+**Comparison with Plex:**
+- Plex OAuth has built-in access control: user must have access to your configured Plex server
+- OIDC has no equivalent - we must implement our own access control
+
+**Access Control Options:**
+
+| Method | Description | Config Complexity | Recommended |
+|--------|-------------|-------------------|-------------|
+| **OIDC Group Claim** | Require membership in specific group | Medium | ✅ Yes |
+| **Allowed Users List** | Admin maintains list of allowed emails | Low | ✅ Yes |
+| **Admin Approval** | Users auto-created but pending until approved | Low | ✅ Yes |
+| **Open Access** | Anyone who authenticates gets access | None | ⚠️ Rarely |
+
+**Recommended: OIDC Group Claim (Primary)**
+
+Requires user to be member of a specific group in the identity provider.
+
+```typescript
+interface OIDCAccessConfig {
+  // Access control (who can use the app)
+  access_control_enabled: boolean;      // default: true
+  access_control_method: 'group_claim' | 'allowed_list' | 'admin_approval' | 'open';
+
+  // Group claim settings (if method = 'group_claim')
+  access_group_claim: string;           // e.g., 'groups' (claim name in token)
+  access_group_value: string;           // e.g., 'readmeabook-users' (required group)
+
+  // Allowed list settings (if method = 'allowed_list')
+  allowed_emails: string[];             // e.g., ['user@example.com']
+  allowed_usernames: string[];          // e.g., ['john', 'jane']
+}
+```
+
+**Group Claim Flow:**
+```
+1. User authenticates with OIDC provider
+2. Provider returns token with claims:
+   {
+     "sub": "user-123",
+     "email": "john@example.com",
+     "groups": ["readmeabook-users", "other-group"]  ← Group claim
+   }
+3. ReadMeABook checks: Does 'groups' contain 'readmeabook-users'?
+4. If YES → Create/update user, issue session
+5. If NO → Show error: "You don't have access to this application"
+```
+
+**Provider Setup Examples:**
+
+**Authentik:**
+1. Create group `readmeabook-users` in Authentik
+2. Add allowed users to the group
+3. In Application → Provider → Advanced Settings:
+   - Add scope mapping for `groups` claim
+4. ReadMeABook config: `access_group_claim: 'groups'`, `access_group_value: 'readmeabook-users'`
+
+**Keycloak:**
+1. Create group `readmeabook-users` in your realm
+2. Add allowed users to the group
+3. In Client → Mappers → Add mapper:
+   - Type: Group Membership
+   - Token Claim Name: `groups`
+4. ReadMeABook config: same as above
+
+**Allowed List Flow (Alternative):**
+```
+1. Admin adds allowed emails/usernames in ReadMeABook settings
+2. User authenticates with OIDC provider
+3. ReadMeABook checks: Is user's email in allowed list?
+4. If YES → Create/update user, issue session
+5. If NO → Show error: "Your account is not authorized"
+```
+
+**Admin Approval Flow (Alternative):**
+```
+1. User authenticates with OIDC provider
+2. User record created with status: 'pending_approval'
+3. User sees: "Your account is pending admin approval"
+4. Admin sees pending users in admin panel
+5. Admin approves → User can now access app
+```
+
+**Setup Wizard Configuration:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│  OIDC Access Control                                        │
+│                                                             │
+│  How should we control who can access ReadMeABook?          │
+│                                                             │
+│  ○ Require OIDC group membership (recommended)              │
+│    Users must be in a specific group in your provider       │
+│    Group claim name: [groups_________]                      │
+│    Required group:   [readmeabook-users]                    │
+│                                                             │
+│  ○ Maintain allowed users list                              │
+│    You'll manually add allowed emails in settings           │
+│                                                             │
+│  ○ Require admin approval                                   │
+│    Anyone can login, but must be approved first             │
+│                                                             │
+│  ○ Open access (not recommended)                            │
+│    Anyone who can authenticate will have access             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 4.2.2 OIDC Role Assignment
+
 **Admin Claim Mapping (Optional):**
 ```typescript
 interface OIDCAdminConfig {
@@ -382,6 +493,8 @@ interface OIDCAdminConfig {
   claim_value: string;     // e.g., 'readmeabook-admin', 'admin'
 }
 ```
+
+**Note:** This is separate from access control. Access control determines WHO can use the app. Admin claim mapping determines which users get admin ROLE.
 
 ### 4.3 Manual Registration
 
@@ -809,7 +922,8 @@ documentation/integrations/
 - Authorization flow with PKCE
 - Token validation
 - User creation/mapping
-- Admin claim mapping (optional)
+- **Access control implementation** (group claim, allowed list, admin approval)
+- Admin role claim mapping (optional)
 
 **Files to Create:**
 ```
@@ -969,6 +1083,15 @@ oidc.provider_name           = 'Authentik'
 oidc.issuer_url              = 'https://...'
 oidc.client_id               = 'xxx'
 oidc.client_secret           = (encrypted)
+
+# OIDC Access Control (Authorization)
+oidc.access_control_method   = 'group_claim' | 'allowed_list' | 'admin_approval' | 'open'
+oidc.access_group_claim      = 'groups'              # claim name containing groups
+oidc.access_group_value      = 'readmeabook-users'   # required group for access
+oidc.allowed_emails          = '[]'                  # JSON array (if method = 'allowed_list')
+oidc.allowed_usernames       = '[]'                  # JSON array (if method = 'allowed_list')
+
+# OIDC Admin Role Mapping (separate from access control)
 oidc.admin_claim_enabled     = 'false'
 oidc.admin_claim_name        = 'groups'
 oidc.admin_claim_value       = 'readmeabook-admin'
