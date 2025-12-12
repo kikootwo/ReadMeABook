@@ -22,6 +22,14 @@
 - **OAuth, library scanning, fuzzy matching** → [integrations/plex.md](integrations/plex.md)
 - **Availability status, plexGuid linking** → [integrations/plex.md](integrations/plex.md)
 
+## Audiobookshelf Integration (PRD - Not Implemented)
+- **Full PRD, architecture, implementation phases** → [features/audiobookshelf-integration.md](features/audiobookshelf-integration.md)
+- **Step-by-step implementation guide** → [features/audiobookshelf-implementation-guide.md](features/audiobookshelf-implementation-guide.md)
+- **OIDC authentication (Authentik, Keycloak)** → [features/audiobookshelf-integration.md](features/audiobookshelf-integration.md)
+- **Manual user registration** → [features/audiobookshelf-integration.md](features/audiobookshelf-integration.md)
+- **Backend mode selection (Plex vs ABS)** → [features/audiobookshelf-integration.md](features/audiobookshelf-integration.md)
+- **Library service abstraction** → [features/audiobookshelf-integration.md](features/audiobookshelf-integration.md)
+
 ## Audible Integration
 - **Web scraping (popular, new releases)** → [integrations/audible.md](integrations/audible.md)
 - **Database caching, real-time matching** → [integrations/audible.md](integrations/audible.md)
@@ -72,3 +80,7 @@
 **"How do I deploy?"** → [deployment/docker.md](deployment/docker.md) (multi-container), [deployment/unified.md](deployment/unified.md) (all-in-one)
 **"How do I use the unified container?"** → [deployment/unified.md](deployment/unified.md)
 **"How does chapter merging work?"** → [features/chapter-merging.md](features/chapter-merging.md) (PRD only, not implemented)
+**"How does Audiobookshelf integration work?"** → [features/audiobookshelf-integration.md](features/audiobookshelf-integration.md) (PRD only, not implemented)
+**"How do I use OIDC/Authentik/Keycloak?"** → [features/audiobookshelf-integration.md](features/audiobookshelf-integration.md) (PRD only, not implemented)
+**"How does manual user registration work?"** → [features/audiobookshelf-integration.md](features/audiobookshelf-integration.md) (PRD only, not implemented)
+**"How do I switch from Plex to Audiobookshelf?"** → [features/audiobookshelf-integration.md](features/audiobookshelf-integration.md) (PRD only, not implemented)
