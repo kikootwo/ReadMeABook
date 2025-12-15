@@ -2,11 +2,14 @@ version: '3.9'
 
 services:
   readmeabook:
-    image: ghcr.io/kikootwo/readmeabook:latest
+#    image: ghcr.io/kikootwo/readmeabook:latest
+    build:
+      context: .
+      dockerfile: dockerfile.unified
     container_name: readmeabook-unified
     restart: unless-stopped
     ports:
-      - "3030:3030"
+      - "3031:3030"
     volumes:
       # Application config and cache
       - ./config:/app/config

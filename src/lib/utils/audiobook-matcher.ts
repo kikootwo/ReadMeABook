@@ -2,12 +2,13 @@
  * Component: Audiobook Matching Utility
  * Documentation: documentation/integrations/audible.md
  *
- * Real-time matching between Audible books and Plex library.
- * Queries plex_library table to determine availability.
+ * Real-time matching between Audible books and library backends (Plex or Audiobookshelf).
+ * Supports ASIN, ISBN, and fuzzy title/author matching.
  */
 
 import { prisma } from '@/lib/db';
 import { compareTwoStrings } from 'string-similarity';
+import { LibraryItem } from '@/lib/services/library';
 
 // Debug logging controlled by LOG_LEVEL environment variable
 const DEBUG_ENABLED = process.env.LOG_LEVEL === 'debug';
@@ -338,4 +339,125 @@ export async function enrichAudiobooksWithMatches(
   }
 
   return results;
+}
+
+/**
+ * Normalize ISBN for comparison (remove dashes and spaces)
+ */
+function normalizeISBN(isbn: string): string {
+  return isbn.replace(/[-\s]/g, '').toUpperCase();
+}
+
+/**
+ * Generic audiobook matching function that works with LibraryItem interface.
+ * Works with any library backend (Plex, Audiobookshelf, etc.)
+ *
+ * Matching priority:
+ * 1. Exact ASIN match (100% confidence)
+ * 2. Exact ISBN match (95% confidence)
+ * 3. Fuzzy title/author match (70%+ threshold)
+ *
+ * @param request - Audiobook request details
+ * @param libraryItems - Items from library backend
+ * @returns Matched LibraryItem or null
+ */
+export function matchAudiobook(
+  request: { title: string; author: string; asin?: string; isbn?: string },
+  libraryItems: LibraryItem[]
+): LibraryItem | null {
+  // 1. Exact ASIN match (highest confidence)
+  if (request.asin) {
+    const asinMatch = libraryItems.find(item =>
+      item.asin?.toLowerCase() === request.asin?.toLowerCase()
+    );
+    if (asinMatch) {
+      if (DEBUG_ENABLED) {
+        console.log(JSON.stringify({
+          GENERIC_MATCHER: {
+            matchType: 'asin_exact',
+            input: { title: request.title, asin: request.asin },
+            matched: { title: asinMatch.title, asin: asinMatch.asin },
+            confidence: 100
+          }
+        }));
+      }
+      return asinMatch;
+    }
+  }
+
+  // 2. Exact ISBN match (normalize ISBNs by removing dashes)
+  if (request.isbn) {
+    const normalizedRequestISBN = normalizeISBN(request.isbn);
+    const isbnMatch = libraryItems.find(item =>
+      item.isbn && normalizeISBN(item.isbn) === normalizedRequestISBN
+    );
+    if (isbnMatch) {
+      if (DEBUG_ENABLED) {
+        console.log(JSON.stringify({
+          GENERIC_MATCHER: {
+            matchType: 'isbn_exact',
+            input: { title: request.title, isbn: request.isbn },
+            matched: { title: isbnMatch.title, isbn: isbnMatch.isbn },
+            confidence: 95
+          }
+        }));
+      }
+      return isbnMatch;
+    }
+  }
+
+  // 3. Fuzzy title/author match
+  const normalizedRequestTitle = normalizeTitle(request.title);
+  const normalizedRequestAuthor = request.author.toLowerCase();
+
+  const candidates = libraryItems.map(item => {
+    const normalizedItemTitle = normalizeTitle(item.title);
+    const normalizedItemAuthor = item.author.toLowerCase();
+
+    const titleScore = compareTwoStrings(normalizedRequestTitle, normalizedItemTitle);
+    const authorScore = compareTwoStrings(normalizedRequestAuthor, normalizedItemAuthor);
+
+    // Weighted average: title is more important
+    const overallScore = titleScore * 0.7 + authorScore * 0.3;
+
+    return { item, titleScore, authorScore, score: overallScore };
+  });
+
+  // Sort by score and get best match
+  candidates.sort((a, b) => b.score - a.score);
+  const bestMatch = candidates[0];
+
+  // Accept if score >= 70%
+  if (bestMatch && bestMatch.score >= 0.7) {
+    if (DEBUG_ENABLED) {
+      console.log(JSON.stringify({
+        GENERIC_MATCHER: {
+          matchType: 'fuzzy',
+          input: { title: request.title, author: request.author },
+          matched: { title: bestMatch.item.title, author: bestMatch.item.author },
+          scores: {
+            title: Math.round(bestMatch.titleScore * 100),
+            author: Math.round(bestMatch.authorScore * 100),
+            overall: Math.round(bestMatch.score * 100)
+          },
+          confidence: Math.round(bestMatch.score * 100)
+        }
+      }));
+    }
+    return bestMatch.item;
+  }
+
+  // No match found
+  if (DEBUG_ENABLED) {
+    console.log(JSON.stringify({
+      GENERIC_MATCHER: {
+        matchType: 'no_match',
+        input: { title: request.title, author: request.author },
+        bestScore: bestMatch ? Math.round(bestMatch.score * 100) : 0,
+        threshold: 70
+      }
+    }));
+  }
+
+  return null;
 }

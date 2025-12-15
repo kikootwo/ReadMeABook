@@ -211,6 +211,21 @@ export class ConfigurationService {
   }
 
   /**
+   * Get backend mode (Plex or Audiobookshelf)
+   */
+  async getBackendMode(): Promise<'plex' | 'audiobookshelf'> {
+    const mode = await this.get('system.backend_mode');
+    return (mode as 'plex' | 'audiobookshelf') || 'plex';
+  }
+
+  /**
+   * Check if Audiobookshelf mode is enabled
+   */
+  async isAudiobookshelfMode(): Promise<boolean> {
+    return (await this.getBackendMode()) === 'audiobookshelf';
+  }
+
+  /**
    * Clear the cache for a specific key or all keys
    */
   clearCache(key?: string): void {
