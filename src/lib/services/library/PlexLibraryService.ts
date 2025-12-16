@@ -126,7 +126,7 @@ export class PlexLibraryService implements ILibraryService {
       libraryId
     );
 
-    return items.map(this.mapPlexItemToLibraryItem);
+    return items.map(item => this.mapPlexItemToLibraryItem(item));
   }
 
   /**
@@ -146,7 +146,7 @@ export class PlexLibraryService implements ILibraryService {
       limit
     );
 
-    return items.map(this.mapPlexItemToLibraryItem);
+    return items.map(item => this.mapPlexItemToLibraryItem(item));
   }
 
   /**
@@ -197,7 +197,7 @@ export class PlexLibraryService implements ILibraryService {
       query
     );
 
-    return items.map(this.mapPlexItemToLibraryItem);
+    return items.map(item => this.mapPlexItemToLibraryItem(item));
   }
 
   /**

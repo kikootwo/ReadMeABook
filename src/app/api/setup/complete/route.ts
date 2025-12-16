@@ -199,8 +199,8 @@ export async function POST(request: NextRequest) {
       const encryptedAbsToken = encryptionService.encrypt(audiobookshelf.api_token);
       await prisma.configuration.upsert({
         where: { key: 'audiobookshelf.api_token' },
-        update: { value: encryptedAbsToken },
-        create: { key: 'audiobookshelf.api_token', value: encryptedAbsToken },
+        update: { value: encryptedAbsToken, encrypted: true },
+        create: { key: 'audiobookshelf.api_token', value: encryptedAbsToken, encrypted: true },
       });
 
       await prisma.configuration.upsert({
@@ -238,8 +238,8 @@ export async function POST(request: NextRequest) {
         const encryptedClientSecret = encryptionService.encrypt(oidc.client_secret);
         await prisma.configuration.upsert({
           where: { key: 'oidc.client_secret' },
-          update: { value: encryptedClientSecret },
-          create: { key: 'oidc.client_secret', value: encryptedClientSecret },
+          update: { value: encryptedClientSecret, encrypted: true },
+          create: { key: 'oidc.client_secret', value: encryptedClientSecret, encrypted: true },
         });
       }
 

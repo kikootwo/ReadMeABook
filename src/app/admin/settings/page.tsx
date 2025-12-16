@@ -30,10 +30,27 @@ interface IndexerConfig {
 }
 
 interface Settings {
+  backendMode: 'plex' | 'audiobookshelf';
   plex: {
     url: string;
     token: string;
     libraryId: string;
+  };
+  audiobookshelf: {
+    serverUrl: string;
+    apiToken: string;
+    libraryId: string;
+  };
+  oidc: {
+    enabled: boolean;
+    providerName: string;
+    issuerUrl: string;
+    clientId: string;
+    clientSecret: string;
+  };
+  registration: {
+    enabled: boolean;
+    requireAdminApproval: boolean;
   };
   prowlarr: {
     url: string;
@@ -52,19 +69,40 @@ interface Settings {
   };
 }
 
+interface PendingUser {
+  id: string;
+  plexUsername: string;
+  plexEmail: string | null;
+  authProvider: string | null;
+  createdAt: string;
+}
+
+interface ABSLibrary {
+  id: string;
+  name: string;
+  type: string;
+  itemCount: number;
+}
+
 export default function AdminSettings() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [originalSettings, setOriginalSettings] = useState<Settings | null>(null); // Track original values
   const [plexLibraries, setPlexLibraries] = useState<PlexLibrary[]>([]);
+  const [absLibraries, setAbsLibraries] = useState<ABSLibrary[]>([]);
   const [indexers, setIndexers] = useState<IndexerConfig[]>([]);
+  const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
   const [isLocalAdmin, setIsLocalAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingLibraries, setLoadingLibraries] = useState(false);
   const [loadingIndexers, setLoadingIndexers] = useState(false);
+  const [loadingPendingUsers, setLoadingPendingUsers] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [validated, setValidated] = useState({
     plex: false,
+    audiobookshelf: false,
+    oidc: false,
+    registration: false,
     prowlarr: false,
     download: false,
     paths: false,
@@ -73,7 +111,7 @@ export default function AdminSettings() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
-  const [activeTab, setActiveTab] = useState<'plex' | 'prowlarr' | 'download' | 'paths' | 'account' | 'bookdate'>('plex');
+  const [activeTab, setActiveTab] = useState<'library' | 'auth' | 'prowlarr' | 'download' | 'paths' | 'account' | 'bookdate'>('library');
 
   // Password change form state
   const [passwordForm, setPasswordForm] = useState({
@@ -114,10 +152,12 @@ export default function AdminSettings() {
   useEffect(() => {
     if (!settings) return;
 
-    if (activeTab === 'plex' && settings.plex.url && settings.plex.token) {
+    if (activeTab === 'library' && settings.backendMode === 'plex' && settings.plex.url && settings.plex.token) {
       fetchPlexLibraries();
+    } else if (activeTab === 'library' && settings.backendMode === 'audiobookshelf' && settings.audiobookshelf.serverUrl && settings.audiobookshelf.apiToken) {
+      fetchABSLibraries();
     }
-  }, [activeTab, settings?.plex.url, settings?.plex.token]);
+  }, [activeTab, settings?.plex.url, settings?.plex.token, settings?.audiobookshelf.serverUrl, settings?.audiobookshelf.apiToken, settings?.backendMode]);
 
   useEffect(() => {
     if (!settings) return;
@@ -132,6 +172,12 @@ export default function AdminSettings() {
       fetchBookdateConfig();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'auth' && settings?.registration.requireAdminApproval) {
+      fetchPendingUsers();
+    }
+  }, [activeTab, settings?.registration.requireAdminApproval]);
 
   const fetchSettings = async () => {
     try {
@@ -169,6 +215,45 @@ export default function AdminSettings() {
       setMessage({ type: 'error', text: 'Failed to load Plex libraries. Check your Plex URL and token.' });
     } finally {
       setLoadingLibraries(false);
+    }
+  };
+
+  const fetchABSLibraries = async (force = false) => {
+    if (!force && absLibraries.length > 0) return; // Already loaded
+
+    setLoadingLibraries(true);
+    try {
+      const response = await fetchWithAuth('/api/admin/settings/audiobookshelf/libraries');
+      if (response.ok) {
+        const data = await response.json();
+        setAbsLibraries(data.libraries || []);
+      } else {
+        const data = await response.json();
+        console.error('Failed to fetch ABS libraries:', data);
+        setMessage({ type: 'error', text: data.message || 'Failed to load Audiobookshelf libraries. Check your server URL and API token.' });
+      }
+    } catch (error) {
+      console.error('Failed to fetch ABS libraries:', error);
+      setMessage({ type: 'error', text: 'Failed to load Audiobookshelf libraries. Check your server URL and API token.' });
+    } finally {
+      setLoadingLibraries(false);
+    }
+  };
+
+  const fetchPendingUsers = async () => {
+    setLoadingPendingUsers(true);
+    try {
+      const response = await fetchWithAuth('/api/admin/users/pending');
+      if (response.ok) {
+        const data = await response.json();
+        setPendingUsers(data.users || []);
+      } else {
+        console.error('Failed to fetch pending users:', response.status);
+      }
+    } catch (error) {
+      console.error('Failed to fetch pending users:', error);
+    } finally {
+      setLoadingPendingUsers(false);
     }
   };
 
@@ -383,6 +468,107 @@ export default function AdminSettings() {
     }
   };
 
+  const testABSConnection = async () => {
+    if (!settings) return;
+
+    setTesting(true);
+    setMessage(null);
+
+    try {
+      const response = await fetchWithAuth('/api/setup/test-abs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serverUrl: settings.audiobookshelf.serverUrl,
+          apiToken: settings.audiobookshelf.apiToken,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setValidated({ ...validated, audiobookshelf: true });
+        setTestResults({ ...testResults, audiobookshelf: { success: true, message: `Connected to Audiobookshelf` } });
+        setMessage({ type: 'success', text: 'Connected to Audiobookshelf. You can now save.' });
+        // Update libraries
+        if (data.libraries) {
+          setAbsLibraries(data.libraries);
+        }
+      } else {
+        setValidated({ ...validated, audiobookshelf: false });
+        setTestResults({ ...testResults, audiobookshelf: { success: false, message: data.error || 'Connection failed' } });
+        setMessage({ type: 'error', text: data.error || 'Failed to connect to Audiobookshelf' });
+      }
+    } catch (error) {
+      setValidated({ ...validated, audiobookshelf: false });
+      const errorMsg = error instanceof Error ? error.message : 'Failed to test connection';
+      setTestResults({ ...testResults, audiobookshelf: { success: false, message: errorMsg } });
+      setMessage({ type: 'error', text: errorMsg });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const testOIDCConnection = async () => {
+    if (!settings) return;
+
+    setTesting(true);
+    setMessage(null);
+
+    try {
+      const response = await fetchWithAuth('/api/setup/test-oidc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          issuerUrl: settings.oidc.issuerUrl,
+          clientId: settings.oidc.clientId,
+          clientSecret: settings.oidc.clientSecret,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setValidated({ ...validated, oidc: true });
+        setTestResults({ ...testResults, oidc: { success: true, message: 'OIDC configuration is valid' } });
+        setMessage({ type: 'success', text: 'OIDC configuration is valid. You can now save.' });
+      } else {
+        setValidated({ ...validated, oidc: false });
+        setTestResults({ ...testResults, oidc: { success: false, message: data.error || 'Connection failed' } });
+        setMessage({ type: 'error', text: data.error || 'Failed to validate OIDC configuration' });
+      }
+    } catch (error) {
+      setValidated({ ...validated, oidc: false });
+      const errorMsg = error instanceof Error ? error.message : 'Failed to test OIDC connection';
+      setTestResults({ ...testResults, oidc: { success: false, message: errorMsg } });
+      setMessage({ type: 'error', text: errorMsg });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const approveUser = async (userId: string, approve: boolean) => {
+    try {
+      const response = await fetchWithAuth(`/api/admin/users/${userId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approve }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setMessage({ type: 'success', text: data.message });
+        // Refresh pending users list
+        await fetchPendingUsers();
+      } else {
+        setMessage({ type: 'error', text: data.error || 'Failed to process user approval' });
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Failed to process user approval' });
+    }
+  };
+
   const testProwlarrConnection = async () => {
     if (!settings) return;
 
@@ -542,15 +728,65 @@ export default function AdminSettings() {
     try {
       // Save settings based on active tab
       switch (activeTab) {
-        case 'plex':
-          const plexResponse = await fetchWithAuth('/api/admin/settings/plex', {
+        case 'library':
+          if (settings.backendMode === 'plex') {
+            const plexResponse = await fetchWithAuth('/api/admin/settings/plex', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(settings.plex),
+            });
+
+            if (!plexResponse.ok) {
+              throw new Error('Failed to save Plex settings');
+            }
+          } else {
+            const absResponse = await fetchWithAuth('/api/admin/settings/audiobookshelf', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(settings.audiobookshelf),
+            });
+
+            if (!absResponse.ok) {
+              throw new Error('Failed to save Audiobookshelf settings');
+            }
+          }
+          break;
+
+        case 'auth':
+          // Validate: In Audiobookshelf mode, at least one auth method must be enabled
+          if (settings.backendMode === 'audiobookshelf') {
+            if (!settings.oidc.enabled && !settings.registration.enabled) {
+              setMessage({
+                type: 'error',
+                text: 'At least one authentication method must be enabled (OIDC or Manual Registration). Otherwise, users will not be able to log in.',
+              });
+              setSaving(false);
+              return;
+            }
+          }
+
+          // Save OIDC settings if OIDC is enabled
+          if (settings.oidc.enabled) {
+            const oidcResponse = await fetchWithAuth('/api/admin/settings/oidc', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(settings.oidc),
+            });
+
+            if (!oidcResponse.ok) {
+              throw new Error('Failed to save OIDC settings');
+            }
+          }
+
+          // Save registration settings
+          const registrationResponse = await fetchWithAuth('/api/admin/settings/registration', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(settings.plex),
+            body: JSON.stringify(settings.registration),
           });
 
-          if (!plexResponse.ok) {
-            throw new Error('Failed to save Plex settings');
+          if (!registrationResponse.ok) {
+            throw new Error('Failed to save registration settings');
           }
           break;
 
@@ -633,7 +869,8 @@ export default function AdminSettings() {
   }
 
   const tabs = [
-    { id: 'plex', label: 'Plex', icon: '📺' },
+    { id: 'library', label: settings?.backendMode === 'plex' ? 'Plex' : 'Audiobookshelf', icon: '📺' },
+    ...(settings?.backendMode === 'audiobookshelf' ? [{ id: 'auth', label: 'Authentication', icon: '🔐' }] : []),
     { id: 'prowlarr', label: 'Indexers', icon: '🔍' },
     { id: 'download', label: 'Download Client', icon: '⬇️' },
     { id: 'paths', label: 'Paths', icon: '📁' },
@@ -666,6 +903,23 @@ export default function AdminSettings() {
           </p>
         </div>
 
+        {/* Backend Mode Display */}
+        <div className="mb-6 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 mt-0.5">
+              <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="text-sm text-blue-800 dark:text-blue-200">
+              <p className="font-medium mb-1">Backend Mode: {settings?.backendMode === 'plex' ? 'Plex' : 'Audiobookshelf'}</p>
+              <p>
+                ⚠️ Backend mode cannot be changed after setup. To switch backends, you must reset the instance and run the setup wizard again.
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Message Banner */}
         {message && (
           <div
@@ -696,7 +950,13 @@ export default function AdminSettings() {
                   key={tab.id}
                   onClick={() => {
                     setActiveTab(tab.id as any);
-                    if (tab.id === 'plex') fetchPlexLibraries();
+                    if (tab.id === 'library') {
+                      if (settings?.backendMode === 'plex') {
+                        fetchPlexLibraries();
+                      } else {
+                        fetchABSLibraries();
+                      }
+                    }
                     if (tab.id === 'prowlarr') fetchIndexers();
                   }}
                   className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${
@@ -714,8 +974,8 @@ export default function AdminSettings() {
 
           {/* Content */}
           <div className="p-8">
-            {/* Plex Tab */}
-            {activeTab === 'plex' && (
+            {/* Library Tab - Conditional (Plex or Audiobookshelf) */}
+            {activeTab === 'library' && settings?.backendMode === 'plex' && (
               <div className="space-y-6 max-w-2xl">
                 <div>
                   <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
@@ -817,6 +1077,115 @@ export default function AdminSettings() {
                         : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
                     }`}>
                       {testResults.plex.message}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Audiobookshelf Tab */}
+            {activeTab === 'library' && settings?.backendMode === 'audiobookshelf' && (
+              <div className="space-y-6 max-w-2xl">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                    Audiobookshelf Server
+                  </h2>
+                  <p className="text-gray-600 dark:text-gray-400 mb-6">
+                    Configure your Audiobookshelf server connection and audiobook library.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Server URL
+                  </label>
+                  <Input
+                    type="url"
+                    value={settings.audiobookshelf.serverUrl}
+                    onChange={(e) => {
+                      setSettings({
+                        ...settings,
+                        audiobookshelf: { ...settings.audiobookshelf, serverUrl: e.target.value },
+                      });
+                      setValidated({ ...validated, audiobookshelf: false });
+                    }}
+                    placeholder="http://localhost:13378"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    API Token
+                  </label>
+                  <Input
+                    type="password"
+                    value={settings.audiobookshelf.apiToken}
+                    onChange={(e) => {
+                      setSettings({
+                        ...settings,
+                        audiobookshelf: { ...settings.audiobookshelf, apiToken: e.target.value },
+                      });
+                      setValidated({ ...validated, audiobookshelf: false });
+                    }}
+                    placeholder="Enter your Audiobookshelf API token"
+                  />
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Found in Audiobookshelf Settings → Users → Your Account → API Tokens
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Audiobook Library
+                  </label>
+                  {loadingLibraries ? (
+                    <div className="flex items-center gap-2 py-2">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                      <span className="text-sm text-gray-500">Loading libraries...</span>
+                    </div>
+                  ) : absLibraries.length > 0 ? (
+                    <select
+                      value={settings.audiobookshelf.libraryId}
+                      onChange={(e) => {
+                        setSettings({
+                          ...settings,
+                          audiobookshelf: { ...settings.audiobookshelf, libraryId: e.target.value },
+                        });
+                        setValidated({ ...validated, audiobookshelf: false });
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                    >
+                      <option value="">Select a library...</option>
+                      {absLibraries.map((lib) => (
+                        <option key={lib.id} value={lib.id}>
+                          {lib.name} ({lib.itemCount} items)
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="text-sm text-gray-500 py-2">
+                      Test your connection to load libraries.
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+                  <Button
+                    onClick={testABSConnection}
+                    loading={testing}
+                    disabled={!settings.audiobookshelf.serverUrl || !settings.audiobookshelf.apiToken}
+                    variant="outline"
+                    className="w-full"
+                  >
+                    Test Connection
+                  </Button>
+                  {testResults.audiobookshelf && (
+                    <div className={`mt-3 p-3 rounded-lg text-sm ${
+                      testResults.audiobookshelf.success
+                        ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200'
+                        : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
+                    }`}>
+                      {testResults.audiobookshelf.message}
                     </div>
                   )}
                 </div>
@@ -1430,6 +1799,313 @@ export default function AdminSettings() {
               </div>
             )}
 
+            {/* Authentication Tab - Only visible in ABS mode */}
+            {activeTab === 'auth' && settings?.backendMode === 'audiobookshelf' && (
+              <div className="space-y-8 max-w-2xl">
+                {/* OIDC Settings Section */}
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                    OIDC Authentication
+                  </h2>
+                  <p className="text-gray-600 dark:text-gray-400 mb-6">
+                    Configure OpenID Connect (OIDC) authentication for single sign-on with Authentik, Keycloak, or other providers.
+                  </p>
+
+                  <div className="space-y-4">
+                    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                      <div className="flex items-start gap-4">
+                        <input
+                          type="checkbox"
+                          id="oidc-enabled"
+                          checked={settings.oidc.enabled}
+                          onChange={(e) => {
+                            setSettings({
+                              ...settings,
+                              oidc: { ...settings.oidc, enabled: e.target.checked },
+                            });
+                            setValidated({ ...validated, oidc: false });
+                          }}
+                          className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <label
+                            htmlFor="oidc-enabled"
+                            className="block text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer"
+                          >
+                            Enable OIDC Authentication
+                          </label>
+                          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                            Allow users to log in using an external OIDC provider
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {settings.oidc.enabled && (
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Provider Name
+                          </label>
+                          <Input
+                            type="text"
+                            value={settings.oidc.providerName}
+                            onChange={(e) => {
+                              setSettings({
+                                ...settings,
+                                oidc: { ...settings.oidc, providerName: e.target.value },
+                              });
+                              setValidated({ ...validated, oidc: false });
+                            }}
+                            placeholder="Authentik"
+                          />
+                          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            Display name for the login button
+                          </p>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Issuer URL
+                          </label>
+                          <Input
+                            type="url"
+                            value={settings.oidc.issuerUrl}
+                            onChange={(e) => {
+                              setSettings({
+                                ...settings,
+                                oidc: { ...settings.oidc, issuerUrl: e.target.value },
+                              });
+                              setValidated({ ...validated, oidc: false });
+                            }}
+                            placeholder="https://auth.example.com/application/o/readmeabook/"
+                          />
+                          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            OIDC provider's issuer URL (must support .well-known/openid-configuration)
+                          </p>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Client ID
+                          </label>
+                          <Input
+                            type="text"
+                            value={settings.oidc.clientId}
+                            onChange={(e) => {
+                              setSettings({
+                                ...settings,
+                                oidc: { ...settings.oidc, clientId: e.target.value },
+                              });
+                              setValidated({ ...validated, oidc: false });
+                            }}
+                            placeholder="readmeabook-client"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Client Secret
+                          </label>
+                          <Input
+                            type="password"
+                            value={settings.oidc.clientSecret}
+                            onChange={(e) => {
+                              setSettings({
+                                ...settings,
+                                oidc: { ...settings.oidc, clientSecret: e.target.value },
+                              });
+                              setValidated({ ...validated, oidc: false });
+                            }}
+                            placeholder="Enter client secret"
+                          />
+                        </div>
+
+                        <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                          <Button
+                            onClick={testOIDCConnection}
+                            loading={testing}
+                            disabled={!settings.oidc.issuerUrl || !settings.oidc.clientId || !settings.oidc.clientSecret}
+                            variant="outline"
+                            className="w-full"
+                          >
+                            Test OIDC Configuration
+                          </Button>
+                          {testResults.oidc && (
+                            <div className={`mt-3 p-3 rounded-lg text-sm ${
+                              testResults.oidc.success
+                                ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200'
+                                : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
+                            }`}>
+                              {testResults.oidc.message}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Registration Settings Section */}
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-8">
+                  <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                    Manual Registration
+                  </h2>
+                  <p className="text-gray-600 dark:text-gray-400 mb-6">
+                    Configure manual user registration settings.
+                  </p>
+
+                  <div className="space-y-4">
+                    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                      <div className="flex items-start gap-4">
+                        <input
+                          type="checkbox"
+                          id="registration-enabled"
+                          checked={settings.registration.enabled}
+                          onChange={(e) => {
+                            setSettings({
+                              ...settings,
+                              registration: { ...settings.registration, enabled: e.target.checked },
+                            });
+                            setValidated({ ...validated, registration: false });
+                          }}
+                          className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <label
+                            htmlFor="registration-enabled"
+                            className="block text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer"
+                          >
+                            Enable Manual Registration
+                          </label>
+                          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                            Allow users to create accounts manually with username/password
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {settings.registration.enabled && (
+                      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                        <div className="flex items-start gap-4">
+                          <input
+                            type="checkbox"
+                            id="require-approval"
+                            checked={settings.registration.requireAdminApproval}
+                            onChange={(e) => {
+                              setSettings({
+                                ...settings,
+                                registration: { ...settings.registration, requireAdminApproval: e.target.checked },
+                              });
+                              setValidated({ ...validated, registration: false });
+                            }}
+                            className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <div className="flex-1">
+                            <label
+                              htmlFor="require-approval"
+                              className="block text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer"
+                            >
+                              Require Admin Approval
+                            </label>
+                            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                              New users must be approved by an admin before they can log in
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Warning: No auth methods enabled */}
+                {settings.backendMode === 'audiobookshelf' && !settings.oidc.enabled && !settings.registration.enabled && (
+                  <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                    <div className="flex gap-3">
+                      <svg className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <div>
+                        <h3 className="text-sm font-semibold text-red-800 dark:text-red-200">
+                          No Authentication Methods Enabled
+                        </h3>
+                        <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+                          You must enable at least one authentication method (OIDC or Manual Registration).
+                          If you save with both disabled, users will not be able to log in to the system.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Pending Users Section */}
+                {settings.registration.enabled && settings.registration.requireAdminApproval && (
+                  <div className="border-t border-gray-200 dark:border-gray-700 pt-8">
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                      Pending User Approvals
+                    </h2>
+                    <p className="text-gray-600 dark:text-gray-400 mb-6">
+                      Review and approve or reject user registration requests.
+                    </p>
+
+                    {loadingPendingUsers ? (
+                      <div className="flex items-center gap-2 py-4">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                        <span className="text-sm text-gray-500">Loading pending users...</span>
+                      </div>
+                    ) : pendingUsers.length > 0 ? (
+                      <div className="space-y-4">
+                        {pendingUsers.map((user) => (
+                          <div
+                            key={user.id}
+                            className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800"
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <h3 className="font-medium text-gray-900 dark:text-gray-100">
+                                  {user.plexUsername}
+                                </h3>
+                                {user.plexEmail && (
+                                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                                    {user.plexEmail}
+                                  </p>
+                                )}
+                                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                                  Registered: {new Date(user.createdAt).toLocaleDateString()}
+                                </p>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button
+                                  onClick={() => approveUser(user.id, true)}
+                                  variant="outline"
+                                  className="border-green-300 text-green-600 hover:bg-green-50 dark:border-green-700 dark:text-green-400 dark:hover:bg-green-900/20"
+                                >
+                                  Approve
+                                </Button>
+                                <Button
+                                  onClick={() => approveUser(user.id, false)}
+                                  variant="outline"
+                                  className="border-red-300 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
+                                >
+                                  Reject
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg">
+                        <p className="text-gray-500 dark:text-gray-400">
+                          No pending user approvals
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Account Tab - Only visible to local admin */}
             {activeTab === 'account' && isLocalAdmin && (
               <div className="space-y-6 max-w-2xl">
@@ -1454,7 +2130,7 @@ export default function AdminSettings() {
                       <p className="font-medium mb-1">Local Admin Account</p>
                       <p>
                         This password is for your local admin account created during setup.
-                        This is separate from Plex authentication and is used to log in to the admin portal.
+                        This is separate from media server authentication and is used to log in to the admin portal.
                       </p>
                     </div>
                   </div>
@@ -1539,6 +2215,21 @@ export default function AdminSettings() {
                   onClick={saveSettings}
                   loading={saving}
                   disabled={(() => {
+                    // For Library tab: check validation based on backend mode
+                    if (activeTab === 'library' && settings) {
+                      if (settings.backendMode === 'plex') {
+                        return !validated.plex;
+                      } else {
+                        return !validated.audiobookshelf;
+                      }
+                    }
+                    // For Auth tab: disable if no auth methods are enabled in Audiobookshelf mode
+                    if (activeTab === 'auth' && settings) {
+                      if (settings.backendMode === 'audiobookshelf') {
+                        return !settings.oidc.enabled && !settings.registration.enabled;
+                      }
+                      return false;
+                    }
                     // For Prowlarr tab: allow save if validated OR if URL/API key unchanged
                     if (activeTab === 'prowlarr' && originalSettings && settings) {
                       const connectionUnchanged =
@@ -1546,14 +2237,39 @@ export default function AdminSettings() {
                         settings.prowlarr.apiKey === originalSettings.prowlarr.apiKey;
                       return !validated.prowlarr && !connectionUnchanged;
                     }
-                    // For all other tabs: require validation
-                    return !validated[activeTab];
+                    // For other tabs: require validation
+                    if (activeTab === 'download') return !validated.download;
+                    if (activeTab === 'paths') return !validated.paths;
+
+                    // Default: allow save
+                    return false;
                   })()}
                 >
                   Save Changes
                 </Button>
               </div>
               {(() => {
+                // For Library tab: check based on backend mode
+                if (activeTab === 'library' && settings) {
+                  if (settings.backendMode === 'plex' && !validated.plex) {
+                    return (
+                      <p className="text-sm text-amber-600 dark:text-amber-400 mt-2 text-right">
+                        Please test your connection before saving
+                      </p>
+                    );
+                  }
+                  if (settings.backendMode === 'audiobookshelf' && !validated.audiobookshelf) {
+                    return (
+                      <p className="text-sm text-amber-600 dark:text-amber-400 mt-2 text-right">
+                        Please test your connection before saving
+                      </p>
+                    );
+                  }
+                }
+                // For Auth tab: no validation message (toggles don't need testing)
+                if (activeTab === 'auth') {
+                  return null;
+                }
                 // For Prowlarr: show message only if URL/API key changed and not validated
                 if (activeTab === 'prowlarr' && originalSettings && settings) {
                   const connectionChanged =
@@ -1568,10 +2284,17 @@ export default function AdminSettings() {
                   }
                 }
                 // For other tabs: show message if not validated
-                else if (!validated[activeTab]) {
+                if (activeTab === 'download' && !validated.download) {
                   return (
                     <p className="text-sm text-amber-600 dark:text-amber-400 mt-2 text-right">
                       Please test your connection before saving
+                    </p>
+                  );
+                }
+                if (activeTab === 'paths' && !validated.paths) {
+                  return (
+                    <p className="text-sm text-amber-600 dark:text-amber-400 mt-2 text-right">
+                      Please test paths before saving
                     </p>
                   );
                 }

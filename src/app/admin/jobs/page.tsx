@@ -310,7 +310,7 @@ function AdminJobsPageContent() {
             About Scheduled Jobs
           </h3>
           <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
-            <li>• <strong>Plex Library Scan:</strong> Automatically scans your Plex library for new audiobooks</li>
+            <li>• <strong>Library Scan:</strong> Automatically scans your media library for new audiobooks</li>
             <li>• <strong>Audible Data Refresh:</strong> Caches popular and new release audiobooks from Audible</li>
             <li>• Trigger jobs manually using the "Trigger Now" button</li>
             <li>• Schedule format follows cron syntax (minute hour day month weekday)</li>

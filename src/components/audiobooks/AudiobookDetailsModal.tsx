@@ -317,13 +317,13 @@ export function AudiobookDetailsModal({
             <div className="border-t border-gray-200 dark:border-gray-700 pt-4 sm:pt-6 flex flex-col sm:flex-row gap-2 sm:gap-3">
               {(() => {
                 // Use props from card instead of fetched audiobook data for request status
-                // Check if book is already available in Plex or completed status
+                // Check if book is already available in library or completed status
                 if (isAvailable || requestStatus === 'completed') {
                   return (
                     <div className="flex-1">
                       <div className="w-full py-3 px-6 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-lg text-center">
                         <span className="text-base font-semibold text-green-700 dark:text-green-400">
-                          Available in Your Plex Library
+                          Available in Your Library
                         </span>
                       </div>
                     </div>

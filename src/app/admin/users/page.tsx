@@ -10,6 +10,7 @@ import useSWR from 'swr';
 import Link from 'next/link';
 import { authenticatedFetcher, fetchJSON } from '@/lib/utils/api';
 import { ToastProvider, useToast } from '@/components/ui/Toast';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
 
 interface User {
   id: string;
@@ -27,17 +28,36 @@ interface User {
   };
 }
 
+interface PendingUser {
+  id: string;
+  plexUsername: string;
+  plexEmail: string | null;
+  authProvider: string;
+  createdAt: string;
+}
+
 function AdminUsersPageContent() {
   const { data, error, mutate } = useSWR('/api/admin/users', authenticatedFetcher);
+  const { data: pendingData, error: pendingError, mutate: mutatePending } = useSWR(
+    '/api/admin/users/pending',
+    authenticatedFetcher
+  );
   const [editDialog, setEditDialog] = useState<{
     isOpen: boolean;
     user: User | null;
   }>({ isOpen: false, user: null });
   const [editRole, setEditRole] = useState<'user' | 'admin'>('user');
   const [saving, setSaving] = useState(false);
+  const [processingUserId, setProcessingUserId] = useState<string | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    type: 'approve' | 'reject' | null;
+    user: PendingUser | null;
+  }>({ isOpen: false, type: null, user: null });
   const toast = useToast();
 
   const isLoading = !data && !error;
+  const pendingUsers: PendingUser[] = pendingData?.users || [];
 
   const showEditDialog = (user: User) => {
     setEditRole(user.role);
@@ -66,6 +86,46 @@ function AdminUsersPageContent() {
       console.error(err);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const showApproveDialog = (user: PendingUser) => {
+    setConfirmDialog({ isOpen: true, type: 'approve', user });
+  };
+
+  const showRejectDialog = (user: PendingUser) => {
+    setConfirmDialog({ isOpen: true, type: 'reject', user });
+  };
+
+  const closeConfirmDialog = () => {
+    if (processingUserId) return; // Don't close while processing
+    setConfirmDialog({ isOpen: false, type: null, user: null });
+  };
+
+  const handleConfirmAction = async () => {
+    if (!confirmDialog.user) return;
+
+    const isApprove = confirmDialog.type === 'approve';
+    try {
+      setProcessingUserId(confirmDialog.user.id);
+      await fetchJSON(`/api/admin/users/${confirmDialog.user.id}/approve`, {
+        method: 'POST',
+        body: JSON.stringify({ approve: isApprove }),
+      });
+      toast.success(
+        isApprove
+          ? `User "${confirmDialog.user.plexUsername}" has been approved`
+          : `User "${confirmDialog.user.plexUsername}" has been rejected`
+      );
+      mutatePending(); // Refresh pending users list
+      if (isApprove) mutate(); // Refresh approved users list
+      closeConfirmDialog();
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : `Failed to ${isApprove ? 'approve' : 'reject'} user`;
+      toast.error(errorMsg);
+      console.error(err);
+    } finally {
+      setProcessingUserId(null);
     }
   };
 
@@ -121,6 +181,70 @@ function AdminUsersPageContent() {
             <span>Back to Dashboard</span>
           </Link>
         </div>
+
+        {/* Pending Users Section */}
+        {pendingUsers.length > 0 && (
+          <div className="mb-8">
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 mb-4">
+              <h2 className="text-lg font-semibold text-yellow-900 dark:text-yellow-200 mb-4 flex items-center gap-2">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                Pending Registrations ({pendingUsers.length})
+              </h2>
+              <p className="text-sm text-yellow-800 dark:text-yellow-300 mb-4">
+                The following users are awaiting approval to access the system.
+              </p>
+              <div className="space-y-3">
+                {pendingUsers.map((user) => (
+                  <div
+                    key={user.id}
+                    className="bg-white dark:bg-gray-800 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 flex items-center justify-between"
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3">
+                        <div>
+                          <div className="font-medium text-gray-900 dark:text-gray-100">
+                            {user.plexUsername}
+                          </div>
+                          <div className="text-sm text-gray-500 dark:text-gray-400">
+                            {user.plexEmail || 'No email'}
+                          </div>
+                          <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                            Registered: {new Date(user.createdAt).toLocaleString()} •
+                            Provider: {user.authProvider}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => showApproveDialog(user)}
+                        disabled={processingUserId === user.id}
+                        className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        {processingUserId === user.id ? 'Processing...' : 'Approve'}
+                      </button>
+                      <button
+                        onClick={() => showRejectDialog(user)}
+                        disabled={processingUserId === user.id}
+                        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                        {processingUserId === user.id ? 'Processing...' : 'Reject'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Users Table */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
@@ -338,6 +462,23 @@ function AdminUsersPageContent() {
             </div>
           </div>
         )}
+
+        {/* Confirm Approve/Reject Dialog */}
+        <ConfirmModal
+          isOpen={confirmDialog.isOpen}
+          onClose={closeConfirmDialog}
+          onConfirm={handleConfirmAction}
+          title={confirmDialog.type === 'approve' ? 'Approve Registration' : 'Reject Registration'}
+          message={
+            confirmDialog.type === 'approve'
+              ? `Are you sure you want to approve the registration for "${confirmDialog.user?.plexUsername}"? They will be able to log in immediately.`
+              : `Are you sure you want to reject and delete the registration for "${confirmDialog.user?.plexUsername}"? This action cannot be undone.`
+          }
+          confirmText={confirmDialog.type === 'approve' ? 'Approve' : 'Reject'}
+          cancelText="Cancel"
+          isLoading={processingUserId !== null}
+          variant={confirmDialog.type === 'reject' ? 'danger' : 'primary'}
+        />
       </div>
     </div>
   );

@@ -4,11 +4,13 @@
  */
 
 export interface UserInfo {
-  id: string;              // External ID (plexId, oidc subject, or local username)
+  id: string;              // User UUID
+  plexId?: string;         // Plex ID, OIDC subject, or local username
   username: string;
   email?: string;
   avatarUrl?: string;
-  isAdmin?: boolean;       // From claims or first-user logic
+  role?: string;           // 'admin' | 'user'
+  isAdmin?: boolean;       // Deprecated: use role instead
 }
 
 export interface AuthTokens {

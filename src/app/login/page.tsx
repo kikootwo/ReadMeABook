@@ -9,6 +9,7 @@ import { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/Button';
+import { AlertModal } from '@/components/ui/AlertModal';
 import Image from 'next/image';
 
 interface BookCover {
@@ -30,6 +31,22 @@ function LoginContent() {
   const [adminPassword, setAdminPassword] = useState('');
   const [bookCovers, setBookCovers] = useState<BookCover[]>([]);
   const [isMobile, setIsMobile] = useState(false);
+  const [authProviders, setAuthProviders] = useState<{
+    backendMode: string;
+    providers: string[];
+    registrationEnabled: boolean;
+    oidcProviderName: string | null;
+  } | null>(null);
+  const [showRegisterForm, setShowRegisterForm] = useState(false);
+  const [registerUsername, setRegisterUsername] = useState('');
+  const [registerPassword, setRegisterPassword] = useState('');
+  const [registerConfirmPassword, setRegisterConfirmPassword] = useState('');
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    variant: 'info' | 'warning' | 'success' | 'danger';
+  }>({ isOpen: false, title: '', message: '', variant: 'info' });
 
   // Detect mobile viewport
   useEffect(() => {
@@ -37,6 +54,30 @@ function LoginContent() {
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Fetch auth providers
+  useEffect(() => {
+    const fetchProviders = async () => {
+      try {
+        const response = await fetch('/api/auth/providers');
+        if (response.ok) {
+          const data = await response.json();
+          setAuthProviders(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch auth providers:', err);
+        // Default to Plex mode
+        setAuthProviders({
+          backendMode: 'plex',
+          providers: ['plex'],
+          registrationEnabled: false,
+          oidcProviderName: null,
+        });
+      }
+    };
+
+    fetchProviders();
   }, []);
 
   // Fetch random popular book covers
@@ -225,7 +266,12 @@ function LoginContent() {
     setError(null);
 
     try {
-      const response = await fetch('/api/auth/admin/login', {
+      // Use local login endpoint for ABS mode with local auth, admin login endpoint for Plex mode
+      const loginEndpoint = authProviders?.providers.includes('local')
+        ? '/api/auth/local/login'
+        : '/api/auth/admin/login';
+
+      const response = await fetch(loginEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -236,8 +282,19 @@ function LoginContent() {
 
       const data = await response.json();
 
+      // Check if account is pending approval (can be 200 or error status)
+      if (data.pendingApproval) {
+        setAlertModal({
+          isOpen: true,
+          title: 'Account Pending Approval',
+          message: 'Your account is awaiting administrator approval. You will be able to log in once your registration has been approved.',
+          variant: 'warning',
+        });
+        return;
+      }
+
       if (!response.ok) {
-        throw new Error(data.message || 'Login failed');
+        throw new Error(data.error || data.message || 'Login failed');
       }
 
       // Store tokens
@@ -252,7 +309,74 @@ function LoginContent() {
       const redirect = searchParams.get('redirect') || '/';
       router.push(redirect);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Admin login failed. Please try again.');
+      setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoggingIn(true);
+    setError(null);
+
+    // Validation
+    if (registerPassword !== registerConfirmPassword) {
+      setError('Passwords do not match');
+      setIsLoggingIn(false);
+      return;
+    }
+
+    if (registerPassword.length < 8) {
+      setError('Password must be at least 8 characters');
+      setIsLoggingIn(false);
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: registerUsername,
+          password: registerPassword,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Registration failed');
+      }
+
+      // Check if pending approval
+      if (data.pendingApproval) {
+        setError(null);
+        setShowRegisterForm(false);
+        setAlertModal({
+          isOpen: true,
+          title: 'Registration Pending',
+          message: 'Your account has been created successfully! An administrator needs to approve your registration before you can log in. You will be notified once your account is approved.',
+          variant: 'warning',
+        });
+        return;
+      }
+
+      // Auto-login after successful registration
+      if (data.success && data.accessToken) {
+        localStorage.setItem('accessToken', data.accessToken);
+        localStorage.setItem('refreshToken', data.refreshToken);
+        localStorage.setItem('user', JSON.stringify(data.user));
+
+        // Update auth context
+        setAuthData(data.user, data.accessToken);
+
+        // Redirect to intended page or homepage
+        const redirect = searchParams.get('redirect') || '/';
+        router.push(redirect);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Registration failed. Please try again.');
     } finally {
       setIsLoggingIn(false);
     }
@@ -390,95 +514,282 @@ function LoginContent() {
               </div>
             )}
 
-            {/* Plex Login button */}
-            <Button
-              onClick={handlePlexLogin}
-              disabled={isLoggingIn}
-              loading={isLoggingIn}
-              className="w-full text-base sm:text-lg py-3 sm:py-4 bg-orange-600 hover:bg-orange-700 text-white font-semibold"
-            >
-              {isLoggingIn ? 'Connecting to Plex...' : 'Login with Plex'}
-            </Button>
+            {!authProviders ? (
+              <div className="text-center text-gray-400">Loading...</div>
+            ) : (
+              <>
+                {/* Plex Login button */}
+                {authProviders.providers.includes('plex') && (
+                  <>
+                    <Button
+                      onClick={handlePlexLogin}
+                      disabled={isLoggingIn}
+                      loading={isLoggingIn}
+                      className="w-full text-base sm:text-lg py-3 sm:py-4 bg-orange-600 hover:bg-orange-700 text-white font-semibold"
+                    >
+                      {isLoggingIn ? 'Connecting to Plex...' : 'Login with Plex'}
+                    </Button>
 
-            {/* Info text */}
-            <div className="mt-4 sm:mt-6 text-center text-xs sm:text-sm text-gray-500">
-              <p>You'll be redirected to Plex to authorize this application</p>
-            </div>
+                    <div className="mt-4 sm:mt-6 text-center text-xs sm:text-sm text-gray-500">
+                      <p>You'll be redirected to Plex to authorize this application</p>
+                    </div>
+                  </>
+                )}
 
-            {/* Divider */}
-            <div className="relative my-6 sm:my-8">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-700"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-4 bg-gray-900/80 text-gray-400">or</span>
-              </div>
-            </div>
+                {/* OIDC Login button */}
+                {authProviders.providers.includes('oidc') && authProviders.oidcProviderName && (
+                  <>
+                    <Button
+                      onClick={() => window.location.href = '/api/auth/oidc/login'}
+                      disabled={isLoggingIn}
+                      className="w-full text-base sm:text-lg py-3 sm:py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+                    >
+                      Login with {authProviders.oidcProviderName}
+                    </Button>
 
-            {/* Admin Login Toggle */}
-            <button
-              onClick={() => setShowAdminLogin(!showAdminLogin)}
-              className="w-full text-sm text-gray-400 hover:text-gray-300 transition-colors py-2 flex items-center justify-center gap-2"
-            >
-              {showAdminLogin ? (
-                <>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                  </svg>
-                  Hide Admin Login
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                  Admin Login
-                </>
-              )}
-            </button>
+                    <div className="mt-4 sm:mt-6 text-center text-xs sm:text-sm text-gray-500">
+                      <p>You'll be redirected to {authProviders.oidcProviderName} to authenticate</p>
+                    </div>
+                  </>
+                )}
 
-            {/* Admin Login Form */}
-            {showAdminLogin && (
-              <form onSubmit={handleAdminLogin} className="mt-6 space-y-4">
-                <div>
-                  <label htmlFor="admin-username" className="block text-sm font-medium text-gray-300 mb-2">
-                    Username
-                  </label>
-                  <input
-                    type="text"
-                    id="admin-username"
-                    value={adminUsername}
-                    onChange={(e) => setAdminUsername(e.target.value)}
-                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                    placeholder="admin"
-                    required
-                    autoComplete="username"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="admin-password" className="block text-sm font-medium text-gray-300 mb-2">
-                    Password
-                  </label>
-                  <input
-                    type="password"
-                    id="admin-password"
-                    value={adminPassword}
-                    onChange={(e) => setAdminPassword(e.target.value)}
-                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                    placeholder="••••••••"
-                    required
-                    autoComplete="current-password"
-                  />
-                </div>
-                <Button
-                  type="submit"
-                  disabled={isLoggingIn}
-                  loading={isLoggingIn}
-                  className="w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold"
-                >
-                  {isLoggingIn ? 'Logging in...' : 'Login as Admin'}
-                </Button>
-              </form>
+                {/* Divider if we have both OIDC and local auth */}
+                {authProviders.providers.includes('oidc') && authProviders.providers.includes('local') && (
+                  <div className="relative my-6 sm:my-8">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-gray-700"></div>
+                    </div>
+                    <div className="relative flex justify-center text-sm">
+                      <span className="px-4 bg-gray-900/80 text-gray-400">or</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Local auth login/register form */}
+                {authProviders.providers.includes('local') && (
+                  <>
+                    {showRegisterForm ? (
+                      /* Registration Form */
+                      <form onSubmit={handleRegister} className="space-y-4">
+                        <div className="text-center mb-4">
+                          <h3 className="text-xl font-semibold text-white">Create Account</h3>
+                        </div>
+                        <div>
+                          <label htmlFor="register-username" className="block text-sm font-medium text-gray-300 mb-2">
+                            Username
+                          </label>
+                          <input
+                            type="text"
+                            id="register-username"
+                            value={registerUsername}
+                            onChange={(e) => setRegisterUsername(e.target.value)}
+                            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                            placeholder="Choose a username"
+                            required
+                            minLength={3}
+                            autoComplete="username"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">At least 3 characters</p>
+                        </div>
+                        <div>
+                          <label htmlFor="register-password" className="block text-sm font-medium text-gray-300 mb-2">
+                            Password
+                          </label>
+                          <input
+                            type="password"
+                            id="register-password"
+                            value={registerPassword}
+                            onChange={(e) => setRegisterPassword(e.target.value)}
+                            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                            placeholder="••••••••"
+                            required
+                            minLength={8}
+                            autoComplete="new-password"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">At least 8 characters</p>
+                        </div>
+                        <div>
+                          <label htmlFor="register-confirm-password" className="block text-sm font-medium text-gray-300 mb-2">
+                            Confirm Password
+                          </label>
+                          <input
+                            type="password"
+                            id="register-confirm-password"
+                            value={registerConfirmPassword}
+                            onChange={(e) => setRegisterConfirmPassword(e.target.value)}
+                            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                            placeholder="••••••••"
+                            required
+                            minLength={8}
+                            autoComplete="new-password"
+                          />
+                        </div>
+                        <Button
+                          type="submit"
+                          disabled={isLoggingIn}
+                          loading={isLoggingIn}
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+                        >
+                          {isLoggingIn ? 'Creating Account...' : 'Register'}
+                        </Button>
+                        {authProviders.registrationEnabled && (
+                          <div className="text-center">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowRegisterForm(false);
+                                setError(null);
+                                setRegisterUsername('');
+                                setRegisterPassword('');
+                                setRegisterConfirmPassword('');
+                              }}
+                              className="text-sm text-gray-400 hover:text-gray-300 transition-colors"
+                            >
+                              Already have an account? Login
+                            </button>
+                          </div>
+                        )}
+                      </form>
+                    ) : (
+                      /* Login Form */
+                      <form onSubmit={handleAdminLogin} className="space-y-4">
+                        <div>
+                          <label htmlFor="admin-username" className="block text-sm font-medium text-gray-300 mb-2">
+                            Username
+                          </label>
+                          <input
+                            type="text"
+                            id="admin-username"
+                            value={adminUsername}
+                            onChange={(e) => setAdminUsername(e.target.value)}
+                            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                            placeholder="username"
+                            required
+                            autoComplete="username"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="admin-password" className="block text-sm font-medium text-gray-300 mb-2">
+                            Password
+                          </label>
+                          <input
+                            type="password"
+                            id="admin-password"
+                            value={adminPassword}
+                            onChange={(e) => setAdminPassword(e.target.value)}
+                            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                            placeholder="••••••••"
+                            required
+                            autoComplete="current-password"
+                          />
+                        </div>
+                        <Button
+                          type="submit"
+                          disabled={isLoggingIn}
+                          loading={isLoggingIn}
+                          className="w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold"
+                        >
+                          {isLoggingIn ? 'Logging in...' : 'Login'}
+                        </Button>
+                        {authProviders.registrationEnabled && (
+                          <div className="text-center">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowRegisterForm(true);
+                                setError(null);
+                                setAdminUsername('');
+                                setAdminPassword('');
+                              }}
+                              className="text-sm text-gray-400 hover:text-gray-300 transition-colors"
+                            >
+                              Don't have an account? Register
+                            </button>
+                          </div>
+                        )}
+                      </form>
+                    )}
+                  </>
+                )}
+
+                {/* Admin Login toggle for Plex mode */}
+                {authProviders.providers.includes('plex') && !authProviders.providers.includes('local') && (
+                  <>
+                    <div className="relative my-6 sm:my-8">
+                      <div className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-gray-700"></div>
+                      </div>
+                      <div className="relative flex justify-center text-sm">
+                        <span className="px-4 bg-gray-900/80 text-gray-400">or</span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => setShowAdminLogin(!showAdminLogin)}
+                      className="w-full text-sm text-gray-400 hover:text-gray-300 transition-colors py-2 flex items-center justify-center gap-2"
+                    >
+                      {showAdminLogin ? (
+                        <>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                          </svg>
+                          Hide Admin Login
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                          Admin Login
+                        </>
+                      )}
+                    </button>
+
+                    {showAdminLogin && (
+                      <form onSubmit={handleAdminLogin} className="mt-6 space-y-4">
+                        <div>
+                          <label htmlFor="admin-username" className="block text-sm font-medium text-gray-300 mb-2">
+                            Username
+                          </label>
+                          <input
+                            type="text"
+                            id="admin-username"
+                            value={adminUsername}
+                            onChange={(e) => setAdminUsername(e.target.value)}
+                            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                            placeholder="admin"
+                            required
+                            autoComplete="username"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="admin-password" className="block text-sm font-medium text-gray-300 mb-2">
+                            Password
+                          </label>
+                          <input
+                            type="password"
+                            id="admin-password"
+                            value={adminPassword}
+                            onChange={(e) => setAdminPassword(e.target.value)}
+                            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                            placeholder="••••••••"
+                            required
+                            autoComplete="current-password"
+                          />
+                        </div>
+                        <Button
+                          type="submit"
+                          disabled={isLoggingIn}
+                          loading={isLoggingIn}
+                          className="w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold"
+                        >
+                          {isLoggingIn ? 'Logging in...' : 'Login as Admin'}
+                        </Button>
+                      </form>
+                    )}
+                  </>
+                )}
+              </>
             )}
           </div>
 
@@ -507,6 +818,15 @@ function LoginContent() {
           </div>
         </div>
       </main>
+
+      {/* Alert Modal */}
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={() => setAlertModal({ ...alertModal, isOpen: false })}
+        title={alertModal.title}
+        message={alertModal.message}
+        variant={alertModal.variant}
+      />
 
       {/* CSS animations for floating book covers */}
       <style jsx>{`

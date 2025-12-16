@@ -1,56 +1,56 @@
 /**
- * Component: Match Plex Job Processor
+ * Component: Match Library Job Processor
  * Documentation: documentation/phase3/README.md
+ *
+ * DEPRECATED: This processor is deprecated. Matching is now handled by scan_library job.
+ * Kept for backwards compatibility but should not be used in new code.
  */
 
 import { MatchPlexPayload } from '../services/job-queue.service';
 import { prisma } from '../db';
-import { getPlexService } from '../integrations/plex.service';
+import { getLibraryService } from '../services/library';
 import { compareTwoStrings } from 'string-similarity';
 import { getConfigService } from '../services/config.service';
 import { createJobLogger } from '../utils/job-logger';
 
 /**
- * Process match Plex job
- * Fuzzy matches requested audiobook to Plex library item and updates status
+ * Process match library job (DEPRECATED - use scan_library instead)
+ * Fuzzy matches requested audiobook to library item and updates status
  */
 export async function processMatchPlex(payload: MatchPlexPayload): Promise<any> {
   const { requestId, audiobookId, title, author, jobId } = payload;
 
-  const logger = jobId ? createJobLogger(jobId, 'MatchPlex') : null;
+  const logger = jobId ? createJobLogger(jobId, 'MatchLibrary') : null;
 
-  await logger?.info(`Matching "${title}" by ${author} in Plex`);
+  await logger?.warn('DEPRECATED: match_plex job is deprecated. Use scan_plex instead.');
+  await logger?.info(`Matching "${title}" by ${author} in library`);
 
   try {
-    // Get Plex configuration
+    // Get library service and configuration
     const configService = getConfigService();
-    const plexConfig = await configService.getPlexConfig();
+    const libraryService = await getLibraryService();
+    const backendMode = await configService.getBackendMode();
 
-    if (!plexConfig.serverUrl || !plexConfig.authToken) {
-      throw new Error('Plex is not configured');
-    }
+    await logger?.info(`Backend mode: ${backendMode}`);
 
-    // Get audiobook library ID
-    const libraryId = plexConfig.libraryId;
+    // Get configured library ID
+    const libraryId = backendMode === 'audiobookshelf'
+      ? await configService.get('audiobookshelf.library_id')
+      : (await configService.getPlexConfig()).libraryId;
+
     if (!libraryId) {
-      throw new Error('Plex audiobook library not configured');
+      throw new Error(`${backendMode} library not configured`);
     }
 
-    // Search Plex library
-    const plexService = getPlexService();
-    const searchResults = await plexService.searchLibrary(
-      plexConfig.serverUrl,
-      plexConfig.authToken,
-      libraryId,
-      title
-    );
+    // Search library using abstraction layer
+    const searchResults = await libraryService.searchItems(libraryId, title);
 
-    await logger?.info(`Found ${searchResults.length} results in Plex library`);
+    await logger?.info(`Found ${searchResults.length} results in library`);
 
     if (searchResults.length === 0) {
-      await logger?.warn(`No matches found in Plex for "${title}"`);
+      await logger?.warn(`No matches found in library for "${title}"`);
 
-      // Mark as completed anyway - the file is there, Plex just needs time to scan
+      // Mark as completed anyway - the file is there, library just needs time to scan
       await prisma.request.update({
         where: { id: requestId },
         data: {
@@ -62,10 +62,10 @@ export async function processMatchPlex(payload: MatchPlexPayload): Promise<any> 
 
       return {
         success: true,
-        message: 'No Plex match found yet, but request completed',
+        message: 'No library match found yet, but request completed',
         requestId,
         matched: false,
-        note: 'Plex may need time to scan the new files',
+        note: 'Library may need time to scan the new files',
       };
     }
 
@@ -102,14 +102,21 @@ export async function processMatchPlex(payload: MatchPlexPayload): Promise<any> 
     if (bestMatch.score >= 0.7) {
       await logger?.info(`Match accepted!`);
 
-      // Update audiobook with Plex info
+      // Update audiobook with library item ID
+      const updateData: any = {
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      if (backendMode === 'audiobookshelf') {
+        updateData.absItemId = bestMatch.item.externalId;
+      } else {
+        updateData.plexGuid = bestMatch.item.externalId;
+      }
+
       await prisma.audiobook.update({
         where: { id: audiobookId },
-        data: {
-          plexGuid: bestMatch.item.guid,
-          completedAt: new Date(),
-          updatedAt: new Date(),
-        },
+        data: updateData,
       });
 
       // Ensure request is marked as completed
@@ -124,15 +131,16 @@ export async function processMatchPlex(payload: MatchPlexPayload): Promise<any> 
 
       return {
         success: true,
-        message: 'Successfully matched audiobook in Plex',
+        message: `Successfully matched audiobook in library (${backendMode})`,
+        backendMode,
         requestId,
         matched: true,
         matchScore: bestMatch.score,
-        plexItem: {
+        libraryItem: {
           title: bestMatch.item.title,
           author: bestMatch.item.author,
-          ratingKey: bestMatch.item.ratingKey,
-          guid: bestMatch.item.guid,
+          id: bestMatch.item.id,
+          externalId: bestMatch.item.externalId,
         },
       };
     } else {
@@ -150,7 +158,7 @@ export async function processMatchPlex(payload: MatchPlexPayload): Promise<any> 
 
       return {
         success: true,
-        message: 'Request completed, but Plex match uncertain',
+        message: 'Request completed, but library match uncertain',
         requestId,
         matched: false,
         matchScore: bestMatch.score,
@@ -166,7 +174,7 @@ export async function processMatchPlex(payload: MatchPlexPayload): Promise<any> 
       where: { id: requestId },
       data: {
         status: 'completed',
-        errorMessage: `Plex matching failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        errorMessage: `Library matching failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
         updatedAt: new Date(),
         completedAt: new Date(),
       },
@@ -174,7 +182,7 @@ export async function processMatchPlex(payload: MatchPlexPayload): Promise<any> 
 
     return {
       success: false,
-      message: 'Request completed despite Plex matching error',
+      message: 'Request completed despite library matching error',
       requestId,
       matched: false,
       error: error instanceof Error ? error.message : 'Unknown error',

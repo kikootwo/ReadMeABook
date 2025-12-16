@@ -15,8 +15,8 @@ interface ABSRequestOptions {
  */
 export async function absRequest<T>(endpoint: string, options: ABSRequestOptions = {}): Promise<T> {
   const configService = getConfigService();
-  const serverUrl = await configService.get('abs.server_url');
-  const apiToken = await configService.get('abs.api_token');
+  const serverUrl = await configService.get('audiobookshelf.server_url');
+  const apiToken = await configService.get('audiobookshelf.api_token');
 
   if (!serverUrl || !apiToken) {
     throw new Error('Audiobookshelf not configured');

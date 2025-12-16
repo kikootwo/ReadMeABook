@@ -513,7 +513,12 @@ export default function SetupWizard() {
   };
 
   return (
-    <WizardLayout currentStep={state.currentStep} totalSteps={totalSteps}>
+    <WizardLayout
+      currentStep={state.currentStep}
+      totalSteps={totalSteps}
+      backendMode={state.backendMode}
+      authMethod={state.authMethod}
+    >
       {renderStep()}
     </WizardLayout>
   );

@@ -11,20 +11,58 @@ interface WizardLayoutProps {
   currentStep: number;
   totalSteps: number;
   children: React.ReactNode;
+  backendMode?: 'plex' | 'audiobookshelf';
+  authMethod?: 'oidc' | 'manual' | 'both';
 }
 
-export function WizardLayout({ currentStep, totalSteps, children }: WizardLayoutProps) {
-  const steps = [
-    { number: 1, title: 'Welcome' },
-    { number: 2, title: 'Admin' },
-    { number: 3, title: 'Plex' },
-    { number: 4, title: 'Prowlarr' },
-    { number: 5, title: 'Download' },
-    { number: 6, title: 'Paths' },
-    { number: 7, title: 'BookDate' },
-    { number: 8, title: 'Review' },
-    { number: 9, title: 'Finalize' },
-  ];
+export function WizardLayout({ currentStep, totalSteps, children, backendMode = 'plex', authMethod = 'oidc' }: WizardLayoutProps) {
+  // Generate dynamic steps based on backend mode and auth method
+  const generateSteps = () => {
+    const steps: { number: number; title: string }[] = [
+      { number: 1, title: 'Welcome' },
+      { number: 2, title: 'Backend' },
+    ];
+
+    if (backendMode === 'plex') {
+      steps.push(
+        { number: 3, title: 'Admin' },
+        { number: 4, title: 'Plex' },
+        { number: 5, title: 'Prowlarr' },
+        { number: 6, title: 'Download' },
+        { number: 7, title: 'Paths' },
+        { number: 8, title: 'BookDate' },
+        { number: 9, title: 'Review' },
+        { number: 10, title: 'Finalize' }
+      );
+    } else {
+      // Audiobookshelf mode
+      let stepNumber = 3;
+      steps.push({ number: stepNumber++, title: 'ABS' });
+      steps.push({ number: stepNumber++, title: 'Auth' });
+
+      if (authMethod === 'oidc' || authMethod === 'both') {
+        steps.push({ number: stepNumber++, title: 'OIDC' });
+      }
+
+      if (authMethod === 'manual' || authMethod === 'both') {
+        steps.push({ number: stepNumber++, title: 'Registration' });
+        steps.push({ number: stepNumber++, title: 'Admin' });
+      }
+
+      steps.push(
+        { number: stepNumber++, title: 'Prowlarr' },
+        { number: stepNumber++, title: 'Download' },
+        { number: stepNumber++, title: 'Paths' },
+        { number: stepNumber++, title: 'BookDate' },
+        { number: stepNumber++, title: 'Review' },
+        { number: stepNumber++, title: 'Finalize' }
+      );
+    }
+
+    return steps;
+  };
+
+  const steps = generateSteps();
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">

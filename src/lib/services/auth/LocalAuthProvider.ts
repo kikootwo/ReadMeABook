@@ -97,18 +97,30 @@ export class LocalAuthProvider implements IAuthProvider {
       });
 
       // Generate tokens
+      console.log('[LocalAuthProvider] Generating tokens for user:', {
+        id: user.id,
+        plexId: user.plexId,
+        username: user.plexUsername,
+        role: user.role,
+        authProvider: user.authProvider,
+      });
+
       const tokens = await this.generateTokens({
         id: user.id,
+        plexId: user.plexId,
         username: user.plexUsername,
         isAdmin: user.role === 'admin',
       });
+
+      console.log('[LocalAuthProvider] Tokens generated, returning user data');
 
       return {
         success: true,
         user: {
           id: user.id,
+          plexId: user.plexId,
           username: user.plexUsername,
-          isAdmin: user.role === 'admin',
+          role: user.role,
         },
         tokens,
       };
@@ -194,6 +206,7 @@ export class LocalAuthProvider implements IAuthProvider {
       // Generate tokens for immediate login
       const tokens = await this.generateTokens({
         id: user.id,
+        plexId: user.plexId,
         username: user.plexUsername,
         isAdmin: user.role === 'admin',
       });
@@ -202,8 +215,9 @@ export class LocalAuthProvider implements IAuthProvider {
         success: true,
         user: {
           id: user.id,
+          plexId: user.plexId,
           username: user.plexUsername,
-          isAdmin: user.role === 'admin',
+          role: user.role,
         },
         tokens,
       };
@@ -219,14 +233,17 @@ export class LocalAuthProvider implements IAuthProvider {
   /**
    * Generate JWT access and refresh tokens
    */
-  private async generateTokens(userInfo: UserInfo): Promise<AuthTokens> {
-    const accessToken = generateAccessToken({
+  private async generateTokens(userInfo: UserInfo & { plexId: string }): Promise<AuthTokens> {
+    const tokenPayload = {
       sub: userInfo.id,
-      plexId: userInfo.id,
+      plexId: userInfo.plexId,
       username: userInfo.username,
       role: userInfo.isAdmin ? 'admin' : 'user',
-    });
+    };
 
+    console.log('[LocalAuthProvider] JWT token payload:', tokenPayload);
+
+    const accessToken = generateAccessToken(tokenPayload);
     const refreshToken = generateRefreshToken(userInfo.id);
 
     return {
