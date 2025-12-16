@@ -5,7 +5,6 @@ services:
     build:
       context: .
       dockerfile: dockerfile.unified
-    image: readmeabook-local:latest
     container_name: readmeabook-local
     restart: unless-stopped
     ports:

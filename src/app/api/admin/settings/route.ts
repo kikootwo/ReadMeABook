@@ -26,10 +26,27 @@ export async function GET(request: NextRequest) {
 
     // Build response object
     const settings = {
+      backendMode: configMap.get('system.backend_mode') || 'plex',
       plex: {
         url: configMap.get('plex_url') || '',
         token: maskValue('token', configMap.get('plex_token')),
         libraryId: configMap.get('plex_audiobook_library_id') || '',
+      },
+      audiobookshelf: {
+        serverUrl: configMap.get('audiobookshelf.server_url') || '',
+        apiToken: maskValue('api_token', configMap.get('audiobookshelf.api_token')),
+        libraryId: configMap.get('audiobookshelf.library_id') || '',
+      },
+      oidc: {
+        enabled: configMap.get('oidc.enabled') === 'true',
+        providerName: configMap.get('oidc.provider_name') || '',
+        issuerUrl: configMap.get('oidc.issuer_url') || '',
+        clientId: configMap.get('oidc.client_id') || '',
+        clientSecret: maskValue('client_secret', configMap.get('oidc.client_secret')),
+      },
+      registration: {
+        enabled: configMap.get('auth.registration_enabled') === 'true',
+        requireAdminApproval: configMap.get('auth.require_admin_approval') === 'true',
       },
       prowlarr: {
         url: configMap.get('prowlarr_url') || '',

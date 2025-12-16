@@ -40,6 +40,7 @@ export async function requireAuth(
   const token = extractToken(request);
 
   if (!token) {
+    console.error('[Auth Middleware] No token provided');
     return NextResponse.json(
       {
         error: 'Unauthorized',
@@ -52,6 +53,7 @@ export async function requireAuth(
   const payload = verifyAccessToken(token);
 
   if (!payload) {
+    console.error('[Auth Middleware] Token verification failed');
     return NextResponse.json(
       {
         error: 'Unauthorized',
@@ -67,6 +69,7 @@ export async function requireAuth(
   });
 
   if (!user) {
+    console.error('[Auth Middleware] User not found in database:', payload.sub);
     return NextResponse.json(
       {
         error: 'Unauthorized',

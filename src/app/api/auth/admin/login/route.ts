@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import bcrypt from 'bcrypt';
 import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
+import { getEncryptionService } from '@/lib/services/encryption.service';
 
 /**
  * POST /api/auth/admin/login
@@ -42,7 +43,22 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify password
-    const passwordValid = await bcrypt.compare(password, user.authToken || '');
+    // authToken contains an encrypted bcrypt hash, so we need to decrypt it first
+    let passwordValid = false;
+    try {
+      const encryptionService = getEncryptionService();
+      const decryptedHash = encryptionService.decrypt(user.authToken || '');
+      passwordValid = await bcrypt.compare(password, decryptedHash);
+    } catch (error) {
+      console.error('[AdminLogin] Password verification failed:', error);
+      return NextResponse.json(
+        {
+          error: 'AuthenticationError',
+          message: 'Invalid username or password',
+        },
+        { status: 401 }
+      );
+    }
 
     if (!passwordValid) {
       return NextResponse.json(

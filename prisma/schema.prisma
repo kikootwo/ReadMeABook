@@ -39,6 +39,12 @@ model User {
   // Plex Home profile tracking
   plexHomeUserId String?  @map("plex_home_user_id") // Profile ID from Plex Home (null = main account, set = home profile)
 
+  // Multi-auth support (for Audiobookshelf integration)
+  authProvider        String?  @map("auth_provider")  // 'plex' | 'oidc' | 'local'
+  oidcSubject         String?  @map("oidc_subject")   // OIDC subject ID (unique per provider)
+  oidcProvider        String?  @map("oidc_provider")  // OIDC provider name (e.g., 'authentik', 'keycloak')
+  registrationStatus  String?  @default("approved") @map("registration_status")  // 'pending_approval' | 'approved' | 'rejected'
+
   // BookDate per-user preferences
   bookDateLibraryScope         String?  @default("full") @map("bookdate_library_scope") // 'full' | 'rated'
   bookDateCustomPrompt         String?  @map("bookdate_custom_prompt") @db.Text
@@ -158,6 +164,9 @@ model Audiobook {
   plexGuid        String?   @map("plex_guid") // Set when imported into Plex
   plexLibraryId   String?   @map("plex_library_id")
 
+  // Audiobookshelf integration (alternative to Plex)
+  absItemId       String?   @map("abs_item_id") // Audiobookshelf item ID
+
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
   completedAt     DateTime? @map("completed_at")
@@ -167,6 +176,7 @@ model Audiobook {
 
   @@index([audibleAsin])
   @@index([plexGuid])
+  @@index([absItemId])
   @@index([title])
   @@index([author])
   @@index([status])

@@ -31,8 +31,8 @@ export function FinalizeStep({ onComplete, onBack }: FinalizeStepProps) {
     },
     {
       id: 'plex_library_scan',
-      name: 'Plex Library Scan',
-      description: 'Scans your Plex library to discover audiobooks you already have',
+      name: 'Library Scan',
+      description: 'Scans your media library to discover audiobooks you already have',
       status: 'pending',
     },
   ]);

@@ -3,7 +3,10 @@ version: '3.9'
 services:
   readmeabook:
     image: ghcr.io/kikootwo/readmeabook:latest
-    container_name: readmeabook-unified
+#    build:
+#      context: .
+#      dockerfile: dockerfile.unified
+    container_name: readmeabook
     restart: unless-stopped
     ports:
       - "3030:3030"

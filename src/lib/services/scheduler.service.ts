@@ -63,14 +63,14 @@ export class SchedulerService {
   private async ensureDefaultJobs(): Promise<void> {
     const defaults = [
       {
-        name: 'Plex Library Scan',
+        name: 'Library Scan',
         type: 'plex_library_scan' as ScheduledJobType,
         schedule: '0 */6 * * *', // Every 6 hours
         enabled: false, // Start disabled until first setup is complete
         payload: {},
       },
       {
-        name: 'Plex Recently Added Check',
+        name: 'Recently Added Check',
         type: 'plex_recently_added_check' as ScheduledJobType,
         schedule: '*/5 * * * *', // Every 5 minutes
         enabled: true, // Enable by default for quick detection
@@ -324,37 +324,70 @@ export class SchedulerService {
   }
 
   /**
-   * Trigger Plex library scan
+   * Trigger library scan (Plex or Audiobookshelf based on backend mode)
    */
   private async triggerPlexScan(job: any): Promise<string> {
     const { getConfigService } = await import('./config.service');
     const configService = getConfigService();
 
-    // Validate Plex configuration before triggering scan
-    const plexConfig = await configService.getMany([
-      'plex_url',
-      'plex_token',
-      'plex_audiobook_library_id',
-    ]);
+    // Check backend mode
+    const backendMode = await configService.getBackendMode();
 
+    // Validate configuration based on backend mode
+    let libraryId: string | null = null;
     const missingFields: string[] = [];
-    if (!plexConfig.plex_url) {
-      missingFields.push('Plex server URL');
-    }
-    if (!plexConfig.plex_token) {
-      missingFields.push('Plex auth token');
-    }
-    if (!plexConfig.plex_audiobook_library_id) {
-      missingFields.push('Plex audiobook library ID');
+
+    if (backendMode === 'audiobookshelf') {
+      const absConfig = await configService.getMany([
+        'audiobookshelf.server_url',
+        'audiobookshelf.api_token',
+        'audiobookshelf.library_id',
+      ]);
+
+      if (!absConfig['audiobookshelf.server_url']) {
+        missingFields.push('Audiobookshelf server URL');
+      }
+      if (!absConfig['audiobookshelf.api_token']) {
+        missingFields.push('Audiobookshelf API token');
+      }
+      if (!absConfig['audiobookshelf.library_id']) {
+        missingFields.push('Audiobookshelf library ID');
+      }
+
+      if (missingFields.length > 0) {
+        const errorMsg = `Audiobookshelf is not configured. Missing: ${missingFields.join(', ')}. Please configure Audiobookshelf in the admin settings before running library scans.`;
+        console.error('[ScanLibrary] Error:', errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      libraryId = job.payload?.libraryId || absConfig['audiobookshelf.library_id'];
+    } else {
+      const plexConfig = await configService.getMany([
+        'plex_url',
+        'plex_token',
+        'plex_audiobook_library_id',
+      ]);
+
+      if (!plexConfig.plex_url) {
+        missingFields.push('Plex server URL');
+      }
+      if (!plexConfig.plex_token) {
+        missingFields.push('Plex auth token');
+      }
+      if (!plexConfig.plex_audiobook_library_id) {
+        missingFields.push('Plex audiobook library ID');
+      }
+
+      if (missingFields.length > 0) {
+        const errorMsg = `Plex is not configured. Missing: ${missingFields.join(', ')}. Please configure Plex in the admin settings before running library scans.`;
+        console.error('[ScanLibrary] Error:', errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      libraryId = job.payload?.libraryId || plexConfig.plex_audiobook_library_id;
     }
 
-    if (missingFields.length > 0) {
-      const errorMsg = `Plex is not configured. Missing: ${missingFields.join(', ')}. Please configure Plex in the admin settings before running library scans.`;
-      console.error('[ScanPlex] Error:', errorMsg);
-      throw new Error(errorMsg);
-    }
-
-    const libraryId = job.payload?.libraryId || plexConfig.plex_audiobook_library_id;
+    console.log(`[ScanLibrary] Triggering ${backendMode} library scan for library: ${libraryId}`);
 
     return await this.jobQueue.addPlexScanJob(
       libraryId || '',

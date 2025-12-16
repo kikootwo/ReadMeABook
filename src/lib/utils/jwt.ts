@@ -54,7 +54,10 @@ export function verifyAccessToken(token: string): TokenPayload | null {
     const decoded = jwt.verify(token, JWT_SECRET) as TokenPayload;
     return decoded;
   } catch (error) {
-    console.error('Access token verification failed:', error);
+    console.error('[JWT] Access token verification failed:', error);
+    if (error instanceof Error) {
+      console.error('[JWT] Error details:', error.message);
+    }
     return null;
   }
 }

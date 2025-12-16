@@ -202,10 +202,10 @@ export default function AdminLogsPage() {
               <option value="download_torrent">Download Torrent</option>
               <option value="monitor_download">Monitor Download</option>
               <option value="organize_files">Organize Files</option>
-              <option value="scan_plex">Scan Plex</option>
-              <option value="match_plex">Match Plex</option>
-              <option value="plex_library_scan">Plex Library Scan</option>
-              <option value="plex_recently_added_check">Plex Recently Added</option>
+              <option value="scan_plex">Library Scan</option>
+              <option value="match_plex">Library Match</option>
+              <option value="plex_library_scan">Library Scan (Scheduled)</option>
+              <option value="plex_recently_added_check">Recently Added Check</option>
               <option value="audible_refresh">Audible Refresh</option>
               <option value="retry_missing_torrents">Retry Missing Torrents</option>
               <option value="retry_failed_imports">Retry Failed Imports</option>
@@ -407,7 +407,7 @@ export default function AdminLogsPage() {
             <li>• Event logs show all internal operations with timestamps (similar to Docker logs)</li>
             <li>• Jobs are retried automatically based on their max attempts setting</li>
             <li>• Use filters to find specific job types or statuses</li>
-            <li>• All job types are tracked: searches, downloads, file organization, Plex scans, RSS monitoring, and more</li>
+            <li>• All job types are tracked: searches, downloads, file organization, library scans, RSS monitoring, and more</li>
           </ul>
         </div>
       </div>

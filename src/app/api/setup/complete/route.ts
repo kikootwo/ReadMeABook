@@ -12,15 +12,65 @@ import { getPlexService } from '@/lib/integrations/plex.service';
 
 export async function POST(request: NextRequest) {
   try {
-    const { admin, plex, prowlarr, downloadClient, paths, bookdate } = await request.json();
+    const {
+      backendMode,
+      admin,
+      plex,
+      audiobookshelf,
+      authMethod,
+      oidc,
+      registration,
+      prowlarr,
+      downloadClient,
+      paths,
+      bookdate,
+    } = await request.json();
 
-    // Validate required fields
+    // Validate backend mode
+    if (!backendMode || !['plex', 'audiobookshelf'].includes(backendMode)) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid or missing backend mode' },
+        { status: 400 }
+      );
+    }
+
+    // Validate required fields based on backend mode
+    if (backendMode === 'plex') {
+      if (
+        !admin?.username ||
+        !admin?.password ||
+        !plex?.url ||
+        !plex?.token ||
+        !plex?.audiobook_library_id
+      ) {
+        return NextResponse.json(
+          { success: false, error: 'Missing required Plex configuration fields' },
+          { status: 400 }
+        );
+      }
+    } else {
+      // Audiobookshelf mode
+      if (
+        !audiobookshelf?.server_url ||
+        !audiobookshelf?.api_token ||
+        !audiobookshelf?.library_id
+      ) {
+        return NextResponse.json(
+          { success: false, error: 'Missing required Audiobookshelf configuration fields' },
+          { status: 400 }
+        );
+      }
+
+      if (!authMethod || !['oidc', 'manual', 'both'].includes(authMethod)) {
+        return NextResponse.json(
+          { success: false, error: 'Invalid or missing authentication method' },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Validate common required fields
     if (
-      !admin?.username ||
-      !admin?.password ||
-      !plex?.url ||
-      !plex?.token ||
-      !plex?.audiobook_library_id ||
       !prowlarr?.url ||
       !prowlarr?.api_key ||
       !prowlarr?.indexers ||
@@ -39,67 +89,177 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create admin user
-    const hashedPassword = await bcrypt.hash(admin.password, 10);
-    const adminUser = await prisma.user.create({
-      data: {
-        plexId: `local-${admin.username}`,
-        plexUsername: admin.username,
-        plexEmail: null,
-        role: 'admin',
-        isSetupAdmin: true, // Mark as setup admin - role cannot be changed
-        avatarUrl: null,
-        authToken: hashedPassword, // Store hashed password in authToken field for local users
-        lastLoginAt: new Date(),
-      },
-    });
+    // Create admin user (for Plex mode or ABS + Manual auth)
+    let adminUser: any = null;
+    let accessToken: string | null = null;
+    let refreshToken: string | null = null;
+
+    if (backendMode === 'plex' || (backendMode === 'audiobookshelf' && admin)) {
+      if (!admin?.username || !admin?.password) {
+        return NextResponse.json(
+          { success: false, error: 'Admin credentials required' },
+          { status: 400 }
+        );
+      }
+
+      const hashedPassword = await bcrypt.hash(admin.password, 10);
+      const encryptionService = getEncryptionService();
+      const encryptedPassword = encryptionService.encrypt(hashedPassword);
+
+      adminUser = await prisma.user.create({
+        data: {
+          plexId: `local-${admin.username}`,
+          plexUsername: admin.username,
+          plexEmail: null,
+          role: 'admin',
+          isSetupAdmin: true, // Mark as setup admin - role cannot be changed
+          avatarUrl: null,
+          authToken: encryptedPassword, // Store encrypted hashed password
+          authProvider: backendMode === 'plex' ? 'plex' : 'local',
+          registrationStatus: 'approved',
+          lastLoginAt: new Date(),
+        },
+      });
+
+      // Generate JWT tokens for auto-login
+      accessToken = generateAccessToken({
+        sub: adminUser.id,
+        plexId: adminUser.plexId,
+        username: adminUser.plexUsername,
+        role: adminUser.role,
+      });
+
+      refreshToken = generateRefreshToken(adminUser.id);
+    }
 
     // Save configuration to database
     // Use upsert to handle both initial setup and updates
+    const encryptionService = getEncryptionService();
 
-    // Plex configuration
+    // Save backend mode
     await prisma.configuration.upsert({
-      where: { key: 'plex_url' },
-      update: { value: plex.url },
-      create: { key: 'plex_url', value: plex.url },
+      where: { key: 'system.backend_mode' },
+      update: { value: backendMode },
+      create: { key: 'system.backend_mode', value: backendMode },
     });
 
-    await prisma.configuration.upsert({
-      where: { key: 'plex_token' },
-      update: { value: plex.token },
-      create: { key: 'plex_token', value: plex.token },
-    });
-
-    await prisma.configuration.upsert({
-      where: { key: 'plex_audiobook_library_id' },
-      update: { value: plex.audiobook_library_id },
-      create: { key: 'plex_audiobook_library_id', value: plex.audiobook_library_id },
-    });
-
-    // Get and save machine identifier (for server-specific access tokens)
-    // Fetch from Plex if not provided by frontend
-    let machineIdentifier = plex.machine_identifier;
-    if (!machineIdentifier) {
-      try {
-        const plexService = getPlexService();
-        const serverInfo = await plexService.testConnection(plex.url, plex.token);
-        if (serverInfo.success && serverInfo.info?.machineIdentifier) {
-          machineIdentifier = serverInfo.info.machineIdentifier;
-          console.log('[Setup] Fetched machineIdentifier:', machineIdentifier);
-        } else {
-          console.warn('[Setup] Could not fetch machineIdentifier');
-        }
-      } catch (error) {
-        console.error('[Setup] Error fetching machineIdentifier:', error);
-      }
-    }
-
-    if (machineIdentifier) {
+    if (backendMode === 'plex') {
+      // Plex configuration
       await prisma.configuration.upsert({
-        where: { key: 'plex_machine_identifier' },
-        update: { value: machineIdentifier },
-        create: { key: 'plex_machine_identifier', value: machineIdentifier },
+        where: { key: 'plex_url' },
+        update: { value: plex.url },
+        create: { key: 'plex_url', value: plex.url },
       });
+
+      await prisma.configuration.upsert({
+        where: { key: 'plex_token' },
+        update: { value: plex.token },
+        create: { key: 'plex_token', value: plex.token },
+      });
+
+      await prisma.configuration.upsert({
+        where: { key: 'plex_audiobook_library_id' },
+        update: { value: plex.audiobook_library_id },
+        create: { key: 'plex_audiobook_library_id', value: plex.audiobook_library_id },
+      });
+
+      // Get and save machine identifier (for server-specific access tokens)
+      // Fetch from Plex if not provided by frontend
+      let machineIdentifier = plex.machine_identifier;
+      if (!machineIdentifier) {
+        try {
+          const plexService = getPlexService();
+          const serverInfo = await plexService.testConnection(plex.url, plex.token);
+          if (serverInfo.success && serverInfo.info?.machineIdentifier) {
+            machineIdentifier = serverInfo.info.machineIdentifier;
+            console.log('[Setup] Fetched machineIdentifier:', machineIdentifier);
+          } else {
+            console.warn('[Setup] Could not fetch machineIdentifier');
+          }
+        } catch (error) {
+          console.error('[Setup] Error fetching machineIdentifier:', error);
+        }
+      }
+
+      if (machineIdentifier) {
+        await prisma.configuration.upsert({
+          where: { key: 'plex_machine_identifier' },
+          update: { value: machineIdentifier },
+          create: { key: 'plex_machine_identifier', value: machineIdentifier },
+        });
+      }
+    } else {
+      // Audiobookshelf configuration
+      await prisma.configuration.upsert({
+        where: { key: 'audiobookshelf.server_url' },
+        update: { value: audiobookshelf.server_url },
+        create: { key: 'audiobookshelf.server_url', value: audiobookshelf.server_url },
+      });
+
+      const encryptedAbsToken = encryptionService.encrypt(audiobookshelf.api_token);
+      await prisma.configuration.upsert({
+        where: { key: 'audiobookshelf.api_token' },
+        update: { value: encryptedAbsToken, encrypted: true },
+        create: { key: 'audiobookshelf.api_token', value: encryptedAbsToken, encrypted: true },
+      });
+
+      await prisma.configuration.upsert({
+        where: { key: 'audiobookshelf.library_id' },
+        update: { value: audiobookshelf.library_id },
+        create: { key: 'audiobookshelf.library_id', value: audiobookshelf.library_id },
+      });
+
+      // OIDC configuration (if enabled)
+      if (authMethod === 'oidc' || authMethod === 'both') {
+        await prisma.configuration.upsert({
+          where: { key: 'oidc.enabled' },
+          update: { value: 'true' },
+          create: { key: 'oidc.enabled', value: 'true' },
+        });
+
+        await prisma.configuration.upsert({
+          where: { key: 'oidc.provider_name' },
+          update: { value: oidc.provider_name },
+          create: { key: 'oidc.provider_name', value: oidc.provider_name },
+        });
+
+        await prisma.configuration.upsert({
+          where: { key: 'oidc.issuer_url' },
+          update: { value: oidc.issuer_url },
+          create: { key: 'oidc.issuer_url', value: oidc.issuer_url },
+        });
+
+        await prisma.configuration.upsert({
+          where: { key: 'oidc.client_id' },
+          update: { value: oidc.client_id },
+          create: { key: 'oidc.client_id', value: oidc.client_id },
+        });
+
+        const encryptedClientSecret = encryptionService.encrypt(oidc.client_secret);
+        await prisma.configuration.upsert({
+          where: { key: 'oidc.client_secret' },
+          update: { value: encryptedClientSecret, encrypted: true },
+          create: { key: 'oidc.client_secret', value: encryptedClientSecret, encrypted: true },
+        });
+      }
+
+      // Manual registration configuration (if enabled)
+      if (authMethod === 'manual' || authMethod === 'both') {
+        await prisma.configuration.upsert({
+          where: { key: 'auth.registration_enabled' },
+          update: { value: 'true' },
+          create: { key: 'auth.registration_enabled', value: 'true' },
+        });
+
+        await prisma.configuration.upsert({
+          where: { key: 'auth.require_admin_approval' },
+          update: { value: registration.require_admin_approval ? 'true' : 'false' },
+          create: {
+            key: 'auth.require_admin_approval',
+            value: registration.require_admin_approval ? 'true' : 'false',
+          },
+        });
+      }
     }
 
     // Prowlarr configuration
@@ -235,34 +395,33 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    console.log('[Setup] Auto jobs enabled (Plex Library Scan, Audible Data Refresh)');
-
-    // Generate JWT tokens for auto-login
-    const accessToken = generateAccessToken({
-      sub: adminUser.id,
-      plexId: adminUser.plexId,
-      username: adminUser.plexUsername,
-      role: adminUser.role,
-    });
-
-    const refreshToken = generateRefreshToken(adminUser.id);
+    console.log('[Setup] Auto jobs enabled');
 
     console.log('[Setup] Configuration saved successfully');
 
-    return NextResponse.json({
-      success: true,
-      message: 'Setup completed successfully',
-      accessToken,
-      refreshToken,
-      user: {
-        id: adminUser.id,
-        plexId: adminUser.plexId,
-        username: adminUser.plexUsername,
-        email: adminUser.plexEmail,
-        role: adminUser.role,
-        avatarUrl: adminUser.avatarUrl,
-      },
-    });
+    // Return response with tokens if admin user was created
+    if (adminUser && accessToken && refreshToken) {
+      return NextResponse.json({
+        success: true,
+        message: 'Setup completed successfully',
+        accessToken,
+        refreshToken,
+        user: {
+          id: adminUser.id,
+          plexId: adminUser.plexId,
+          username: adminUser.plexUsername,
+          email: adminUser.plexEmail,
+          role: adminUser.role,
+          avatarUrl: adminUser.avatarUrl,
+        },
+      });
+    } else {
+      // OIDC-only mode - no admin user created yet
+      return NextResponse.json({
+        success: true,
+        message: 'Setup completed successfully. First OIDC login will become admin.',
+      });
+    }
   } catch (error) {
     console.error('[Setup] Failed to save configuration:', error);
     return NextResponse.json(

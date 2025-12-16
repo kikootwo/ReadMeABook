@@ -28,11 +28,33 @@ urlencode() {
     echo "${encoded}"
 }
 
-# Generate secrets only if not already set
+# Secrets file location (persisted on volume)
+SECRETS_FILE="/app/config/.secrets"
+
+# Load existing secrets from file if it exists
+if [ -f "$SECRETS_FILE" ]; then
+    echo "🔑 Loading persisted secrets from $SECRETS_FILE"
+    source "$SECRETS_FILE"
+fi
+
+# Generate secrets only if not already set (from env, file, or generate new)
 export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(generate_secret)}"
 export JWT_SECRET="${JWT_SECRET:-$(generate_secret)}"
 export JWT_REFRESH_SECRET="${JWT_REFRESH_SECRET:-$(generate_secret)}"
 export CONFIG_ENCRYPTION_KEY="${CONFIG_ENCRYPTION_KEY:-$(generate_secret)}"
+
+# Persist secrets to file for future container restarts
+cat > "$SECRETS_FILE" <<EOF
+# Auto-generated secrets - DO NOT DELETE THIS FILE
+# Generated on: $(date)
+POSTGRES_PASSWORD="$POSTGRES_PASSWORD"
+JWT_SECRET="$JWT_SECRET"
+JWT_REFRESH_SECRET="$JWT_REFRESH_SECRET"
+CONFIG_ENCRYPTION_KEY="$CONFIG_ENCRYPTION_KEY"
+EOF
+
+chmod 600 "$SECRETS_FILE"
+echo "✅ Secrets persisted to $SECRETS_FILE"
 
 # Set other defaults
 export POSTGRES_USER="${POSTGRES_USER:-readmeabook}"

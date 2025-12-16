@@ -18,12 +18,13 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 
 **Image:** `ghcr.io/kikootwo/readmeabook:latest`
 
-**Auto-generated secrets:**
+**Auto-generated secrets (persisted to `/app/config/.secrets`):**
 - `JWT_SECRET` - Random 32-byte base64
 - `JWT_REFRESH_SECRET` - Random 32-byte base64
 - `CONFIG_ENCRYPTION_KEY` - Random 32-byte base64
 - `POSTGRES_PASSWORD` - Random 32-byte base64
 - `PLEX_CLIENT_IDENTIFIER` - Random hex ID
+- **Note:** Secrets are generated once on first run and reused on subsequent container restarts
 
 **Volumes:**
 - `/app/config` - App config/logs (bind mount: ./config)
@@ -58,14 +59,16 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 ## Startup Sequence
 
 **Entrypoint script (`entrypoint.sh`):**
-1. Generate secrets if not provided
-2. Initialize PostgreSQL if first run
-3. Start PostgreSQL temporarily
-4. Create database user and database
-5. Stop PostgreSQL
-6. Export environment variables
+1. Load secrets from `/app/config/.secrets` if exists
+2. Generate secrets if not provided (from env or file)
+3. Persist secrets to `/app/config/.secrets` for future restarts
+4. Initialize PostgreSQL if first run
+5. Start PostgreSQL temporarily
+6. Create database user and database
 7. Run Prisma migrations
-8. Start supervisord (postgres → redis → app)
+8. Stop PostgreSQL
+9. Export environment variables
+10. Start supervisord (postgres → redis → app)
 
 **Supervisord priorities:**
 - PostgreSQL: priority 10 (starts first)
@@ -330,11 +333,13 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
 
 ## Security Notes
 
-1. **Auto-generated secrets:** Secure by default (32-byte random)
-2. **Override in production:** Set environment variables for persistent secrets
-3. **No external DB access:** PostgreSQL bound to 127.0.0.1
-4. **No external Redis access:** Redis bound to 127.0.0.1
-5. **Use reverse proxy:** HTTPS termination (Nginx, Caddy, Traefik)
+1. **Auto-generated secrets:** Secure by default (32-byte random), persisted to `/app/config/.secrets`
+2. **Secrets persistence:** Auto-generated secrets are saved to `/app/config/.secrets` on first run and reused on subsequent starts
+3. **Override in production:** Set environment variables in docker-compose.yml to use custom secrets (takes precedence over file)
+4. **Protect secrets file:** Ensure `/app/config` volume has appropriate permissions (chmod 600 on .secrets file)
+5. **No external DB access:** PostgreSQL bound to 127.0.0.1
+6. **No external Redis access:** Redis bound to 127.0.0.1
+7. **Use reverse proxy:** HTTPS termination (Nginx, Caddy, Traefik)
 
 ## Fixed Issues ✅
 
@@ -407,6 +412,12 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
 - Issue: Middleware logs `Setup check failed: Error: fetch failed` on every request when the container cannot resolve the public hostname.
 - Cause: Setup check used the incoming Host header only, so DNS hairpinning or air-gapped domains blocked loopback fetches.
 - Fix: Middleware now tries `SETUP_CHECK_BASE_URL` (optional), request origin, then `http://127.0.0.1:${PORT|3030}`; log noise eliminated once any origin succeeds.
+
+**16. Local admin authentication fails after container restart**
+- Issue: After container restart, local admin (manual registration) login fails with "Invalid username or password"
+- Cause: CONFIG_ENCRYPTION_KEY was auto-generated on each container start and not persisted. Passwords are encrypted with bcrypt hash then encrypted again with CONFIG_ENCRYPTION_KEY. When the key changes, decryption fails and password validation fails.
+- Fix: Entrypoint script now persists all auto-generated secrets (JWT_SECRET, JWT_REFRESH_SECRET, CONFIG_ENCRYPTION_KEY, POSTGRES_PASSWORD) to `/app/config/.secrets` file which is mounted on a volume. On subsequent starts, secrets are loaded from this file instead of regenerating.
+- Recovery: If already experiencing this issue, either (1) recreate admin account after updating to fixed version, or (2) if you know the old CONFIG_ENCRYPTION_KEY, set it as environment variable in docker-compose.yml
 
 ## Related
 

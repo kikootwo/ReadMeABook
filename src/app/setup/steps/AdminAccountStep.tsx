@@ -138,8 +138,8 @@ export function AdminAccountStep({
             <div className="text-sm text-blue-300">
               <p className="font-medium mb-1">About Admin Accounts</p>
               <p className="text-blue-400">
-                This local admin account is separate from Plex authentication. Use it to access
-                admin settings and manage the application. You'll still log in with Plex for regular use.
+                This local admin account is separate from media server authentication. Use it to access
+                admin settings and manage the application.
               </p>
             </div>
           </div>
