@@ -235,10 +235,32 @@ export class QBittorrentService {
     console.log(`[qBittorrent] Downloading .torrent file from: ${torrentUrl}`);
 
     // Download .torrent file into memory
-    const torrentResponse = await axios.get(torrentUrl, {
-      responseType: 'arraybuffer',
-      timeout: 30000,
-    });
+    let torrentResponse;
+    try {
+      torrentResponse = await axios.get(torrentUrl, {
+        responseType: 'arraybuffer',
+        timeout: 30000,
+        maxRedirects: 5,
+        validateStatus: (status) => status >= 200 && status < 400,
+      });
+    } catch (error) {
+      // Handle case where URL redirects to a magnet link
+      // Some Prowlarr indexers return HTTP URLs that redirect to magnet: links
+      if (axios.isAxiosError(error) && error.message.includes('magnet:')) {
+        console.log('[qBittorrent] Detected redirect to magnet link, extracting...');
+
+        // Try to extract magnet link from error message or response
+        const magnetMatch = error.message.match(/(magnet:\?[^\s"'<>]+)/);
+        if (magnetMatch) {
+          const magnetUrl = magnetMatch[1];
+          console.log(`[qBittorrent] Extracted magnet link from redirect: ${magnetUrl}`);
+          return await this.addMagnetLink(magnetUrl, category, options);
+        }
+      }
+
+      // Re-throw if we couldn't handle the error
+      throw error;
+    }
 
     const torrentBuffer = Buffer.from(torrentResponse.data);
     console.log(`[qBittorrent] Downloaded ${torrentBuffer.length} bytes`);
