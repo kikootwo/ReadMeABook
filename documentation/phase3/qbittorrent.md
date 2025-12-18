@@ -78,7 +78,7 @@ type TorrentState = 'downloading' | 'uploading' | 'stalledDL' |
 **5. Unclear error messages** - List missing fields explicitly
 **6. Race condition on torrent availability** - Fixed with 3s initial delay + exponential backoff retry (500ms, 1s, 2s)
 **7. Error logging during duplicate check** - Removed console.error in getTorrent() during expected "not found" cases (duplicate checking)
-**8. Prowlarr magnet link redirects** - Some indexers return HTTP URLs that redirect to magnet: links. Now detects and handles these redirects by extracting the magnet link and using the magnet flow
+**8. Prowlarr magnet link redirects** - Some indexers return HTTP URLs that redirect to magnet: links. Fixed by intercepting 3xx redirects before axios follows them, extracting the Location header, and routing to magnet flow if target is a magnet: link
 
 ## Tech Stack
 

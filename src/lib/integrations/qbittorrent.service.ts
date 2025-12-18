@@ -234,70 +234,76 @@ export class QBittorrentService {
   ): Promise<string> {
     console.log(`[qBittorrent] Downloading .torrent file from: ${torrentUrl}`);
 
-    // First attempt: Check if URL redirects to a magnet link
+    // Make initial request with maxRedirects: 0 to intercept redirects
     // Some Prowlarr indexers return HTTP URLs that redirect to magnet: links
     let torrentResponse;
     try {
       torrentResponse = await axios.get(torrentUrl, {
         responseType: 'arraybuffer',
         maxRedirects: 0,
-        validateStatus: (status) => status >= 200 && status < 400,
+        validateStatus: (status) => status >= 200 && status < 300, // Only 2xx is success
         timeout: 10000,
       });
 
-      console.log(`[qBittorrent] Initial response: status=${torrentResponse.status}, size=${torrentResponse.data.length} bytes`);
+      console.log(`[qBittorrent] Got 2xx response, size=${torrentResponse.data.length} bytes`);
 
-      // If we got a 200 OK, check if response is empty or contains a magnet link
-      const responseText = torrentResponse.data.toString();
-
-      // Check if response is empty or very small (likely not a real torrent file)
-      if (torrentResponse.data.length === 0) {
-        console.log(`[qBittorrent] Empty response, checking for redirects with follow enabled...`);
-        torrentResponse = await axios.get(torrentUrl, {
-          responseType: 'arraybuffer',
-          timeout: 30000,
-          maxRedirects: 5,
-        });
-        console.log(`[qBittorrent] After following redirects: size=${torrentResponse.data.length} bytes`);
-      } else if (responseText.includes('magnet:')) {
-        // Response contains a magnet link (might be HTML with redirect, or plain magnet)
-        const magnetMatch = responseText.match(/(magnet:\?[^\s"'<>]+)/);
+      // Check if response body contains a magnet link
+      if (torrentResponse.data.length > 0) {
+        const responseText = torrentResponse.data.toString();
+        const magnetMatch = responseText.match(/^magnet:\?[^\s]+$/);
         if (magnetMatch) {
-          const magnetUrl = magnetMatch[1];
-          console.log(`[qBittorrent] Found magnet link in response: ${magnetUrl}`);
-          return await this.addMagnetLink(magnetUrl, category, options);
+          console.log(`[qBittorrent] Response body is a magnet link`);
+          return await this.addMagnetLink(magnetMatch[0], category, options);
         }
       }
 
-      // Got valid torrent data, we'll use this response below
+      // Got valid torrent data (or will be validated below)
     } catch (error) {
-      // Check if this is a redirect response (3xx)
-      if (axios.isAxiosError(error) && error.response && error.response.status >= 300 && error.response.status < 400) {
-        const location = error.response.headers['location'];
-        console.log(`[qBittorrent] Got redirect (${error.response.status}) to: ${location}`);
+      if (!axios.isAxiosError(error) || !error.response) {
+        // Not an axios error or no response - re-throw
+        console.error(`[qBittorrent] Request failed:`, error);
+        throw error;
+      }
 
+      const status = error.response.status;
+
+      // Handle 3xx redirects
+      if (status >= 300 && status < 400) {
+        const location = error.response.headers['location'];
+        console.log(`[qBittorrent] Got ${status} redirect to: ${location}`);
+
+        // Check if redirect target is a magnet link
         if (location && location.startsWith('magnet:')) {
-          console.log(`[qBittorrent] Redirect location is magnet link`);
+          console.log(`[qBittorrent] Redirect target is magnet link`);
           return await this.addMagnetLink(location, category, options);
         }
 
-        // If it's a regular HTTP redirect, download with redirects enabled
-        console.log(`[qBittorrent] Following HTTP redirect...`);
-        torrentResponse = await axios.get(torrentUrl, {
-          responseType: 'arraybuffer',
-          timeout: 30000,
-          maxRedirects: 5,
-        });
-        console.log(`[qBittorrent] After following redirects: size=${torrentResponse.data.length} bytes`);
+        // Regular HTTP redirect - follow it manually
+        if (location && (location.startsWith('http://') || location.startsWith('https://'))) {
+          console.log(`[qBittorrent] Following HTTP redirect...`);
+          try {
+            torrentResponse = await axios.get(location, {
+              responseType: 'arraybuffer',
+              timeout: 30000,
+              maxRedirects: 5,
+            });
+            console.log(`[qBittorrent] After following redirect: size=${torrentResponse.data.length} bytes`);
+          } catch (redirectError) {
+            console.error(`[qBittorrent] Failed to follow redirect:`, redirectError);
+            throw new Error('Failed to download torrent file after redirect');
+          }
+        } else {
+          throw new Error(`Invalid redirect location: ${location}`);
+        }
       } else {
-        // Some other error, re-throw
-        console.error(`[qBittorrent] Unexpected error during download:`, error);
-        throw error;
+        // Non-redirect error (4xx, 5xx)
+        console.error(`[qBittorrent] HTTP error ${status}:`, error.message);
+        throw new Error(`Failed to download torrent: HTTP ${status}`);
       }
     }
 
     const torrentBuffer = Buffer.from(torrentResponse.data);
-    console.log(`[qBittorrent] Downloaded ${torrentBuffer.length} bytes`);
+    console.log(`[qBittorrent] Processing torrent file: ${torrentBuffer.length} bytes`);
 
     // Parse .torrent file to extract info_hash (deterministic)
     let parsedTorrent: any;
