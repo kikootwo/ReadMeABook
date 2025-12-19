@@ -13,6 +13,7 @@
 - **Settings management, encryption** → [backend/services/config.md](backend/services/config.md)
 - **Settings UI (Plex, Prowlarr, paths)** → [settings-pages.md](settings-pages.md)
 - **Setup middleware & status check** → [backend/middleware.md](backend/middleware.md)
+- **Environment variables, PUBLIC_URL, OAuth configuration** → [backend/services/environment.md](backend/services/environment.md)
 
 ## Database & Data Models
 - **PostgreSQL schema, tables, relationships** → [backend/database.md](backend/database.md)
@@ -79,6 +80,8 @@
 **"How do I change the admin password?"** → [settings-pages.md](settings-pages.md), [backend/services/auth.md](backend/services/auth.md)
 **"How do I deploy?"** → [deployment/docker.md](deployment/docker.md) (multi-container), [deployment/unified.md](deployment/unified.md) (all-in-one)
 **"How do I use the unified container?"** → [deployment/unified.md](deployment/unified.md)
+**"OAuth redirects to localhost / PUBLIC_URL not working"** → [backend/services/environment.md](backend/services/environment.md)
+**"What environment variables do I need?"** → [backend/services/environment.md](backend/services/environment.md)
 **"How does chapter merging work?"** → [features/chapter-merging.md](features/chapter-merging.md) (PRD only, not implemented)
 **"How does Audiobookshelf integration work?"** → [features/audiobookshelf-integration.md](features/audiobookshelf-integration.md) (PRD only, not implemented)
 **"How do I use OIDC/Authentik/Keycloak?"** → [features/audiobookshelf-integration.md](features/audiobookshelf-integration.md) (PRD only, not implemented)

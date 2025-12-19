@@ -64,9 +64,12 @@ services:
       # LOG_LEVEL: "info"
 
       # ========================================================================
-      # IMPORTANT: Public URL Configuration
+      # IMPORTANT: Public URL Configuration (Required for OAuth)
       # ========================================================================
-      # Set this to your public URL if accessing from outside localhost:
+      # Set this to your public URL for OAuth callbacks (Plex/OIDC authentication)
+      # Format: https://your-domain.com (no trailing slash)
+      # REQUIRED if accessing from outside localhost or using OIDC/Plex OAuth
+      # See: documentation/backend/services/environment.md
       # PUBLIC_URL: "https://readmeabook.yourdomain.com"
 
     healthcheck:

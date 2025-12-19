@@ -5,6 +5,7 @@
 
 import { NextResponse } from 'next/server';
 import { getAuthProvider } from '@/lib/services/auth';
+import { getBaseUrl } from '@/lib/utils/url';
 
 export async function GET() {
   try {
@@ -27,7 +28,7 @@ export async function GET() {
     console.error('[OIDC Login] Failed to initiate login:', error);
 
     // Redirect to login page with error
-    const baseUrl = process.env.NEXTAUTH_URL || process.env.BASE_URL || 'http://localhost:3030';
+    const baseUrl = getBaseUrl();
     const errorMessage = error instanceof Error ? error.message : 'Failed to initiate login';
     return NextResponse.redirect(`${baseUrl}/login?error=${encodeURIComponent(errorMessage)}`);
   }

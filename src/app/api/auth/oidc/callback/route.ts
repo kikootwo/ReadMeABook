@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthProvider } from '@/lib/services/auth';
+import { getBaseUrl } from '@/lib/utils/url';
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -13,7 +14,7 @@ export async function GET(request: NextRequest) {
   const error = searchParams.get('error');
   const errorDescription = searchParams.get('error_description');
 
-  const baseUrl = process.env.NEXTAUTH_URL || process.env.BASE_URL || 'http://localhost:3030';
+  const baseUrl = getBaseUrl();
 
   // Handle OAuth errors from provider
   if (error) {

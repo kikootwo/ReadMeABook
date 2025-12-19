@@ -15,6 +15,7 @@ import { getPlexService } from '@/lib/integrations/plex.service';
 import { getConfigService } from '@/lib/services/config.service';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
+import { getBaseUrl } from '@/lib/utils/url';
 import { prisma } from '@/lib/db';
 
 export class PlexAuthProvider implements IAuthProvider {
@@ -33,7 +34,7 @@ export class PlexAuthProvider implements IAuthProvider {
 
       // Generate OAuth URL
       const baseCallbackUrl = process.env.PLEX_OAUTH_CALLBACK_URL ||
-                             `${process.env.NEXTAUTH_URL || 'http://localhost:3030'}/api/auth/plex/callback`;
+                             `${getBaseUrl()}/api/auth/plex/callback`;
 
       const oauthUrl = this.plexService.getOAuthUrl(pin.code, pin.id, baseCallbackUrl);
 

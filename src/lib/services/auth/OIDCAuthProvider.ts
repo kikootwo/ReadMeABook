@@ -15,6 +15,7 @@ import {
 import { getConfigService } from '@/lib/services/config.service';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
+import { getBaseUrl } from '@/lib/utils/url';
 import { prisma } from '@/lib/db';
 
 // In-memory storage for OIDC flow state (temporary until callback completes)
@@ -67,7 +68,7 @@ export class OIDCAuthProvider implements IAuthProvider {
    * Get redirect URI for OAuth callback
    */
   private async getRedirectUri(): Promise<string> {
-    const baseUrl = process.env.NEXTAUTH_URL || process.env.BASE_URL || 'http://localhost:3030';
+    const baseUrl = getBaseUrl();
     return `${baseUrl}/api/auth/oidc/callback`;
   }
 
