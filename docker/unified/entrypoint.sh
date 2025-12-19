@@ -4,42 +4,6 @@ set -e
 echo "🚀 ReadMeABook Unified Container Starting..."
 
 # ============================================================================
-# FILESYSTEM CHECK
-# ============================================================================
-# PostgreSQL requires a filesystem that supports Linux permissions (chmod/chown)
-# WSL2 Windows mounts (/mnt/c) and some network filesystems don't support this
-
-# Test if chmod works on the PostgreSQL data directory
-PGDATA_TEST="/var/lib/postgresql/data"
-if [ -d "$PGDATA_TEST" ]; then
-    if ! chmod 755 "$PGDATA_TEST" 2>/dev/null; then
-        echo "❌ CRITICAL ERROR: Filesystem does not support permission changes"
-        echo "   "
-        echo "   PostgreSQL requires a filesystem with full Linux permission support."
-        echo "   The current mount for /var/lib/postgresql/data does not support chmod."
-        echo "   "
-        echo "   Common causes:"
-        echo "   1. WSL2: Project is on Windows filesystem (/mnt/c/...)"
-        echo "   2. Network mount: NFS/CIFS without proper options"
-        echo "   3. Docker Desktop with incompatible volume driver"
-        echo "   "
-        echo "   Solutions:"
-        echo "   1. Move your project to a Linux filesystem:"
-        echo "      - WSL2: Use /home/username/ instead of /mnt/c/"
-        echo "      - Create directory: mkdir -p ~/readmeabook && cd ~/readmeabook"
-        echo "      - Clone/move your project there"
-        echo "   "
-        echo "   2. Use Docker volumes instead of bind mounts:"
-        echo "      - In docker-compose.yml, replace './pgdata:/var/lib/postgresql/data'"
-        echo "      - With: 'pgdata:/var/lib/postgresql/data' (named volume)"
-        echo "   "
-        echo "   3. For NFS mounts, add these options: rw,sync,no_subtree_check,no_root_squash"
-        echo "   "
-        exit 1
-    fi
-fi
-
-# ============================================================================
 # PUID/PGID USER REMAPPING (Hybrid approach)
 # ============================================================================
 # Hybrid approach to support user file ownership while maintaining PostgreSQL compatibility:
@@ -198,7 +162,38 @@ PG_WAS_EMPTY=0
 echo "🔧 Setting up directory permissions..."
 
 # PostgreSQL directories - owned by postgres user, group accessible
-chown -R postgres:postgres "$PGDATA" /var/run/postgresql
+if ! chown -R postgres:postgres "$PGDATA" /var/run/postgresql 2>/dev/null; then
+    echo ""
+    echo "❌ ERROR: Failed to set ownership on PostgreSQL directories"
+    echo ""
+    echo "   This usually happens when using bind mounts on incompatible filesystems."
+    echo ""
+    echo "   Common causes:"
+    echo "   - WSL2: Project on Windows filesystem (/mnt/c/...)"
+    echo "   - NFS/CIFS: Mount without proper permission support"
+    echo ""
+    echo "   Solutions:"
+    echo ""
+    echo "   1. Use Docker named volumes (recommended for WSL2):"
+    echo "      In docker-compose.yml, change:"
+    echo "        - ./pgdata:/var/lib/postgresql/data"
+    echo "      To:"
+    echo "        - pgdata:/var/lib/postgresql/data"
+    echo "      Then add at bottom:"
+    echo "        volumes:"
+    echo "          pgdata:"
+    echo ""
+    echo "   2. Move project to Linux filesystem (WSL2):"
+    echo "      mkdir -p ~/readmeabook && cd ~/readmeabook"
+    echo "      # Copy docker-compose.yml and restart"
+    echo ""
+    echo "   3. Pre-create directories with correct ownership:"
+    echo "      mkdir -p pgdata redis config cache"
+    echo "      # Let Docker create them on first run"
+    echo ""
+    exit 1
+fi
+
 if [ -n "$PGID" ]; then
     # With PUID/PGID: Use 750 (owner rwx, group rx) for PostgreSQL data
     # This allows the PGID group to read PostgreSQL files if needed
@@ -211,12 +206,24 @@ else
 fi
 
 # Redis directory - owned by redis user (remapped to PUID:PGID if set)
-chown -R redis:redis /var/lib/redis
+if ! chown -R redis:redis /var/lib/redis 2>/dev/null; then
+    echo ""
+    echo "❌ ERROR: Failed to set ownership on Redis directory"
+    echo "   See solutions above for PostgreSQL directories"
+    echo ""
+    exit 1
+fi
 chmod 770 /var/lib/redis
 
 # App directories - owned by node user (remapped to PUID:PGID if set)
 # These need group write permissions for shared access
-chown -R node:node /app/config /app/cache
+if ! chown -R node:node /app/config /app/cache 2>/dev/null; then
+    echo ""
+    echo "❌ ERROR: Failed to set ownership on app directories"
+    echo "   See solutions above for PostgreSQL directories"
+    echo ""
+    exit 1
+fi
 chmod 775 /app/config /app/cache
 
 echo "✅ Directory permissions configured"

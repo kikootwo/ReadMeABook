@@ -418,30 +418,14 @@ pct start <CTID>
 
 **WSL2 Permission Errors:**
 
-*Symptom:* "initdb: error: could not change permissions" or "Operation not permitted"
+*Symptom:* "Failed to set ownership" or "Operation not permitted" on `/mnt/c/` filesystem
 
-*Cause:* Project is on Windows filesystem (`/mnt/c/`), which doesn't support Linux permissions
+*Cause:* Windows filesystem doesn't support Linux permissions when using bind mounts
 
-*Solution:* Move project to Linux filesystem
-
-```bash
-# Move to Linux filesystem
-cd ~
-mkdir readmeabook
-cd readmeabook
-
-# Copy or clone your project
-cp -r /mnt/c/git/readmeabook/* .
-# Or: git clone <your-repo-url> .
-
-# Start container
-docker compose up -d
-```
-
-**Alternative: Use Docker volumes instead of bind mounts**
+*Solution 1: Use Docker volumes (RECOMMENDED for WSL2)*
 
 ```yaml
-# In docker-compose.yml, replace:
+# In docker-compose.yml, replace bind mounts:
 volumes:
   - ./pgdata:/var/lib/postgresql/data
   - ./redis:/var/lib/redis
@@ -455,6 +439,34 @@ volumes:
 volumes:
   pgdata:
   redis:
+```
+
+This stores data in Docker-managed volumes which support full permissions.
+
+*Solution 2: Move project to Linux filesystem*
+
+```bash
+# Move to Linux filesystem
+cd ~
+mkdir readmeabook
+cd readmeabook
+
+# Copy compose file
+cp /mnt/c/git/readmeabook/docker-compose.yml .
+
+# Start container
+docker compose up -d
+```
+
+*Solution 3: Delete existing directories and let Docker create them*
+
+```bash
+# Stop container and remove directories
+docker compose down
+rm -rf pgdata redis config cache
+
+# Start fresh - Docker will create directories with correct ownership
+docker compose up -d
 ```
 
 **Database access:**
@@ -670,13 +682,14 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
 - Backwards compatible: If PUID/PGID not set, uses default system user IDs
 
 **18. WSL2 Windows filesystem incompatibility**
-- Issue: Container fails with "initdb: error: could not change permissions of directory" when project is on `/mnt/c/` (Windows filesystem)
-- Cause: Windows 9p filesystem doesn't support Linux permission operations (chmod/chown) required by PostgreSQL
-- Fix: Added filesystem check in entrypoint with detailed error message and solutions
+- Issue: Container fails when using bind mounts on Windows filesystem (`/mnt/c/`) with error "Operation not permitted"
+- Cause: Windows 9p filesystem doesn't support Linux permission operations (chmod/chown) required by PostgreSQL when using bind mounts
+- Fix: Only error when chown actually fails (not preemptively), provide helpful solutions
 - Solutions:
-  - Move project to Linux filesystem (~/readmeabook instead of /mnt/c/)
-  - Use Docker named volumes instead of bind mounts
-  - For NFS: Add options rw,sync,no_subtree_check,no_root_squash
+  - Use Docker named volumes (recommended): `pgdata:/var/lib/postgresql/data` instead of `./pgdata:/var/lib/postgresql/data`
+  - Move project to Linux filesystem: `~/readmeabook` instead of `/mnt/c/`
+  - Let Docker create directories on first run (they'll have correct ownership)
+- Note: Works fine on WSL2 when using Docker volumes or letting container create directories
 
 ## Related
 
