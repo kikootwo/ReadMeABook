@@ -96,6 +96,11 @@ services:
       - ./pgdata:/var/lib/postgresql/data
       - ./redis:/var/lib/redis
     environment:
+      # RECOMMENDED: Set to your user/group IDs (run 'id' to find yours)
+      # Hybrid approach: postgres keeps UID 103, everything else uses PUID:PGID
+      PUID: 1000
+      PGID: 1000
+
       # Optional overrides:
       # JWT_SECRET: "custom"
       # PUBLIC_URL: "https://example.com"
@@ -134,6 +139,8 @@ docker compose -f docker-compose.local.yml down
 docker run -d \
   --name readmeabook \
   -p 3030:3030 \
+  -e PUID=1000 \
+  -e PGID=1000 \
   -v ./config:/app/config \
   -v ./cache:/app/cache \
   -v ./downloads:/downloads \
@@ -144,6 +151,10 @@ docker run -d \
 ```
 
 ## Environment Variables
+
+**Recommended (for bind mount permissions):**
+- `PUID` - User ID for file ownership (default: uses system defaults)
+- `PGID` - Group ID for file ownership (default: uses system defaults)
 
 **All optional (auto-generated if not set):**
 - `JWT_SECRET` - JWT signing key
@@ -163,6 +174,157 @@ docker run -d \
 - `NODE_ENV` - production
 - `PORT` - 3030
 - `HOSTNAME` - 0.0.0.0
+
+## PUID/PGID Configuration (Hybrid Approach - Recommended)
+
+**Problem:** Bind-mounted volumes (`./pgdata`, `./redis`, `./config`, etc.) may have permission issues, especially with:
+- LXC containers with user namespace mapping
+- NFS/CIFS mounts
+- Running Docker as non-root user
+- Multiple users accessing the same files
+
+**Solution:** Hybrid PUID/PGID mapping that maintains PostgreSQL compatibility while giving you ownership of important files.
+
+### How the Hybrid Approach Works
+
+PostgreSQL requires that the database cluster owner have a specific username ("postgres"), which prevents full user remapping. The hybrid approach solves this:
+
+**User Remapping Strategy:**
+- `postgres` user: **Keeps UID 103** (PostgreSQL requirement), **remaps GID → PGID**
+- `redis` user: **Fully remapped to PUID:PGID**
+- `node` user: **Fully remapped to PUID:PGID**
+
+**File Ownership Result:**
+- PostgreSQL data (`/var/lib/postgresql/data`): **103:PGID**
+- Redis data (`/var/lib/redis`): **PUID:PGID** ✅ Your user owns it
+- App config (`/app/config`): **PUID:PGID** ✅ Your user owns it
+- Downloads (`/downloads`): **PUID:PGID** ✅ Your user owns it
+- Media (`/media`): **PUID:PGID** ✅ Your user owns it
+
+**Key Benefits:**
+- ✅ You fully own downloads, media, and config directories
+- ✅ PostgreSQL works correctly (no username conflicts)
+- ✅ All files accessible via shared PGID group
+- ✅ Minimal LXC mapping needed (only UID 103)
+
+### Usage
+
+**Standard Docker Setup:**
+
+```yaml
+services:
+  readmeabook:
+    image: ghcr.io/kikootwo/readmeabook:latest
+    environment:
+      PUID: 1000  # Your user ID
+      PGID: 1000  # Your group ID
+    volumes:
+      - ./config:/app/config
+      - ./pgdata:/var/lib/postgresql/data
+      - ./redis:/var/lib/redis
+      - ./downloads:/downloads
+      - ./media:/media
+```
+
+**Find your PUID/PGID:**
+```bash
+id
+# Output: uid=1000(youruser) gid=1000(yourgroup)
+```
+
+### LXC Configuration
+
+For LXC with user namespace mapping, you only need to passthrough container UID 103 (postgres):
+
+**Example LXC Config:**
+```bash
+# File: /etc/pve/lxc/<CTID>.conf
+# Map most UIDs normally (0-102 → 100000-100102)
+lxc.idmap: u 0 100000 103
+lxc.idmap: g 0 100000 103
+
+# Passthrough postgres UID 103 to host UID 103
+lxc.idmap: u 103 103 1
+lxc.idmap: g 103 100103 1
+
+# Map remaining UIDs (104-65536 → 100104-165536)
+lxc.idmap: u 104 100104 65432
+lxc.idmap: g 104 100104 65432
+```
+
+**Alternative: Map to your user:**
+```bash
+# If you want PostgreSQL files accessible as your host user (UID 1000):
+lxc.idmap: u 0 100000 103
+lxc.idmap: g 0 100000 103
+lxc.idmap: u 103 1000 1      # Map container 103 → host 1000
+lxc.idmap: g 103 1000 1
+lxc.idmap: u 104 100104 65432
+lxc.idmap: g 104 100104 65432
+
+# Then set in docker-compose.yml:
+environment:
+  PUID: 1000
+  PGID: 1000
+```
+
+### Startup Logs
+
+When PUID/PGID are set, you'll see:
+
+```
+🔧 PUID/PGID detected - Configuring hybrid user mapping for 1000:1000
+
+   Current UIDs: postgres=103 redis=102 node=1000
+
+   Applying hybrid mapping strategy:
+   - postgres: Keep UID 103, remap GID → 1000 (PostgreSQL compatibility)
+   - redis:    Remap to 1000:1000 (full user ownership)
+   - node:     Remap to 1000:1000 (full user ownership)
+
+✅ User mapping complete!
+
+   File ownership will be:
+   - PostgreSQL data (/var/lib/postgresql/data): 103:1000
+   - Redis data      (/var/lib/redis):           1000:1000
+   - App config      (/app/config):              1000:1000
+   - Downloads       (/downloads):               1000:1000
+   - Media           (/media):                   1000:1000
+
+   On your host, these will appear as:
+   - PostgreSQL: UID 103, GID 1000 (readable via group)
+   - Everything else: Your user (1000:1000)
+```
+
+### File Permissions
+
+The container uses group-friendly permissions:
+
+| Directory | Ownership | Permissions | Description |
+|-----------|-----------|-------------|-------------|
+| `/var/lib/postgresql/data` | 103:PGID | 750 (rwxr-x---) | PostgreSQL data, group-readable |
+| `/var/lib/redis` | PUID:PGID | 770 (rwxrwx---) | Redis data, group-writable |
+| `/app/config` | PUID:PGID | 775 (rwxrwxr-x) | App config, group-writable |
+| `/app/cache` | PUID:PGID | 775 (rwxrwxr-x) | Thumbnail cache, group-writable |
+| `/downloads` | PUID:PGID | 775 (rwxrwxr-x) | Torrent downloads, group-writable |
+| `/media` | PUID:PGID | 775 (rwxrwxr-x) | Plex library, group-writable |
+
+**Your host user (PUID:PGID) can:**
+- ✅ Fully read/write: downloads, media, config, cache, redis
+- ✅ Read (via group): PostgreSQL data
+
+### Without PUID/PGID (Default Behavior)
+
+If you don't set PUID/PGID, the container uses default system users:
+
+```
+   Default ownership:
+   - PostgreSQL data: postgres (UID 103)
+   - Redis data:      redis (UID 102)
+   - App/Downloads:   node (UID 1000)
+```
+
+This works fine for most deployments, but files will have different owners on the host.
 
 ## GitHub Action
 
@@ -211,17 +373,88 @@ docker logs readmeabook-unified 2>&1 | grep "app"
 
 ## Troubleshooting
 
-**Container keeps restarting - Permission errors:**
+**Container fails with permission errors:**
+
+*Symptom:* "Operation not permitted" or "Failed to set ownership" in logs
+
+*Solution:* Set PUID and PGID in docker-compose.yml
+
 ```bash
-# Symptom: "could not change permissions" or "Operation not permitted" in logs
-# Note: This should not happen with current version (entrypoint fixes ownership automatically)
-# If using older image or encountering issues, manually fix ownership:
-docker compose -f docker-compose.unified.yml down
-sudo chown -R 103:107 ./pgdata
-sudo chown -R 102:106 ./redis
-sudo chown -R 1000:1000 ./cache ./config
-docker compose -f docker-compose.unified.yml pull  # Get latest image
-docker compose -f docker-compose.unified.yml up -d
+# 1. Find your user ID and group ID
+id
+# Output: uid=1000(youruser) gid=1000(yourgroup)
+
+# 2. Update docker-compose.yml:
+services:
+  readmeabook:
+    environment:
+      PUID: 1000  # Use your UID from step 1
+      PGID: 1000  # Use your GID from step 1
+
+# 3. Restart container
+docker compose down
+docker compose up -d
+```
+
+**LXC Permission Issues:**
+
+*Symptom:* Files owned by UID 103 on host are not accessible
+
+*Solution:* Configure LXC idmap to passthrough UID 103
+
+```bash
+# Edit /etc/pve/lxc/<CTID>.conf and add:
+lxc.idmap: u 0 100000 103
+lxc.idmap: g 0 100000 103
+lxc.idmap: u 103 103 1          # Passthrough postgres UID
+lxc.idmap: g 103 100103 1
+lxc.idmap: u 104 100104 65432
+lxc.idmap: g 104 100104 65432
+
+# Then restart LXC container
+pct stop <CTID>
+pct start <CTID>
+```
+
+**WSL2 Permission Errors:**
+
+*Symptom:* "initdb: error: could not change permissions" or "Operation not permitted"
+
+*Cause:* Project is on Windows filesystem (`/mnt/c/`), which doesn't support Linux permissions
+
+*Solution:* Move project to Linux filesystem
+
+```bash
+# Move to Linux filesystem
+cd ~
+mkdir readmeabook
+cd readmeabook
+
+# Copy or clone your project
+cp -r /mnt/c/git/readmeabook/* .
+# Or: git clone <your-repo-url> .
+
+# Start container
+docker compose up -d
+```
+
+**Alternative: Use Docker volumes instead of bind mounts**
+
+```yaml
+# In docker-compose.yml, replace:
+volumes:
+  - ./pgdata:/var/lib/postgresql/data
+  - ./redis:/var/lib/redis
+
+# With named volumes:
+volumes:
+  - pgdata:/var/lib/postgresql/data
+  - redis:/var/lib/redis
+
+# Add at bottom of file:
+volumes:
+  pgdata:
+  redis:
 ```
 
 **Database access:**
@@ -418,6 +651,32 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
 - Cause: CONFIG_ENCRYPTION_KEY was auto-generated on each container start and not persisted. Passwords are encrypted with bcrypt hash then encrypted again with CONFIG_ENCRYPTION_KEY. When the key changes, decryption fails and password validation fails.
 - Fix: Entrypoint script now persists all auto-generated secrets (JWT_SECRET, JWT_REFRESH_SECRET, CONFIG_ENCRYPTION_KEY, POSTGRES_PASSWORD) to `/app/config/.secrets` file which is mounted on a volume. On subsequent starts, secrets are loaded from this file instead of regenerating.
 - Recovery: If already experiencing this issue, either (1) recreate admin account after updating to fixed version, or (2) if you know the old CONFIG_ENCRYPTION_KEY, set it as environment variable in docker-compose.yml
+
+**17. Permission errors with bind mounts and LXC user namespace mapping (Hybrid PUID/PGID)**
+- Issue: Container fails with "Operation not permitted" when using bind mounts (`./pgdata`, `./redis`). LXC user namespace mapping (container UID 103 → host UID 100103) makes file access complex.
+- Root cause analysis:
+  - PostgreSQL requires database cluster owner to be username "postgres" (UID 103)
+  - Cannot remap postgres UID without breaking PostgreSQL initialization
+  - Users need ownership of downloads, media, config directories
+- Solution: Hybrid PUID/PGID approach:
+  - postgres user: Keep UID 103 (PostgreSQL compatibility), remap GID → PGID
+  - redis/node users: Fully remap to PUID:PGID
+  - Result: Downloads/media/config owned by PUID:PGID, PostgreSQL uses 103:PGID with group-readable permissions
+- Usage: Set `PUID=1000` and `PGID=1000` in docker-compose.yml
+- File ownership:
+  - PostgreSQL data: 103:PGID (readable via group)
+  - Downloads/media/config: PUID:PGID (full user ownership)
+- LXC configuration: Only need to passthrough UID 103 (much simpler than before)
+- Backwards compatible: If PUID/PGID not set, uses default system user IDs
+
+**18. WSL2 Windows filesystem incompatibility**
+- Issue: Container fails with "initdb: error: could not change permissions of directory" when project is on `/mnt/c/` (Windows filesystem)
+- Cause: Windows 9p filesystem doesn't support Linux permission operations (chmod/chown) required by PostgreSQL
+- Fix: Added filesystem check in entrypoint with detailed error message and solutions
+- Solutions:
+  - Move project to Linux filesystem (~/readmeabook instead of /mnt/c/)
+  - Use Docker named volumes instead of bind mounts
+  - For NFS: Add options rw,sync,no_subtree_check,no_root_squash
 
 ## Related
 

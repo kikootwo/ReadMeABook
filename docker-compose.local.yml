@@ -24,7 +24,27 @@ services:
       # Redis data persistence
       - ./redis:/var/lib/redis
 
-#    environment:
+    environment:
+      # ========================================================================
+      # RECOMMENDED: User/Group ID Mapping (Hybrid Approach)
+      # ========================================================================
+      # Set these to match your host user for proper file ownership
+      # Run 'id' on your host to find your UID and GID
+      #
+      # How it works:
+      # - postgres user: Keeps UID 103 (PostgreSQL requirement), uses your PGID
+      # - redis/node:    Fully remapped to your PUID:PGID
+      #
+      # File ownership on host:
+      # - PostgreSQL data (/var/lib/postgresql/data): UID 103, GID <your-PGID>
+      # - Everything else (/downloads, /media, /config): <your-PUID>:<your-PGID>
+      #
+      # For LXC: You only need to passthrough/map container UID 103
+      # See documentation/deployment/unified.md for LXC examples
+      #
+      PUID: 1000
+      PGID: 1000
+
       # ========================================================================
       # OPTIONAL: Secrets (auto-generated on first run if not provided)
       # ========================================================================

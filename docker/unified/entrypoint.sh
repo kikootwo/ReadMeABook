@@ -4,6 +4,131 @@ set -e
 echo "🚀 ReadMeABook Unified Container Starting..."
 
 # ============================================================================
+# FILESYSTEM CHECK
+# ============================================================================
+# PostgreSQL requires a filesystem that supports Linux permissions (chmod/chown)
+# WSL2 Windows mounts (/mnt/c) and some network filesystems don't support this
+
+# Test if chmod works on the PostgreSQL data directory
+PGDATA_TEST="/var/lib/postgresql/data"
+if [ -d "$PGDATA_TEST" ]; then
+    if ! chmod 755 "$PGDATA_TEST" 2>/dev/null; then
+        echo "❌ CRITICAL ERROR: Filesystem does not support permission changes"
+        echo "   "
+        echo "   PostgreSQL requires a filesystem with full Linux permission support."
+        echo "   The current mount for /var/lib/postgresql/data does not support chmod."
+        echo "   "
+        echo "   Common causes:"
+        echo "   1. WSL2: Project is on Windows filesystem (/mnt/c/...)"
+        echo "   2. Network mount: NFS/CIFS without proper options"
+        echo "   3. Docker Desktop with incompatible volume driver"
+        echo "   "
+        echo "   Solutions:"
+        echo "   1. Move your project to a Linux filesystem:"
+        echo "      - WSL2: Use /home/username/ instead of /mnt/c/"
+        echo "      - Create directory: mkdir -p ~/readmeabook && cd ~/readmeabook"
+        echo "      - Clone/move your project there"
+        echo "   "
+        echo "   2. Use Docker volumes instead of bind mounts:"
+        echo "      - In docker-compose.yml, replace './pgdata:/var/lib/postgresql/data'"
+        echo "      - With: 'pgdata:/var/lib/postgresql/data' (named volume)"
+        echo "   "
+        echo "   3. For NFS mounts, add these options: rw,sync,no_subtree_check,no_root_squash"
+        echo "   "
+        exit 1
+    fi
+fi
+
+# ============================================================================
+# PUID/PGID USER REMAPPING (Hybrid approach)
+# ============================================================================
+# Hybrid approach to support user file ownership while maintaining PostgreSQL compatibility:
+# - postgres user: Keep UID 103 (required by PostgreSQL), remap GID → PGID
+# - redis user:    Remap UID → PUID, GID → PGID
+# - node user:     Remap UID → PUID, GID → PGID
+#
+# Result:
+# - PostgreSQL data (103:PGID) - postgres user with shared group
+# - Redis/App/Downloads/Media (PUID:PGID) - your user owns everything else
+# - All files accessible via PGID group permissions
+
+PUID=${PUID:-}
+PGID=${PGID:-}
+
+if [ -n "$PUID" ] && [ -n "$PGID" ]; then
+    echo "🔧 PUID/PGID detected - Configuring hybrid user mapping for $PUID:$PGID"
+    echo ""
+
+    # Get current UIDs/GIDs before remapping
+    POSTGRES_UID=$(id -u postgres)
+    POSTGRES_GID=$(id -g postgres)
+    REDIS_UID=$(id -u redis)
+    NODE_UID=$(id -u node)
+
+    echo "   Current UIDs: postgres=$POSTGRES_UID redis=$REDIS_UID node=$NODE_UID"
+    echo ""
+    echo "   Applying hybrid mapping strategy:"
+    echo "   - postgres: Keep UID $POSTGRES_UID, remap GID → $PGID (PostgreSQL compatibility)"
+    echo "   - redis:    Remap to $PUID:$PGID (full user ownership)"
+    echo "   - node:     Remap to $PUID:$PGID (full user ownership)"
+    echo ""
+
+    # Step 1: Remap postgres group to PGID (keep UID 103 for PostgreSQL compatibility)
+    echo "   [1/3] Remapping postgres group to $PGID..."
+    groupmod -o -g "$PGID" postgres 2>/dev/null || true
+    # Postgres user keeps its UID but gets the new GID
+    usermod -g "$PGID" postgres
+
+    # Step 2: Remap redis user to PUID:PGID
+    echo "   [2/3] Remapping redis user to $PUID:$PGID..."
+    groupmod -o -g "$PGID" redis 2>/dev/null || true
+    usermod -o -u "$PUID" -g "$PGID" redis
+
+    # Step 3: Remap node user to PUID:PGID
+    echo "   [3/3] Remapping node user to $PUID:$PGID..."
+    groupmod -o -g "$PGID" node 2>/dev/null || true
+    usermod -o -u "$PUID" -g "$PGID" node
+
+    echo ""
+    echo "✅ User mapping complete!"
+    echo ""
+    echo "   File ownership will be:"
+    echo "   - PostgreSQL data (/var/lib/postgresql/data): $POSTGRES_UID:$PGID"
+    echo "   - Redis data      (/var/lib/redis):           $PUID:$PGID"
+    echo "   - App config      (/app/config):              $PUID:$PGID"
+    echo "   - Downloads       (/downloads):               $PUID:$PGID"
+    echo "   - Media           (/media):                   $PUID:$PGID"
+    echo ""
+    echo "   On your host, these will appear as:"
+    echo "   - PostgreSQL: UID $POSTGRES_UID, GID $PGID (readable via group)"
+    echo "   - Everything else: Your user ($PUID:$PGID)"
+    echo ""
+
+    # For LXC users, provide helpful mapping info
+    if [ "$POSTGRES_UID" != "$PUID" ]; then
+        echo "   📝 LXC Note: You need to map container UID $POSTGRES_UID to an accessible host UID"
+        echo "   Example lxc.idmap configuration:"
+        echo "   lxc.idmap: u 0 100000 $POSTGRES_UID"
+        echo "   lxc.idmap: g 0 100000 $POSTGRES_UID"
+        echo "   lxc.idmap: u $POSTGRES_UID $POSTGRES_UID 1    # Passthrough postgres UID"
+        echo "   lxc.idmap: g $POSTGRES_UID 100$POSTGRES_UID 1"
+        echo "   lxc.idmap: u $((POSTGRES_UID + 1)) 100$((POSTGRES_UID + 1)) 65432"
+        echo "   lxc.idmap: g $((POSTGRES_UID + 1)) 100$((POSTGRES_UID + 1)) 65432"
+        echo ""
+    fi
+else
+    echo "ℹ️  PUID/PGID not set - using default system user IDs"
+    echo "   Default ownership:"
+    echo "   - PostgreSQL data: postgres (UID 103)"
+    echo "   - Redis data:      redis (UID 102)"
+    echo "   - App/Downloads:   node (UID 1000)"
+    echo ""
+    echo "   To customize ownership, set PUID and PGID environment variables"
+    echo "   Example: PUID=1000 PGID=1000"
+    echo ""
+fi
+
+# ============================================================================
 # GENERATE DEFAULT SECRETS IF NOT PROVIDED
 # ============================================================================
 generate_secret() {
@@ -71,10 +196,30 @@ PG_WAS_EMPTY=0
 
 # Ensure correct ownership of data directories (critical for bind mounts)
 echo "🔧 Setting up directory permissions..."
+
+# PostgreSQL directories - owned by postgres user, group accessible
 chown -R postgres:postgres "$PGDATA" /var/run/postgresql
-chmod 700 "$PGDATA"
+if [ -n "$PGID" ]; then
+    # With PUID/PGID: Use 750 (owner rwx, group rx) for PostgreSQL data
+    # This allows the PGID group to read PostgreSQL files if needed
+    chmod 750 "$PGDATA"
+    chmod 775 /var/run/postgresql
+else
+    # Without PUID/PGID: Use strict 700 permissions (owner only)
+    chmod 700 "$PGDATA"
+    chmod 775 /var/run/postgresql
+fi
+
+# Redis directory - owned by redis user (remapped to PUID:PGID if set)
 chown -R redis:redis /var/lib/redis
+chmod 770 /var/lib/redis
+
+# App directories - owned by node user (remapped to PUID:PGID if set)
+# These need group write permissions for shared access
 chown -R node:node /app/config /app/cache
+chmod 775 /app/config /app/cache
+
+echo "✅ Directory permissions configured"
 
 if [ ! -f "$PGDATA/PG_VERSION" ]; then
     PG_WAS_EMPTY=1
@@ -119,14 +264,17 @@ for i in {1..30}; do
     sleep 1
 done
 
-if [ "$PG_WAS_EMPTY" -eq 1 ]; then
-    # Create user and database if they don't exist (fresh cluster)
-    echo "👤 Setting up database user and database..."
-    su - postgres -c "psql -h 127.0.0.1 -U postgres" <<EOF
+# Always ensure user and database exist (safe due to IF NOT EXISTS checks)
+# This handles cases where data directory exists but user/database don't
+echo "👤 Ensuring database user and database exist..."
+su - postgres -c "psql -h 127.0.0.1 -U postgres" <<EOF
 DO \$\$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_user WHERE usename = '$POSTGRES_USER') THEN
         CREATE USER $POSTGRES_USER WITH PASSWORD '$POSTGRES_PASSWORD';
+        RAISE NOTICE 'Created user $POSTGRES_USER';
+    ELSE
+        RAISE NOTICE 'User $POSTGRES_USER already exists';
     END IF;
 END
 \$\$;
@@ -137,9 +285,10 @@ GRANT ALL PRIVILEGES ON DATABASE $POSTGRES_DB TO $POSTGRES_USER;
 ALTER DATABASE $POSTGRES_DB OWNER TO $POSTGRES_USER;
 EOF
 
-    echo "✅ Database setup complete"
+if [ "$PG_WAS_EMPTY" -eq 1 ]; then
+    echo "✅ Database initialized and setup complete"
 else
-    echo "ℹ️ Existing PostgreSQL data detected, skipping user/database creation"
+    echo "✅ Database user and permissions verified"
 fi
 
 # ============================================================================
