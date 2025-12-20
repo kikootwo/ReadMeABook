@@ -149,6 +149,15 @@ export class OIDCAuthProvider implements IAuthProvider {
       const client = await this.getClient();
       const redirectUri = await this.getRedirectUri();
 
+      if (process.env.LOG_LEVEL === 'debug') {
+        console.debug('[OIDCAuthProvider] Exchanging code for tokens', {
+          redirectUri,
+          hasCode: !!code,
+          hasState: !!state,
+          stateMatches: state === flowState.state,
+        });
+      }
+
       // Exchange code for tokens
       const tokenSet = await client.callback(
         redirectUri,
@@ -156,6 +165,7 @@ export class OIDCAuthProvider implements IAuthProvider {
         {
           code_verifier: flowState.codeVerifier,
           nonce: flowState.nonce,
+          state: flowState.state,
         }
       );
 

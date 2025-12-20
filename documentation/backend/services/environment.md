@@ -137,6 +137,24 @@ environment:
 
 **Fix:** Always set PUBLIC_URL in production deployments.
 
+### Issue: checks.state argument is missing (OIDC)
+
+**Symptoms:**
+- Error in URL after OIDC login: `error=TypeError: checks.state argument is missing`
+- Login redirects back to login page after Authentik authentication
+- No cookies visible in DevTools
+
+**Cause:** Missing state parameter in openid-client callback checks (fixed in v1.x.x)
+
+**Fix:**
+- Update to latest version
+- Ensure `groups` scope is added in OIDC provider (Authentik/Keycloak)
+
+**Authentik Configuration:**
+1. Go to Application/Provider → Scopes
+2. Add: `openid`, `profile`, `email`, `groups`
+3. Save and retry login
+
 ## Environment Variable Reference
 
 | Variable | Required | Default | Description |
