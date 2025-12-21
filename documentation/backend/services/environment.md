@@ -142,18 +142,31 @@ environment:
 **Symptoms:**
 - Error in URL after OIDC login: `error=TypeError: checks.state argument is missing`
 - Login redirects back to login page after Authentik authentication
-- No cookies visible in DevTools
 
-**Cause:** Missing state parameter in openid-client callback checks (fixed in v1.x.x)
+**Cause:** Missing state parameter in openid-client callback checks (fixed in latest version)
+
+**Fix:** Update to latest version with state parameter fix
+
+### Issue: OIDC login succeeds but redirects back to login page
+
+**Symptoms:**
+- OIDC authentication completes in Authentik
+- Redirect back to ReadMeABook succeeds
+- URL shows `/login?redirect=%2F`
+- Not actually logged in, no auth cookies visible
+
+**Cause:** httpOnly cookies prevent JavaScript from reading tokens (fixed in latest version)
 
 **Fix:**
 - Update to latest version
-- Ensure `groups` scope is added in OIDC provider (Authentik/Keycloak)
+- Callback now uses URL hash + accessible cookies (matches Plex OAuth pattern)
+- Tokens properly stored in localStorage
 
-**Authentik Configuration:**
+**Authentik Configuration Requirements:**
 1. Go to Application/Provider → Scopes
 2. Add: `openid`, `profile`, `email`, `groups`
-3. Save and retry login
+3. Redirect URI: `https://your-domain.com/api/auth/oidc/callback`
+4. Save and retry login
 
 ## Environment Variable Reference
 

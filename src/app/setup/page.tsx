@@ -143,6 +143,7 @@ export default function SetupWizard() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [setupHasAdminTokens, setSetupHasAdminTokens] = useState(false);
 
   // Calculate total steps based on backend mode and auth method
   const getTotalSteps = () => {
@@ -268,14 +269,26 @@ export default function SetupWizard() {
 
       // Store admin auth tokens (if provided)
       if (data.accessToken && data.refreshToken) {
+        // Clear any old tokens first to avoid conflicts
+        localStorage.clear();
+
         localStorage.setItem('accessToken', data.accessToken);
         localStorage.setItem('refreshToken', data.refreshToken);
         localStorage.setItem('user', JSON.stringify(data.user));
 
+        // Mark that we have admin tokens for FinalizeStep
+        setSetupHasAdminTokens(true);
+
         // Go to finalize step to run initial jobs
         goToStep(totalSteps);
       } else {
-        // Fallback if no tokens returned (OIDC-only mode)
+        // OIDC-only mode - clear localStorage to remove stale tokens
+        localStorage.clear();
+
+        // Mark that we don't have admin tokens
+        setSetupHasAdminTokens(false);
+
+        // Go to finalize step (will show OIDC-only UI)
         goToStep(totalSteps);
       }
     } catch (err) {
@@ -500,8 +513,15 @@ export default function SetupWizard() {
     if (state.currentStep === currentStepNumber) {
       return (
         <FinalizeStep
+          hasAdminTokens={setupHasAdminTokens}
           onComplete={() => {
-            // Force full page reload to initialize auth context with new tokens
+            // OIDC-only mode: redirect to login
+            if (!setupHasAdminTokens) {
+              window.location.href = '/login';
+              return;
+            }
+
+            // Normal mode: Force full page reload to initialize auth context with new tokens
             window.location.href = '/';
           }}
           onBack={() => goToStep(currentStepNumber - 1)}

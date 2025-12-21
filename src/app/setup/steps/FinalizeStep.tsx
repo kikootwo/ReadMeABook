@@ -9,6 +9,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 
 interface FinalizeStepProps {
+  hasAdminTokens: boolean; // True if admin was created and tokens exist
   onComplete: () => void;
   onBack: () => void;
 }
@@ -21,7 +22,7 @@ interface JobStatus {
   error?: string;
 }
 
-export function FinalizeStep({ onComplete, onBack }: FinalizeStepProps) {
+export function FinalizeStep({ hasAdminTokens, onComplete, onBack }: FinalizeStepProps) {
   const [jobs, setJobs] = useState<JobStatus[]>([
     {
       id: 'audible_refresh',
@@ -40,14 +41,20 @@ export function FinalizeStep({ onComplete, onBack }: FinalizeStepProps) {
   const [isComplete, setIsComplete] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
 
-  // Auto-start jobs when component mounts
+  // Auto-start jobs based on setup mode
   useEffect(() => {
-    if (!hasStarted) {
+    if (!hasAdminTokens) {
+      // OIDC-only mode - no admin user created during setup
+      console.log('[Setup] OIDC-only mode detected - skipping initial jobs');
+      setIsComplete(true);
+    } else if (!hasStarted) {
+      // Normal mode - admin user created, run jobs
+      console.log('[Setup] Normal mode detected - running initial jobs');
       setHasStarted(true);
       runJobs();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasStarted]);
+  }, [hasAdminTokens, hasStarted]);
 
   const pollJobStatus = async (jobId: string, accessToken: string): Promise<'completed' | 'failed'> => {
     console.log(`[Setup] Starting to poll job status for jobId: ${jobId}`);
@@ -210,6 +217,71 @@ export function FinalizeStep({ onComplete, onBack }: FinalizeStepProps) {
 
   const allJobsCompleted = jobs.every(job => job.status === 'completed' || job.status === 'error');
 
+  // OIDC-only mode UI (no admin tokens)
+  if (!hasAdminTokens) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+            Setup Complete!
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400 mt-2">
+            Your ReadMeABook instance is configured and ready to use.
+          </p>
+        </div>
+
+        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-6 border-2 border-blue-200 dark:border-blue-800">
+          <div className="flex gap-4">
+            <svg
+              className="w-8 h-8 text-blue-600 dark:text-blue-400 flex-shrink-0"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                fillRule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                clipRule="evenodd"
+              />
+            </svg>
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-100 mb-2">
+                Next Steps: Complete Your First Login
+              </h3>
+              <div className="space-y-2 text-sm text-blue-800 dark:text-blue-200">
+                <p>
+                  Since you're using OIDC authentication, you'll need to complete your first login to proceed:
+                </p>
+                <ol className="list-decimal list-inside space-y-1 ml-2">
+                  <li>Click "Finish Setup" below to complete the wizard</li>
+                  <li>You'll be redirected to the login page</li>
+                  <li>Log in with your OIDC provider (the first user will automatically become an admin)</li>
+                  <li>Initial library scans will run automatically after your first login</li>
+                </ol>
+                <p className="mt-3 font-medium">
+                  The following jobs will run automatically on your first login:
+                </p>
+                <ul className="list-disc list-inside ml-2 space-y-1">
+                  <li><strong>Audible Data Refresh</strong> - Populate your browse catalog with audiobooks</li>
+                  <li><strong>Library Scan</strong> - Discover audiobooks you already have</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-between pt-4">
+          <Button onClick={onBack} variant="outline">
+            Back
+          </Button>
+          <Button onClick={onComplete} size="lg">
+            Finish Setup
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Normal mode UI (with admin user and job execution)
   return (
     <div className="space-y-6">
       <div>

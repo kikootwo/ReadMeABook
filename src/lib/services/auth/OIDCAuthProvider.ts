@@ -16,6 +16,7 @@ import { getConfigService } from '@/lib/services/config.service';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
 import { getBaseUrl } from '@/lib/utils/url';
+import { getSchedulerService } from '@/lib/services/scheduler.service';
 import { prisma } from '@/lib/db';
 
 // In-memory storage for OIDC flow state (temporary until callback completes)
@@ -233,7 +234,7 @@ export class OIDCAuthProvider implements IAuthProvider {
       }
 
       // Create or update user
-      const userInfo = await this.createOrUpdateUser(
+      const result = await this.createOrUpdateUser(
         userinfo.sub,
         username,
         email,
@@ -242,12 +243,13 @@ export class OIDCAuthProvider implements IAuthProvider {
       );
 
       // Generate JWT tokens
-      const tokens = await this.generateTokens(userInfo);
+      const tokens = await this.generateTokens(result.userInfo);
 
       return {
         success: true,
-        user: userInfo,
+        user: result.userInfo,
         tokens,
+        isFirstLogin: result.isFirstLogin,
       };
     } catch (error) {
       console.error('[OIDCAuthProvider] Callback failed:', error);
@@ -381,7 +383,7 @@ export class OIDCAuthProvider implements IAuthProvider {
     email: string | undefined,
     avatarUrl: string | undefined,
     isAdminFromClaim: boolean
-  ): Promise<UserInfo> {
+  ): Promise<{ userInfo: UserInfo; isFirstLogin: boolean }> {
     const providerName = await this.configService.get('oidc.provider_name');
 
     // Check if this is the first user (should be promoted to admin)
@@ -417,13 +419,86 @@ export class OIDCAuthProvider implements IAuthProvider {
       },
     });
 
+    // Track if we need to trigger initial jobs
+    let shouldTriggerJobs = false;
+
+    // If this is the first user, trigger initial jobs (Audible refresh + Library scan)
+    // This happens after OIDC-only setup where no admin was created during wizard
+    if (isFirstUser) {
+      console.log('[OIDCAuthProvider] First OIDC user created - triggering initial jobs');
+
+      // Check if initial jobs have already been run (avoid duplicate runs)
+      const initialJobsRun = await this.configService.get('system.initial_jobs_run');
+
+      if (initialJobsRun !== 'true') {
+        shouldTriggerJobs = true;
+
+        // Trigger jobs in background (don't block authentication)
+        this.triggerInitialJobs().catch(err => {
+          console.error('[OIDCAuthProvider] Failed to trigger initial jobs:', err);
+        });
+      }
+    }
+
     return {
-      id: user.id,
-      username: user.plexUsername,
-      email: user.plexEmail || undefined,
-      avatarUrl: user.avatarUrl || undefined,
-      isAdmin: user.role === 'admin',
+      userInfo: {
+        id: user.id,
+        username: user.plexUsername,
+        email: user.plexEmail || undefined,
+        avatarUrl: user.avatarUrl || undefined,
+        isAdmin: user.role === 'admin',
+      },
+      isFirstLogin: isFirstUser && shouldTriggerJobs,
     };
+  }
+
+  /**
+   * Trigger initial jobs (Audible refresh + Library scan) after first OIDC login
+   * This is called automatically when the first user logs in via OIDC after setup
+   */
+  private async triggerInitialJobs(): Promise<void> {
+    try {
+      const schedulerService = getSchedulerService();
+
+      // Get scheduled jobs by type
+      const audibleJob = await prisma.scheduledJob.findFirst({
+        where: { type: 'audible_refresh' },
+      });
+
+      const libraryJob = await prisma.scheduledJob.findFirst({
+        where: { type: 'plex_library_scan' },
+      });
+
+      console.log('[OIDCAuthProvider] Triggering initial jobs...');
+
+      // Trigger Audible refresh
+      if (audibleJob) {
+        await schedulerService.triggerJobNow(audibleJob.id);
+        console.log('[OIDCAuthProvider] Triggered Audible refresh job');
+      } else {
+        console.warn('[OIDCAuthProvider] Audible refresh job not found');
+      }
+
+      // Trigger Library scan
+      if (libraryJob) {
+        await schedulerService.triggerJobNow(libraryJob.id);
+        console.log('[OIDCAuthProvider] Triggered Library scan job');
+      } else {
+        console.warn('[OIDCAuthProvider] Library scan job not found');
+      }
+
+      // Mark initial jobs as run
+      await prisma.configuration.upsert({
+        where: { key: 'system.initial_jobs_run' },
+        update: { value: 'true' },
+        create: { key: 'system.initial_jobs_run', value: 'true' },
+      });
+
+      console.log('[OIDCAuthProvider] Initial jobs triggered successfully');
+    } catch (error) {
+      console.error('[OIDCAuthProvider] Error triggering initial jobs:', error);
+      throw error;
+    }
   }
 
   /**

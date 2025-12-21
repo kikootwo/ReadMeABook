@@ -312,16 +312,17 @@ model JobEvent {
 }
 
 model ScheduledJob {
-  id        String    @id @default(uuid())
-  name      String
-  type      String    // 'plex_library_scan', 'plex_recently_added_check', 'audible_refresh', 'retry_missing_torrents', 'retry_failed_imports', 'cleanup_seeded_torrents', 'monitor_rss_feeds'
-  schedule  String    // Cron expression
-  enabled   Boolean   @default(true)
-  payload   Json      @default("{}")
-  lastRun   DateTime? @map("last_run")
-  nextRun   DateTime? @map("next_run")
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
+  id          String    @id @default(uuid())
+  name        String
+  type        String    // 'plex_library_scan', 'plex_recently_added_check', 'audible_refresh', 'retry_missing_torrents', 'retry_failed_imports', 'cleanup_seeded_torrents', 'monitor_rss_feeds'
+  schedule    String    // Cron expression
+  enabled     Boolean   @default(true)
+  payload     Json      @default("{}")
+  lastRun     DateTime? @map("last_run")
+  lastRunJobId String?  @map("last_run_job_id")  // Bull queue job ID of most recent execution
+  nextRun     DateTime? @map("next_run")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
   @@index([type])
   @@index([enabled])

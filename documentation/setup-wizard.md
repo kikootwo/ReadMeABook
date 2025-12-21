@@ -72,6 +72,42 @@ interface SetupState {
 **Download Client:** Valid URL, credentials required, connection succeeds
 **Paths:** Absolute paths, writable
 
+## OIDC-Only Setup Flow
+
+**When using OIDC authentication without creating a local admin:**
+
+1. Setup wizard completes without creating admin user
+2. FinalizeStep detects no access token (OIDC-only mode)
+3. Shows message: jobs will run on first login
+4. User completes setup → redirected to /login
+5. User logs in via OIDC → first user becomes admin
+6. Initial jobs (Audible refresh + Library scan) trigger automatically in background
+7. User redirected to /setup/initializing page → shows real-time job progress
+8. Jobs complete → user clicks "Go to Homepage" → fully initialized app
+
+**User Experience:**
+- FinalizeStep: Clear instructions about first login
+- First OIDC login: Automatic redirect to initializing page
+- Initializing page: Real-time job status with progress indicators
+- Subsequent logins: Normal login flow (no initializing page)
+
+**Implementation:**
+- `setup/page.tsx`: Passes `hasAdminTokens` prop to FinalizeStep, clears localStorage to remove stale tokens
+- `FinalizeStep.tsx`: Uses prop (not localStorage) to detect mode, shows appropriate UI
+- `OIDCAuthProvider.ts`:
+  - Triggers initial jobs on first user creation
+  - Returns `isFirstLogin: true` flag in AuthResult
+- `api/auth/oidc/callback/route.ts`:
+  - Checks `isFirstLogin` flag
+  - Redirects to `/setup/initializing` for first login
+  - Normal redirect for subsequent logins
+- `setup/initializing/page.tsx`:
+  - Reads auth data from URL hash
+  - Polls job status every 2s
+  - Shows real-time progress
+  - Auto-enables "Go to Homepage" when complete
+- `system.initial_jobs_run` config flag prevents duplicate runs
+
 ## Fixed Issues ✅
 
 **1. Plex Server Info Parsing**
@@ -93,14 +129,42 @@ interface SetupState {
 - Saves to database as JSON
 
 **5. Initial Job Execution**
-- Feature: Added FinalizeStep (step 8)
-- Automatically runs Audible refresh + Plex scan
+- Feature: Added FinalizeStep (step 9)
+- **Normal mode (with admin):** Runs jobs during setup
+- **OIDC-only mode:** Jobs run on first OIDC login
 - Polls job status every 2s until actual completion
 - Shows real-time execution status (pending → running → completed/failed)
 - Prevents navigation until all jobs complete
 - Uses `/api/admin/job-status/:id` endpoint for status polling
 
+**6. OIDC-Only Setup Support**
+- Issue: Initial jobs failed with "Authentication required" or "Failed to fetch job configuration"
+- Root causes:
+  - No admin user created during setup (OIDC-only), no auth token available
+  - Stale tokens in localStorage from previous tests caused false-positive detection
+- Fix: Proper architectural solution
+  - Setup wizard passes `hasAdminTokens` prop to FinalizeStep (explicit mode detection)
+  - Setup wizard clears localStorage before storing new tokens (removes stale data)
+  - FinalizeStep uses prop instead of checking localStorage (avoids stale token issues)
+  - OIDC-only mode redirects to /login after setup completion
+- Jobs automatically trigger on first OIDC login (first user becomes admin)
+- Background execution doesn't block authentication flow
+
+**7. Initializing Page Job Detection**
+- Issue: "Job did not start" error on initializing page while jobs running
+- Root cause: `lastRunJobId` field missing from ScheduledJob schema
+  - `triggerJobNow()` returned Bull job ID but never stored it
+  - Initializing page couldn't find running jobs
+- Fix: Database schema update + scheduler service update
+  - Added `lastRunJobId` field to ScheduledJob model
+  - Updated `triggerJobNow()` to store Bull job ID in database
+  - Migration: `20251221072639_add_last_run_job_id_to_scheduled_jobs`
+- Initializing page now successfully finds and polls running jobs
+
 ## Related Files
 
 - `/src/app/setup/` - Wizard components
+- `/src/app/setup/initializing/` - First login initialization page (OIDC-only)
 - `/src/app/api/setup/` - API routes
+- `/src/lib/services/auth/OIDCAuthProvider.ts` - OIDC auth + first login detection
+- `/src/lib/services/auth/IAuthProvider.ts` - Auth interfaces (includes isFirstLogin flag)

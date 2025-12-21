@@ -18,6 +18,7 @@ export interface ScheduledJob {
   createdAt: Date;
   updatedAt: Date;
   lastRun: Date | null;
+  lastRunJobId: string | null; // Bull queue job ID of most recent execution
   nextRun: Date | null;
 }
 
@@ -314,11 +315,16 @@ export class SchedulerService {
         throw new Error(`Unknown job type: ${job.type}`);
     }
 
-    // Update last run time
+    // Update last run time and store Bull job ID
     await prisma.scheduledJob.update({
       where: { id },
-      data: { lastRun: new Date() },
+      data: {
+        lastRun: new Date(),
+        lastRunJobId: bullJobId,
+      },
     });
+
+    console.log(`[Scheduler] Job "${job.name}" triggered with Bull job ID: ${bullJobId}`);
 
     return bullJobId;
   }

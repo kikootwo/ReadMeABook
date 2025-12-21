@@ -40,6 +40,7 @@ export interface AuthResult {
   requiresApproval?: boolean;  // For pending approval flow
   requiresProfileSelection?: boolean;  // For Plex Home
   profiles?: any[];  // Plex Home profiles
+  isFirstLogin?: boolean;  // First user login (initial jobs will run)
 }
 
 export interface IAuthProvider {
