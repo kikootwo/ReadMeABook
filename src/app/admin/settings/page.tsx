@@ -47,6 +47,14 @@ interface Settings {
     issuerUrl: string;
     clientId: string;
     clientSecret: string;
+    accessControlMethod: string;
+    accessGroupClaim: string;
+    accessGroupValue: string;
+    allowedEmails: string;
+    allowedUsernames: string;
+    adminClaimEnabled: boolean;
+    adminClaimName: string;
+    adminClaimValue: string;
   };
   registration: {
     enabled: boolean;
@@ -184,6 +192,22 @@ export default function AdminSettings() {
       const response = await fetchWithAuth('/api/admin/settings');
       if (response.ok) {
         const data = await response.json();
+
+        // Convert OIDC allowed lists from JSON arrays to comma-separated strings for display
+        if (data.oidc) {
+          const parseArrayToCommaSeparated = (jsonStr: string): string => {
+            try {
+              const arr = JSON.parse(jsonStr);
+              return Array.isArray(arr) ? arr.join(', ') : '';
+            } catch {
+              return '';
+            }
+          };
+
+          data.oidc.allowedEmails = parseArrayToCommaSeparated(data.oidc.allowedEmails);
+          data.oidc.allowedUsernames = parseArrayToCommaSeparated(data.oidc.allowedUsernames);
+        }
+
         setSettings(data);
         setOriginalSettings(JSON.parse(JSON.stringify(data))); // Deep copy for comparison
       } else {
@@ -767,10 +791,23 @@ export default function AdminSettings() {
 
           // Save OIDC settings if OIDC is enabled
           if (settings.oidc.enabled) {
+            // Helper function to parse comma-separated strings into JSON arrays
+            const parseCommaSeparatedToArray = (str: string): string => {
+              if (!str || str.trim() === '') return '[]';
+              const items = str.split(',').map(s => s.trim()).filter(s => s.length > 0);
+              return JSON.stringify(items);
+            };
+
+            const oidcPayload = {
+              ...settings.oidc,
+              allowedEmails: parseCommaSeparatedToArray(settings.oidc.allowedEmails),
+              allowedUsernames: parseCommaSeparatedToArray(settings.oidc.allowedUsernames),
+            };
+
             const oidcResponse = await fetchWithAuth('/api/admin/settings/oidc', {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(settings.oidc),
+              body: JSON.stringify(oidcPayload),
             });
 
             if (!oidcResponse.ok) {
@@ -1940,6 +1977,247 @@ export default function AdminSettings() {
                               {testResults.oidc.message}
                             </div>
                           )}
+                        </div>
+
+                        {/* Access Control Section */}
+                        <div className="border-t border-gray-200 dark:border-gray-700 pt-6 mt-6">
+                          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">
+                            Access Control
+                          </h3>
+                          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                            Control who can log in to your application. This is separate from admin permissions.
+                          </p>
+
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Access Control Method
+                              </label>
+                              <select
+                                value={settings.oidc.accessControlMethod}
+                                onChange={(e) => {
+                                  setSettings({
+                                    ...settings,
+                                    oidc: { ...settings.oidc, accessControlMethod: e.target.value },
+                                  });
+                                  setValidated({ ...validated, oidc: false });
+                                }}
+                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              >
+                                <option value="open">Open Access (anyone can log in)</option>
+                                <option value="group_claim">Group/Claim Based</option>
+                                <option value="allowed_list">Allowed List (emails/usernames)</option>
+                                <option value="admin_approval">Admin Approval Required</option>
+                              </select>
+                              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                {settings.oidc.accessControlMethod === 'open' && 'Anyone who can authenticate with your OIDC provider will have access'}
+                                {settings.oidc.accessControlMethod === 'group_claim' && 'Only users with a specific group/claim can access'}
+                                {settings.oidc.accessControlMethod === 'allowed_list' && 'Only explicitly allowed users can access'}
+                                {settings.oidc.accessControlMethod === 'admin_approval' && 'New users must be approved by an admin before access is granted'}
+                              </p>
+                            </div>
+
+                            {settings.oidc.accessControlMethod === 'group_claim' && (
+                              <>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                    Group Claim Name
+                                  </label>
+                                  <Input
+                                    type="text"
+                                    value={settings.oidc.accessGroupClaim}
+                                    onChange={(e) => {
+                                      setSettings({
+                                        ...settings,
+                                        oidc: { ...settings.oidc, accessGroupClaim: e.target.value },
+                                      });
+                                      setValidated({ ...validated, oidc: false });
+                                    }}
+                                    placeholder="groups"
+                                  />
+                                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                    The OIDC claim field that contains group membership (usually "groups" or "roles")
+                                  </p>
+                                </div>
+
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                    Required Group
+                                  </label>
+                                  <Input
+                                    type="text"
+                                    value={settings.oidc.accessGroupValue}
+                                    onChange={(e) => {
+                                      setSettings({
+                                        ...settings,
+                                        oidc: { ...settings.oidc, accessGroupValue: e.target.value },
+                                      });
+                                      setValidated({ ...validated, oidc: false });
+                                    }}
+                                    placeholder="readmeabook-users"
+                                  />
+                                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                    Users must be in this group to access the application
+                                  </p>
+                                </div>
+                              </>
+                            )}
+
+                            {settings.oidc.accessControlMethod === 'allowed_list' && (
+                              <>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                    Allowed Emails (comma-separated)
+                                  </label>
+                                  <Input
+                                    type="text"
+                                    value={settings.oidc.allowedEmails}
+                                    onChange={(e) => {
+                                      setSettings({
+                                        ...settings,
+                                        oidc: { ...settings.oidc, allowedEmails: e.target.value },
+                                      });
+                                      setValidated({ ...validated, oidc: false });
+                                    }}
+                                    placeholder="user1@example.com, user2@example.com"
+                                  />
+                                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                    Enter email addresses separated by commas
+                                  </p>
+                                </div>
+
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                    Allowed Usernames (comma-separated)
+                                  </label>
+                                  <Input
+                                    type="text"
+                                    value={settings.oidc.allowedUsernames}
+                                    onChange={(e) => {
+                                      setSettings({
+                                        ...settings,
+                                        oidc: { ...settings.oidc, allowedUsernames: e.target.value },
+                                      });
+                                      setValidated({ ...validated, oidc: false });
+                                    }}
+                                    placeholder="john_doe, jane_smith"
+                                  />
+                                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                    Enter usernames separated by commas
+                                  </p>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Admin Role Mapping Section */}
+                        <div className="border-t border-gray-200 dark:border-gray-700 pt-6 mt-6">
+                          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">
+                            Admin Role Mapping
+                          </h3>
+                          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                            Automatically grant admin permissions based on OIDC claims (e.g., group membership). The first user will always become admin.
+                          </p>
+
+                          <div className="space-y-4">
+                            <div className="flex items-start gap-3">
+                              <input
+                                type="checkbox"
+                                id="admin-claim-enabled"
+                                checked={settings.oidc.adminClaimEnabled}
+                                onChange={(e) => {
+                                  setSettings({
+                                    ...settings,
+                                    oidc: { ...settings.oidc, adminClaimEnabled: e.target.checked },
+                                  });
+                                  setValidated({ ...validated, oidc: false });
+                                }}
+                                className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                              />
+                              <div className="flex-1">
+                                <label
+                                  htmlFor="admin-claim-enabled"
+                                  className="text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer"
+                                >
+                                  Enable Admin Role Mapping
+                                </label>
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                  Automatically grant admin role to users with specific OIDC claim values
+                                </p>
+                              </div>
+                            </div>
+
+                            {settings.oidc.adminClaimEnabled && (
+                              <>
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                    Admin Claim Name
+                                  </label>
+                                  <Input
+                                    type="text"
+                                    value={settings.oidc.adminClaimName}
+                                    onChange={(e) => {
+                                      setSettings({
+                                        ...settings,
+                                        oidc: { ...settings.oidc, adminClaimName: e.target.value },
+                                      });
+                                      setValidated({ ...validated, oidc: false });
+                                    }}
+                                    placeholder="groups"
+                                  />
+                                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                    The OIDC claim field to check for admin role (usually "groups" or "roles")
+                                  </p>
+                                </div>
+
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                    Admin Claim Value
+                                  </label>
+                                  <Input
+                                    type="text"
+                                    value={settings.oidc.adminClaimValue}
+                                    onChange={(e) => {
+                                      setSettings({
+                                        ...settings,
+                                        oidc: { ...settings.oidc, adminClaimValue: e.target.value },
+                                      });
+                                      setValidated({ ...validated, oidc: false });
+                                    }}
+                                    placeholder="readmeabook-admin"
+                                  />
+                                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                    Users with this value in their claim will be granted admin role
+                                  </p>
+                                </div>
+
+                                <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-4 border border-amber-200 dark:border-amber-800">
+                                  <div className="flex gap-3">
+                                    <svg
+                                      className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5"
+                                      fill="currentColor"
+                                      viewBox="0 0 20 20"
+                                    >
+                                      <path
+                                        fillRule="evenodd"
+                                        d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                                        clipRule="evenodd"
+                                      />
+                                    </svg>
+                                    <div>
+                                      <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
+                                        Example Configuration
+                                      </p>
+                                      <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+                                        In Authentik: Create a group called "readmeabook-admin", add users to it, and set "Admin Claim Value" to "readmeabook-admin"
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                          </div>
                         </div>
                       </>
                     )}
