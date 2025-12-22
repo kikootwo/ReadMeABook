@@ -393,10 +393,15 @@ export class QBittorrentService {
         }
       );
 
-      console.log(`[qBittorrent] Category "${category}" created/exists`);
+      console.log(`[qBittorrent] Category "${category}" created`);
     } catch (error) {
-      // Category might already exist - that's OK
-      console.log(`[qBittorrent] Category creation returned:`, error);
+      // 409 = category already exists (expected, not an error)
+      if (axios.isAxiosError(error) && error.response?.status === 409) {
+        console.log(`[qBittorrent] Category "${category}" already exists`);
+      } else {
+        // Unexpected error, but don't fail - editCategory below will handle it
+        console.warn(`[qBittorrent] Failed to create category:`, error);
+      }
     }
 
     // Always update the category's save path to ensure it matches current config
