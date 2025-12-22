@@ -393,18 +393,32 @@ export class FileOrganizer {
   }
 
   /**
-   * Download cover art from URL
+   * Download cover art from URL or copy from local cache
    */
   private async downloadCoverArt(url: string, targetDir: string): Promise<void> {
     const targetPath = path.join(targetDir, 'cover.jpg');
 
     try {
-      const response = await axios.get(url, {
-        responseType: 'arraybuffer',
-        timeout: 30000,
-      });
+      // Check if this is a cached thumbnail (local file)
+      if (url.startsWith('/api/cache/thumbnails/')) {
+        // Extract filename from the API path
+        const filename = url.replace('/api/cache/thumbnails/', '');
+        const cachedPath = path.join('/app/cache/thumbnails', filename);
 
-      await fs.writeFile(targetPath, response.data);
+        // Copy from local cache instead of downloading
+        const coverData = await fs.readFile(cachedPath);
+        await fs.writeFile(targetPath, coverData, { mode: 0o644 });
+        console.log(`[FileOrganizer] Copied cover art from cache: ${filename}`);
+      } else {
+        // Download from external URL (e.g., Audible CDN)
+        const response = await axios.get(url, {
+          responseType: 'arraybuffer',
+          timeout: 30000,
+        });
+
+        await fs.writeFile(targetPath, response.data);
+        console.log(`[FileOrganizer] Downloaded cover art from URL`);
+      }
     } catch (error) {
       console.error('[FileOrganizer] Failed to download cover art:', error);
       throw error;

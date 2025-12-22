@@ -103,6 +103,8 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
             summary: item.description,
             duration: item.duration ? item.duration * 1000 : null, // Convert seconds to milliseconds
             year: item.year,
+            asin: item.asin,  // Store ASIN from library backend
+            isbn: item.isbn,  // Store ISBN from library backend
             thumbUrl: item.coverUrl,
             plexLibraryId: libraryId!,
             addedAt: item.addedAt,
@@ -121,6 +123,8 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
             summary: item.description || existing.summary,
             duration: item.duration ? item.duration * 1000 : existing.duration,
             year: item.year || existing.year,
+            asin: item.asin || existing.asin,  // Update ASIN if available
+            isbn: item.isbn || existing.isbn,  // Update ISBN if available
             thumbUrl: item.coverUrl || existing.thumbUrl,
             lastScannedAt: new Date(),
           },

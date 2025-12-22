@@ -217,6 +217,15 @@ export class ProwlarrService {
           // Extract metadata from title
           const metadata = this.extractMetadata(item.title || '');
 
+          // Extract download URL
+          const downloadUrl = item.link || item.enclosure?.['@_url'] || '';
+
+          // Skip torrents without a valid download URL
+          if (!downloadUrl || typeof downloadUrl !== 'string' || downloadUrl.trim() === '') {
+            console.warn(`[Prowlarr] Skipping torrent "${item.title || 'Unknown'}" - missing download URL`);
+            continue;
+          }
+
           const result: TorrentResult = {
             indexer: item.prowlarrindexer?.['#text'] || item.prowlarrindexer || 'Unknown',
             title: item.title || '',
@@ -224,7 +233,7 @@ export class ProwlarrService {
             seeders,
             leechers,
             publishDate: item.pubDate ? new Date(item.pubDate) : new Date(),
-            downloadUrl: item.link || item.enclosure?.['@_url'] || '',
+            downloadUrl: downloadUrl.trim(),
             infoHash: getAttr('infohash'),
             guid: item.guid || '',
             format: metadata.format,
@@ -274,6 +283,12 @@ export class ProwlarrService {
    */
   private transformResult(result: ProwlarrSearchResult): TorrentResult | null {
     try {
+      // Validate download URL
+      if (!result.downloadUrl || typeof result.downloadUrl !== 'string' || result.downloadUrl.trim() === '') {
+        console.warn(`[Prowlarr] Skipping result "${result.title}" - missing download URL`);
+        return null;
+      }
+
       // Extract metadata from title
       const metadata = this.extractMetadata(result.title);
 
@@ -284,7 +299,7 @@ export class ProwlarrService {
         seeders: result.seeders,
         leechers: result.leechers,
         publishDate: new Date(result.publishDate),
-        downloadUrl: result.downloadUrl,
+        downloadUrl: result.downloadUrl.trim(),
         infoHash: result.infoHash,
         guid: result.guid,
         format: metadata.format,

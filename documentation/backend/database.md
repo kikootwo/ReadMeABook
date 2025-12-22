@@ -28,6 +28,19 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - Indexes: `asin`, `title`, `author`, `is_popular`, `is_new_release`, `popular_rank`, `new_release_rank`
 - **Purpose:** Cached Audible metadata (popular/new releases), thumbnails stored locally in `/app/cache/thumbnails`
 
+### Plex_Library (Library Cache)
+- `id` (UUID PK), `plex_guid` (unique, external ID from Plex or Audiobookshelf), `plex_rating_key`
+- `title`, `author`, `narrator`, `summary`, `duration` (milliseconds), `year`, `user_rating` (0-10 scale)
+- **Universal identifiers:** `asin` (Audible ASIN), `isbn` (ISBN-10 or ISBN-13)
+- `file_path`, `thumb_url`, `plex_library_id`, `added_at`
+- `last_scanned_at`, `created_at`, `updated_at`
+- Indexes: `plex_guid`, `title`, `author`, `plex_library_id`, `asin`, `isbn`
+- **Purpose:** Universal library cache for both Plex and Audiobookshelf backends
+- **ASIN/ISBN fields:** Enable accurate matching across backends
+  - **Plex:** ASIN extracted from Plex GUID (e.g., `com.plexapp.agents.audible://B00ABC123`) + stored in dedicated field
+  - **Audiobookshelf:** ASIN/ISBN retrieved directly from ABS metadata + stored in dedicated fields
+  - **Matching:** Prioritizes exact ASIN/ISBN matches (100% confidence) before fuzzy title/author matching
+
 ### Audiobooks
 - `id` (UUID PK), `audible_asin` (nullable), `title`, `author`, `narrator`, `description`
 - `cover_art_url`, `file_path`, `file_format`, `file_size_bytes`

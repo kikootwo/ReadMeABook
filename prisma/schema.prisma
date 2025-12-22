@@ -100,9 +100,10 @@ model AudibleCache {
 }
 
 // ============================================================================
-// PLEX LIBRARY TABLE
-// Pure Plex library content - What's actually in your Plex server
-// No Audible data - just Plex metadata and file info
+// LIBRARY CACHE TABLE (plex_library for backward compatibility)
+// Universal library content - Works with Plex or Audiobookshelf backends
+// Stores complete metadata including ASIN/ISBN for accurate matching
+// No Audible data - just library backend metadata and file info
 // ============================================================================
 model PlexLibrary {
   id            String    @id @default(uuid())
@@ -116,6 +117,10 @@ model PlexLibrary {
   duration      Int?      // Duration in milliseconds (Plex format)
   year          Int?
   userRating    Decimal?  @map("user_rating") @db.Decimal(3, 1) // User's rating (0-10 scale from Plex)
+
+  // Universal identifiers (works for both Plex and Audiobookshelf)
+  asin          String?   // Audible ASIN - extracted from Plex GUID or stored directly from ABS
+  isbn          String?   // ISBN (10 or 13) - for additional matching capability
 
   // File information
   filePath      String?   @map("file_path") @db.Text
@@ -133,6 +138,8 @@ model PlexLibrary {
   @@index([title])
   @@index([author])
   @@index([plexLibraryId])
+  @@index([asin])
+  @@index([isbn])
   @@map("plex_library")
 }
 

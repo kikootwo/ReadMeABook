@@ -84,6 +84,8 @@ export async function findPlexMatch(
       plexGuid: true,
       title: true,
       author: true,
+      asin: true,    // Include ASIN field for direct matching
+      isbn: true,    // Include ISBN field for additional matching
     },
     take: 20,
   });
@@ -109,10 +111,27 @@ export async function findPlexMatch(
     return null;
   }
 
-  // PRIORITY 1: Check for EXACT ASIN match in plexGuid
+  // PRIORITY 1a: Check for EXACT ASIN match in dedicated field (works for all backends)
+  for (const plexBook of plexBooks) {
+    if (plexBook.asin && plexBook.asin.toLowerCase() === audiobook.asin.toLowerCase()) {
+      matchResult.matchType = 'asin_exact_field';
+      matchResult.matched = true;
+      matchResult.result = {
+        plexGuid: plexBook.plexGuid,
+        plexTitle: plexBook.title,
+        plexAuthor: plexBook.author,
+        asin: plexBook.asin,
+        confidence: 100,
+      };
+      if (DEBUG_ENABLED) console.log(JSON.stringify({ MATCHER: matchResult }));
+      return plexBook;
+    }
+  }
+
+  // PRIORITY 1b: Check for ASIN in plexGuid (backward compatibility for Plex)
   for (const plexBook of plexBooks) {
     if (plexBook.plexGuid && plexBook.plexGuid.includes(audiobook.asin)) {
-      matchResult.matchType = 'asin_exact';
+      matchResult.matchType = 'asin_exact_guid';
       matchResult.matched = true;
       matchResult.result = {
         plexGuid: plexBook.plexGuid,
@@ -125,10 +144,20 @@ export async function findPlexMatch(
     }
   }
 
-  // FILTER OUT candidates with wrong ASINs in plexGuid
+  // FILTER OUT candidates with wrong ASINs (check both dedicated field and plexGuid)
   const ASIN_PATTERN = /[A-Z0-9]{10}/g;
   const rejectedAsins: string[] = [];
   const validCandidates = plexBooks.filter((plexBook) => {
+    // Check dedicated ASIN field first (more reliable)
+    if (plexBook.asin) {
+      if (plexBook.asin.toLowerCase() !== audiobook.asin.toLowerCase()) {
+        rejectedAsins.push(plexBook.asin);
+        return false; // Wrong ASIN in dedicated field - reject
+      }
+      return true; // Correct ASIN in dedicated field - keep
+    }
+
+    // Fall back to checking plexGuid for legacy Plex data
     if (!plexBook.plexGuid) return true;
     const asinsInGuid = plexBook.plexGuid.match(ASIN_PATTERN);
     if (!asinsInGuid || asinsInGuid.length === 0) return true;

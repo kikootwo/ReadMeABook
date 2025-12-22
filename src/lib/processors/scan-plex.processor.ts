@@ -87,6 +87,8 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
               summary: item.description || existing.summary,
               duration: item.duration ? item.duration * 1000 : existing.duration, // Convert seconds to milliseconds
               year: item.year || existing.year,
+              asin: item.asin || existing.asin,  // Store ASIN from library backend
+              isbn: item.isbn || existing.isbn,  // Store ISBN from library backend
               thumbUrl: item.coverUrl || existing.thumbUrl,
               plexLibraryId: targetLibraryId,
               plexRatingKey: item.id || existing.plexRatingKey,
@@ -108,6 +110,8 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
               summary: item.description,
               duration: item.duration ? item.duration * 1000 : null, // Convert seconds to milliseconds
               year: item.year,
+              asin: item.asin,  // Store ASIN from library backend (Plex or Audiobookshelf)
+              isbn: item.isbn,  // Store ISBN from library backend
               thumbUrl: item.coverUrl,
               plexLibraryId: targetLibraryId,
               addedAt: item.addedAt,

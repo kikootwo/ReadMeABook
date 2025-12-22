@@ -136,6 +136,12 @@ export class QBittorrentService {
    * Add torrent (magnet link or file URL) - Enterprise Implementation
    */
   async addTorrent(url: string, options?: AddTorrentOptions): Promise<string> {
+    // Validate URL parameter
+    if (!url || typeof url !== 'string' || url.trim() === '') {
+      console.error('[qBittorrent] Invalid download URL:', url);
+      throw new Error('Invalid download URL: URL is required and must be a non-empty string');
+    }
+
     // Ensure we're authenticated
     if (!this.cookie) {
       await this.login();
@@ -242,7 +248,7 @@ export class QBittorrentService {
         responseType: 'arraybuffer',
         maxRedirects: 0,
         validateStatus: (status) => status >= 200 && status < 300, // Only 2xx is success
-        timeout: 10000,
+        timeout: 30000, // 30 seconds - public indexers can be slow
       });
 
       console.log(`[qBittorrent] Got 2xx response, size=${torrentResponse.data.length} bytes`);
