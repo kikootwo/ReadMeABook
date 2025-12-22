@@ -11,7 +11,21 @@ export async function PUT(request: NextRequest) {
     return requireAdmin(req, async () => {
       try {
         const body = await request.json();
-        const { enabled, providerName, issuerUrl, clientId, clientSecret } = body;
+        const {
+          enabled,
+          providerName,
+          issuerUrl,
+          clientId,
+          clientSecret,
+          accessControlMethod,
+          accessGroupClaim,
+          accessGroupValue,
+          allowedEmails,
+          allowedUsernames,
+          adminClaimEnabled,
+          adminClaimName,
+          adminClaimValue,
+        } = body;
 
         const { getConfigService } = await import('@/lib/services/config.service');
         const configService = getConfigService();
@@ -22,6 +36,14 @@ export async function PUT(request: NextRequest) {
           { key: 'oidc.provider_name', value: providerName || '' },
           { key: 'oidc.issuer_url', value: issuerUrl || '' },
           { key: 'oidc.client_id', value: clientId || '' },
+          { key: 'oidc.access_control_method', value: accessControlMethod || 'open' },
+          { key: 'oidc.access_group_claim', value: accessGroupClaim || 'groups' },
+          { key: 'oidc.access_group_value', value: accessGroupValue || '' },
+          { key: 'oidc.allowed_emails', value: allowedEmails || '[]' },
+          { key: 'oidc.allowed_usernames', value: allowedUsernames || '[]' },
+          { key: 'oidc.admin_claim_enabled', value: adminClaimEnabled ? 'true' : 'false' },
+          { key: 'oidc.admin_claim_name', value: adminClaimName || 'groups' },
+          { key: 'oidc.admin_claim_value', value: adminClaimValue || '' },
         ];
 
         // Only update client secret if provided (not masked)

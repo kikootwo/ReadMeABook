@@ -241,6 +241,56 @@ export async function POST(request: NextRequest) {
           update: { value: encryptedClientSecret, encrypted: true },
           create: { key: 'oidc.client_secret', value: encryptedClientSecret, encrypted: true },
         });
+
+        // Access control configuration
+        await prisma.configuration.upsert({
+          where: { key: 'oidc.access_control_method' },
+          update: { value: oidc.access_control_method || 'open' },
+          create: { key: 'oidc.access_control_method', value: oidc.access_control_method || 'open' },
+        });
+
+        await prisma.configuration.upsert({
+          where: { key: 'oidc.access_group_claim' },
+          update: { value: oidc.access_group_claim || 'groups' },
+          create: { key: 'oidc.access_group_claim', value: oidc.access_group_claim || 'groups' },
+        });
+
+        await prisma.configuration.upsert({
+          where: { key: 'oidc.access_group_value' },
+          update: { value: oidc.access_group_value || '' },
+          create: { key: 'oidc.access_group_value', value: oidc.access_group_value || '' },
+        });
+
+        await prisma.configuration.upsert({
+          where: { key: 'oidc.allowed_emails' },
+          update: { value: oidc.allowed_emails || '[]' },
+          create: { key: 'oidc.allowed_emails', value: oidc.allowed_emails || '[]' },
+        });
+
+        await prisma.configuration.upsert({
+          where: { key: 'oidc.allowed_usernames' },
+          update: { value: oidc.allowed_usernames || '[]' },
+          create: { key: 'oidc.allowed_usernames', value: oidc.allowed_usernames || '[]' },
+        });
+
+        // Admin role mapping configuration
+        await prisma.configuration.upsert({
+          where: { key: 'oidc.admin_claim_enabled' },
+          update: { value: oidc.admin_claim_enabled || 'false' },
+          create: { key: 'oidc.admin_claim_enabled', value: oidc.admin_claim_enabled || 'false' },
+        });
+
+        await prisma.configuration.upsert({
+          where: { key: 'oidc.admin_claim_name' },
+          update: { value: oidc.admin_claim_name || 'groups' },
+          create: { key: 'oidc.admin_claim_name', value: oidc.admin_claim_name || 'groups' },
+        });
+
+        await prisma.configuration.upsert({
+          where: { key: 'oidc.admin_claim_value' },
+          update: { value: oidc.admin_claim_value || '' },
+          create: { key: 'oidc.admin_claim_value', value: oidc.admin_claim_value || '' },
+        });
       }
 
       // Manual registration configuration (if enabled)

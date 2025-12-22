@@ -1,8 +1,8 @@
 # Authentication Service
 
-**Status:** ✅ Implemented | Plex OAuth + Plex Home profile support + JWT sessions + RBAC
+**Status:** ✅ Implemented | Plex OAuth + OIDC + Plex Home + Local Admin + JWT + RBAC
 
-Handles authentication and authorization: Plex OAuth integration with Plex Home profile support, JWT session management, role-based access control.
+Handles authentication and authorization: Multiple auth providers (Plex OAuth, OIDC, Local Admin), Plex Home profile support, JWT session management, comprehensive access control, role-based authorization.
 
 ## Authentication: Plex OAuth
 
@@ -155,6 +155,96 @@ Handles authentication and authorization: Plex OAuth integration with Plex Home 
 - Separate "My Requests" per family member
 - Accurate logs and analytics
 
+## OIDC Authentication (Audiobookshelf Mode)
+
+**Status:** ✅ Implemented | OpenID Connect support with comprehensive access control and admin role mapping
+
+### OIDC Provider Configuration
+- **Provider Name**: Display name for login button (e.g., "Authentik", "Keycloak")
+- **Issuer URL**: OIDC provider's issuer URL (must support `.well-known/openid-configuration`)
+- **Client ID/Secret**: OAuth2 credentials from OIDC provider
+- **Required Scopes**: `openid`, `profile`, `email`, `groups`
+- **Redirect URI**: `{BASE_URL}/api/auth/oidc/callback`
+
+### Access Control Methods
+Controls who can log in to the application (separate from admin role assignment):
+
+**1. Open Access (`open`)**
+- Anyone who can authenticate with OIDC provider has access
+- No additional restrictions
+- Default: Suitable for trusted internal providers
+
+**2. Group/Claim Based (`group_claim`)**
+- Requires specific group/claim value for access
+- Config: `oidc.access_group_claim` (default: `groups`)
+- Config: `oidc.access_group_value` (required group name)
+- Example: Only users in "readmeabook-users" group can log in
+
+**3. Allowed List (`allowed_list`)**
+- Whitelist of specific emails and/or usernames
+- Config: `oidc.allowed_emails` (JSON array)
+- Config: `oidc.allowed_usernames` (JSON array)
+- Example: `["user1@example.com", "user2@example.com"]`
+
+**4. Admin Approval (`admin_approval`)**
+- New users created in "pending_approval" state
+- Admin must approve/reject users before they can access
+- Pending users visible in admin settings
+
+### Admin Role Mapping
+Automatically grants admin permissions based on OIDC claims (e.g., group membership):
+
+**Configuration:**
+- `oidc.admin_claim_enabled` = `'true'` | `'false'` (default: `'false'`)
+- `oidc.admin_claim_name` = claim field to check (default: `'groups'`)
+- `oidc.admin_claim_value` = required value for admin role (e.g., `'readmeabook-admin'`)
+
+**Behavior:**
+- First OIDC user always becomes admin (regardless of claim settings)
+- Subsequent users checked against admin claim if enabled
+- If claim matches → granted admin role
+- If claim doesn't match → granted user role
+- Claim check occurs on every login (role can be updated dynamically)
+
+**Example:**
+- Authentik group: Create `readmeabook-admin` group
+- Add users to group
+- Configure: `oidc.admin_claim_value = 'readmeabook-admin'`
+- Users in group get admin role on login
+
+### OIDC Endpoints
+- **GET /api/auth/oidc/login** - Initiate OIDC flow, redirect to provider
+- **GET /api/auth/oidc/callback** - Handle OAuth callback, create/update user, return JWT
+- **GET /api/auth/providers** - List enabled auth providers for login page
+
+### Configuration Keys
+```
+oidc.enabled                 = 'true' | 'false'
+oidc.provider_name           = 'Authentik' (display name)
+oidc.issuer_url              = 'https://...'
+oidc.client_id               = 'xxx'
+oidc.client_secret           = (encrypted)
+
+# Access Control
+oidc.access_control_method   = 'open' | 'group_claim' | 'allowed_list' | 'admin_approval'
+oidc.access_group_claim      = 'groups' (claim name)
+oidc.access_group_value      = 'readmeabook-users' (required group)
+oidc.allowed_emails          = '["user@example.com"]' (JSON array)
+oidc.allowed_usernames       = '["username"]' (JSON array)
+
+# Admin Role Mapping
+oidc.admin_claim_enabled     = 'true' | 'false'
+oidc.admin_claim_name        = 'groups'
+oidc.admin_claim_value       = 'readmeabook-admin'
+```
+
+### Implementation
+- **Provider:** `src/lib/services/auth/OIDCAuthProvider.ts`
+- **Routes:** `src/app/api/auth/oidc/login/route.ts`, `src/app/api/auth/oidc/callback/route.ts`
+- **Setup Wizard:** `src/app/setup/steps/OIDCConfigStep.tsx`
+- **Admin Settings:** OIDC section in `/admin/settings` (auth tab)
+- **Library:** `openid-client` (OIDC discovery, token exchange, PKCE)
+
 ## Security
 
 - Never log tokens
@@ -166,9 +256,11 @@ Handles authentication and authorization: Plex OAuth integration with Plex Home 
   - Only users with access to the configured Plex server can authenticate
   - Prevents any Plex user from accessing the instance
   - machineIdentifier stored during setup/settings configuration (architectural optimization)
+- **OIDC PKCE**: All OIDC flows use PKCE (Proof Key for Code Exchange) for enhanced security
 
 ## Tech Stack
 
 - Custom Plex OAuth (direct API)
+- OIDC: openid-client (npm)
 - jsonwebtoken (npm)
 - Node.js crypto

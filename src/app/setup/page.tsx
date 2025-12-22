@@ -57,6 +57,14 @@ interface SetupState {
   oidcIssuerUrl: string;
   oidcClientId: string;
   oidcClientSecret: string;
+  oidcAccessControlMethod: string;
+  oidcAccessGroupClaim: string;
+  oidcAccessGroupValue: string;
+  oidcAllowedEmails: string;
+  oidcAllowedUsernames: string;
+  oidcAdminClaimEnabled: boolean;
+  oidcAdminClaimName: string;
+  oidcAdminClaimValue: string;
 
   // Manual registration config
   requireAdminApproval: boolean;
@@ -114,6 +122,14 @@ export default function SetupWizard() {
     oidcIssuerUrl: '',
     oidcClientId: '',
     oidcClientSecret: '',
+    oidcAccessControlMethod: 'open',
+    oidcAccessGroupClaim: 'groups',
+    oidcAccessGroupValue: '',
+    oidcAllowedEmails: '',
+    oidcAllowedUsernames: '',
+    oidcAdminClaimEnabled: false,
+    oidcAdminClaimName: 'groups',
+    oidcAdminClaimValue: '',
 
     // Manual registration config
     requireAdminApproval: true,
@@ -231,11 +247,26 @@ export default function SetupWizard() {
 
         // OIDC configuration
         if (state.authMethod === 'oidc' || state.authMethod === 'both') {
+          // Helper function to parse comma-separated strings into JSON arrays
+          const parseCommaSeparatedToArray = (str: string): string => {
+            if (!str || str.trim() === '') return '[]';
+            const items = str.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            return JSON.stringify(items);
+          };
+
           payload.oidc = {
             provider_name: state.oidcProviderName,
             issuer_url: state.oidcIssuerUrl,
             client_id: state.oidcClientId,
             client_secret: state.oidcClientSecret,
+            access_control_method: state.oidcAccessControlMethod,
+            access_group_claim: state.oidcAccessGroupClaim,
+            access_group_value: state.oidcAccessGroupValue,
+            allowed_emails: parseCommaSeparatedToArray(state.oidcAllowedEmails),
+            allowed_usernames: parseCommaSeparatedToArray(state.oidcAllowedUsernames),
+            admin_claim_enabled: state.oidcAdminClaimEnabled ? 'true' : 'false',
+            admin_claim_name: state.oidcAdminClaimName,
+            admin_claim_value: state.oidcAdminClaimValue,
           };
         }
 
@@ -392,6 +423,14 @@ export default function SetupWizard() {
               oidcIssuerUrl={state.oidcIssuerUrl}
               oidcClientId={state.oidcClientId}
               oidcClientSecret={state.oidcClientSecret}
+              oidcAccessControlMethod={state.oidcAccessControlMethod}
+              oidcAccessGroupClaim={state.oidcAccessGroupClaim}
+              oidcAccessGroupValue={state.oidcAccessGroupValue}
+              oidcAllowedEmails={state.oidcAllowedEmails}
+              oidcAllowedUsernames={state.oidcAllowedUsernames}
+              oidcAdminClaimEnabled={state.oidcAdminClaimEnabled}
+              oidcAdminClaimName={state.oidcAdminClaimName}
+              oidcAdminClaimValue={state.oidcAdminClaimValue}
               onUpdate={updateField}
               onNext={() => goToStep(currentStepNumber + 1)}
               onBack={() => goToStep(currentStepNumber - 1)}
