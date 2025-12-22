@@ -740,6 +740,17 @@ export class QBittorrentService {
 let qbittorrentService: QBittorrentService | null = null;
 let configLoaded = false;
 
+/**
+ * Invalidate the qBittorrent service singleton
+ * Call this after updating download_dir or qBittorrent connection settings
+ * Forces service to reload configuration from database on next use
+ */
+export function invalidateQBittorrentService(): void {
+  console.log('[qBittorrent] Invalidating service singleton - will reload config on next use');
+  qbittorrentService = null;
+  configLoaded = false;
+}
+
 export async function getQBittorrentService(): Promise<QBittorrentService> {
   // Always recreate if config hasn't been loaded successfully
   if (!qbittorrentService || !configLoaded) {

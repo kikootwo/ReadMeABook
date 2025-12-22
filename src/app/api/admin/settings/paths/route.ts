@@ -55,6 +55,10 @@ export async function PUT(request: NextRequest) {
 
         console.log('[Admin] Paths settings updated');
 
+        // Invalidate qBittorrent service singleton to force reload of download_dir
+        const { invalidateQBittorrentService } = await import('@/lib/integrations/qbittorrent.service');
+        invalidateQBittorrentService();
+
         return NextResponse.json({
           success: true,
           message: 'Paths settings updated successfully',

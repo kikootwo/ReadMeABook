@@ -58,6 +58,10 @@ export async function PUT(request: NextRequest) {
 
         console.log('[Admin] Download client settings updated');
 
+        // Invalidate qBittorrent service singleton to force reload of credentials and URL
+        const { invalidateQBittorrentService } = await import('@/lib/integrations/qbittorrent.service');
+        invalidateQBittorrentService();
+
         return NextResponse.json({
           success: true,
           message: 'Download client settings updated successfully',
