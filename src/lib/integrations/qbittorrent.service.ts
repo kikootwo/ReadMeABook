@@ -423,8 +423,13 @@ export class QBittorrentService {
 
       console.log(`[qBittorrent] Category "${category}" save path updated to: ${this.defaultSavePath}`);
     } catch (error) {
-      console.warn(`[qBittorrent] Failed to update category save path:`, error);
-      // Don't throw - torrents can still be added with per-torrent savepath parameter
+      // 409 = category already has this save path (expected, not an error)
+      if (axios.isAxiosError(error) && error.response?.status === 409) {
+        console.log(`[qBittorrent] Category "${category}" already has save path: ${this.defaultSavePath}`);
+      } else {
+        console.warn(`[qBittorrent] Failed to update category save path:`, error);
+        // Don't throw - torrents can still be added with per-torrent savepath parameter
+      }
     }
   }
 
