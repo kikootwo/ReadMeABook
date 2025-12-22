@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
 
     // Mask sensitive values
     const maskValue = (key: string, value: string | null | undefined) => {
-      const sensitiveKeys = ['token', 'api_key', 'password'];
+      const sensitiveKeys = ['token', 'api_key', 'password', 'secret'];
       if (value && sensitiveKeys.some((k) => key.includes(k))) {
         return '••••••••••••';
       }

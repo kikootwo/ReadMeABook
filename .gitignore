@@ -49,3 +49,6 @@ next-env.d.ts
 
 /src/generated/prisma
 /RMAB
+/cache
+/redis
+/pgdata

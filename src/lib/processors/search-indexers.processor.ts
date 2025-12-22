@@ -31,6 +31,24 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       },
     });
 
+    // Get enabled indexers from configuration
+    const { getConfigService } = await import('../services/config.service');
+    const configService = getConfigService();
+    const indexersConfigStr = await configService.get('prowlarr_indexers');
+
+    if (!indexersConfigStr) {
+      throw new Error('No indexers configured. Please configure indexers in settings.');
+    }
+
+    const indexersConfig = JSON.parse(indexersConfigStr);
+    const enabledIndexerIds = indexersConfig.map((indexer: any) => indexer.id);
+
+    if (enabledIndexerIds.length === 0) {
+      throw new Error('No indexers enabled. Please enable at least one indexer in settings.');
+    }
+
+    await logger?.info(`Searching ${enabledIndexerIds.length} enabled indexers`);
+
     // Get Prowlarr service
     const prowlarr = await getProwlarrService();
 
@@ -39,11 +57,12 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
 
     await logger?.info(`Searching for: "${searchQuery}"`);
 
-    // Search indexers
+    // Search indexers - ONLY enabled ones
     const searchResults = await prowlarr.search(searchQuery, {
       category: 3030, // Audiobooks
       minSeeders: 1, // Only torrents with at least 1 seeder
       maxResults: 50, // Limit results
+      indexerIds: enabledIndexerIds, // Filter by enabled indexers
     });
 
     await logger?.info(`Found ${searchResults.length} results`);

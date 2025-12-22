@@ -11,6 +11,7 @@ export interface SearchFilters {
   category?: number;
   minSeeders?: number;
   maxResults?: number;
+  indexerIds?: number[];
 }
 
 export interface Indexer {
@@ -72,7 +73,8 @@ export class ProwlarrService {
   }
 
   /**
-   * Search for audiobooks across all configured indexers
+   * Search for audiobooks across configured indexers
+   * If indexerIds is provided, only searches those indexers
    */
   async search(
     query: string,
@@ -85,6 +87,11 @@ export class ProwlarrService {
         type: 'search',
         extended: 1, // Enable searching in tags, labels, and metadata
       };
+
+      // Filter by specific indexers if provided
+      if (filters?.indexerIds && filters.indexerIds.length > 0) {
+        params.indexerIds = filters.indexerIds.join(',');
+      }
 
       const response = await this.client.get('/search', { params });
 
