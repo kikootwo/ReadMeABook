@@ -210,22 +210,29 @@ export class OIDCAuthProvider implements IAuthProvider {
         const existingUser = await this.findUserByOIDCSubject(userinfo.sub);
 
         if (!existingUser) {
-          // Create pending user
-          await this.createPendingUser(userinfo.sub, username, email, avatarUrl);
+          // Check if this is the first user - they should bypass approval
+          const userCount = await prisma.user.count();
+          const isFirstUser = userCount === 0;
+
+          if (!isFirstUser) {
+            // Not the first user - create pending user requiring approval
+            await this.createPendingUser(userinfo.sub, username, email, avatarUrl);
+            return {
+              success: false,
+              requiresApproval: true,
+            };
+          }
+          // First user - continue to create them as approved admin (bypass approval)
+        }
+
+        if (existingUser?.registrationStatus === 'pending_approval') {
           return {
             success: false,
             requiresApproval: true,
           };
         }
 
-        if (existingUser.registrationStatus === 'pending_approval') {
-          return {
-            success: false,
-            requiresApproval: true,
-          };
-        }
-
-        if (existingUser.registrationStatus === 'rejected') {
+        if (existingUser?.registrationStatus === 'rejected') {
           return {
             success: false,
             error: 'Your account has been rejected by an administrator',
