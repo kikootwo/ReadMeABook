@@ -208,6 +208,18 @@ function LoginContent() {
     }
   }, [searchParams, user, authLoading, setAuthData, router]);
 
+  // Handle error messages from URL query parameters (e.g., OIDC access denied)
+  useEffect(() => {
+    const errorParam = searchParams.get('error');
+    if (errorParam) {
+      setError(decodeURIComponent(errorParam));
+      // Clean up URL by removing the error parameter
+      const newUrl = new URL(window.location.href);
+      newUrl.searchParams.delete('error');
+      window.history.replaceState({}, '', newUrl.toString());
+    }
+  }, [searchParams]);
+
   const handlePlexLogin = async () => {
     setIsLoggingIn(true);
     setError(null);
