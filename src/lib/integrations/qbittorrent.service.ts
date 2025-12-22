@@ -370,7 +370,7 @@ export class QBittorrentService {
 
   /**
    * Ensure category exists in qBittorrent with correct save path
-   * Always updates the category's save path to match current config
+   * Checks existing categories first, then creates or updates as needed
    */
   private async ensureCategory(category: string): Promise<void> {
     if (!this.cookie) {
@@ -378,57 +378,71 @@ export class QBittorrentService {
     }
 
     try {
-      // Try to create category first (idempotent - won't fail if exists)
-      await this.client.post(
-        '/torrents/createCategory',
-        new URLSearchParams({
-          category,
-          savePath: this.defaultSavePath,
-        }),
-        {
-          headers: {
-            Cookie: this.cookie,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        }
-      );
+      // First, get all categories to check if it exists and what save path it has
+      const categoriesResponse = await this.client.get('/torrents/categories', {
+        headers: { Cookie: this.cookie },
+      });
 
-      console.log(`[qBittorrent] Category "${category}" created`);
-    } catch (error) {
-      // 409 = category already exists (expected, not an error)
-      if (axios.isAxiosError(error) && error.response?.status === 409) {
-        console.log(`[qBittorrent] Category "${category}" already exists`);
+      const categories = categoriesResponse.data;
+      const existingCategory = categories[category];
+
+      if (!existingCategory) {
+        // Category doesn't exist - create it
+        console.log(`[qBittorrent] Creating category "${category}" with save path: ${this.defaultSavePath}`);
+
+        await this.client.post(
+          '/torrents/createCategory',
+          new URLSearchParams({
+            category,
+            savePath: this.defaultSavePath,
+          }),
+          {
+            headers: {
+              Cookie: this.cookie,
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+          }
+        );
+
+        console.log(`[qBittorrent] Category "${category}" created successfully`);
       } else {
-        // Unexpected error, but don't fail - editCategory below will handle it
-        console.warn(`[qBittorrent] Failed to create category:`, error);
+        // Category exists - check if save path needs updating
+        const currentSavePath = existingCategory.savePath || existingCategory.save_path;
+
+        if (currentSavePath !== this.defaultSavePath) {
+          console.log(`[qBittorrent] Updating category "${category}" save path from "${currentSavePath}" to "${this.defaultSavePath}"`);
+
+          await this.client.post(
+            '/torrents/editCategory',
+            new URLSearchParams({
+              category,
+              savePath: this.defaultSavePath,
+            }),
+            {
+              headers: {
+                Cookie: this.cookie,
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+            }
+          );
+
+          console.log(`[qBittorrent] Category "${category}" save path updated successfully`);
+        } else {
+          console.log(`[qBittorrent] Category "${category}" already has correct save path: ${this.defaultSavePath}`);
+        }
       }
-    }
-
-    // Always update the category's save path to ensure it matches current config
-    // This handles cases where download_dir was changed after category was created
-    try {
-      await this.client.post(
-        '/torrents/editCategory',
-        new URLSearchParams({
-          category,
-          savePath: this.defaultSavePath,
-        }),
-        {
-          headers: {
-            Cookie: this.cookie,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        }
-      );
-
-      console.log(`[qBittorrent] Category "${category}" save path updated to: ${this.defaultSavePath}`);
     } catch (error) {
-      // 409 = category already has this save path (expected, not an error)
-      if (axios.isAxiosError(error) && error.response?.status === 409) {
-        console.log(`[qBittorrent] Category "${category}" already has save path: ${this.defaultSavePath}`);
+      // If we can't ensure the category, log error but don't throw
+      // Torrents can still be added with per-torrent savepath parameter
+      if (axios.isAxiosError(error)) {
+        console.error(`[qBittorrent] Failed to ensure category "${category}":`, {
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          data: error.response?.data,
+          requestedPath: this.defaultSavePath,
+        });
       } else {
-        console.warn(`[qBittorrent] Failed to update category save path:`, error);
-        // Don't throw - torrents can still be added with per-torrent savepath parameter
+        console.error(`[qBittorrent] Failed to ensure category:`, error);
       }
     }
   }
