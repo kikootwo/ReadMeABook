@@ -50,13 +50,37 @@ export async function POST(
         );
       }
 
-      // Search Prowlarr for torrents
+      // Get enabled indexers from configuration
+      const { getConfigService } = await import('@/lib/services/config.service');
+      const configService = getConfigService();
+      const indexersConfigStr = await configService.get('prowlarr_indexers');
+
+      if (!indexersConfigStr) {
+        return NextResponse.json(
+          { error: 'ConfigError', message: 'No indexers configured. Please configure indexers in settings.' },
+          { status: 400 }
+        );
+      }
+
+      const indexersConfig = JSON.parse(indexersConfigStr);
+      const enabledIndexerIds = indexersConfig.map((indexer: any) => indexer.id);
+
+      if (enabledIndexerIds.length === 0) {
+        return NextResponse.json(
+          { error: 'ConfigError', message: 'No indexers enabled. Please enable at least one indexer in settings.' },
+          { status: 400 }
+        );
+      }
+
+      // Search Prowlarr for torrents - ONLY enabled indexers
       const prowlarr = await getProwlarrService();
       const searchQuery = `${requestRecord.audiobook.title} ${requestRecord.audiobook.author}`;
 
-      console.log(`[InteractiveSearch] Searching for: ${searchQuery}`);
+      console.log(`[InteractiveSearch] Searching ${enabledIndexerIds.length} enabled indexers for: ${searchQuery}`);
 
-      const results = await prowlarr.search(searchQuery);
+      const results = await prowlarr.search(searchQuery, {
+        indexerIds: enabledIndexerIds,
+      });
 
       if (results.length === 0) {
         return NextResponse.json({

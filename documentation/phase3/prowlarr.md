@@ -9,7 +9,7 @@ Indexer aggregator for searching multiple torrent/usenet indexers simultaneously
 **Base:** `http://prowlarr:9696/api/v1`
 **Auth:** `X-Api-Key` header
 
-**GET /search?query={q}&categories=3030** - Search all indexers (3030 = audiobooks)
+**GET /search?query={q}&categories=3030&indexerIds={ids}** - Search indexers (3030 = audiobooks, ids = comma-separated indexer IDs)
 **GET /indexer** - List configured indexers
 **GET /indexerstats** - Indexer statistics
 **GET /feed/{indexerId}/api?t=search&cat=3030&limit=100** - RSS feed for specific indexer
@@ -49,13 +49,17 @@ interface TorrentResult {
 
 ## Manual & Interactive Search
 
+**Indexer Filtering:** All searches (manual and interactive) only query indexers enabled in settings (`prowlarr_indexers` config). If no indexers are enabled, search will fail with error.
+
 **Manual Search** (`POST /api/requests/{id}/manual-search`)
 - Triggers automatic search job for requests with status: pending, failed, awaiting_search
+- Searches only enabled indexers
 - Uses ranking algorithm to select best torrent
 - Updates request status to 'pending'
 
 **Interactive Search** (`POST /api/requests/{id}/interactive-search`)
 - Returns ranked torrent results for user selection
+- Searches only enabled indexers
 - Shows table with: rank, title, size, quality score, seeders, indexer, publish date
 - Available for same statuses as manual search
 - User clicks "Download" button to select specific torrent
