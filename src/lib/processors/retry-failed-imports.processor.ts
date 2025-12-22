@@ -72,8 +72,7 @@ export async function processRetryFailedImports(payload: RetryFailedImportsPaylo
         await jobQueue.addOrganizeJob(
           request.id,
           request.audiobook.id,
-          downloadPath,
-          `/media/audiobooks/${request.audiobook.author}/${request.audiobook.title}`
+          downloadPath
         );
         triggered++;
         await logger?.info(`Triggered organize job for request ${request.id}: ${request.audiobook.title}`);

@@ -6,23 +6,28 @@ Copies completed downloads to standardized directory structure for Plex. Automat
 
 ## Target Structure
 
+Target directory read from database config `media_dir` (configurable in setup wizard and settings).
+
 ```
-/media/audiobooks/
+[media_dir]/
 └── Author Name/
     └── Book Title (Year)/
         ├── Book Title.m4b
         └── cover.jpg
 ```
 
+Default: `/media/audiobooks/` (if not configured)
+
 ## Process
 
 1. Download completes in `/downloads/[torrent-name]/` or `/downloads/[filename]` (single file)
 2. Identify audiobook files (.m4b, .m4a, .mp3) - supports both directories and single files
-3. Create `/media/audiobooks/[Author]/[Title]/`
-4. **Copy** files (not move - originals stay for seeding)
-5. **Tag metadata** (if enabled) - writes correct title, author, narrator to audio files
-6. Copy cover art if found, else download from Audible
-7. Originals remain until seeding requirements met
+3. Read media directory from database config `media_dir`
+4. Create `[media_dir]/[Author]/[Title]/`
+5. **Copy** files (not move - originals stay for seeding)
+6. **Tag metadata** (if enabled) - writes correct title, author, narrator to audio files
+7. Copy cover art if found, else download from Audible
+8. Originals remain until seeding requirements met
 
 ## Metadata Tagging
 
@@ -110,12 +115,19 @@ async function organize(
 - Limit to 200 chars
 - Example: `Author: The <Best>! Book?` → `Author The Best! Book`
 
+## Configuration
+
+- **Media directory:** Read from database config key `media_dir` (set in setup wizard or settings)
+- **Fallback:** `/media/audiobooks` if not configured
+- **Temp directory:** `/tmp/readmeabook` (or `TEMP_DIR` env var)
+
 ## Fixed Issues ✅
 
 **1. EPERM errors** - Fixed with `fs.readFile/writeFile` instead of `copyFile`
 **2. Immediate deletion** - Changed to copy-only, scheduled cleanup after seeding
 **3. Files moved not copied** - Now copies to support seeding
 **4. Single file downloads** - Now supports files directly in downloads folder (not just directories)
+**5. Hardcoded media path** - Now reads `media_dir` from database config instead of hardcoded `/media/audiobooks`
 
 ## Tech Stack
 

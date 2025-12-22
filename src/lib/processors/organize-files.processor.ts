@@ -43,8 +43,8 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
 
     await logger?.info(`Organizing: ${audiobook.title} by ${audiobook.author}`);
 
-    // Get file organizer
-    const organizer = getFileOrganizer();
+    // Get file organizer (reads media_dir from database config)
+    const organizer = await getFileOrganizer();
 
     // Organize files (pass logger to file organizer)
     const result = await organizer.organize(
