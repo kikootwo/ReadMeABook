@@ -58,7 +58,7 @@ export interface OrganizeFilesPayload extends JobPayload {
   requestId: string;
   audiobookId: string;
   downloadPath: string;
-  targetPath: string;
+  targetPath?: string; // Optional - not used by processor (reads from database config)
 }
 
 export interface ScanPlexPayload extends JobPayload {
@@ -499,12 +499,13 @@ export class JobQueueService {
 
   /**
    * Add organize files job
+   * Note: targetPath parameter is deprecated and unused (reads from database config instead)
    */
   async addOrganizeJob(
     requestId: string,
     audiobookId: string,
     downloadPath: string,
-    targetPath: string
+    targetPath?: string
   ): Promise<string> {
     return await this.addJob(
       'organize_files',
@@ -512,7 +513,7 @@ export class JobQueueService {
         requestId,
         audiobookId,
         downloadPath,
-        targetPath,
+        targetPath, // Not used by processor
       } as OrganizeFilesPayload,
       {
         priority: 8,

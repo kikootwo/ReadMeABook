@@ -194,8 +194,7 @@ export async function PATCH(
           await jobQueue.addOrganizeJob(
             id,
             requestWithData.audiobook.id,
-            downloadPath,
-            `/media/audiobooks/${requestWithData.audiobook.author}/${requestWithData.audiobook.title}`
+            downloadPath
           );
 
           updated = await prisma.request.update({

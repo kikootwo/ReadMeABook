@@ -117,13 +117,12 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         throw new Error('Request or audiobook not found');
       }
 
-      // Trigger organize files job
+      // Trigger organize files job (target path determined by database config)
       const jobQueue = getJobQueueService();
       await jobQueue.addOrganizeJob(
         requestId,
         request.audiobook.id,
-        `${downloadPath}/${torrent.name}`,
-        `/media/audiobooks/${request.audiobook.author}/${request.audiobook.title}`
+        `${downloadPath}/${torrent.name}`
       );
 
       await logger?.info(`Triggered organize_files job for request ${requestId}`);

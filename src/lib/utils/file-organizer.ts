@@ -464,16 +464,18 @@ export class FileOrganizer {
   }
 }
 
-// Singleton instance
-let fileOrganizer: FileOrganizer | null = null;
+/**
+ * Get FileOrganizer instance configured from database settings
+ * Reads media_dir from database configuration, falls back to /media/audiobooks if not configured
+ */
+export async function getFileOrganizer(): Promise<FileOrganizer> {
+  // Read media_dir from database config
+  const config = await prisma.configuration.findUnique({
+    where: { key: 'media_dir' },
+  });
 
-export function getFileOrganizer(): FileOrganizer {
-  if (!fileOrganizer) {
-    const mediaDir = process.env.MEDIA_DIR || '/media/audiobooks';
-    const tempDir = process.env.TEMP_DIR || '/tmp/readmeabook';
+  const mediaDir = config?.value || process.env.MEDIA_DIR || '/media/audiobooks';
+  const tempDir = process.env.TEMP_DIR || '/tmp/readmeabook';
 
-    fileOrganizer = new FileOrganizer(mediaDir, tempDir);
-  }
-
-  return fileOrganizer;
+  return new FileOrganizer(mediaDir, tempDir);
 }
