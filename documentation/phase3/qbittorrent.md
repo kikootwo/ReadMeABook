@@ -50,6 +50,12 @@ Free, open-source BitTorrent client with comprehensive Web API.
 
 Validation: All fields checked before service initialization.
 
+**Singleton Invalidation:**
+Service uses singleton pattern for performance. When settings change (via admin settings page), singleton is invalidated to force reload:
+- `invalidateQBittorrentService()` called after updating paths or download client settings
+- Forces service to re-read database config on next torrent addition
+- Ensures category save path and credentials are always current
+
 ## Category Management
 
 **Category:** `readmeabook` (auto-created for all torrents)
@@ -97,7 +103,10 @@ type TorrentState = 'downloading' | 'uploading' | 'stalledDL' |
 **6. Race condition on torrent availability** - Fixed with 3s initial delay + exponential backoff retry (500ms, 1s, 2s)
 **7. Error logging during duplicate check** - Removed console.error in getTorrent() during expected "not found" cases (duplicate checking)
 **8. Prowlarr magnet link redirects** - Some indexers return HTTP URLs that redirect to magnet: links. Fixed by intercepting 3xx redirects before axios follows them, extracting the Location header, and routing to magnet flow if target is a magnet: link
-**9. Category save path not updating** - When user changes `download_dir` setting, category keeps old path. Fixed by calling both `createCategory` and `editCategory` on every torrent addition to ensure category path matches current config
+**9. Category save path not updating** - When user changes `download_dir` setting, category keeps old path. Fixed by:
+   - Checking existing categories before create/edit (avoid unnecessary 409 errors)
+   - Invalidating service singleton when settings change (forces config reload)
+   - Settings API calls `invalidateQBittorrentService()` after updating paths or credentials
 
 ## Tech Stack
 
