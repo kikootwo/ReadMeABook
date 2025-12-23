@@ -1,7 +1,6 @@
 /**
  * ReadMeABook Database Schema
  * Documentation: documentation/backend/database.md
- *
  * ARCHITECTURE:
  * - audible_cache: Pure Audible metadata (popular/new releases from Audible.com)
  * - plex_library: Pure Plex library content (what's in your Plex server)
@@ -24,31 +23,31 @@ datasource db {
 // ============================================================================
 
 model User {
-  id            String    @id @default(uuid())
-  plexId        String    @unique @map("plex_id")
-  plexUsername  String    @map("plex_username")
-  plexEmail     String?   @map("plex_email")
-  role          String    @default("user") // 'user' or 'admin'
-  isSetupAdmin  Boolean   @default(false) @map("is_setup_admin") // First admin created during setup, cannot be demoted
-  avatarUrl     String?   @map("avatar_url")
-  authToken     String?   @map("auth_token") // Encrypted
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-  lastLoginAt   DateTime? @map("last_login_at")
+  id           String    @id @default(uuid())
+  plexId       String    @unique @map("plex_id")
+  plexUsername String    @map("plex_username")
+  plexEmail    String?   @map("plex_email")
+  role         String    @default("user") // 'user' or 'admin'
+  isSetupAdmin Boolean   @default(false) @map("is_setup_admin") // First admin created during setup, cannot be demoted
+  avatarUrl    String?   @map("avatar_url")
+  authToken    String?   @map("auth_token") // Encrypted
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  lastLoginAt  DateTime? @map("last_login_at")
 
   // Plex Home profile tracking
-  plexHomeUserId String?  @map("plex_home_user_id") // Profile ID from Plex Home (null = main account, set = home profile)
+  plexHomeUserId String? @map("plex_home_user_id") // Profile ID from Plex Home (null = main account, set = home profile)
 
   // Multi-auth support (for Audiobookshelf integration)
-  authProvider        String?  @map("auth_provider")  // 'plex' | 'oidc' | 'local'
-  oidcSubject         String?  @map("oidc_subject")   // OIDC subject ID (unique per provider)
-  oidcProvider        String?  @map("oidc_provider")  // OIDC provider name (e.g., 'authentik', 'keycloak')
-  registrationStatus  String?  @default("approved") @map("registration_status")  // 'pending_approval' | 'approved' | 'rejected'
+  authProvider       String? @map("auth_provider") // 'plex' | 'oidc' | 'local'
+  oidcSubject        String? @map("oidc_subject") // OIDC subject ID (unique per provider)
+  oidcProvider       String? @map("oidc_provider") // OIDC provider name (e.g., 'authentik', 'keycloak')
+  registrationStatus String? @default("approved") @map("registration_status") // 'pending_approval' | 'approved' | 'rejected'
 
   // BookDate per-user preferences
-  bookDateLibraryScope         String?  @default("full") @map("bookdate_library_scope") // 'full' | 'rated'
-  bookDateCustomPrompt         String?  @map("bookdate_custom_prompt") @db.Text
-  bookDateOnboardingComplete   Boolean  @default(false) @map("bookdate_onboarding_complete")
+  bookDateLibraryScope       String? @default("full") @map("bookdate_library_scope") // 'full' | 'rated'
+  bookDateCustomPrompt       String? @map("bookdate_custom_prompt") @db.Text
+  bookDateOnboardingComplete Boolean @default(false) @map("bookdate_onboarding_complete")
 
   // Relations
   requests                Request[]
@@ -72,22 +71,22 @@ model AudibleCache {
   author          String
   narrator        String?
   description     String?   @db.Text
-  coverArtUrl       String?   @map("cover_art_url") @db.Text
-  cachedCoverPath   String?   @map("cached_cover_path") @db.Text // Local path to cached cover image
-  durationMinutes   Int?      @map("duration_minutes")
+  coverArtUrl     String?   @map("cover_art_url") @db.Text
+  cachedCoverPath String?   @map("cached_cover_path") @db.Text // Local path to cached cover image
+  durationMinutes Int?      @map("duration_minutes")
   releaseDate     DateTime? @map("release_date") @db.Date
   rating          Decimal?  @db.Decimal(3, 2)
   genres          Json      @default("[]")
 
   // Discovery categories
-  isPopular      Boolean   @default(false) @map("is_popular")
-  isNewRelease   Boolean   @default(false) @map("is_new_release")
-  popularRank    Int?      @map("popular_rank")
-  newReleaseRank Int?      @map("new_release_rank")
+  isPopular      Boolean @default(false) @map("is_popular")
+  isNewRelease   Boolean @default(false) @map("is_new_release")
+  popularRank    Int?    @map("popular_rank")
+  newReleaseRank Int?    @map("new_release_rank")
 
-  lastSyncedAt   DateTime  @default(now()) @map("last_synced_at")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  lastSyncedAt DateTime @default(now()) @map("last_synced_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   @@index([asin])
   @@index([title])
@@ -106,33 +105,33 @@ model AudibleCache {
 // No Audible data - just library backend metadata and file info
 // ============================================================================
 model PlexLibrary {
-  id            String    @id @default(uuid())
-  plexGuid      String    @unique @map("plex_guid") // Plex's unique identifier
-  plexRatingKey String?   @map("plex_rating_key") // Plex's rating key
+  id            String  @id @default(uuid())
+  plexGuid      String  @unique @map("plex_guid") // Plex's unique identifier
+  plexRatingKey String? @map("plex_rating_key") // Plex's rating key
 
-  title         String
-  author        String
-  narrator      String?
-  summary       String?   @db.Text
-  duration      Int?      // Duration in milliseconds (Plex format)
-  year          Int?
-  userRating    Decimal?  @map("user_rating") @db.Decimal(3, 1) // User's rating (0-10 scale from Plex)
+  title      String
+  author     String
+  narrator   String?
+  summary    String?  @db.Text
+  duration   Int? // Duration in milliseconds (Plex format)
+  year       Int?
+  userRating Decimal? @map("user_rating") @db.Decimal(3, 1) // User's rating (0-10 scale from Plex)
 
   // Universal identifiers (works for both Plex and Audiobookshelf)
-  asin          String?   // Audible ASIN - extracted from Plex GUID or stored directly from ABS
-  isbn          String?   // ISBN (10 or 13) - for additional matching capability
+  asin String? // Audible ASIN - extracted from Plex GUID or stored directly from ABS
+  isbn String? // ISBN (10 or 13) - for additional matching capability
 
   // File information
-  filePath      String?   @map("file_path") @db.Text
-  thumbUrl      String?   @map("thumb_url") @db.Text // Plex thumbnail URL
+  filePath String? @map("file_path") @db.Text
+  thumbUrl String? @map("thumb_url") @db.Text // Plex thumbnail URL
 
   // Plex metadata
   plexLibraryId String    @map("plex_library_id") // Which Plex library contains this
   addedAt       DateTime? @map("added_at") // When added to Plex
 
-  lastScannedAt DateTime  @default(now()) @map("last_scanned_at")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  lastScannedAt DateTime @default(now()) @map("last_scanned_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   @@index([plexGuid])
   @@index([title])
@@ -149,34 +148,34 @@ model PlexLibrary {
 // Links to AudibleCache for metadata (optional - search results may not be cached)
 // ============================================================================
 model Audiobook {
-  id              String    @id @default(uuid())
+  id String @id @default(uuid())
 
   // Core metadata (may come from Audible search, not necessarily cached)
-  audibleAsin     String?   @map("audible_asin") // ASIN if from Audible
-  title           String
-  author          String
-  narrator        String?
-  description     String?   @db.Text
-  coverArtUrl     String?   @map("cover_art_url") @db.Text
+  audibleAsin String? @map("audible_asin") // ASIN if from Audible
+  title       String
+  author      String
+  narrator    String?
+  description String? @db.Text
+  coverArtUrl String? @map("cover_art_url") @db.Text
 
   // Request tracking
-  status          String    @default("requested") // requested, downloading, processing, completed, failed
+  status String @default("requested") // requested, downloading, processing, completed, failed
 
   // File information (populated after download/organization)
-  filePath        String?   @map("file_path") @db.Text
-  fileFormat      String?   @map("file_format") // m4b, m4a, mp3
-  fileSizeBytes   BigInt?   @map("file_size_bytes")
+  filePath      String? @map("file_path") @db.Text
+  fileFormat    String? @map("file_format") // m4b, m4a, mp3
+  fileSizeBytes BigInt? @map("file_size_bytes")
 
   // Plex integration (populated after successful import)
-  plexGuid        String?   @map("plex_guid") // Set when imported into Plex
-  plexLibraryId   String?   @map("plex_library_id")
+  plexGuid      String? @map("plex_guid") // Set when imported into Plex
+  plexLibraryId String? @map("plex_library_id")
 
   // Audiobookshelf integration (alternative to Plex)
-  absItemId       String?   @map("abs_item_id") // Audiobookshelf item ID
+  absItemId String? @map("abs_item_id") // Audiobookshelf item ID
 
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  completedAt     DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  completedAt DateTime? @map("completed_at")
 
   // Relations
   requests Request[]
@@ -210,17 +209,21 @@ model Request {
   updatedAt        DateTime  @updatedAt @map("updated_at")
   completedAt      DateTime? @map("completed_at")
 
-  // Relations
-  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  audiobook        Audiobook          @relation(fields: [audiobookId], references: [id], onDelete: Cascade)
-  downloadHistory  DownloadHistory[]
-  jobs             Job[]
+  // Soft delete support
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by") // Admin user ID
 
-  @@unique([userId, audiobookId])
+  // Relations
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  audiobook       Audiobook         @relation(fields: [audiobookId], references: [id], onDelete: Cascade)
+  downloadHistory DownloadHistory[]
+  jobs            Job[]
+
   @@index([userId])
   @@index([audiobookId])
   @@index([status])
   @@index([createdAt(sort: Desc)])
+  @@index([deletedAt])
   @@map("requests")
 }
 
@@ -271,27 +274,27 @@ model Configuration {
 }
 
 model Job {
-  id          String    @id @default(uuid())
-  bullJobId   String?   @map("bull_job_id")
-  requestId   String?   @map("request_id")
-  type        String
+  id           String    @id @default(uuid())
+  bullJobId    String?   @map("bull_job_id")
+  requestId    String?   @map("request_id")
+  type         String
   // Job types: search_indexers, monitor_download, organize_files, scan_plex, plex_recently_added_check, match_plex
-  status      String    @default("pending")
+  status       String    @default("pending")
   // Status values: pending, active, completed, failed, delayed, stuck
-  priority    Int       @default(0)
-  attempts    Int       @default(0)
-  maxAttempts Int       @default(3) @map("max_attempts")
-  payload     Json?
-  result      Json?
+  priority     Int       @default(0)
+  attempts     Int       @default(0)
+  maxAttempts  Int       @default(3) @map("max_attempts")
+  payload      Json?
+  result       Json?
   errorMessage String?   @map("error_message") @db.Text
-  stackTrace  String?   @map("stack_trace") @db.Text
-  startedAt   DateTime? @map("started_at")
-  completedAt DateTime? @map("completed_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  stackTrace   String?   @map("stack_trace") @db.Text
+  startedAt    DateTime? @map("started_at")
+  completedAt  DateTime? @map("completed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
 
   // Relations
-  request Request? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  request Request?   @relation(fields: [requestId], references: [id], onDelete: SetNull)
   events  JobEvent[]
 
   @@index([requestId])
@@ -304,10 +307,10 @@ model Job {
 model JobEvent {
   id        String   @id @default(uuid())
   jobId     String   @map("job_id")
-  level     String   // info, warn, error
-  context   String   // e.g., OrganizeFiles, FileOrganizer, MonitorDownload
+  level     String // info, warn, error
+  context   String // e.g., OrganizeFiles, FileOrganizer, MonitorDownload
   message   String   @db.Text
-  metadata  Json?    // Additional structured data
+  metadata  Json? // Additional structured data
   createdAt DateTime @default(now()) @map("created_at")
 
   // Relations
@@ -319,17 +322,17 @@ model JobEvent {
 }
 
 model ScheduledJob {
-  id          String    @id @default(uuid())
-  name        String
-  type        String    // 'plex_library_scan', 'plex_recently_added_check', 'audible_refresh', 'retry_missing_torrents', 'retry_failed_imports', 'cleanup_seeded_torrents', 'monitor_rss_feeds'
-  schedule    String    // Cron expression
-  enabled     Boolean   @default(true)
-  payload     Json      @default("{}")
-  lastRun     DateTime? @map("last_run")
-  lastRunJobId String?  @map("last_run_job_id")  // Bull queue job ID of most recent execution
-  nextRun     DateTime? @map("next_run")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id           String    @id @default(uuid())
+  name         String
+  type         String // 'plex_library_scan', 'plex_recently_added_check', 'audible_refresh', 'retry_missing_torrents', 'retry_failed_imports', 'cleanup_seeded_torrents', 'monitor_rss_feeds'
+  schedule     String // Cron expression
+  enabled      Boolean   @default(true)
+  payload      Json      @default("{}")
+  lastRun      DateTime? @map("last_run")
+  lastRunJobId String?   @map("last_run_job_id") // Bull queue job ID of most recent execution
+  nextRun      DateTime? @map("next_run")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
 
   @@index([type])
   @@index([enabled])
@@ -343,16 +346,16 @@ model ScheduledJob {
 // ============================================================================
 
 model BookDateConfig {
-  id            String   @id @default(uuid())
-  provider      String   // 'openai' | 'claude'
-  apiKey        String   @map("api_key") @db.Text // Encrypted at rest (AES-256)
-  model         String   // e.g., 'gpt-4o', 'claude-sonnet-4-5-20250929'
-  libraryScope  String?  @map("library_scope") // DEPRECATED: Now per-user (User.bookDateLibraryScope)
-  customPrompt  String?  @map("custom_prompt") @db.Text // DEPRECATED: Now per-user (User.bookDateCustomPrompt)
-  isVerified    Boolean  @default(false) @map("is_verified")
-  isEnabled     Boolean  @default(true) @map("is_enabled") // Admin toggle (global feature)
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id           String   @id @default(uuid())
+  provider     String // 'openai' | 'claude'
+  apiKey       String   @map("api_key") @db.Text // Encrypted at rest (AES-256)
+  model        String // e.g., 'gpt-4o', 'claude-sonnet-4-5-20250929'
+  libraryScope String?  @map("library_scope") // DEPRECATED: Now per-user (User.bookDateLibraryScope)
+  customPrompt String?  @map("custom_prompt") @db.Text // DEPRECATED: Now per-user (User.bookDateCustomPrompt)
+  isVerified   Boolean  @default(false) @map("is_verified")
+  isEnabled    Boolean  @default(true) @map("is_enabled") // Admin toggle (global feature)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   @@map("bookdate_config")
 }
@@ -362,18 +365,18 @@ model BookDateConfig {
 // Individual users still have their own recommendations and swipe history.
 
 model BookDateRecommendation {
-  id             String    @id @default(uuid())
-  userId         String    @map("user_id")
-  batchId        String    @map("batch_id") // Group recommendations from same AI call
-  title          String
-  author         String
-  narrator       String?
-  rating         Decimal?  @db.Decimal(3, 2)
-  description    String?   @db.Text
-  coverUrl       String?   @map("cover_url") @db.Text
-  audnexusAsin   String?   @map("audnexus_asin") // For matching
-  aiReason       String    @map("ai_reason") @db.Text // Why AI recommended this
-  createdAt      DateTime  @default(now()) @map("created_at")
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  batchId      String   @map("batch_id") // Group recommendations from same AI call
+  title        String
+  author       String
+  narrator     String?
+  rating       Decimal? @db.Decimal(3, 2)
+  description  String?  @db.Text
+  coverUrl     String?  @map("cover_url") @db.Text
+  audnexusAsin String?  @map("audnexus_asin") // For matching
+  aiReason     String   @map("ai_reason") @db.Text // Why AI recommended this
+  createdAt    DateTime @default(now()) @map("created_at")
 
   // Relations
   user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -385,14 +388,14 @@ model BookDateRecommendation {
 }
 
 model BookDateSwipe {
-  id               String    @id @default(uuid())
-  userId           String    @map("user_id")
-  recommendationId String?   @map("recommendation_id") // NULL if book not from BookDate
-  bookTitle        String    @map("book_title")
-  bookAuthor       String    @map("book_author")
-  action           String    // 'left' | 'right' | 'up'
-  markedAsKnown    Boolean   @default(false) @map("marked_as_known") // True if "Mark as Known"
-  createdAt        DateTime  @default(now()) @map("created_at")
+  id               String   @id @default(uuid())
+  userId           String   @map("user_id")
+  recommendationId String?  @map("recommendation_id") // NULL if book not from BookDate
+  bookTitle        String   @map("book_title")
+  bookAuthor       String   @map("book_author")
+  action           String // 'left' | 'right' | 'up'
+  markedAsKnown    Boolean  @default(false) @map("marked_as_known") // True if "Mark as Known"
+  createdAt        DateTime @default(now()) @map("created_at")
 
   // Relations
   user           User                    @relation(fields: [userId], references: [id], onDelete: Cascade)

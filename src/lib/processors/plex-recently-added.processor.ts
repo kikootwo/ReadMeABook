@@ -135,7 +135,10 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
 
     // Check for downloaded requests to match
     const downloadedRequests = await prisma.request.findMany({
-      where: { status: 'downloaded' },
+      where: {
+        status: 'downloaded',
+        deletedAt: null,
+      },
       include: { audiobook: true },
       take: 50,
     });

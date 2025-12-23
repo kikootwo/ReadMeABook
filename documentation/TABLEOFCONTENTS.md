@@ -62,6 +62,7 @@
 ## Admin Features
 - **Dashboard (metrics, downloads, requests)** → [admin-dashboard.md](admin-dashboard.md)
 - **Jobs management UI** → [backend/services/scheduler.md](backend/services/scheduler.md)
+- **Request deletion (soft delete, seeding awareness)** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
 
 ## Deployment
 - **Docker Compose setup (multi-container)** → [deployment/docker.md](deployment/docker.md)
@@ -78,6 +79,7 @@
 **"What's the database schema?"** → [backend/database.md](backend/database.md)
 **"How does authentication work?"** → [backend/services/auth.md](backend/services/auth.md)
 **"How do I change the admin password?"** → [settings-pages.md](settings-pages.md), [backend/services/auth.md](backend/services/auth.md)
+**"How do I delete requests?"** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
 **"How do I deploy?"** → [deployment/docker.md](deployment/docker.md) (multi-container), [deployment/unified.md](deployment/unified.md) (all-in-one)
 **"How do I use the unified container?"** → [deployment/unified.md](deployment/unified.md)
 **"OAuth redirects to localhost / PUBLIC_URL not working"** → [backend/services/environment.md](backend/services/environment.md)

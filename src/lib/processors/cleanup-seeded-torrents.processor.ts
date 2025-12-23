@@ -44,10 +44,20 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
 
     await logger?.info(`Loaded configuration for ${indexerConfigMap.size} indexers`);
 
-    // Find all completed requests that have download history
+    // Find all completed requests + soft-deleted requests (orphaned downloads)
     const completedRequests = await prisma.request.findMany({
       where: {
-        status: { in: ['available', 'downloaded'] },
+        OR: [
+          // Active requests with completed downloads
+          {
+            status: { in: ['available', 'downloaded'] },
+            deletedAt: null,
+          },
+          // Soft-deleted requests (orphaned downloads still seeding)
+          {
+            deletedAt: { not: null },
+          },
+        ],
       },
       include: {
         downloadHistory: {
@@ -82,13 +92,13 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
         // Find matching indexer configuration by name
         const seedingConfig = indexerConfigMap.get(indexerName);
 
-        // If no config found or seeding time is 0 (unlimited), skip
-        if (!seedingConfig) {
-          noConfig++;
-          continue;
-        }
-
-        if (seedingConfig.seedingTimeMinutes === 0) {
+        // If no config found or seeding time is 0 (unlimited)
+        if (!seedingConfig || seedingConfig.seedingTimeMinutes === 0) {
+          // For soft-deleted requests with unlimited seeding, hard delete immediately
+          if (request.deletedAt) {
+            await prisma.request.delete({ where: { id: request.id } });
+            await logger?.info(`Hard-deleted orphaned request ${request.id} with unlimited seeding`);
+          }
           noConfig++;
           continue;
         }
@@ -122,7 +132,14 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
         // Delete torrent and files from qBittorrent
         await qbt.deleteTorrent(downloadHistory.downloadClientId, true); // true = delete files
 
-        await logger?.info(`Deleted torrent and files for request ${request.id}`);
+        // If this is a soft-deleted request (orphaned download), hard delete it now
+        if (request.deletedAt) {
+          await prisma.request.delete({ where: { id: request.id } });
+          await logger?.info(`Hard-deleted orphaned request ${request.id} after torrent cleanup`);
+        } else {
+          await logger?.info(`Deleted torrent and files for active request ${request.id}`);
+        }
+
         cleaned++;
       } catch (error) {
         await logger?.error(`Failed to cleanup request ${request.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);

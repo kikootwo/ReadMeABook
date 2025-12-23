@@ -114,25 +114,33 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
 
     const errorMessage = error instanceof Error ? error.message : 'File organization failed';
 
-    // Check if this is a "no files found" error that should be retried
-    const isNoFilesError = errorMessage.includes('No audiobook files found');
+    // Check if this is a retryable error (transient filesystem issues or no files found)
+    const isRetryableError =
+      errorMessage.includes('No audiobook files found') ||
+      errorMessage.includes('ENOENT') || // File/directory not found
+      errorMessage.includes('no such file or directory') ||
+      errorMessage.includes('EACCES') || // Permission denied (might be temporary)
+      errorMessage.includes('EPERM');    // Operation not permitted (might be temporary)
 
-    if (isNoFilesError) {
+    if (isRetryableError) {
       // Get current request to check retry count
-      const currentRequest = await prisma.request.findUnique({
-        where: { id: requestId },
+      const currentRequest = await prisma.request.findFirst({
+        where: {
+          id: requestId,
+          deletedAt: null,
+        },
         select: { importAttempts: true, maxImportRetries: true },
       });
 
       if (!currentRequest) {
-        throw new Error('Request not found');
+        throw new Error('Request not found or deleted');
       }
 
       const newAttempts = currentRequest.importAttempts + 1;
 
       if (newAttempts < currentRequest.maxImportRetries) {
         // Still have retries left - queue for re-import
-        await logger?.warn(`No files found for request ${requestId}, queueing for retry (attempt ${newAttempts}/${currentRequest.maxImportRetries})`);
+        await logger?.warn(`Retryable error for request ${requestId}, queueing for retry (attempt ${newAttempts}/${currentRequest.maxImportRetries})`);
 
         await prisma.request.update({
           where: { id: requestId },
@@ -147,7 +155,7 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
 
         return {
           success: false,
-          message: 'No audiobook files found, queued for re-import',
+          message: 'Retryable error detected, queued for re-import',
           requestId,
           attempts: newAttempts,
           maxRetries: currentRequest.maxImportRetries,

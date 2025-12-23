@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
     const activeDownloads = await prisma.request.findMany({
       where: {
         status: 'downloading',
+        deletedAt: null,
       },
       include: {
         audiobook: {

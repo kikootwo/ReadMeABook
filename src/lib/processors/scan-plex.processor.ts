@@ -140,7 +140,10 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
     // 5. Match downloaded requests against library
     await logger?.info(`Checking for downloaded requests to match...`);
     const downloadedRequests = await prisma.request.findMany({
-      where: { status: 'downloaded' },
+      where: {
+        status: 'downloaded',
+        deletedAt: null,
+      },
       include: { audiobook: true },
       take: 50, // Limit to prevent overwhelming
     });

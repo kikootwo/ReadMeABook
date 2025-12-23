@@ -10,16 +10,19 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { TorrentResult } from '@/lib/utils/ranking-algorithm';
-import { useInteractiveSearch, useSelectTorrent } from '@/lib/hooks/useRequests';
+import { useInteractiveSearch, useSelectTorrent, useSearchTorrents, useRequestWithTorrent } from '@/lib/hooks/useRequests';
+import { Audiobook } from '@/lib/hooks/useAudiobooks';
 
 interface InteractiveTorrentSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
-  requestId: string;
+  requestId?: string; // Optional - only provided when called from existing request
   audiobook: {
     title: string;
     author: string;
   };
+  fullAudiobook?: Audiobook; // Optional - only provided when called from details modal
+  onSuccess?: () => void;
 }
 
 export function InteractiveTorrentSearchModal({
@@ -27,13 +30,27 @@ export function InteractiveTorrentSearchModal({
   onClose,
   requestId,
   audiobook,
+  fullAudiobook,
+  onSuccess,
 }: InteractiveTorrentSearchModalProps) {
-  const { searchTorrents, isLoading: isSearching, error: searchError } = useInteractiveSearch();
-  const { selectTorrent, isLoading: isDownloading, error: downloadError } = useSelectTorrent();
+  // Hooks for existing request flow
+  const { searchTorrents: searchByRequestId, isLoading: isSearchingByRequest, error: searchByRequestError } = useInteractiveSearch();
+  const { selectTorrent, isLoading: isSelectingTorrent, error: selectTorrentError } = useSelectTorrent();
+
+  // Hooks for new audiobook flow
+  const { searchTorrents: searchByAudiobook, isLoading: isSearchingByAudiobook, error: searchByAudiobookError } = useSearchTorrents();
+  const { requestWithTorrent, isLoading: isRequestingWithTorrent, error: requestWithTorrentError } = useRequestWithTorrent();
+
   const [results, setResults] = useState<(TorrentResult & { rank: number; qualityScore?: number })[]>([]);
   const [confirmTorrent, setConfirmTorrent] = useState<TorrentResult | null>(null);
 
-  const error = searchError || downloadError;
+  // Determine which mode we're in
+  const hasRequestId = !!requestId;
+  const isSearching = hasRequestId ? isSearchingByRequest : isSearchingByAudiobook;
+  const isDownloading = hasRequestId ? isSelectingTorrent : isRequestingWithTorrent;
+  const error = hasRequestId
+    ? (searchByRequestError || selectTorrentError)
+    : (searchByAudiobookError || requestWithTorrentError);
 
   // Perform search when modal opens
   React.useEffect(() => {
@@ -44,7 +61,14 @@ export function InteractiveTorrentSearchModal({
 
   const performSearch = async () => {
     try {
-      const data = await searchTorrents(requestId);
+      let data;
+      if (hasRequestId) {
+        // Existing flow: search by requestId
+        data = await searchByRequestId(requestId);
+      } else {
+        // New flow: search by audiobook title/author
+        data = await searchByAudiobook(audiobook.title, audiobook.author);
+      }
       setResults(data || []);
     } catch (err) {
       // Error already handled by hook
@@ -60,7 +84,18 @@ export function InteractiveTorrentSearchModal({
     if (!confirmTorrent) return;
 
     try {
-      await selectTorrent(requestId, confirmTorrent);
+      if (hasRequestId) {
+        // Existing flow: select torrent for existing request
+        await selectTorrent(requestId, confirmTorrent);
+      } else {
+        // New flow: create request with torrent
+        if (!fullAudiobook) {
+          throw new Error('Audiobook data required to create request');
+        }
+        await requestWithTorrent(fullAudiobook, confirmTorrent);
+      }
+      // Notify parent of successful selection
+      onSuccess?.();
       // Close modals on success
       setConfirmTorrent(null);
       onClose();

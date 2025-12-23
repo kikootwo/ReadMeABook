@@ -11,8 +11,11 @@ export async function GET(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        // Get recent requests
+        // Get recent requests (only active, non-deleted)
     const recentRequests = await prisma.request.findMany({
+      where: {
+        deletedAt: null,
+      },
       include: {
         audiobook: {
           select: {

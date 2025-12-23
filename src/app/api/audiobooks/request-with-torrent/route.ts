@@ -1,6 +1,8 @@
 /**
- * Component: Requests API Routes
- * Documentation: documentation/backend/api.md
+ * Component: Request with Specific Torrent API
+ * Documentation: documentation/phase3/prowlarr.md
+ *
+ * Create a request and immediately download a specific torrent
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -10,7 +12,7 @@ import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { z } from 'zod';
 
-const CreateRequestSchema = z.object({
+const RequestWithTorrentSchema = z.object({
   audiobook: z.object({
     asin: z.string(),
     title: z.string(),
@@ -22,11 +24,25 @@ const CreateRequestSchema = z.object({
     releaseDate: z.string().optional(),
     rating: z.number().optional(),
   }),
+  torrent: z.object({
+    guid: z.string(),
+    title: z.string(),
+    size: z.number(),
+    seeders: z.number(),
+    leechers: z.number(),
+    indexer: z.string(),
+    downloadUrl: z.string(),
+    publishDate: z.string().transform((str) => new Date(str)),
+    infoHash: z.string().optional(),
+    format: z.enum(['M4B', 'M4A', 'MP3', 'OTHER']).optional(),
+    bitrate: z.string().optional(),
+    hasChapters: z.boolean().optional(),
+  }),
 });
 
 /**
- * POST /api/requests
- * Create a new audiobook request
+ * POST /api/audiobooks/request-with-torrent
+ * Create a request and download a specific torrent in one operation
  */
 export async function POST(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
@@ -39,7 +55,7 @@ export async function POST(request: NextRequest) {
       }
 
       const body = await req.json();
-      const { audiobook } = CreateRequestSchema.parse(body);
+      const { audiobook, torrent } = RequestWithTorrentSchema.parse(body);
 
       // Check if audiobook is already available in Plex library
       const plexMatch = await findPlexMatch({
@@ -80,17 +96,15 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      // Check if user already has an active (non-deleted) request for this audiobook
+      // Check if user already has an active request for this audiobook
       const existingRequest = await prisma.request.findFirst({
         where: {
           userId: req.user.id,
           audiobookId: audiobookRecord.id,
-          deletedAt: null, // Only check active requests
         },
       });
 
       if (existingRequest) {
-        // Allow re-requesting if the status is failed, warn, or cancelled
         const canReRequest = ['failed', 'warn', 'cancelled'].includes(existingRequest.status);
 
         if (!canReRequest) {
@@ -105,21 +119,18 @@ export async function POST(request: NextRequest) {
         }
 
         // Delete the existing failed/warn/cancelled request
-        console.log(`[Requests] Deleting existing ${existingRequest.status} request ${existingRequest.id} to allow re-request`);
+        console.log(`[RequestWithTorrent] Deleting existing ${existingRequest.status} request ${existingRequest.id}`);
         await prisma.request.delete({
           where: { id: existingRequest.id },
         });
       }
 
-      // Check if we should skip auto-search (for interactive search)
-      const skipAutoSearch = req.nextUrl.searchParams.get('skipAutoSearch') === 'true';
-
-      // Create request with appropriate status
+      // Create request with downloading status
       const newRequest = await prisma.request.create({
         data: {
           userId: req.user.id,
           audiobookId: audiobookRecord.id,
-          status: skipAutoSearch ? 'awaiting_search' : 'pending',
+          status: 'downloading',
           progress: 0,
         },
         include: {
@@ -133,22 +144,26 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      // Trigger search job only if not skipped
-      if (!skipAutoSearch) {
-        const jobQueue = getJobQueueService();
-        await jobQueue.addSearchJob(newRequest.id, {
+      // Queue download job with the selected torrent
+      const jobQueue = getJobQueueService();
+      await jobQueue.addDownloadJob(
+        newRequest.id,
+        {
           id: audiobookRecord.id,
           title: audiobookRecord.title,
           author: audiobookRecord.author,
-        });
-      }
+        },
+        torrent
+      );
+
+      console.log(`[RequestWithTorrent] Queued download monitor job for request ${newRequest.id}`);
 
       return NextResponse.json({
         success: true,
         request: newRequest,
       }, { status: 201 });
     } catch (error) {
-      console.error('Failed to create request:', error);
+      console.error('Failed to create request with torrent:', error);
 
       if (error instanceof z.ZodError) {
         return NextResponse.json(
@@ -163,70 +178,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: 'RequestError',
-          message: 'Failed to create audiobook request',
-        },
-        { status: 500 }
-      );
-    }
-  });
-}
-
-/**
- * GET /api/requests?status=pending&limit=50
- * Get user's audiobook requests (or all requests for admins)
- */
-export async function GET(request: NextRequest) {
-  return requireAuth(request, async (req: AuthenticatedRequest) => {
-    try {
-      if (!req.user) {
-        return NextResponse.json(
-          { error: 'Unauthorized', message: 'User not authenticated' },
-          { status: 401 }
-        );
-      }
-
-      const searchParams = req.nextUrl.searchParams;
-      const status = searchParams.get('status');
-      const limit = parseInt(searchParams.get('limit') || '50', 10);
-      const myOnly = searchParams.get('myOnly') === 'true';
-      const isAdmin = req.user.role === 'admin';
-
-      // Build query
-      // If myOnly=true, always filter by current user (even for admins)
-      // Otherwise, admins see all requests, users see only their own
-      const where: any = myOnly || !isAdmin ? { userId: req.user.id } : {};
-      if (status) {
-        where.status = status;
-      }
-      // Only show active (non-deleted) requests
-      where.deletedAt = null;
-
-      const requests = await prisma.request.findMany({
-        where,
-        include: {
-          audiobook: true,
-          user: {
-            select: {
-              id: true,
-              plexUsername: true,
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-      });
-
-      return NextResponse.json({
-        success: true,
-        requests,
-        count: requests.length,
-      });
-    } catch (error) {
-      console.error('Failed to get requests:', error);
-      return NextResponse.json(
-        {
-          error: 'FetchError',
-          message: 'Failed to fetch requests',
+          message: error instanceof Error ? error.message : 'Failed to create request and download torrent',
         },
         { status: 500 }
       );

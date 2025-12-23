@@ -5,7 +5,12 @@
 
 'use client';
 
+import { useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
+import { ConfirmDialog } from './ConfirmDialog';
+import { RequestActionsDropdown } from './RequestActionsDropdown';
+import { mutate } from 'swr';
+import { fetchWithAuth } from '@/lib/utils/api';
 
 interface RecentRequest {
   requestId: string;
@@ -57,6 +62,120 @@ function getStatusBadge(status: string) {
 }
 
 export function RecentRequestsTable({ requests }: RecentRequestsTableProps) {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteClick = (requestId: string, title: string) => {
+    setSelectedRequest({ id: requestId, title });
+    setShowDeleteConfirm(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!selectedRequest) return;
+
+    setIsDeleting(true);
+
+    try {
+      const response = await fetchWithAuth(`/api/admin/requests/${selectedRequest.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to delete request');
+      }
+
+      const result = await response.json();
+
+      // Show success message
+      console.log('[Admin] Request deleted:', result);
+
+      // Refresh the requests list
+      await mutate('/api/admin/requests/recent');
+      await mutate('/api/admin/metrics');
+
+      // Close dialog
+      setShowDeleteConfirm(false);
+      setSelectedRequest(null);
+    } catch (error) {
+      console.error('[Admin] Failed to delete request:', error);
+      alert(
+        `Failed to delete request: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDeleteCancel = () => {
+    setShowDeleteConfirm(false);
+    setSelectedRequest(null);
+  };
+
+  const handleManualSearch = async (requestId: string) => {
+    try {
+      const response = await fetchWithAuth(`/api/requests/${requestId}/manual-search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to trigger manual search');
+      }
+
+      console.log('[Admin] Manual search triggered for request:', requestId);
+      // Refresh the requests list
+      await mutate('/api/admin/requests/recent');
+    } catch (error) {
+      console.error('[Admin] Failed to trigger manual search:', error);
+      alert(
+        `Failed to trigger manual search: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+    }
+  };
+
+  const handleCancel = async (requestId: string) => {
+    try {
+      const response = await fetchWithAuth(`/api/requests/${requestId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action: 'cancel' }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to cancel request');
+      }
+
+      console.log('[Admin] Request cancelled:', requestId);
+      // Refresh the requests list
+      await mutate('/api/admin/requests/recent');
+    } catch (error) {
+      console.error('[Admin] Failed to cancel request:', error);
+      alert(
+        `Failed to cancel request: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`
+      );
+    }
+  };
+
   if (requests.length === 0) {
     return (
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8">
@@ -107,6 +226,9 @@ export function RecentRequestsTable({ requests }: RecentRequestsTableProps) {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                 Completed
               </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -144,11 +266,53 @@ export function RecentRequestsTable({ requests }: RecentRequestsTableProps) {
                       })
                     : '-'}
                 </td>
+                <td className="px-6 py-4">
+                  <RequestActionsDropdown
+                    request={{
+                      requestId: request.requestId,
+                      title: request.title,
+                      author: request.author,
+                      status: request.status,
+                    }}
+                    onDelete={handleDeleteClick}
+                    onManualSearch={handleManualSearch}
+                    onCancel={handleCancel}
+                    isLoading={isDeleting}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={showDeleteConfirm}
+        title="Delete Request?"
+        message={
+          selectedRequest ? (
+            <div>
+              <p className="mb-3">
+                This will delete the request for &quot;{selectedRequest.title}&quot; and:
+              </p>
+              <ul className="list-disc list-inside space-y-1 text-sm">
+                <li>Remove the request (allowing it to be re-requested)</li>
+                <li>Delete files from the media directory</li>
+                <li>Keep torrent seeding if time remaining</li>
+              </ul>
+              <p className="mt-3 font-semibold">Are you sure?</p>
+            </div>
+          ) : (
+            ''
+          )
+        }
+        confirmLabel={isDeleting ? 'Deleting...' : 'Delete'}
+        cancelLabel="Cancel"
+        confirmVariant="danger"
+        onConfirm={handleDeleteConfirm}
+        onCancel={handleDeleteCancel}
+      />
     </div>
   );
 }

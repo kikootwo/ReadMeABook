@@ -57,9 +57,12 @@ export async function processMonitorRssFeeds(payload: MonitorRssFeedsPayload): P
     return { success: true, message: 'No RSS results', matched: 0 };
   }
 
-  // Get all requests awaiting search (missing audiobooks)
+  // Get all active requests awaiting search (missing audiobooks)
   const missingRequests = await prisma.request.findMany({
-    where: { status: 'awaiting_search' },
+    where: {
+      status: 'awaiting_search',
+      deletedAt: null,
+    },
     include: { audiobook: true },
     take: 100,
   });

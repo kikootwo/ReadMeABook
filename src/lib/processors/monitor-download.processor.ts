@@ -106,15 +106,18 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
       });
 
       // Get request with audiobook details
-      const request = await prisma.request.findUnique({
-        where: { id: requestId },
+      const request = await prisma.request.findFirst({
+        where: {
+          id: requestId,
+          deletedAt: null,
+        },
         include: {
           audiobook: true,
         },
       });
 
       if (!request || !request.audiobook) {
-        throw new Error('Request or audiobook not found');
+        throw new Error('Request or audiobook not found or deleted');
       }
 
       // Trigger organize files job (target path determined by database config)

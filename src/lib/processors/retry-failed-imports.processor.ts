@@ -8,6 +8,7 @@
 import { prisma } from '../db';
 import { createJobLogger } from '../utils/job-logger';
 import { getJobQueueService } from '../services/job-queue.service';
+import { getConfigService } from '../services/config.service';
 
 export interface RetryFailedImportsPayload {
   jobId?: string;
@@ -21,10 +22,11 @@ export async function processRetryFailedImports(payload: RetryFailedImportsPaylo
   await logger?.info('Starting retry job for requests awaiting import...');
 
   try {
-    // Find all requests in awaiting_import status
+    // Find all active requests in awaiting_import status
     const requests = await prisma.request.findMany({
       where: {
         status: 'awaiting_import',
+        deletedAt: null,
       },
       include: {
         audiobook: true,
@@ -57,17 +59,64 @@ export async function processRetryFailedImports(payload: RetryFailedImportsPaylo
         // Get the download path from the most recent download history
         const downloadHistory = request.downloadHistory[0];
 
-        if (!downloadHistory || !downloadHistory.downloadClientId) {
+        if (!downloadHistory) {
           await logger?.warn(`No download history found for request ${request.id}, skipping`);
           skipped++;
           continue;
         }
 
-        // Get download path from qBittorrent
-        const { getQBittorrentService } = await import('../integrations/qbittorrent.service');
-        const qbt = await getQBittorrentService();
-        const torrent = await qbt.getTorrent(downloadHistory.downloadClientId);
-        const downloadPath = `${torrent.save_path}/${torrent.name}`;
+        let downloadPath: string;
+
+        // Try to get download path from qBittorrent if we have the torrent
+        if (downloadHistory.downloadClientId) {
+          try {
+            const { getQBittorrentService } = await import('../integrations/qbittorrent.service');
+            const qbt = await getQBittorrentService();
+            const torrent = await qbt.getTorrent(downloadHistory.downloadClientId);
+            downloadPath = `${torrent.save_path}/${torrent.name}`;
+            await logger?.info(`Got download path from qBittorrent for request ${request.id}: ${downloadPath}`);
+          } catch (qbtError) {
+            // Torrent not found in qBittorrent - try to construct path from config
+            await logger?.warn(`Torrent not found in qBittorrent for request ${request.id}, falling back to configured path`);
+
+            if (!downloadHistory.torrentName) {
+              await logger?.warn(`No torrent name stored for request ${request.id}, cannot construct fallback path, skipping`);
+              skipped++;
+              continue;
+            }
+
+            const configService = getConfigService();
+            const downloadDir = await configService.get('download_dir');
+
+            if (!downloadDir) {
+              await logger?.error(`download_dir not configured, cannot retry request ${request.id}, skipping`);
+              skipped++;
+              continue;
+            }
+
+            downloadPath = `${downloadDir}/${downloadHistory.torrentName}`;
+            await logger?.info(`Using fallback download path for request ${request.id}: ${downloadPath}`);
+          }
+        } else {
+          // No download client ID - use fallback path
+          if (!downloadHistory.torrentName) {
+            await logger?.warn(`No download client ID or torrent name for request ${request.id}, skipping`);
+            skipped++;
+            continue;
+          }
+
+          const configService = getConfigService();
+          const downloadDir = await configService.get('download_dir');
+
+          if (!downloadDir) {
+            await logger?.error(`download_dir not configured, cannot retry request ${request.id}, skipping`);
+            skipped++;
+            continue;
+          }
+
+          downloadPath = `${downloadDir}/${downloadHistory.torrentName}`;
+          await logger?.info(`Using configured download path for request ${request.id}: ${downloadPath}`);
+        }
 
         await jobQueue.addOrganizeJob(
           request.id,

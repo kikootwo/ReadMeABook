@@ -84,7 +84,7 @@ export function useCreateRequest() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const createRequest = async (audiobook: Audiobook) => {
+  const createRequest = async (audiobook: Audiobook, options?: { skipAutoSearch?: boolean }) => {
     if (!accessToken) {
       throw new Error('Not authenticated');
     }
@@ -93,7 +93,8 @@ export function useCreateRequest() {
     setError(null);
 
     try {
-      const response = await fetchWithAuth('/api/requests', {
+      const queryParams = options?.skipAutoSearch ? '?skipAutoSearch=true' : '';
+      const response = await fetchWithAuth(`/api/requests${queryParams}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -289,4 +290,92 @@ export function useSelectTorrent() {
   };
 
   return { selectTorrent, isLoading, error };
+}
+
+export function useSearchTorrents() {
+  const { accessToken } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const searchTorrents = async (title: string, author: string) => {
+    if (!accessToken) {
+      throw new Error('Not authenticated');
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetchWithAuth('/api/audiobooks/search-torrents', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title, author }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to search for torrents');
+      }
+
+      return data.results || [];
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return { searchTorrents, isLoading, error };
+}
+
+export function useRequestWithTorrent() {
+  const { accessToken } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const requestWithTorrent = async (audiobook: Audiobook, torrent: any) => {
+    if (!accessToken) {
+      throw new Error('Not authenticated');
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetchWithAuth('/api/audiobooks/request-with-torrent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ audiobook, torrent }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to create request and download torrent');
+      }
+
+      // Revalidate requests
+      mutate((key) => typeof key === 'string' && key.includes('/api/requests'));
+
+      // Revalidate audiobook lists
+      mutate((key) => typeof key === 'string' && key.includes('/api/audiobooks'));
+
+      return data.request;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return { requestWithTorrent, isLoading, error };
 }

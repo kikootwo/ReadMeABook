@@ -26,8 +26,11 @@ export async function GET(
 
       const { id } = await params;
 
-      const requestRecord = await prisma.request.findUnique({
-        where: { id },
+      const requestRecord = await prisma.request.findFirst({
+        where: {
+          id,
+          deletedAt: null, // Only show active requests
+        },
         include: {
           audiobook: true,
           user: {
@@ -100,13 +103,16 @@ export async function PATCH(
       const body = await req.json();
       const { action } = body;
 
-      const requestRecord = await prisma.request.findUnique({
-        where: { id },
+      const requestRecord = await prisma.request.findFirst({
+        where: {
+          id,
+          deletedAt: null, // Only allow updates to active requests
+        },
       });
 
       if (!requestRecord) {
         return NextResponse.json(
-          { error: 'NotFound', message: 'Request not found' },
+          { error: 'NotFound', message: 'Request not found or already deleted' },
           { status: 404 }
         );
       }
@@ -161,8 +167,11 @@ export async function PATCH(
 
         if (requestRecord.status === 'warn' || requestRecord.status === 'awaiting_import') {
           // Retry import
-          const requestWithData = await prisma.request.findUnique({
-            where: { id },
+          const requestWithData = await prisma.request.findFirst({
+            where: {
+              id,
+              deletedAt: null,
+            },
             include: {
               audiobook: true,
               downloadHistory: {
@@ -213,8 +222,11 @@ export async function PATCH(
           jobType = 'import';
         } else {
           // Retry search
-          const requestWithData = await prisma.request.findUnique({
-            where: { id },
+          const requestWithData = await prisma.request.findFirst({
+            where: {
+              id,
+              deletedAt: null,
+            },
             include: {
               audiobook: true,
             },

@@ -13,6 +13,7 @@ import { StatusBadge } from '@/components/requests/StatusBadge';
 import { useAudiobookDetails } from '@/lib/hooks/useAudiobooks';
 import { useCreateRequest } from '@/lib/hooks/useRequests';
 import { useAuth } from '@/contexts/AuthContext';
+import { InteractiveTorrentSearchModal } from '@/components/requests/InteractiveTorrentSearchModal';
 
 interface AudiobookDetailsModalProps {
   asin: string;
@@ -41,6 +42,7 @@ export function AudiobookDetailsModal({
   const [showToast, setShowToast] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -75,6 +77,29 @@ export function AudiobookDetailsModal({
       setRequestError(err instanceof Error ? err.message : 'Failed to create request');
       setTimeout(() => setRequestError(null), 5000);
     }
+  };
+
+  const handleInteractiveSearch = () => {
+    if (!user || !audiobook) {
+      setRequestError('Please log in to request audiobooks');
+      return;
+    }
+
+    // Just show the interactive search modal - no request created yet
+    setShowInteractiveSearch(true);
+  };
+
+  const handleInteractiveSearchClose = () => {
+    // Clean up state
+    setShowInteractiveSearch(false);
+
+    // Close the details modal too
+    onClose();
+  };
+
+  const handleInteractiveSearchSuccess = () => {
+    // Request was created and torrent was selected successfully
+    onRequestSuccess?.();
   };
 
   const formatDuration = (minutes?: number) => {
@@ -381,6 +406,35 @@ export function AudiobookDetailsModal({
                 );
               })()}
 
+              {/* Interactive Search Button - only show if not already available */}
+              {!isAvailable && requestStatus !== 'completed' && (
+                <button
+                  onClick={handleInteractiveSearch}
+                  disabled={!user}
+                  className="group relative inline-flex items-center justify-center p-3 rounded-lg border-2 border-purple-600 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Interactive Search"
+                  aria-label="Interactive Search"
+                >
+                  <svg
+                    className="w-6 h-6 text-purple-600 dark:text-purple-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                    />
+                  </svg>
+                  {/* Tooltip */}
+                  <span className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-1 bg-gray-900 dark:bg-gray-700 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+                    Interactive Search
+                  </span>
+                </button>
+              )}
+
               <Button onClick={onClose} variant="outline" size="lg">
                 Close
               </Button>
@@ -407,5 +461,27 @@ export function AudiobookDetailsModal({
     </div>
   );
 
-  return createPortal(modalContent, document.body);
+  return (
+    <>
+      {createPortal(modalContent, document.body)}
+      {/* Interactive Search Modal - render with higher z-index to appear above details modal */}
+      {showInteractiveSearch && audiobook && createPortal(
+        <div className="fixed inset-0 z-[60]" style={{ pointerEvents: 'none' }}>
+          <div style={{ pointerEvents: 'auto' }}>
+            <InteractiveTorrentSearchModal
+              isOpen={showInteractiveSearch}
+              onClose={handleInteractiveSearchClose}
+              onSuccess={handleInteractiveSearchSuccess}
+              audiobook={{
+                title: audiobook.title,
+                author: audiobook.author,
+              }}
+              fullAudiobook={audiobook}
+            />
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
 }

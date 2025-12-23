@@ -22,13 +22,18 @@ export async function GET(request: NextRequest) {
       failedLast30Days,
       totalUsers,
     ] = await Promise.all([
-      // Total requests (all time)
-      prisma.request.count(),
+      // Total requests (all time, only active)
+      prisma.request.count({
+        where: {
+          deletedAt: null,
+        },
+      }),
 
       // Active downloads (downloading status)
       prisma.request.count({
         where: {
           status: 'downloading',
+          deletedAt: null,
         },
       }),
 
@@ -41,6 +46,7 @@ export async function GET(request: NextRequest) {
           completedAt: {
             gte: thirtyDaysAgo,
           },
+          deletedAt: null,
         },
       }),
 
@@ -51,6 +57,7 @@ export async function GET(request: NextRequest) {
           updatedAt: {
             gte: thirtyDaysAgo,
           },
+          deletedAt: null,
         },
       }),
 
@@ -103,6 +110,7 @@ async function checkSystemHealth(): Promise<{
       updatedAt: {
         lt: oneDayAgo,
       },
+      deletedAt: null,
     },
   });
 

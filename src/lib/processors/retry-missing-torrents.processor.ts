@@ -21,10 +21,11 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
   await logger?.info('Starting retry job for requests awaiting search...');
 
   try {
-    // Find all requests in awaiting_search status
+    // Find all active requests in awaiting_search status
     const requests = await prisma.request.findMany({
       where: {
         status: 'awaiting_search',
+        deletedAt: null,
       },
       include: {
         audiobook: true,
