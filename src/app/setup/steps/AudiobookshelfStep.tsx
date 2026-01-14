@@ -136,7 +136,7 @@ export function AudiobookshelfStep({
             onChange={(e) => onUpdate('absApiToken', e.target.value)}
           />
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Find this in Audiobookshelf → Settings → Users → Your User → API Token
+            Generate this in Audiobookshelf → Settings → API Keys → Add API Key
           </p>
         </div>
 
@@ -270,8 +270,8 @@ export function AudiobookshelfStep({
               About API Token
             </p>
             <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
-              You can generate an API token in Audiobookshelf by going to Settings → Users
-              → selecting your user → and copying the API Token.
+              Generate an API key in Audiobookshelf by navigating to Settings → API Keys → Add API Key.
+              Give it a descriptive name and copy the generated key to use here.
             </p>
           </div>
         </div>

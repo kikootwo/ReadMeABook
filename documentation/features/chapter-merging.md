@@ -6,9 +6,26 @@
 
 Automatically merge multi-file audiobook downloads (separate MP3/M4A files per chapter) into a single M4B file with proper chapter markers during file organization.
 
-## Recent Updates (v2 - Corruption Fixes)
+## Recent Updates
 
-**Status:** ✅ Implemented (2026-01-09)
+### v3 - Book Title Detection (2026-01-14)
+
+**Status:** ✅ Implemented
+
+**Critical Fix:**
+- ✅ **Fixed identical chapter names bug** - Detects when title metadata contains book title instead of chapter names
+- ✅ **Smart book title detection** - Analyzes files; if >80% have same title, flags it as book title
+- ✅ **Updated filename patterns** - Added support for "BookTitle - 01 - ChapterName" format
+- ✅ **Revised priority logic** - Prioritizes filename extraction over metadata when book title detected
+- ✅ **Enhanced logging** - Reports book title detection and filename extraction strategy
+
+**Impact:**
+- Before: Files with book title in metadata → All chapters named "The Let Them Theory"
+- After: Filename extraction prioritized → Ch1: "Opening Credits", Ch2: "Introduction: My Story", etc.
+
+### v2 - Corruption Fixes (2026-01-09)
+
+**Status:** ✅ Implemented
 
 **Critical Fixes:**
 1. ✅ **Fixed corruption on long audiobooks** - Dynamic timeout calculation (16h book = 254min vs old 20min)
@@ -74,10 +91,23 @@ Detection now uses a **permissive heuristic** instead of strict filename pattern
 
 ### Chapter Metadata Generation
 
-**Chapter Naming Strategy:**
-1. **From filename:** Extract "Chapter 1", "01", "Part 1"
-2. **Fallback numbering:** "Chapter 1", "Chapter 2" if no name found
-3. **Preserve order:** Sort files naturally (ch1, ch2, ch10)
+**Chapter Naming Strategy (Updated v3):**
+
+**Priority Order:**
+1. **From filename:** Extract chapter name from filename patterns (most reliable)
+   - "01 - The Beginning" → "The Beginning"
+   - "Chapter 1 - Introduction" → "Introduction"
+   - "BookTitle - 01 - ChapterName" → "ChapterName" (NEW: supports book title prefix)
+2. **From metadata:** Use embedded title tag (only if chapter-specific)
+   - Automatically detects if title metadata is the book title (appears in >80% of files)
+   - Skips metadata that matches the book title to avoid "every chapter named the same"
+3. **Fallback numbering:** "Chapter 1", "Chapter 2" if no name found
+
+**Book Title Detection (NEW):**
+- Analyzes all files to detect if title metadata contains the book title instead of chapter names
+- If >80% of files have identical title metadata, flags it as the book title
+- Prioritizes filename extraction when book title is detected in metadata
+- Logs detection: "Detected book title in metadata: [title] (appears in X/Y files)"
 
 **Chapter Timing:**
 - Calculate from individual file durations using ffprobe
@@ -206,6 +236,7 @@ All chapter merging decisions are **fully logged** for user transparency:
 
 **Analysis Phase Logs:**
 - Sample filenames for debugging
+- Book title detection in metadata (NEW v3)
 - Metadata availability (track numbers)
 - Ordering strategy chosen (metadata vs filename)
 - Sample chapter titles generated
@@ -220,23 +251,25 @@ All chapter merging decisions are **fully logged** for user transparency:
 - Final file size and chapter count
 - Cleanup status
 
-**Example Log Output:**
+**Example Log Output (v3 with book title detection):**
 ```
-[FileOrganizer] Multiple audio files detected (30 files) - checking chapter merge settings...
+[FileOrganizer] Multiple audio files detected (31 files) - checking chapter merge settings...
 [FileOrganizer] Chapter merging enabled - analyzing files...
-[FileOrganizer] Chapter detection: 30 files with format .mp3 - attempting chapter merge
-[FileOrganizer] Analyzing 30 chapter files...
-[FileOrganizer] Sample filenames: Andy Weir - Project Hail Mary - 01.mp3, Andy Weir - Project Hail Mary - 02.mp3, Andy Weir - Project Hail Mary - 03.mp3, ...
-[FileOrganizer] Metadata analysis: 30/30 files have track numbers
-[FileOrganizer] Track numbers: 1, 2, 3 ... 30
+[FileOrganizer] Chapter detection: 31 files with format .mp3 - attempting chapter merge
+[FileOrganizer] Analyzing 31 chapter files...
+[FileOrganizer] Sample filenames: The Let Them Theory - 01 - Opening Credits.mp3, The Let Them Theory - 02 - Introduction_ My Story.mp3, ...
+[FileOrganizer] Detected book title in metadata: "The Let Them Theory" (appears in 31/31 files)
+[FileOrganizer] Title metadata flagged as book title - will prioritize filename extraction for chapter names
+[FileOrganizer] Metadata analysis: 31/31 files have track numbers
+[FileOrganizer] Track numbers: 1, 2, 3 ... 31
 [FileOrganizer] Chapter ordering: Filename and metadata orders match - high confidence
-[FileOrganizer] Using metadata-based ordering for 30 chapters
-[FileOrganizer] Sample chapter titles: Ch1: "Chapter 1", Ch2: "Chapter 2", Ch3: "Chapter 3", ...
-[FileOrganizer] Starting chapter merge: "Project Hail Mary" by Andy Weir
+[FileOrganizer] Using metadata-based ordering for 31 chapters
+[FileOrganizer] Sample chapter titles: Ch1: "Opening Credits", Ch2: "Introduction: My Story", Ch3: "Dedication", ...
+[FileOrganizer] Starting chapter merge: "The Let Them Theory" by Mel Robbins
 [FileOrganizer] Merge strategy: Re-encoding MP3 → AAC/M4B at 128k
-[FileOrganizer] Executing FFmpeg merge (timeout: 20 minutes)...
+[FileOrganizer] Executing FFmpeg merge (timeout: 254 minutes)...
 [FileOrganizer] ✓ Chapter merge successful!
-[FileOrganizer]   - Chapters: 30
+[FileOrganizer]   - Chapters: 31
 [FileOrganizer]   - Duration: 16h 32m 10s
 [FileOrganizer]   - Size: 452MB
 ```

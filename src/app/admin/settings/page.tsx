@@ -1340,7 +1340,7 @@ export default function AdminSettings() {
                     placeholder="Enter your Audiobookshelf API token"
                   />
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Found in Audiobookshelf Settings → Users → Your Account → API Tokens
+                    Generate in Audiobookshelf: Settings → API Keys → Add API Key
                   </p>
                 </div>
 

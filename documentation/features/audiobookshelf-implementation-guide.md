@@ -1771,7 +1771,7 @@ export function AudiobookshelfStep({
             className="w-full px-3 py-2 border rounded-lg"
           />
           <p className="text-xs text-gray-500 mt-1">
-            Find this in Audiobookshelf → Settings → Users → Your User → API Token
+            Generate this in Audiobookshelf → Settings → API Keys → Add API Key
           </p>
         </div>
 

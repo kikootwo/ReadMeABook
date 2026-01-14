@@ -1147,11 +1147,11 @@ auth.require_admin_approval         = 'false'
 
 **Instructions for users:**
 1. Login to Audiobookshelf web UI as admin
-2. Go to Settings → Users
-3. Click on your user
-4. Scroll to "API Token" section
-5. Click "Generate Token"
-6. Copy token for ReadMeABook setup
+2. Go to Settings → API Keys
+3. Click "Add API Key"
+4. Enter a descriptive name (e.g., "ReadMeABook")
+5. Copy the generated API key
+6. Use the key in ReadMeABook setup
 
 ### B. OIDC Provider Setup Guides
 

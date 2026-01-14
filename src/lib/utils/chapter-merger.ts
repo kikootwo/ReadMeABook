@@ -42,6 +42,7 @@ export interface ChapterFile {
   bitrate?: number;           // kbps
   trackNumber?: number;       // from metadata
   titleMetadata?: string;     // from metadata
+  titleIsBookTitle?: boolean; // true if titleMetadata is the book title (not chapter-specific)
   chapterTitle: string;       // final computed title
 }
 
@@ -196,7 +197,9 @@ function extractChapterNameFromFilename(filename: string): string | null {
   // Try to extract meaningful name after chapter indicator
   // "01 - The Beginning" -> "The Beginning"
   // "Chapter 1 - Introduction" -> "Introduction"
+  // "Book Title - 01 - Chapter Name" -> "Chapter Name"
   const patterns = [
+    /[\s._-]+\d+[\s._-]+(.+)$/,             // "BookTitle - 01 - ChapterName" (extract after last digit sequence)
     /^\d+[\s._-]+(.+)$/,                    // "01 - Title" or "01_Title"
     /^chapter\s*\d+[\s._-]+(.+)$/i,         // "Chapter 1 - Title"
     /^ch\s*\d+[\s._-]+(.+)$/i,              // "Ch1 - Title"
@@ -217,22 +220,63 @@ function extractChapterNameFromFilename(filename: string): string | null {
 }
 
 /**
- * Get chapter title with priority: metadata > filename > fallback
+ * Get chapter title with priority: filename > metadata (if not book title) > fallback
  */
 function getChapterTitle(file: ChapterFile, index: number): string {
-  // Priority 1: Title metadata (if meaningful)
-  if (file.titleMetadata && !isGenericTitle(file.titleMetadata)) {
-    return file.titleMetadata;
-  }
-
-  // Priority 2: Extract from filename
+  // Priority 1: Extract from filename (most reliable for chapter-specific names)
   const extracted = extractChapterNameFromFilename(file.filename);
   if (extracted) {
     return extracted;
   }
 
+  // Priority 2: Title metadata (only if meaningful AND not the book title)
+  if (file.titleMetadata && !file.titleIsBookTitle && !isGenericTitle(file.titleMetadata)) {
+    return file.titleMetadata;
+  }
+
   // Priority 3: Fallback to "Chapter X"
   return `Chapter ${index + 1}`;
+}
+
+/**
+ * Detect if a title appearing in metadata is the book title (not chapter-specific)
+ * Returns the book title if >80% of files have the same title metadata
+ */
+function detectBookTitle(files: { titleMetadata?: string }[]): string | null {
+  if (files.length === 0) return null;
+
+  // Count occurrences of each title
+  const titleCounts = new Map<string, number>();
+  let filesWithTitle = 0;
+
+  for (const file of files) {
+    if (file.titleMetadata && file.titleMetadata.trim().length > 0) {
+      const title = file.titleMetadata.trim();
+      titleCounts.set(title, (titleCounts.get(title) || 0) + 1);
+      filesWithTitle++;
+    }
+  }
+
+  if (filesWithTitle === 0) return null;
+
+  // Find most common title
+  let mostCommonTitle: string | null = null;
+  let maxCount = 0;
+
+  for (const [title, count] of titleCounts.entries()) {
+    if (count > maxCount) {
+      maxCount = count;
+      mostCommonTitle = title;
+    }
+  }
+
+  // If >80% of files have the same title, it's likely the book title
+  const threshold = files.length * 0.8;
+  if (mostCommonTitle && maxCount >= threshold) {
+    return mostCommonTitle;
+  }
+
+  return null;
 }
 
 /**
@@ -255,6 +299,7 @@ export async function analyzeChapterFiles(
       bitrate: probe.bitrate,
       trackNumber: probe.trackNumber,
       titleMetadata: probe.title,
+      titleIsBookTitle: false, // Will be updated if book title detected
       chapterTitle: '', // Will be computed after ordering
     };
   });
@@ -265,6 +310,22 @@ export async function analyzeChapterFiles(
   const sampleCount = Math.min(3, files.length);
   const sampleFilenames = files.slice(0, sampleCount).map(f => f.filename);
   await logger?.info(`Sample filenames: ${sampleFilenames.join(', ')}${files.length > sampleCount ? ', ...' : ''}`);
+
+  // Detect if title metadata is actually the book title (not chapter-specific)
+  const bookTitle = detectBookTitle(files);
+  if (bookTitle) {
+    const filesWithBookTitle = files.filter(f => f.titleMetadata?.trim() === bookTitle).length;
+    await logger?.info(`Detected book title in metadata: "${bookTitle}" (appears in ${filesWithBookTitle}/${files.length} files)`);
+
+    // Flag all files that have the book title as metadata
+    for (const file of files) {
+      if (file.titleMetadata?.trim() === bookTitle) {
+        file.titleIsBookTitle = true;
+      }
+    }
+
+    await logger?.info(`Title metadata flagged as book title - will prioritize filename extraction for chapter names`);
+  }
 
   // Create filename-based order (natural sort)
   const filenameOrder = [...files].sort((a, b) =>

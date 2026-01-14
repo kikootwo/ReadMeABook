@@ -9,7 +9,7 @@ async function setupABSConfig() {
     // Configure these values for your Audiobookshelf instance
     const config = {
       'audiobookshelf.server_url': 'http://localhost:13378',  // Change to your ABS server URL
-      'audiobookshelf.api_token': 'YOUR_ABS_API_TOKEN',      // Get from ABS Settings -> Users -> Your User -> API Token
+      'audiobookshelf.api_token': 'YOUR_ABS_API_TOKEN',      // Generate from ABS Settings -> API Keys -> Add API Key
       'audiobookshelf.library_id': 'YOUR_LIBRARY_ID',        // Get from ABS or use test-abs endpoint
     };
 
