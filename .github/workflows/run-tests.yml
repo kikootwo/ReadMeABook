@@ -63,9 +63,10 @@ jobs:
         continue-on-error: true
         run: |
           START_TIME=$(date +%s)
-          npm test -- --reporter=json --outputFile=test-results.json 2>&1 | tee test-output.txt
+          npm test 2>&1 | tee test-output.txt
+          TEST_EXIT_CODE=${PIPESTATUS[0]}
           END_TIME=$(date +%s)
-          echo "exit_code=$?" >> $GITHUB_OUTPUT
+          echo "exit_code=$TEST_EXIT_CODE" >> $GITHUB_OUTPUT
           echo "start_time=$(date -u +"%H:%M:%S")" >> $GITHUB_OUTPUT
           echo "elapsed=$((END_TIME - START_TIME))" >> $GITHUB_OUTPUT
 
@@ -73,15 +74,46 @@ jobs:
         id: test-results
         if: always()
         run: |
-          if [ -f test-results.json ]; then
-            TOTAL=$(jq '.numTotalTests // 0' test-results.json)
-            PASSED=$(jq '.numPassedTests // 0' test-results.json)
-            FAILED=$(jq '.numFailedTests // 0' test-results.json)
-            TEST_FILES=$(jq '.numTotalTestSuites // 0' test-results.json)
-            TEST_FILES_PASSED=$(jq '.numPassedTestSuites // 0' test-results.json)
-            TEST_FILES_FAILED=$(jq '.numFailedTestSuites // 0' test-results.json)
-            DURATION=$(jq '((.testResults | map(.endTime) | max) - (.testResults | map(.startTime) | min)) / 1000 | . * 100 | floor / 100' test-results.json 2>/dev/null || echo "0")
-            SUCCESS=$([ "$FAILED" -eq 0 ] && echo "true" || echo "false")
+          # Parse the test output from vitest's default reporter
+          if [ -f test-output.txt ]; then
+            # Extract test file count (e.g., "Test Files  81 passed (81)")
+            TEST_FILES_LINE=$(grep -E "Test Files\s+" test-output.txt || echo "")
+            if [ -n "$TEST_FILES_LINE" ]; then
+              TEST_FILES_PASSED=$(echo "$TEST_FILES_LINE" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || echo "0")
+              TEST_FILES_FAILED=$(echo "$TEST_FILES_LINE" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" || echo "0")
+              TEST_FILES=$(echo "$TEST_FILES_LINE" | grep -oE "\([0-9]+\)" | grep -oE "[0-9]+" || echo "0")
+            else
+              TEST_FILES_PASSED=0
+              TEST_FILES_FAILED=0
+              TEST_FILES=0
+            fi
+            
+            # Extract test count (e.g., "Tests  708 passed (708)")
+            TESTS_LINE=$(grep -E "^\s*Tests\s+" test-output.txt || echo "")
+            if [ -n "$TESTS_LINE" ]; then
+              PASSED=$(echo "$TESTS_LINE" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || echo "0")
+              FAILED=$(echo "$TESTS_LINE" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" || echo "0")
+              TOTAL=$(echo "$TESTS_LINE" | grep -oE "\([0-9]+\)" | grep -oE "[0-9]+" || echo "0")
+            else
+              PASSED=0
+              FAILED=0
+              TOTAL=0
+            fi
+            
+            # Extract duration (e.g., "Duration  10.44s")
+            DURATION_LINE=$(grep -E "Duration\s+" test-output.txt || echo "")
+            if [ -n "$DURATION_LINE" ]; then
+              DURATION=$(echo "$DURATION_LINE" | grep -oE "[0-9]+\.[0-9]+s" | head -1 | sed 's/s//' || echo "0")
+            else
+              DURATION="${{ steps.run-tests.outputs.elapsed }}"
+            fi
+            
+            # Determine success based on exit code and failed count
+            if [ "${{ steps.run-tests.outputs.exit_code }}" = "0" ] && [ "${FAILED:-0}" = "0" ]; then
+              SUCCESS="true"
+            else
+              SUCCESS="false"
+            fi
           else
             TOTAL=0
             PASSED=0
@@ -92,6 +124,15 @@ jobs:
             DURATION=0
             SUCCESS="false"
           fi
+          
+          # Set defaults for empty values
+          TOTAL=${TOTAL:-0}
+          PASSED=${PASSED:-0}
+          FAILED=${FAILED:-0}
+          TEST_FILES=${TEST_FILES:-0}
+          TEST_FILES_PASSED=${TEST_FILES_PASSED:-0}
+          TEST_FILES_FAILED=${TEST_FILES_FAILED:-0}
+          DURATION=${DURATION:-0}
           
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
           echo "passed=$PASSED" >> $GITHUB_OUTPUT
