@@ -76,24 +76,29 @@ jobs:
         run: |
           # Parse the test output from vitest's default reporter
           if [ -f test-output.txt ]; then
+            # Debug: show relevant lines
+            echo "=== Relevant test output lines ==="
+            grep -E "(Test Files|Tests|Duration)" test-output.txt || true
+            echo "==================================="
+            
             # Extract test file count (e.g., "Test Files  81 passed (81)")
-            TEST_FILES_LINE=$(grep -E "Test Files\s+" test-output.txt || echo "")
+            TEST_FILES_LINE=$(grep "Test Files" test-output.txt | head -1 || echo "")
             if [ -n "$TEST_FILES_LINE" ]; then
-              TEST_FILES_PASSED=$(echo "$TEST_FILES_LINE" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || echo "0")
-              TEST_FILES_FAILED=$(echo "$TEST_FILES_LINE" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" || echo "0")
-              TEST_FILES=$(echo "$TEST_FILES_LINE" | grep -oE "\([0-9]+\)" | grep -oE "[0-9]+" || echo "0")
+              TEST_FILES_PASSED=$(echo "$TEST_FILES_LINE" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" | head -1 || echo "0")
+              TEST_FILES_FAILED=$(echo "$TEST_FILES_LINE" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" | head -1 || echo "0")
+              TEST_FILES=$(echo "$TEST_FILES_LINE" | grep -oE "\([0-9]+\)" | grep -oE "[0-9]+" | head -1 || echo "0")
             else
               TEST_FILES_PASSED=0
               TEST_FILES_FAILED=0
               TEST_FILES=0
             fi
             
-            # Extract test count (e.g., "Tests  708 passed (708)")
-            TESTS_LINE=$(grep -E "^\s*Tests\s+" test-output.txt || echo "")
+            # Extract test count - match line with "Tests" but not "Test Files"
+            TESTS_LINE=$(grep -E "^\s*Tests\s" test-output.txt | grep -v "Test Files" | head -1 || echo "")
             if [ -n "$TESTS_LINE" ]; then
-              PASSED=$(echo "$TESTS_LINE" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || echo "0")
-              FAILED=$(echo "$TESTS_LINE" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" || echo "0")
-              TOTAL=$(echo "$TESTS_LINE" | grep -oE "\([0-9]+\)" | grep -oE "[0-9]+" || echo "0")
+              PASSED=$(echo "$TESTS_LINE" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" | head -1 || echo "0")
+              FAILED=$(echo "$TESTS_LINE" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" | head -1 || echo "0")
+              TOTAL=$(echo "$TESTS_LINE" | grep -oE "\([0-9]+\)" | grep -oE "[0-9]+" | head -1 || echo "0")
             else
               PASSED=0
               FAILED=0
@@ -101,7 +106,7 @@ jobs:
             fi
             
             # Extract duration (e.g., "Duration  10.44s")
-            DURATION_LINE=$(grep -E "Duration\s+" test-output.txt || echo "")
+            DURATION_LINE=$(grep "Duration" test-output.txt | head -1 || echo "")
             if [ -n "$DURATION_LINE" ]; then
               DURATION=$(echo "$DURATION_LINE" | grep -oE "[0-9]+\.[0-9]+s" | head -1 | sed 's/s//' || echo "0")
             else
@@ -133,6 +138,15 @@ jobs:
           TEST_FILES_PASSED=${TEST_FILES_PASSED:-0}
           TEST_FILES_FAILED=${TEST_FILES_FAILED:-0}
           DURATION=${DURATION:-0}
+          
+          echo "=== Parsed values ==="
+          echo "TEST_FILES_PASSED=$TEST_FILES_PASSED"
+          echo "TEST_FILES=$TEST_FILES"
+          echo "PASSED=$PASSED"
+          echo "TOTAL=$TOTAL"
+          echo "DURATION=$DURATION"
+          echo "SUCCESS=$SUCCESS"
+          echo "===================="
           
           echo "total=$TOTAL" >> $GITHUB_OUTPUT
           echo "passed=$PASSED" >> $GITHUB_OUTPUT
