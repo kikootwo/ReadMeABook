@@ -76,13 +76,16 @@ jobs:
         run: |
           # Parse the test output from vitest's default reporter
           if [ -f test-output.txt ]; then
+            # Strip ANSI color codes for reliable parsing
+            sed -i 's/\x1b\[[0-9;]*m//g' test-output.txt
+            
             # Debug: show relevant lines
             echo "=== Relevant test output lines ==="
-            grep -E "(Test Files|Tests|Duration)" test-output.txt || true
+            grep -E "(Test Files|Tests|Duration)" test-output.txt | tail -5 || true
             echo "==================================="
             
             # Extract test file count (e.g., "Test Files  81 passed (81)")
-            TEST_FILES_LINE=$(grep "Test Files" test-output.txt | head -1 || echo "")
+            TEST_FILES_LINE=$(grep "Test Files" test-output.txt | tail -1 || echo "")
             if [ -n "$TEST_FILES_LINE" ]; then
               TEST_FILES_PASSED=$(echo "$TEST_FILES_LINE" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" | head -1 || echo "0")
               TEST_FILES_FAILED=$(echo "$TEST_FILES_LINE" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" | head -1 || echo "0")
@@ -93,8 +96,8 @@ jobs:
               TEST_FILES=0
             fi
             
-            # Extract test count - match line with "Tests" but not "Test Files"
-            TESTS_LINE=$(grep -E "^\s*Tests\s" test-output.txt | grep -v "Test Files" | head -1 || echo "")
+            # Extract test count - look for line containing "Tests" followed by number, exclude "Test Files"
+            TESTS_LINE=$(grep -E "Tests\s+[0-9]+" test-output.txt | grep -v "Test Files" | tail -1 || echo "")
             if [ -n "$TESTS_LINE" ]; then
               PASSED=$(echo "$TESTS_LINE" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" | head -1 || echo "0")
               FAILED=$(echo "$TESTS_LINE" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" | head -1 || echo "0")
@@ -105,8 +108,8 @@ jobs:
               TOTAL=0
             fi
             
-            # Extract duration (e.g., "Duration  10.44s")
-            DURATION_LINE=$(grep "Duration" test-output.txt | head -1 || echo "")
+            # Extract duration (e.g., "Duration  26.97s")
+            DURATION_LINE=$(grep -E "Duration\s+[0-9]+" test-output.txt | tail -1 || echo "")
             if [ -n "$DURATION_LINE" ]; then
               DURATION=$(echo "$DURATION_LINE" | grep -oE "[0-9]+\.[0-9]+s" | head -1 | sed 's/s//' || echo "0")
             else
