@@ -117,12 +117,15 @@ export function NotificationsTab() {
       setIsTesting(true);
       setTestResult(null);
 
+      // In edit mode, use backend ID to test with real config (masked values won't work)
+      // In add mode, use the form config directly
+      const testPayload = modalState.mode === 'edit' && modalState.backend
+        ? { backendId: modalState.backend.id }
+        : { type: modalState.selectedType, config: formData.config };
+
       const response = await fetchWithAuth('/api/admin/notifications/test', {
         method: 'POST',
-        body: JSON.stringify({
-          type: modalState.selectedType,
-          config: formData.config,
-        }),
+        body: JSON.stringify(testPayload),
       });
 
       const data = await response.json();

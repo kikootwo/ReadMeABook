@@ -58,6 +58,41 @@ describe('Admin job status route', () => {
     expect(payload.success).toBe(true);
     expect(payload.job.status).toBe('completed');
   });
+
+  it('rejects non-admin tokens', async () => {
+    verifyAccessTokenMock.mockReturnValue({ role: 'user' });
+
+    const { GET } = await import('@/app/api/admin/job-status/[id]/route');
+    const response = await GET(makeRequest('Bearer token') as any, { params: Promise.resolve({ id: '1' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(payload.error).toMatch(/Admin access required/);
+  });
+
+  it('returns 404 when job is missing', async () => {
+    verifyAccessTokenMock.mockReturnValue({ role: 'admin' });
+    jobQueueMock.getJob.mockResolvedValue(null);
+
+    const { GET } = await import('@/app/api/admin/job-status/[id]/route');
+    const response = await GET(makeRequest('Bearer token') as any, { params: Promise.resolve({ id: 'missing' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(payload.error).toBe('Job not found');
+  });
+
+  it('returns 500 when job lookup fails', async () => {
+    verifyAccessTokenMock.mockReturnValue({ role: 'admin' });
+    jobQueueMock.getJob.mockRejectedValue(new Error('lookup failed'));
+
+    const { GET } = await import('@/app/api/admin/job-status/[id]/route');
+    const response = await GET(makeRequest('Bearer token') as any, { params: Promise.resolve({ id: '1' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toBe('InternalError');
+  });
 });
 
 

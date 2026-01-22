@@ -95,6 +95,50 @@ describe('Auth misc routes', () => {
     expect(payload.accessToken).toBe('access-token');
   });
 
+  it('returns 400 when refresh token is missing', async () => {
+    const { POST } = await import('@/app/api/auth/refresh/route');
+    const response = await POST({ json: vi.fn().mockResolvedValue({}) } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe('ValidationError');
+  });
+
+  it('returns 401 when refresh token is invalid', async () => {
+    verifyRefreshTokenMock.mockReturnValue(null);
+    const { POST } = await import('@/app/api/auth/refresh/route');
+    const response = await POST({ json: vi.fn().mockResolvedValue({ refreshToken: 'bad' }) } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(payload.error).toBe('Unauthorized');
+  });
+
+  it('returns 401 when user is not found for refresh token', async () => {
+    verifyRefreshTokenMock.mockReturnValue({ sub: 'user-missing' });
+    prismaMock.user.findUnique.mockResolvedValue(null);
+
+    const { POST } = await import('@/app/api/auth/refresh/route');
+    const response = await POST({ json: vi.fn().mockResolvedValue({ refreshToken: 'refresh' }) } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(payload.error).toBe('Unauthorized');
+  });
+
+  it('returns 500 when refresh token verification throws', async () => {
+    verifyRefreshTokenMock.mockImplementation(() => {
+      throw new Error('bad token');
+    });
+
+    const { POST } = await import('@/app/api/auth/refresh/route');
+    const response = await POST({ json: vi.fn().mockResolvedValue({ refreshToken: 'refresh' }) } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toBe('RefreshError');
+  });
+
   it('returns provider info for audiobookshelf mode', async () => {
     configServiceMock.get
       .mockResolvedValueOnce('audiobookshelf')

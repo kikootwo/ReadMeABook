@@ -12,6 +12,11 @@ const prismaMock = createPrismaMock();
 const requireAuthMock = vi.hoisted(() => vi.fn());
 const requireAdminMock = vi.hoisted(() => vi.fn());
 const deleteRequestMock = vi.hoisted(() => vi.fn());
+const jobQueueMock = vi.hoisted(() => ({
+  addDownloadJob: vi.fn(),
+  addSearchJob: vi.fn(),
+  addNotificationJob: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock('@/lib/db', () => ({
   prisma: prismaMock,
@@ -26,12 +31,17 @@ vi.mock('@/lib/services/request-delete.service', () => ({
   deleteRequest: deleteRequestMock,
 }));
 
+vi.mock('@/lib/services/job-queue.service', () => ({
+  getJobQueueService: () => jobQueueMock,
+}));
+
 describe('Admin requests routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authRequest = { user: { id: 'admin-1', role: 'admin' } };
     requireAuthMock.mockImplementation((_req: any, handler: any) => handler(authRequest));
     requireAdminMock.mockImplementation((_req: any, handler: any) => handler());
+    jobQueueMock.addNotificationJob.mockResolvedValue(undefined);
   });
 
   it('returns recent requests', async () => {
@@ -72,6 +82,202 @@ describe('Admin requests routes', () => {
 
     expect(payload.success).toBe(true);
     expect(deleteRequestMock).toHaveBeenCalledWith('req-1', 'admin-1');
+  });
+
+  it('returns 401 when admin user is missing', async () => {
+    authRequest.user = null;
+
+    const { DELETE } = await import('@/app/api/admin/requests/[id]/route');
+    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-2' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(payload.error).toBe('Unauthorized');
+  });
+
+  it('returns 404 when delete service reports missing request', async () => {
+    deleteRequestMock.mockResolvedValueOnce({
+      success: false,
+      error: 'NotFound',
+      message: 'Missing',
+    });
+
+    const { DELETE } = await import('@/app/api/admin/requests/[id]/route');
+    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-3' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(payload.error).toBe('NotFound');
+  });
+
+  it('returns 500 when delete service fails', async () => {
+    deleteRequestMock.mockResolvedValueOnce({
+      success: false,
+      error: 'DeleteFailed',
+      message: 'boom',
+    });
+
+    const { DELETE } = await import('@/app/api/admin/requests/[id]/route');
+    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-4' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toBe('DeleteFailed');
+  });
+
+  it('returns pending approval requests', async () => {
+    prismaMock.request.findMany.mockResolvedValueOnce([{ id: 'req-10', status: 'awaiting_approval' }]);
+
+    const { GET } = await import('@/app/api/admin/requests/pending-approval/route');
+    const response = await GET({} as any);
+    const payload = await response.json();
+
+    expect(payload.success).toBe(true);
+    expect(payload.count).toBe(1);
+  });
+
+  it('returns 500 when pending approval fetch fails', async () => {
+    prismaMock.request.findMany.mockRejectedValueOnce(new Error('fetch failed'));
+
+    const { GET } = await import('@/app/api/admin/requests/pending-approval/route');
+    const response = await GET({} as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toBe('FetchError');
+  });
+
+  it('returns 401 when approving without a user', async () => {
+    authRequest.user = null;
+    const request = { json: vi.fn().mockResolvedValue({ action: 'approve' }) };
+
+    const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
+    const response = await POST(request as any, { params: Promise.resolve({ id: 'req-1' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(payload.error).toBe('Unauthorized');
+  });
+
+  it('returns validation error for invalid approval action', async () => {
+    const request = { json: vi.fn().mockResolvedValue({ action: 'maybe' }) };
+
+    const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
+    const response = await POST(request as any, { params: Promise.resolve({ id: 'req-1' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe('ValidationError');
+  });
+
+  it('returns 404 when approving a missing request', async () => {
+    prismaMock.request.findUnique.mockResolvedValueOnce(null);
+    const request = { json: vi.fn().mockResolvedValue({ action: 'approve' }) };
+
+    const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
+    const response = await POST(request as any, { params: Promise.resolve({ id: 'missing' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(payload.error).toBe('NotFound');
+  });
+
+  it('returns 400 when request is not awaiting approval', async () => {
+    prismaMock.request.findUnique.mockResolvedValueOnce({
+      id: 'req-2',
+      status: 'pending',
+      audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
+      user: { id: 'u1', plexUsername: 'user' },
+    });
+    const request = { json: vi.fn().mockResolvedValue({ action: 'approve' }) };
+
+    const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
+    const response = await POST(request as any, { params: Promise.resolve({ id: 'req-2' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe('InvalidStatus');
+  });
+
+  it('approves request with a selected torrent and triggers download', async () => {
+    prismaMock.request.findUnique.mockResolvedValueOnce({
+      id: 'req-3',
+      status: 'awaiting_approval',
+      selectedTorrent: { title: 'Torrent' },
+      audiobook: { id: 'ab-3', title: 'Title', author: 'Author' },
+      user: { id: 'u3', plexUsername: 'user3' },
+      userId: 'u3',
+    });
+    prismaMock.request.update.mockResolvedValueOnce({
+      id: 'req-3',
+      status: 'downloading',
+      audiobook: { id: 'ab-3', title: 'Title', author: 'Author' },
+      user: { id: 'u3', plexUsername: 'user3' },
+      userId: 'u3',
+    });
+    const request = { json: vi.fn().mockResolvedValue({ action: 'approve' }) };
+
+    const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
+    const response = await POST(request as any, { params: Promise.resolve({ id: 'req-3' }) });
+    const payload = await response.json();
+
+    expect(payload.success).toBe(true);
+    expect(jobQueueMock.addDownloadJob).toHaveBeenCalled();
+    expect(jobQueueMock.addNotificationJob).toHaveBeenCalled();
+  });
+
+  it('approves request without a selected torrent and triggers search', async () => {
+    prismaMock.request.findUnique.mockResolvedValueOnce({
+      id: 'req-4',
+      status: 'awaiting_approval',
+      selectedTorrent: null,
+      audiobook: { id: 'ab-4', title: 'Title', author: 'Author', audibleAsin: 'ASIN4' },
+      user: { id: 'u4', plexUsername: 'user4' },
+      userId: 'u4',
+    });
+    prismaMock.request.update.mockResolvedValueOnce({
+      id: 'req-4',
+      status: 'pending',
+      audiobook: { id: 'ab-4', title: 'Title', author: 'Author', audibleAsin: 'ASIN4' },
+      user: { id: 'u4', plexUsername: 'user4' },
+      userId: 'u4',
+    });
+    const request = { json: vi.fn().mockResolvedValue({ action: 'approve' }) };
+
+    const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
+    const response = await POST(request as any, { params: Promise.resolve({ id: 'req-4' }) });
+    const payload = await response.json();
+
+    expect(payload.success).toBe(true);
+    expect(jobQueueMock.addSearchJob).toHaveBeenCalled();
+    expect(jobQueueMock.addNotificationJob).toHaveBeenCalled();
+  });
+
+  it('denies request without triggering jobs', async () => {
+    prismaMock.request.findUnique.mockResolvedValueOnce({
+      id: 'req-5',
+      status: 'awaiting_approval',
+      selectedTorrent: null,
+      audiobook: { id: 'ab-5', title: 'Title', author: 'Author' },
+      user: { id: 'u5', plexUsername: 'user5' },
+      userId: 'u5',
+    });
+    prismaMock.request.update.mockResolvedValueOnce({
+      id: 'req-5',
+      status: 'denied',
+      audiobook: { id: 'ab-5', title: 'Title', author: 'Author' },
+      user: { id: 'u5', plexUsername: 'user5' },
+      userId: 'u5',
+    });
+    const request = { json: vi.fn().mockResolvedValue({ action: 'deny' }) };
+
+    const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
+    const response = await POST(request as any, { params: Promise.resolve({ id: 'req-5' }) });
+    const payload = await response.json();
+
+    expect(payload.success).toBe(true);
+    expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
+    expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
   });
 });
 

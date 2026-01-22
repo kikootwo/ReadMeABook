@@ -129,6 +129,100 @@ describe('Admin settings core routes', () => {
     expect(invalidateQbMock).toHaveBeenCalled();
   });
 
+  it('rejects invalid download client types', async () => {
+    const request = {
+      json: vi.fn().mockResolvedValue({
+        type: 'transmission',
+        url: 'http://transmission',
+      }),
+    };
+
+    const { PUT } = await import('@/app/api/admin/settings/download-client/route');
+    const response = await PUT(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/Invalid client type/);
+  });
+
+  it('rejects missing qBittorrent credentials', async () => {
+    const request = {
+      json: vi.fn().mockResolvedValue({
+        type: 'qbittorrent',
+        url: 'http://qbt',
+        password: 'pass',
+        remotePathMappingEnabled: false,
+      }),
+    };
+
+    const { PUT } = await import('@/app/api/admin/settings/download-client/route');
+    const response = await PUT(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/URL, username, and password/);
+  });
+
+  it('rejects missing SABnzbd credentials', async () => {
+    const request = {
+      json: vi.fn().mockResolvedValue({
+        type: 'sabnzbd',
+        url: 'http://sab',
+        remotePathMappingEnabled: false,
+      }),
+    };
+
+    const { PUT } = await import('@/app/api/admin/settings/download-client/route');
+    const response = await PUT(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/API key/);
+  });
+
+  it('rejects path mapping when required fields are missing', async () => {
+    const request = {
+      json: vi.fn().mockResolvedValue({
+        type: 'qbittorrent',
+        url: 'http://qbt',
+        username: 'user',
+        password: 'pass',
+        remotePathMappingEnabled: true,
+      }),
+    };
+
+    const { PUT } = await import('@/app/api/admin/settings/download-client/route');
+    const response = await PUT(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/Remote path and local path/);
+  });
+
+  it('rejects invalid path mapping configuration', async () => {
+    pathMapperMock.validate.mockImplementationOnce(() => {
+      throw new Error('bad mapping');
+    });
+    const request = {
+      json: vi.fn().mockResolvedValue({
+        type: 'qbittorrent',
+        url: 'http://qbt',
+        username: 'user',
+        password: 'pass',
+        remotePathMappingEnabled: true,
+        remotePath: '/remote',
+        localPath: '/local',
+      }),
+    };
+
+    const { PUT } = await import('@/app/api/admin/settings/download-client/route');
+    const response = await PUT(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/bad mapping/);
+  });
+
   it('updates paths settings', async () => {
     const request = {
       json: vi.fn().mockResolvedValue({

@@ -44,6 +44,29 @@ describe('Admin BookDate toggle route', () => {
     expect(payload.isEnabled).toBe(true);
     expect(prismaMock.bookDateConfig.updateMany).toHaveBeenCalledWith({ data: { isEnabled: true } });
   });
+
+  it('rejects non-boolean toggle values', async () => {
+    authRequest.json.mockResolvedValue({ isEnabled: 'yes' });
+
+    const { PATCH } = await import('@/app/api/admin/bookdate/toggle/route');
+    const response = await PATCH({} as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/must be a boolean/);
+  });
+
+  it('returns 500 when toggle fails', async () => {
+    authRequest.json.mockResolvedValue({ isEnabled: false });
+    prismaMock.bookDateConfig.updateMany.mockRejectedValue(new Error('toggle failed'));
+
+    const { PATCH } = await import('@/app/api/admin/bookdate/toggle/route');
+    const response = await PATCH({} as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toMatch(/toggle failed/);
+  });
 });
 
 

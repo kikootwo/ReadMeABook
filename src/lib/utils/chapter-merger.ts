@@ -448,6 +448,23 @@ function determineOutputBitrate(chapters: ChapterFile[]): string {
 }
 
 /**
+ * Map bitrate to native AAC VBR quality value
+ * Quality range: 0.1-5 (higher = better quality/larger file)
+ */
+function bitrateToVbrQuality(bitrateStr: string): number {
+  const bitrate = parseInt(bitrateStr.replace('k', ''));
+
+  // Approximate mapping based on AAC VBR behavior
+  if (bitrate <= 64) return 1.0;   // ~64kbps
+  if (bitrate <= 96) return 1.5;   // ~96kbps
+  if (bitrate <= 128) return 2.0;  // ~128kbps
+  if (bitrate <= 160) return 2.5;  // ~160kbps
+  if (bitrate <= 192) return 3.0;  // ~192kbps
+  if (bitrate <= 256) return 4.0;  // ~256kbps
+  return 4.5; // ~320kbps+ (max quality)
+}
+
+/**
  * Check if libfdk_aac encoder is available (higher quality than native AAC)
  */
 async function checkLibFdkAac(): Promise<boolean> {
@@ -640,10 +657,12 @@ export async function mergeChapters(
         args.push('-vbr', '4'); // VBR mode 4 (~128-160kbps, high quality)
         await logger?.info(`Merge strategy: Re-encoding MP3 → AAC/M4B using libfdk_aac (high quality VBR, target ~${bitrate})`);
       } else {
+        // Use VBR for better quality at same average bitrate
+        const vbrQuality = bitrateToVbrQuality(bitrate);
         args.push('-c:a', 'aac');
-        args.push('-b:a', bitrate);
+        args.push('-q:a', vbrQuality.toString());
         args.push('-profile:a', 'aac_low'); // AAC-LC profile for maximum compatibility
-        await logger?.info(`Merge strategy: Re-encoding MP3 → AAC/M4B using native AAC at ${bitrate}`);
+        await logger?.info(`Merge strategy: Re-encoding MP3 → AAC/M4B using native AAC VBR (quality ${vbrQuality}, target ~${bitrate})`);
       }
     } else {
       // M4A/M4B -> M4B can use codec copy (fast, lossless)
@@ -838,7 +857,7 @@ async function validateMergedFile(
     const stats = await fs.stat(outputPath);
     const sizeMB = stats.size / 1024 / 1024;
     const durationMinutes = expectedDuration / 1000 / 60;
-    const expectedMinSize = durationMinutes * 0.5; // ~0.5MB per minute minimum for compressed audio
+    const expectedMinSize = durationMinutes * 0.4; // ~0.4MB per minute minimum (accommodates 64kbps encoding)
 
     if (sizeMB < expectedMinSize) {
       return {

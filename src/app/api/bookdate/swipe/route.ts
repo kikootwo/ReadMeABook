@@ -63,8 +63,10 @@ async function handler(req: AuthenticatedRequest) {
     // If swiped right and not marked as known, create request
     if (action === 'right' && !markedAsKnown && recommendation.audnexusAsin) {
       try {
-        // Fetch full details from Audnexus to get releaseDate and year
+        // Fetch full details from Audnexus to get releaseDate, year, and series
         let year: number | undefined;
+        let series: string | undefined;
+        let seriesPart: string | undefined;
         try {
           const audibleService = getAudibleService();
           const audnexusData = await audibleService.getAudiobookDetails(recommendation.audnexusAsin);
@@ -80,6 +82,16 @@ async function handler(req: AuthenticatedRequest) {
               logger.warn(`Failed to parse Audnexus releaseDate "${audnexusData.releaseDate}": ${error instanceof Error ? error.message : 'Unknown error'}`);
             }
           }
+
+          // Extract series data
+          if (audnexusData?.series) {
+            series = audnexusData.series;
+            logger.debug(`Extracted series: ${series}`);
+          }
+          if (audnexusData?.seriesPart) {
+            seriesPart = audnexusData.seriesPart;
+            logger.debug(`Extracted seriesPart: ${seriesPart}`);
+          }
         } catch (error) {
           logger.warn(`Failed to fetch Audnexus data for ASIN ${recommendation.audnexusAsin}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
@@ -89,7 +101,7 @@ async function handler(req: AuthenticatedRequest) {
           where: { audibleAsin: recommendation.audnexusAsin },
         });
 
-        // If not, create it with year
+        // If not, create it with year and series
         if (!audiobook) {
           audiobook = await prisma.audiobook.create({
             data: {
@@ -100,17 +112,23 @@ async function handler(req: AuthenticatedRequest) {
               description: recommendation.description,
               coverArtUrl: recommendation.coverUrl,
               year,
+              series,
+              seriesPart,
               status: 'requested',
             },
           });
-          logger.debug(`Created audiobook ${audiobook.id} with year: ${year || 'none'}`);
-        } else if (year) {
-          // Always update year if we have it from Audnexus (even if audiobook already has one)
+          logger.debug(`Created audiobook ${audiobook.id} with year: ${year || 'none'}, series: ${series || 'none'}`);
+        } else if (year || series || seriesPart) {
+          // Always update year/series if we have them from Audnexus (even if audiobook already has them)
           audiobook = await prisma.audiobook.update({
             where: { id: audiobook.id },
-            data: { year },
+            data: {
+              ...(year && { year }),
+              ...(series && { series }),
+              ...(seriesPart && { seriesPart }),
+            },
           });
-          logger.debug(`Updated audiobook ${audiobook.id} with year ${year}`);
+          logger.debug(`Updated audiobook ${audiobook.id} with year: ${year || 'unchanged'}, series: ${series || 'unchanged'}`);
         }
 
         // Create request (if not already exists)

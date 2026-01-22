@@ -94,6 +94,8 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
         coverArtUrl: audiobook.coverArtUrl || undefined,
         asin: audiobook.audibleAsin || undefined,
         year,
+        series: audiobook.series || undefined,
+        seriesPart: audiobook.seriesPart || undefined,
       },
       template,
       jobId ? { jobId, context: 'FileOrganizer' } : undefined

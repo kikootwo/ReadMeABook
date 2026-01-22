@@ -14,7 +14,6 @@
   [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg?style=for-the-badge)](https://www.gnu.org/licenses/agpl-3.0)
   [![GitHub Stars](https://img.shields.io/github/stars/kikootwo/readmeabook?style=for-the-badge&logo=github)](https://github.com/kikootwo/readmeabook/stargazers)
   [![Discord](https://img.shields.io/discord/1450562177277755464?style=for-the-badge&logo=discord&logoColor=white&label=Discord)](https://discord.gg/kaw6jKbKts)
-
 </div>
 
 *Radarr/Sonarr + Overseerr for audiobooks, all in one*

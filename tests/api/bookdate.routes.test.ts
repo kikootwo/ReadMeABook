@@ -355,6 +355,61 @@ describe('BookDate routes', () => {
     expect(payload.recommendations).toHaveLength(1);
   });
 
+  it('returns 500 when AI response is missing recommendations', async () => {
+    prismaMock.bookDateRecommendation.findMany.mockResolvedValueOnce([]);
+    prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce({
+      isVerified: true,
+      isEnabled: true,
+      provider: 'openai',
+      model: 'gpt',
+      apiKey: 'enc-key',
+      baseUrl: null,
+    });
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      bookDateLibraryScope: 'full',
+      bookDateCustomPrompt: null,
+    });
+    bookdateHelpersMock.buildAIPrompt.mockResolvedValueOnce('{}');
+    bookdateHelpersMock.callAI.mockResolvedValueOnce({ invalid: true });
+
+    const { GET } = await import('@/app/api/bookdate/recommendations/route');
+    const response = await GET({} as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toMatch(/Invalid AI response format/);
+  });
+
+  it('returns generated response even when no valid recommendations match', async () => {
+    prismaMock.bookDateRecommendation.findMany.mockResolvedValueOnce([]);
+    prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce({
+      isVerified: true,
+      isEnabled: true,
+      provider: 'openai',
+      model: 'gpt',
+      apiKey: 'enc-key',
+      baseUrl: null,
+    });
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      bookDateLibraryScope: 'full',
+      bookDateCustomPrompt: null,
+    });
+    bookdateHelpersMock.buildAIPrompt.mockResolvedValueOnce('{}');
+    bookdateHelpersMock.callAI.mockResolvedValueOnce({
+      recommendations: [{ title: 'Title only' }, { author: 'Author only' }],
+    });
+    prismaMock.bookDateRecommendation.findMany.mockResolvedValueOnce([]);
+    (prismaMock.bookDateRecommendation as any).createMany = vi.fn();
+
+    const { GET } = await import('@/app/api/bookdate/recommendations/route');
+    const response = await GET({} as any);
+    const payload = await response.json();
+
+    expect(payload.source).toBe('generated');
+    expect(payload.generatedCount).toBe(0);
+    expect((prismaMock.bookDateRecommendation as any).createMany).not.toHaveBeenCalled();
+  });
+
   it('returns error when generating recommendations without config', async () => {
     prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce(null);
 
@@ -393,6 +448,49 @@ describe('BookDate routes', () => {
 
     expect(response.status).toBe(404);
     expect(payload.error).toMatch(/Could not find any new recommendations/i);
+  });
+
+  it('returns 404 when user is missing during generation', async () => {
+    prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce({
+      isVerified: true,
+      isEnabled: true,
+      provider: 'openai',
+      model: 'gpt',
+      apiKey: 'enc-key',
+      baseUrl: null,
+    });
+    prismaMock.user.findUnique.mockResolvedValueOnce(null);
+
+    const { POST } = await import('@/app/api/bookdate/generate/route');
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(payload.error).toMatch(/User not found/);
+  });
+
+  it('returns 500 when generate receives invalid AI response', async () => {
+    prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce({
+      isVerified: true,
+      isEnabled: true,
+      provider: 'openai',
+      model: 'gpt',
+      apiKey: 'enc-key',
+      baseUrl: null,
+    });
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      bookDateLibraryScope: 'full',
+      bookDateCustomPrompt: null,
+    });
+    bookdateHelpersMock.buildAIPrompt.mockResolvedValueOnce('{}');
+    bookdateHelpersMock.callAI.mockResolvedValueOnce({ invalid: true });
+
+    const { POST } = await import('@/app/api/bookdate/generate/route');
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toMatch(/Invalid AI response format/);
   });
 
   it('stores generated recommendations from the AI', async () => {
@@ -434,6 +532,112 @@ describe('BookDate routes', () => {
     expect(payload.source).toBe('generated');
     expect(prismaMock.bookDateRecommendation.createMany).toHaveBeenCalled();
     expect(payload.recommendations).toHaveLength(1);
+  });
+
+  it('returns 400 when swipe payload is missing fields', async () => {
+    authRequest.json.mockResolvedValue({ action: 'left' });
+
+    const { POST } = await import('@/app/api/bookdate/swipe/route');
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/recommendationId and action/);
+  });
+
+  it('returns 400 when swipe action is invalid', async () => {
+    authRequest.json.mockResolvedValue({ recommendationId: 'rec-1', action: 'sideways' });
+
+    const { POST } = await import('@/app/api/bookdate/swipe/route');
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/Invalid action/);
+  });
+
+  it('returns 404 when recommendation is missing', async () => {
+    authRequest.json.mockResolvedValue({ recommendationId: 'rec-1', action: 'left' });
+    prismaMock.bookDateRecommendation.findUnique.mockResolvedValueOnce(null);
+
+    const { POST } = await import('@/app/api/bookdate/swipe/route');
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(payload.error).toMatch(/Recommendation not found/);
+  });
+
+  it('does not create a request when right swipe is marked as known', async () => {
+    authRequest.json.mockResolvedValue({ recommendationId: 'rec-known', action: 'right', markedAsKnown: true });
+    prismaMock.bookDateRecommendation.findUnique.mockResolvedValueOnce({
+      id: 'rec-known',
+      userId: 'user-1',
+      title: 'Known Book',
+      author: 'Known Author',
+      audnexusAsin: 'ASIN-KNOWN',
+    } as any);
+
+    const { POST } = await import('@/app/api/bookdate/swipe/route');
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(payload.success).toBe(true);
+    expect(prismaMock.request.create).not.toHaveBeenCalled();
+    expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
+  });
+
+  it('records left swipe without creating a request', async () => {
+    authRequest.json.mockResolvedValue({ recommendationId: 'rec-left', action: 'left' });
+    prismaMock.bookDateRecommendation.findUnique.mockResolvedValueOnce({
+      id: 'rec-left',
+      userId: 'user-1',
+      title: 'Left Book',
+      author: 'Left Author',
+      audnexusAsin: 'ASIN-LEFT',
+    } as any);
+    prismaMock.bookDateSwipe.create.mockResolvedValueOnce({} as any);
+
+    const { POST } = await import('@/app/api/bookdate/swipe/route');
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(payload.success).toBe(true);
+    expect(prismaMock.request.create).not.toHaveBeenCalled();
+  });
+
+  it('updates existing audiobook year when Audnexus provides releaseDate', async () => {
+    authRequest.json.mockResolvedValue({ recommendationId: 'rec-year', action: 'right', markedAsKnown: false });
+    prismaMock.bookDateRecommendation.findUnique.mockResolvedValueOnce({
+      id: 'rec-year',
+      userId: 'user-1',
+      title: 'Year Book',
+      author: 'Year Author',
+      audnexusAsin: 'ASIN-YEAR',
+    } as any);
+    prismaMock.bookDateSwipe.create.mockResolvedValueOnce({} as any);
+    audibleServiceMock.getAudiobookDetails.mockResolvedValueOnce({
+      releaseDate: '2020-01-15',
+    });
+    prismaMock.audiobook.findFirst.mockResolvedValueOnce({
+      id: 'ab-year',
+      title: 'Year Book',
+      author: 'Year Author',
+      audibleAsin: 'ASIN-YEAR',
+    } as any);
+    prismaMock.audiobook.update.mockResolvedValueOnce({ id: 'ab-year' } as any);
+    prismaMock.request.findFirst.mockResolvedValueOnce({ id: 'req-existing' } as any);
+
+    const { POST } = await import('@/app/api/bookdate/swipe/route');
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(payload.success).toBe(true);
+    expect(prismaMock.audiobook.update).toHaveBeenCalledWith({
+      where: { id: 'ab-year' },
+      data: { year: 2020 },
+    });
+    expect(prismaMock.request.create).not.toHaveBeenCalled();
   });
 
   it('records swipe and creates request on right swipe (admin auto-approves)', async () => {
@@ -664,5 +868,4 @@ describe('BookDate routes', () => {
     expect(payload.models[0].id).toBe('model-1');
   });
 });
-
 

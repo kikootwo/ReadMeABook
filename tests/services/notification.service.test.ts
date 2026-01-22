@@ -30,11 +30,10 @@ vi.mock('@/lib/services/encryption.service', () => ({
   getEncryptionService: () => encryptionMock,
 }));
 
-global.fetch = fetchMock as any;
-
 describe('NotificationService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal('fetch', fetchMock);
   });
 
   describe('sendNotification', () => {

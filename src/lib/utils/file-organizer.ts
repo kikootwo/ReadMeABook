@@ -30,6 +30,8 @@ export interface AudiobookMetadata {
   year?: number;
   coverArtUrl?: string;
   asin?: string;
+  series?: string;
+  seriesPart?: string;
 }
 
 export interface OrganizationResult {
@@ -275,7 +277,9 @@ export class FileOrganizer {
         audiobook.title,
         audiobook.narrator,
         audiobook.asin,
-        audiobook.year
+        audiobook.year,
+        audiobook.series,
+        audiobook.seriesPart
       );
 
       await logger?.info(`Target path: ${targetPath}`);
@@ -556,7 +560,9 @@ export class FileOrganizer {
     title: string,
     narrator?: string,
     asin?: string,
-    year?: number
+    year?: number,
+    series?: string,
+    seriesPart?: string
   ): string {
     const variables: TemplateVariables = {
       author,
@@ -564,6 +570,8 @@ export class FileOrganizer {
       narrator,
       asin,
       year,
+      series,
+      seriesPart,
     };
 
     const relativePath = substituteTemplate(template, variables);
@@ -713,7 +721,7 @@ export async function getFileOrganizer(): Promise<FileOrganizer> {
 export function buildAudiobookPath(
   baseDir: string,
   template: string,
-  variables: { author: string; title: string; narrator?: string; asin?: string; year?: number }
+  variables: { author: string; title: string; narrator?: string; asin?: string; year?: number; series?: string; seriesPart?: string }
 ): string {
   const templateVars: TemplateVariables = {
     author: variables.author,
@@ -721,6 +729,8 @@ export function buildAudiobookPath(
     narrator: variables.narrator,
     asin: variables.asin,
     year: variables.year,
+    series: variables.series,
+    seriesPart: variables.seriesPart,
   };
 
   const relativePath = substituteTemplate(template, templateVars);

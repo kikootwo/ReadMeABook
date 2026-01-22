@@ -60,6 +60,9 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
       logger.info(`NZB added with ID: ${downloadClientId}`);
 
       // Create DownloadHistory record
+      // Determine indexer page URL - exclude magnet links from guid fallback
+      const indexerPageUrl = torrent.infoUrl || (torrent.guid?.startsWith('magnet:') ? null : torrent.guid);
+
       const downloadHistory = await prisma.downloadHistory.create({
         data: {
           requestId,
@@ -69,7 +72,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
           torrentName: torrent.title,
           nzbId: downloadClientId, // Store NZB ID
           torrentSizeBytes: torrent.size,
-          torrentUrl: torrent.infoUrl || torrent.guid, // Indexer page URL (prefer infoUrl, fallback to guid)
+          torrentUrl: indexerPageUrl, // Indexer page URL (only if available and not a magnet/download link)
           magnetLink: torrent.downloadUrl, // Download URL (.nzb file)
           seeders: torrent.seeders || 0, // Usenet doesn't have seeders, but include for consistency
           leechers: 0,
@@ -121,6 +124,9 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
       logger.info(`Torrent added with hash: ${downloadClientId}`);
 
       // Create DownloadHistory record
+      // Determine indexer page URL - exclude magnet links from guid fallback
+      const indexerPageUrl = torrent.infoUrl || (torrent.guid?.startsWith('magnet:') ? null : torrent.guid);
+
       const downloadHistory = await prisma.downloadHistory.create({
         data: {
           requestId,
@@ -130,7 +136,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
           torrentName: torrent.title,
           torrentHash: torrent.infoHash || downloadClientId, // Store torrent hash
           torrentSizeBytes: torrent.size,
-          torrentUrl: torrent.infoUrl || torrent.guid, // Indexer page URL (prefer infoUrl, fallback to guid)
+          torrentUrl: indexerPageUrl, // Indexer page URL (only if available and not a magnet/download link)
           magnetLink: torrent.downloadUrl,
           seeders: torrent.seeders || 0,
           leechers: torrent.leechers || 0,

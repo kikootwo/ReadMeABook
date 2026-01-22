@@ -94,6 +94,16 @@ describe('Audiobooks browse routes', () => {
     expect(payload.audiobooks[0].coverArtUrl).toBe('/api/cache/thumbnails/asin.jpg');
   });
 
+  it('returns 400 for invalid new releases pagination', async () => {
+    const { GET } = await import('@/app/api/audiobooks/new-releases/route');
+
+    const response = await GET({ nextUrl: new URL('http://app/api/audiobooks/new-releases?page=0') } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe('ValidationError');
+  });
+
   it('returns new release audiobooks', async () => {
     prismaMock.audibleCache.findMany.mockResolvedValueOnce([]);
     prismaMock.audibleCache.count.mockResolvedValueOnce(0);
@@ -106,6 +116,54 @@ describe('Audiobooks browse routes', () => {
     expect(payload.count).toBe(0);
   });
 
+  it('enriches new releases and uses cached cover URLs', async () => {
+    prismaMock.audibleCache.findMany.mockResolvedValueOnce([
+      {
+        asin: 'ASIN',
+        title: 'Title',
+        author: 'Author',
+        narrator: null,
+        description: null,
+        coverArtUrl: 'http://image',
+        cachedCoverPath: '/tmp/cache/asin.jpg',
+        durationMinutes: 90,
+        releaseDate: new Date('2024-01-01'),
+        rating: '4.2',
+        genres: ['Fiction'],
+        lastSyncedAt: new Date('2024-01-02'),
+      },
+    ]);
+    prismaMock.audibleCache.count.mockResolvedValueOnce(1);
+    currentUserMock.mockReturnValue({ sub: 'user-1' });
+    enrichMock.mockResolvedValueOnce([{ asin: 'ASIN', available: true }]);
+
+    const { GET } = await import('@/app/api/audiobooks/new-releases/route');
+    const response = await GET({ nextUrl: new URL('http://app/api/audiobooks/new-releases?page=1&limit=1') } as any);
+    const payload = await response.json();
+
+    expect(payload.success).toBe(true);
+    expect(enrichMock).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          asin: 'ASIN',
+          coverArtUrl: '/api/cache/thumbnails/asin.jpg',
+        }),
+      ],
+      'user-1'
+    );
+  });
+
+  it('returns 500 when new releases query fails', async () => {
+    prismaMock.audibleCache.findMany.mockRejectedValueOnce(new Error('db down'));
+
+    const { GET } = await import('@/app/api/audiobooks/new-releases/route');
+    const response = await GET({ nextUrl: new URL('http://app/api/audiobooks/new-releases?page=1&limit=1') } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toBe('FetchError');
+  });
+
   it('returns audiobook details when ASIN is valid', async () => {
     audibleServiceMock.getAudiobookDetails.mockResolvedValue({ asin: 'ASIN123456', title: 'Title' });
     const { GET } = await import('@/app/api/audiobooks/[asin]/route');
@@ -115,6 +173,38 @@ describe('Audiobooks browse routes', () => {
 
     expect(payload.success).toBe(true);
     expect(payload.audiobook.asin).toBe('ASIN123456');
+  });
+
+  it('returns 400 when ASIN is invalid', async () => {
+    const { GET } = await import('@/app/api/audiobooks/[asin]/route');
+
+    const response = await GET({} as any, { params: Promise.resolve({ asin: 'BAD' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe('ValidationError');
+  });
+
+  it('returns 404 when audiobook is not found', async () => {
+    audibleServiceMock.getAudiobookDetails.mockResolvedValue(null);
+    const { GET } = await import('@/app/api/audiobooks/[asin]/route');
+
+    const response = await GET({} as any, { params: Promise.resolve({ asin: 'ASIN123456' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(payload.error).toBe('NotFound');
+  });
+
+  it('returns 500 when audiobook lookup fails', async () => {
+    audibleServiceMock.getAudiobookDetails.mockRejectedValue(new Error('fail'));
+    const { GET } = await import('@/app/api/audiobooks/[asin]/route');
+
+    const response = await GET({} as any, { params: Promise.resolve({ asin: 'ASIN123456' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toBe('FetchError');
   });
 
   it('returns cached covers for login', async () => {

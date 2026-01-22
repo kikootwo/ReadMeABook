@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   absRequest,
+  deleteABSItem,
   getABSLibraries,
   getABSLibraryItems,
   getABSRecentItems,
@@ -56,6 +57,21 @@ describe('Audiobookshelf API client', () => {
     expect(fetchMock).toHaveBeenCalledWith('http://abs/api/status', expect.any(Object));
   });
 
+  it('throws when ABS responds with an error status', async () => {
+    configServiceMock.get.mockImplementation(async (key: string) => {
+      if (key === 'audiobookshelf.server_url') return 'http://abs';
+      if (key === 'audiobookshelf.api_token') return 'token';
+      return null;
+    });
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+    });
+
+    await expect(absRequest('/status')).rejects.toThrow('ABS API error: 401 Unauthorized');
+  });
+
   it('maps library responses and search queries', async () => {
     configServiceMock.get.mockImplementation(async (key: string) => {
       if (key === 'audiobookshelf.server_url') return 'http://abs';
@@ -89,6 +105,20 @@ describe('Audiobookshelf API client', () => {
     expect(fetchMock.mock.calls[1][0]).toBe('http://abs/api/libraries/lib-1/items');
     expect(fetchMock.mock.calls[2][0]).toBe('http://abs/api/libraries/lib-1/items?sort=addedAt&desc=1&limit=5');
     expect(fetchMock.mock.calls[3][0]).toBe('http://abs/api/libraries/lib-1/search?q=hello%20world');
+  });
+
+  it('returns an empty array when search results are missing', async () => {
+    configServiceMock.get.mockImplementation(async (key: string) => {
+      if (key === 'audiobookshelf.server_url') return 'http://abs';
+      if (key === 'audiobookshelf.api_token') return 'token';
+      return null;
+    });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
+
+    expect(await searchABSItems('lib-1', 'missing')).toEqual([]);
   });
 
   it('triggers library scan using plain text responses', async () => {
@@ -143,5 +173,36 @@ describe('Audiobookshelf API client', () => {
     });
 
     await expect(triggerABSItemMatch('item-1', 'ASIN123')).resolves.toBeUndefined();
+  });
+
+  it('deletes a library item successfully', async () => {
+    configServiceMock.get.mockImplementation(async (key: string) => {
+      if (key === 'audiobookshelf.server_url') return 'http://abs';
+      if (key === 'audiobookshelf.api_token') return 'token';
+      return null;
+    });
+    fetchMock.mockResolvedValue({
+      ok: true,
+    });
+
+    await expect(deleteABSItem('item-1')).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith('http://abs/api/items/item-1', expect.objectContaining({
+      method: 'DELETE',
+    }));
+  });
+
+  it('throws when delete fails', async () => {
+    configServiceMock.get.mockImplementation(async (key: string) => {
+      if (key === 'audiobookshelf.server_url') return 'http://abs';
+      if (key === 'audiobookshelf.api_token') return 'token';
+      return null;
+    });
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: 'Boom',
+    });
+
+    await expect(deleteABSItem('item-1')).rejects.toThrow('ABS API error: 500 Boom');
   });
 });

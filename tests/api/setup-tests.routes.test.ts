@@ -85,6 +85,55 @@ describe('Setup test routes', () => {
     expect(payload.libraries[0].id).toBe('1');
   });
 
+  it('returns 400 when Plex url or token is missing', async () => {
+    const { POST } = await import('@/app/api/setup/test-plex/route');
+    const response = await POST({ json: vi.fn().mockResolvedValue({ url: 'http://plex' }) } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/URL and token/);
+  });
+
+  it('returns 400 when Plex connection fails', async () => {
+    plexServiceMock.testConnection.mockResolvedValue({
+      success: false,
+      message: 'bad token',
+    });
+
+    const { POST } = await import('@/app/api/setup/test-plex/route');
+    const response = await POST({ json: vi.fn().mockResolvedValue({ url: 'http://plex', token: 'bad' }) } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/bad token/);
+  });
+
+  it('returns 400 when Plex info is missing', async () => {
+    plexServiceMock.testConnection.mockResolvedValue({
+      success: true,
+      info: null,
+      message: 'missing info',
+    });
+
+    const { POST } = await import('@/app/api/setup/test-plex/route');
+    const response = await POST({ json: vi.fn().mockResolvedValue({ url: 'http://plex', token: 'token' }) } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/missing info/);
+  });
+
+  it('returns 500 when Plex test throws', async () => {
+    plexServiceMock.testConnection.mockRejectedValue(new Error('connection error'));
+
+    const { POST } = await import('@/app/api/setup/test-plex/route');
+    const response = await POST({ json: vi.fn().mockResolvedValue({ url: 'http://plex', token: 'token' }) } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toMatch(/connection error/);
+  });
+
   it('tests qBittorrent credentials', async () => {
     qbtMock.testConnectionWithCredentials.mockResolvedValue('4.0.0');
 
@@ -103,6 +152,28 @@ describe('Setup test routes', () => {
     expect(payload.version).toBe('4.0.0');
   });
 
+  it('rejects invalid download client type', async () => {
+    const { POST } = await import('@/app/api/setup/test-download-client/route');
+    const response = await POST({
+      json: vi.fn().mockResolvedValue({ type: 'transmission', url: 'http://transmission' }),
+    } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/Invalid client type/);
+  });
+
+  it('rejects missing qBittorrent credentials', async () => {
+    const { POST } = await import('@/app/api/setup/test-download-client/route');
+    const response = await POST({
+      json: vi.fn().mockResolvedValue({ type: 'qbittorrent', url: 'http://qbt' }),
+    } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/Username and password/);
+  });
+
   it('tests SABnzbd connection', async () => {
     sabnzbdMock.testConnection.mockResolvedValue({ success: true, version: '3.0' });
 
@@ -118,6 +189,23 @@ describe('Setup test routes', () => {
 
     expect(payload.success).toBe(true);
     expect(payload.version).toBe('3.0');
+  });
+
+  it('returns error when SABnzbd connection fails', async () => {
+    sabnzbdMock.testConnection.mockResolvedValue({ success: false, error: 'bad key' });
+
+    const { POST } = await import('@/app/api/setup/test-download-client/route');
+    const response = await POST({
+      json: vi.fn().mockResolvedValue({
+        type: 'sabnzbd',
+        url: 'http://sab',
+        password: 'api-key',
+      }),
+    } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toMatch(/bad key/);
   });
 
   it('tests Prowlarr indexers', async () => {
@@ -159,6 +247,72 @@ describe('Setup test routes', () => {
 
     expect(payload.success).toBe(true);
     expect(payload.issuer.authorizationEndpoint).toBe('http://issuer/auth');
+  });
+
+  it('returns error when OIDC fields are missing', async () => {
+    const { POST } = await import('@/app/api/setup/test-oidc/route');
+    const response = await POST({
+      json: vi.fn().mockResolvedValue({ issuerUrl: 'http://issuer', clientId: 'client' }),
+    } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/required/);
+  });
+
+  it('returns error when OIDC issuer URL is invalid', async () => {
+    const { POST } = await import('@/app/api/setup/test-oidc/route');
+    const response = await POST({
+      json: vi.fn().mockResolvedValue({
+        issuerUrl: 'not a url',
+        clientId: 'client',
+        clientSecret: 'secret',
+      }),
+    } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/Invalid issuer URL/);
+  });
+
+  it('returns error when OIDC issuer metadata is incomplete', async () => {
+    issuerMock.discover.mockResolvedValue({
+      issuer: 'http://issuer',
+      metadata: {
+        token_endpoint: 'http://issuer/token',
+        userinfo_endpoint: 'http://issuer/user',
+      },
+    });
+
+    const { POST } = await import('@/app/api/setup/test-oidc/route');
+    const response = await POST({
+      json: vi.fn().mockResolvedValue({
+        issuerUrl: 'http://issuer',
+        clientId: 'client',
+        clientSecret: 'secret',
+      }),
+    } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toMatch(/missing required endpoints/);
+  });
+
+  it('returns friendly error when OIDC discovery fails to resolve host', async () => {
+    issuerMock.discover.mockRejectedValue(new Error('getaddrinfo ENOTFOUND issuer'));
+
+    const { POST } = await import('@/app/api/setup/test-oidc/route');
+    const response = await POST({
+      json: vi.fn().mockResolvedValue({
+        issuerUrl: 'http://issuer',
+        clientId: 'client',
+        clientSecret: 'secret',
+      }),
+    } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toMatch(/Cannot reach OIDC provider/);
   });
 
   it('validates paths are writable', async () => {
@@ -279,6 +433,63 @@ describe('Setup test routes', () => {
 
     expect(payload.success).toBe(true);
     expect(payload.libraries[0].id).toBe('1');
+  });
+
+  it('returns error when Audiobookshelf server URL is missing', async () => {
+    const { POST } = await import('@/app/api/setup/test-abs/route');
+    const response = await POST({ json: vi.fn().mockResolvedValue({}) } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/Server URL/);
+  });
+
+  it('returns error when saved Audiobookshelf token is missing', async () => {
+    configServiceMock.get.mockResolvedValueOnce(null);
+
+    const { POST } = await import('@/app/api/setup/test-abs/route');
+    const response = await POST({
+      json: vi.fn().mockResolvedValue({ serverUrl: 'http://abs', apiToken: '' }),
+    } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/API token is required/);
+  });
+
+  it('returns error when Audiobookshelf connection fails', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { POST } = await import('@/app/api/setup/test-abs/route');
+    const response = await POST({
+      json: vi.fn().mockResolvedValue({ serverUrl: 'http://abs', apiToken: 'token' }),
+    } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/Connection failed/);
+  });
+
+  it('returns error when Audiobookshelf response is missing libraries', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({}),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { POST } = await import('@/app/api/setup/test-abs/route');
+    const response = await POST({
+      json: vi.fn().mockResolvedValue({ serverUrl: 'http://abs', apiToken: 'token' }),
+    } as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/Invalid response/);
   });
 });
 

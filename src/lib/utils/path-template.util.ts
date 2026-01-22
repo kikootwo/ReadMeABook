@@ -15,6 +15,8 @@ export interface TemplateVariables {
   narrator?: string;
   asin?: string;
   year?: number;
+  series?: string;
+  seriesPart?: string;
 }
 
 /**
@@ -28,7 +30,7 @@ export interface ValidationResult {
 /**
  * Supported template variable names
  */
-const VALID_VARIABLES = ['author', 'title', 'narrator', 'asin', 'year'];
+const VALID_VARIABLES = ['author', 'title', 'narrator', 'asin', 'year', 'series', 'seriesPart'];
 
 /**
  * Invalid file path characters (outside of template variables)
@@ -228,14 +230,18 @@ export function generateMockPreviews(template: string): string[] {
       title: 'Mistborn: The Final Empire',
       narrator: 'Michael Kramer',
       asin: 'B002UZMLXM',
-      year: 2006
+      year: 2006,
+      series: 'The Mistborn Saga',
+      seriesPart: '1'
     },
     {
       author: 'Douglas Adams',
       title: "The Hitchhiker's Guide to the Galaxy",
       narrator: 'Stephen Fry',
       asin: 'B0009JKV9W',
-      year: 2005
+      year: 2005,
+      series: "Hitchhiker's Guide",
+      seriesPart: '1'
     },
     {
       author: 'Andy Weir',
@@ -243,6 +249,7 @@ export function generateMockPreviews(template: string): string[] {
       // No narrator for this example
       asin: 'B08G9PRS1K',
       year: 2021
+      // No series data - to test empty handling
     }
   ];
 

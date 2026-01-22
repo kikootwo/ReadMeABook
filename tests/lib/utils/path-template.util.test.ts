@@ -316,7 +316,9 @@ describe('getValidVariables', () => {
     expect(variables).toContain('narrator');
     expect(variables).toContain('asin');
     expect(variables).toContain('year');
-    expect(variables).toHaveLength(5);
+    expect(variables).toContain('series');
+    expect(variables).toContain('seriesPart');
+    expect(variables).toHaveLength(7);
   });
 
   it('should return a new array each time (not mutate original)', () => {

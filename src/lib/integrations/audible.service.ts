@@ -23,6 +23,8 @@ export interface AudibleAudiobook {
   releaseDate?: string;
   rating?: number;
   genres?: string[];
+  series?: string;
+  seriesPart?: string;
 }
 
 export interface AudibleSearchResult {
@@ -492,6 +494,8 @@ export class AudibleService {
         releaseDate: data.releaseDate || undefined,
         rating: data.rating ? parseFloat(data.rating) : undefined,
         genres: data.genres?.map((g: any) => typeof g === 'string' ? g : g.name).slice(0, 5) || undefined,
+        series: data.seriesPrimary?.name || undefined,
+        seriesPart: data.seriesPrimary?.position || undefined,
       };
 
       // Ensure cover art URL is high quality
@@ -506,7 +510,9 @@ export class AudibleService {
         descLength: result.description?.length || 0,
         duration: result.durationMinutes,
         rating: result.rating,
-        genreCount: result.genres?.length || 0
+        genreCount: result.genres?.length || 0,
+        series: result.series,
+        seriesPart: result.seriesPart
       });
 
       return result;

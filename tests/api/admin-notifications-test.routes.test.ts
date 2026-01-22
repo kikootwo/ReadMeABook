@@ -4,8 +4,14 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createPrismaMock } from '../helpers/prisma';
 
 let authRequest: any;
+
+const prismaMock = createPrismaMock();
+prismaMock.notificationBackend = {
+  findUnique: vi.fn(),
+} as any;
 
 const requireAuthMock = vi.hoisted(() => vi.fn());
 const requireAdminMock = vi.hoisted(() => vi.fn());
@@ -13,6 +19,10 @@ const notificationServiceMock = vi.hoisted(() => ({
   encryptConfig: vi.fn((type: string, config: any) => ({ ...config, encrypted: true })),
   sendNotification: vi.fn(),
   sendToBackend: vi.fn(),
+}));
+
+vi.mock('@/lib/db', () => ({
+  prisma: prismaMock,
 }));
 
 vi.mock('@/lib/middleware/auth', () => ({
@@ -125,6 +135,63 @@ describe('Admin notifications test route', () => {
 
       expect(payload.success).toBe(true);
       expect(notificationServiceMock.encryptConfig).toHaveBeenCalledWith('pushover', testConfig.config);
+    });
+
+    it('tests existing backend using backend ID', async () => {
+      const existingBackend = {
+        id: 'backend-1',
+        type: 'discord',
+        name: 'Discord - Admins',
+        config: { webhookUrl: 'iv:authTag:encryptedData', username: 'Bot' }, // Already encrypted
+        events: ['request_available'],
+        enabled: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      prismaMock.notificationBackend.findUnique.mockResolvedValue(existingBackend);
+      authRequest.json.mockResolvedValue({ backendId: 'backend-1' });
+      notificationServiceMock.sendToBackend.mockResolvedValue(undefined);
+
+      const { POST } = await import('@/app/api/admin/notifications/test/route');
+      const response = await POST({ json: authRequest.json } as any);
+      const payload = await response.json();
+
+      expect(payload.success).toBe(true);
+      expect(prismaMock.notificationBackend.findUnique).toHaveBeenCalledWith({
+        where: { id: 'backend-1' },
+      });
+      // Should use stored config directly, not encrypt again
+      expect(notificationServiceMock.encryptConfig).not.toHaveBeenCalled();
+      expect(notificationServiceMock.sendToBackend).toHaveBeenCalledWith(
+        'discord',
+        existingBackend.config,
+        expect.any(Object)
+      );
+    });
+
+    it('returns 404 if backend ID not found', async () => {
+      prismaMock.notificationBackend.findUnique.mockResolvedValue(null);
+      authRequest.json.mockResolvedValue({ backendId: 'nonexistent' });
+
+      const { POST } = await import('@/app/api/admin/notifications/test/route');
+      const response = await POST({ json: authRequest.json } as any);
+
+      expect(response.status).toBe(404);
+      const payload = await response.json();
+      expect(payload.error).toBe('NotFound');
+    });
+
+    it('returns validation error when payload is invalid', async () => {
+      authRequest.json.mockResolvedValue('bad-payload');
+
+      const { POST } = await import('@/app/api/admin/notifications/test/route');
+      const response = await POST({ json: authRequest.json } as any);
+      const payload = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(payload.error).toBe('ValidationError');
+      expect(payload.details).toBeDefined();
     });
   });
 });

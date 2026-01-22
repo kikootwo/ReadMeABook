@@ -24,6 +24,7 @@ const qbtMock = vi.hoisted(() => ({
 const sabnzbdMock = vi.hoisted(() => ({
   testConnection: vi.fn(),
 }));
+const maskedValue = '\u2022\u2022\u2022\u2022';
 const testFlareSolverrMock = vi.hoisted(() => vi.fn());
 const fsMock = vi.hoisted(() => ({
   access: vi.fn(),
@@ -94,6 +95,40 @@ describe('Admin settings test routes', () => {
     expect(payload.success).toBe(true);
   });
 
+  it('rejects Plex test when URL or token is missing', async () => {
+    const request = { json: vi.fn().mockResolvedValue({ url: '', token: 'token' }) };
+    const { POST } = await import('@/app/api/admin/settings/test-plex/route');
+    const response = await POST(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/URL and token are required/);
+  });
+
+  it('rejects Plex test when masked token is missing in storage', async () => {
+    prismaMock.configuration.findUnique.mockResolvedValueOnce(null);
+    const request = { json: vi.fn().mockResolvedValue({ url: 'http://plex', token: maskedValue }) };
+
+    const { POST } = await import('@/app/api/admin/settings/test-plex/route');
+    const response = await POST(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/No stored token/);
+  });
+
+  it('returns error when Plex connection test fails', async () => {
+    plexServiceMock.testConnection.mockResolvedValueOnce({ success: false, message: 'bad token' });
+    const request = { json: vi.fn().mockResolvedValue({ url: 'http://plex', token: 'token' }) };
+
+    const { POST } = await import('@/app/api/admin/settings/test-plex/route');
+    const response = await POST(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/bad token/);
+  });
+
   it('tests Prowlarr connection', async () => {
     prowlarrMock.getIndexers.mockResolvedValueOnce([{ id: 1, name: 'Indexer', protocol: 'torrent', enable: true }]);
     const request = { json: vi.fn().mockResolvedValue({ url: 'http://prowlarr', apiKey: 'key' }) };
@@ -103,6 +138,40 @@ describe('Admin settings test routes', () => {
     const payload = await response.json();
 
     expect(payload.success).toBe(true);
+  });
+
+  it('rejects Prowlarr test when URL or API key is missing', async () => {
+    const request = { json: vi.fn().mockResolvedValue({ url: 'http://prowlarr' }) };
+    const { POST } = await import('@/app/api/admin/settings/test-prowlarr/route');
+    const response = await POST(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/URL and API key are required/);
+  });
+
+  it('rejects masked Prowlarr API key when no stored key exists', async () => {
+    prismaMock.configuration.findUnique.mockResolvedValueOnce(null);
+    const request = { json: vi.fn().mockResolvedValue({ url: 'http://prowlarr', apiKey: maskedValue }) };
+
+    const { POST } = await import('@/app/api/admin/settings/test-prowlarr/route');
+    const response = await POST(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/No stored API key/);
+  });
+
+  it('returns error when Prowlarr test fails', async () => {
+    prowlarrMock.getIndexers.mockRejectedValueOnce(new Error('prowlarr down'));
+    const request = { json: vi.fn().mockResolvedValue({ url: 'http://prowlarr', apiKey: 'key' }) };
+
+    const { POST } = await import('@/app/api/admin/settings/test-prowlarr/route');
+    const response = await POST(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toMatch(/prowlarr down/);
   });
 
   it('tests download client connection', async () => {
@@ -251,6 +320,40 @@ describe('Admin settings test routes', () => {
     const payload = await response.json();
 
     expect(payload.success).toBe(true);
+  });
+
+  it('rejects FlareSolverr test when URL is missing', async () => {
+    const request = { json: vi.fn().mockResolvedValue({}) };
+
+    const { POST } = await import('@/app/api/admin/settings/ebook/test-flaresolverr/route');
+    const response = await POST(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/URL is required/);
+  });
+
+  it('rejects FlareSolverr test when URL has invalid scheme', async () => {
+    const request = { json: vi.fn().mockResolvedValue({ url: 'ftp://flare' }) };
+
+    const { POST } = await import('@/app/api/admin/settings/ebook/test-flaresolverr/route');
+    const response = await POST(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/must start with http/);
+  });
+
+  it('returns error when FlareSolverr test throws', async () => {
+    testFlareSolverrMock.mockRejectedValueOnce(new Error('flare down'));
+    const request = { json: vi.fn().mockResolvedValue({ url: 'http://flare' }) };
+
+    const { POST } = await import('@/app/api/admin/settings/ebook/test-flaresolverr/route');
+    const response = await POST(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.message).toMatch(/flare down/);
   });
 });
 

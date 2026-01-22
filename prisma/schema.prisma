@@ -168,6 +168,8 @@ model Audiobook {
   description String? @db.Text
   coverArtUrl String? @map("cover_art_url") @db.Text
   year        Int?    // Release year extracted from releaseDate
+  series      String? // Book series name (e.g., "The Mistborn Saga")
+  seriesPart  String? @map("series_part") // Series position (e.g., "1", "1.5", "Book 1")
 
   // Request tracking
   status String @default("requested") // requested, downloading, processing, completed, failed

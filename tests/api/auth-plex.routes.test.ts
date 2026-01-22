@@ -278,6 +278,64 @@ describe('Plex auth routes', () => {
     expect(payload.users).toHaveLength(1);
   });
 
+  it('rejects Plex home users when token is missing', async () => {
+    const { GET } = await import('@/app/api/auth/plex/home-users/route');
+    const response = await GET(makeRequest('http://localhost/api/auth/plex/home-users') as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(payload.error).toBe('Unauthorized');
+  });
+
+  it('returns 500 when Plex home users fetch fails', async () => {
+    plexServiceMock.getHomeUsers.mockRejectedValue(new Error('boom'));
+
+    const { GET } = await import('@/app/api/auth/plex/home-users/route');
+    const response = await GET(makeRequest('http://localhost/api/auth/plex/home-users', { 'x-plex-token': 'token' }) as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toBe('ServerError');
+  });
+
+  it('rejects profile switch without main account token', async () => {
+    const { POST } = await import('@/app/api/auth/plex/switch-profile/route');
+    const request = makeRequest('http://localhost/api/auth/plex/switch-profile');
+    request.json.mockResolvedValue({ userId: 'home-1' });
+
+    const response = await POST(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(payload.error).toBe('Unauthorized');
+  });
+
+  it('rejects profile switch when userId is missing', async () => {
+    const { POST } = await import('@/app/api/auth/plex/switch-profile/route');
+    const request = makeRequest('http://localhost/api/auth/plex/switch-profile', { 'x-plex-token': 'main-token' });
+    request.json.mockResolvedValue({});
+
+    const response = await POST(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe('ValidationError');
+  });
+
+  it('returns 401 for invalid profile PIN', async () => {
+    plexServiceMock.switchHomeUser.mockRejectedValue(new Error('Invalid PIN'));
+
+    const { POST } = await import('@/app/api/auth/plex/switch-profile/route');
+    const request = makeRequest('http://localhost/api/auth/plex/switch-profile', { 'x-plex-token': 'main-token' });
+    request.json.mockResolvedValue({ userId: 'home-1', pin: '0000' });
+
+    const response = await POST(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(payload.error).toBe('InvalidPIN');
+  });
+
   it('switches Plex profile using provided profile info', async () => {
     plexServiceMock.switchHomeUser.mockResolvedValue('profile-token');
     prismaMock.user.count.mockResolvedValue(1);
@@ -303,6 +361,51 @@ describe('Plex auth routes', () => {
 
     expect(payload.success).toBe(true);
     expect(payload.accessToken).toBe('access-token');
+  });
+
+  it('switches Plex profile using getUserInfo fallback', async () => {
+    plexServiceMock.switchHomeUser.mockResolvedValue('profile-token');
+    plexServiceMock.getUserInfo.mockResolvedValue({
+      id: 'plex-3',
+      username: 'Fallback',
+      email: 'user@example.com',
+      thumb: '/avatar',
+    });
+    prismaMock.user.count.mockResolvedValue(0);
+    prismaMock.user.upsert.mockResolvedValue({
+      id: 'user-3',
+      plexId: 'plex-3',
+      plexUsername: 'Fallback',
+      plexEmail: 'user@example.com',
+      role: 'admin',
+      avatarUrl: '/avatar',
+    });
+
+    const { POST } = await import('@/app/api/auth/plex/switch-profile/route');
+    const request = makeRequest('http://localhost/api/auth/plex/switch-profile', { 'x-plex-token': 'main-token' });
+    request.json.mockResolvedValue({ userId: 'home-2', pin: '1234' });
+
+    const response = await POST(request as any);
+    const payload = await response.json();
+
+    expect(payload.success).toBe(true);
+    expect(payload.user.plexId).toBe('plex-3');
+    expect(payload.user.role).toBe('admin');
+  });
+
+  it('returns 500 when profile info lookup fails', async () => {
+    plexServiceMock.switchHomeUser.mockResolvedValue('profile-token');
+    plexServiceMock.getUserInfo.mockResolvedValue({ id: null });
+
+    const { POST } = await import('@/app/api/auth/plex/switch-profile/route');
+    const request = makeRequest('http://localhost/api/auth/plex/switch-profile', { 'x-plex-token': 'main-token' });
+    request.json.mockResolvedValue({ userId: 'home-2', pin: '1234' });
+
+    const response = await POST(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toBe('ServerError');
   });
 });
 

@@ -38,6 +38,27 @@ describe('OIDC auth routes', () => {
     expect(response.headers.get('location')).toBe('http://oidc/login');
   });
 
+  it('returns error when OIDC login URL is missing', async () => {
+    authProviderMock.initiateLogin.mockResolvedValue({});
+    const { GET } = await import('@/app/api/auth/oidc/login/route');
+
+    const response = await GET();
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toMatch(/Failed to generate authorization URL/);
+  });
+
+  it('redirects to login when OIDC login initiation fails', async () => {
+    authProviderMock.initiateLogin.mockRejectedValue(new Error('boom'));
+    const { GET } = await import('@/app/api/auth/oidc/login/route');
+
+    const response = await GET();
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get('location')).toContain('/login?error=');
+  });
+
   it('redirects to login on missing code/state', async () => {
     const { GET } = await import('@/app/api/auth/oidc/callback/route');
 

@@ -45,7 +45,10 @@ export function RequestActionsDropdown({
   const canSearch = ['pending', 'failed', 'awaiting_search'].includes(request.status);
   const canCancel = ['pending', 'searching', 'downloading'].includes(request.status);
   const canDelete = true; // Admins can always delete
-  const canViewSource = !!request.torrentUrl && ['downloading', 'processing', 'downloaded', 'available'].includes(request.status);
+  // Only show "View Source" if we have a valid indexer page URL (not a magnet link)
+  const canViewSource = !!request.torrentUrl &&
+    !request.torrentUrl.startsWith('magnet:') &&
+    ['downloading', 'processing', 'downloaded', 'available'].includes(request.status);
   const canFetchEbook = ebookSidecarEnabled && ['downloaded', 'available'].includes(request.status);
 
   // Close dropdown when clicking outside

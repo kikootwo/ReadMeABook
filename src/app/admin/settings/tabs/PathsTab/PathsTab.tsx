@@ -137,6 +137,14 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
               <code className="text-blue-700 dark:text-blue-300 font-mono">{'{asin}'}</code>
               <span className="text-gray-600 dark:text-gray-400 ml-2">- Audible ASIN</span>
             </div>
+            <div>
+              <code className="text-blue-700 dark:text-blue-300 font-mono">{'{series}'}</code>
+              <span className="text-gray-600 dark:text-gray-400 ml-2">- Book series name</span>
+            </div>
+            <div>
+              <code className="text-blue-700 dark:text-blue-300 font-mono">{'{seriesPart}'}</code>
+              <span className="text-gray-600 dark:text-gray-400 ml-2">- Series part/position</span>
+            </div>
           </div>
         </div>
 

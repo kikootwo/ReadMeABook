@@ -164,14 +164,14 @@ ffmpeg -y -f concat -safe 0 -i filelist.txt \
 **For MP3 files (requires conversion - v2 enhanced):**
 ```bash
 # Re-encode to M4B (AAC) with quality preservation
-# Uses libfdk_aac if available (higher quality) or native aac
+# Uses libfdk_aac if available (higher quality) or native aac with VBR
 ffmpeg -y -f concat -safe 0 -i filelist.txt \
   -i chapters.txt \
   -map_metadata 1 \
   -map 0:a \
-  -c:a libfdk_aac -vbr 4 \          # High quality AAC (or: -c:a aac -b:a <source_bitrate> -profile:a aac_low)
+  -c:a libfdk_aac -vbr 4 \          # High quality AAC (or: -c:a aac -q:a <quality> -profile:a aac_low)
   -movflags +faststart \             # CRITICAL: Instant playback
-  -fflags +genpts \                  # Fix timestamps
+  -fflags +genpts \                  # Fix timestamps (regenerates presentation timestamps)
   -avoid_negative_ts make_zero \     # Handle edge cases
   -max_muxing_queue_size 9999 \      # Long file support
   -metadata title="Book Title" \
@@ -182,16 +182,18 @@ ffmpeg -y -f concat -safe 0 -i filelist.txt \
 
 **Quality Settings (MP3 → M4B - v2):**
 - **Bitrate:** Matches source average (64-320kbps range)
-  - Example: 128kbps MP3 source → 128kbps AAC output
-  - Example: 192kbps MP3 source → 192kbps AAC output
-- **Encoder:** libfdk_aac (VBR mode 4, high quality) if available, else native aac
+  - Example: 128kbps MP3 source → ~128kbps AAC output
+  - Example: 192kbps MP3 source → ~192kbps AAC output
+- **Encoder:** libfdk_aac (VBR mode 4, high quality) if available, else native aac with VBR
+  - Native AAC uses variable bitrate for better quality/efficiency
+  - Quality mapped dynamically: 64k→q1.0, 128k→q2.0, 192k→q3.0, 256k→q4.0
 - **Profile:** AAC-LC (maximum compatibility)
 - **Sampling rate:** Preserved from source
 - **Channels:** Preserved (mono/stereo)
 
 **Critical Flags (v2):**
 - **`-movflags +faststart`**: Moves moov atom to file beginning → instant playback (fixes 1-min delay)
-- **`-fflags +genpts`**: Regenerates presentation timestamps → fixes seeking/timing issues
+- **`-fflags +genpts`**: Regenerates presentation timestamps for audio/video → fixes seeking/timing issues at concat boundaries
 - **`-avoid_negative_ts make_zero`**: Handles negative timestamps at concat boundaries
 - **`-max_muxing_queue_size 9999`**: Prevents buffer overflow on long audiobooks (16h+)
 
@@ -466,8 +468,8 @@ timeout = 5 minutes + (chapter_count * 30 seconds)
 All merged files are validated before marked successful:
 
 1. **Duration Check:** Expected vs actual duration (within 2% tolerance)
-2. **Decode Test:** FFmpeg attempts to decode first 10 seconds (catches corruption)
-3. **Size Check:** File size reasonable for duration (~0.5MB/min minimum)
+2. **Decode Test:** FFmpeg attempts to decode first and last 10 seconds (catches corruption/truncation)
+3. **Size Check:** File size reasonable for duration (~0.4MB/min minimum, accommodates 64kbps encoding)
 
 **If validation fails:**
 - Corrupt file is deleted
