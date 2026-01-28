@@ -449,6 +449,26 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
   - User with autoApproveRequests=true auto-approves (status: 'pending', sends approved notification, triggers search)
   - User with autoApproveRequests=null checks global setting
 
+**10. Empty ASIN Matching All Library Books**
+- Issue: All AI recommendations incorrectly matched to first library book, causing empty recommendation list
+- User Experience: "BookDate returns 0 recommendations. Logs show AI generated 20, but all matched to 'Murder Your Employer'"
+- Impact: Critical - BookDate completely non-functional, all recommendations filtered out
+- Cause: Empty ASIN in database query matched every record in library
+  - AI generates recommendations without ASINs (title/author only)
+  - `isInLibrary()` calls `findPlexMatch()` with `asin: ""`
+  - Database query: `{ plexGuid: { contains: "" } }` returns all 29 library books
+  - Code checks: `plexGuid.includes("")` returns true for first book
+  - All 20 recommendations matched to same book → filtered out as "already in library"
+  - SQL behavior: `WHERE plexGuid LIKE '%%'` matches all rows
+- Fix: Add guard clause to return null if ASIN is empty or falsy
+  - Early return prevents database query with empty string
+  - First `isInLibrary()` call (no ASIN) → Returns false immediately
+  - Recommendation matches to Audnexus → Gets real ASIN
+  - Second `isInLibrary()` call (with ASIN) → Correctly checks for exact match
+  - Only books actually in library get filtered out
+- Files updated: `src/lib/utils/audiobook-matcher.ts:44-61`
+- Documentation: `documentation/fixes/asin-matching-fix.md` - Phase 3 section added
+
 ## Related
 
 - Full requirements: [features/bookdate-prd.md](bookdate-prd.md)

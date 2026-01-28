@@ -511,4 +511,82 @@ This fix resolves the critical ASIN matching issue for Audiobookshelf by impleme
 - **Preserves critical functionality:** Fuzzy matching kept for Prowlarr torrent ranking
 - **Improves performance:** O(1) indexed lookups replace O(n²) string comparisons
 
-**Status:** ✅ Both phases complete and production-ready
+**Status:** ✅ All phases complete and production-ready
+
+## Phase 3: Empty ASIN Guard (January 2026)
+
+**Status:** ✅ Implemented
+**Date:** 2026-01-28
+**Issue:** Empty ASIN causing all library books to match AI recommendations
+
+### Problem Statement
+
+**BookDate Recommendations Returning Empty:**
+1. AI generates 20 recommendations (without ASINs)
+2. BookDate calls `isInLibrary()` to filter out books already in library
+3. `isInLibrary()` calls `findPlexMatch()` with empty ASIN (`asin: ""`)
+4. Database query: `{ plexGuid: { contains: "" } }` matches ALL records (29 books)
+5. Code checks: `plexGuid.includes("")` returns true for first book
+6. All 20 recommendations incorrectly matched to first library book ("Murder Your Employer")
+7. All recommendations filtered out → User sees 0 recommendations
+
+### Root Cause
+
+**Empty string matching bug in database query:**
+- SQL: `WHERE plexGuid LIKE '%' + '' + '%'` matches every record
+- JavaScript: `anyString.includes("")` always returns true
+- Prisma: `{ contains: "" }` returns all rows in table
+
+### Solution
+
+Add guard clause at start of `findPlexMatch()` to return `null` immediately if ASIN is empty or falsy.
+
+**Implementation:**
+```typescript
+export async function findPlexMatch(audiobook: AudiobookMatchInput) {
+  // Early return if no ASIN provided (prevents empty string matching all records)
+  if (!audiobook.asin || audiobook.asin.trim() === '') {
+    logger.debug('Matcher result', {
+      MATCHER: {
+        input: { title: audiobook.title, author: audiobook.author, asin: audiobook.asin },
+        candidatesFound: 0,
+        matchType: 'no_asin_provided',
+        matched: false,
+        result: null,
+      }
+    });
+    return null;
+  }
+
+  // Existing ASIN query logic...
+}
+```
+
+### Expected Behavior
+
+**BookDate Flow (After Phase 3):**
+1. AI generates 20 recommendations (no ASINs)
+2. First `isInLibrary()` call with empty ASIN → Returns `false` immediately ✅
+3. Recommendation matches to Audnexus → Gets real ASIN
+4. Second `isInLibrary()` call with real ASIN → Correctly checks for exact match ✅
+5. Only books actually in library get filtered out ✅
+6. User sees 10-15 new recommendations ✅
+
+### Files Modified
+
+**Matching Logic:**
+- ✅ `src/lib/utils/audiobook-matcher.ts:44-61` - Added empty ASIN guard clause
+
+**Documentation:**
+- ✅ `documentation/fixes/asin-matching-fix.md` - Added Phase 3 section
+- ✅ `documentation/features/bookdate.md` - Added to Fixed Issues
+
+### Benefits
+
+1. **Fixes critical bug:** Empty ASIN no longer matches all library books
+2. **Prevents false positives:** Only exact ASIN matches are considered matches
+3. **Aligns with design:** ASIN-only matcher requires valid ASIN to match
+4. **Single-line fix:** Minimal code change with maximum impact
+5. **No breaking changes:** All existing functionality preserved
+
+**Status:** ✅ All three phases complete and production-ready

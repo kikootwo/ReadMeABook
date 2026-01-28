@@ -41,6 +41,25 @@ export interface AudiobookMatchResult {
 export async function findPlexMatch(
   audiobook: AudiobookMatchInput
 ): Promise<AudiobookMatchResult | null> {
+  // Early return if no ASIN provided (prevents empty string matching all records)
+  if (!audiobook.asin || audiobook.asin.trim() === '') {
+    logger.debug('Matcher result', {
+      MATCHER: {
+        input: {
+          title: audiobook.title,
+          author: audiobook.author,
+          narrator: audiobook.narrator || null,
+          asin: audiobook.asin,
+        },
+        candidatesFound: 0,
+        matchType: 'no_asin_provided',
+        matched: false,
+        result: null,
+      }
+    });
+    return null;
+  }
+
   // Query plex_library directly by ASIN (indexed O(1) lookup)
   // Check both dedicated asin field and plexGuid for backward compatibility
   const plexBooks = await prisma.plexLibrary.findMany({
