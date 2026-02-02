@@ -29,6 +29,11 @@ const pathMapperMock = vi.hoisted(() => ({
 }));
 const invalidateQbMock = vi.hoisted(() => vi.fn());
 const invalidateSabMock = vi.hoisted(() => vi.fn());
+const invalidateDownloadClientManagerMock = vi.hoisted(() => vi.fn());
+const downloadClientManagerMock = vi.hoisted(() => ({
+  getAllClients: vi.fn(),
+  testConnection: vi.fn(),
+}));
 
 vi.mock('@/lib/db', () => ({
   prisma: prismaMock,
@@ -67,12 +72,20 @@ vi.mock('@/lib/integrations/sabnzbd.service', () => ({
   invalidateSABnzbdService: invalidateSabMock,
 }));
 
+vi.mock('@/lib/services/download-client-manager.service', () => ({
+  getDownloadClientManager: () => downloadClientManagerMock,
+  invalidateDownloadClientManager: invalidateDownloadClientManagerMock,
+}));
+
 describe('Admin settings core routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authRequest = { user: { id: 'admin-1', role: 'admin' }, json: vi.fn() };
     requireAuthMock.mockImplementation((_req: any, handler: any) => handler(authRequest));
     requireAdminMock.mockImplementation((_req: any, handler: any) => handler());
+    // Reset download client manager mocks with default values
+    downloadClientManagerMock.getAllClients.mockResolvedValue([]);
+    downloadClientManagerMock.testConnection.mockResolvedValue({ success: true, message: 'Connected' });
   });
 
   it('returns settings payload', async () => {

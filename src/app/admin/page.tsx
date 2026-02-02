@@ -13,7 +13,7 @@ import { ActiveDownloadsTable } from './components/ActiveDownloadsTable';
 import { RecentRequestsTable } from './components/RecentRequestsTable';
 import { ToastProvider, useToast } from '@/components/ui/Toast';
 import { formatDistanceToNow } from 'date-fns';
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 
 interface PendingApprovalRequest {
   id: string;
@@ -303,13 +303,7 @@ function AdminDashboardContent() {
     }
   );
 
-  const { data: requestsData, error: requestsError } = useSWR(
-    '/api/admin/requests/recent',
-    authenticatedFetcher,
-    {
-      refreshInterval: 10000,
-    }
-  );
+  // Note: RecentRequestsTable now fetches its own data with filtering/pagination
 
   const { data: pendingApprovalData } = useSWR(
     '/api/admin/requests/pending-approval',
@@ -327,8 +321,8 @@ function AdminDashboardContent() {
     }
   );
 
-  const isLoading = !metrics || !downloadsData || !requestsData;
-  const hasError = metricsError || downloadsError || requestsError;
+  const isLoading = !metrics || !downloadsData;
+  const hasError = metricsError || downloadsError;
 
   if (hasError) {
     return (
@@ -341,7 +335,6 @@ function AdminDashboardContent() {
             <p className="text-sm text-red-700 dark:text-red-300 mt-1">
               {metricsError?.message ||
                 downloadsError?.message ||
-                requestsError?.message ||
                 'Failed to load dashboard data'}
             </p>
           </div>
@@ -490,15 +483,24 @@ function AdminDashboardContent() {
               <ActiveDownloadsTable downloads={downloadsData.downloads} />
             </div>
 
-            {/* Recent Requests */}
+            {/* Request Management */}
             <div className="mb-8">
               <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-4">
-                Recent Requests
+                Request Management
               </h2>
-              <RecentRequestsTable
-                requests={requestsData.requests}
-                ebookSidecarEnabled={settingsData?.ebook?.annasArchiveEnabled || settingsData?.ebook?.indexerSearchEnabled || false}
-              />
+              <Suspense
+                fallback={
+                  <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-8">
+                    <div className="flex items-center justify-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    </div>
+                  </div>
+                }
+              >
+                <RecentRequestsTable
+                  ebookSidecarEnabled={settingsData?.ebook?.annasArchiveEnabled || settingsData?.ebook?.indexerSearchEnabled || false}
+                />
+              </Suspense>
             </div>
 
             {/* Quick Actions */}

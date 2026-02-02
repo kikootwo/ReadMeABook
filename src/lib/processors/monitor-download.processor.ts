@@ -8,8 +8,9 @@ import { MonitorDownloadPayload, getJobQueueService } from '../services/job-queu
 import { prisma } from '../db';
 import { getQBittorrentService } from '../integrations/qbittorrent.service';
 import { RMABLogger } from '../utils/logger';
-import { PathMapper } from '../utils/path-mapper';
+import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import { getConfigService } from '../services/config.service';
+import { getDownloadClientManager } from '../services/download-client-manager.service';
 
 /**
  * Helper function to retry getTorrent with exponential backoff
@@ -130,20 +131,23 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         throw new Error('Download path not available from download client');
       }
 
-      // Load path mapping configuration
+      // Get path mapping configuration from the specific download client
       const configService = getConfigService();
-      const pathMappingConfig = await configService.getMany([
-        'download_client_remote_path_mapping_enabled',
-        'download_client_remote_path',
-        'download_client_local_path',
-      ]);
+      const manager = getDownloadClientManager(configService);
+      const protocol = downloadClient === 'sabnzbd' ? 'usenet' : 'torrent';
+      const clientConfig = await manager.getClientForProtocol(protocol);
+
+      // Build path mapping config from client settings
+      const pathMappingConfig: PathMappingConfig = clientConfig && clientConfig.remotePathMappingEnabled
+        ? {
+            enabled: true,
+            remotePath: clientConfig.remotePath || '',
+            localPath: clientConfig.localPath || '',
+          }
+        : { enabled: false, remotePath: '', localPath: '' };
 
       // Apply remote-to-local path transformation if enabled
-      const organizePath = PathMapper.transform(downloadPath, {
-        enabled: pathMappingConfig.download_client_remote_path_mapping_enabled === 'true',
-        remotePath: pathMappingConfig.download_client_remote_path || '',
-        localPath: pathMappingConfig.download_client_local_path || '',
-      });
+      const organizePath = PathMapper.transform(downloadPath, pathMappingConfig);
 
       logger.info(`Download completed`, {
         downloadClient,

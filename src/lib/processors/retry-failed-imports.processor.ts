@@ -9,7 +9,8 @@ import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { getJobQueueService } from '../services/job-queue.service';
 import { getConfigService } from '../services/config.service';
-import { PathMapper } from '../utils/path-mapper';
+import { getDownloadClientManager } from '../services/download-client-manager.service';
+import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 
 export interface RetryFailedImportsPayload {
   jobId?: string;
@@ -23,18 +24,23 @@ export async function processRetryFailedImports(payload: RetryFailedImportsPaylo
   logger.info('Starting retry job for requests awaiting import...');
 
   try {
-    // Load path mapping configuration once
+    // Initialize config and download client manager
     const configService = getConfigService();
-    const pathMappingConfig = await configService.getMany([
-      'download_client_remote_path_mapping_enabled',
-      'download_client_remote_path',
-      'download_client_local_path',
-    ]);
+    const manager = getDownloadClientManager(configService);
 
-    const mappingConfig = {
-      enabled: pathMappingConfig.download_client_remote_path_mapping_enabled === 'true',
-      remotePath: pathMappingConfig.download_client_remote_path || '',
-      localPath: pathMappingConfig.download_client_local_path || '',
+    // Helper function to get path mapping config for a specific download client type
+    const getPathMappingForClient = async (clientType: string): Promise<PathMappingConfig> => {
+      const protocol = clientType === 'sabnzbd' ? 'usenet' : 'torrent';
+      const clientConfig = await manager.getClientForProtocol(protocol);
+
+      if (clientConfig && clientConfig.remotePathMappingEnabled) {
+        return {
+          enabled: true,
+          remotePath: clientConfig.remotePath || '',
+          localPath: clientConfig.localPath || '',
+        };
+      }
+      return { enabled: false, remotePath: '', localPath: '' };
     };
 
     // Find all active audiobook requests in awaiting_import status
@@ -85,6 +91,10 @@ export async function processRetryFailedImports(payload: RetryFailedImportsPaylo
         let downloadPath: string;
 
         // Try to get download path from the appropriate download client
+        // Get path mapping for this specific download client
+        const clientType = downloadHistory.downloadClient || 'qbittorrent';
+        const mappingConfig = await getPathMappingForClient(clientType);
+
         if (downloadHistory.torrentHash) {
           // qBittorrent download
           try {

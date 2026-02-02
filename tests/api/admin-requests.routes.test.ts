@@ -44,7 +44,7 @@ describe('Admin requests routes', () => {
     jobQueueMock.addNotificationJob.mockResolvedValue(undefined);
   });
 
-  it('returns recent requests', async () => {
+  it('returns recent requests (legacy endpoint)', async () => {
     prismaMock.request.findMany.mockResolvedValueOnce([
       {
         id: 'req-1',
@@ -64,6 +64,172 @@ describe('Admin requests routes', () => {
 
     expect(payload.requests).toHaveLength(1);
     expect(payload.requests[0].torrentUrl).toBe('http://torrent');
+  });
+
+  it('returns paginated requests with default params', async () => {
+    prismaMock.request.count.mockResolvedValueOnce(1);
+    prismaMock.request.findMany.mockResolvedValueOnce([
+      {
+        id: 'req-1',
+        status: 'pending',
+        createdAt: new Date(),
+        completedAt: null,
+        errorMessage: null,
+        audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
+        user: { id: 'u-1', plexUsername: 'user' },
+        downloadHistory: [{ torrentUrl: 'http://torrent' }],
+      },
+    ]);
+
+    const mockRequest = {
+      url: 'http://localhost/api/admin/requests',
+    };
+
+    const { GET } = await import('@/app/api/admin/requests/route');
+    const response = await GET(mockRequest as any);
+    const payload = await response.json();
+
+    expect(payload.requests).toHaveLength(1);
+    expect(payload.total).toBe(1);
+    expect(payload.page).toBe(1);
+    expect(payload.pageSize).toBe(25);
+    expect(payload.totalPages).toBe(1);
+    expect(payload.requests[0].userId).toBe('u-1');
+  });
+
+  it('filters requests by status', async () => {
+    prismaMock.request.count.mockResolvedValueOnce(1);
+    prismaMock.request.findMany.mockResolvedValueOnce([
+      {
+        id: 'req-1',
+        status: 'failed',
+        createdAt: new Date(),
+        completedAt: null,
+        errorMessage: 'Search failed',
+        audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
+        user: { id: 'u-1', plexUsername: 'user' },
+        downloadHistory: [],
+      },
+    ]);
+
+    const mockRequest = {
+      url: 'http://localhost/api/admin/requests?status=failed',
+    };
+
+    const { GET } = await import('@/app/api/admin/requests/route');
+    const response = await GET(mockRequest as any);
+    const payload = await response.json();
+
+    expect(payload.requests).toHaveLength(1);
+    expect(payload.requests[0].status).toBe('failed');
+    expect(prismaMock.request.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: 'failed',
+        }),
+      })
+    );
+  });
+
+  it('filters requests by userId', async () => {
+    prismaMock.request.count.mockResolvedValueOnce(1);
+    prismaMock.request.findMany.mockResolvedValueOnce([
+      {
+        id: 'req-1',
+        status: 'pending',
+        createdAt: new Date(),
+        completedAt: null,
+        errorMessage: null,
+        audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
+        user: { id: 'user-123', plexUsername: 'specificuser' },
+        downloadHistory: [],
+      },
+    ]);
+
+    const mockRequest = {
+      url: 'http://localhost/api/admin/requests?userId=user-123',
+    };
+
+    const { GET } = await import('@/app/api/admin/requests/route');
+    const response = await GET(mockRequest as any);
+    const payload = await response.json();
+
+    expect(payload.requests).toHaveLength(1);
+    expect(prismaMock.request.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: 'user-123',
+        }),
+      })
+    );
+  });
+
+  it('searches requests by title/author', async () => {
+    prismaMock.request.count.mockResolvedValueOnce(1);
+    prismaMock.request.findMany.mockResolvedValueOnce([
+      {
+        id: 'req-1',
+        status: 'pending',
+        createdAt: new Date(),
+        completedAt: null,
+        errorMessage: null,
+        audiobook: { id: 'ab-1', title: 'Harry Potter', author: 'J.K. Rowling' },
+        user: { id: 'u-1', plexUsername: 'user' },
+        downloadHistory: [],
+      },
+    ]);
+
+    const mockRequest = {
+      url: 'http://localhost/api/admin/requests?search=Harry',
+    };
+
+    const { GET } = await import('@/app/api/admin/requests/route');
+    const response = await GET(mockRequest as any);
+    const payload = await response.json();
+
+    expect(payload.requests).toHaveLength(1);
+    expect(payload.requests[0].title).toBe('Harry Potter');
+  });
+
+  it('paginates requests correctly', async () => {
+    prismaMock.request.count.mockResolvedValueOnce(100);
+    prismaMock.request.findMany.mockResolvedValueOnce([]);
+
+    const mockRequest = {
+      url: 'http://localhost/api/admin/requests?page=3&pageSize=10',
+    };
+
+    const { GET } = await import('@/app/api/admin/requests/route');
+    const response = await GET(mockRequest as any);
+    const payload = await response.json();
+
+    expect(payload.page).toBe(3);
+    expect(payload.pageSize).toBe(10);
+    expect(payload.totalPages).toBe(10);
+    expect(prismaMock.request.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 20, // (page - 1) * pageSize = 2 * 10
+        take: 10,
+      })
+    );
+  });
+
+  it('sorts requests by different fields', async () => {
+    prismaMock.request.count.mockResolvedValueOnce(1);
+    prismaMock.request.findMany.mockResolvedValueOnce([]);
+
+    const mockRequest = {
+      url: 'http://localhost/api/admin/requests?sortBy=title&sortOrder=asc',
+    };
+
+    const { GET } = await import('@/app/api/admin/requests/route');
+    await GET(mockRequest as any);
+
+    expect(prismaMock.request.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: { audiobook: { title: 'asc' } },
+      })
+    );
   });
 
   it('soft deletes a request via delete service', async () => {

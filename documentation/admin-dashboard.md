@@ -9,7 +9,7 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - **Metrics:** Total requests, active downloads, completed/failed requests, total users, system health
 - **Requests Awaiting Approval:** Grid of requests pending admin approval (approve/deny buttons, auto-refresh)
 - **Active Downloads:** Real-time table with title, progress, speed, ETA
-- **Recent Requests:** Last 50 with status and timestamps
+- **Request Management:** Full-featured table with filtering, sorting, pagination
 - **Quick Actions:** Links to settings, users, scheduled jobs, system logs
 
 ## Data Sources
@@ -25,8 +25,15 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 **GET /api/admin/downloads/active**
 - Request ID, title, progress %, speed, ETA, user
 
-**GET /api/admin/requests/recent**
+**GET /api/admin/requests** (Paginated)
+- Query params: `page`, `pageSize` (10|25|50|100), `search`, `status`, `userId`, `sortBy`, `sortOrder`
+- Returns: `requests[]`, `total`, `page`, `pageSize`, `totalPages`
+- Sorting: createdAt (default), completedAt, title, user, status
+- Filtering: by status, by user, text search (title/author)
+
+**GET /api/admin/requests/recent** (Legacy)
 - Request ID, title, user, status, created/completed dates
+- Limited to 50 entries, no filtering
 
 **GET /api/admin/requests/pending-approval**
 - Requests with status 'awaiting_approval', includes audiobook + user details
@@ -53,6 +60,18 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - Query params: page, limit, status, type
 - Returns: Job logs with request/audiobook/user details, pagination info
 - Filters: status (all/pending/active/completed/failed/delayed/stuck), type (all job types)
+
+## Request Management Features
+
+- **Filter Bar:**
+  - Text search (title/author, 300ms debounce)
+  - Status dropdown (all statuses)
+  - User dropdown (all users)
+  - Clear filters button
+- **Sortable Columns:** Click headers to sort by title, user, status, requested, completed
+- **Pagination:** Page navigation, page size selector (10/25/50/100), results count
+- **URL State:** Filters/sort/page stored in URL query params (shareable, bookmarkable)
+- **Actions:** Delete, cancel, manual search, fetch ebook (via dropdown)
 
 ## Features
 

@@ -11,8 +11,10 @@ import { createJobQueueMock } from '../helpers/job-queue';
 const prismaMock = createPrismaMock();
 const jobQueueMock = createJobQueueMock();
 const configMock = vi.hoisted(() => ({
-  getMany: vi.fn(),
   get: vi.fn(),
+}));
+const downloadClientManagerMock = vi.hoisted(() => ({
+  getClientForProtocol: vi.fn(),
 }));
 const qbtMock = vi.hoisted(() => ({ getTorrent: vi.fn() }));
 const sabnzbdMock = vi.hoisted(() => ({ getNZB: vi.fn() }));
@@ -29,6 +31,10 @@ vi.mock('@/lib/services/config.service', () => ({
   getConfigService: () => configMock,
 }));
 
+vi.mock('@/lib/services/download-client-manager.service', () => ({
+  getDownloadClientManager: () => downloadClientManagerMock,
+}));
+
 vi.mock('@/lib/integrations/qbittorrent.service', () => ({
   getQBittorrentService: () => qbtMock,
 }));
@@ -43,17 +49,19 @@ describe('processRetryFailedImports', () => {
   });
 
   it('queues organize jobs using download client paths', async () => {
-    configMock.getMany.mockResolvedValue({
-      download_client_remote_path_mapping_enabled: 'false',
-      download_client_remote_path: '',
-      download_client_local_path: '',
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-1',
+      type: 'qbittorrent',
+      name: 'qBittorrent',
+      enabled: true,
+      remotePathMappingEnabled: false,
     });
 
     prismaMock.request.findMany.mockResolvedValue([
       {
         id: 'req-1',
         audiobook: { id: 'a1', title: 'Book' },
-        downloadHistory: [{ torrentHash: 'hash-1', torrentName: 'Book' }],
+        downloadHistory: [{ torrentHash: 'hash-1', torrentName: 'Book', downloadClient: 'qbittorrent' }],
       },
     ]);
 
@@ -74,11 +82,6 @@ describe('processRetryFailedImports', () => {
   });
 
   it('returns early when no requests await import', async () => {
-    configMock.getMany.mockResolvedValue({
-      download_client_remote_path_mapping_enabled: 'false',
-      download_client_remote_path: '',
-      download_client_local_path: '',
-    });
     prismaMock.request.findMany.mockResolvedValue([]);
 
     const { processRetryFailedImports } = await import('@/lib/processors/retry-failed-imports.processor');
@@ -90,11 +93,6 @@ describe('processRetryFailedImports', () => {
   });
 
   it('skips requests missing download history', async () => {
-    configMock.getMany.mockResolvedValue({
-      download_client_remote_path_mapping_enabled: 'false',
-      download_client_remote_path: '',
-      download_client_local_path: '',
-    });
     prismaMock.request.findMany.mockResolvedValue([
       {
         id: 'req-2',
@@ -111,10 +109,14 @@ describe('processRetryFailedImports', () => {
   });
 
   it('falls back to configured download dir when qBittorrent lookup fails', async () => {
-    configMock.getMany.mockResolvedValue({
-      download_client_remote_path_mapping_enabled: 'true',
-      download_client_remote_path: '/remote',
-      download_client_local_path: '/downloads',
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-1',
+      type: 'qbittorrent',
+      name: 'qBittorrent',
+      enabled: true,
+      remotePathMappingEnabled: true,
+      remotePath: '/remote',
+      localPath: '/downloads',
     });
     configMock.get.mockResolvedValue('/remote');
 
@@ -122,7 +124,7 @@ describe('processRetryFailedImports', () => {
       {
         id: 'req-3',
         audiobook: { id: 'a3', title: 'Book' },
-        downloadHistory: [{ torrentHash: 'hash-3', torrentName: 'Book' }],
+        downloadHistory: [{ torrentHash: 'hash-3', torrentName: 'Book', downloadClient: 'qbittorrent' }],
       },
     ]);
 
@@ -140,16 +142,20 @@ describe('processRetryFailedImports', () => {
   });
 
   it('uses SABnzbd download path when available', async () => {
-    configMock.getMany.mockResolvedValue({
-      download_client_remote_path_mapping_enabled: 'true',
-      download_client_remote_path: '/remote/nzb',
-      download_client_local_path: '/downloads',
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-2',
+      type: 'sabnzbd',
+      name: 'SABnzbd',
+      enabled: true,
+      remotePathMappingEnabled: true,
+      remotePath: '/remote/nzb',
+      localPath: '/downloads',
     });
     prismaMock.request.findMany.mockResolvedValue([
       {
         id: 'req-4',
         audiobook: { id: 'a4', title: 'Book' },
-        downloadHistory: [{ nzbId: 'nzb-1', torrentName: 'Book' }],
+        downloadHistory: [{ nzbId: 'nzb-1', torrentName: 'Book', downloadClient: 'sabnzbd' }],
       },
     ]);
 
@@ -167,17 +173,19 @@ describe('processRetryFailedImports', () => {
   });
 
   it('skips SABnzbd retries when download dir is missing', async () => {
-    configMock.getMany.mockResolvedValue({
-      download_client_remote_path_mapping_enabled: 'false',
-      download_client_remote_path: '',
-      download_client_local_path: '',
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-2',
+      type: 'sabnzbd',
+      name: 'SABnzbd',
+      enabled: true,
+      remotePathMappingEnabled: false,
     });
     configMock.get.mockResolvedValue(null);
     prismaMock.request.findMany.mockResolvedValue([
       {
         id: 'req-5',
         audiobook: { id: 'a5', title: 'Book' },
-        downloadHistory: [{ nzbId: 'nzb-2', torrentName: 'Book' }],
+        downloadHistory: [{ nzbId: 'nzb-2', torrentName: 'Book', downloadClient: 'sabnzbd' }],
       },
     ]);
 
@@ -191,16 +199,18 @@ describe('processRetryFailedImports', () => {
   });
 
   it('skips requests with no client identifiers or names', async () => {
-    configMock.getMany.mockResolvedValue({
-      download_client_remote_path_mapping_enabled: 'false',
-      download_client_remote_path: '',
-      download_client_local_path: '',
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-1',
+      type: 'qbittorrent',
+      name: 'qBittorrent',
+      enabled: true,
+      remotePathMappingEnabled: false,
     });
     prismaMock.request.findMany.mockResolvedValue([
       {
         id: 'req-6',
         audiobook: { id: 'a6', title: 'Book' },
-        downloadHistory: [{}],
+        downloadHistory: [{ downloadClient: 'qbittorrent' }],
       },
     ]);
 
@@ -212,16 +222,18 @@ describe('processRetryFailedImports', () => {
   });
 
   it('tracks skipped requests when organize job fails', async () => {
-    configMock.getMany.mockResolvedValue({
-      download_client_remote_path_mapping_enabled: 'false',
-      download_client_remote_path: '',
-      download_client_local_path: '',
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-1',
+      type: 'qbittorrent',
+      name: 'qBittorrent',
+      enabled: true,
+      remotePathMappingEnabled: false,
     });
     prismaMock.request.findMany.mockResolvedValue([
       {
         id: 'req-7',
         audiobook: { id: 'a7', title: 'Book' },
-        downloadHistory: [{ torrentHash: 'hash-7', torrentName: 'Book' }],
+        downloadHistory: [{ torrentHash: 'hash-7', torrentName: 'Book', downloadClient: 'qbittorrent' }],
       },
     ]);
     qbtMock.getTorrent.mockResolvedValue({ save_path: '/downloads', name: 'Book' });
@@ -235,16 +247,18 @@ describe('processRetryFailedImports', () => {
   });
 
   it('skips qBittorrent fallbacks when torrent name is missing', async () => {
-    configMock.getMany.mockResolvedValue({
-      download_client_remote_path_mapping_enabled: 'false',
-      download_client_remote_path: '',
-      download_client_local_path: '',
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-1',
+      type: 'qbittorrent',
+      name: 'qBittorrent',
+      enabled: true,
+      remotePathMappingEnabled: false,
     });
     prismaMock.request.findMany.mockResolvedValue([
       {
         id: 'req-8',
         audiobook: { id: 'a8', title: 'Book' },
-        downloadHistory: [{ torrentHash: 'hash-8' }],
+        downloadHistory: [{ torrentHash: 'hash-8', downloadClient: 'qbittorrent' }],
       },
     ]);
     qbtMock.getTorrent.mockRejectedValue(new Error('not found'));
@@ -258,17 +272,19 @@ describe('processRetryFailedImports', () => {
   });
 
   it('skips qBittorrent fallbacks when download_dir is not configured', async () => {
-    configMock.getMany.mockResolvedValue({
-      download_client_remote_path_mapping_enabled: 'false',
-      download_client_remote_path: '',
-      download_client_local_path: '',
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-1',
+      type: 'qbittorrent',
+      name: 'qBittorrent',
+      enabled: true,
+      remotePathMappingEnabled: false,
     });
     configMock.get.mockResolvedValue(null);
     prismaMock.request.findMany.mockResolvedValue([
       {
         id: 'req-9',
         audiobook: { id: 'a9', title: 'Book' },
-        downloadHistory: [{ torrentHash: 'hash-9', torrentName: 'Book' }],
+        downloadHistory: [{ torrentHash: 'hash-9', torrentName: 'Book', downloadClient: 'qbittorrent' }],
       },
     ]);
     qbtMock.getTorrent.mockRejectedValue(new Error('not found'));
@@ -281,16 +297,18 @@ describe('processRetryFailedImports', () => {
   });
 
   it('skips SABnzbd retries when the client throws', async () => {
-    configMock.getMany.mockResolvedValue({
-      download_client_remote_path_mapping_enabled: 'false',
-      download_client_remote_path: '',
-      download_client_local_path: '',
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-2',
+      type: 'sabnzbd',
+      name: 'SABnzbd',
+      enabled: true,
+      remotePathMappingEnabled: false,
     });
     prismaMock.request.findMany.mockResolvedValue([
       {
         id: 'req-10',
         audiobook: { id: 'a10', title: 'Book' },
-        downloadHistory: [{ nzbId: 'nzb-10', torrentName: 'Book' }],
+        downloadHistory: [{ nzbId: 'nzb-10', torrentName: 'Book', downloadClient: 'sabnzbd' }],
       },
     ]);
 
@@ -304,17 +322,19 @@ describe('processRetryFailedImports', () => {
   });
 
   it('skips requests without download_dir when no client identifiers exist', async () => {
-    configMock.getMany.mockResolvedValue({
-      download_client_remote_path_mapping_enabled: 'false',
-      download_client_remote_path: '',
-      download_client_local_path: '',
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-1',
+      type: 'qbittorrent',
+      name: 'qBittorrent',
+      enabled: true,
+      remotePathMappingEnabled: false,
     });
     configMock.get.mockResolvedValue(null);
     prismaMock.request.findMany.mockResolvedValue([
       {
         id: 'req-11',
         audiobook: { id: 'a11', title: 'Book' },
-        downloadHistory: [{ torrentName: 'Book' }],
+        downloadHistory: [{ torrentName: 'Book', downloadClient: 'qbittorrent' }],
       },
     ]);
 

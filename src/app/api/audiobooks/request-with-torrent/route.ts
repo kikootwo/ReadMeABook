@@ -35,12 +35,15 @@ const RequestWithTorrentSchema = z.object({
     seeders: z.number().optional(), // Optional for NZB/Usenet results
     leechers: z.number().optional(), // Optional for NZB/Usenet results
     indexer: z.string(),
+    indexerId: z.number().optional(), // Prowlarr indexer ID
     downloadUrl: z.string(),
+    infoUrl: z.string().optional(), // Link to indexer's info page
     publishDate: z.string().transform((str) => new Date(str)),
     infoHash: z.string().optional(),
     format: z.enum(['M4B', 'M4A', 'MP3', 'OTHER']).optional(),
     bitrate: z.string().optional(),
     hasChapters: z.boolean().optional(),
+    protocol: z.enum(['torrent', 'usenet']).optional(), // Protocol from Prowlarr API
   }),
 });
 

@@ -19,6 +19,9 @@ const sabMock = vi.hoisted(() => ({
 const configMock = vi.hoisted(() => ({
   getMany: vi.fn(),
 }));
+const downloadClientManagerMock = vi.hoisted(() => ({
+  getClientForProtocol: vi.fn(),
+}));
 
 vi.mock('@/lib/db', () => ({
   prisma: prismaMock,
@@ -40,6 +43,10 @@ vi.mock('@/lib/services/config.service', () => ({
   getConfigService: () => configMock,
 }));
 
+vi.mock('@/lib/services/download-client-manager.service', () => ({
+  getDownloadClientManager: () => downloadClientManagerMock,
+}));
+
 describe('processMonitorDownload', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -57,10 +64,14 @@ describe('processMonitorDownload', () => {
       speed: 0,
       eta: 0,
     });
-    configMock.getMany.mockResolvedValue({
-      download_client_remote_path_mapping_enabled: 'true',
-      download_client_remote_path: '/remote/done',
-      download_client_local_path: '/downloads',
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-1',
+      type: 'qbittorrent',
+      name: 'qBittorrent',
+      enabled: true,
+      remotePathMappingEnabled: true,
+      remotePath: '/remote/done',
+      localPath: '/downloads',
     });
     prismaMock.request.update.mockResolvedValue({});
     prismaMock.downloadHistory.update.mockResolvedValue({});
@@ -161,10 +172,12 @@ describe('processMonitorDownload', () => {
       timeLeft: 0,
       downloadPath: '/usenet/complete/Book',
     });
-    configMock.getMany.mockResolvedValue({
-      download_client_remote_path_mapping_enabled: 'false',
-      download_client_remote_path: '',
-      download_client_local_path: '',
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-2',
+      type: 'sabnzbd',
+      name: 'SABnzbd',
+      enabled: true,
+      remotePathMappingEnabled: false,
     });
     prismaMock.request.update.mockResolvedValue({});
     prismaMock.downloadHistory.update.mockResolvedValue({});

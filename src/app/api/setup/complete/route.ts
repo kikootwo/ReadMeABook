@@ -418,20 +418,6 @@ export async function POST(request: NextRequest) {
       create: { key: 'download_clients', value: JSON.stringify(downloadClientsArray) },
     });
 
-    // Legacy: Keep old keys for backward compatibility with migration
-    // (Will be cleaned up by migration on first access)
-    await prisma.configuration.upsert({
-      where: { key: 'download_client_remote_path' },
-      update: { value: downloadClient.remotePath || '' },
-      create: { key: 'download_client_remote_path', value: downloadClient.remotePath || '' },
-    });
-
-    await prisma.configuration.upsert({
-      where: { key: 'download_client_local_path' },
-      update: { value: downloadClient.localPath || '' },
-      create: { key: 'download_client_local_path', value: downloadClient.localPath || '' },
-    });
-
     // Path configuration
     await prisma.configuration.upsert({
       where: { key: 'download_dir' },

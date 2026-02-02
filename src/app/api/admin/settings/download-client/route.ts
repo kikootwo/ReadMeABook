@@ -1,13 +1,19 @@
 /**
- * Component: Admin Download Client Settings API
- * Documentation: documentation/settings-pages.md
+ * Component: Admin Download Client Settings API (DEPRECATED)
+ * Documentation: documentation/phase3/download-clients.md
+ *
+ * DEPRECATED: This route is deprecated in favor of /api/admin/settings/download-clients
+ * which supports multiple download clients. This route is maintained for backward
+ * compatibility but updates are written to the new multi-client format.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
-import { prisma } from '@/lib/db';
+import { getConfigService } from '@/lib/services/config.service';
+import { getDownloadClientManager, invalidateDownloadClientManager, DownloadClientConfig } from '@/lib/services/download-client-manager.service';
 import { PathMapper } from '@/lib/utils/path-mapper';
 import { RMABLogger } from '@/lib/utils/logger';
+import { randomUUID } from 'crypto';
 
 const logger = RMABLogger.create('API.Admin.Settings.DownloadClient');
 
@@ -25,6 +31,8 @@ export async function PUT(request: NextRequest) {
           remotePath,
           localPath,
         } = await request.json();
+
+        logger.warn('DEPRECATED: Using legacy single-client API. Please use /api/admin/settings/download-clients instead.');
 
         // Validate type
         if (type !== 'qbittorrent' && type !== 'sabnzbd') {
@@ -78,69 +86,51 @@ export async function PUT(request: NextRequest) {
           }
         }
 
-        // Update configuration
-        await prisma.configuration.upsert({
-          where: { key: 'download_client_type' },
-          update: { value: type },
-          create: { key: 'download_client_type', value: type },
-        });
+        // Get existing clients from new format
+        const config = await getConfigService();
+        const manager = getDownloadClientManager(config);
+        const existingClients = await manager.getAllClients();
 
-        await prisma.configuration.upsert({
-          where: { key: 'download_client_url' },
-          update: { value: url },
-          create: { key: 'download_client_url', value: url },
-        });
+        // Find existing client of same type to update, or create new
+        const existingIndex = existingClients.findIndex(c => c.type === type);
 
-        await prisma.configuration.upsert({
-          where: { key: 'download_client_username' },
-          update: { value: username },
-          create: { key: 'download_client_username', value: username },
-        });
+        const updatedClient: DownloadClientConfig = {
+          id: existingIndex >= 0 ? existingClients[existingIndex].id : randomUUID(),
+          type,
+          name: type === 'qbittorrent' ? 'qBittorrent' : 'SABnzbd',
+          enabled: true,
+          url,
+          username: username || undefined,
+          // Only update password if it's not the masked value
+          password: password.startsWith('••••') && existingIndex >= 0
+            ? existingClients[existingIndex].password
+            : password,
+          disableSSLVerify: disableSSLVerify || false,
+          remotePathMappingEnabled: remotePathMappingEnabled || false,
+          remotePath: remotePath || undefined,
+          localPath: localPath || undefined,
+          category: existingIndex >= 0 ? existingClients[existingIndex].category : 'readmeabook',
+        };
 
-        // Only update password if it's not the masked value
-        if (!password.startsWith('••••')) {
-          await prisma.configuration.upsert({
-            where: { key: 'download_client_password' },
-            update: { value: password },
-            create: { key: 'download_client_password', value: password },
-          });
+        // Update or add client
+        let updatedClients: DownloadClientConfig[];
+        if (existingIndex >= 0) {
+          updatedClients = [...existingClients];
+          updatedClients[existingIndex] = updatedClient;
+        } else {
+          updatedClients = [...existingClients, updatedClient];
         }
 
-        // Save SSL verification setting
-        await prisma.configuration.upsert({
-          where: { key: 'download_client_disable_ssl_verify' },
-          update: { value: disableSSLVerify ? 'true' : 'false' },
-          create: {
-            key: 'download_client_disable_ssl_verify',
-            value: disableSSLVerify ? 'true' : 'false',
-          },
-        });
+        // Save to new format
+        await config.setMany([
+          { key: 'download_clients', value: JSON.stringify(updatedClients) },
+        ]);
 
-        // Save remote path mapping configuration
-        await prisma.configuration.upsert({
-          where: { key: 'download_client_remote_path_mapping_enabled' },
-          update: { value: remotePathMappingEnabled ? 'true' : 'false' },
-          create: {
-            key: 'download_client_remote_path_mapping_enabled',
-            value: remotePathMappingEnabled ? 'true' : 'false',
-          },
-        });
+        logger.info('Download client settings updated via legacy API', { type, id: updatedClient.id });
 
-        await prisma.configuration.upsert({
-          where: { key: 'download_client_remote_path' },
-          update: { value: remotePath || '' },
-          create: { key: 'download_client_remote_path', value: remotePath || '' },
-        });
+        // Invalidate caches
+        invalidateDownloadClientManager();
 
-        await prisma.configuration.upsert({
-          where: { key: 'download_client_local_path' },
-          update: { value: localPath || '' },
-          create: { key: 'download_client_local_path', value: localPath || '' },
-        });
-
-        logger.info('Download client settings updated');
-
-        // Invalidate download client service singleton to force reload of credentials and URL
         if (type === 'qbittorrent') {
           const { invalidateQBittorrentService } = await import('@/lib/integrations/qbittorrent.service');
           invalidateQBittorrentService();
@@ -152,6 +142,8 @@ export async function PUT(request: NextRequest) {
         return NextResponse.json({
           success: true,
           message: 'Download client settings updated successfully',
+          deprecated: true,
+          warning: 'This API is deprecated. Please use /api/admin/settings/download-clients instead.',
         });
       } catch (error) {
         logger.error('Failed to update download client settings', { error: error instanceof Error ? error.message : String(error) });

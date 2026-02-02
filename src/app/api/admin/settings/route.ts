@@ -81,17 +81,46 @@ export async function GET(request: NextRequest) {
         url: configMap.get('prowlarr_url') || '',
         apiKey: maskValue('api_key', configMap.get('prowlarr_api_key')),
       },
-      downloadClient: {
-        type: configMap.get('download_client_type') || 'qbittorrent',
-        url: configMap.get('download_client_url') || '',
-        username: configMap.get('download_client_username') || '',
-        password: maskValue('password', configMap.get('download_client_password')),
-        disableSSLVerify: configMap.get('download_client_disable_ssl_verify') === 'true',
-        seedingTimeMinutes: parseInt(configMap.get('seeding_time_minutes') || '0'),
-        remotePathMappingEnabled: configMap.get('download_client_remote_path_mapping_enabled') === 'true',
-        remotePath: configMap.get('download_client_remote_path') || '',
-        localPath: configMap.get('download_client_local_path') || '',
-      },
+      // downloadClient is populated from multi-client format for backward compatibility
+      // The DownloadTab component now uses DownloadClientManagement which reads from /api/admin/settings/download-clients
+      downloadClient: (() => {
+        // Try to read from new multi-client format first
+        const downloadClientsJson = configMap.get('download_clients');
+        if (downloadClientsJson) {
+          try {
+            const clients = JSON.parse(downloadClientsJson);
+            // Return the first enabled client for backward compatibility
+            const firstClient = clients.find((c: any) => c.enabled) || clients[0];
+            if (firstClient) {
+              return {
+                type: firstClient.type || 'qbittorrent',
+                url: firstClient.url || '',
+                username: firstClient.username || '',
+                password: maskValue('password', firstClient.password),
+                disableSSLVerify: firstClient.disableSSLVerify === true,
+                seedingTimeMinutes: parseInt(configMap.get('seeding_time_minutes') || '0'),
+                remotePathMappingEnabled: firstClient.remotePathMappingEnabled === true,
+                remotePath: firstClient.remotePath || '',
+                localPath: firstClient.localPath || '',
+              };
+            }
+          } catch {
+            // Fall through to legacy format
+          }
+        }
+        // Fall back to legacy flat keys
+        return {
+          type: configMap.get('download_client_type') || 'qbittorrent',
+          url: configMap.get('download_client_url') || '',
+          username: configMap.get('download_client_username') || '',
+          password: maskValue('password', configMap.get('download_client_password')),
+          disableSSLVerify: configMap.get('download_client_disable_ssl_verify') === 'true',
+          seedingTimeMinutes: parseInt(configMap.get('seeding_time_minutes') || '0'),
+          remotePathMappingEnabled: configMap.get('download_client_remote_path_mapping_enabled') === 'true',
+          remotePath: configMap.get('download_client_remote_path') || '',
+          localPath: configMap.get('download_client_local_path') || '',
+        };
+      })(),
       paths: {
         downloadDir: configMap.get('download_dir') || '/downloads',
         mediaDir: configMap.get('media_dir') || '/media/audiobooks',
