@@ -14,7 +14,7 @@ export async function PUT(request: NextRequest) {
     return requireAdmin(req, async () => {
       try {
         // Parse request body - new structure with separate source toggles
-        const { annasArchiveEnabled, indexerSearchEnabled, format, baseUrl, flaresolverrUrl, autoGrabEnabled } = await request.json();
+        const { annasArchiveEnabled, indexerSearchEnabled, format, baseUrl, flaresolverrUrl, autoGrabEnabled, kindleFixEnabled } = await request.json();
 
         // Enforce: auto-grab must be false if no sources are enabled
         const effectiveAutoGrabEnabled = (annasArchiveEnabled || indexerSearchEnabled) ? (autoGrabEnabled ?? true) : false;
@@ -87,6 +87,13 @@ export async function PUT(request: NextRequest) {
             value: flaresolverrUrl || '',
             category: 'ebook',
             description: 'FlareSolverr URL for bypassing Cloudflare protection',
+          },
+          // Kindle compatibility
+          {
+            key: 'ebook_kindle_fix_enabled',
+            value: kindleFixEnabled ? 'true' : 'false',
+            category: 'ebook',
+            description: 'Apply compatibility fixes to EPUB files for Kindle import',
           },
         ];
 

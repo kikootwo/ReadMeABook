@@ -83,6 +83,7 @@ export function useEbookSettings({ ebook, onChange, onSuccess, onError, markAsSa
           baseUrl: ebook.baseUrl || 'https://annas-archive.li',
           flaresolverrUrl: ebook.flaresolverrUrl || '',
           autoGrabEnabled: ebook.autoGrabEnabled ?? true,
+          kindleFixEnabled: ebook.kindleFixEnabled ?? false,
         }),
       });
 

@@ -10,6 +10,7 @@ import { RMABLogger } from '../utils/logger';
 import { getLibraryService } from '../services/library';
 import { getConfigService } from '../services/config.service';
 import { generateFilesHash } from '../utils/files-hash';
+import { fixEpubForKindle, cleanupFixedEpub } from '../utils/epub-fixer';
 
 /**
  * Process organize files job
@@ -585,10 +586,52 @@ async function processEbookOrganization(
   });
   const template = templateConfig?.value || '{author}/{title} {asin}';
 
+  // Check if Kindle EPUB fix is needed
+  let effectiveDownloadPath = downloadPath;
+  let fixedEpubPath: string | null = null;
+
+  // Detect the actual EPUB file path (handles both single file and directory downloads)
+  const epubFilePath = await detectEpubFilePath(downloadPath);
+
+  // Only apply Kindle fix for EPUB files when enabled
+  if (epubFilePath) {
+    const configService = getConfigService();
+    const kindleFixEnabled = await configService.get('ebook_kindle_fix_enabled');
+
+    if (kindleFixEnabled === 'true') {
+      logger.info('Kindle EPUB fix enabled - applying compatibility fixes');
+
+      const tempDir = process.env.TEMP_DIR || '/tmp/readmeabook';
+      const fixResult = await fixEpubForKindle(
+        epubFilePath,
+        tempDir,
+        jobId ? { jobId, context: 'EpubFixer' } : undefined
+      );
+
+      if (fixResult.success && fixResult.outputPath) {
+        fixedEpubPath = fixResult.outputPath;
+        effectiveDownloadPath = fixResult.outputPath;
+        logger.info(`Using fixed EPUB: ${fixResult.outputPath}`);
+
+        // Log fixes applied
+        const { encodingFixes, bodyIdLinkFixes, languageFix, strayImgFixes } = fixResult.fixesApplied;
+        const totalFixes = encodingFixes + bodyIdLinkFixes + (languageFix ? 1 : 0) + strayImgFixes;
+        if (totalFixes > 0) {
+          logger.info(`Kindle fixes applied: encoding=${encodingFixes}, bodyIdLinks=${bodyIdLinkFixes}, language=${languageFix}, strayImages=${strayImgFixes}`);
+        }
+      } else {
+        // Fix failed - continue with original file
+        logger.warn(`Kindle EPUB fix failed: ${fixResult.error}. Continuing with original file.`);
+      }
+    } else {
+      logger.info('Kindle EPUB fix disabled - organizing original file');
+    }
+  }
+
   // Organize ebook files (organizer will detect ebook type and skip audio-specific processing)
   // Pass all metadata that could be used in path templates (same as audiobooks)
   const result = await organizer.organizeEbook(
-    downloadPath,
+    effectiveDownloadPath,
     {
       title: book.title,
       author: book.author,
@@ -602,6 +645,12 @@ async function processEbookOrganization(
     jobId ? { jobId, context: 'FileOrganizer.Ebook' } : undefined,
     isIndexerDownload
   );
+
+  // Clean up fixed EPUB temp file after organization (regardless of success)
+  if (fixedEpubPath) {
+    await cleanupFixedEpub(fixedEpubPath);
+    logger.info('Cleaned up temporary fixed EPUB');
+  }
 
   if (!result.success) {
     throw new Error(`Ebook organization failed: ${result.errors.join(', ')}`);
@@ -856,4 +905,77 @@ async function createEbookRequestIfEnabled(
     // Don't fail the main audiobook organization if ebook request creation fails
     logger.error(`Failed to create ebook request: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
+}
+
+// =========================================================================
+// HELPER FUNCTIONS
+// =========================================================================
+
+/**
+ * Detect the path to an EPUB file from download path
+ * Handles both single file downloads (direct path) and directory downloads (indexer)
+ *
+ * @param downloadPath - Path to the download (file or directory)
+ * @returns Full path to EPUB file, or null if no EPUB found
+ */
+async function detectEpubFilePath(downloadPath: string): Promise<string | null> {
+  const fs = await import('fs/promises');
+  const path = await import('path');
+
+  try {
+    const stats = await fs.stat(downloadPath);
+
+    if (stats.isFile()) {
+      // Single file - check if it's an EPUB
+      if (path.extname(downloadPath).toLowerCase() === '.epub') {
+        return downloadPath;
+      }
+      return null;
+    }
+
+    // Directory - search for EPUB file
+    const files = await walkDirectory(downloadPath);
+    const epubFile = files.find(file =>
+      path.extname(file).toLowerCase() === '.epub'
+    );
+
+    if (epubFile) {
+      return path.join(downloadPath, epubFile);
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Recursively walk directory to find all files
+ * Returns relative paths from the base directory
+ */
+async function walkDirectory(dir: string, baseDir: string = ''): Promise<string[]> {
+  const fs = await import('fs/promises');
+  const path = await import('path');
+
+  const files: string[] = [];
+
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      const relativePath = baseDir ? path.join(baseDir, entry.name) : entry.name;
+
+      if (entry.isDirectory()) {
+        const subFiles = await walkDirectory(fullPath, relativePath);
+        files.push(...subFiles);
+      } else {
+        files.push(relativePath);
+      }
+    }
+  } catch {
+    // Directory not accessible
+  }
+
+  return files;
 }

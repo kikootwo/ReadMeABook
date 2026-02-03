@@ -66,8 +66,30 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
 |-----|---------|---------|-------------|
 | `ebook_sidecar_preferred_format` | `epub` | `epub, pdf, mobi, azw3, any` | Preferred format |
 | `ebook_auto_grab_enabled` | `true` | `true, false` | Auto-create ebook requests after audiobook downloads |
+| `ebook_kindle_fix_enabled` | `false` | `true, false` | Apply Kindle compatibility fixes to EPUB files |
 
-*Note: Auto-grab is automatically disabled if no ebook sources are enabled. Manual fetch via admin buttons still works.*
+*Notes:*
+- *Auto-grab is automatically disabled if no ebook sources are enabled. Manual fetch via admin buttons still works.*
+- *Kindle fix toggle only visible when preferred format is EPUB.*
+
+### Kindle EPUB Fix
+
+**Purpose:** Apply compatibility fixes to EPUB files before organizing, ensuring successful Kindle import.
+
+**Fixes Applied:**
+1. **Encoding declaration** - Adds UTF-8 XML declaration to files missing it
+2. **Body ID link fix** - Removes `#body`/`#bodymatter` fragments from hyperlinks that break on Kindle
+3. **Language validation** - Ensures `dc:language` uses Amazon KDP-approved codes (defaults to `en` if invalid)
+4. **Stray IMG removal** - Removes `<img>` tags without `src` attributes
+
+**How It Works:**
+- Enabled via toggle in E-book Sidecar settings (only visible when EPUB format selected)
+- Applied during `organize_files` job, before copying to final location
+- Creates temp fixed file → organizes temp file → cleans up temp file
+- Original download file stays intact (important for seeding torrents)
+- Non-blocking: if fix fails, continues with original file
+
+**Source:** Based on [kindle-epub-fix](https://github.com/innocenat/kindle-epub-fix)
 
 ## Database Schema
 
@@ -204,6 +226,7 @@ Search: https://annas-archive.li/search?q=Title+Author&ext=epub&lang=en
 - `src/lib/utils/file-organizer.ts` (`organizeEbook` method)
 - `src/lib/utils/ranking-algorithm.ts` (`rankEbookTorrents` function)
 - `src/lib/utils/indexer-grouping.ts` (supports `'ebook'` type)
+- `src/lib/utils/epub-fixer.ts` (Kindle EPUB compatibility fixes)
 
 **UI:**
 - `src/components/requests/RequestCard.tsx` (ebook badge)

@@ -254,6 +254,32 @@ export function EbookTab({ ebook, onChange, onSuccess, onError, markAsSaved }: E
                 </p>
               </div>
             </div>
+
+            {/* Kindle Fix Toggle - Only shown when EPUB is selected */}
+            {(ebook.preferredFormat === 'epub' || !ebook.preferredFormat) && (
+              <div className="flex items-start gap-4 pt-2 border-t border-gray-200 dark:border-gray-700 mt-4">
+                <input
+                  type="checkbox"
+                  id="kindle-fix-enabled"
+                  checked={ebook.kindleFixEnabled ?? false}
+                  onChange={(e) => updateEbook('kindleFixEnabled', e.target.checked)}
+                  className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <div className="flex-1">
+                  <label
+                    htmlFor="kindle-fix-enabled"
+                    className="block text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer"
+                  >
+                    Fix EPUB for Kindle import
+                  </label>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                    Apply compatibility fixes before organizing EPUB files. Fixes encoding declarations,
+                    broken hyperlinks, invalid language tags, and orphaned image elements that can
+                    cause Kindle import failures.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

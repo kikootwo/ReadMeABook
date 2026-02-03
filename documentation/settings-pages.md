@@ -91,6 +91,7 @@ src/app/admin/settings/
 3. **General Settings Section** (visible when any source enabled)
    - Preferred format: EPUB (recommended), PDF, MOBI, AZW3, Any
    - Auto-grab toggle: Automatically create ebook requests after audiobook downloads
+   - Kindle fix toggle: Apply compatibility fixes to EPUB files (only visible when EPUB format selected)
 
 **Configuration Keys:**
 | Key | Default | Description |
@@ -99,6 +100,7 @@ src/app/admin/settings/
 | `ebook_indexer_search_enabled` | `false` | Enable Indexer Search via Prowlarr |
 | `ebook_sidecar_preferred_format` | `epub` | Preferred format |
 | `ebook_auto_grab_enabled` | `true` | Auto-create ebook requests after audiobook downloads |
+| `ebook_kindle_fix_enabled` | `false` | Apply Kindle compatibility fixes to EPUB files |
 | `ebook_sidecar_base_url` | `https://annas-archive.li` | Anna's Archive mirror |
 | `ebook_sidecar_flaresolverr_url` | `` | FlareSolverr URL |
 
@@ -107,6 +109,7 @@ src/app/admin/settings/
 - If Indexer Search enabled → Falls back to indexer search if Anna's Archive fails/disabled
 - If both disabled → Ebook downloads completely off
 - If auto-grab disabled → Manual "Fetch Ebook" button only (admin buttons still work)
+- If Kindle fix enabled (and EPUB format) → Applies compatibility fixes during organization
 
 ## Indexer Categories (Tabbed)
 

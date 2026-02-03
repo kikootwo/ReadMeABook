@@ -141,6 +141,8 @@ export async function GET(request: NextRequest) {
         preferredFormat: configMap.get('ebook_sidecar_preferred_format') || 'epub',
         // Auto-grab: default true to preserve existing behavior
         autoGrabEnabled: configMap.get('ebook_auto_grab_enabled') !== 'false',
+        // Kindle compatibility fixes: default false
+        kindleFixEnabled: configMap.get('ebook_kindle_fix_enabled') === 'true',
       },
       general: {
         appName: configMap.get('app_name') || 'ReadMeABook',

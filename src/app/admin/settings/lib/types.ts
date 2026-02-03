@@ -115,6 +115,8 @@ export interface EbookSettings {
   // General settings (shared across sources)
   preferredFormat: string;
   autoGrabEnabled: boolean;
+  // Kindle compatibility
+  kindleFixEnabled: boolean;
 }
 
 /**
