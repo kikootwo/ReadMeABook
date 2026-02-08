@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>ReadMeABook</Name>
+  <Repository>ghcr.io/kikootwo/readmeabook:latest</Repository>
+  <Registry>https://github.com/kikootwo/ReadMeABook/pkgs/container/readmeabook</Registry>
+  <TemplateURL>https://github.com/kikootwo/ReadMeABook/blob/main/unraid.xml</TemplateURL>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/kikootwo/ReadMeABook/issues</Support>
+  <Discord>https://discord.gg/kaw6jKbKts</Discord>
+  <Project>https://github.com/kikootwo/ReadMeABook</Project>
+  <Overview>ReadMeABook is an audiobook library management and automation system, purpose-built for audiobooks. Request a book, and it handles the rest: searches indexers, downloads, organizes files, and triggers a library scan.</Overview>
+  <Category>Downloaders: Tools: MediaApp:Other MediaServer:Books</Category>
+  <WebUI>http://[IP]:[PORT: 3030]/</WebUI>
+  <Icon>https://raw.githubusercontent.com/kikootwo/ReadMeABook/main/public/RMAB_1024x1024_APPICON.png</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <Maintainer>
+    <WebPage>https://github.com/kikootwo</WebPage>
+    <DonateText>If you find this project useful, consider supporting development!</DonateText>
+    <DonateLink>https://github.com/sponsors/kikootwo</DonateLink>
+  </Maintainer>
+  <Requires/>
+  <Screenshots>
+    <Screenshot>https://raw.githubusercontent.com/kikootwo/ReadMeABook/main/screenshots/HOMEPAGE.png</Screenshot>
+    <Screenshot>https://raw.githubusercontent.com/kikootwo/ReadMeABook/main/screenshots/ADMIN.png</Screenshot>
+    <Screenshot>https://raw.githubusercontent.com/kikootwo/ReadMeABook/main/screenshots/BOOKDATE.png</Screenshot>
+  </Screenshots>
+  <Network>bridge</Network>
+  <Config Name="Web UI Host Port" Target="3030" Default="3030" Mode="tcp" Description="Port for ReadMeABook's web interface." Type="Port" Display="always" Required="true" Mask="false">3030</Config>
+  <Config Name="Appdata" Target="/app/config" Default="/mnt/user/appdata/readmeabook" Mode="rw" Description="Persistent config files" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/readmeabook</Config>
+  <Config Name="Download Location" Target="/downloads" Default="/mnt/user/data/downloads" Mode="rw" Description="Both your download client and RMAB must see files at the SAME path. See: https://github.com/kikootwo/ReadMeABook/blob/main/documentation/deployment/volume-mapping.md" Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Media Library" Target="/media" Default="/mnt/user/data/media/audiobooks" Mode="rw" Description="Your audiobook/ebook library" Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Postgres Storage Location" Target="/var/lib/postgresql/data" Default="readmeabook_pgdata" Mode="rw" Description="" Type="Path" Display="always" Required="true" Mask="false">readmeabook_pgdata</Config>
+  <Config Name="Redis Storage Location" Target="/var/lib/redis" Default="/mnt/user/appdata/readmeabook/redis" Mode="rw" Description="" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/readmeabook/redis</Config>
+  <Config Name="App Cache" Target="/app/cache" Default="/mnt/user/appdata/readmeabook/cache" Mode="rw" Description="" Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/readmeabook/cache</Config>
+  <Config Name="PUBLIC_URL" Target="PUBLIC_URL" Default="https://audiobooks.example.com" Mode="" Description="Public URL if accessing from outside localhost. Required for OAuth." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="" Type="Variable" Display="advanced-hide" Required="true" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="" Type="Variable" Display="advanced-hide" Required="true" Mask="false">100</Config>
+  <TailscaleStateDir/>
+</Container>
