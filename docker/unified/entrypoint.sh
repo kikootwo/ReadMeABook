@@ -172,8 +172,13 @@ if [ -n "$DATABASE_URL" ]; then
 fi
 
 if [ -n "$REDIS_URL" ]; then
-    REDIS_HOST=$(echo "$REDIS_URL" | sed -n 's|redis://\([^:@]*@\)\?\([^:/]*\).*|\2|p')
-    if [ "$REDIS_HOST" != "127.0.0.1" ] && [ "$REDIS_HOST" != "localhost" ]; then
+    # Extract host from REDIS_URL - handles both redis://host:port and redis://:password@host:port
+    if echo "$REDIS_URL" | grep -q '@'; then
+        REDIS_HOST=$(echo "$REDIS_URL" | sed -n 's|.*@\([^:/]*\).*|\1|p')
+    else
+        REDIS_HOST=$(echo "$REDIS_URL" | sed -n 's|redis://\([^:/]*\).*|\1|p')
+    fi
+    if [ -n "$REDIS_HOST" ] && [ "$REDIS_HOST" != "127.0.0.1" ] && [ "$REDIS_HOST" != "localhost" ]; then
         USE_EXTERNAL_REDIS=true
         echo "ℹ️  External Redis detected at $REDIS_HOST"
     fi
@@ -192,33 +197,33 @@ if [ "$USE_EXTERNAL_POSTGRES" = "false" ]; then
 
     # PostgreSQL directories - owned by postgres user, group accessible
     if ! chown -R postgres:postgres "$PGDATA" /var/run/postgresql 2>/dev/null; then
-    echo ""
-    echo "❌ ERROR: Failed to set ownership on PostgreSQL directories"
-    echo ""
-    echo "   This usually happens when using bind mounts on incompatible filesystems."
-    echo ""
-    echo "   Common causes:"
-    echo "   - WSL2: Project on Windows filesystem (/mnt/c/...)"
-    echo "   - NFS/CIFS: Mount without proper permission support"
-    echo ""
-    echo "   Solutions:"
-    echo ""
-    echo "   1. Use Docker named volumes (recommended for WSL2):"
-    echo "      In docker-compose.yml, change:"
-    echo "        - ./pgdata:/var/lib/postgresql/data"
-    echo "      To:"
-    echo "        - pgdata:/var/lib/postgresql/data"
-    echo "      Then add at bottom:"
-    echo "        volumes:"
-    echo "          pgdata:"
-    echo ""
-    echo "   2. Move project to Linux filesystem (WSL2):"
-    echo "      mkdir -p ~/readmeabook && cd ~/readmeabook"
-    echo "      # Copy docker-compose.yml and restart"
-    echo ""
-    echo "   3. Pre-create directories with correct ownership:"
-    echo "      mkdir -p pgdata redis config cache"
-    echo "      # Let Docker create them on first run"
+        echo ""
+        echo "❌ ERROR: Failed to set ownership on PostgreSQL directories"
+        echo ""
+        echo "   This usually happens when using bind mounts on incompatible filesystems."
+        echo ""
+        echo "   Common causes:"
+        echo "   - WSL2: Project on Windows filesystem (/mnt/c/...)"
+        echo "   - NFS/CIFS: Mount without proper permission support"
+        echo ""
+        echo "   Solutions:"
+        echo ""
+        echo "   1. Use Docker named volumes (recommended for WSL2):"
+        echo "      In docker-compose.yml, change:"
+        echo "        - ./pgdata:/var/lib/postgresql/data"
+        echo "      To:"
+        echo "        - pgdata:/var/lib/postgresql/data"
+        echo "      Then add at bottom:"
+        echo "        volumes:"
+        echo "          pgdata:"
+        echo ""
+        echo "   2. Move project to Linux filesystem (WSL2):"
+        echo "      mkdir -p ~/readmeabook && cd ~/readmeabook"
+        echo "      # Copy docker-compose.yml and restart"
+        echo ""
+        echo "   3. Pre-create directories with correct ownership:"
+        echo "      mkdir -p pgdata redis config cache"
+        echo "      # Let Docker create them on first run"
         echo ""
         exit 1
     fi
@@ -336,9 +341,6 @@ EOF
         echo "✅ Database user and permissions verified"
     fi
 
-    # Stop PostgreSQL (supervisord will start it via wrapper)
-    echo "🔧 Stopping temporary PostgreSQL instance..."
-    su - postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D $PGDATA stop -m fast"
 fi
 
 # ============================================================================
@@ -352,7 +354,7 @@ if [ "$USE_EXTERNAL_POSTGRES" = "false" ]; then
     echo "✅ Using internal PostgreSQL (127.0.0.1:5432)"
 else
     # DATABASE_URL already set by user - do not modify
-    echo "✅ Using external DATABASE_URL: ${DATABASE_URL%%@*}@***"
+    echo "✅ Using external DATABASE_URL: $(echo "$DATABASE_URL" | sed 's|//.*@|//***@|')"
 fi
 
 if [ "$USE_EXTERNAL_REDIS" = "false" ]; then
@@ -360,7 +362,7 @@ if [ "$USE_EXTERNAL_REDIS" = "false" ]; then
     echo "✅ Using internal Redis (127.0.0.1:6379)"
 else
     # REDIS_URL already set by user - do not modify
-    echo "✅ Using external REDIS_URL: ${REDIS_URL}"
+    echo "✅ Using external REDIS_URL: $(echo "$REDIS_URL" | sed 's|//.*@|//***@|')"
 fi
 
 export NODE_ENV="production"
@@ -372,6 +374,8 @@ export HOSTNAME="0.0.0.0"
 cat > /etc/environment <<EOF
 DATABASE_URL=$DATABASE_URL
 REDIS_URL=$REDIS_URL
+USE_EXTERNAL_POSTGRES=$USE_EXTERNAL_POSTGRES
+USE_EXTERNAL_REDIS=$USE_EXTERNAL_REDIS
 JWT_SECRET=$JWT_SECRET
 JWT_REFRESH_SECRET=$JWT_REFRESH_SECRET
 CONFIG_ENCRYPTION_KEY=$CONFIG_ENCRYPTION_KEY
@@ -391,9 +395,19 @@ echo "✅ Environment configured"
 # ============================================================================
 # RUN PRISMA MIGRATIONS
 # ============================================================================
+if [ "$USE_EXTERNAL_POSTGRES" = "true" ]; then
+    echo "⚠️  Running schema sync against EXTERNAL database - prisma db push --accept-data-loss"
+    echo "   This runs on every container start. Ensure your external database is backed up."
+fi
 echo "🔄 Running Prisma migrations..."
 cd /app
 su - node -c "cd /app && DATABASE_URL='$DATABASE_URL' npx prisma db push --skip-generate --accept-data-loss" || echo "⚠️  Migrations may have failed, continuing..."
+
+# Stop internal PostgreSQL (supervisord will restart it via wrapper)
+if [ "$USE_EXTERNAL_POSTGRES" = "false" ]; then
+    echo "🔧 Stopping temporary PostgreSQL instance..."
+    su - postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D $PGDATA stop -m fast"
+fi
 
 # ============================================================================
 # DISPLAY STARTUP INFO

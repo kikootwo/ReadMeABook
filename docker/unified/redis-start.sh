@@ -1,10 +1,7 @@
 #!/bin/bash
 # Redis startup wrapper for unified container
-# Smart supervisor: detects external Redis and sleeps instead of starting local instance
-#
-# Behavior:
-# - If REDIS_URL points to external host (not 127.0.0.1/localhost), sleep infinity
-# - Otherwise, start local Redis instance
+# Checks USE_EXTERNAL_REDIS flag (set by entrypoint) to decide whether
+# to start the local instance or sleep to keep supervisord happy.
 #
 # Uses gosu to ensure correct PUID:PGID for file operations
 #
@@ -21,22 +18,9 @@ if [ -f /etc/environment ]; then
     set +a
 fi
 
-echo "[Redis] Checking for external Redis configuration..."
-
-# Extract host from REDIS_URL
-# Format: redis://host:port or redis://:password@host:port
-if [ -n "$REDIS_URL" ]; then
-    # Extract the host part (between :// or @, and :port or end)
-    REDIS_HOST=$(echo "$REDIS_URL" | sed -n 's|redis://\([^:@]*@\)\?\([^:/]*\).*|\2|p')
-    
-    echo "[Redis] Detected REDIS_URL host: $REDIS_HOST"
-    
-    # Check if host is external (not localhost or 127.0.0.1)
-    if [ "$REDIS_HOST" != "127.0.0.1" ] && [ "$REDIS_HOST" != "localhost" ]; then
-        echo "[Redis] ✅ External Redis detected at $REDIS_HOST"
-        echo "[Redis] Skipping local Redis startup - sleeping to keep supervisord happy"
-        exec sleep infinity
-    fi
+if [ "$USE_EXTERNAL_REDIS" = "true" ]; then
+    echo "[Redis] External Redis configured - skipping local instance"
+    exec sleep infinity
 fi
 
 echo "[Redis] Starting local Redis server..."
