@@ -12,7 +12,7 @@
   <Project>https://github.com/kikootwo/ReadMeABook</Project>
   <Overview>ReadMeABook is an audiobook library management and automation system, purpose-built for audiobooks. Request a book, and it handles the rest: searches indexers, downloads, organizes files, and triggers a library scan.</Overview>
   <Category>Downloaders: Tools: MediaApp:Other MediaServer:Books</Category>
-  <WebUI>http://[IP]:[PORT: 3030]/</WebUI>
+  <WebUI>http://[IP]:[PORT:3030]/</WebUI>
   <Icon>https://raw.githubusercontent.com/kikootwo/ReadMeABook/main/public/RMAB_1024x1024_APPICON.png</Icon>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
   <PostArgs/>
@@ -31,10 +31,10 @@
   </Screenshots>
   <Network>bridge</Network>
   <Config Name="Web UI Host Port" Target="3030" Default="3030" Mode="tcp" Description="Port for ReadMeABook's web interface." Type="Port" Display="always" Required="true" Mask="false">3030</Config>
-  <Config Name="Appdata" Target="/app/config" Default="/mnt/user/appdata/readmeabook" Mode="rw" Description="Persistent config files" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/readmeabook</Config>
+  <Config Name="Config Location" Target="/app/config" Default="/mnt/user/appdata/readmeabook/config" Mode="rw" Description="Persistent config files" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/readmeabook/config</Config>
   <Config Name="Download Location" Target="/downloads" Default="/mnt/user/data/downloads" Mode="rw" Description="Both your download client and RMAB must see files at the SAME path. See: https://github.com/kikootwo/ReadMeABook/blob/main/documentation/deployment/volume-mapping.md" Type="Path" Display="always" Required="true" Mask="false"/>
   <Config Name="Media Library" Target="/media" Default="/mnt/user/data/media/audiobooks" Mode="rw" Description="Your audiobook/ebook library" Type="Path" Display="always" Required="true" Mask="false"/>
-  <Config Name="Postgres Storage Location" Target="/var/lib/postgresql/data" Default="readmeabook_pgdata" Mode="rw" Description="" Type="Path" Display="always" Required="true" Mask="false">readmeabook_pgdata</Config>
+  <Config Name="Postgres Storage Location" Target="/var/lib/postgresql/data" Default="/mnt/user/appdata/readmeabook/pgdata" Mode="rw" Description="" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/readmeabook/pgdata</Config>
   <Config Name="Redis Storage Location" Target="/var/lib/redis" Default="/mnt/user/appdata/readmeabook/redis" Mode="rw" Description="" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/readmeabook/redis</Config>
   <Config Name="App Cache" Target="/app/cache" Default="/mnt/user/appdata/readmeabook/cache" Mode="rw" Description="" Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/readmeabook/cache</Config>
   <Config Name="PUBLIC_URL" Target="PUBLIC_URL" Default="https://audiobooks.example.com" Mode="" Description="Public URL if accessing from outside localhost. Required for OAuth." Type="Variable" Display="always" Required="false" Mask="false"/>
