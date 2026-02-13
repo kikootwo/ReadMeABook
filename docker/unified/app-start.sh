@@ -53,14 +53,75 @@ start_server() {
 start_server
 SERVER_PID=$!
 
-echo "[App] Waiting for server to be ready..."
-sleep 5
+# =============================================================================
+# WAIT FOR SERVER READINESS
+# =============================================================================
+# The health endpoint (/api/health) checks both the Next.js server AND database
+# connectivity. We must wait for both before initializing scheduled jobs.
 
-# Initialize application services (creates default scheduled jobs)
-echo "[App] Initializing application services..."
-curl -sf http://localhost:3030/api/init || echo "[App] Warning: Failed to initialize services (may already be initialized)"
+HEALTH_URL="http://localhost:3030/api/health"
+INIT_URL="http://localhost:3030/api/init"
+READY_TIMEOUT=${APP_READY_TIMEOUT:-60}
+INIT_RETRIES=${APP_INIT_RETRIES:-5}
 
-echo "[App] Server ready with PID $SERVER_PID"
+echo "[App] Waiting for server to be ready (timeout: ${READY_TIMEOUT}s)..."
+
+READY=false
+for i in $(seq 1 "$READY_TIMEOUT"); do
+    # Check if the server process is still alive
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        echo "[App] ERROR: Server process (PID $SERVER_PID) exited unexpectedly"
+        exit 1
+    fi
+
+    if curl -sf "$HEALTH_URL" > /dev/null 2>&1; then
+        READY=true
+        echo "[App] Server is healthy (took ${i}s)"
+        break
+    fi
+
+    # Log progress every 10 seconds
+    if [ $((i % 10)) -eq 0 ]; then
+        echo "[App] Still waiting for server... (${i}/${READY_TIMEOUT}s)"
+    fi
+
+    sleep 1
+done
+
+if [ "$READY" = "false" ]; then
+    echo "[App] ERROR: Server did not become healthy within ${READY_TIMEOUT}s"
+    echo "[App] The scheduler will not be initialized - scheduled jobs may be missing"
+    echo "[App] Check server logs above for errors (database connection, port conflict, etc.)"
+else
+    # =========================================================================
+    # INITIALIZE APPLICATION SERVICES
+    # =========================================================================
+    # Creates default scheduled jobs, runs credential migration, etc.
+    # Retry with backoff to handle transient failures during startup.
+
+    echo "[App] Initializing application services..."
+
+    INIT_SUCCESS=false
+    for attempt in $(seq 1 "$INIT_RETRIES"); do
+        HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" "$INIT_URL" 2>/dev/null) || HTTP_CODE="000"
+
+        if [ "$HTTP_CODE" = "200" ]; then
+            INIT_SUCCESS=true
+            echo "[App] Services initialized successfully"
+            break
+        fi
+
+        echo "[App] Init attempt $attempt/$INIT_RETRIES failed (HTTP $HTTP_CODE), retrying in ${attempt}s..."
+        sleep "$attempt"
+    done
+
+    if [ "$INIT_SUCCESS" = "false" ]; then
+        echo "[App] ERROR: Failed to initialize services after $INIT_RETRIES attempts"
+        echo "[App] Scheduled jobs may be missing - check application logs for details"
+    fi
+fi
+
+echo "[App] Server running with PID $SERVER_PID"
 
 # Verify the process is running with correct UID:GID (for debugging)
 if [ -f "/proc/$SERVER_PID/status" ]; then

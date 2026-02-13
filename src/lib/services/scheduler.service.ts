@@ -51,12 +51,18 @@ export class SchedulerService {
     logger.info('Initializing scheduler service...');
 
     // Re-encrypt any notification backends with plaintext sensitive fields
-    await getNotificationService().reEncryptUnprotectedBackends();
+    try {
+      await getNotificationService().reEncryptUnprotectedBackends();
+    } catch (error) {
+      logger.error('Failed to re-encrypt notification backends (non-fatal)', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
 
     // Create default jobs if they don't exist
     await this.ensureDefaultJobs();
 
-    // Load and schedule all enabled jobs
+    // Load and schedule all enabled jobs (works with whatever jobs exist in DB)
     await this.scheduleAllJobs();
 
     // Check and trigger overdue jobs
@@ -66,7 +72,8 @@ export class SchedulerService {
   }
 
   /**
-   * Ensure default jobs exist in database
+   * Ensure default jobs exist in database.
+   * Each job is created independently so a single failure doesn't block the rest.
    */
   private async ensureDefaultJobs(): Promise<void> {
     const defaults = [
@@ -128,17 +135,35 @@ export class SchedulerService {
       },
     ];
 
-    for (const defaultJob of defaults) {
-      const existing = await prisma.scheduledJob.findFirst({
-        where: { type: defaultJob.type },
-      });
+    let created = 0;
+    let failed = 0;
 
-      if (!existing) {
-        await prisma.scheduledJob.create({
-          data: defaultJob,
+    for (const defaultJob of defaults) {
+      try {
+        const existing = await prisma.scheduledJob.findFirst({
+          where: { type: defaultJob.type },
         });
-        logger.info(`Created default job: ${defaultJob.name} (disabled by default)`);
+
+        if (!existing) {
+          await prisma.scheduledJob.create({
+            data: defaultJob,
+          });
+          created++;
+          logger.info(`Created default job: ${defaultJob.name} (enabled: ${defaultJob.enabled})`);
+        }
+      } catch (error) {
+        failed++;
+        logger.error(`Failed to create default job: ${defaultJob.name}`, {
+          type: defaultJob.type,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
+    }
+
+    if (failed > 0) {
+      logger.warn(`Default jobs: ${created} created, ${failed} failed — failed jobs will be retried on next restart`);
+    } else if (created > 0) {
+      logger.info(`Default jobs: ${created} created`);
     }
   }
 
