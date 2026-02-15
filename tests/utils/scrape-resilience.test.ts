@@ -46,6 +46,16 @@ describe('getBrowserHeaders', () => {
     expect(headers['Sec-Fetch-User']).toBeDefined();
     expect(headers['Upgrade-Insecure-Requests']).toBeDefined();
   });
+
+  it('defaults to en-US Accept-Language when no custom value given', () => {
+    const headers = getBrowserHeaders('TestUA/1.0');
+    expect(headers['Accept-Language']).toBe('en-US,en;q=0.9');
+  });
+
+  it('uses custom Accept-Language for non-English regions', () => {
+    const headers = getBrowserHeaders('TestUA/1.0', 'de-DE,de;q=0.9,en;q=0.5');
+    expect(headers['Accept-Language']).toBe('de-DE,de;q=0.9,en;q=0.5');
+  });
 });
 
 describe('jitteredBackoff', () => {

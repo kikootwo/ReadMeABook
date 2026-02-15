@@ -13,6 +13,7 @@ import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Author } from '@/lib/hooks/useAuthors';
+import { FollowAuthorButton } from './FollowAuthorButton';
 
 interface AuthorCardProps {
   author: Author;
@@ -26,7 +27,16 @@ export function AuthorCard({ author }: AuthorCardProps) {
       aria-label={`View details for ${author.name}`}
     >
       {/* Circular Portrait Container */}
-      <div className="flex justify-center">
+      <div className="flex justify-center relative">
+        {/* Follow button overlay */}
+        <div className="absolute top-0 right-0 z-10">
+          <FollowAuthorButton
+            asin={author.asin}
+            name={author.name}
+            image={author.image}
+            compact
+          />
+        </div>
         <div
           className="
             relative overflow-hidden rounded-full

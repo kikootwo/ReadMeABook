@@ -65,6 +65,7 @@ model User {
   bookDateRecommendations BookDateRecommendation[]
   bookDateSwipes          BookDateSwipe[]
   goodreadsShelves        GoodreadsShelf[]
+  followedAuthors         FollowedAuthor[]
   reportedIssues          ReportedIssue[]          @relation("Reporter")
   resolvedIssues          ReportedIssue[]          @relation("Resolver")
 
@@ -527,4 +528,27 @@ model GoodreadsBookMapping {
   @@index([goodreadsBookId])
   @@index([audibleAsin])
   @@map("goodreads_book_mappings")
+}
+
+// ============================================================================
+// FOLLOWED AUTHORS TABLE
+// Per-user author subscriptions for tracking new releases
+// Documentation: documentation/features/followed-authors.md
+// ============================================================================
+
+model FollowedAuthor {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  asin      String   // Audible author ASIN
+  name      String   // Cached author name (for display without API call)
+  image     String?  @db.Text // Cached author image URL
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, asin])
+  @@index([userId])
+  @@index([asin])
+  @@map("followed_authors")
 }

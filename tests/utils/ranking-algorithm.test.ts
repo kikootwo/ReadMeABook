@@ -1398,6 +1398,84 @@ describe('ranking-algorithm', () => {
       expect(ranked[0].bonusModifiers.length).toBeGreaterThan(0);
     });
   });
+
+  describe('German title and author matching', () => {
+    const baseTorrent = {
+      indexer: 'IndexerA',
+      title: '',
+      size: 300 * MB,
+      seeders: 10,
+      leechers: 2,
+      downloadUrl: 'https://example.com/download/1',
+      age: 7,
+      indexerId: 1,
+    };
+
+    it('preserves German umlauts in title matching', () => {
+      const algorithm = new RankingAlgorithm();
+      const torrent = {
+        ...baseTorrent,
+        title: 'Die unendliche Geschichte - Michael Ende [Hörbuch]',
+      };
+
+      const ranked = rankTorrents(
+        [torrent],
+        { title: 'Die unendliche Geschichte', author: 'Michael Ende' }
+      );
+
+      expect(ranked).toHaveLength(1);
+      expect(ranked[0].score).toBeGreaterThan(0);
+    });
+
+    it('preserves ß and umlauts in author names', () => {
+      const algorithm = new RankingAlgorithm();
+      const torrent = {
+        ...baseTorrent,
+        title: 'Günter Grass - Die Blechtrommel',
+      };
+
+      const ranked = rankTorrents(
+        [torrent],
+        { title: 'Die Blechtrommel', author: 'Günter Grass' }
+      );
+
+      expect(ranked).toHaveLength(1);
+      expect(ranked[0].score).toBeGreaterThan(0);
+    });
+
+    it('matches German titles with special characters in torrent names', () => {
+      const algorithm = new RankingAlgorithm();
+      const torrent = {
+        ...baseTorrent,
+        title: 'Der Steppenwolf - Hermann Hesse [Ungekürzt]',
+      };
+
+      const ranked = rankTorrents(
+        [torrent],
+        { title: 'Der Steppenwolf', author: 'Hermann Hesse' }
+      );
+
+      expect(ranked).toHaveLength(1);
+      expect(ranked[0].score).toBeGreaterThan(0);
+    });
+
+    it('handles dotted separators with German names', () => {
+      const algorithm = new RankingAlgorithm();
+      const torrent = {
+        ...baseTorrent,
+        title: 'Sebastian.Fitzek.Der.Seelenbrecher',
+      };
+
+      const ranked = rankTorrents(
+        [torrent],
+        { title: 'Der Seelenbrecher', author: 'Sebastian Fitzek' },
+        { requireAuthor: false }
+      );
+
+      expect(ranked).toHaveLength(1);
+      expect(ranked[0].score).toBeGreaterThan(0);
+    });
+  });
 });
 
 

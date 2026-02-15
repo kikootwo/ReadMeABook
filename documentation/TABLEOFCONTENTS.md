@@ -97,6 +97,11 @@
 - **File hash-based library matching (ABS)** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md)
 - **Accurate ASIN matching for RMAB-organized content** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md)
 
+## Followed Authors
+- **Follow/unfollow authors, discover books** → [features/followed-authors.md](features/followed-authors.md)
+- **Authors page (Following/Search tabs)** → [features/followed-authors.md](features/followed-authors.md)
+- **Author detail + book availability** → [features/followed-authors.md](features/followed-authors.md)
+
 ## Deployment
 - **Docker Compose setup (multi-container)** → [deployment/docker.md](deployment/docker.md)
 - **Unified container (all-in-one)** → [deployment/unified.md](deployment/unified.md)
@@ -150,3 +155,5 @@
 **"Why do BookDate library books show placeholders?"** → [features/library-thumbnail-cache.md](features/library-thumbnail-cache.md)
 **"How does file hash matching work?"** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md)
 **"Why is ABS matching the wrong book?"** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md) (file hash prevents false positives)
+**"How do I follow an author?"** → [features/followed-authors.md](features/followed-authors.md)
+**"How do I see which books I already have from an author?"** → [features/followed-authors.md](features/followed-authors.md)

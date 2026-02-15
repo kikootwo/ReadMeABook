@@ -11,6 +11,7 @@
 import React, { useState } from 'react';
 import Image from 'next/image';
 import { AuthorDetail } from '@/lib/hooks/useAuthors';
+import { FollowAuthorButton } from './FollowAuthorButton';
 
 interface AuthorDetailCardProps {
   author: AuthorDetail;
@@ -64,20 +65,27 @@ export function AuthorDetailCard({ author }: AuthorDetailCardProps) {
           </div>
         )}
 
-        {/* Audible Link */}
-        {author.audibleUrl && (
-          <a
-            href={author.audibleUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-3 inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-          >
-            View on Audible
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-            </svg>
-          </a>
-        )}
+        {/* Audible Link + Follow Button */}
+        <div className="mt-3 flex flex-wrap items-center justify-center sm:justify-start gap-3">
+          {author.audibleUrl && (
+            <a
+              href={author.audibleUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+            >
+              View on Audible
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </a>
+          )}
+          <FollowAuthorButton
+            asin={author.asin}
+            name={author.name}
+            image={author.image}
+          />
+        </div>
 
         {/* Description */}
         {author.description && (

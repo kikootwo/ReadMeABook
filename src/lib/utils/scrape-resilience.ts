@@ -22,11 +22,11 @@ export function pickUserAgent(): string {
 }
 
 /** Build a full set of realistic browser headers for the given UA */
-export function getBrowserHeaders(userAgent: string): Record<string, string> {
+export function getBrowserHeaders(userAgent: string, acceptLanguage?: string): Record<string, string> {
   return {
     'User-Agent': userAgent,
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Language': acceptLanguage || 'en-US,en;q=0.9',
     'Accept-Encoding': 'gzip, deflate, br',
     'Connection': 'keep-alive',
     'Sec-Fetch-Site': 'none',
