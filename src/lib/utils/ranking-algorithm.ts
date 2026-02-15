@@ -335,20 +335,23 @@ export class RankingAlgorithm {
 
 
   /**
-   * Normalize text for matching by handling CamelCase and punctuation separators
+   * Normalize text for matching by handling CamelCase and punctuation separators.
+   * Preserves Unicode letters (umlauts, accented characters) for correct German/international matching.
    * "VirginaEvans TheCorrespondent" → "virgina evans the correspondent"
    * "Twelve.Months-Jim.Butcher" → "twelve months jim butcher"
    * "Author_Name_Book" → "author name book"
+   * "Die unendliche Geschichte - Michael Ende" → "die unendliche geschichte michael ende"
+   * "Günter Grass" → "günter grass"
    */
   private normalizeForMatching(text: string): string {
     return text
       // Split CamelCase FIRST (before lowercasing): "TheCorrespondent" → "The Correspondent"
-      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/([a-z\u00e0-\u024f])([A-Z\u00c0-\u024f])/g, '$1 $2')
       .toLowerCase()
       // Replace underscores with spaces (must be explicit since \w includes _)
       .replace(/_/g, ' ')
-      // Replace other punctuation/separators with spaces (preserves apostrophes in contractions)
-      .replace(/[^\w\s']/g, ' ')
+      // Replace punctuation/separators with spaces — preserves Unicode letters (\p{L}), numbers (\p{N}), apostrophes
+      .replace(/[^\p{L}\p{N}\s']/gu, ' ')
       // Collapse multiple spaces
       .replace(/\s+/g, ' ')
       .trim();
