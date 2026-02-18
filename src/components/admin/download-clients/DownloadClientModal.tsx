@@ -286,7 +286,7 @@ export function DownloadClientModal({
         remotePath: remotePathMappingEnabled ? remotePath : undefined,
         localPath: remotePathMappingEnabled ? localPath : undefined,
         category,
-        customPath: sanitizedCustomPath || undefined,
+        customPath: sanitizedCustomPath,
         postImportCategory,
       };
 
