@@ -157,6 +157,9 @@ export async function processRetryFailedImports(payload: RetryFailedImportsPaylo
         );
         triggered++;
         logger.info(`Triggered organize job for ${request.type || 'audiobook'} request ${request.id}: ${request.audiobook.title}`);
+
+        // Spread DB operations over time to avoid connection pool exhaustion
+        await new Promise(resolve => setTimeout(resolve, 100));
       } catch (error) {
         logger.error(`Failed to trigger organize for request ${request.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         skipped++;

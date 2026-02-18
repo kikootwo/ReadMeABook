@@ -316,6 +316,7 @@ async function downloadFileWithProgress(
     let bytesDownloaded = 0;
     let lastLogTime = Date.now();
     let lastDbUpdateTime = Date.now();
+    let dbUpdatePending = false; // Guard against stacking unresolved DB updates
 
     response.data.on('data', (chunk: Buffer) => {
       bytesDownloaded += chunk.length;
@@ -332,18 +333,18 @@ async function downloadFileWithProgress(
         logger.info(`Download progress: ${percent}% (${(bytesDownloaded / (1024 * 1024)).toFixed(1)} MB, ${speedMBps.toFixed(2)} MB/s)`);
         lastLogTime = now;
 
-        // Update database with progress (non-blocking)
-        if (now - lastDbUpdateTime >= PROGRESS_UPDATE_INTERVAL_MS) {
+        // Update database with progress (non-blocking, at most 1 in-flight at a time)
+        if (now - lastDbUpdateTime >= PROGRESS_UPDATE_INTERVAL_MS && !dbUpdatePending) {
           lastDbUpdateTime = now;
+          dbUpdatePending = true;
 
-          // Non-blocking update - fire and forget
           prisma.request.update({
             where: { id: tracking.requestId },
             data: {
               progress: Math.min(percent, 99), // Cap at 99% until fully complete
               updatedAt: new Date(),
             },
-          }).catch(() => {}); // Ignore errors during progress update
+          }).catch(() => {}).finally(() => { dbUpdatePending = false; });
         }
       }
     });

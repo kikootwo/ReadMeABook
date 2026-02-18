@@ -124,6 +124,9 @@ export async function processMonitorRssFeeds(payload: MonitorRssFeedsPayload): P
         break;
       }
     }
+
+    // Spread DB operations over time to avoid connection pool exhaustion
+    await new Promise(resolve => setTimeout(resolve, 100));
   }
 
   logger.info(`RSS monitoring complete: ${matched} matches found and queued for processing`);

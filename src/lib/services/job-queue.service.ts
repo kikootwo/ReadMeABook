@@ -63,6 +63,8 @@ export interface MonitorDownloadPayload extends JobPayload {
   downloadHistoryId: string;
   downloadClientId: string;
   downloadClient: DownloadClientType;
+  lastProgress?: number;  // Previous poll's progress (0-100) for stall detection
+  stallCount?: number;    // Consecutive polls with no progress change (drives backoff)
 }
 
 export interface OrganizeFilesPayload extends JobPayload {
@@ -277,19 +279,19 @@ export class JobQueueService {
    */
   private startProcessors(): void {
     // Search indexers processor
-    this.queue.process('search_indexers', 3, async (job: BullJob<SearchIndexersPayload>) => {
+    this.queue.process('search_indexers', 2, async (job: BullJob<SearchIndexersPayload>) => {
       const { processSearchIndexers } = await import('../processors/search-indexers.processor');
       return await processSearchIndexers(job.data);
     });
 
     // Download torrent processor
-    this.queue.process('download_torrent', 3, async (job: BullJob<DownloadTorrentPayload>) => {
+    this.queue.process('download_torrent', 2, async (job: BullJob<DownloadTorrentPayload>) => {
       const { processDownloadTorrent } = await import('../processors/download-torrent.processor');
       return await processDownloadTorrent(job.data);
     });
 
     // Monitor download processor
-    this.queue.process('monitor_download', 5, async (job: BullJob<MonitorDownloadPayload>) => {
+    this.queue.process('monitor_download', 2, async (job: BullJob<MonitorDownloadPayload>) => {
       const { processMonitorDownload } = await import('../processors/monitor-download.processor');
       return await processMonitorDownload(job.data);
     });
@@ -357,23 +359,23 @@ export class JobQueueService {
     });
 
     // Send notification processor
-    this.queue.process('send_notification', 5, async (job: BullJob<SendNotificationPayload>) => {
+    this.queue.process('send_notification', 2, async (job: BullJob<SendNotificationPayload>) => {
       const { processSendNotification } = await import('../processors/send-notification.processor');
       return await processSendNotification(job.data);
     });
 
     // Ebook-specific processors
-    this.queue.process('search_ebook', 3, async (job: BullJob<SearchEbookPayload>) => {
+    this.queue.process('search_ebook', 2, async (job: BullJob<SearchEbookPayload>) => {
       const { processSearchEbook } = await import('../processors/search-ebook.processor');
       return await processSearchEbook(job.data);
     });
 
-    this.queue.process('start_direct_download', 3, async (job: BullJob<StartDirectDownloadPayload>) => {
+    this.queue.process('start_direct_download', 2, async (job: BullJob<StartDirectDownloadPayload>) => {
       const { processStartDirectDownload } = await import('../processors/direct-download.processor');
       return await processStartDirectDownload(job.data);
     });
 
-    this.queue.process('monitor_direct_download', 5, async (job: BullJob<MonitorDirectDownloadPayload>) => {
+    this.queue.process('monitor_direct_download', 2, async (job: BullJob<MonitorDirectDownloadPayload>) => {
       const { processMonitorDirectDownload } = await import('../processors/direct-download.processor');
       return await processMonitorDirectDownload(job.data);
     });
@@ -563,7 +565,9 @@ export class JobQueueService {
     downloadHistoryId: string,
     downloadClientId: string,
     downloadClient: DownloadClientType,
-    delaySeconds: number = 0
+    delaySeconds: number = 0,
+    lastProgress?: number,
+    stallCount?: number
   ): Promise<string> {
     return await this.addJob(
       'monitor_download',
@@ -572,6 +576,8 @@ export class JobQueueService {
         downloadHistoryId,
         downloadClientId,
         downloadClient,
+        lastProgress,
+        stallCount,
       } as MonitorDownloadPayload,
       {
         priority: 5, // Medium priority

@@ -44,6 +44,7 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
     }
 
     // Trigger appropriate search job for each request based on type
+    // Throttle: 100ms delay between jobs to avoid connection pool burst
     const jobQueue = getJobQueueService();
     let triggered = 0;
 
@@ -73,6 +74,9 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
       } catch (error) {
         logger.error(`Failed to trigger search for request ${request.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
+
+      // Spread DB operations over time to avoid connection pool exhaustion
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
 
     logger.info(`Triggered ${triggered}/${requests.length} search jobs`);

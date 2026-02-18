@@ -16,8 +16,23 @@ import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-
  * Checks download progress from download client and updates request status
  * Re-schedules itself if download is still in progress
  */
+/** Base polling interval in seconds */
+const BASE_POLL_INTERVAL = 10;
+/** Maximum polling interval in seconds (5 minutes) */
+const MAX_POLL_INTERVAL = 300;
+
+/**
+ * Compute next poll delay with exponential backoff for stalled downloads.
+ * Active downloads poll every 10s; stalled downloads back off up to 5 min.
+ */
+function getBackoffDelay(stallCount: number): number {
+  if (stallCount <= 0) return BASE_POLL_INTERVAL;
+  return Math.min(BASE_POLL_INTERVAL * Math.pow(2, stallCount), MAX_POLL_INTERVAL);
+}
+
 export async function processMonitorDownload(payload: MonitorDownloadPayload): Promise<any> {
-  const { requestId, downloadHistoryId, downloadClientId, downloadClient, jobId } = payload;
+  const { requestId, downloadHistoryId, downloadClientId, downloadClient, jobId,
+          lastProgress: prevProgress, stallCount: prevStallCount } = payload;
 
   const logger = RMABLogger.forJob(jobId, 'MonitorDownload');
 
@@ -199,22 +214,35 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         progress: progressPercent,
       };
     } else {
-      // Still downloading - schedule another check in 10 seconds
+      // Still downloading — compute adaptive poll interval
+      const isStalled = info.downloadSpeed === 0
+        || progressPercent === (prevProgress ?? -1)
+        || progressState === 'paused'
+        || progressState === 'queued'
+        || progressState === 'checking';
+
+      const stallCount = isStalled ? (prevStallCount ?? 0) + 1 : 0;
+      const delay = getBackoffDelay(stallCount);
+
       const jobQueue = getJobQueueService();
       await jobQueue.addMonitorJob(
         requestId,
         downloadHistoryId,
         downloadClientId,
         downloadClient,
-        10 // Delay 10 seconds between checks
+        delay,
+        progressPercent,
+        stallCount
       );
 
-      // Only log every 5% progress to reduce log spam
-      const shouldLog = progressPercent % 5 === 0 || progressPercent < 5;
+      // Only log every 5% progress to reduce log spam, but always log stall transitions
+      const shouldLog = progressPercent % 5 === 0 || progressPercent < 5
+        || (stallCount === 1) || (stallCount > 0 && stallCount % 10 === 0);
       if (shouldLog) {
         logger.info(`Request ${requestId}: ${progressPercent}% complete (${progressState})`, {
           speed: info.downloadSpeed,
           eta: info.eta,
+          ...(stallCount > 0 && { stallCount, nextPollSec: delay }),
         });
       }
 
@@ -227,6 +255,8 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         speed: info.downloadSpeed,
         eta: info.eta,
         state: progressState,
+        stallCount,
+        nextPollSec: delay,
       };
     }
   } catch (error) {

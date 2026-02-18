@@ -491,6 +491,9 @@ export class SchedulerService {
         if (this.isJobOverdue(job)) {
           logger.info(`Job "${job.name}" is overdue, triggering now...`);
           await this.triggerJobNow(job.id);
+
+          // Stagger triggers to avoid connection pool burst on startup
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
       } catch (error) {
         logger.error(`Failed to trigger overdue job "${job.name}"`, { error: error instanceof Error ? error.message : String(error) });

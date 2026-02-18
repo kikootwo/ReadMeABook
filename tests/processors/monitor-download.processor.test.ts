@@ -150,7 +150,9 @@ describe('processMonitorDownload', () => {
       'dh-2',
       'hash-2',
       'qbittorrent',
-      10
+      10,
+      45,  // progressPercent passed as lastProgress
+      0,   // stallCount reset (download is actively progressing)
     );
   });
 

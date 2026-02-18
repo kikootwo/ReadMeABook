@@ -163,7 +163,20 @@ export async function enrichAudiobooksWithMatches(
   audiobooks: Array<AudiobookMatchInput & Record<string, any>>,
   userId?: string
 ) {
-  const results = await Promise.all(audiobooks.map((book) => enrichAudiobookWithMatch(book)));
+  // Batch parallel DB queries to avoid connection pool exhaustion
+  const BATCH_SIZE = 5;
+  const results: Awaited<ReturnType<typeof enrichAudiobookWithMatch>>[] = [];
+  for (let i = 0; i < audiobooks.length; i += BATCH_SIZE) {
+    const batch = audiobooks.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.allSettled(batch.map((book) => enrichAudiobookWithMatch(book)));
+    for (const result of batchResults) {
+      if (result.status === 'fulfilled') {
+        results.push(result.value);
+      } else {
+        logger.error('Failed to enrich audiobook', { error: result.reason instanceof Error ? result.reason.message : String(result.reason) });
+      }
+    }
+  }
 
   // Always enrich with request status (check ANY user's requests)
   const asins = audiobooks.map(book => book.asin);
