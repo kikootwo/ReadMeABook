@@ -31,6 +31,8 @@ export interface ScrapingConfig {
   languageLabels: string[];
   /** Release date field labels */
   releaseDateLabels: string[];
+  /** Series label prefixes used to find series links in search results */
+  seriesLabels: string[];
   /** Accepted language values for filtering (lowercase) */
   acceptedLanguageValues: string[];
   /** Regex patterns that match hour portions in runtime strings */
@@ -80,6 +82,7 @@ const ENGLISH_CONFIG: LanguageConfig = {
     lengthLabels: ['Length:'],
     languageLabels: ['Language:'],
     releaseDateLabels: ['Release date:'],
+    seriesLabels: ['Series:'],
     acceptedLanguageValues: ['english'],
     runtimeHourPatterns: [/(\d+)\s*hrs?/i, /(\d+)\s*hours?/i],
     runtimeMinutePatterns: [/(\d+)\s*mins?/i, /(\d+)\s*minutes?/i],
@@ -112,6 +115,7 @@ const GERMAN_CONFIG: LanguageConfig = {
     lengthLabels: ['Spieldauer:', 'Dauer:', 'L\u00e4nge:'],
     languageLabels: ['Sprache:'],
     releaseDateLabels: ['Erscheinungsdatum:'],
+    seriesLabels: ['Serie:', 'Reihe:'],
     acceptedLanguageValues: ['deutsch', 'german'],
     runtimeHourPatterns: [/(\d+)\s*Std\.?/i, /(\d+)\s*Stunden?/i],
     runtimeMinutePatterns: [/(\d+)\s*Min\.?/i, /(\d+)\s*Minuten?/i],
@@ -145,6 +149,7 @@ const SPANISH_CONFIG: LanguageConfig = {
     lengthLabels: ['Duraci\u00f3n:'],
     languageLabels: ['Idioma:'],
     releaseDateLabels: ['Fecha de lanzamiento:'],
+    seriesLabels: ['Serie:'],
     acceptedLanguageValues: ['espa\u00f1ol', 'spanish'],
     runtimeHourPatterns: [/(\d+)\s*h\b/i, /(\d+)\s*horas?/i],
     runtimeMinutePatterns: [/(\d+)\s*min/i, /(\d+)\s*minutos?/i],

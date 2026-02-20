@@ -307,6 +307,24 @@ export function AudiobookDetailsModal({
                       Narrated by {audiobook.narrator}
                     </p>
                   )}
+                  {audiobook.series && (
+                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                      {audiobook.seriesAsin ? (
+                        <Link
+                          href={`/series/${audiobook.seriesAsin}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onClose();
+                          }}
+                          className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                        >
+                          {audiobook.series}{audiobook.seriesPart ? `, Book ${audiobook.seriesPart}` : ''}
+                        </Link>
+                      ) : (
+                        <span>{audiobook.series}{audiobook.seriesPart ? `, Book ${audiobook.seriesPart}` : ''}</span>
+                      )}
+                    </p>
+                  )}
 
                   {/* Status Badge */}
                   {status.type !== 'none' && (

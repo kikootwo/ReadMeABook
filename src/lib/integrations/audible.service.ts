@@ -48,6 +48,7 @@ export interface AudibleAudiobook {
   genres?: string[];
   series?: string;
   seriesPart?: string;
+  seriesAsin?: string;
 }
 
 export interface AudibleSearchResult {
@@ -75,6 +76,22 @@ export class AudibleService {
    */
   public getBaseUrl(): string {
     return this.baseUrl;
+  }
+
+  /**
+   * Get the current Audible region code
+   */
+  public getRegion(): AudibleRegion {
+    return this.region;
+  }
+
+  /**
+   * Public fetch wrapper for external scraping modules (e.g. audible-series.ts).
+   * Ensures the service is initialized and delegates to fetchWithRetry.
+   */
+  public async fetch(url: string, config: any = {}): Promise<{ data: any; meta: FetchResultMeta }> {
+    await this.initialize();
+    return this.fetchWithRetry(url, config);
   }
 
   /**
@@ -749,6 +766,7 @@ export class AudibleService {
         genres: data.genres?.map((g: any) => typeof g === 'string' ? g : g.name).slice(0, 5) || undefined,
         series: data.seriesPrimary?.name || undefined,
         seriesPart: data.seriesPrimary?.position || undefined,
+        seriesAsin: data.seriesPrimary?.asin || undefined,
       };
 
       // Ensure cover art URL is high quality
@@ -765,7 +783,8 @@ export class AudibleService {
         rating: result.rating,
         genreCount: result.genres?.length || 0,
         series: result.series,
-        seriesPart: result.seriesPart
+        seriesPart: result.seriesPart,
+        seriesAsin: result.seriesAsin
       });
 
       return result;

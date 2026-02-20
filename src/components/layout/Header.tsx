@@ -166,6 +166,12 @@ export function Header() {
             >
               Authors
             </Link>
+            <Link
+              href="/series"
+              className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            >
+              Series
+            </Link>
             {showBookDate && (
               <Link
                 href="/bookdate"
@@ -276,6 +282,13 @@ export function Header() {
                 className="px-3 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors"
               >
                 Authors
+              </Link>
+              <Link
+                href="/series"
+                onClick={() => setShowMobileMenu(false)}
+                className="px-3 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors"
+              >
+                Series
               </Link>
               {showBookDate && (
                 <Link

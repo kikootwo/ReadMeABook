@@ -20,6 +20,9 @@ export interface Audiobook {
   releaseDate?: string;
   rating?: number;
   genres?: string[];
+  series?: string;         // Series name (e.g., "A Song of Ice and Fire")
+  seriesPart?: string;     // Position in series (e.g., "1", "1.5")
+  seriesAsin?: string;     // Audible ASIN for the series (links to /series/{asin})
   isAvailable?: boolean;  // Set by real-time matching against plex_library
   plexGuid?: string | null;
   dbId?: string | null;

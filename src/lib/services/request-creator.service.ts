@@ -84,6 +84,7 @@ export async function createRequestForUser(
   let year: number | undefined;
   let series: string | undefined;
   let seriesPart: string | undefined;
+  let seriesAsin: string | undefined;
   try {
     const audibleService = getAudibleService();
     const audnexusData = await audibleService.getAudiobookDetails(audiobook.asin);
@@ -100,6 +101,7 @@ export async function createRequestForUser(
     }
     if (audnexusData?.series) series = audnexusData.series;
     if (audnexusData?.seriesPart) seriesPart = audnexusData.seriesPart;
+    if (audnexusData?.seriesAsin) seriesAsin = audnexusData.seriesAsin;
   } catch (error) {
     logger.warn(`Failed to fetch Audnexus data for ASIN ${audiobook.asin}: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
@@ -121,6 +123,7 @@ export async function createRequestForUser(
         year,
         series,
         seriesPart,
+        seriesAsin,
         status: 'requested',
       },
     });
@@ -134,6 +137,7 @@ export async function createRequestForUser(
     if (year) updates.year = year;
     if (series) updates.series = series;
     if (seriesPart) updates.seriesPart = seriesPart;
+    if (seriesAsin) updates.seriesAsin = seriesAsin;
 
     if (Object.keys(updates).length > 0) {
       audiobookRecord = await prisma.audiobook.update({
