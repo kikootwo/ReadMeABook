@@ -9,6 +9,14 @@ import { RMABLogger } from '../utils/logger';
 import { getConfigService } from '../services/config.service';
 import { AudibleRegion, AUDIBLE_REGIONS, DEFAULT_AUDIBLE_REGION } from '../types/audible';
 import {
+  getLanguageForRegion,
+  stripPrefixes,
+  buildContainsSelector,
+  extractByPatterns,
+  isAcceptedLanguage,
+  type LanguageConfig,
+} from '../constants/language-config';
+import {
   pickUserAgent,
   getBrowserHeaders,
   jitteredBackoff,
@@ -70,6 +78,13 @@ export class AudibleService {
   }
 
   /**
+   * Get the language config for the current region
+   */
+  private getLangConfig(): LanguageConfig {
+    return getLanguageForRegion(this.region);
+  }
+
+  /**
    * Force re-initialization (used when region config changes)
    */
   public forceReinitialize(): void {
@@ -106,6 +121,9 @@ export class AudibleService {
 
       logger.info(`Initializing Audible service with region: ${this.region} (${this.baseUrl})`);
 
+      // Get language config for the region
+      const langConfig = getLanguageForRegion(this.region);
+
       // Create axios client with region-specific base URL and realistic browser headers
       this.client = axios.create({
         baseURL: this.baseUrl,
@@ -113,7 +131,7 @@ export class AudibleService {
         headers: getBrowserHeaders(this.sessionUserAgent),
         params: {
           ipRedirectOverride: 'true', // Prevent IP-based region redirects
-          language: 'english', // Force English locale (prevents IP-based language serving for non-English IPs)
+          language: langConfig.scraping.audibleLocaleParam, // Force locale (prevents IP-based language serving)
         },
       });
 
@@ -125,13 +143,16 @@ export class AudibleService {
       this.baseUrl = AUDIBLE_REGIONS[this.region].baseUrl;
       this.sessionUserAgent = pickUserAgent();
       this.pacer.reset();
+
+      const fallbackLangConfig = getLanguageForRegion(this.region);
+
       this.client = axios.create({
         baseURL: this.baseUrl,
         timeout: 15000,
         headers: getBrowserHeaders(this.sessionUserAgent),
         params: {
           ipRedirectOverride: 'true',
-          language: 'english',
+          language: fallbackLangConfig.scraping.audibleLocaleParam,
         },
       });
       this.initialized = true;
@@ -289,12 +310,14 @@ export class AudibleService {
           const ratingText = $el.find('.ratingsLabel').text().trim();
           const rating = ratingText ? parseFloat(ratingText.split(' ')[0]) : undefined;
 
+          const langConfig = this.getLangConfig();
+
           audiobooks.push({
             asin,
             title,
-            author: authorText.replace('By:', '').replace('Written by:', '').trim(),
+            author: stripPrefixes(authorText, langConfig.scraping.authorPrefixes),
             authorAsin: authorAsinMatch?.[1] || undefined,
-            narrator: narratorText.replace('Narrated by:', '').trim(),
+            narrator: stripPrefixes(narratorText, langConfig.scraping.narratorPrefixes),
             coverArtUrl: coverArtUrl.replace(/\._.*_\./, '._SL500_.'),
             rating,
           });
@@ -391,12 +414,14 @@ export class AudibleService {
           const ratingText = $el.find('.ratingsLabel').text().trim();
           const rating = ratingText ? parseFloat(ratingText.split(' ')[0]) : undefined;
 
+          const langConfig = this.getLangConfig();
+
           audiobooks.push({
             asin,
             title,
-            author: authorText.replace('By:', '').replace('Written by:', '').trim(),
+            author: stripPrefixes(authorText, langConfig.scraping.authorPrefixes),
             authorAsin: authorAsinMatch?.[1] || undefined,
-            narrator: narratorText.replace('Narrated by:', '').trim(),
+            narrator: stripPrefixes(narratorText, langConfig.scraping.narratorPrefixes),
             coverArtUrl: coverArtUrl.replace(/\._.*_\./, '._SL500_.'),
             rating,
           });
@@ -487,9 +512,11 @@ export class AudibleService {
 
         const coverArtUrl = $el.find('img').attr('src') || '';
 
+        const langConfig = this.getLangConfig();
+
         // Extract runtime/duration
         const runtimeText = $el.find('.runtimeLabel').text().trim() ||
-                           $el.find('span:contains("Length:")').text().trim();
+                           $el.find(buildContainsSelector('span', langConfig.scraping.lengthLabels)).text().trim();
         const durationMinutes = this.parseRuntime(runtimeText);
 
         // Extract rating
@@ -500,9 +527,9 @@ export class AudibleService {
         audiobooks.push({
           asin,
           title,
-          author: authorText.replace('By:', '').replace('Written by:', '').trim(),
+          author: stripPrefixes(authorText, langConfig.scraping.authorPrefixes),
           authorAsin: authorAsinMatch?.[1] || undefined,
-          narrator: narratorText.replace('Narrated by:', '').trim(),
+          narrator: stripPrefixes(narratorText, langConfig.scraping.narratorPrefixes),
           coverArtUrl: coverArtUrl.replace(/\._.*_\./, '._SL500_.'),
           durationMinutes,
           rating,
@@ -565,13 +592,15 @@ export class AudibleService {
         $('.s-result-item, .productListItem').each((_index, element) => {
           const $el = $(element);
 
-          // --- Language filter: require explicit "English" ---
-          const langText = $el.find('span:contains("Language:")').text().trim() ||
+          // --- Language filter: require matching language for region ---
+          const langConfig = this.getLangConfig();
+          const langText = $el.find(buildContainsSelector('span', langConfig.scraping.languageLabels)).text().trim() ||
                            $el.find('.languageLabel').text().trim();
-          // Extract language value (e.g. "Language: English" → "English")
-          const langMatch = langText.match(/Language:\s*(.+)/i);
+          // Extract language value (e.g. "Language: English" -> "English", "Sprache: Deutsch" -> "Deutsch")
+          const langLabelPattern = new RegExp(`(?:${langConfig.scraping.languageLabels.map(l => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\s*(.+)`, 'i');
+          const langMatch = langText.match(langLabelPattern);
           const language = langMatch?.[1]?.trim();
-          if (!language || language.toLowerCase() !== 'english') return;
+          if (!language || !isAcceptedLanguage(language, langConfig)) return;
 
           // --- Author ASIN filter: verify target ASIN in author links ---
           const authorLinks = $el.find('a[href*="/author/"]');
@@ -609,7 +638,7 @@ export class AudibleService {
           const coverArtUrl = $el.find('img').attr('src') || '';
 
           const runtimeText = $el.find('.runtimeLabel').text().trim() ||
-                              $el.find('span:contains("Length:")').text().trim();
+                              $el.find(buildContainsSelector('span', langConfig.scraping.lengthLabels)).text().trim();
           const durationMinutes = this.parseRuntime(runtimeText);
 
           const ratingText = $el.find('.ratingsLabel').text().trim() ||
@@ -619,9 +648,9 @@ export class AudibleService {
           allBooks.push({
             asin: bookAsin,
             title,
-            author: authorText.replace('By:', '').replace('Written by:', '').trim(),
+            author: stripPrefixes(authorText, langConfig.scraping.authorPrefixes),
             authorAsin,
-            narrator: narratorText.replace('Narrated by:', '').trim(),
+            narrator: stripPrefixes(narratorText, langConfig.scraping.narratorPrefixes),
             coverArtUrl: coverArtUrl.replace(/\._.*_\./, '._SL500_.'),
             durationMinutes,
             rating,
@@ -867,7 +896,8 @@ export class AudibleService {
           result.author = [...new Set(authors)].slice(0, 3).join(', ');
         }
 
-        result.author = result.author.replace(/^By:\s*/i, '').replace(/^Written by:\s*/i, '').trim();
+        const authorLangConfig = this.getLangConfig();
+        result.author = stripPrefixes(result.author, authorLangConfig.scraping.authorPrefixes);
         logger.info(` Author from HTML: "${result.author}"`);
       }
 
@@ -911,22 +941,16 @@ export class AudibleService {
         }
 
         if (result.narrator) {
-          result.narrator = result.narrator.replace(/^Narrated by:\s*/i, '').trim();
+          const detailLangConfig = this.getLangConfig();
+          result.narrator = stripPrefixes(result.narrator, detailLangConfig.scraping.narratorPrefixes);
         }
         logger.info(` Narrator from HTML: "${result.narrator || ''}"`);
       }
 
       // Description - try multiple approaches with strict filtering
       if (!result.description) {
-        const excludePatterns = [
-          /\$\d+\.\d+/,  // Price patterns
-          /cancel anytime/i,
-          /free trial/i,
-          /membership/i,
-          /subscribe/i,
-          /offer.*ends/i,
-          /^\s*by\s+[\w\s,]+$/i,  // Just author names
-        ];
+        const descLangConfig = this.getLangConfig();
+        const excludePatterns = descLangConfig.scraping.descriptionExcludePatterns;
 
         const isValidDescription = (text: string): boolean => {
           if (!text || text.length < 50 || text.length > 5000) return false;
@@ -982,18 +1006,20 @@ export class AudibleService {
 
       // Runtime/Duration - try multiple approaches
       if (!result.durationMinutes) {
+        const rtLangConfig = this.getLangConfig();
+
         // Look for runtime text in various places
         const runtimeText =
           $('li.runtimeLabel span').text().trim() ||
           $('.runtimeLabel').text().trim() ||
-          $('span:contains("Length:")').parent().text().trim() ||
-          $('li:contains("Length:")').text().trim() ||
+          $(buildContainsSelector('span', rtLangConfig.scraping.lengthLabels)).parent().text().trim() ||
+          $(buildContainsSelector('li', rtLangConfig.scraping.lengthLabels)).text().trim() ||
           (() => {
             // Look for any text matching duration pattern
             let found = '';
             $('li, span, div').each((_, elem) => {
               const text = $(elem).text().trim();
-              if (text.match(/\d+\s*(hr|hour|h)\s*\d*\s*(min|minute|m)?/i) && text.length < 100) {
+              if (text.match(rtLangConfig.scraping.durationDetectionPattern) && text.length < 100) {
                 found = text;
                 return false; // break
               }
@@ -1007,41 +1033,55 @@ export class AudibleService {
 
       // Rating - try multiple approaches
       if (!result.rating) {
+        const ratingLangConfig = this.getLangConfig();
         const ratingText =
           $('.ratingsLabel').text().trim() ||
           $('[class*="rating"]').first().text().trim() ||
-          $('span:contains("out of 5 stars")').parent().text().trim() ||
+          $(`span:contains("${ratingLangConfig.scraping.ratingTextSelector}")`).parent().text().trim() ||
           (() => {
-            // Look for rating pattern
+            // Look for rating pattern using language-specific patterns
             let found = '';
             $('span, div').each((_, elem) => {
               const text = $(elem).text().trim();
-              if (text.match(/\d+\.?\d*\s*out of\s*5/i) && text.length < 50) {
-                found = text;
-                return false;
+              if (text.length < 50) {
+                for (const pattern of ratingLangConfig.scraping.ratingPatterns) {
+                  if (pattern.test(text)) {
+                    found = text;
+                    return false;
+                  }
+                }
               }
             });
             return found;
           })();
 
         if (ratingText) {
-          const ratingMatch = ratingText.match(/(\d+\.?\d*)\s*out of/i);
-          result.rating = ratingMatch ? parseFloat(ratingMatch[1]) : undefined;
+          let ratingValue: number | undefined;
+          for (const pattern of ratingLangConfig.scraping.ratingPatterns) {
+            const ratingMatch = ratingText.match(pattern);
+            if (ratingMatch) {
+              // Handle comma as decimal separator (e.g. "4,5" in German/Spanish)
+              ratingValue = parseFloat(ratingMatch[1].replace(',', '.'));
+              break;
+            }
+          }
+          result.rating = ratingValue;
         }
         logger.info(` Rating from "${ratingText}": ${result.rating}`);
       }
 
       // Release date - try multiple selectors
       if (!result.releaseDate) {
+        const rdLangConfig = this.getLangConfig();
         const releaseDateText =
-          $('li:contains("Release date:")').text().trim() ||
-          $('span:contains("Release date:")').parent().text().trim() ||
+          $(buildContainsSelector('li', rdLangConfig.scraping.releaseDateLabels)).text().trim() ||
+          $(buildContainsSelector('span', rdLangConfig.scraping.releaseDateLabels)).parent().text().trim() ||
           $('[class*="release"]').text().trim();
 
-        const dateMatch = releaseDateText.match(/Release date:\s*(.+)/i) ||
-                         releaseDateText.match(/(\w+ \d{1,2},? \d{4})/);
+        const dateMatch = extractByPatterns(releaseDateText, rdLangConfig.scraping.releaseDatePatterns) ||
+                         releaseDateText.match(/(\w+ \d{1,2},? \d{4})/)?.[1];
         if (dateMatch) {
-          result.releaseDate = dateMatch[1].trim();
+          result.releaseDate = dateMatch.trim();
         }
         logger.info(` Release date from "${releaseDateText}": ${result.releaseDate}`);
       }
@@ -1078,20 +1118,30 @@ export class AudibleService {
   }
 
   /**
-   * Parse runtime text to minutes
+   * Parse runtime text to minutes using language-specific patterns
    */
   private parseRuntime(runtimeText: string): number | undefined {
     if (!runtimeText) return undefined;
 
-    const hoursMatch = runtimeText.match(/(\d+)\s*hrs?/i);
-    const minutesMatch = runtimeText.match(/(\d+)\s*mins?/i);
-
+    const langConfig = this.getLangConfig();
     let totalMinutes = 0;
-    if (hoursMatch) {
-      totalMinutes += parseInt(hoursMatch[1]) * 60;
+
+    // Try each hour pattern until one matches
+    for (const pattern of langConfig.scraping.runtimeHourPatterns) {
+      const match = runtimeText.match(pattern);
+      if (match) {
+        totalMinutes += parseInt(match[1]) * 60;
+        break;
+      }
     }
-    if (minutesMatch) {
-      totalMinutes += parseInt(minutesMatch[1]);
+
+    // Try each minute pattern until one matches
+    for (const pattern of langConfig.scraping.runtimeMinutePatterns) {
+      const match = runtimeText.match(pattern);
+      if (match) {
+        totalMinutes += parseInt(match[1]);
+        break;
+      }
     }
 
     return totalMinutes > 0 ? totalMinutes : undefined;

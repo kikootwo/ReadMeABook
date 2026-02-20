@@ -10,6 +10,7 @@ const prismaMock = createPrismaMock();
 
 const configServiceMock = vi.hoisted(() => ({
   get: vi.fn(),
+  getAudibleRegion: vi.fn().mockResolvedValue('us'),
 }));
 
 const jobQueueMock = vi.hoisted(() => ({
@@ -39,6 +40,7 @@ vi.mock('@/lib/services/ebook-scraper', () => ebookScraperMock);
 describe('processSearchEbook', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    configServiceMock.getAudibleRegion.mockResolvedValue('us');
     configServiceMock.get.mockImplementation(async (key: string) => {
       if (key === 'ebook_sidecar_preferred_format') return 'epub';
       if (key === 'ebook_sidecar_base_url') return 'https://annas-archive.li';
@@ -79,7 +81,8 @@ describe('processSearchEbook', () => {
       'epub',
       'https://annas-archive.li',
       expect.anything(),
-      undefined
+      undefined,
+      'en'
     );
     expect(jobQueueMock.addStartDirectDownloadJob).toHaveBeenCalledWith(
       'req-1',
@@ -123,7 +126,8 @@ describe('processSearchEbook', () => {
       'epub',
       'https://annas-archive.li',
       expect.anything(),
-      undefined
+      undefined,
+      'en'
     );
   });
 
@@ -253,7 +257,8 @@ describe('processSearchEbook', () => {
       'epub',
       'https://annas-archive.li',
       expect.anything(),
-      'http://flaresolverr:8191'
+      'http://flaresolverr:8191',
+      'en'
     );
   });
 

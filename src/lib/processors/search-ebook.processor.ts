@@ -14,6 +14,8 @@ import { RMABLogger } from '../utils/logger';
 import { getProwlarrService } from '../integrations/prowlarr.service';
 import { rankEbookTorrents, RankedEbookTorrent } from '../utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer-grouping';
+import { getLanguageForRegion } from '../constants/language-config';
+import type { AudibleRegion } from '../types/audible';
 
 // Import ebook scraper functions for Anna's Archive
 import {
@@ -151,6 +153,11 @@ async function searchAnnasArchive(
   const baseUrl = await configService.get('ebook_sidecar_base_url') || 'https://annas-archive.li';
   const flaresolverrUrl = await configService.get('ebook_sidecar_flaresolverr_url') || undefined;
 
+  // Get language code from Audible region config
+  const region = await configService.getAudibleRegion() as AudibleRegion;
+  const langConfig = getLanguageForRegion(region);
+  const languageCode = langConfig.annasArchiveLang;
+
   if (flaresolverrUrl) {
     logger.info(`Using FlareSolverr at ${flaresolverrUrl}`);
   }
@@ -161,7 +168,7 @@ async function searchAnnasArchive(
   // Try ASIN search first (exact match - best)
   if (audiobook.asin) {
     logger.info(`Searching Anna's Archive by ASIN: ${audiobook.asin} (format: ${preferredFormat})...`);
-    md5 = await searchByAsin(audiobook.asin, preferredFormat, baseUrl, logger, flaresolverrUrl);
+    md5 = await searchByAsin(audiobook.asin, preferredFormat, baseUrl, logger, flaresolverrUrl, languageCode);
 
     if (md5) {
       logger.info(`Found via ASIN: ${md5}`);
@@ -174,7 +181,7 @@ async function searchAnnasArchive(
   // Fallback to title + author search
   if (!md5) {
     logger.info(`Searching Anna's Archive by title + author: "${audiobook.title}" by ${audiobook.author}...`);
-    md5 = await searchByTitle(audiobook.title, audiobook.author, preferredFormat, baseUrl, logger, flaresolverrUrl);
+    md5 = await searchByTitle(audiobook.title, audiobook.author, preferredFormat, baseUrl, logger, flaresolverrUrl, languageCode);
 
     if (md5) {
       logger.info(`Found via title search: ${md5}`);
@@ -301,6 +308,10 @@ async function searchIndexers(
     logger.info(`Will filter ${aboveThreshold.length} results > 20 MB (too large for ebooks)`);
   }
 
+  // Get language-specific stop words for ranking
+  const ebookRegion = await configService.getAudibleRegion() as AudibleRegion;
+  const ebookLangConfig = getLanguageForRegion(ebookRegion);
+
   // Rank results with ebook-specific scoring
   // This filters out > 20MB and uses inverted size scoring
   const rankedResults = rankEbookTorrents(allResults, {
@@ -311,6 +322,8 @@ async function searchIndexers(
     indexerPriorities,
     flagConfigs,
     requireAuthor: true, // Automatic mode - prevent wrong authors
+    stopWords: ebookLangConfig.stopWords,
+    characterReplacements: ebookLangConfig.characterReplacements,
   });
 
   // Log filter results

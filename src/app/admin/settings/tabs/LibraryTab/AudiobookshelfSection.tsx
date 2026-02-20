@@ -164,11 +164,11 @@ export function AudiobookshelfSection({
         >
           {Object.values(AUDIBLE_REGIONS).map((region) => (
             <option key={region.code} value={region.code}>
-              {region.name}{!region.isEnglish ? ' *' : ''}
+              {region.name}{region.language !== 'en' ? ' *' : ''}
             </option>
           ))}
         </select>
-        {AUDIBLE_REGIONS[settings.audibleRegion as keyof typeof AUDIBLE_REGIONS]?.isEnglish === false && (
+        {AUDIBLE_REGIONS[settings.audibleRegion as keyof typeof AUDIBLE_REGIONS]?.language !== 'en' && (
           <div className="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-4 border border-amber-200 dark:border-amber-800 mt-2">
             <div className="flex gap-3">
               <svg

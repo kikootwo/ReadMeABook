@@ -14,6 +14,8 @@ import { getProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { rankEbookTorrents, RankedEbookTorrent } from '@/lib/utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '@/lib/utils/indexer-grouping';
 import { RMABLogger } from '@/lib/utils/logger';
+import { getLanguageForRegion } from '@/lib/constants/language-config';
+import type { AudibleRegion } from '@/lib/types/audible';
 import {
   searchByAsin,
   searchByTitle,
@@ -121,6 +123,11 @@ export async function POST(
         const format = preferredFormat || 'epub';
         const annasBaseUrl = baseUrl || 'https://annas-archive.li';
 
+        // Get language code from Audible region config
+        const region = await configService.getAudibleRegion() as AudibleRegion;
+        const langConfig = getLanguageForRegion(region);
+        const languageCode = langConfig.annasArchiveLang;
+
         if (!isAnnasArchiveEnabled && !isIndexerSearchEnabled) {
           return NextResponse.json(
             { error: 'No ebook sources enabled. Enable Anna\'s Archive or Indexer Search in settings.' },
@@ -145,7 +152,8 @@ export async function POST(
               audiobook.author,
               format,
               annasBaseUrl,
-              flaresolverrUrl || undefined
+              flaresolverrUrl || undefined,
+              languageCode
             ).catch((err) => {
               logger.error(`Anna's Archive search failed: ${err.message}`);
               return null;
@@ -217,7 +225,8 @@ async function searchAnnasArchiveForInteractive(
   author: string,
   preferredFormat: string,
   baseUrl: string,
-  flaresolverrUrl?: string
+  flaresolverrUrl?: string,
+  languageCode: string = 'en'
 ): Promise<EbookSearchResult[]> {
   let md5: string | null = null;
   let searchMethod: 'asin' | 'title' = 'title';
@@ -225,7 +234,7 @@ async function searchAnnasArchiveForInteractive(
   // Try ASIN search first
   if (asin) {
     logger.info(`Searching Anna's Archive by ASIN: ${asin}`);
-    md5 = await searchByAsin(asin, preferredFormat, baseUrl, undefined, flaresolverrUrl);
+    md5 = await searchByAsin(asin, preferredFormat, baseUrl, undefined, flaresolverrUrl, languageCode);
     if (md5) {
       searchMethod = 'asin';
       logger.info(`Found via ASIN: ${md5}`);
@@ -235,7 +244,7 @@ async function searchAnnasArchiveForInteractive(
   // Fallback to title search
   if (!md5) {
     logger.info(`Searching Anna's Archive by title: "${title}"`);
-    md5 = await searchByTitle(title, author, preferredFormat, baseUrl, undefined, flaresolverrUrl);
+    md5 = await searchByTitle(title, author, preferredFormat, baseUrl, undefined, flaresolverrUrl, languageCode);
     if (md5) {
       logger.info(`Found via title: ${md5}`);
     }
@@ -356,6 +365,10 @@ async function searchIndexersForInteractive(
     return [];
   }
 
+  // Get language-specific stop words for ranking
+  const rankRegion = await configService.getAudibleRegion() as AudibleRegion;
+  const rankLangConfig = getLanguageForRegion(rankRegion);
+
   // Rank results with ebook scoring
   // Use requireAuthor=false for interactive mode (let user decide)
   const rankedResults = rankEbookTorrents(allResults, {
@@ -366,6 +379,8 @@ async function searchIndexersForInteractive(
     indexerPriorities,
     flagConfigs,
     requireAuthor: false,
+    stopWords: rankLangConfig.stopWords,
+    characterReplacements: rankLangConfig.characterReplacements,
   });
 
   // Log ranking debug info (same format as search-ebook.processor.ts)

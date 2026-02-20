@@ -10,6 +10,8 @@ import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { getProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { rankTorrents } from '@/lib/utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '@/lib/utils/indexer-grouping';
+import { getLanguageForRegion } from '@/lib/constants/language-config';
+import type { AudibleRegion } from '@/lib/types/audible';
 import { z } from 'zod';
 import { RMABLogger } from '@/lib/utils/logger';
 
@@ -140,13 +142,19 @@ export async function POST(request: NextRequest) {
         logger.info(`Will filter ${belowThreshold.length} results < ${sizeMBThreshold} MB (likely ebooks)`);
       }
 
+      // Get language-specific stop words for ranking
+      const region = await configService.getAudibleRegion() as AudibleRegion;
+      const langConfig = getLanguageForRegion(region);
+
       // Rank torrents using the ranking algorithm with indexer priorities and flag configs
       // Note: rankTorrents now filters out results < 20 MB internally
       // requireAuthor: false - interactive search, show all results for user decision
       const rankedResults = rankTorrents(results, { title, author, durationMinutes }, {
         indexerPriorities,
         flagConfigs,
-        requireAuthor: false  // Interactive mode - let user decide
+        requireAuthor: false,  // Interactive mode - let user decide
+        stopWords: langConfig.stopWords,
+        characterReplacements: langConfig.characterReplacements,
       });
 
       // Log filter results

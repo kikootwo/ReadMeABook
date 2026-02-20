@@ -8,7 +8,7 @@ import { createPrismaMock } from '../helpers/prisma';
 import { createJobQueueMock } from '../helpers/job-queue';
 
 const prismaMock = createPrismaMock();
-const configMock = vi.hoisted(() => ({ get: vi.fn() }));
+const configMock = vi.hoisted(() => ({ get: vi.fn(), getAudibleRegion: vi.fn().mockResolvedValue('us') }));
 const jobQueueMock = createJobQueueMock();
 const prowlarrMock = vi.hoisted(() => ({ search: vi.fn(), searchWithVariations: vi.fn() }));
 
@@ -35,6 +35,7 @@ vi.mock('@/lib/integrations/audible.service', () => ({
 describe('processSearchIndexers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    configMock.getAudibleRegion.mockResolvedValue('us');
   });
 
   it('marks request awaiting_search when no results found', async () => {

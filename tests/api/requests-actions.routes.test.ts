@@ -12,7 +12,7 @@ const prismaMock = createPrismaMock();
 const requireAuthMock = vi.hoisted(() => vi.fn());
 const prowlarrMock = vi.hoisted(() => ({ search: vi.fn(), searchWithVariations: vi.fn() }));
 const rankTorrentsMock = vi.hoisted(() => vi.fn());
-const configServiceMock = vi.hoisted(() => ({ get: vi.fn() }));
+const configServiceMock = vi.hoisted(() => ({ get: vi.fn(), getAudibleRegion: vi.fn().mockResolvedValue('us') }));
 const groupIndexersMock = vi.hoisted(() => vi.fn());
 const groupDescriptionMock = vi.hoisted(() => vi.fn(() => 'Group'));
 const configState = vi.hoisted(() => ({
@@ -75,6 +75,7 @@ vi.mock('fs/promises', () => ({ default: fsMock, ...fsMock, constants: { R_OK: 4
 describe('Request action routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    configServiceMock.getAudibleRegion.mockResolvedValue('us');
     configState.values.clear();
     authRequest = { user: { id: 'user-1', role: 'user' }, json: vi.fn() };
     requireAuthMock.mockImplementation((_req: any, handler: any) => handler(authRequest));

@@ -170,7 +170,8 @@ export async function downloadEbook(
   preferredFormat: string = 'epub',
   baseUrl: string = 'https://annas-archive.li',
   logger?: RMABLogger,
-  flaresolverrUrl?: string
+  flaresolverrUrl?: string,
+  languageCode: string = 'en'
 ): Promise<EbookDownloadResult> {
   try {
     let md5: string | null = null;
@@ -183,7 +184,7 @@ export async function downloadEbook(
     // Step 1: Try ASIN search (exact match - best)
     if (asin) {
       await logger?.info(`Searching by ASIN: ${asin} (format: ${preferredFormat})...`);
-      md5 = await searchByAsin(asin, preferredFormat, baseUrl, logger, flaresolverrUrl);
+      md5 = await searchByAsin(asin, preferredFormat, baseUrl, logger, flaresolverrUrl, languageCode);
 
       if (md5) {
         await logger?.info(`Found via ASIN: ${md5}`);
@@ -195,7 +196,7 @@ export async function downloadEbook(
     // Step 2: Fallback to title + author search
     if (!md5) {
       await logger?.info(`Searching by title + author: "${title}" by ${author}...`);
-      md5 = await searchByTitle(title, author, preferredFormat, baseUrl, logger, flaresolverrUrl);
+      md5 = await searchByTitle(title, author, preferredFormat, baseUrl, logger, flaresolverrUrl, languageCode);
 
       if (md5) {
         await logger?.info(`Found via title search: ${md5}`);
@@ -312,10 +313,11 @@ export async function searchByAsin(
   format: string,
   baseUrl: string,
   logger?: RMABLogger,
-  flaresolverrUrl?: string
+  flaresolverrUrl?: string,
+  languageCode: string = 'en'
 ): Promise<string | null> {
   // Check cache first
-  const cacheKey = `${asin}-${format}`;
+  const cacheKey = `${asin}-${format}-${languageCode}`;
   if (md5Cache.has(cacheKey)) {
     const cached = md5Cache.get(cacheKey);
     if (cached) {
@@ -327,7 +329,7 @@ export async function searchByAsin(
   try {
     // Build search URL with ASIN and optional format filter
     const formatParam = format && format !== 'any' ? `ext=${format}&` : '';
-    const searchUrl = `${baseUrl}/search?${formatParam}lang=en&q=%22asin:${asin}%22`;
+    const searchUrl = `${baseUrl}/search?${formatParam}lang=${languageCode}&q=%22asin:${asin}%22`;
 
     moduleLogger.debug(`ASIN search URL: ${searchUrl}`);
 
@@ -404,10 +406,11 @@ export async function searchByTitle(
   format: string,
   baseUrl: string,
   logger?: RMABLogger,
-  flaresolverrUrl?: string
+  flaresolverrUrl?: string,
+  languageCode: string = 'en'
 ): Promise<string | null> {
   // Check cache first
-  const cacheKey = `title-${title}-${author}-${format}`.toLowerCase();
+  const cacheKey = `title-${title}-${author}-${format}-${languageCode}`.toLowerCase();
   if (md5Cache.has(cacheKey)) {
     const cached = md5Cache.get(cacheKey);
     if (cached) {
@@ -432,8 +435,8 @@ export async function searchByTitle(
     // Add content type filters (books only, all fiction/nonfiction/unknown)
     searchUrl += '&content=book_nonfiction&content=book_fiction&content=book_unknown';
 
-    // Add language filter (English)
-    searchUrl += '&lang=en';
+    // Add language filter
+    searchUrl += `&lang=${languageCode}`;
 
     // Empty raw query (we're using specific terms instead)
     searchUrl += '&q=';

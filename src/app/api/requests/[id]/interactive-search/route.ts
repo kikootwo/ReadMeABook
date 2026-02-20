@@ -9,6 +9,8 @@ import { prisma } from '@/lib/db';
 import { getProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { rankTorrents } from '@/lib/utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '@/lib/utils/indexer-grouping';
+import { getLanguageForRegion } from '@/lib/constants/language-config';
+import type { AudibleRegion } from '@/lib/types/audible';
 import { RMABLogger } from '@/lib/utils/logger';
 import { resolveInteractiveSearchAccess } from '@/lib/utils/permissions';
 
@@ -189,6 +191,10 @@ export async function POST(
         }
       }
 
+      // Get language-specific stop words for ranking
+      const region = await configService.getAudibleRegion() as AudibleRegion;
+      const langConfig = getLanguageForRegion(region);
+
       // Rank torrents using the ranking algorithm with indexer priorities and flag configs
       // Always use the audiobook's title/author for ranking (not custom search query)
       // requireAuthor: false - interactive mode, show all results for user decision
@@ -199,7 +205,9 @@ export async function POST(
       }, {
         indexerPriorities,
         flagConfigs,
-        requireAuthor: false  // Interactive mode - let user decide
+        requireAuthor: false,  // Interactive mode - let user decide
+        stopWords: langConfig.stopWords,
+        characterReplacements: langConfig.characterReplacements,
       });
 
       // No threshold filtering for interactive search - show all results

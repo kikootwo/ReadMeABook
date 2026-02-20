@@ -10,6 +10,7 @@ let authRequest: any;
 const requireAuthMock = vi.hoisted(() => vi.fn());
 const configServiceMock = vi.hoisted(() => ({
   get: vi.fn(),
+  getAudibleRegion: vi.fn().mockResolvedValue('us'),
 }));
 const prowlarrMock = vi.hoisted(() => ({
   search: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock('@/lib/utils/indexer-grouping', () => ({
 describe('Audiobooks search torrents route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    configServiceMock.getAudibleRegion.mockResolvedValue('us');
     authRequest = {
       user: { id: 'user-1', role: 'user' },
       json: vi.fn(),

@@ -9,6 +9,8 @@ import { getProwlarrService } from '../integrations/prowlarr.service';
 import { getRankingAlgorithm } from '../utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer-grouping';
 import { RMABLogger } from '../utils/logger';
+import { getLanguageForRegion } from '../constants/language-config';
+import type { AudibleRegion } from '../types/audible';
 
 /**
  * Process search indexers job
@@ -146,8 +148,10 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       logger.info(`Will filter ${belowThreshold.length} results < ${sizeMBThreshold} MB (likely ebooks)`);
     }
 
-    // Get ranking algorithm
+    // Get ranking algorithm and language-specific stop words
     const ranker = getRankingAlgorithm();
+    const region = await configService.getAudibleRegion() as AudibleRegion;
+    const langConfig = getLanguageForRegion(region);
 
     // Rank results with indexer priorities and flag configs
     // Note: rankTorrents now filters out results < 20 MB internally
@@ -159,7 +163,9 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     }, {
       indexerPriorities,
       flagConfigs,
-      requireAuthor: true  // Automatic mode - prevent wrong authors
+      requireAuthor: true,  // Automatic mode - prevent wrong authors
+      stopWords: langConfig.stopWords,
+      characterReplacements: langConfig.characterReplacements,
     });
 
     // Log filter results

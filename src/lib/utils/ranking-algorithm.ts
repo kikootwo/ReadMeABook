@@ -40,6 +40,8 @@ export interface RankTorrentsOptions {
   indexerPriorities?: Map<number, number>;  // indexerId -> priority (1-25)
   flagConfigs?: IndexerFlagConfig[];         // Flag bonus configurations
   requireAuthor?: boolean;                   // Enforce author presence check (default: true)
+  stopWords?: string[];                      // Language-specific stop words for matching
+  characterReplacements?: Record<string, string>;  // Language-specific char replacements (e.g. ß→ss)
 }
 
 export interface EbookTorrentRequest {
@@ -52,6 +54,8 @@ export interface RankEbookTorrentsOptions {
   indexerPriorities?: Map<number, number>;  // indexerId -> priority (1-25)
   flagConfigs?: IndexerFlagConfig[];         // Flag bonus configurations
   requireAuthor?: boolean;                   // Enforce author presence check (default: true)
+  stopWords?: string[];                      // Language-specific stop words for matching
+  characterReplacements?: Record<string, string>;  // Language-specific char replacements (e.g. ß→ss)
 }
 
 export interface BonusModifier {
@@ -113,7 +117,9 @@ export class RankingAlgorithm {
     const {
       indexerPriorities,
       flagConfigs,
-      requireAuthor = true  // Safe default: require author in automatic mode
+      requireAuthor = true,  // Safe default: require author in automatic mode
+      stopWords,
+      characterReplacements,
     } = options;
     // Filter out files < 20 MB (likely ebooks/samples)
     const filteredTorrents = torrents.filter((torrent) => {
@@ -126,7 +132,7 @@ export class RankingAlgorithm {
       const formatScore = this.scoreFormat(torrent);
       const sizeScore = this.scoreSize(torrent, audiobook.durationMinutes);
       const seederScore = this.scoreSeeders(torrent.seeders);
-      const matchScore = this.scoreMatch(torrent, audiobook, requireAuthor);
+      const matchScore = this.scoreMatch(torrent, audiobook, requireAuthor, stopWords, characterReplacements);
 
       const baseScore = formatScore + sizeScore + seederScore + matchScore;
 
@@ -340,11 +346,22 @@ export class RankingAlgorithm {
    * "Twelve.Months-Jim.Butcher" → "twelve months jim butcher"
    * "Author_Name_Book" → "author name book"
    */
-  private normalizeForMatching(text: string): string {
-    return text
+  private normalizeForMatching(text: string, characterReplacements?: Record<string, string>): string {
+    let result = text
       // Split CamelCase FIRST (before lowercasing): "TheCorrespondent" → "The Correspondent"
       .replace(/([a-z])([A-Z])/g, '$1 $2')
-      .toLowerCase()
+      .toLowerCase();
+    // Apply language-specific character replacements before NFD (e.g. ß→ss)
+    if (characterReplacements) {
+      for (const [from, to] of Object.entries(characterReplacements)) {
+        result = result.replace(new RegExp(from, 'g'), to);
+      }
+    }
+    return result
+      // NFD normalization: convert accented chars to ASCII base forms
+      // e.g. "uber" from "uber", "senor" from "senor", "cafe" from "cafe"
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
       // Replace underscores with spaces (must be explicit since \w includes _)
       .replace(/_/g, ' ')
       // Replace other punctuation/separators with spaces (preserves apostrophes in contractions)
@@ -362,11 +379,13 @@ export class RankingAlgorithm {
   private scoreMatch(
     torrent: TorrentResult,
     audiobook: AudiobookRequest,
-    requireAuthor: boolean = true
+    requireAuthor: boolean = true,
+    customStopWords?: string[],
+    characterReplacements?: Record<string, string>
   ): number {
-    // Normalize for matching (handles CamelCase, punctuation separators)
-    const torrentTitle = this.normalizeForMatching(torrent.title);
-    const requestTitle = this.normalizeForMatching(audiobook.title);
+    // Normalize for matching (handles CamelCase, punctuation separators, diacritics)
+    const torrentTitle = this.normalizeForMatching(torrent.title, characterReplacements);
+    const requestTitle = this.normalizeForMatching(audiobook.title, characterReplacements);
 
     // Parse authors from RAW string first (preserving commas for splitting)
     // Then normalize individual authors for matching
@@ -377,19 +396,30 @@ export class RankingAlgorithm {
       .filter(a => a.length > 2 && !['translator', 'narrator'].includes(a));
 
     // Normalize parsed authors for matching (handles CamelCase in author names)
-    const normalizedAuthors = parsedAuthors.map(a => this.normalizeForMatching(a));
+    const normalizedAuthors = parsedAuthors.map(a => this.normalizeForMatching(a, characterReplacements));
     // Combined normalized author string for fuzzy matching
     const requestAuthorNormalized = normalizedAuthors.join(' ');
 
     // ========== STAGE 1: WORD COVERAGE FILTER (MANDATORY) ==========
     // Extract significant words (filter out common stop words)
-    const stopWords = ['the', 'a', 'an', 'of', 'on', 'in', 'at', 'by', 'for'];
+    // Use provided language-specific stop words, or fall back to English defaults
+    const stopWords = customStopWords || ['the', 'a', 'an', 'of', 'on', 'in', 'at', 'by', 'for'];
 
     const extractWords = (text: string, stopList: string[]): string[] => {
-      return text
+      let processed = text
         // Split CamelCase FIRST: "TheCorrespondent" → "The Correspondent"
         .replace(/([a-z])([A-Z])/g, '$1 $2')
-        .toLowerCase()
+        .toLowerCase();
+      // Apply language-specific character replacements before NFD
+      if (characterReplacements) {
+        for (const [from, to] of Object.entries(characterReplacements)) {
+          processed = processed.replace(new RegExp(from, 'g'), to);
+        }
+      }
+      return processed
+        // NFD normalization for accented characters
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
         // Replace underscores with spaces (must be explicit since \w includes _)
         .replace(/_/g, ' ')
         // Remove other punctuation (but keep apostrophes for contractions)
@@ -431,7 +461,7 @@ export class RankingAlgorithm {
       }
 
       // Normalize the required portion (handles CamelCase, punctuation)
-      const required = this.normalizeForMatching(requiredRaw);
+      const required = this.normalizeForMatching(requiredRaw, characterReplacements);
       const optional = optionalMatches.join(' ');
 
       return { required, optional };
@@ -653,7 +683,7 @@ export class RankingAlgorithm {
    * @param requestAuthor - Raw author string (will be parsed and normalized internally)
    * @returns true if at least ONE author is present with high confidence
    */
-  private checkAuthorPresence(torrentTitle: string, requestAuthor: string): boolean {
+  private checkAuthorPresence(torrentTitle: string, requestAuthor: string, characterReplacements?: Record<string, string>): boolean {
     // Parse multiple authors (same logic as Stage 3 author matching)
     const authors = requestAuthor
       .split(/,|&| and | - /)
@@ -661,7 +691,7 @@ export class RankingAlgorithm {
       .filter(a => a.length > 2 && !['translator', 'narrator'].includes(a));
 
     // Normalize each author for matching
-    const normalizedAuthors = authors.map(a => this.normalizeForMatching(a));
+    const normalizedAuthors = authors.map(a => this.normalizeForMatching(a, characterReplacements));
 
     return this.checkAuthorPresenceWithParsed(torrentTitle, normalizedAuthors);
   }
@@ -788,7 +818,9 @@ export class RankingAlgorithm {
     const {
       indexerPriorities,
       flagConfigs,
-      requireAuthor = true  // Safe default: require author in automatic mode
+      requireAuthor = true,  // Safe default: require author in automatic mode
+      stopWords,
+      characterReplacements,
     } = options;
 
     // Filter out files > 20 MB (too large for ebooks)
@@ -809,7 +841,7 @@ export class RankingAlgorithm {
       const matchScore = this.scoreMatch(torrent, {
         title: ebook.title,
         author: ebook.author,
-      }, requireAuthor);
+      }, requireAuthor, stopWords, characterReplacements);
 
       const baseScore = formatScore + sizeScore + seederScore + matchScore;
 
