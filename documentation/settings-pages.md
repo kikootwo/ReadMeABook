@@ -271,7 +271,7 @@ src/app/admin/settings/
 
 **PUT /api/admin/settings/audible**
 - Updates Audible region
-- Body: `{ region: string }` (one of: us, ca, uk, au, in, es)
+- Body: `{ region: string }` (one of: us, ca, uk, au, in, es, fr)
 - No validation required
 
 **PUT /api/admin/settings/prowlarr/indexers**
