@@ -16,7 +16,7 @@ import type { AudibleRegion } from '../types/audible';
 // Types
 // ---------------------------------------------------------------------------
 
-export type SupportedLanguage = 'en' | 'de' | 'es';
+export type SupportedLanguage = 'en' | 'de' | 'es' | 'fr';
 
 export interface ScrapingConfig {
   /** Audible locale query-param value (e.g. 'english', 'deutsch') */
@@ -170,6 +170,38 @@ const SPANISH_CONFIG: LanguageConfig = {
   },
 };
 
+const FRENCH_CONFIG: LanguageConfig = {
+  code: 'fr',
+  annasArchiveLang: 'fr',
+  epubCode: 'fr',
+  stopWords: ['le', 'la', 'les','un', 'une', 'de', 'des', 'sur', 'dans', '\u00e0', 'et', 'par', 'pour'],
+  characterReplacements: {},
+  scraping: {
+    audibleLocaleParam: 'français',
+    authorPrefixes: ['De :', '\u00c9crit par :', 'Auteur :'],
+    narratorPrefixes: ['Lu par :'],
+    lengthLabels: ['Dur\u00e9e :'],
+    languageLabels: ['Langue :'],
+    releaseDateLabels: ['Date de publication :'],
+    seriesLabels: ['S\u00e9rie :'],
+    acceptedLanguageValues: ['français', 'french'],
+    runtimeHourPatterns: [/(\d+)\s*h\b/i, /(\d+)\s*heures?/i],
+    runtimeMinutePatterns: [/(\d+)\s*min/i, /(\d+)\s*minutes?/i],
+    ratingPatterns: [/(\d+[.,]?\d*)\s*de\s*5/i],
+    releaseDatePatterns: [/Date de publication:\s*(.+)/i],
+    descriptionExcludePatterns: [
+      /\$\d+\.\d+/,
+      /\d+,\d+\s*\u20ac/,
+      /Essayer pour/i,
+      /R\u00e9siliez \u00e0 tout moment/i,
+      /Acheter pour/i,
+      /^\s*de\s+[\w\s,]+$/i,
+    ],
+    durationDetectionPattern: /\d+\s*(h|heures?)\s*\d*\s*(min|minutes?)?/i,
+    ratingTextSelector: 'sur 5 étoiles',
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Lookup Maps
 // ---------------------------------------------------------------------------
@@ -178,6 +210,7 @@ export const LANGUAGE_CONFIGS: Record<SupportedLanguage, LanguageConfig> = {
   en: ENGLISH_CONFIG,
   de: GERMAN_CONFIG,
   es: SPANISH_CONFIG,
+  fr: FRENCH_CONFIG,
 };
 
 /**
@@ -192,6 +225,7 @@ export const REGION_LANGUAGE_MAP: Record<AudibleRegion, SupportedLanguage> = {
   in: 'en',
   de: 'de',
   es: 'es',
+  fr: 'fr',
 };
 
 // ---------------------------------------------------------------------------
