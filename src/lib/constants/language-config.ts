@@ -192,7 +192,6 @@ const FRENCH_CONFIG: LanguageConfig = {
     descriptionExcludePatterns: [
       /\$\d+\.\d+/,
       /\d+,\d+\s*\u20ac/,
-      /cancela cuando quieras/i,
       /Essayer pour/i,
       /R\u00e9siliez \u00e0 tout moment/i,
       /Acheter pour/i,
