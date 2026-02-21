@@ -140,7 +140,7 @@ export class QBittorrentService implements IDownloadClient {
 
     this.client = axios.create({
       baseURL: `${this.baseUrl}/api/v2`,
-      timeout: 30000,
+      timeout: 60000, // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
       httpsAgent: this.httpsAgent,
       // Support nginx/Apache reverse proxy with HTTP Basic Auth
       auth: {
@@ -352,7 +352,7 @@ export class QBittorrentService implements IDownloadClient {
         responseType: 'arraybuffer',
         maxRedirects: 0,
         validateStatus: (status) => status >= 200 && status < 300, // Only 2xx is success
-        timeout: 30000, // 30 seconds - public indexers can be slow
+        timeout: 60000, // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
       });
 
       logger.info(` Got 2xx response, size=${torrentResponse.data.length} bytes`);
@@ -394,7 +394,7 @@ export class QBittorrentService implements IDownloadClient {
           try {
             torrentResponse = await axios.get(location, {
               responseType: 'arraybuffer',
-              timeout: 30000,
+              timeout: 60000, // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
               maxRedirects: 5,
             });
             logger.info(` After following redirect: size=${torrentResponse.data.length} bytes`);

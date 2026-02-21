@@ -106,7 +106,7 @@ export class TransmissionService implements IDownloadClient {
 
     this.client = axios.create({
       baseURL: this.baseUrl,
-      timeout: 30000,
+      timeout: 60000, // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
       httpsAgent: this.httpsAgent,
     });
   }
@@ -274,7 +274,7 @@ export class TransmissionService implements IDownloadClient {
         responseType: 'arraybuffer',
         maxRedirects: 0,
         validateStatus: (status) => status >= 200 && status < 300,
-        timeout: 30000,
+        timeout: 60000, // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
       });
 
       // Check if response body is a magnet link
@@ -302,7 +302,7 @@ export class TransmissionService implements IDownloadClient {
           try {
             torrentResponse = await axios.get(location, {
               responseType: 'arraybuffer',
-              timeout: 30000,
+              timeout: 60000, // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
               maxRedirects: 5,
             });
           } catch {

@@ -49,7 +49,7 @@ export class DelugeService implements IDownloadClient {
       ? new https.Agent({ rejectUnauthorized: false }) : undefined;
     if (httpsAgent) logger.info('[Deluge] SSL certificate verification disabled');
 
-    this.client = axios.create({ baseURL: this.baseUrl, timeout: 30000, httpsAgent });
+    this.client = axios.create({ baseURL: this.baseUrl, timeout: 60000, httpsAgent }); // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
   }
 
   /** JSON-RPC call with automatic re-authentication on auth failure */
@@ -190,7 +190,7 @@ export class DelugeService implements IDownloadClient {
     try {
       torrentResponse = await axios.get(torrentUrl, {
         responseType: 'arraybuffer', maxRedirects: 0,
-        validateStatus: (s) => s >= 200 && s < 300, timeout: 30000,
+        validateStatus: (s) => s >= 200 && s < 300, timeout: 60000, // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
       });
       if (torrentResponse.data.length > 0) {
         const magnetMatch = torrentResponse.data.toString().match(/^magnet:\?[^\s]+$/);
@@ -203,7 +203,7 @@ export class DelugeService implements IDownloadClient {
         const loc = error.response.headers['location'];
         if (loc?.startsWith('magnet:')) return this.addMagnetLink(loc, category, options);
         if (loc?.startsWith('http://') || loc?.startsWith('https://')) {
-          try { torrentResponse = await axios.get(loc, { responseType: 'arraybuffer', timeout: 30000, maxRedirects: 5 }); }
+          try { torrentResponse = await axios.get(loc, { responseType: 'arraybuffer', timeout: 60000, maxRedirects: 5 }); } // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
           catch { throw new Error('Failed to download torrent file after redirect'); }
         } else { throw new Error(`Invalid redirect location: ${loc}`); }
       } else { throw new Error(`Failed to download torrent: HTTP ${status}`); }
