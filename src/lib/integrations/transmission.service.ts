@@ -6,6 +6,7 @@
 import axios, { AxiosInstance } from 'axios';
 import https from 'https';
 import path from 'path';
+import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
 import * as parseTorrentModule from 'parse-torrent';
 import { RMABLogger } from '../utils/logger';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
@@ -106,7 +107,7 @@ export class TransmissionService implements IDownloadClient {
 
     this.client = axios.create({
       baseURL: this.baseUrl,
-      timeout: 60000, // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
+      timeout: DOWNLOAD_CLIENT_TIMEOUT,
       httpsAgent: this.httpsAgent,
     });
   }
@@ -274,7 +275,7 @@ export class TransmissionService implements IDownloadClient {
         responseType: 'arraybuffer',
         maxRedirects: 0,
         validateStatus: (status) => status >= 200 && status < 300,
-        timeout: 60000, // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
+        timeout: DOWNLOAD_CLIENT_TIMEOUT,
       });
 
       // Check if response body is a magnet link
@@ -302,7 +303,7 @@ export class TransmissionService implements IDownloadClient {
           try {
             torrentResponse = await axios.get(location, {
               responseType: 'arraybuffer',
-              timeout: 60000, // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
+              timeout: DOWNLOAD_CLIENT_TIMEOUT,
               maxRedirects: 5,
             });
           } catch {

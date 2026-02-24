@@ -6,6 +6,7 @@
 import axios, { AxiosInstance } from 'axios';
 import https from 'https';
 import path from 'path';
+import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
 import * as parseTorrentModule from 'parse-torrent';
 import { RMABLogger } from '../utils/logger';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
@@ -49,7 +50,7 @@ export class DelugeService implements IDownloadClient {
       ? new https.Agent({ rejectUnauthorized: false }) : undefined;
     if (httpsAgent) logger.info('[Deluge] SSL certificate verification disabled');
 
-    this.client = axios.create({ baseURL: this.baseUrl, timeout: 60000, httpsAgent }); // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
+    this.client = axios.create({ baseURL: this.baseUrl, timeout: DOWNLOAD_CLIENT_TIMEOUT, httpsAgent });
   }
 
   /** JSON-RPC call with automatic re-authentication on auth failure */
@@ -190,7 +191,7 @@ export class DelugeService implements IDownloadClient {
     try {
       torrentResponse = await axios.get(torrentUrl, {
         responseType: 'arraybuffer', maxRedirects: 0,
-        validateStatus: (s) => s >= 200 && s < 300, timeout: 60000, // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
+        validateStatus: (s) => s >= 200 && s < 300, timeout: DOWNLOAD_CLIENT_TIMEOUT,
       });
       if (torrentResponse.data.length > 0) {
         const magnetMatch = torrentResponse.data.toString().match(/^magnet:\?[^\s]+$/);
@@ -203,7 +204,7 @@ export class DelugeService implements IDownloadClient {
         const loc = error.response.headers['location'];
         if (loc?.startsWith('magnet:')) return this.addMagnetLink(loc, category, options);
         if (loc?.startsWith('http://') || loc?.startsWith('https://')) {
-          try { torrentResponse = await axios.get(loc, { responseType: 'arraybuffer', timeout: 60000, maxRedirects: 5 }); } // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
+          try { torrentResponse = await axios.get(loc, { responseType: 'arraybuffer', timeout: DOWNLOAD_CLIENT_TIMEOUT, maxRedirects: 5 }); }
           catch { throw new Error('Failed to download torrent file after redirect'); }
         } else { throw new Error(`Invalid redirect location: ${loc}`); }
       } else { throw new Error(`Failed to download torrent: HTTP ${status}`); }

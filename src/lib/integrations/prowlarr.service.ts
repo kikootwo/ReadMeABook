@@ -5,6 +5,7 @@
 
 import axios, { AxiosInstance } from 'axios';
 import { XMLParser } from 'fast-xml-parser';
+import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
 import { TorrentResult } from '../utils/ranking-algorithm';
 import { RMABLogger } from '../utils/logger';
 
@@ -87,7 +88,7 @@ export class ProwlarrService {
       headers: {
         'X-Api-Key': this.apiKey,
       },
-      timeout: 60000, // 60 seconds - some indexers (e.g. yggtorrent) enforce a 30s wait before download
+      timeout: DOWNLOAD_CLIENT_TIMEOUT,
       paramsSerializer: {
         serialize: (params) => {
           // Custom serializer to handle arrays correctly for Prowlarr API
@@ -314,7 +315,7 @@ export class ProwlarrService {
           limit: 100,
           extended: 1,
         },
-        timeout: 60000,
+        timeout: DOWNLOAD_CLIENT_TIMEOUT,
         responseType: 'text', // Get XML as text
       });
 
