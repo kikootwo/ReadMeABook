@@ -174,7 +174,7 @@ const FRENCH_CONFIG: LanguageConfig = {
   code: 'fr',
   annasArchiveLang: 'fr',
   epubCode: 'fr',
-  stopWords: ['le', 'la', 'les','un', 'une', 'de', 'des', 'sur', 'dans', '\u00e0', 'et', 'par', 'pour'],
+  stopWords: ['le', 'la', 'les', 'un', 'une', 'de', 'des', 'sur', 'dans', '\u00e0', 'et', 'par', 'pour'],
   characterReplacements: {},
   scraping: {
     audibleLocaleParam: 'français',

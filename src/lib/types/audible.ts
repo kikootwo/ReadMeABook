@@ -67,7 +67,7 @@ export const AUDIBLE_REGIONS: Record<AudibleRegion, AudibleRegionConfig> = {
   },
   fr: {
     code: 'fr',
-    name: 'French',
+    name: 'France',
     baseUrl: 'https://www.audible.fr',
     audnexusParam: 'fr',
     language: 'fr',
