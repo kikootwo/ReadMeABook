@@ -33,6 +33,7 @@ Configurable Audible region for accurate metadata matching across different inte
 - India (`in`) - `audible.in` (English)
 - Germany (`de`) - `audible.de` (non-English)
 - Spain (`es`) - `audible.es` (non-English)
+- French (`fr`) - `audible.fr` (non-English)
 
 **`isEnglish` Flag:**
 - Each region has `isEnglish: boolean` in `AudibleRegionConfig`
