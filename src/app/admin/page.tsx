@@ -13,17 +13,34 @@ import { ActiveDownloadsTable } from './components/ActiveDownloadsTable';
 import { RecentRequestsTable } from './components/RecentRequestsTable';
 import { ToastProvider, useToast } from '@/components/ui/Toast';
 import { ReportedIssuesSection } from './components/ReportedIssuesSection';
+import { InteractiveTorrentSearchModal } from '@/components/requests/InteractiveTorrentSearchModal';
+import { TorrentResult } from '@/lib/utils/ranking-algorithm';
 import { formatDistanceToNow } from 'date-fns';
 import { useState } from 'react';
+
+interface SelectedTorrentData {
+  title?: string;
+  indexer?: string;
+  size?: number;
+  format?: string;
+  ebookFormat?: string;
+  seeders?: number;
+  infoUrl?: string;
+  source?: string;
+  protocol?: string;
+  score?: number;
+}
 
 interface PendingApprovalRequest {
   id: string;
   createdAt: string;
   type: 'audiobook' | 'ebook';
+  selectedTorrent: SelectedTorrentData | null;
   audiobook: {
     title: string;
     author: string;
     coverArtUrl: string | null;
+    audibleAsin: string | null;
   };
   user: {
     id: string;
@@ -32,9 +49,20 @@ interface PendingApprovalRequest {
   };
 }
 
+function formatTorrentSize(bytes: number): string {
+  const gb = bytes / (1024 ** 3);
+  const mb = bytes / (1024 ** 2);
+  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${mb.toFixed(0)} MB`;
+}
+
 function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest[] }) {
   const toast = useToast();
   const [loadingStates, setLoadingStates] = useState<Record<string, boolean>>({});
+  const [searchModalRequestId, setSearchModalRequestId] = useState<string | null>(null);
+
+  const searchModalRequest = searchModalRequestId
+    ? requests.find((r) => r.id === searchModalRequestId)
+    : null;
 
   const handleApproveRequest = async (requestId: string) => {
     setLoadingStates((prev) => ({ ...prev, [requestId]: true }));
@@ -47,7 +75,6 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
 
       toast.success('Request approved');
 
-      // Mutate both pending requests and recent requests caches
       await mutate('/api/admin/requests/pending-approval');
       await mutate('/api/admin/requests/recent');
       await mutate('/api/admin/metrics');
@@ -72,7 +99,6 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
 
       toast.success('Request denied');
 
-      // Mutate pending requests cache
       await mutate('/api/admin/requests/pending-approval');
       await mutate('/api/admin/metrics');
     } catch (error) {
@@ -84,6 +110,26 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
       setLoadingStates((prev) => ({ ...prev, [requestId]: false }));
     }
   };
+
+  const handleApproveWithTorrent = async (requestId: string, torrent: TorrentResult) => {
+    await fetchJSON(`/api/admin/requests/${requestId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'approve', selectedTorrent: torrent }),
+    });
+
+    toast.success('Request approved and download started');
+
+    await mutate('/api/admin/requests/pending-approval');
+    await mutate('/api/admin/requests/recent');
+    await mutate('/api/admin/metrics');
+  };
+
+  const LoadingSpinner = () => (
+    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+    </svg>
+  );
 
   return (
     <div className="mb-8">
@@ -116,6 +162,9 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {requests.map((request) => {
           const isLoading = loadingStates[request.id] || false;
+          const torrent = request.selectedTorrent;
+          const displayFormat = torrent?.format || torrent?.ebookFormat;
+          const isAnnasArchive = torrent?.source === 'annas_archive';
 
           return (
             <div
@@ -205,89 +254,107 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
                 </div>
               </div>
 
+              {/* Pre-Selected Release */}
+              {torrent && torrent.title && (
+                <div className="mx-4 mb-3 px-3 py-2.5 bg-gray-50 dark:bg-gray-900/60 rounded-lg border border-gray-200 dark:border-gray-700/60">
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <svg className="w-3 h-3 text-gray-400 dark:text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    </svg>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                      User-Selected Release
+                    </span>
+                  </div>
+                  {torrent.infoUrl ? (
+                    <a
+                      href={torrent.infoUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors line-clamp-2 leading-snug"
+                      title={torrent.title}
+                    >
+                      {torrent.title}
+                    </a>
+                  ) : (
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300 line-clamp-2 leading-snug" title={torrent.title}>
+                      {torrent.title}
+                    </p>
+                  )}
+                  <div className="flex items-center gap-1 mt-1.5 text-[11px] text-gray-500 dark:text-gray-400 flex-wrap">
+                    {isAnnasArchive ? (
+                      <span className="text-orange-600 dark:text-orange-400 font-medium">Anna&apos;s Archive</span>
+                    ) : torrent.indexer ? (
+                      <span>{torrent.indexer}</span>
+                    ) : null}
+                    {torrent.size && torrent.size > 0 ? (
+                      <>
+                        <span className="text-gray-300 dark:text-gray-600 select-none">&middot;</span>
+                        <span>{formatTorrentSize(torrent.size)}</span>
+                      </>
+                    ) : null}
+                    {displayFormat ? (
+                      <>
+                        <span className="text-gray-300 dark:text-gray-600 select-none">&middot;</span>
+                        <span className="px-1 py-px text-[10px] font-semibold uppercase tracking-wide rounded bg-purple-100 dark:bg-purple-500/15 text-purple-700 dark:text-purple-300">
+                          {displayFormat}
+                        </span>
+                      </>
+                    ) : null}
+                    {torrent.protocol === 'usenet' ? (
+                      <>
+                        <span className="text-gray-300 dark:text-gray-600 select-none">&middot;</span>
+                        <span className="text-sky-600 dark:text-sky-400 font-medium">NZB</span>
+                      </>
+                    ) : torrent.seeders !== undefined && torrent.seeders !== null ? (
+                      <>
+                        <span className="text-gray-300 dark:text-gray-600 select-none">&middot;</span>
+                        <span className="text-emerald-600 dark:text-emerald-400">{torrent.seeders} seeds</span>
+                      </>
+                    ) : null}
+                    {torrent.score !== undefined && torrent.score !== null ? (
+                      <>
+                        <span className="text-gray-300 dark:text-gray-600 select-none">&middot;</span>
+                        <span className="font-medium">Score {Math.round(torrent.score)}</span>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+
               {/* Action Buttons */}
               <div className="border-t border-amber-200 dark:border-amber-800 bg-gray-50 dark:bg-gray-900/50 px-4 py-3 flex gap-2">
                 <button
                   onClick={() => handleApproveRequest(request.id)}
                   disabled={isLoading}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
                 >
-                  {isLoading ? (
-                    <svg
-                      className="animate-spin h-4 w-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      />
-                    </svg>
-                  ) : (
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M5 13l4 4L19 7"
-                      />
+                  {isLoading ? <LoadingSpinner /> : (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                   )}
                   <span>Approve</span>
                 </button>
 
                 <button
+                  onClick={() => setSearchModalRequestId(request.id)}
+                  disabled={isLoading}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <span>Search</span>
+                </button>
+
+                <button
                   onClick={() => handleDenyRequest(request.id)}
                   disabled={isLoading}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
                 >
-                  {isLoading ? (
-                    <svg
-                      className="animate-spin h-4 w-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      />
-                    </svg>
-                  ) : (
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M6 18L18 6M6 6l12 12"
-                      />
+                  {isLoading ? <LoadingSpinner /> : (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   )}
                   <span>Deny</span>
@@ -297,6 +364,26 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
           );
         })}
       </div>
+
+      {/* Interactive Search Modal */}
+      {searchModalRequest && (
+        <InteractiveTorrentSearchModal
+          isOpen={!!searchModalRequestId}
+          onClose={() => setSearchModalRequestId(null)}
+          requestId={searchModalRequest.id}
+          audiobook={{
+            title: searchModalRequest.audiobook.title,
+            author: searchModalRequest.audiobook.author,
+          }}
+          searchMode={searchModalRequest.type === 'ebook' ? 'ebook' : 'audiobook'}
+          onConfirm={async (torrent) => {
+            await handleApproveWithTorrent(searchModalRequest.id, torrent);
+          }}
+          onSuccess={() => {
+            setSearchModalRequestId(null);
+          }}
+        />
+      )}
     </div>
   );
 }

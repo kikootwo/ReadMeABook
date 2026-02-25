@@ -433,7 +433,7 @@ describe('Setup test routes', () => {
     expect(payload.success).toBe(true);
     expect(payload.template).toBeDefined();
     expect(payload.template.isValid).toBe(false);
-    expect(payload.template.error).toContain('Unknown variable');
+    expect(payload.template.error).toContain('No valid variable found in conditional block');
     expect(payload.template.previewPaths).toBeUndefined();
   });
 

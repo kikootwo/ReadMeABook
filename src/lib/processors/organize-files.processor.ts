@@ -128,7 +128,19 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     });
     const template = templateConfig?.value || '{author}/{title} {asin}';
 
-    // Organize files (pass template and logger to file organizer)
+    // Read file rename configuration
+    const fileRenameEnabledConfig = await prisma.configuration.findUnique({
+      where: { key: 'file_rename_enabled' },
+    });
+    const fileRenameTemplateConfig = await prisma.configuration.findUnique({
+      where: { key: 'file_rename_template' },
+    });
+    const renameConfig = {
+      enabled: fileRenameEnabledConfig?.value === 'true',
+      template: fileRenameTemplateConfig?.value || '{title}',
+    };
+
+    // Organize files (pass template, logger, and rename config to file organizer)
     const result = await organizer.organize(
       downloadPath,
       {
@@ -142,7 +154,8 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
         seriesPart: audiobook.seriesPart || undefined,
       },
       template,
-      jobId ? { jobId, context: 'FileOrganizer' } : undefined
+      jobId ? { jobId, context: 'FileOrganizer' } : undefined,
+      renameConfig
     );
 
     if (!result.success) {
@@ -556,6 +569,18 @@ async function processEbookOrganization(
     }
   }
 
+  // Read file rename configuration
+  const fileRenameEnabledConfig = await prisma.configuration.findUnique({
+    where: { key: 'file_rename_enabled' },
+  });
+  const fileRenameTemplateConfig = await prisma.configuration.findUnique({
+    where: { key: 'file_rename_template' },
+  });
+  const ebookRenameConfig = {
+    enabled: fileRenameEnabledConfig?.value === 'true',
+    template: fileRenameTemplateConfig?.value || '{title}',
+  };
+
   // Organize ebook files (organizer will detect ebook type and skip audio-specific processing)
   // Pass all metadata that could be used in path templates (same as audiobooks)
   const result = await organizer.organizeEbook(
@@ -571,7 +596,8 @@ async function processEbookOrganization(
     },
     template,
     jobId ? { jobId, context: 'FileOrganizer.Ebook' } : undefined,
-    isIndexerDownload
+    isIndexerDownload,
+    ebookRenameConfig
   );
 
   // Clean up fixed EPUB temp file after organization (regardless of success)

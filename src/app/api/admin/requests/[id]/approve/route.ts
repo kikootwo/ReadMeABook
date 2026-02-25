@@ -14,6 +14,7 @@ const logger = RMABLogger.create('API.Admin.Requests.Approve');
 
 const ApprovalActionSchema = z.object({
   action: z.enum(['approve', 'deny']),
+  selectedTorrent: z.any().optional(),
 });
 
 /**
@@ -37,8 +38,8 @@ export async function POST(
         const { id } = await params;
         const body = await request.json();
 
-        // Validate action
-        const { action } = ApprovalActionSchema.parse(body);
+        // Validate action and optional admin-selected torrent
+        const { action, selectedTorrent: adminSelectedTorrent } = ApprovalActionSchema.parse(body);
 
         // Fetch the request
         const existingRequest = await prisma.request.findUnique({
@@ -78,12 +79,15 @@ export async function POST(
           const jobQueue = getJobQueueService();
           const isEbookRequest = existingRequest.type === 'ebook';
 
-          // Check if request has a pre-selected torrent (from interactive search)
-          if (existingRequest.selectedTorrent) {
-            const selectedTorrent = existingRequest.selectedTorrent as any;
+          // Use admin-provided torrent (from admin interactive search) or fall back to user's pre-selected torrent
+          const effectiveTorrent = adminSelectedTorrent || existingRequest.selectedTorrent;
 
-            // User pre-selected a specific torrent - download that torrent directly
-            logger.info(`Request ${id} has pre-selected torrent, starting download`, {
+          if (effectiveTorrent) {
+            const selectedTorrent = effectiveTorrent as any;
+            const torrentSource = adminSelectedTorrent ? 'admin' : 'user';
+
+            // Download the selected torrent directly
+            logger.info(`Request ${id} has ${torrentSource}-selected torrent, starting download`, {
               requestId: id,
               userId: existingRequest.userId,
               adminId: req.user.sub,
@@ -167,17 +171,20 @@ export async function POST(
               logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
             });
 
-            logger.info(`Request ${id} approved by admin ${req.user.sub}, downloading pre-selected torrent`, {
+            logger.info(`Request ${id} approved by admin ${req.user.sub}, downloading ${torrentSource}-selected torrent`, {
               requestId: id,
               userId: updatedRequest.userId,
               audiobookTitle: existingRequest.audiobook.title,
               adminId: req.user.sub,
               type: existingRequest.type,
+              torrentSource,
             });
 
             return NextResponse.json({
               success: true,
-              message: 'Request approved and download started with pre-selected torrent',
+              message: adminSelectedTorrent
+                ? 'Request approved and download started with admin-selected torrent'
+                : 'Request approved and download started with pre-selected torrent',
               request: updatedRequest,
             });
           } else {

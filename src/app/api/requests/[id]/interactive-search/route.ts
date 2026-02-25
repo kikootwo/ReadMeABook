@@ -67,8 +67,8 @@ export async function POST(
         );
       }
 
-      // Check if request is awaiting approval
-      if (requestRecord.status === 'awaiting_approval') {
+      // Check if request is awaiting approval (admins can still search to override the user's selection)
+      if (requestRecord.status === 'awaiting_approval' && req.user.role !== 'admin') {
         return NextResponse.json(
           { error: 'AwaitingApproval', message: 'This request is awaiting admin approval. You cannot search for torrents until it is approved.' },
           { status: 403 }

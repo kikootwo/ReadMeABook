@@ -128,6 +128,8 @@ export async function GET(request: NextRequest) {
         ebookPathTemplate: configMap.get('ebook_path_template') || configMap.get('audiobook_path_template') || '{author}/{title} {asin}',
         metadataTaggingEnabled: configMap.get('metadata_tagging_enabled') === 'true',
         chapterMergingEnabled: configMap.get('chapter_merging_enabled') === 'true',
+        fileRenameEnabled: configMap.get('file_rename_enabled') === 'true',
+        fileRenameTemplate: configMap.get('file_rename_template') || '{title}',
       },
       ebook: {
         // New granular source toggles (with migration from legacy ebook_sidecar_enabled)

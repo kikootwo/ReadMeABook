@@ -8,6 +8,9 @@ import {
   validateTemplate,
   generateMockPreviews,
   getValidVariables,
+  validateFilenameTemplate,
+  generateMockFilenamePreviews,
+  buildRenamedFilename,
   type TemplateVariables
 } from '@/lib/utils/path-template.util';
 
@@ -213,6 +216,142 @@ describe('substituteTemplate', () => {
     const result = substituteTemplate(template, variables);
     expect(result).toBe('Author/{narrated}/Title');
   });
+
+  // Conditional block tests
+  it('should render conditional block when variable has a value', () => {
+    const template = '{author}/{Book seriesPart - }{title}';
+    const variables: TemplateVariables = {
+      author: 'Brandon Sanderson',
+      title: 'Mistborn',
+      seriesPart: '1'
+    };
+
+    const result = substituteTemplate(template, variables);
+    expect(result).toBe('Brandon Sanderson/Book 1 - Mistborn');
+  });
+
+  it('should remove conditional block when variable is missing', () => {
+    const template = '{author}/{Book seriesPart - }{title}';
+    const variables: TemplateVariables = {
+      author: 'Andy Weir',
+      title: 'Project Hail Mary'
+      // seriesPart is missing
+    };
+
+    const result = substituteTemplate(template, variables);
+    expect(result).toBe('Andy Weir/Project Hail Mary');
+  });
+
+  it('should handle conditional block with path separator', () => {
+    const template = '{author}/{series/Book seriesPart - }{title}';
+    const variables: TemplateVariables = {
+      author: 'Brandon Sanderson',
+      title: 'Mistborn',
+      series: 'The Mistborn Saga',
+      seriesPart: '1'
+    };
+
+    const result = substituteTemplate(template, variables);
+    expect(result).toBe('Brandon Sanderson/The Mistborn Saga/Book 1 - Mistborn');
+  });
+
+  it('should render conditional block when all variables present', () => {
+    const template = '{author}/{series Book seriesPart}/{title}';
+    const variables: TemplateVariables = {
+      author: 'Brandon Sanderson',
+      title: 'Mistborn',
+      series: 'The Mistborn Saga',
+      seriesPart: '1'
+    };
+
+    const result = substituteTemplate(template, variables);
+    expect(result).toBe('Brandon Sanderson/The Mistborn Saga Book 1/Mistborn');
+  });
+
+  it('should remove conditional block when any variable is missing', () => {
+    const template = '{author}/{series Book seriesPart}/{title}';
+    const variables: TemplateVariables = {
+      author: 'Andy Weir',
+      title: 'Project Hail Mary',
+      series: 'Some Series'
+      // seriesPart is missing
+    };
+
+    const result = substituteTemplate(template, variables);
+    expect(result).toBe('Andy Weir/Project Hail Mary');
+  });
+
+  it('should handle adjacent conditional blocks', () => {
+    const template = '{author}/{series - }{Book seriesPart - }{title}';
+    const variables: TemplateVariables = {
+      author: 'Brandon Sanderson',
+      title: 'Mistborn',
+      series: 'The Mistborn Saga',
+      seriesPart: '1'
+    };
+
+    const result = substituteTemplate(template, variables);
+    expect(result).toBe('Brandon Sanderson/The Mistborn Saga - Book 1 - Mistborn');
+  });
+
+  it('should handle conditional block next to simple variable', () => {
+    const template = '{author}/{series - }{title}';
+    const variables: TemplateVariables = {
+      author: 'Andy Weir',
+      title: 'Project Hail Mary'
+      // series is missing
+    };
+
+    const result = substituteTemplate(template, variables);
+    expect(result).toBe('Andy Weir/Project Hail Mary');
+  });
+
+  it('should handle conditional block with year variable', () => {
+    const template = '{author}/{title} {(year)}';
+    const variables: TemplateVariables = {
+      author: 'Brandon Sanderson',
+      title: 'Mistborn',
+      year: 2006
+    };
+
+    const result = substituteTemplate(template, variables);
+    expect(result).toBe('Brandon Sanderson/Mistborn (2006)');
+  });
+
+  it('should remove year conditional block when year is missing', () => {
+    const template = '{author}/{title} {(year)}';
+    const variables: TemplateVariables = {
+      author: 'Andy Weir',
+      title: 'Project Hail Mary'
+      // year is missing
+    };
+
+    const result = substituteTemplate(template, variables);
+    expect(result).toBe('Andy Weir/Project Hail Mary');
+  });
+
+  it('should still handle simple variables correctly (regression)', () => {
+    const template = '{author}/{title}';
+    const variables: TemplateVariables = {
+      author: 'Brandon Sanderson',
+      title: 'Mistborn'
+    };
+
+    const result = substituteTemplate(template, variables);
+    expect(result).toBe('Brandon Sanderson/Mistborn');
+  });
+
+  it('should remove conditional block when variable is empty string', () => {
+    const template = '{author}/{Book seriesPart - }{title}';
+    const variables: TemplateVariables = {
+      author: 'Author',
+      title: 'Title',
+      seriesPart: ''
+    };
+
+    const result = substituteTemplate(template, variables);
+    expect(result).toBe('Author/Title');
+  });
 });
 
 describe('validateTemplate', () => {
@@ -247,7 +386,7 @@ describe('validateTemplate', () => {
   it('should reject unknown variables', () => {
     const result = validateTemplate('{author}/{invalid}');
     expect(result.valid).toBe(false);
-    expect(result.error).toContain('Unknown variable');
+    expect(result.error).toContain('No valid variable found in conditional block');
     expect(result.error).toContain('{invalid}');
   });
 
@@ -287,12 +426,13 @@ describe('validateTemplate', () => {
   it('should provide helpful error messages for multiple unknown variables', () => {
     const result = validateTemplate('{author}/{invalid1}/{invalid2}');
     expect(result.valid).toBe(false);
-    expect(result.error).toContain('Unknown variable');
+    expect(result.error).toContain('No valid variable found in conditional block');
   });
 
   it('should list valid variables in error message', () => {
     const result = validateTemplate('{invalid}');
     expect(result.valid).toBe(false);
+    expect(result.error).toContain('No valid variable found in conditional block');
     expect(result.error).toContain('{author}');
     expect(result.error).toContain('{title}');
     expect(result.error).toContain('{narrator}');
@@ -332,6 +472,34 @@ describe('validateTemplate', () => {
 
   it('should accept a template that is only escaped braces', () => {
     const result = validateTemplate('\\{\\}');
+    expect(result.valid).toBe(true);
+  });
+
+  // Conditional block validation tests
+  it('should accept conditional blocks with valid variables', () => {
+    const result = validateTemplate('{author}/{Book seriesPart - }{title}');
+    expect(result.valid).toBe(true);
+  });
+
+  it('should accept conditional blocks with multiple variables', () => {
+    const result = validateTemplate('{author}/{series Book seriesPart}/{title}');
+    expect(result.valid).toBe(true);
+  });
+
+  it('should reject conditional blocks with no valid variables', () => {
+    const result = validateTemplate('{author}/{random text}/{title}');
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('No valid variable found in conditional block');
+  });
+
+  it('should reject conditional blocks with invalid path chars inside', () => {
+    const result = validateTemplate('{author}/{series: part}/{title}');
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('Invalid characters');
+  });
+
+  it('should accept mix of simple variables and conditional blocks', () => {
+    const result = validateTemplate('{author}/{series - }{Book seriesPart - }{title} {(year)}');
     expect(result.valid).toBe(true);
   });
 });
@@ -442,5 +610,185 @@ describe('getValidVariables', () => {
 
     expect(vars1).toEqual(vars2);
     expect(vars1).not.toBe(vars2); // Different array instances
+  });
+});
+
+describe('validateFilenameTemplate', () => {
+  it('should accept valid filename templates', () => {
+    const templates = [
+      '{title}',
+      '{author} - {title}',
+      '{title} ({year})',
+      '{author} - {title} {(year)}',
+    ];
+
+    templates.forEach(template => {
+      const result = validateFilenameTemplate(template);
+      expect(result.valid).toBe(true);
+      expect(result.error).toBeUndefined();
+    });
+  });
+
+  it('should reject empty templates', () => {
+    const result = validateFilenameTemplate('');
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('empty');
+  });
+
+  it('should reject templates containing forward slashes', () => {
+    const result = validateFilenameTemplate('{author}/{title}');
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('/');
+    expect(result.error).toContain('directory separator');
+  });
+
+  it('should reject templates containing backslashes (not brace escapes)', () => {
+    const result = validateFilenameTemplate('{author}\\n{title}');
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('backslash');
+  });
+
+  it('should accept escaped braces in filename templates', () => {
+    const result = validateFilenameTemplate('\\{{title}\\}');
+    expect(result.valid).toBe(true);
+  });
+
+  it('should reject unknown variables', () => {
+    const result = validateFilenameTemplate('{invalid}');
+    expect(result.valid).toBe(false);
+    expect(result.error).toContain('No valid variable found');
+  });
+
+  it('should reject invalid characters', () => {
+    const invalidChars = ['<', '>', ':', '"', '|', '?', '*'];
+
+    invalidChars.forEach(char => {
+      const result = validateFilenameTemplate(`{title}${char}extra`);
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('Invalid characters');
+    });
+  });
+
+  it('should accept conditional blocks in filename templates', () => {
+    const result = validateFilenameTemplate('{title} {(year)}');
+    expect(result.valid).toBe(true);
+  });
+
+  it('should accept templates with only static text', () => {
+    const result = validateFilenameTemplate('audiobook');
+    expect(result.valid).toBe(true);
+  });
+});
+
+describe('generateMockFilenamePreviews', () => {
+  it('should return single and multi-file previews', () => {
+    const result = generateMockFilenamePreviews('{title}');
+
+    expect(result.single).toBeDefined();
+    expect(result.multi).toBeDefined();
+    expect(result.single.length).toBe(2);
+    expect(result.multi.length).toBe(3);
+  });
+
+  it('should include file extensions in single previews', () => {
+    const result = generateMockFilenamePreviews('{title}');
+
+    result.single.forEach(preview => {
+      expect(preview).toMatch(/\.m4b$/);
+    });
+  });
+
+  it('should include index and extensions in multi-file previews', () => {
+    const result = generateMockFilenamePreviews('{title}');
+
+    expect(result.multi[0]).toMatch(/ - 1\.mp3$/);
+    expect(result.multi[1]).toMatch(/ - 2\.mp3$/);
+    expect(result.multi[2]).toMatch(/ - 3\.mp3$/);
+  });
+
+  it('should substitute variables correctly', () => {
+    const result = generateMockFilenamePreviews('{author} - {title}');
+
+    expect(result.single[0]).toContain('Brandon Sanderson');
+    expect(result.single[0]).toContain('Mistborn');
+    expect(result.single[1]).toContain('Douglas Adams');
+  });
+});
+
+describe('buildRenamedFilename', () => {
+  const baseVariables: TemplateVariables = {
+    author: 'Brandon Sanderson',
+    title: 'Mistborn: The Final Empire',
+    narrator: 'Michael Kramer',
+    asin: 'B002UZMLXM',
+    year: 2006,
+  };
+
+  it('should build a renamed filename with extension', () => {
+    const result = buildRenamedFilename('{title}', baseVariables, '.m4b');
+    expect(result).toBe('Mistborn The Final Empire.m4b');
+  });
+
+  it('should append index for multi-file scenarios', () => {
+    const result = buildRenamedFilename('{title}', baseVariables, '.mp3', 1);
+    expect(result).toBe('Mistborn The Final Empire - 1.mp3');
+  });
+
+  it('should handle multiple variables', () => {
+    const result = buildRenamedFilename('{author} - {title}', baseVariables, '.m4b');
+    expect(result).toBe('Brandon Sanderson - Mistborn The Final Empire.m4b');
+  });
+
+  it('should handle extension without leading dot', () => {
+    const result = buildRenamedFilename('{title}', baseVariables, 'mp3');
+    expect(result).toBe('Mistborn The Final Empire.mp3');
+  });
+
+  it('should sanitize invalid characters from variable values', () => {
+    const vars: TemplateVariables = {
+      author: 'Author: <Test>',
+      title: 'Title|Book*'
+    };
+    const result = buildRenamedFilename('{author} - {title}', vars, '.m4b');
+    expect(result).not.toContain(':');
+    expect(result).not.toContain('<');
+    expect(result).not.toContain('>');
+    expect(result).not.toContain('|');
+    expect(result).not.toContain('*');
+  });
+
+  it('should strip slashes from conditional block output', () => {
+    const result = buildRenamedFilename('{author}/{title}', baseVariables, '.m4b');
+    expect(result).not.toContain('/');
+    expect(result).not.toContain('\\');
+  });
+
+  it('should handle conditional blocks', () => {
+    const result = buildRenamedFilename('{title} {(year)}', baseVariables, '.m4b');
+    expect(result).toBe('Mistborn The Final Empire (2006).m4b');
+  });
+
+  it('should remove conditional blocks when variable is missing', () => {
+    const vars: TemplateVariables = {
+      author: 'Andy Weir',
+      title: 'Project Hail Mary',
+    };
+    const result = buildRenamedFilename('{title} {(year)}', vars, '.m4b');
+    expect(result).toBe('Project Hail Mary.m4b');
+  });
+
+  it('should handle index appended after conditional blocks', () => {
+    const result = buildRenamedFilename('{title} {(year)}', baseVariables, '.mp3', 5);
+    expect(result).toBe('Mistborn The Final Empire (2006) - 5.mp3');
+  });
+
+  it('should limit very long filenames', () => {
+    const vars: TemplateVariables = {
+      author: 'Author',
+      title: 'A'.repeat(300),
+    };
+    const result = buildRenamedFilename('{title}', vars, '.m4b');
+    // 200 char limit on base name + extension
+    expect(result.length).toBeLessThanOrEqual(204); // 200 + '.m4b'
   });
 });

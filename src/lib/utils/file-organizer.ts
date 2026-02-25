@@ -20,7 +20,7 @@ import {
   checkDiskSpace,
 } from './chapter-merger';
 import { prisma } from '../db';
-import { substituteTemplate, type TemplateVariables } from './path-template.util';
+import { substituteTemplate, buildRenamedFilename, type TemplateVariables } from './path-template.util';
 import { AUDIO_EXTENSIONS } from '../constants/audio-formats';
 
 export interface AudiobookMetadata {
@@ -77,7 +77,8 @@ export class FileOrganizer {
     downloadPath: string,
     audiobook: AudiobookMetadata,
     template: string,
-    loggerConfig?: LoggerConfig
+    loggerConfig?: LoggerConfig,
+    renameConfig?: { enabled: boolean; template: string }
   ): Promise<OrganizationResult> {
     // Create logger if config provided
     const logger = loggerConfig ? RMABLogger.forJob(loggerConfig.jobId, loggerConfig.context) : null;
@@ -294,8 +295,17 @@ export class FileOrganizer {
       // Create target directory
       await fs.mkdir(targetPath, { recursive: true });
 
+      // Determine if file renaming should be applied
+      const shouldRename = renameConfig?.enabled && renameConfig.template;
+      const isMultiFile = audioFiles.length > 1;
+
+      if (shouldRename) {
+        await logger?.info(`File renaming enabled with template: ${renameConfig.template}${isMultiFile ? ` (${audioFiles.length} files, indices will be appended)` : ''}`);
+      }
+
       // Copy audio files (do NOT delete originals - needed for seeding)
-      for (const audioFile of audioFiles) {
+      for (let i = 0; i < audioFiles.length; i++) {
+        const audioFile = audioFiles[i];
         // Handle merged files (absolute paths) vs original files (relative paths)
         const isAbsolutePath = path.isAbsolute(audioFile);
         const originalSourcePath = isAbsolutePath
@@ -303,7 +313,30 @@ export class FileOrganizer {
           : isFile
             ? downloadPath
             : path.join(downloadPath, audioFile);
-        const filename = path.basename(audioFile);
+
+        // Determine target filename (apply rename template if enabled)
+        let filename: string;
+        if (shouldRename) {
+          const ext = path.extname(audioFile);
+          const variables: TemplateVariables = {
+            author: audiobook.author,
+            title: audiobook.title,
+            narrator: audiobook.narrator,
+            asin: audiobook.asin,
+            year: audiobook.year,
+            series: audiobook.series,
+            seriesPart: audiobook.seriesPart,
+          };
+          filename = buildRenamedFilename(
+            renameConfig.template,
+            variables,
+            ext,
+            isMultiFile ? i + 1 : undefined,
+          );
+        } else {
+          filename = path.basename(audioFile);
+        }
+
         const targetFilePath = path.join(targetPath, filename);
 
         // Check if we have a tagged version of this file
@@ -690,7 +723,8 @@ export class FileOrganizer {
     metadata: { title: string; author: string; narrator?: string; asin?: string; year?: number; series?: string; seriesPart?: string },
     template: string,
     loggerConfig?: LoggerConfig,
-    isIndexerDownload: boolean = false
+    isIndexerDownload: boolean = false,
+    renameConfig?: { enabled: boolean; template: string }
   ): Promise<EbookOrganizationResult> {
     const logger = loggerConfig ? RMABLogger.forJob(loggerConfig.jobId, loggerConfig.context) : null;
 
@@ -739,9 +773,25 @@ export class FileOrganizer {
       // Create target directory
       await fs.mkdir(targetDir, { recursive: true });
 
-      // Build target filename (sanitize source filename)
+      // Build target filename (apply rename template if enabled, otherwise sanitize source filename)
       const sourceFilename = path.basename(ebookFile);
-      const targetFilename = this.sanitizePath(sourceFilename);
+      let targetFilename: string;
+      if (renameConfig?.enabled && renameConfig.template) {
+        const originalExt = path.extname(ebookFile);
+        const variables: TemplateVariables = {
+          author: metadata.author,
+          title: metadata.title,
+          narrator: metadata.narrator,
+          asin: metadata.asin,
+          year: metadata.year,
+          series: metadata.series,
+          seriesPart: metadata.seriesPart,
+        };
+        targetFilename = buildRenamedFilename(renameConfig.template, variables, originalExt);
+        await logger?.info(`Renamed ebook file: ${sourceFilename} -> ${targetFilename}`);
+      } else {
+        targetFilename = this.sanitizePath(sourceFilename);
+      }
       const targetPath = path.join(targetDir, targetFilename);
 
       // Check if target already exists

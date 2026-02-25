@@ -15,7 +15,7 @@ export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { downloadDir, mediaDir, audiobookPathTemplate, ebookPathTemplate, metadataTaggingEnabled, chapterMergingEnabled } = await request.json();
+        const { downloadDir, mediaDir, audiobookPathTemplate, ebookPathTemplate, metadataTaggingEnabled, chapterMergingEnabled, fileRenameEnabled, fileRenameTemplate } = await request.json();
 
         if (!downloadDir || !mediaDir) {
           return NextResponse.json(
@@ -97,6 +97,32 @@ export async function PUT(request: NextRequest) {
           },
         });
 
+        // Update file rename setting
+        await prisma.configuration.upsert({
+          where: { key: 'file_rename_enabled' },
+          update: { value: String(fileRenameEnabled ?? false) },
+          create: {
+            key: 'file_rename_enabled',
+            value: String(fileRenameEnabled ?? false),
+            category: 'automation',
+            description: 'Rename audio and ebook files using a custom naming template during organization',
+          },
+        });
+
+        // Update file rename template
+        if (fileRenameTemplate !== undefined) {
+          await prisma.configuration.upsert({
+            where: { key: 'file_rename_template' },
+            update: { value: fileRenameTemplate },
+            create: {
+              key: 'file_rename_template',
+              value: fileRenameTemplate,
+              category: 'automation',
+              description: 'Template for renaming audio and ebook files during organization',
+            },
+          });
+        }
+
         logger.info('Paths settings updated');
 
         // Clear config cache for all updated keys so services get fresh values
@@ -107,6 +133,8 @@ export async function PUT(request: NextRequest) {
         configService.clearCache('ebook_path_template');
         configService.clearCache('metadata_tagging_enabled');
         configService.clearCache('chapter_merging_enabled');
+        configService.clearCache('file_rename_enabled');
+        configService.clearCache('file_rename_template');
 
         // Invalidate all download client singletons to force reload of download_dir
         const { invalidateDownloadClientManager } = await import('@/lib/services/download-client-manager.service');

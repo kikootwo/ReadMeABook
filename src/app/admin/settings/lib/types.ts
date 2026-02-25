@@ -100,6 +100,8 @@ export interface PathsSettings {
   ebookPathTemplate?: string;
   metadataTaggingEnabled: boolean;
   chapterMergingEnabled: boolean;
+  fileRenameEnabled: boolean;
+  fileRenameTemplate?: string;
 }
 
 /**

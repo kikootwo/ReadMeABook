@@ -69,6 +69,81 @@ function sanitizePath(name: string): string {
 }
 
 /**
+ * Find valid template variable names within arbitrary content text.
+ * Sorts by length descending to prevent substring false matches
+ * (e.g., 'seriesPart' matched before 'series').
+ * Uses word-boundary detection to avoid matching variable names
+ * that are substrings of other words.
+ */
+function findVariablesInContent(content: string): string[] {
+  const sortedVars = [...VALID_VARIABLES].sort((a, b) => b.length - a.length);
+  const found: string[] = [];
+
+  for (const varName of sortedVars) {
+    const regex = new RegExp(`(?<![a-zA-Z0-9])${varName}(?![a-zA-Z0-9])`);
+    if (regex.test(content)) {
+      found.push(varName);
+    }
+  }
+
+  return found;
+}
+
+/**
+ * Resolve conditional blocks in the template.
+ * A conditional block is {literal text varName more text} where the entire
+ * content is rendered only if ALL variables inside have non-empty values.
+ * If any variable is empty/missing, the entire block is removed.
+ *
+ * Simple variable references like {author} are left untouched for the
+ * existing substitution logic to handle.
+ *
+ * Must run after escaped-brace replacement and before simple variable substitution.
+ */
+function resolveConditionalBlocks(
+  template: string,
+  variables: TemplateVariables
+): string {
+  return template.replace(/\{([^}]+)\}/g, (match, content: string) => {
+    // If content is exactly a valid variable name, skip (leave for simple substitution)
+    if (VALID_VARIABLES.includes(content)) {
+      return match;
+    }
+
+    // Find variables in the content
+    const foundVars = findVariablesInContent(content);
+
+    // If no variables found, leave as-is (validation will catch it)
+    if (foundVars.length === 0) {
+      return match;
+    }
+
+    // Check if all found variables have non-empty values
+    const allPresent = foundVars.every(varName => {
+      const value = variables[varName as keyof TemplateVariables];
+      return value !== undefined && value !== null && String(value).trim() !== '';
+    });
+
+    if (!allPresent) {
+      return '';
+    }
+
+    // Substitute variables within the content, output rest as literal text
+    // Sort by length descending to prevent substring false matches
+    let result = content;
+    const sortedVars = [...foundVars].sort((a, b) => b.length - a.length);
+    for (const varName of sortedVars) {
+      const value = variables[varName as keyof TemplateVariables];
+      const sanitizedValue = sanitizePath(String(value).trim());
+      const regex = new RegExp(`(?<![a-zA-Z0-9])${varName}(?![a-zA-Z0-9])`, 'g');
+      result = result.replace(regex, sanitizedValue);
+    }
+
+    return result;
+  });
+}
+
+/**
  * Substitute template variables with actual values
  *
  * Supported variables: {author}, {title}, {narrator}, {asin}
@@ -98,6 +173,9 @@ export function substituteTemplate(
   // Replace escaped braces with placeholders before any processing,
   // so they survive the variable substitution and path cleanup steps
   result = result.replace(/\\\{/g, LBRACE_PLACEHOLDER).replace(/\\\}/g, RBRACE_PLACEHOLDER);
+
+  // Resolve conditional blocks before simple variable substitution
+  result = resolveConditionalBlocks(result, variables);
 
   // Substitute each variable
   for (const key of VALID_VARIABLES) {
@@ -187,21 +265,47 @@ export function validateTemplate(template: string): ValidationResult {
 
   if (variableMatches) {
     for (const match of variableMatches) {
-      const varName = match.slice(1, -1); // Remove { and }
+      const content = match.slice(1, -1); // Remove { and }
 
-      if (!VALID_VARIABLES.includes(varName)) {
+      // Simple variable — exact match to a valid variable name
+      if (VALID_VARIABLES.includes(content)) {
+        continue;
+      }
+
+      // Conditional block — must contain at least one valid variable
+      const foundVars = findVariablesInContent(content);
+      if (foundVars.length === 0) {
         return {
           valid: false,
-          error: `Unknown variable: {${varName}}. Valid variables are: ${VALID_VARIABLES.map(v => `{${v}}`).join(', ')}`
+          error: `No valid variable found in conditional block: {${content}}. Valid variables are: ${VALID_VARIABLES.map(v => `{${v}}`).join(', ')}`
+        };
+      }
+
+      // Check literal text inside conditional block for invalid path chars
+      let literalText = content;
+      const sortedVars = [...foundVars].sort((a, b) => b.length - a.length);
+      for (const varName of sortedVars) {
+        literalText = literalText.replace(
+          new RegExp(`(?<![a-zA-Z0-9])${varName}(?![a-zA-Z0-9])`, 'g'),
+          ''
+        );
+      }
+      const invalidCharsInBlock = literalText.match(INVALID_PATH_CHARS);
+      if (invalidCharsInBlock) {
+        return {
+          valid: false,
+          error: `Invalid characters found: ${[...new Set(invalidCharsInBlock)].join(', ')}. These characters are not allowed in path templates.`
         };
       }
     }
   }
 
-  // Remove valid variables temporarily to check for invalid characters
+  // Remove valid variables and conditional blocks to check remaining text for invalid chars
   let templateWithoutVars = templateWithoutEscapedBraces;
-  for (const varName of VALID_VARIABLES) {
-    templateWithoutVars = templateWithoutVars.replace(new RegExp(`\\{${varName}\\}`, 'g'), '');
+  if (variableMatches) {
+    for (const match of variableMatches) {
+      templateWithoutVars = templateWithoutVars.replace(match, '');
+    }
   }
 
   // Check for invalid characters outside of variables
@@ -285,4 +389,193 @@ export function generateMockPreviews(template: string): string[] {
  */
 export function getValidVariables(): string[] {
   return [...VALID_VARIABLES];
+}
+
+/**
+ * Validate a filename template string
+ *
+ * Similar to validateTemplate but for filenames (not paths):
+ * - Disallows forward slashes (no directory separators in filenames)
+ * - Does not require relative path structure
+ * - Must contain at least one variable
+ *
+ * @param template - Filename template string to validate
+ * @returns Validation result with error message if invalid
+ */
+export function validateFilenameTemplate(template: string): ValidationResult {
+  if (!template || template.trim().length === 0) {
+    return {
+      valid: false,
+      error: 'Filename template cannot be empty',
+    };
+  }
+
+  // Disallow forward slashes — filenames cannot contain directory separators
+  if (template.includes('/')) {
+    return {
+      valid: false,
+      error: 'Filename template cannot contain "/" (directory separators). Use the organization template for directory structure.',
+    };
+  }
+
+  // Disallow backslashes that aren't brace escapes
+  if (/\\(?![{}])/.test(template)) {
+    return {
+      valid: false,
+      error: 'Filename template cannot contain backslashes. Use the organization template for directory structure.',
+    };
+  }
+
+  // Strip escaped braces before parsing
+  const templateWithoutEscapedBraces = template.replace(/\\[{}]/g, '');
+
+  // Extract all variables from the stripped template
+  const variableMatches = templateWithoutEscapedBraces.match(/\{[^}]+\}/g);
+
+  if (variableMatches) {
+    for (const match of variableMatches) {
+      const content = match.slice(1, -1);
+
+      // Simple variable
+      if (VALID_VARIABLES.includes(content)) {
+        continue;
+      }
+
+      // Conditional block — must contain at least one valid variable
+      const foundVars = findVariablesInContent(content);
+      if (foundVars.length === 0) {
+        return {
+          valid: false,
+          error: `No valid variable found in: {${content}}. Valid variables are: ${VALID_VARIABLES.map(v => `{${v}}`).join(', ')}`,
+        };
+      }
+
+      // Check literal text inside conditional block for invalid filename chars
+      let literalText = content;
+      const sortedVars = [...foundVars].sort((a, b) => b.length - a.length);
+      for (const varName of sortedVars) {
+        literalText = literalText.replace(
+          new RegExp(`(?<![a-zA-Z0-9])${varName}(?![a-zA-Z0-9])`, 'g'),
+          ''
+        );
+      }
+      const invalidCharsInBlock = literalText.match(INVALID_PATH_CHARS);
+      if (invalidCharsInBlock) {
+        return {
+          valid: false,
+          error: `Invalid characters found: ${[...new Set(invalidCharsInBlock)].join(', ')}. These characters are not allowed in filenames.`,
+        };
+      }
+    }
+  }
+
+  // Remove valid variables and conditional blocks to check remaining text
+  let templateWithoutVars = templateWithoutEscapedBraces;
+  if (variableMatches) {
+    for (const match of variableMatches) {
+      templateWithoutVars = templateWithoutVars.replace(match, '');
+    }
+  }
+
+  // Check for invalid characters outside of variables
+  const invalidChars = templateWithoutVars.match(INVALID_PATH_CHARS);
+  if (invalidChars) {
+    return {
+      valid: false,
+      error: `Invalid characters found: ${[...new Set(invalidChars)].join(', ')}. These characters are not allowed in filenames.`,
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Generate mock filename previews using sample audiobook data
+ *
+ * Creates example filenames with extensions to demonstrate how the template will look.
+ * Shows both single-file and multi-file (with index) examples.
+ *
+ * @param template - Filename template string
+ * @returns Object with single and multi-file preview arrays
+ */
+export function generateMockFilenamePreviews(template: string): {
+  single: string[];
+  multi: string[];
+} {
+  const mockData: TemplateVariables[] = [
+    {
+      author: 'Brandon Sanderson',
+      title: 'Mistborn: The Final Empire',
+      narrator: 'Michael Kramer',
+      asin: 'B002UZMLXM',
+      year: 2006,
+      series: 'The Mistborn Saga',
+      seriesPart: '1',
+    },
+    {
+      author: 'Douglas Adams',
+      title: "The Hitchhiker's Guide to the Galaxy",
+      narrator: 'Stephen Fry',
+      asin: 'B0009JKV9W',
+      year: 2005,
+      series: "Hitchhiker's Guide",
+      seriesPart: '1',
+    },
+  ];
+
+  const single = mockData.map((variables) => {
+    const name = substituteTemplate(template, variables);
+    return `${name}.m4b`;
+  });
+
+  // Show multi-file example with first mock data only
+  const multiName = substituteTemplate(template, mockData[0]);
+  const multi = [
+    `${multiName} - 1.mp3`,
+    `${multiName} - 2.mp3`,
+    `${multiName} - 3.mp3`,
+  ];
+
+  return { single, multi };
+}
+
+/**
+ * Build a renamed filename from a template, metadata variables, and original extension.
+ * Optionally appends a 1-based index for multi-file scenarios.
+ *
+ * @param template - Filename template string (e.g., "{title}")
+ * @param variables - Template variables with metadata values
+ * @param originalExtension - File extension including dot (e.g., ".m4b")
+ * @param index - Optional 1-based index for multi-file scenarios
+ * @returns Sanitized filename with extension
+ */
+export function buildRenamedFilename(
+  template: string,
+  variables: TemplateVariables,
+  originalExtension: string,
+  index?: number,
+): string {
+  let baseName = substituteTemplate(template, variables);
+
+  // substituteTemplate cleans up slashes for paths — but since this is a filename,
+  // remove any residual slashes that conditional blocks might have introduced
+  baseName = baseName.replace(/[/\\]/g, '');
+
+  // Sanitize again for filename safety
+  baseName = baseName
+    .replace(/[<>:"/\\|?*]/g, '')
+    .trim()
+    .replace(/^\.+/, '')
+    .replace(/\.+$/, '')
+    .replace(/\s+/g, ' ')
+    .slice(0, 200);
+
+  if (index !== undefined) {
+    baseName = `${baseName} - ${index}`;
+  }
+
+  // Ensure extension starts with a dot
+  const ext = originalExtension.startsWith('.') ? originalExtension : `.${originalExtension}`;
+
+  return `${baseName}${ext}`;
 }

@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { usePathsSettings } from './usePathsSettings';
 import type { PathsSettings } from '../../lib/types';
-import { validateTemplate, generateMockPreviews } from '@/lib/utils/path-template.util';
+import { validateTemplate, generateMockPreviews, validateFilenameTemplate, generateMockFilenamePreviews } from '@/lib/utils/path-template.util';
 
 interface PathsTabProps {
   paths: PathsSettings;
@@ -22,6 +22,13 @@ interface TemplatePreview {
   isValid: boolean;
   error?: string;
   previewPaths?: string[];
+}
+
+interface FilenamePreview {
+  isValid: boolean;
+  error?: string;
+  single?: string[];
+  multi?: string[];
 }
 
 export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps) {
@@ -72,6 +79,34 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
       });
     }
   }, [paths.ebookPathTemplate]);
+
+  // Live preview state for filename template
+  const [filenamePreview, setFilenamePreview] = useState<FilenamePreview | null>(null);
+
+  // Update filename live preview whenever template changes
+  useEffect(() => {
+    if (!paths.fileRenameEnabled) {
+      setFilenamePreview(null);
+      return;
+    }
+
+    const template = paths.fileRenameTemplate || '{title}';
+    const validation = validateFilenameTemplate(template);
+
+    if (validation.valid) {
+      const previews = generateMockFilenamePreviews(template);
+      setFilenamePreview({
+        isValid: true,
+        single: previews.single,
+        multi: previews.multi,
+      });
+    } else {
+      setFilenamePreview({
+        isValid: false,
+        error: validation.error,
+      });
+    }
+  }, [paths.fileRenameTemplate, paths.fileRenameEnabled]);
 
   const audiobookTemplate = paths.audiobookPathTemplate || '{author}/{title} {asin}';
   const ebookTemplate = paths.ebookPathTemplate || '{author}/{title} {asin}';
@@ -218,6 +253,83 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
         )}
       </div>
 
+      {/* File Rename Toggle */}
+      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+        <div className="flex items-start gap-4">
+          <input
+            type="checkbox"
+            id="file-rename-settings"
+            checked={paths.fileRenameEnabled}
+            onChange={(e) => updatePath('fileRenameEnabled', e.target.checked)}
+            className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <div className="flex-1">
+            <label
+              htmlFor="file-rename-settings"
+              className="block text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer"
+            >
+              Rename files during organization
+            </label>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              Rename audio and ebook files using a custom naming template when organizing into the media
+              library. When multiple files exist (e.g. chapterized MP3s), an index number is appended.
+            </p>
+          </div>
+        </div>
+
+        {/* File Naming Template (shown when enabled) */}
+        {paths.fileRenameEnabled && (
+          <div className="mt-4 pl-9">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              File Naming Template
+            </label>
+            <Input
+              type="text"
+              value={paths.fileRenameTemplate || '{title}'}
+              onChange={(e) => updatePath('fileRenameTemplate', e.target.value)}
+              placeholder="{title}"
+              className="font-mono"
+            />
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Uses the same variables as the organization template. Do not include the file extension.
+            </p>
+
+            {/* Filename Validation Error */}
+            {filenamePreview && !filenamePreview.isValid && (
+              <div className="mt-3 p-3 rounded-lg text-sm flex items-start gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200">
+                <span className="flex-shrink-0 mt-0.5">✗</span>
+                <div className="flex-1">
+                  <span>{filenamePreview.error || 'Invalid filename template'}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Filename Preview */}
+            {filenamePreview && filenamePreview.isValid && (
+              <div className="mt-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
+                  Single File
+                </h4>
+                <div className="space-y-1.5 text-sm font-mono text-gray-700 dark:text-gray-300">
+                  {filenamePreview.single?.map((preview, index) => (
+                    <div key={index} className="text-xs">{preview}</div>
+                  ))}
+                </div>
+
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mt-3 mb-2">
+                  Multiple Files (chapterized)
+                </h4>
+                <div className="space-y-1.5 text-sm font-mono text-gray-700 dark:text-gray-300">
+                  {filenamePreview.multi?.map((preview, index) => (
+                    <div key={index} className="text-xs">{preview}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Variable Reference Panel (shared for both templates) */}
       <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
         <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-3">
@@ -251,6 +363,27 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
           <div>
             <code className="text-blue-700 dark:text-blue-300 font-mono">{'{seriesPart}'}</code>
             <span className="text-gray-600 dark:text-gray-400 ml-2">- Series part/position</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Conditional Syntax Help */}
+      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+        <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-100 mb-2">
+          Conditional Syntax
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+          Wrap text around a variable in <code className="text-amber-700 dark:text-amber-300 font-mono">{'{ }'}</code> to
+          include that text only when the variable has a value. If the variable is empty, the entire block is removed.
+        </p>
+        <div className="text-sm font-mono bg-white dark:bg-gray-900 rounded px-3 py-2 border border-amber-100 dark:border-amber-900">
+          <div className="text-gray-700 dark:text-gray-300">
+            <code className="text-amber-700 dark:text-amber-300">{'{Book seriesPart - }'}</code>
+          </div>
+          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            With value: <span className="text-green-700 dark:text-green-400">Book 1 - </span>
+            &nbsp;&bull;&nbsp;
+            Without value: <span className="text-red-700 dark:text-red-400">(removed)</span>
           </div>
         </div>
       </div>

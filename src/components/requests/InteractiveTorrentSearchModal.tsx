@@ -38,6 +38,7 @@ interface InteractiveTorrentSearchModalProps {
   onSuccess?: () => void;
   searchMode?: 'audiobook' | 'ebook'; // Search mode - defaults to audiobook
   replaceIssueId?: string; // Optional - when set, confirm handler calls replace endpoint instead
+  onConfirm?: (torrent: TorrentResult) => Promise<void>; // Optional - overrides default confirm handler
 }
 
 // Format relative time from publish date
@@ -90,6 +91,7 @@ export function InteractiveTorrentSearchModal({
   onSuccess,
   searchMode = 'audiobook',
   replaceIssueId,
+  onConfirm,
 }: InteractiveTorrentSearchModalProps) {
   // Hooks for existing audiobook request flow
   const { searchTorrents: searchByRequestId, isLoading: isSearchingByRequest, error: searchByRequestError } = useInteractiveSearch();
@@ -113,6 +115,7 @@ export function InteractiveTorrentSearchModal({
   const [results, setResults] = useState<(RankedTorrent & { qualityScore?: number; source?: string; ebookFormat?: string })[]>([]);
   const [confirmTorrent, setConfirmTorrent] = useState<TorrentResult | null>(null);
   const [searchTitle, setSearchTitle] = useState(audiobook.title);
+  const [isCustomConfirming, setIsCustomConfirming] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   // Stable close handler via ref
@@ -130,11 +133,13 @@ export function InteractiveTorrentSearchModal({
   const isSearching = isEbookMode
     ? (useAsinMode ? isSearchingEbooksByAsin : isSearchingEbooks)
     : (hasRequestId ? isSearchingByRequest : isSearchingByAudiobook);
-  const isDownloading = replaceIssueId
-    ? isReplacing
-    : isEbookMode
-      ? (useAsinMode ? isSelectingEbookByAsin : isSelectingEbook)
-      : (hasRequestId ? isSelectingTorrent : isRequestingWithTorrent);
+  const isDownloading = isCustomConfirming
+    ? true
+    : replaceIssueId
+      ? isReplacing
+      : isEbookMode
+        ? (useAsinMode ? isSelectingEbookByAsin : isSelectingEbook)
+        : (hasRequestId ? isSelectingTorrent : isRequestingWithTorrent);
   const error = replaceIssueId
     ? (replaceError || (hasRequestId ? searchByRequestError : searchByAudiobookError))
     : isEbookMode
@@ -218,7 +223,11 @@ export function InteractiveTorrentSearchModal({
   const handleConfirmDownload = async () => {
     if (!confirmTorrent) return;
     try {
-      if (replaceIssueId) {
+      if (onConfirm) {
+        // Custom confirm handler (e.g., admin approve-with-torrent flow)
+        setIsCustomConfirming(true);
+        await onConfirm(confirmTorrent);
+      } else if (replaceIssueId) {
         // Reported issue replacement flow
         await replaceWithTorrent(replaceIssueId, confirmTorrent);
       } else if (isEbookMode) {
@@ -241,6 +250,8 @@ export function InteractiveTorrentSearchModal({
     } catch (err) {
       console.error('Failed to download:', err);
       setConfirmTorrent(null);
+    } finally {
+      setIsCustomConfirming(false);
     }
   };
 
