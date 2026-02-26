@@ -329,233 +329,206 @@ describe('QBittorrentService', () => {
     });
   });
 
-  describe('downloadPath resolution (TempPathEnabled race + name mismatch fix)', () => {
-    it('uses save_path + content basename for seeding torrents even when content_path points to temp dir', async () => {
-      const service = new QBittorrentService('http://qb', 'user', 'pass');
-      (service as any).cookie = 'SID=temppath';
-      clientMock.get.mockResolvedValueOnce({
-        data: [{
-          hash: 'abc123', name: 'Audiobook', size: 1000, progress: 1.0,
-          dlspeed: 0, upspeed: 5000, downloaded: 1000, uploaded: 500,
-          eta: 0, state: 'uploading', category: 'readmeabook', tags: '',
-          save_path: '/downloads/', content_path: '/incomplete/Audiobook',
-          completion_on: 1700000000, added_on: 1699000000,
-        }],
+  describe('downloadPath resolution', () => {
+    describe('normal operation (content_path under save_path)', () => {
+      it('uses content_path directly for seeding multi-file torrent', async () => {
+        const service = new QBittorrentService('http://qb', 'user', 'pass');
+        (service as any).cookie = 'SID=normal-multi';
+        clientMock.get.mockResolvedValueOnce({
+          data: [{
+            hash: 'abc123', name: 'Audiobook', size: 1000, progress: 1.0,
+            dlspeed: 0, upspeed: 5000, downloaded: 1000, uploaded: 500,
+            eta: 0, state: 'uploading', category: 'readmeabook', tags: '',
+            save_path: '/downloads/', content_path: '/downloads/Audiobook',
+            completion_on: 1700000000, added_on: 1699000000,
+          }],
+        });
+
+        const info = await service.getDownload('abc123');
+
+        expect(info).not.toBeNull();
+        expect(info!.status).toBe('seeding');
+        expect(info!.downloadPath).toBe('/downloads/Audiobook');
+        expect(info!.savePath).toBe('/downloads/');
       });
 
-      const info = await service.getDownload('abc123');
+      it('uses content_path directly for single-file torrent in folder', async () => {
+        const service = new QBittorrentService('http://qb', 'user', 'pass');
+        (service as any).cookie = 'SID=normal-single-folder';
+        clientMock.get.mockResolvedValueOnce({
+          data: [{
+            hash: 'abc123', name: 'Audiobook Name', size: 3700000000, progress: 1.0,
+            dlspeed: 0, upspeed: 0, downloaded: 3700000000, uploaded: 100000,
+            eta: 0, state: 'stalledUP', category: 'readmeabook', tags: '',
+            save_path: '/downloads/books/',
+            content_path: '/downloads/books/Audiobook Folder/Audiobook.m4b',
+            completion_on: 1700000000, added_on: 1699000000,
+          }],
+        });
 
-      expect(info).not.toBeNull();
-      expect(info!.status).toBe('seeding');
-      // Must use save_path + content_path basename, NOT the stale full content_path
-      expect(info!.downloadPath).toBe(path.join('/downloads/', 'Audiobook'));
-      expect(info!.downloadPath).not.toContain('incomplete');
+        const info = await service.getDownload('abc123');
+
+        expect(info!.status).toBe('seeding');
+        // Must preserve the full path including intermediate folder
+        expect(info!.downloadPath).toBe('/downloads/books/Audiobook Folder/Audiobook.m4b');
+        expect(info!.savePath).toBe('/downloads/books/');
+      });
+
+      it('uses content_path directly when torrent name differs from folder name', async () => {
+        const service = new QBittorrentService('http://qb', 'user', 'pass');
+        (service as any).cookie = 'SID=name-mismatch';
+        clientMock.get.mockResolvedValueOnce({
+          data: [{
+            hash: 'abc123',
+            name: 'Harry Potter [Full-Cast] (aka Philosophers Stone) - J.K. Rowling',
+            size: 3006477107, progress: 1.0,
+            dlspeed: 0, upspeed: 0, downloaded: 3006477107, uploaded: 500000,
+            eta: 0, state: 'uploading', category: 'readmeabook', tags: '',
+            save_path: '/downloads/books/',
+            content_path: '/downloads/books/Harry Potter (Full-Cast Edition) EAC3 6ch - J.K. Rowling',
+            completion_on: 1700000000, added_on: 1699000000,
+          }],
+        });
+
+        const info = await service.getDownload('abc123');
+
+        expect(info!.status).toBe('seeding');
+        // Must use content_path (real folder name), NOT torrent.name
+        expect(info!.downloadPath).toBe(
+          '/downloads/books/Harry Potter (Full-Cast Edition) EAC3 6ch - J.K. Rowling'
+        );
+        expect(info!.downloadPath).not.toContain('[Full-Cast]');
+        expect(info!.savePath).toBe('/downloads/books/');
+      });
+
+      it('uses content_path directly for all seeding states (pausedUP, stalledUP, forcedUP, queuedUP, stoppedUP)', async () => {
+        const seedingStates = ['pausedUP', 'stalledUP', 'forcedUP', 'queuedUP', 'stoppedUP'];
+
+        for (const state of seedingStates) {
+          const service = new QBittorrentService('http://qb', 'user', 'pass');
+          (service as any).cookie = `SID=state-${state}`;
+          clientMock.get.mockResolvedValueOnce({
+            data: [{
+              hash: 'abc123', name: 'Audiobook', size: 1000, progress: 1.0,
+              dlspeed: 0, upspeed: 0, downloaded: 1000, uploaded: 100,
+              eta: 0, state, category: 'readmeabook', tags: '',
+              save_path: '/downloads/', content_path: '/downloads/Audiobook',
+              completion_on: 1700000000, added_on: 1699000000,
+            }],
+          });
+
+          const info = await service.getDownload('abc123');
+
+          expect(info!.status).toBe('seeding');
+          expect(info!.downloadPath).toBe('/downloads/Audiobook');
+        }
+      });
     });
 
-    it('uses save_path for stalledUP torrents (completed, stalled on upload)', async () => {
-      const service = new QBittorrentService('http://qb', 'user', 'pass');
-      (service as any).cookie = 'SID=stalledup';
-      clientMock.get.mockResolvedValueOnce({
-        data: [{
-          hash: 'abc123', name: 'Audiobook', size: 1000, progress: 1.0,
-          dlspeed: 0, upspeed: 0, downloaded: 1000, uploaded: 200,
-          eta: 0, state: 'stalledUP', category: 'readmeabook', tags: '',
-          save_path: '/downloads/', content_path: '/incomplete/Audiobook',
-          completion_on: 1700000000, added_on: 1699000000,
-        }],
+    describe('TempPathEnabled (content_path outside save_path)', () => {
+      it('passes through content_path as-is even when pointing to temp dir (monitor handles wait)', async () => {
+        const service = new QBittorrentService('http://qb', 'user', 'pass');
+        (service as any).cookie = 'SID=temppath';
+        clientMock.get.mockResolvedValueOnce({
+          data: [{
+            hash: 'abc123', name: 'Audiobook', size: 1000, progress: 1.0,
+            dlspeed: 0, upspeed: 5000, downloaded: 1000, uploaded: 500,
+            eta: 0, state: 'uploading', category: 'readmeabook', tags: '',
+            save_path: '/downloads/', content_path: '/incomplete/Audiobook',
+            completion_on: 1700000000, added_on: 1699000000,
+          }],
+        });
+
+        const info = await service.getDownload('abc123');
+
+        expect(info!.status).toBe('seeding');
+        // content_path is always used directly — monitor detects temp path via savePath
+        expect(info!.downloadPath).toBe('/incomplete/Audiobook');
+        expect(info!.savePath).toBe('/downloads/');
       });
 
-      const info = await service.getDownload('abc123');
+      it('exposes savePath so monitor can detect temp path for pausedUP', async () => {
+        const service = new QBittorrentService('http://qb', 'user', 'pass');
+        (service as any).cookie = 'SID=pausedup-temp';
+        clientMock.get.mockResolvedValueOnce({
+          data: [{
+            hash: 'abc123', name: 'Audiobook', size: 1000, progress: 1.0,
+            dlspeed: 0, upspeed: 0, downloaded: 1000, uploaded: 0,
+            eta: 0, state: 'pausedUP', category: 'readmeabook', tags: '',
+            save_path: '/data/torrents/readmeabook/', content_path: '/tmp/incomplete/Audiobook',
+            completion_on: 1700000000, added_on: 1699000000,
+          }],
+        });
 
-      expect(info!.status).toBe('seeding');
-      expect(info!.downloadPath).toBe(path.join('/downloads/', 'Audiobook'));
+        const info = await service.getDownload('abc123');
+
+        expect(info!.status).toBe('seeding');
+        // content_path is always used directly — no reconstruction
+        expect(info!.downloadPath).toBe('/tmp/incomplete/Audiobook');
+        expect(info!.savePath).toBe('/data/torrents/readmeabook/');
+      });
     });
 
-    it('uses save_path for pausedUP torrents (completed, paused on upload)', async () => {
-      const service = new QBittorrentService('http://qb', 'user', 'pass');
-      (service as any).cookie = 'SID=pausedup2';
-      clientMock.get.mockResolvedValueOnce({
-        data: [{
-          hash: 'abc123', name: 'Audiobook', size: 1000, progress: 1.0,
-          dlspeed: 0, upspeed: 0, downloaded: 1000, uploaded: 0,
-          eta: 0, state: 'pausedUP', category: 'readmeabook', tags: '',
-          save_path: '/data/torrents/readmeabook/', content_path: '/tmp/incomplete/Audiobook',
-          completion_on: 1700000000, added_on: 1699000000,
-        }],
+    describe('downloading torrents', () => {
+      it('uses content_path for actively downloading torrents', async () => {
+        const service = new QBittorrentService('http://qb', 'user', 'pass');
+        (service as any).cookie = 'SID=downloading';
+        clientMock.get.mockResolvedValueOnce({
+          data: [{
+            hash: 'abc123', name: 'Audiobook', size: 1000, progress: 0.5,
+            dlspeed: 5000, upspeed: 0, downloaded: 500, uploaded: 0,
+            eta: 100, state: 'downloading', category: 'readmeabook', tags: '',
+            save_path: '/downloads/', content_path: '/incomplete/Audiobook',
+            completion_on: 0, added_on: 1699000000,
+          }],
+        });
+
+        const info = await service.getDownload('abc123');
+
+        expect(info!.status).toBe('downloading');
+        // During download, content_path is used as-is (points to where files currently are)
+        expect(info!.downloadPath).toBe('/incomplete/Audiobook');
       });
 
-      const info = await service.getDownload('abc123');
+      it('falls back to save_path + name when content_path is empty', async () => {
+        const service = new QBittorrentService('http://qb', 'user', 'pass');
+        (service as any).cookie = 'SID=nocontent';
+        clientMock.get.mockResolvedValueOnce({
+          data: [{
+            hash: 'abc123', name: 'Audiobook', size: 1000, progress: 0.3,
+            dlspeed: 1000, upspeed: 0, downloaded: 300, uploaded: 0,
+            eta: 700, state: 'downloading', category: 'readmeabook', tags: '',
+            save_path: '/downloads/', content_path: '',
+            completion_on: 0, added_on: 1699000000,
+          }],
+        });
 
-      expect(info!.status).toBe('seeding');
-      expect(info!.downloadPath).toBe(path.join('/data/torrents/readmeabook/', 'Audiobook'));
+        const info = await service.getDownload('abc123');
+
+        expect(info!.status).toBe('downloading');
+        expect(info!.downloadPath).toBe(path.join('/downloads/', 'Audiobook'));
+      });
     });
 
-    it('uses save_path for stoppedUP torrents (qBittorrent v5.x completed)', async () => {
-      const service = new QBittorrentService('http://qb', 'user', 'pass');
-      (service as any).cookie = 'SID=stoppedup2';
-      clientMock.get.mockResolvedValueOnce({
-        data: [{
-          hash: 'abc123', name: 'Audiobook', size: 1000, progress: 1.0,
-          dlspeed: 0, upspeed: 0, downloaded: 1000, uploaded: 100,
-          eta: 0, state: 'stoppedUP', category: 'readmeabook', tags: '',
-          save_path: '/downloads/', content_path: '/incomplete/Audiobook',
-          completion_on: 1700000000, added_on: 1699000000,
-        }],
+    describe('empty content_path fallback', () => {
+      it('falls back to save_path + name for finished torrents with no content_path', async () => {
+        const service = new QBittorrentService('http://qb', 'user', 'pass');
+        (service as any).cookie = 'SID=nocontent-finished';
+        clientMock.get.mockResolvedValueOnce({
+          data: [{
+            hash: 'abc123', name: 'Audiobook', size: 1000, progress: 1.0,
+            dlspeed: 0, upspeed: 0, downloaded: 1000, uploaded: 0,
+            eta: 0, state: 'pausedUP', category: 'readmeabook', tags: '',
+            save_path: '/downloads/', content_path: '',
+            completion_on: 1700000000, added_on: 1699000000,
+          }],
+        });
+
+        const info = await service.getDownload('abc123');
+
+        expect(info!.status).toBe('seeding');
+        expect(info!.downloadPath).toBe(path.join('/downloads/', 'Audiobook'));
       });
-
-      const info = await service.getDownload('abc123');
-
-      expect(info!.status).toBe('seeding');
-      expect(info!.downloadPath).toBe(path.join('/downloads/', 'Audiobook'));
-    });
-
-    it('uses content_path for actively downloading torrents', async () => {
-      const service = new QBittorrentService('http://qb', 'user', 'pass');
-      (service as any).cookie = 'SID=downloading';
-      clientMock.get.mockResolvedValueOnce({
-        data: [{
-          hash: 'abc123', name: 'Audiobook', size: 1000, progress: 0.5,
-          dlspeed: 5000, upspeed: 0, downloaded: 500, uploaded: 0,
-          eta: 100, state: 'downloading', category: 'readmeabook', tags: '',
-          save_path: '/downloads/', content_path: '/incomplete/Audiobook',
-          completion_on: 0, added_on: 1699000000,
-        }],
-      });
-
-      const info = await service.getDownload('abc123');
-
-      expect(info!.status).toBe('downloading');
-      // During download, content_path is used (points to where files currently are)
-      expect(info!.downloadPath).toBe('/incomplete/Audiobook');
-    });
-
-    it('falls back to save_path + name when content_path is empty during download', async () => {
-      const service = new QBittorrentService('http://qb', 'user', 'pass');
-      (service as any).cookie = 'SID=nocontent';
-      clientMock.get.mockResolvedValueOnce({
-        data: [{
-          hash: 'abc123', name: 'Audiobook', size: 1000, progress: 0.3,
-          dlspeed: 1000, upspeed: 0, downloaded: 300, uploaded: 0,
-          eta: 700, state: 'downloading', category: 'readmeabook', tags: '',
-          save_path: '/downloads/', content_path: '',
-          completion_on: 0, added_on: 1699000000,
-        }],
-      });
-
-      const info = await service.getDownload('abc123');
-
-      expect(info!.status).toBe('downloading');
-      expect(info!.downloadPath).toBe(path.join('/downloads/', 'Audiobook'));
-    });
-
-    it('uses save_path for forcedUP torrents (force-resumed seeding)', async () => {
-      const service = new QBittorrentService('http://qb', 'user', 'pass');
-      (service as any).cookie = 'SID=forcedup2';
-      clientMock.get.mockResolvedValueOnce({
-        data: [{
-          hash: 'abc123', name: 'Audiobook', size: 1000, progress: 1.0,
-          dlspeed: 0, upspeed: 10000, downloaded: 1000, uploaded: 2000,
-          eta: 0, state: 'forcedUP', category: 'readmeabook', tags: '',
-          save_path: '/downloads/', content_path: '/incomplete/Audiobook',
-          completion_on: 1700000000, added_on: 1699000000,
-        }],
-      });
-
-      const info = await service.getDownload('abc123');
-
-      expect(info!.status).toBe('seeding');
-      expect(info!.downloadPath).toBe(path.join('/downloads/', 'Audiobook'));
-    });
-
-    it('uses save_path for queuedUP torrents (completed, queued for upload)', async () => {
-      const service = new QBittorrentService('http://qb', 'user', 'pass');
-      (service as any).cookie = 'SID=queuedup';
-      clientMock.get.mockResolvedValueOnce({
-        data: [{
-          hash: 'abc123', name: 'Audiobook', size: 1000, progress: 1.0,
-          dlspeed: 0, upspeed: 0, downloaded: 1000, uploaded: 0,
-          eta: 0, state: 'queuedUP', category: 'readmeabook', tags: '',
-          save_path: '/downloads/', content_path: '/incomplete/Audiobook',
-          completion_on: 1700000000, added_on: 1699000000,
-        }],
-      });
-
-      const info = await service.getDownload('abc123');
-
-      expect(info!.status).toBe('seeding');
-      expect(info!.downloadPath).toBe(path.join('/downloads/', 'Audiobook'));
-    });
-
-    it('uses content_path basename when torrent name differs from folder name on disk', async () => {
-      const service = new QBittorrentService('http://qb', 'user', 'pass');
-      (service as any).cookie = 'SID=namemismatch';
-      clientMock.get.mockResolvedValueOnce({
-        data: [{
-          hash: 'abc123',
-          name: 'Harry Potter and the Sorcerers Stone [Full-Cast] (aka Harry Potter and the Philosophers Stone) - J.K. Rowling',
-          size: 3006477107, progress: 1.0,
-          dlspeed: 0, upspeed: 0, downloaded: 3006477107, uploaded: 500000,
-          eta: 0, state: 'uploading', category: 'readmeabook', tags: '',
-          save_path: '/downloads/books/',
-          content_path: '/incomplete/Harry Potter and the Sorcerers Stone (Full-Cast Edition) EAC3+Atmos 6ch - J.K. Rowling',
-          completion_on: 1700000000, added_on: 1699000000,
-        }],
-      });
-
-      const info = await service.getDownload('abc123');
-
-      expect(info!.status).toBe('seeding');
-      // Must use the content_path basename (actual folder on disk), NOT torrent.name
-      expect(info!.downloadPath).toBe(
-        path.join('/downloads/books/', 'Harry Potter and the Sorcerers Stone (Full-Cast Edition) EAC3+Atmos 6ch - J.K. Rowling')
-      );
-      // Must NOT use the torrent name (which differs from the real folder)
-      expect(info!.downloadPath).not.toContain('[Full-Cast]');
-      expect(info!.downloadPath).not.toContain('incomplete');
-    });
-
-    it('falls back to torrent name when content_path is empty for finished torrents', async () => {
-      const service = new QBittorrentService('http://qb', 'user', 'pass');
-      (service as any).cookie = 'SID=nocontent-finished';
-      clientMock.get.mockResolvedValueOnce({
-        data: [{
-          hash: 'abc123', name: 'Audiobook', size: 1000, progress: 1.0,
-          dlspeed: 0, upspeed: 0, downloaded: 1000, uploaded: 0,
-          eta: 0, state: 'pausedUP', category: 'readmeabook', tags: '',
-          save_path: '/downloads/', content_path: '',
-          completion_on: 1700000000, added_on: 1699000000,
-        }],
-      });
-
-      const info = await service.getDownload('abc123');
-
-      expect(info!.status).toBe('seeding');
-      // With no content_path, falls back to torrent name
-      expect(info!.downloadPath).toBe(path.join('/downloads/', 'Audiobook'));
-    });
-
-    it('uses content_path basename for single-file torrent where name differs', async () => {
-      const service = new QBittorrentService('http://qb', 'user', 'pass');
-      (service as any).cookie = 'SID=singlefile';
-      clientMock.get.mockResolvedValueOnce({
-        data: [{
-          hash: 'abc123',
-          name: 'My Audiobook - Special Edition',
-          size: 500000000, progress: 1.0,
-          dlspeed: 0, upspeed: 1000, downloaded: 500000000, uploaded: 100000,
-          eta: 0, state: 'uploading', category: 'readmeabook', tags: '',
-          save_path: '/downloads/books/',
-          content_path: '/incomplete/My Audiobook.m4b',
-          completion_on: 1700000000, added_on: 1699000000,
-        }],
-      });
-
-      const info = await service.getDownload('abc123');
-
-      expect(info!.status).toBe('seeding');
-      // Single file: basename is the filename itself
-      expect(info!.downloadPath).toBe(path.join('/downloads/books/', 'My Audiobook.m4b'));
-      expect(info!.downloadPath).not.toContain('Special Edition');
     });
   });
 

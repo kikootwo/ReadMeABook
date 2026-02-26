@@ -11,6 +11,7 @@ import { getLibraryService } from '../services/library';
 import { getConfigService } from '../services/config.service';
 import { getDownloadClientManager } from '../services/download-client-manager.service';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
+import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import { generateFilesHash } from '../utils/files-hash';
 import { fixEpubForKindle, cleanupFixedEpub } from '../utils/epub-fixer';
 import { removeEmptyParentDirectories } from '../utils/cleanup-helpers';
@@ -308,6 +309,43 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       if (newAttempts < currentRequest.maxImportRetries) {
         // Still have retries left - queue for re-import
         logger.warn(`Retryable error for request ${requestId}, queueing for retry (attempt ${newAttempts}/${currentRequest.maxImportRetries})`);
+
+        // Re-query download client for fresh path (content_path may have been updated since handoff)
+        try {
+          const downloadHistory = await prisma.downloadHistory.findFirst({
+            where: { requestId },
+            orderBy: { createdAt: 'desc' },
+          });
+
+          if (downloadHistory?.downloadClientId && downloadHistory?.downloadClient && downloadHistory.downloadClient !== 'direct') {
+            const configService = getConfigService();
+            const dlManager = getDownloadClientManager(configService);
+            const dlProtocol = CLIENT_PROTOCOL_MAP[downloadHistory.downloadClient as DownloadClientType];
+
+            if (dlProtocol) {
+              const dlClient = await dlManager.getClientServiceForProtocol(dlProtocol);
+              if (dlClient) {
+                const freshInfo = await dlClient.getDownload(downloadHistory.downloadClientId);
+                if (freshInfo?.downloadPath && freshInfo.downloadPath !== downloadPath) {
+                  // Apply path mapping and update stored path
+                  const clientConfig = await dlManager.getClientForProtocol(dlProtocol);
+                  const pathMappingConfig: PathMappingConfig = clientConfig?.remotePathMappingEnabled
+                    ? { enabled: true, remotePath: clientConfig.remotePath || '', localPath: clientConfig.localPath || '' }
+                    : { enabled: false, remotePath: '', localPath: '' };
+                  const freshPath = PathMapper.transform(freshInfo.downloadPath, pathMappingConfig);
+
+                  logger.info(`Download client returned updated path: ${freshPath} (was: ${downloadPath})`);
+                  await prisma.downloadHistory.update({
+                    where: { id: downloadHistory.id },
+                    data: { downloadPath: freshPath },
+                  });
+                }
+              }
+            }
+          }
+        } catch (refreshError) {
+          logger.warn(`Failed to refresh download path: ${refreshError instanceof Error ? refreshError.message : String(refreshError)}`);
+        }
 
         await prisma.request.update({
           where: { id: requestId },

@@ -1091,20 +1091,12 @@ export class QBittorrentService implements IDownloadClient {
   protected mapTorrentToDownloadInfo(torrent: TorrentInfo): DownloadInfo {
     const status = this.mapStateToDownloadStatus(torrent.state);
 
-    // For completed/seeding torrents, combine save_path with the content folder basename.
-    // Two problems are solved simultaneously:
-    //  1. TempPathEnabled race — content_path may still reference the temp/incomplete directory
-    //     after qBittorrent marks the torrent as seeding but before the file move finishes.
-    //  2. Name mismatch — torrent.name (display name) can differ from the actual folder name
-    //     on disk (the root folder inside the torrent archive). content_path always reflects
-    //     the real filesystem name, so we extract its basename for the join.
-    const isFinished = status === 'seeding' || status === 'completed';
-    const contentBasename = torrent.content_path
-      ? path.basename(torrent.content_path)
-      : torrent.name;
-    const downloadPath = isFinished
-      ? path.join(torrent.save_path, contentBasename)
-      : (torrent.content_path || path.join(torrent.save_path, torrent.name));
+    // content_path is the canonical path from qBittorrent — always use it directly.
+    // It correctly handles all torrent structures (multi-file folders, single files,
+    // single files in wrapper folders, name mismatches).
+    // For TempPathEnabled race detection, we expose save_path so the monitor can
+    // compare and wait for files to relocate before triggering file organization.
+    const downloadPath = torrent.content_path || path.join(torrent.save_path, torrent.name);
 
     return {
       id: torrent.hash,
@@ -1117,6 +1109,7 @@ export class QBittorrentService implements IDownloadClient {
       eta: torrent.eta,
       category: torrent.category,
       downloadPath,
+      savePath: torrent.save_path,
       completedAt: torrent.completion_on > 0 ? new Date(torrent.completion_on * 1000) : undefined,
       seedingTime: torrent.seeding_time,
       ratio: torrent.ratio,

@@ -32,7 +32,7 @@ function getBackoffDelay(stallCount: number): number {
 
 export async function processMonitorDownload(payload: MonitorDownloadPayload): Promise<any> {
   const { requestId, downloadHistoryId, downloadClientId, downloadClient, jobId,
-          lastProgress: prevProgress, stallCount: prevStallCount } = payload;
+          lastProgress: prevProgress, stallCount: prevStallCount, pathWaitCount: prevPathWaitCount } = payload;
 
   const logger = RMABLogger.forJob(jobId, 'MonitorDownload');
 
@@ -93,6 +93,32 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
       const downloadPath = info.downloadPath;
       if (!downloadPath) {
         throw new Error('Download path not available from download client');
+      }
+
+      // Detect TempPathEnabled race: content_path hasn't been relocated to save_path yet
+      if (info.savePath && downloadPath) {
+        const normalizedSave = info.savePath.endsWith('/') ? info.savePath : info.savePath + '/';
+        if (!downloadPath.startsWith(normalizedSave)) {
+          const waitCount = (prevPathWaitCount ?? 0) + 1;
+          const MAX_PATH_WAIT = 30; // Give up after ~5 minutes
+
+          if (waitCount < MAX_PATH_WAIT) {
+            const delay = Math.min(10, waitCount * 2); // 2s, 4s, 6s... up to 10s
+            logger.info(`Download path still in temp location, waiting for relocation (${waitCount}/${MAX_PATH_WAIT})`, {
+              downloadPath, savePath: info.savePath,
+            });
+
+            const jobQueue = getJobQueueService();
+            await jobQueue.addMonitorJob(
+              requestId, downloadHistoryId, downloadClientId, downloadClient,
+              delay, 100, 0, waitCount
+            );
+
+            return { success: true, completed: false, message: 'Waiting for file relocation', pathWaitCount: waitCount };
+          }
+
+          logger.warn(`Download path still in temp location after ${waitCount} checks, proceeding with organization`);
+        }
       }
 
       // Get path mapping configuration from the specific download client
