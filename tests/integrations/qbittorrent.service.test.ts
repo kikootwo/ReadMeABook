@@ -329,8 +329,8 @@ describe('QBittorrentService', () => {
     });
   });
 
-  describe('downloadPath resolution (TempPathEnabled race condition fix)', () => {
-    it('uses save_path for seeding torrents even when content_path points to temp dir', async () => {
+  describe('downloadPath resolution (TempPathEnabled race + name mismatch fix)', () => {
+    it('uses save_path + content basename for seeding torrents even when content_path points to temp dir', async () => {
       const service = new QBittorrentService('http://qb', 'user', 'pass');
       (service as any).cookie = 'SID=temppath';
       clientMock.get.mockResolvedValueOnce({
@@ -347,7 +347,7 @@ describe('QBittorrentService', () => {
 
       expect(info).not.toBeNull();
       expect(info!.status).toBe('seeding');
-      // Must use save_path + name, NOT the stale content_path
+      // Must use save_path + content_path basename, NOT the stale full content_path
       expect(info!.downloadPath).toBe(path.join('/downloads/', 'Audiobook'));
       expect(info!.downloadPath).not.toContain('incomplete');
     });
@@ -484,6 +484,78 @@ describe('QBittorrentService', () => {
 
       expect(info!.status).toBe('seeding');
       expect(info!.downloadPath).toBe(path.join('/downloads/', 'Audiobook'));
+    });
+
+    it('uses content_path basename when torrent name differs from folder name on disk', async () => {
+      const service = new QBittorrentService('http://qb', 'user', 'pass');
+      (service as any).cookie = 'SID=namemismatch';
+      clientMock.get.mockResolvedValueOnce({
+        data: [{
+          hash: 'abc123',
+          name: 'Harry Potter and the Sorcerers Stone [Full-Cast] (aka Harry Potter and the Philosophers Stone) - J.K. Rowling',
+          size: 3006477107, progress: 1.0,
+          dlspeed: 0, upspeed: 0, downloaded: 3006477107, uploaded: 500000,
+          eta: 0, state: 'uploading', category: 'readmeabook', tags: '',
+          save_path: '/downloads/books/',
+          content_path: '/incomplete/Harry Potter and the Sorcerers Stone (Full-Cast Edition) EAC3+Atmos 6ch - J.K. Rowling',
+          completion_on: 1700000000, added_on: 1699000000,
+        }],
+      });
+
+      const info = await service.getDownload('abc123');
+
+      expect(info!.status).toBe('seeding');
+      // Must use the content_path basename (actual folder on disk), NOT torrent.name
+      expect(info!.downloadPath).toBe(
+        path.join('/downloads/books/', 'Harry Potter and the Sorcerers Stone (Full-Cast Edition) EAC3+Atmos 6ch - J.K. Rowling')
+      );
+      // Must NOT use the torrent name (which differs from the real folder)
+      expect(info!.downloadPath).not.toContain('[Full-Cast]');
+      expect(info!.downloadPath).not.toContain('incomplete');
+    });
+
+    it('falls back to torrent name when content_path is empty for finished torrents', async () => {
+      const service = new QBittorrentService('http://qb', 'user', 'pass');
+      (service as any).cookie = 'SID=nocontent-finished';
+      clientMock.get.mockResolvedValueOnce({
+        data: [{
+          hash: 'abc123', name: 'Audiobook', size: 1000, progress: 1.0,
+          dlspeed: 0, upspeed: 0, downloaded: 1000, uploaded: 0,
+          eta: 0, state: 'pausedUP', category: 'readmeabook', tags: '',
+          save_path: '/downloads/', content_path: '',
+          completion_on: 1700000000, added_on: 1699000000,
+        }],
+      });
+
+      const info = await service.getDownload('abc123');
+
+      expect(info!.status).toBe('seeding');
+      // With no content_path, falls back to torrent name
+      expect(info!.downloadPath).toBe(path.join('/downloads/', 'Audiobook'));
+    });
+
+    it('uses content_path basename for single-file torrent where name differs', async () => {
+      const service = new QBittorrentService('http://qb', 'user', 'pass');
+      (service as any).cookie = 'SID=singlefile';
+      clientMock.get.mockResolvedValueOnce({
+        data: [{
+          hash: 'abc123',
+          name: 'My Audiobook - Special Edition',
+          size: 500000000, progress: 1.0,
+          dlspeed: 0, upspeed: 1000, downloaded: 500000000, uploaded: 100000,
+          eta: 0, state: 'uploading', category: 'readmeabook', tags: '',
+          save_path: '/downloads/books/',
+          content_path: '/incomplete/My Audiobook.m4b',
+          completion_on: 1700000000, added_on: 1699000000,
+        }],
+      });
+
+      const info = await service.getDownload('abc123');
+
+      expect(info!.status).toBe('seeding');
+      // Single file: basename is the filename itself
+      expect(info!.downloadPath).toBe(path.join('/downloads/books/', 'My Audiobook.m4b'));
+      expect(info!.downloadPath).not.toContain('Special Edition');
     });
   });
 

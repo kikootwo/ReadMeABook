@@ -1091,14 +1091,19 @@ export class QBittorrentService implements IDownloadClient {
   protected mapTorrentToDownloadInfo(torrent: TorrentInfo): DownloadInfo {
     const status = this.mapStateToDownloadStatus(torrent.state);
 
-    // For completed/seeding torrents, always use save_path (the configured final destination)
-    // rather than content_path. When TempPathEnabled is active in qBittorrent, there is a race
-    // window where the torrent state transitions to uploading/seeding before the file move from
-    // the temp/incomplete directory to save_path finishes — content_path still references the
-    // stale temp location during this window, causing downstream ENOENT failures.
+    // For completed/seeding torrents, combine save_path with the content folder basename.
+    // Two problems are solved simultaneously:
+    //  1. TempPathEnabled race — content_path may still reference the temp/incomplete directory
+    //     after qBittorrent marks the torrent as seeding but before the file move finishes.
+    //  2. Name mismatch — torrent.name (display name) can differ from the actual folder name
+    //     on disk (the root folder inside the torrent archive). content_path always reflects
+    //     the real filesystem name, so we extract its basename for the join.
     const isFinished = status === 'seeding' || status === 'completed';
+    const contentBasename = torrent.content_path
+      ? path.basename(torrent.content_path)
+      : torrent.name;
     const downloadPath = isFinished
-      ? path.join(torrent.save_path, torrent.name)
+      ? path.join(torrent.save_path, contentBasename)
       : (torrent.content_path || path.join(torrent.save_path, torrent.name));
 
     return {
