@@ -78,6 +78,35 @@ export function verifyRefreshToken(token: string): RefreshTokenPayload | null {
   }
 }
 
+const DOWNLOAD_TOKEN_EXPIRY = '30d';
+
+export interface DownloadTokenPayload {
+  sub: string; // userId
+  requestId: string;
+  type: 'download';
+}
+
+/**
+ * Generate download token (30-day, stateless, URL-embeddable)
+ */
+export function generateDownloadToken(userId: string, requestId: string): string {
+  const payload: DownloadTokenPayload = { sub: userId, requestId, type: 'download' };
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: DOWNLOAD_TOKEN_EXPIRY });
+}
+
+/**
+ * Verify download token
+ */
+export function verifyDownloadToken(token: string): DownloadTokenPayload | null {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as DownloadTokenPayload;
+    if (decoded.type !== 'download') return null;
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Decode token without verification (for debugging)
  */

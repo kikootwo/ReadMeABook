@@ -9,6 +9,7 @@ import { prisma } from '@/lib/db';
 import { z } from 'zod';
 import { RMABLogger } from '@/lib/utils/logger';
 import { createRequestForUser } from '@/lib/services/request-creator.service';
+import { generateDownloadToken } from '@/lib/utils/jwt';
 
 const logger = RMABLogger.create('API.Requests');
 
@@ -146,10 +147,19 @@ export async function GET(request: NextRequest) {
         take: limit,
       });
 
+      const COMPLETED_STATUSES = ['available', 'downloaded'];
+      const enriched = requests.map(r => {
+        const isCompleted = COMPLETED_STATUSES.includes(r.status);
+        const hasFile = isCompleted && r.audiobook?.filePath;
+        if (!hasFile) return r;
+        const token = generateDownloadToken(req.user!.id, r.id);
+        return { ...r, downloadUrl: `/api/requests/${r.id}/download?token=${token}` };
+      });
+
       return NextResponse.json({
         success: true,
-        requests,
-        count: requests.length,
+        requests: enriched,
+        count: enriched.length,
       });
     } catch (error) {
       logger.error('Failed to get requests', { error: error instanceof Error ? error.message : String(error) });
