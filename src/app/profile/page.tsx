@@ -11,8 +11,7 @@ import { RequestCard } from '@/components/requests/RequestCard';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRequests } from '@/lib/hooks/useRequests';
 import { cn } from '@/lib/utils/cn';
-import { GoodreadsShelvesSection } from '@/components/profile/GoodreadsShelvesSection';
-import { HardcoverShelvesSection } from '@/components/profile/HardcoverShelvesSection';
+import { ShelvesSection } from '@/components/profile/ShelvesSection';
 
 const statConfig = [
   { key: 'total', label: 'Total', color: 'text-gray-900 dark:text-white' },
@@ -179,11 +178,8 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        {/* Goodreads Shelves */}
-        <GoodreadsShelvesSection />
-
-        {/* Hardcover Lists */}
-        <HardcoverShelvesSection />
+        {/* Generic Shelves Section */}
+        <ShelvesSection />
 
         {/* Active Downloads */}
         {activeDownloads.length > 0 && (

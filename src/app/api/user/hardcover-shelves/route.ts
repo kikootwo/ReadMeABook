@@ -159,7 +159,7 @@ export async function POST(request: NextRequest) {
       // Trigger immediate sync for this shelf (unlimited lookups, process all books)
       try {
         const jobQueue = getJobQueueService();
-        await jobQueue.addSyncHardcoverShelvesJob(undefined, shelf.id, 0);
+        await jobQueue.addSyncShelvesJob(undefined, shelf.id, 'hardcover', 0);
         logger.info(
           `Triggered immediate sync for Hardcover list "${listName}" (${shelf.id})`,
         );

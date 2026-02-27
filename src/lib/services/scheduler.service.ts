@@ -18,8 +18,7 @@ export type ScheduledJobType =
   | 'retry_failed_imports'
   | 'cleanup_seeded_torrents'
   | 'monitor_rss_feeds'
-  | 'sync_goodreads_shelves'
-  | 'sync_hardcover_shelves';
+  | 'sync_reading_shelves';
 
 export interface ScheduledJob {
   id: string;
@@ -67,6 +66,9 @@ export class SchedulerService {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+
+    // Clean up deprecated scheduled jobs
+    await this.cleanupDeprecatedJobs();
 
     // Create default jobs if they don't exist
     await this.ensureDefaultJobs();
@@ -136,15 +138,8 @@ export class SchedulerService {
         payload: {},
       },
       {
-        name: 'Sync Goodreads Shelves',
-        type: 'sync_goodreads_shelves' as ScheduledJobType,
-        schedule: '0 */6 * * *', // Every 6 hours
-        enabled: true, // Enable by default
-        payload: {},
-      },
-      {
-        name: 'Sync Hardcover Lists',
-        type: 'sync_hardcover_shelves' as ScheduledJobType,
+        name: 'Sync Reading Shelves',
+        type: 'sync_reading_shelves' as ScheduledJobType,
         schedule: '0 */6 * * *', // Every 6 hours
         enabled: true, // Enable by default
         payload: {},
@@ -184,6 +179,36 @@ export class SchedulerService {
       );
     } else if (created > 0) {
       logger.info(`Default jobs: ${created} created`);
+    }
+  }
+
+  /**
+   * Remove any old jobs that are no longer supported
+   */
+  private async cleanupDeprecatedJobs(): Promise<void> {
+    try {
+      const deprecatedTypes = [
+        'sync_goodreads_shelves',
+        'sync_hardcover_shelves',
+      ];
+
+      const obsoleteJobs = await prisma.scheduledJob.findMany({
+        where: { type: { in: deprecatedTypes } },
+      });
+
+      for (const job of obsoleteJobs) {
+        if (job.enabled) {
+          await this.unscheduleJob(job);
+        }
+        await prisma.scheduledJob.delete({ where: { id: job.id } });
+        logger.info(
+          `Removed deprecated scheduled job: ${job.name} (${job.type})`,
+        );
+      }
+    } catch (error) {
+      logger.error('Failed to cleanup deprecated scheduled jobs', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -374,11 +399,8 @@ export class SchedulerService {
       case 'monitor_rss_feeds':
         bullJobId = await this.triggerMonitorRssFeeds(job);
         break;
-      case 'sync_goodreads_shelves':
-        bullJobId = await this.triggerSyncGoodreadsShelves(job);
-        break;
-      case 'sync_hardcover_shelves':
-        bullJobId = await this.triggerSyncHardcoverShelves(job);
+      case 'sync_reading_shelves':
+        bullJobId = await this.triggerSyncShelves(job);
         break;
       default:
         throw new Error(`Unknown job type: ${job.type}`);
@@ -663,17 +685,10 @@ export class SchedulerService {
   }
 
   /**
-   * Trigger Goodreads shelves sync
+   * Trigger Reading shelves sync
    */
-  private async triggerSyncGoodreadsShelves(job: any): Promise<string> {
-    return await this.jobQueue.addSyncGoodreadsShelvesJob(job.id);
-  }
-
-  /**
-   * Trigger Hardcover lists sync
-   */
-  private async triggerSyncHardcoverShelves(job: any): Promise<string> {
-    return await this.jobQueue.addSyncHardcoverShelvesJob(job.id);
+  private async triggerSyncShelves(job: any): Promise<string> {
+    return await this.jobQueue.addSyncShelvesJob(job.id);
   }
 }
 

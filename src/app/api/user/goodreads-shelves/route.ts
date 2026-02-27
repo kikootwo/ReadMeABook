@@ -16,10 +16,13 @@ const logger = RMABLogger.create('API.GoodreadsShelves');
 const GOODREADS_RSS_PATTERN = /goodreads\.com\/review\/list_rss\//;
 
 const AddShelfSchema = z.object({
-  rssUrl: z.string().url().refine(
-    (url) => GOODREADS_RSS_PATTERN.test(url),
-    { message: 'URL must be a Goodreads shelf RSS URL (goodreads.com/review/list_rss/...)' }
-  ),
+  rssUrl: z
+    .string()
+    .url()
+    .refine((url) => GOODREADS_RSS_PATTERN.test(url), {
+      message:
+        'URL must be a Goodreads shelf RSS URL (goodreads.com/review/list_rss/...)',
+    }),
 });
 
 /**
@@ -40,7 +43,12 @@ export async function GET(request: NextRequest) {
 
       const shelvesWithMeta = shelves.map((shelf) => {
         // Normalize coverUrls: old format (string[]) → new format ({coverUrl,asin,title,author}[])
-        let books: { coverUrl: string; asin: string | null; title: string; author: string }[] = [];
+        let books: {
+          coverUrl: string;
+          asin: string | null;
+          title: string;
+          author: string;
+        }[] = [];
         if (shelf.coverUrls) {
           const parsed = JSON.parse(shelf.coverUrls);
           if (Array.isArray(parsed)) {
@@ -72,8 +80,13 @@ export async function GET(request: NextRequest) {
 
       return NextResponse.json({ success: true, shelves: shelvesWithMeta });
     } catch (error) {
-      logger.error('Failed to list shelves', { error: error instanceof Error ? error.message : String(error) });
-      return NextResponse.json({ error: 'Failed to list shelves' }, { status: 500 });
+      logger.error('Failed to list shelves', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return NextResponse.json(
+        { error: 'Failed to list shelves' },
+        { status: 500 },
+      );
     }
   });
 }
@@ -99,30 +112,43 @@ export async function POST(request: NextRequest) {
 
       if (existing) {
         return NextResponse.json(
-          { error: 'DuplicateShelf', message: 'You have already added this shelf' },
-          { status: 409 }
+          {
+            error: 'DuplicateShelf',
+            message: 'You have already added this shelf',
+          },
+          { status: 409 },
         );
       }
 
       // Validate by fetching the RSS feed
       let shelfName: string;
       let bookCount: number;
-      let initialBooks: { coverUrl: string; asin: null; title: string; author: string }[] = [];
+      let initialBooks: {
+        coverUrl: string;
+        asin: null;
+        title: string;
+        author: string;
+      }[] = [];
       try {
         const rssData = await fetchAndValidateRss(rssUrl);
         shelfName = rssData.shelfName;
         bookCount = rssData.books.length;
         initialBooks = rssData.books
-          .filter(b => b.coverUrl)
+          .filter((b) => b.coverUrl)
           .slice(0, 8)
-          .map(b => ({ coverUrl: b.coverUrl!, asin: null, title: b.title, author: b.author }));
+          .map((b) => ({
+            coverUrl: b.coverUrl!,
+            asin: null,
+            title: b.title,
+            author: b.author,
+          }));
       } catch (error) {
         return NextResponse.json(
           {
             error: 'InvalidRSS',
             message: `Could not fetch or parse the RSS feed: ${error instanceof Error ? error.message : 'Unknown error'}`,
           },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
@@ -132,43 +158,55 @@ export async function POST(request: NextRequest) {
           name: shelfName,
           rssUrl,
           bookCount,
-          coverUrls: initialBooks.length > 0 ? JSON.stringify(initialBooks) : null,
+          coverUrls:
+            initialBooks.length > 0 ? JSON.stringify(initialBooks) : null,
         },
       });
 
-      // Trigger immediate sync for this shelf (unlimited lookups, process all books)
       try {
         const jobQueue = getJobQueueService();
-        await jobQueue.addSyncGoodreadsShelvesJob(undefined, shelf.id, 0);
-        logger.info(`Triggered immediate sync for shelf "${shelfName}" (${shelf.id})`);
+        await jobQueue.addSyncShelvesJob(undefined, shelf.id, 'goodreads', 0);
+        logger.info(
+          `Triggered immediate sync for Goodreads shelf "${shelfName}" (${shelf.id})`,
+        );
       } catch (error) {
-        logger.error('Failed to trigger immediate shelf sync', { error: error instanceof Error ? error.message : String(error) });
+        logger.error('Failed to trigger immediate shelf sync', {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
 
-      return NextResponse.json({
-        success: true,
-        shelf: {
-          id: shelf.id,
-          name: shelf.name,
-          rssUrl: shelf.rssUrl,
-          lastSyncAt: shelf.lastSyncAt,
-          createdAt: shelf.createdAt,
-          bookCount: shelf.bookCount,
-          books: initialBooks,
+      return NextResponse.json(
+        {
+          success: true,
+          shelf: {
+            id: shelf.id,
+            name: shelf.name,
+            rssUrl: shelf.rssUrl,
+            lastSyncAt: shelf.lastSyncAt,
+            createdAt: shelf.createdAt,
+            bookCount: shelf.bookCount,
+            books: initialBooks,
+          },
+          bookCount,
         },
-        bookCount,
-      }, { status: 201 });
+        { status: 201 },
+      );
     } catch (error) {
-      logger.error('Failed to add shelf', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to add shelf', {
+        error: error instanceof Error ? error.message : String(error),
+      });
 
       if (error instanceof z.ZodError) {
         return NextResponse.json(
           { error: 'ValidationError', details: error.errors },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
-      return NextResponse.json({ error: 'Failed to add shelf' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Failed to add shelf' },
+        { status: 500 },
+      );
     }
   });
 }
