@@ -515,6 +515,25 @@ export function useEbookStatus(asin: string | null) {
   };
 }
 
+interface DownloadStatus {
+  downloadAvailable: boolean;
+  requestId: string | null;
+}
+
+export function useDownloadStatus(asin: string | null) {
+  const { accessToken } = useAuth();
+
+  const endpoint = accessToken && asin ? `/api/audiobooks/${asin}/download-status` : null;
+
+  const { data, isLoading } = useSWR<DownloadStatus>(endpoint, fetcher);
+
+  return {
+    downloadAvailable: data?.downloadAvailable ?? false,
+    requestId: data?.requestId ?? null,
+    isLoading,
+  };
+}
+
 export function useFetchEbookByAsin() {
   const { accessToken } = useAuth();
   const [isLoading, setIsLoading] = useState(false);

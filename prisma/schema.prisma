@@ -55,6 +55,7 @@ model User {
 
   // Fine-grained permissions
   interactiveSearchAccess Boolean? @map("interactive_search_access") // null = use global setting, true = allow, false = deny
+  downloadAccess          Boolean? @map("download_access")           // null = use global setting, true = allow, false = deny
 
   // Soft delete support
   deletedAt DateTime? @map("deleted_at")

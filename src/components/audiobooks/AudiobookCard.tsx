@@ -56,8 +56,13 @@ export function AudiobookCard({
   const [showToast, setShowToast] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [localRequestStatus, setLocalRequestStatus] = useState<string | undefined>(undefined);
 
-  const status = getStatusConfig(audiobook);
+  // Build a display-only audiobook with the local status override
+  const displayAudiobook = localRequestStatus !== undefined
+    ? { ...audiobook, requestStatus: localRequestStatus }
+    : audiobook;
+  const status = getStatusConfig(displayAudiobook);
 
   const handleRequest = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -69,6 +74,7 @@ export function AudiobookCard({
 
     try {
       await createRequest(audiobook);
+      setLocalRequestStatus('pending');
       setShowToast(true);
       setTimeout(() => setShowToast(false), 2500);
       onRequestSuccess?.();
@@ -240,8 +246,9 @@ export function AudiobookCard({
         isOpen={showModal}
         onClose={() => setShowModal(false)}
         onRequestSuccess={onRequestSuccess}
-        isRequested={audiobook.isRequested}
-        requestStatus={audiobook.requestStatus}
+        onStatusChange={(newStatus) => setLocalRequestStatus(newStatus)}
+        isRequested={audiobook.isRequested || localRequestStatus !== undefined}
+        requestStatus={displayAudiobook.requestStatus}
         isAvailable={audiobook.isAvailable}
         requestedByUsername={audiobook.requestedByUsername}
         hasReportedIssue={audiobook.hasReportedIssue}

@@ -50,7 +50,7 @@ export async function GET(
     }
 
     const requestRecord = await prisma.request.findFirst({
-      where: { id, userId: payload.sub, deletedAt: null },
+      where: { id, deletedAt: null },
       include: { audiobook: true },
     });
 

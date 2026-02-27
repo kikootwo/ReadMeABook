@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
         createdAt: true,
         lastLoginAt: true,
         interactiveSearchAccess: true,
+        downloadAccess: true,
       },
     });
 
@@ -63,6 +64,13 @@ export async function GET(request: NextRequest) {
       globalInteractiveSearch
     );
 
+    const globalDownload = await getGlobalBooleanSetting('download_access', true);
+    const effectiveDownload = resolvePermission(
+      user.role,
+      user.downloadAccess,
+      globalDownload
+    );
+
     return NextResponse.json({
       user: {
         id: user.id,
@@ -77,6 +85,7 @@ export async function GET(request: NextRequest) {
         lastLoginAt: user.lastLoginAt,
         permissions: {
           interactiveSearch: effectiveInteractiveSearch,
+          download: effectiveDownload,
         },
       },
     });

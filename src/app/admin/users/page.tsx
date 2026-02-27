@@ -28,6 +28,7 @@ interface User {
   lastLoginAt: string | null;
   autoApproveRequests: boolean | null;
   interactiveSearchAccess: boolean | null;
+  downloadAccess: boolean | null;
   _count: {
     requests: number;
   };
@@ -193,6 +194,10 @@ function AdminUsersPageContent() {
     '/api/admin/settings/interactive-search',
     authenticatedFetcher
   );
+  const { data: globalDownloadAccessData, mutate: mutateGlobalDownloadAccess } = useSWR(
+    '/api/admin/settings/download-access',
+    authenticatedFetcher
+  );
   const [editDialog, setEditDialog] = useState<{
     isOpen: boolean;
     user: User | null;
@@ -212,6 +217,7 @@ function AdminUsersPageContent() {
   const [deleting, setDeleting] = useState(false);
   const [globalAutoApprove, setGlobalAutoApprove] = useState<boolean>(false);
   const [globalInteractiveSearch, setGlobalInteractiveSearch] = useState<boolean>(true);
+  const [globalDownloadAccess, setGlobalDownloadAccess] = useState<boolean>(true);
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [permissionsUserId, setPermissionsUserId] = useState<string | null>(null);
   const toast = useToast();
@@ -236,6 +242,15 @@ function AdminUsersPageContent() {
       setGlobalInteractiveSearch(true);
     }
   }, [globalInteractiveSearchData]);
+
+  // Sync global download access state (default to true if not set)
+  useEffect(() => {
+    if (globalDownloadAccessData?.downloadAccess !== undefined) {
+      setGlobalDownloadAccess(globalDownloadAccessData.downloadAccess);
+    } else if (globalDownloadAccessData !== undefined && globalDownloadAccessData.downloadAccess === undefined) {
+      setGlobalDownloadAccess(true);
+    }
+  }, [globalDownloadAccessData]);
 
   const handleGlobalAutoApproveToggle = async (newValue: boolean) => {
     setGlobalAutoApprove(newValue);
@@ -307,6 +322,43 @@ function AdminUsersPageContent() {
     } catch (err) {
       mutate({ users: previousUsers }, false);
       const errorMsg = err instanceof Error ? err.message : 'Failed to update user interactive search setting';
+      toast.error(errorMsg);
+    }
+  };
+
+  const handleGlobalDownloadAccessToggle = async (newValue: boolean) => {
+    setGlobalDownloadAccess(newValue);
+    try {
+      await fetchJSON('/api/admin/settings/download-access', {
+        method: 'PATCH',
+        body: JSON.stringify({ downloadAccess: newValue }),
+      });
+      toast.success(`Global download access ${newValue ? 'enabled' : 'disabled'}`);
+      mutateGlobalDownloadAccess();
+      mutate();
+    } catch (err) {
+      setGlobalDownloadAccess(!newValue);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to update download access setting';
+      toast.error(errorMsg);
+    }
+  };
+
+  const handleUserDownloadAccessToggle = async (user: User, newValue: boolean) => {
+    const previousUsers = data?.users || [];
+    const optimisticUsers = previousUsers.map((u: User) =>
+      u.id === user.id ? { ...u, downloadAccess: newValue } : u
+    );
+    mutate({ users: optimisticUsers }, false);
+    try {
+      await fetchJSON(`/api/admin/users/${user.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ role: user.role, downloadAccess: newValue }),
+      });
+      toast.success(`Download access ${newValue ? 'enabled' : 'disabled'} for ${user.plexUsername}`);
+      mutate();
+    } catch (err) {
+      mutate({ users: previousUsers }, false);
+      const errorMsg = err instanceof Error ? err.message : 'Failed to update user download access setting';
       toast.error(errorMsg);
     }
   };
@@ -909,6 +961,8 @@ function AdminUsersPageContent() {
           onToggleAutoApprove={handleGlobalAutoApproveToggle}
           globalInteractiveSearch={globalInteractiveSearch}
           onToggleInteractiveSearch={handleGlobalInteractiveSearchToggle}
+          globalDownloadAccess={globalDownloadAccess}
+          onToggleDownloadAccess={handleGlobalDownloadAccessToggle}
         />
 
         {/* User Permissions Modal */}
@@ -918,11 +972,15 @@ function AdminUsersPageContent() {
           user={permissionsUser}
           globalAutoApprove={globalAutoApprove}
           globalInteractiveSearch={globalInteractiveSearch}
+          globalDownloadAccess={globalDownloadAccess}
           onToggleAutoApprove={(user, newValue) => {
             handleUserAutoApproveToggle(user as User, newValue);
           }}
           onToggleInteractiveSearch={(user, newValue) => {
             handleUserInteractiveSearchToggle(user as User, newValue);
+          }}
+          onToggleDownloadAccess={(user, newValue) => {
+            handleUserDownloadAccessToggle(user as User, newValue);
           }}
         />
       </div>

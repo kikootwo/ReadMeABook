@@ -13,17 +13,21 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { useAudiobookDetails } from '@/lib/hooks/useAudiobooks';
-import { useCreateRequest, useEbookStatus, useFetchEbookByAsin } from '@/lib/hooks/useRequests';
+import { useCreateRequest, useEbookStatus, useDownloadStatus, useFetchEbookByAsin } from '@/lib/hooks/useRequests';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePreferences } from '@/contexts/PreferencesContext';
 import { InteractiveTorrentSearchModal } from '@/components/requests/InteractiveTorrentSearchModal';
 import { ReportIssueModal } from '@/components/audiobooks/ReportIssueModal';
+import { ManualImportBrowser } from '@/components/audiobooks/ManualImportBrowser';
+import { FolderArrowDownIcon } from '@heroicons/react/24/outline';
+import { fetchWithAuth } from '@/lib/utils/api';
 
 interface AudiobookDetailsModalProps {
   asin: string;
   isOpen: boolean;
   onClose: () => void;
   onRequestSuccess?: () => void;
+  onStatusChange?: (newStatus: string) => void;
   isRequested?: boolean;
   requestStatus?: string | null;
   isAvailable?: boolean;
@@ -63,6 +67,7 @@ export function AudiobookDetailsModal({
   isOpen,
   onClose,
   onRequestSuccess,
+  onStatusChange,
   isRequested = false,
   requestStatus = null,
   isAvailable = false,
@@ -75,6 +80,7 @@ export function AudiobookDetailsModal({
   const { audiobook, audibleBaseUrl, isLoading, error } = useAudiobookDetails(isOpen ? asin : null);
   const { createRequest, isLoading: isRequesting } = useCreateRequest();
   const { ebookStatus, revalidate: revalidateEbookStatus } = useEbookStatus(isOpen && isAvailable ? asin : null);
+  const { downloadAvailable, requestId } = useDownloadStatus(isOpen ? asin : null);
   const { fetchEbook, isLoading: isFetchingEbook } = useFetchEbookByAsin();
 
   const [showToast, setShowToast] = useState(false);
@@ -84,9 +90,18 @@ export function AudiobookDetailsModal({
   const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
   const [showInteractiveSearchEbook, setShowInteractiveSearchEbook] = useState(false);
   const [showReportIssue, setShowReportIssue] = useState(false);
+  const [showManualImport, setShowManualImport] = useState(false);
   const [asinCopied, setAsinCopied] = useState(false);
+  const [localRequestStatus, setLocalRequestStatus] = useState<string | null>(requestStatus ?? null);
+  const [isDownloading, setIsDownloading] = useState(false);
 
-  const status = getStatusInfo(isAvailable, requestStatus, requestedByUsername);
+  // Sync local status when the prop changes (e.g. page data refreshes)
+  useEffect(() => {
+    setLocalRequestStatus(requestStatus ?? null);
+  }, [requestStatus]);
+
+  const effectiveStatus = localRequestStatus;
+  const status = getStatusInfo(isAvailable, effectiveStatus, requestedByUsername);
   const canShowEbookButtons = isAvailable && ebookStatus?.ebookSourcesEnabled && !ebookStatus?.hasActiveEbookRequest;
 
   useEffect(() => {
@@ -119,6 +134,8 @@ export function AudiobookDetailsModal({
 
     try {
       await createRequest(audiobook);
+      setLocalRequestStatus('pending');
+      onStatusChange?.('pending');
       showNotification('Request created!');
       setTimeout(onClose, 1500);
       onRequestSuccess?.();
@@ -157,6 +174,22 @@ export function AudiobookDetailsModal({
       setTimeout(() => setAsinCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy ASIN:', err);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!requestId) return;
+    setIsDownloading(true);
+    try {
+      const res = await fetchWithAuth(`/api/requests/${requestId}/download-token`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to get download link');
+      const { downloadUrl } = await res.json();
+      window.location.href = downloadUrl;
+    } catch (err) {
+      console.error('Failed to initiate download:', err);
+      showNotification('Failed to start download. Please try again.', 'error');
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -461,6 +494,36 @@ export function AudiobookDetailsModal({
                       </svg>
                     </a>
                   </div>
+
+                  {/* Download Link - subtle utility, visible from any context */}
+                  {isAvailable && downloadAvailable && requestId && user?.permissions?.download !== false && (
+                    <div>
+                      <p className="text-gray-500 dark:text-gray-400">Download</p>
+                      <button
+                        onClick={handleDownload}
+                        disabled={isDownloading}
+                        className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+                        aria-label={isDownloading ? 'Preparing download...' : 'Download audiobook files'}
+                      >
+                        {isDownloading ? (
+                          <>
+                            <svg className="w-3.5 h-3.5 animate-spin flex-shrink-0" viewBox="0 0 24 24" fill="none">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                            <span>Preparing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                            <span>Download files</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -485,7 +548,8 @@ export function AudiobookDetailsModal({
           )}
         </div>
 
-        {/* Sticky Action Bar - hidden when opened from bookdate */}
+
+        {/* Sticky Action Bar - hidden when opened from read-only contexts */}
         {audiobook && !isLoading && !hideRequestActions && (
           <div
             className="sticky bottom-0 z-20 p-4 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-t border-gray-200/50 dark:border-gray-700/50"
@@ -553,6 +617,17 @@ export function AudiobookDetailsModal({
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                   </svg>
+                </button>
+              )}
+
+              {/* Manual Import - admin only, hidden during active processing and completed states */}
+              {user?.role === 'admin' && !isAvailable && !['downloading', 'processing', 'searching', 'downloaded', 'completed', 'available'].includes(effectiveStatus || '') && (
+                <button
+                  onClick={() => setShowManualImport(true)}
+                  className="p-3 rounded-xl bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 hover:bg-teal-200 dark:hover:bg-teal-900/50 transition-colors"
+                  title="Manual Import"
+                >
+                  <FolderArrowDownIcon className="w-6 h-6" />
                 </button>
               )}
 
@@ -672,6 +747,26 @@ export function AudiobookDetailsModal({
           bookTitle={audiobook.title}
           bookAuthor={audiobook.author}
           coverArtUrl={audiobook.coverArtUrl}
+        />
+      )}
+
+      {/* Manual Import Browser */}
+      {showManualImport && audiobook && (
+        <ManualImportBrowser
+          isOpen={showManualImport}
+          onClose={() => setShowManualImport(false)}
+          onSuccess={() => {
+            setLocalRequestStatus('processing');
+            onStatusChange?.('processing');
+            showNotification('Import started — files are being processed');
+            onRequestSuccess?.();
+          }}
+          audiobook={{
+            asin: audiobook.asin,
+            title: audiobook.title,
+            author: audiobook.author,
+            coverArtUrl: audiobook.coverArtUrl,
+          }}
         />
       )}
     </>

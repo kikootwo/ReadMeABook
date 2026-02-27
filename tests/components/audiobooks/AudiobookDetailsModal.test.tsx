@@ -33,6 +33,7 @@ vi.mock('@/lib/hooks/useRequests', () => ({
     ebookStatus: { ebookSourcesEnabled: false, hasActiveEbookRequest: false },
     revalidate: revalidateEbookStatusMock,
   }),
+  useDownloadStatus: () => ({ downloadAvailable: false, requestId: null }),
   useFetchEbookByAsin: () => ({ fetchEbook: fetchEbookMock, isLoading: false }),
 }));
 

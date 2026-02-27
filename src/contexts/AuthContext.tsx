@@ -10,6 +10,7 @@ import { isTokenExpired, getRefreshTimeMs } from '@/lib/utils/jwt-client';
 
 interface UserPermissions {
   interactiveSearch: boolean;
+  download: boolean;
 }
 
 interface User {

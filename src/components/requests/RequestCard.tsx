@@ -27,7 +27,7 @@ interface RequestCardProps {
     createdAt: string;
     updatedAt: string;
     completedAt?: string;
-    downloadUrl?: string | null;
+    downloadAvailable?: boolean;
     audiobook: {
       id: string;
       audibleAsin?: string;
@@ -275,18 +275,6 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
                       Interactive Search
                     </Button>
                   </>
-                )}
-                {isCompleted && request.downloadUrl && (
-                  <a
-                    href={request.downloadUrl}
-                    className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:underline"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                    Download
-                  </a>
                 )}
                 {canCancel && (
                   <Button

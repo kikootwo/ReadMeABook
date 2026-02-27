@@ -15,6 +15,7 @@ interface UserPermissionsUser {
   role: 'user' | 'admin';
   autoApproveRequests: boolean | null;
   interactiveSearchAccess: boolean | null;
+  downloadAccess: boolean | null;
 }
 
 interface UserPermissionsModalProps {
@@ -23,8 +24,10 @@ interface UserPermissionsModalProps {
   user: UserPermissionsUser | null;
   globalAutoApprove: boolean;
   globalInteractiveSearch: boolean;
+  globalDownloadAccess: boolean;
   onToggleAutoApprove: (user: UserPermissionsUser, newValue: boolean) => void;
   onToggleInteractiveSearch: (user: UserPermissionsUser, newValue: boolean) => void;
+  onToggleDownloadAccess: (user: UserPermissionsUser, newValue: boolean) => void;
 }
 
 interface PermissionToggleProps {
@@ -86,8 +89,10 @@ export function UserPermissionsModal({
   user,
   globalAutoApprove,
   globalInteractiveSearch,
+  globalDownloadAccess,
   onToggleAutoApprove,
   onToggleInteractiveSearch,
+  onToggleDownloadAccess,
 }: UserPermissionsModalProps) {
   if (!user) return null;
 
@@ -102,6 +107,11 @@ export function UserPermissionsModal({
   const isSearchGlobalOverride = !isAdmin && globalInteractiveSearch;
   const isSearchDisabled = isAdmin || isSearchGlobalOverride;
   const searchValue = isAdmin ? true : isSearchGlobalOverride ? true : (user.interactiveSearchAccess ?? false);
+
+  // Download Access resolution
+  const isDownloadGlobalOverride = !isAdmin && globalDownloadAccess;
+  const isDownloadDisabled = isAdmin || isDownloadGlobalOverride;
+  const downloadValue = isAdmin ? true : isDownloadGlobalOverride ? true : (user.downloadAccess ?? false);
 
   const getDisabledMessage = (isAdminUser: boolean, isGlobalOverride: boolean, adminMessage: string, globalMessage: string): string | undefined => {
     if (isAdminUser) return adminMessage;
@@ -175,6 +185,21 @@ export function UserPermissionsModal({
               )}
               description="When enabled, this user can manually search and select torrents and ebooks"
               onToggle={() => onToggleInteractiveSearch(user, !searchValue)}
+            />
+
+            {/* Download Access Permission */}
+            <PermissionToggle
+              label="Download Access"
+              ariaLabel="Download Access"
+              value={downloadValue}
+              disabled={isDownloadDisabled}
+              disabledMessage={getDisabledMessage(
+                isAdmin, isDownloadGlobalOverride,
+                'Admins always have download access',
+                'Controlled by global download access setting'
+              )}
+              description="When enabled, this user can download audiobook files directly"
+              onToggle={() => onToggleDownloadAccess(user, !downloadValue)}
             />
           </div>
         </div>

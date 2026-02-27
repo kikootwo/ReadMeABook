@@ -9,7 +9,6 @@ import { prisma } from '@/lib/db';
 import { z } from 'zod';
 import { RMABLogger } from '@/lib/utils/logger';
 import { createRequestForUser } from '@/lib/services/request-creator.service';
-import { generateDownloadToken } from '@/lib/utils/jwt';
 import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
 
 const logger = RMABLogger.create('API.Requests');
@@ -150,12 +149,10 @@ export async function GET(request: NextRequest) {
 
       const enriched = requests.map(r => {
         const isCompleted = COMPLETED_STATUSES.includes(r.status as typeof COMPLETED_STATUSES[number]);
-        const hasFile = isCompleted && r.audiobook?.filePath;
-        const token = hasFile ? generateDownloadToken(req.user!.id, r.id) : null;
-        const downloadUrl = token ? `/api/requests/${r.id}/download?token=${token}` : undefined;
+        const downloadAvailable = isCompleted && !!r.audiobook?.filePath;
         // Strip server-side absolute path from client response
         const audiobook = r.audiobook ? { ...r.audiobook, filePath: undefined } : r.audiobook;
-        return { ...r, audiobook, ...(downloadUrl ? { downloadUrl } : {}) };
+        return { ...r, audiobook, downloadAvailable };
       });
 
       return NextResponse.json({

@@ -55,3 +55,16 @@ export async function resolveInteractiveSearchAccess(
   if (userInteractiveSearchAccess === false) return false;
   return getGlobalBooleanSetting('interactive_search_access', true);
 }
+
+/**
+ * Resolve a user's effective download access permission.
+ */
+export async function resolveDownloadAccess(
+  userRole: string,
+  userDownloadAccess: boolean | null
+): Promise<boolean> {
+  if (userRole === 'admin') return true;
+  if (userDownloadAccess === true) return true;
+  if (userDownloadAccess === false) return false;
+  return getGlobalBooleanSetting('download_access', true);
+}

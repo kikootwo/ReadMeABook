@@ -32,6 +32,7 @@ export async function GET(request: NextRequest) {
             lastLoginAt: true,
             autoApproveRequests: true,
             interactiveSearchAccess: true,
+            downloadAccess: true,
             _count: {
               select: {
                 requests: true,

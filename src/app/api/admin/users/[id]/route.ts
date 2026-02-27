@@ -19,7 +19,7 @@ export async function PUT(
       try {
         const { id } = await params;
         const body = await request.json();
-        const { role, autoApproveRequests, interactiveSearchAccess } = body;
+        const { role, autoApproveRequests, interactiveSearchAccess, downloadAccess } = body;
 
         // Validate role
         if (!role || (role !== 'user' && role !== 'admin')) {
@@ -41,6 +41,14 @@ export async function PUT(
         if (interactiveSearchAccess !== undefined && interactiveSearchAccess !== null && typeof interactiveSearchAccess !== 'boolean') {
           return NextResponse.json(
             { error: 'Invalid interactiveSearchAccess. Must be a boolean or null' },
+            { status: 400 }
+          );
+        }
+
+        // Validate downloadAccess (optional)
+        if (downloadAccess !== undefined && downloadAccess !== null && typeof downloadAccess !== 'boolean') {
+          return NextResponse.json(
+            { error: 'Invalid downloadAccess. Must be a boolean or null' },
             { status: 400 }
           );
         }
@@ -112,14 +120,23 @@ export async function PUT(
             { status: 400 }
           );
         }
+        if (role === 'admin' && downloadAccess === false) {
+          return NextResponse.json(
+            { error: 'Admins always have download access. Cannot set downloadAccess to false for admin users.' },
+            { status: 400 }
+          );
+        }
 
         // Prepare update data
-        const updateData: { role: string; autoApproveRequests?: boolean | null; interactiveSearchAccess?: boolean | null } = { role };
+        const updateData: { role: string; autoApproveRequests?: boolean | null; interactiveSearchAccess?: boolean | null; downloadAccess?: boolean | null } = { role };
         if (autoApproveRequests !== undefined) {
           updateData.autoApproveRequests = autoApproveRequests;
         }
         if (interactiveSearchAccess !== undefined) {
           updateData.interactiveSearchAccess = interactiveSearchAccess;
+        }
+        if (downloadAccess !== undefined) {
+          updateData.downloadAccess = downloadAccess;
         }
 
         // Update user
@@ -132,6 +149,7 @@ export async function PUT(
             role: true,
             autoApproveRequests: true,
             interactiveSearchAccess: true,
+            downloadAccess: true,
           },
         });
 

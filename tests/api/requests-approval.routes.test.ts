@@ -469,6 +469,7 @@ describe('Request Approval Workflow', () => {
           role: true,
           autoApproveRequests: true,
           interactiveSearchAccess: true,
+          downloadAccess: true,
         },
       });
     });
