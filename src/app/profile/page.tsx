@@ -19,11 +19,7 @@ const statConfig = [
   { key: 'waiting', label: 'Waiting', color: 'text-amber-500' },
   { key: 'completed', label: 'Complete', color: 'text-emerald-500' },
   { key: 'failed', label: 'Failed', color: 'text-red-500' },
-  {
-    key: 'cancelled',
-    label: 'Cancelled',
-    color: 'text-gray-400 dark:text-gray-500',
-  },
+  { key: 'cancelled', label: 'Cancelled', color: 'text-gray-400 dark:text-gray-500' },
 ] as const;
 
 type StatKey = (typeof statConfig)[number]['key'];
@@ -34,45 +30,25 @@ export default function ProfilePage() {
 
   const stats = useMemo(() => {
     if (!requests.length) {
-      return {
-        total: 0,
-        completed: 0,
-        active: 0,
-        waiting: 0,
-        failed: 0,
-        cancelled: 0,
-      };
+      return { total: 0, completed: 0, active: 0, waiting: 0, failed: 0, cancelled: 0 };
     }
     return {
       total: requests.length,
-      completed: requests.filter((r: any) =>
-        ['available', 'downloaded'].includes(r.status),
-      ).length,
-      active: requests.filter((r: any) =>
-        ['pending', 'searching', 'downloading', 'processing'].includes(
-          r.status,
-        ),
-      ).length,
-      waiting: requests.filter((r: any) =>
-        ['awaiting_search', 'awaiting_import'].includes(r.status),
-      ).length,
+      completed: requests.filter((r: any) => ['available', 'downloaded'].includes(r.status)).length,
+      active: requests.filter((r: any) => ['pending', 'searching', 'downloading', 'processing'].includes(r.status)).length,
+      waiting: requests.filter((r: any) => ['awaiting_search', 'awaiting_import'].includes(r.status)).length,
       failed: requests.filter((r: any) => r.status === 'failed').length,
       cancelled: requests.filter((r: any) => r.status === 'cancelled').length,
     };
   }, [requests]);
 
   const activeDownloads = useMemo(() => {
-    return requests.filter((r: any) =>
-      ['downloading', 'processing'].includes(r.status),
-    );
+    return requests.filter((r: any) => ['downloading', 'processing'].includes(r.status));
   }, [requests]);
 
   const recentRequests = useMemo(() => {
     return [...requests]
-      .sort(
-        (a: any, b: any) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      )
+      .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 5);
   }, [requests]);
 
@@ -82,18 +58,8 @@ export default function ProfilePage() {
         <Header />
         <main className="container mx-auto px-4 py-20 max-w-5xl text-center">
           <div className="w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-5">
-            <svg
-              className="w-8 h-8 text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              strokeWidth={1.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
-              />
+            <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
             </svg>
           </div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
@@ -147,7 +113,7 @@ export default function ProfilePage() {
                   'inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide',
                   user.role === 'admin'
                     ? 'bg-purple-50 text-purple-600 dark:bg-purple-500/15 dark:text-purple-400'
-                    : 'bg-gray-100 text-gray-500 dark:bg-gray-700/50 dark:text-gray-400',
+                    : 'bg-gray-100 text-gray-500 dark:bg-gray-700/50 dark:text-gray-400'
                 )}
               >
                 {user.role === 'admin' ? 'Administrator' : 'User'}
@@ -162,12 +128,7 @@ export default function ProfilePage() {
                 key={stat.key}
                 className="py-5 sm:py-6 px-3 text-center bg-white dark:bg-gray-800"
               >
-                <div
-                  className={cn(
-                    'text-2xl sm:text-3xl font-bold tabular-nums',
-                    stat.color,
-                  )}
-                >
+                <div className={cn('text-2xl sm:text-3xl font-bold tabular-nums', stat.color)}>
                   {isLoading ? '\u2013' : stats[stat.key as StatKey]}
                 </div>
                 <div className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider mt-1.5">
@@ -197,11 +158,7 @@ export default function ProfilePage() {
             </div>
             <div className="space-y-4">
               {activeDownloads.map((request: any) => (
-                <RequestCard
-                  key={request.id}
-                  request={request}
-                  showActions={false}
-                />
+                <RequestCard key={request.id} request={request} showActions={false} />
               ))}
             </div>
           </section>
@@ -244,11 +201,7 @@ export default function ProfilePage() {
           ) : recentRequests.length > 0 ? (
             <div className="space-y-4">
               {recentRequests.map((request: any) => (
-                <RequestCard
-                  key={request.id}
-                  request={request}
-                  showActions={false}
-                />
+                <RequestCard key={request.id} request={request} showActions={false} />
               ))}
             </div>
           ) : (
@@ -260,11 +213,7 @@ export default function ProfilePage() {
                 viewBox="0 0 24 24"
                 strokeWidth={1.5}
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z"
-                />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
               </svg>
               <p className="text-base font-medium text-gray-500 dark:text-gray-400">
                 No requests yet
@@ -276,18 +225,8 @@ export default function ProfilePage() {
                 href="/search"
                 className="inline-flex items-center gap-2 mt-5 px-5 py-2.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
               >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
-                  />
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
                 </svg>
                 Search Audiobooks
               </a>
