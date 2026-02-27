@@ -66,6 +66,7 @@ model User {
   bookDateRecommendations BookDateRecommendation[]
   bookDateSwipes          BookDateSwipe[]
   goodreadsShelves        GoodreadsShelf[]
+  hardcoverShelves        HardcoverShelf[]
   reportedIssues          ReportedIssue[]          @relation("Reporter")
   resolvedIssues          ReportedIssue[]          @relation("Resolver")
 
@@ -529,4 +530,46 @@ model GoodreadsBookMapping {
   @@index([goodreadsBookId])
   @@index([audibleAsin])
   @@map("goodreads_book_mappings")
+}
+
+// ============================================================================
+// HARDCOVER SYNC TABLES
+// Per-user Hardcover list subscriptions + global book-to-ASIN mapping cache
+// ============================================================================
+
+model HardcoverShelf {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  name       String    // Extracted from Hardcover API list name or status
+  listId     String    @map("list_id") // Hardcover List ID or Status ID
+  apiToken   String    @map("api_token") @db.Text // User's personal access token for hardcover api
+  lastSyncAt DateTime? @map("last_sync_at")
+  bookCount  Int?      @map("book_count")
+  coverUrls  String?   @map("cover_urls") @db.Text // JSON array of cover image URLs
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, listId])
+  @@index([userId])
+  @@map("hardcover_shelves")
+}
+
+model HardcoverBookMapping {
+  id              String    @id @default(uuid())
+  hardcoverBookId String    @unique @map("hardcover_book_id") // Internal ID from Hardcover
+  title           String
+  author          String
+  audibleAsin     String?   @map("audible_asin")
+  coverUrl        String?   @map("cover_url") @db.Text
+  noMatch         Boolean   @default(false) @map("no_match")
+  lastSearchAt    DateTime? @map("last_search_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([hardcoverBookId])
+  @@index([audibleAsin])
+  @@map("hardcover_book_mappings")
 }

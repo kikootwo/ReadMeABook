@@ -10,7 +10,16 @@ import { RMABLogger } from '../utils/logger';
 
 const logger = RMABLogger.create('Scheduler');
 
-export type ScheduledJobType = 'plex_library_scan' | 'plex_recently_added_check' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'cleanup_seeded_torrents' | 'monitor_rss_feeds' | 'sync_goodreads_shelves';
+export type ScheduledJobType =
+  | 'plex_library_scan'
+  | 'plex_recently_added_check'
+  | 'audible_refresh'
+  | 'retry_missing_torrents'
+  | 'retry_failed_imports'
+  | 'cleanup_seeded_torrents'
+  | 'monitor_rss_feeds'
+  | 'sync_goodreads_shelves'
+  | 'sync_hardcover_shelves';
 
 export interface ScheduledJob {
   id: string;
@@ -133,6 +142,13 @@ export class SchedulerService {
         enabled: true, // Enable by default
         payload: {},
       },
+      {
+        name: 'Sync Hardcover Lists',
+        type: 'sync_hardcover_shelves' as ScheduledJobType,
+        schedule: '0 */6 * * *', // Every 6 hours
+        enabled: true, // Enable by default
+        payload: {},
+      },
     ];
 
     let created = 0;
@@ -149,7 +165,9 @@ export class SchedulerService {
             data: defaultJob,
           });
           created++;
-          logger.info(`Created default job: ${defaultJob.name} (enabled: ${defaultJob.enabled})`);
+          logger.info(
+            `Created default job: ${defaultJob.name} (enabled: ${defaultJob.enabled})`,
+          );
         }
       } catch (error) {
         failed++;
@@ -161,7 +179,9 @@ export class SchedulerService {
     }
 
     if (failed > 0) {
-      logger.warn(`Default jobs: ${created} created, ${failed} failed — failed jobs will be retried on next restart`);
+      logger.warn(
+        `Default jobs: ${created} created, ${failed} failed — failed jobs will be retried on next restart`,
+      );
     } else if (created > 0) {
       logger.info(`Default jobs: ${created} created`);
     }
@@ -191,11 +211,13 @@ export class SchedulerService {
         job.type,
         { scheduledJobId: job.id },
         job.schedule,
-        `scheduled-${job.id}`
+        `scheduled-${job.id}`,
       );
       logger.info(`Job scheduled: ${job.name} (${job.schedule})`);
     } catch (error) {
-      logger.error(`Failed to schedule job ${job.name}`, { error: error instanceof Error ? error.message : String(error) });
+      logger.error(`Failed to schedule job ${job.name}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw error;
     }
   }
@@ -208,11 +230,13 @@ export class SchedulerService {
       await this.jobQueue.removeRepeatableJob(
         job.type,
         job.schedule,
-        `scheduled-${job.id}`
+        `scheduled-${job.id}`,
       );
       logger.info(`Job unscheduled: ${job.name}`);
     } catch (error) {
-      logger.error(`Failed to unschedule job ${job.name}`, { error: error instanceof Error ? error.message : String(error) });
+      logger.error(`Failed to unschedule job ${job.name}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
       // Don't throw - job might not exist in Bull yet
     }
   }
@@ -264,7 +288,7 @@ export class SchedulerService {
    */
   async updateScheduledJob(
     id: string,
-    dto: UpdateScheduledJobDto
+    dto: UpdateScheduledJobDto,
   ): Promise<ScheduledJob> {
     if (dto.schedule) {
       this.validateCronExpression(dto.schedule);
@@ -353,6 +377,9 @@ export class SchedulerService {
       case 'sync_goodreads_shelves':
         bullJobId = await this.triggerSyncGoodreadsShelves(job);
         break;
+      case 'sync_hardcover_shelves':
+        bullJobId = await this.triggerSyncHardcoverShelves(job);
+        break;
       default:
         throw new Error(`Unknown job type: ${job.type}`);
     }
@@ -408,7 +435,8 @@ export class SchedulerService {
         throw new Error(errorMsg);
       }
 
-      libraryId = job.payload?.libraryId || absConfig['audiobookshelf.library_id'];
+      libraryId =
+        job.payload?.libraryId || absConfig['audiobookshelf.library_id'];
     } else {
       const plexConfig = await configService.getMany([
         'plex_url',
@@ -432,15 +460,18 @@ export class SchedulerService {
         throw new Error(errorMsg);
       }
 
-      libraryId = job.payload?.libraryId || plexConfig.plex_audiobook_library_id;
+      libraryId =
+        job.payload?.libraryId || plexConfig.plex_audiobook_library_id;
     }
 
-    logger.info(`Triggering ${backendMode} library scan for library: ${libraryId}`);
+    logger.info(
+      `Triggering ${backendMode} library scan for library: ${libraryId}`,
+    );
 
     return await this.jobQueue.addPlexScanJob(
       libraryId || '',
       job.payload?.partial,
-      job.payload?.path
+      job.payload?.path,
     );
   }
 
@@ -460,7 +491,6 @@ export class SchedulerService {
   private async triggerAudibleRefresh(job: any): Promise<string> {
     return await this.jobQueue.addAudibleRefreshJob(job.id);
   }
-
 
   /**
    * Enable a scheduled job
@@ -493,10 +523,12 @@ export class SchedulerService {
           await this.triggerJobNow(job.id);
 
           // Stagger triggers to avoid connection pool burst on startup
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise((resolve) => setTimeout(resolve, 500));
         }
       } catch (error) {
-        logger.error(`Failed to trigger overdue job "${job.name}"`, { error: error instanceof Error ? error.message : String(error) });
+        logger.error(`Failed to trigger overdue job "${job.name}"`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   }
@@ -569,13 +601,22 @@ export class SchedulerService {
     if (dayOfMonth === '*' && month === '*' && dayOfWeek === '*') {
       const hourNum = parseInt(hour, 10);
       const minuteNum = parseInt(minute, 10);
-      if (!isNaN(hourNum) && !isNaN(minuteNum) && hourNum >= 0 && hourNum <= 23 && minuteNum >= 0 && minuteNum <= 59) {
+      if (
+        !isNaN(hourNum) &&
+        !isNaN(minuteNum) &&
+        hourNum >= 0 &&
+        hourNum <= 23 &&
+        minuteNum >= 0 &&
+        minuteNum <= 59
+      ) {
         return 24 * 60 * 60 * 1000; // 24 hours
       }
     }
 
     // For other patterns, return a conservative default (24 hours)
-    logger.warn(`Unknown cron pattern "${cronExpression}", defaulting to 24 hours`);
+    logger.warn(
+      `Unknown cron pattern "${cronExpression}", defaulting to 24 hours`,
+    );
     return 24 * 60 * 60 * 1000;
   }
 
@@ -626,6 +667,13 @@ export class SchedulerService {
    */
   private async triggerSyncGoodreadsShelves(job: any): Promise<string> {
     return await this.jobQueue.addSyncGoodreadsShelvesJob(job.id);
+  }
+
+  /**
+   * Trigger Hardcover lists sync
+   */
+  private async triggerSyncHardcoverShelves(job: any): Promise<string> {
+    return await this.jobQueue.addSyncHardcoverShelvesJob(job.id);
   }
 }
 
