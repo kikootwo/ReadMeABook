@@ -17,6 +17,11 @@ services:
       - ./downloads:/downloads
       - ./media:/media
 
+      # Book Drop: optional folder for Manual Import (Admin → audiobook → Manual Import)
+      # Map any host folder here and it will appear as a browsable root in the file picker.
+      # Example: - /path/to/your/audiobooks:/bookdrop
+      # - ./bookdrop:/bookdrop
+
       # PostgreSQL data persistence
       - ./pgdata:/var/lib/postgresql/data
 

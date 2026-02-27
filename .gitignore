@@ -54,3 +54,4 @@ next-env.d.ts
 /pgdata
 /test-media
 /test-data
+/bookdrop
