@@ -15,6 +15,7 @@ import { usePreferences } from '@/contexts/PreferencesContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { InteractiveTorrentSearchModal } from './InteractiveTorrentSearchModal';
 import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsModal';
+import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
 
 interface RequestCardProps {
   request: {
@@ -26,12 +27,15 @@ interface RequestCardProps {
     createdAt: string;
     updatedAt: string;
     completedAt?: string;
+    downloadUrl?: string | null;
     audiobook: {
       id: string;
       audibleAsin?: string;
       title: string;
       author: string;
       coverArtUrl?: string;
+      filePath?: string | null;
+      fileFormat?: string | null;
     };
   };
   showActions?: boolean;
@@ -49,6 +53,7 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
   const requestType = request.type || 'audiobook';
   const isEbook = requestType === 'ebook';
 
+  const isCompleted = COMPLETED_STATUSES.includes(request.status as typeof COMPLETED_STATUSES[number]);
   const canCancel = ['pending', 'searching', 'downloading'].includes(request.status);
   const isActive = ['searching', 'downloading', 'processing'].includes(request.status);
   const isFailed = request.status === 'failed';
@@ -271,6 +276,18 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
                     </Button>
                   </>
                 )}
+                {isCompleted && request.downloadUrl && (
+                  <a
+                    href={request.downloadUrl}
+                    className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:underline"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Download
+                  </a>
+                )}
                 {canCancel && (
                   <Button
                     onClick={handleCancel}
@@ -306,7 +323,7 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
           isOpen={showDetailsModal}
           onClose={() => setShowDetailsModal(false)}
           requestStatus={request.status}
-          isAvailable={['available', 'downloaded'].includes(request.status)}
+          isAvailable={COMPLETED_STATUSES.includes(request.status as typeof COMPLETED_STATUSES[number])}
           hideRequestActions
         />
       )}

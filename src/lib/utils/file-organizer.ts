@@ -298,9 +298,13 @@ export class FileOrganizer {
       // Determine if file renaming should be applied
       const shouldRename = renameConfig?.enabled && renameConfig.template;
       const isMultiFile = audioFiles.length > 1;
+      const duplicateBasenames = this.findDuplicateBasenames(audioFiles);
+      const usedTargetFilenames = new Set<string>();
 
       if (shouldRename) {
         await logger?.info(`File renaming enabled with template: ${renameConfig.template}${isMultiFile ? ` (${audioFiles.length} files, indices will be appended)` : ''}`);
+      } else if (duplicateBasenames.size > 0) {
+        await logger?.info(`Detected ${duplicateBasenames.size} duplicate source filename(s); applying folder-aware naming to avoid collisions`);
       }
 
       // Copy audio files (do NOT delete originals - needed for seeding)
@@ -333,8 +337,13 @@ export class FileOrganizer {
             ext,
             isMultiFile ? i + 1 : undefined,
           );
+          filename = this.makeUniqueFilename(filename, usedTargetFilenames);
         } else {
-          filename = path.basename(audioFile);
+          filename = this.buildSourceAwareFilename(
+            audioFile,
+            duplicateBasenames,
+            usedTargetFilenames
+          );
         }
 
         const targetFilePath = path.join(targetPath, filename);
@@ -626,6 +635,72 @@ export class FileOrganizer {
         // Limit length (255 chars max for most filesystems)
         .slice(0, 200)
     );
+  }
+
+  private findDuplicateBasenames(files: string[]): Set<string> {
+    const counts = new Map<string, number>();
+
+    for (const file of files) {
+      const basename = path.basename(file);
+      counts.set(basename, (counts.get(basename) || 0) + 1);
+    }
+
+    return new Set(
+      Array.from(counts.entries())
+        .filter(([, count]) => count > 1)
+        .map(([basename]) => basename)
+    );
+  }
+
+  private buildSourceAwareFilename(
+    sourcePath: string,
+    duplicateBasenames: Set<string>,
+    usedFilenames: Set<string>
+  ): string {
+    const basename = path.basename(sourcePath);
+    const ext = path.extname(basename);
+    const stem = path.basename(basename, ext);
+
+    let candidate = basename;
+
+    // Preserve folder context for duplicate track names (e.g. CD1/Track01.mp3,
+    // CD2/Track01.mp3) so each file keeps a unique target name.
+    if (duplicateBasenames.has(basename) && !path.isAbsolute(sourcePath)) {
+      const folder = path.dirname(sourcePath);
+      if (folder !== '.') {
+        const folderPrefix = folder
+          .split(path.sep)
+          .filter(Boolean)
+          .map((segment) => this.sanitizePath(segment))
+          .join('-');
+
+        if (folderPrefix) {
+          candidate = `${folderPrefix}-${stem}${ext}`;
+        }
+      }
+    }
+
+    return this.makeUniqueFilename(candidate, usedFilenames);
+  }
+
+  private makeUniqueFilename(filename: string, usedFilenames: Set<string>): string {
+    if (!usedFilenames.has(filename)) {
+      usedFilenames.add(filename);
+      return filename;
+    }
+
+    const ext = path.extname(filename);
+    const stem = path.basename(filename, ext);
+    let suffix = 2;
+
+    while (true) {
+      const candidate = `${stem} (${suffix})${ext}`;
+      if (!usedFilenames.has(candidate)) {
+        usedFilenames.add(candidate);
+        return candidate;
+      }
+      suffix++;
+    }
   }
 
   /**
