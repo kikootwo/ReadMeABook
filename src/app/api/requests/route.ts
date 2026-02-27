@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { RMABLogger } from '@/lib/utils/logger';
 import { createRequestForUser } from '@/lib/services/request-creator.service';
 import { generateDownloadToken } from '@/lib/utils/jwt';
+import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
 
 const logger = RMABLogger.create('API.Requests');
 
@@ -147,13 +148,14 @@ export async function GET(request: NextRequest) {
         take: limit,
       });
 
-      const COMPLETED_STATUSES = ['available', 'downloaded'];
       const enriched = requests.map(r => {
-        const isCompleted = COMPLETED_STATUSES.includes(r.status);
+        const isCompleted = COMPLETED_STATUSES.includes(r.status as typeof COMPLETED_STATUSES[number]);
         const hasFile = isCompleted && r.audiobook?.filePath;
-        if (!hasFile) return r;
-        const token = generateDownloadToken(req.user!.id, r.id);
-        return { ...r, downloadUrl: `/api/requests/${r.id}/download?token=${token}` };
+        const token = hasFile ? generateDownloadToken(req.user!.id, r.id) : null;
+        const downloadUrl = token ? `/api/requests/${r.id}/download?token=${token}` : undefined;
+        // Strip server-side absolute path from client response
+        const audiobook = r.audiobook ? { ...r.audiobook, filePath: undefined } : r.audiobook;
+        return { ...r, audiobook, ...(downloadUrl ? { downloadUrl } : {}) };
       });
 
       return NextResponse.json({

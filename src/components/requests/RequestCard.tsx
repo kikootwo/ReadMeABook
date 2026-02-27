@@ -15,6 +15,7 @@ import { usePreferences } from '@/contexts/PreferencesContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { InteractiveTorrentSearchModal } from './InteractiveTorrentSearchModal';
 import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsModal';
+import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
 
 interface RequestCardProps {
   request: {
@@ -52,7 +53,7 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
   const requestType = request.type || 'audiobook';
   const isEbook = requestType === 'ebook';
 
-  const isCompleted = ['available', 'downloaded'].includes(request.status);
+  const isCompleted = COMPLETED_STATUSES.includes(request.status as typeof COMPLETED_STATUSES[number]);
   const canCancel = ['pending', 'searching', 'downloading'].includes(request.status);
   const isActive = ['searching', 'downloading', 'processing'].includes(request.status);
   const isFailed = request.status === 'failed';
@@ -322,7 +323,7 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
           isOpen={showDetailsModal}
           onClose={() => setShowDetailsModal(false)}
           requestStatus={request.status}
-          isAvailable={['available', 'downloaded'].includes(request.status)}
+          isAvailable={COMPLETED_STATUSES.includes(request.status as typeof COMPLETED_STATUSES[number])}
           hideRequestActions
         />
       )}

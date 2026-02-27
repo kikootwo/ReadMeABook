@@ -67,3 +67,16 @@ export type TorrentTitleFormat = (typeof TORRENT_TITLE_FORMATS)[number];
  * 'OTHER' is used when no recognized format is detected in the title.
  */
 export type AudioFormat = TorrentTitleFormat | 'OTHER';
+
+/**
+ * All supported ebook file extensions for ebook detection and file serving.
+ */
+export const EBOOK_EXTENSIONS = [
+  '.epub',
+  '.pdf',
+  '.mobi',
+  '.azw3',
+  '.fb2',
+  '.cbz',
+  '.cbr',
+] as const;

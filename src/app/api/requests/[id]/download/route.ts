@@ -7,14 +7,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { verifyDownloadToken } from '@/lib/utils/jwt';
 import { RMABLogger } from '@/lib/utils/logger';
+import { AUDIO_EXTENSIONS, EBOOK_EXTENSIONS } from '@/lib/constants/audio-formats';
+import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
 import fs from 'fs';
 import path from 'path';
-import AdmZip from 'adm-zip';
+import archiver from 'archiver';
+import { PassThrough } from 'stream';
 
 const logger = RMABLogger.create('API.Download');
-
-const AUDIOBOOK_EXTENSIONS = ['.m4b', '.m4a', '.mp3', '.mp4', '.aa', '.aax', '.flac', '.ogg'];
-const EBOOK_EXTENSIONS = ['.epub', '.pdf', '.mobi', '.azw3', '.fb2', '.cbz', '.cbr'];
 
 function sanitizeFilename(name: string): string {
   return name
@@ -58,8 +58,7 @@ export async function GET(
       return NextResponse.json({ error: 'NotFound', message: 'Request not found' }, { status: 404 });
     }
 
-    const COMPLETED_STATUSES = ['available', 'downloaded'];
-    if (!COMPLETED_STATUSES.includes(requestRecord.status)) {
+    if (!COMPLETED_STATUSES.includes(requestRecord.status as typeof COMPLETED_STATUSES[number])) {
       return NextResponse.json({ error: 'BadRequest', message: 'Request is not yet completed' }, { status: 400 });
     }
 
@@ -75,7 +74,7 @@ export async function GET(
     }
 
     const requestType = requestRecord.type || 'audiobook';
-    const allowedExtensions = requestType === 'ebook' ? EBOOK_EXTENSIONS : AUDIOBOOK_EXTENSIONS;
+    const allowedExtensions: readonly string[] = requestType === 'ebook' ? EBOOK_EXTENSIONS : AUDIO_EXTENSIONS;
 
     const allEntries = fs.readdirSync(resolvedDir);
     const matchingFiles = allEntries
@@ -117,16 +116,26 @@ export async function GET(
       });
     }
 
-    // Multiple files — zip them in memory
-    const zip = new AdmZip();
+    // Multiple files — stream zip via archiver (avoids loading all files into memory)
+    const passThrough = new PassThrough();
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.pipe(passThrough);
     for (const filePath of matchingFiles) {
-      zip.addLocalFile(filePath);
+      archive.file(filePath, { name: path.basename(filePath) });
     }
-    const zipBuffer = zip.toBuffer();
+    archive.finalize();
+
     const zipReadable = new ReadableStream({
       start(controller) {
-        controller.enqueue(new Uint8Array(zipBuffer));
-        controller.close();
+        passThrough.on('data', chunk => controller.enqueue(new Uint8Array(chunk)));
+        passThrough.on('end', () => controller.close());
+        passThrough.on('error', err => {
+          logger.error('Zip stream error', { error: err.message });
+          controller.error(err);
+        });
+      },
+      cancel() {
+        archive.abort();
       },
     });
 
@@ -134,7 +143,6 @@ export async function GET(
       headers: {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="${sanitizedTitle}.zip"`,
-        'Content-Length': String(zipBuffer.byteLength),
       },
     });
   } catch (error) {

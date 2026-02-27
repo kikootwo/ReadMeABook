@@ -10,6 +10,7 @@ const logger = RMABLogger.create('JWT');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-to-a-random-secret-key';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'change-this-to-another-random-secret-key';
+const JWT_DOWNLOAD_SECRET = process.env.JWT_DOWNLOAD_SECRET || JWT_SECRET + '-download';
 
 const ACCESS_TOKEN_EXPIRY = '1h'; // 1 hour
 const REFRESH_TOKEN_EXPIRY = '7d'; // 7 days
@@ -91,7 +92,7 @@ export interface DownloadTokenPayload {
  */
 export function generateDownloadToken(userId: string, requestId: string): string {
   const payload: DownloadTokenPayload = { sub: userId, requestId, type: 'download' };
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: DOWNLOAD_TOKEN_EXPIRY });
+  return jwt.sign(payload, JWT_DOWNLOAD_SECRET, { expiresIn: DOWNLOAD_TOKEN_EXPIRY });
 }
 
 /**
@@ -99,7 +100,7 @@ export function generateDownloadToken(userId: string, requestId: string): string
  */
 export function verifyDownloadToken(token: string): DownloadTokenPayload | null {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as DownloadTokenPayload;
+    const decoded = jwt.verify(token, JWT_DOWNLOAD_SECRET) as DownloadTokenPayload;
     if (decoded.type !== 'download') return null;
     return decoded;
   } catch {
