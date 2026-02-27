@@ -468,6 +468,55 @@ describe('file organizer', () => {
     expect(result.isFile).toBe(false);
   });
 
+  it('keeps nested duplicate track names unique when renaming is disabled', async () => {
+    configState.values.set('metadata_tagging_enabled', 'false');
+
+    const organizer = new FileOrganizer('/media', '/tmp');
+    (organizer as any).findAudiobookFiles = vi.fn().mockResolvedValue({
+      audioFiles: [
+        path.join('CD1', 'Track01.mp3'),
+        path.join('CD1', 'Track02.mp3'),
+        path.join('CD2', 'Track01.mp3'),
+        path.join('CD2', 'Track02.mp3'),
+      ],
+      coverFile: undefined,
+      isFile: false,
+    });
+
+    const sourceRoot = path.normalize('/downloads/book');
+    fsMock.access.mockImplementation(async (filePath: string) => {
+      const normalized = path.normalize(filePath);
+      if (normalized.startsWith(sourceRoot)) return undefined;
+      throw new Error('missing');
+    });
+    fsMock.mkdir.mockResolvedValue(undefined);
+    copyFileMock.copyFile.mockResolvedValue(undefined);
+    fsMock.chmod.mockResolvedValue(undefined);
+
+    const result = await organizer.organize('/downloads/book', {
+      title: 'Book',
+      author: 'Author',
+    }, '{author}/{title}');
+
+    const expectedDir = path.join('/media', 'Author', 'Book');
+    expect(result.success).toBe(true);
+    expect(result.filesMovedCount).toBe(4);
+    expect(result.audioFiles).toEqual([
+      path.join(expectedDir, 'CD1-Track01.mp3'),
+      path.join(expectedDir, 'CD1-Track02.mp3'),
+      path.join(expectedDir, 'CD2-Track01.mp3'),
+      path.join(expectedDir, 'CD2-Track02.mp3'),
+    ]);
+    expect(copyFileMock.copyFile).toHaveBeenCalledWith(
+      path.join('/downloads', 'book', 'CD1', 'Track01.mp3'),
+      path.join(expectedDir, 'CD1-Track01.mp3')
+    );
+    expect(copyFileMock.copyFile).toHaveBeenCalledWith(
+      path.join('/downloads', 'book', 'CD2', 'Track01.mp3'),
+      path.join(expectedDir, 'CD2-Track01.mp3')
+    );
+  });
+
   it('returns no audio files for unsupported single files', async () => {
     const organizer = new FileOrganizer('/media', '/tmp');
     fsMock.stat.mockResolvedValue({ isFile: () => true });
