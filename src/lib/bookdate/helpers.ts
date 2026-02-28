@@ -691,6 +691,73 @@ export async function callAI(
     logger.debug('Claude cleaned response:', { cleanedContent });
     return JSON.parse(cleanedContent);
 
+  } else if (provider === 'gemini') {
+    const requestBody = {
+      systemInstruction: {
+        parts: [{ text: systemMessage }],
+      },
+      contents: [
+        {
+          parts: [{ text: prompt }],
+        },
+      ],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "OBJECT",
+          properties: {
+            recommendations: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  title: { type: "STRING" },
+                  author: { type: "STRING" },
+                  reason: { type: "STRING" },
+                },
+                required: ["title", "author", "reason"],
+              },
+            },
+          },
+          required: ["recommendations"],
+        },
+      },
+    };
+
+    logger.debug('Gemini request body:', { requestBody });
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error('Gemini API error', { status: response.status, error: errorText });
+      throw new Error(`Gemini API error: ${response.status} ${errorText}`);
+    }
+
+    const data = await response.json();
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!content) {
+      throw new Error('Invalid response format from Gemini API');
+    }
+
+    logger.debug('Gemini raw response:', { content });
+
+    // Clean potential markdown wrapping
+    const cleanedContent = content
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+
+    logger.debug('Gemini cleaned response:', { cleanedContent });
+    return JSON.parse(cleanedContent);
+
   } else if (provider === 'custom') {
     if (!baseUrl) {
       throw new Error('Base URL is required for custom provider');
