@@ -391,7 +391,7 @@ model ScheduledJob {
 
 model BookDateConfig {
   id           String   @id @default(uuid())
-  provider     String // 'openai' | 'claude' | 'custom'
+  provider     String // 'openai' | 'claude' | 'gemini' | 'custom'
   apiKey       String   @map("api_key") @db.Text // Encrypted at rest (AES-256)
   model        String // e.g., 'gpt-4o', 'claude-sonnet-4-5-20250929'
   baseUrl      String?  @map("base_url") @db.Text // Base URL for custom provider (OpenAI-compatible endpoints)

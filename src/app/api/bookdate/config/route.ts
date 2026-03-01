@@ -59,9 +59,9 @@ async function saveConfig(req: AuthenticatedRequest) {
       );
     }
 
-    if (!['openai', 'claude', 'custom'].includes(provider)) {
+    if (!['openai', 'claude', 'custom', 'gemini'].includes(provider)) {
       return NextResponse.json(
-        { error: 'Invalid provider. Must be "openai", "claude", or "custom"' },
+        { error: 'Invalid provider. Must be "openai", "claude", "custom", or "gemini"' },
         { status: 400 }
       );
     }
@@ -107,7 +107,7 @@ async function saveConfig(req: AuthenticatedRequest) {
       // No new API key, use existing one
       encryptedApiKeyToUse = existingConfig.apiKey;
     } else {
-      // API key required for OpenAI/Claude
+      // API key required for OpenAI/Claude/Gemini
       return NextResponse.json(
         { error: 'API key is required' },
         { status: 400 }

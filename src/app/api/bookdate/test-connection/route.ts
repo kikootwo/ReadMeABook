@@ -52,6 +52,29 @@ async function fetchClaudeModels(apiKey: string): Promise<{ id: string; name: st
   return allModels;
 }
 
+// Fetch available Gemini models from the Google API
+async function fetchGeminiModels(apiKey: string): Promise<{ id: string; name: string }[]> {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error('Gemini API error', { error: errorText });
+    throw new Error('Invalid Gemini API key or connection failed');
+  }
+
+  const data = await response.json();
+
+  return (data.models || [])
+    .filter((m: any) => m.name?.startsWith('models/gemini-') && m.supportedGenerationMethods?.includes('generateContent'))
+    .map((m: any) => ({
+      id: m.name.replace('models/', ''),
+      name: m.displayName || m.name.replace('models/', ''),
+    }))
+    .sort((a: any, b: any) => a.name.localeCompare(b.name));
+}
+
 // Helper functions for custom provider
 function isValidBaseUrl(url: string): boolean {
   try {
@@ -79,9 +102,9 @@ async function authenticatedHandler(req: AuthenticatedRequest) {
       );
     }
 
-    if (!['openai', 'claude', 'custom'].includes(provider)) {
+    if (!['openai', 'claude', 'custom', 'gemini'].includes(provider)) {
       return NextResponse.json(
-        { error: 'Invalid provider. Must be "openai", "claude", or "custom"' },
+        { error: 'Invalid provider. Must be "openai", "claude", "custom", or "gemini"' },
         { status: 400 }
       );
     }
@@ -193,6 +216,16 @@ async function authenticatedHandler(req: AuthenticatedRequest) {
           { status: 400 }
         );
       }
+    } else if (provider === 'gemini') {
+      // Gemini: Fetch models dynamically from the Google API
+      try {
+        models = await fetchGeminiModels(testApiKey);
+      } catch {
+        return NextResponse.json(
+          { error: 'Invalid Gemini API key or connection failed' },
+          { status: 400 }
+        );
+      }
     } else if (provider === 'custom') {
       // Custom: Fetch models from custom OpenAI-compatible endpoint
       const normalizedUrl = normalizeBaseUrl(testBaseUrl);
@@ -291,9 +324,9 @@ async function unauthenticatedHandler(req: NextRequest) {
       );
     }
 
-    if (!['openai', 'claude', 'custom'].includes(provider)) {
+    if (!['openai', 'claude', 'custom', 'gemini'].includes(provider)) {
       return NextResponse.json(
-        { error: 'Invalid provider. Must be "openai", "claude", or "custom"' },
+        { error: 'Invalid provider. Must be "openai", "claude", "custom", or "gemini"' },
         { status: 400 }
       );
     }
@@ -360,6 +393,16 @@ async function unauthenticatedHandler(req: NextRequest) {
       } catch {
         return NextResponse.json(
           { error: 'Invalid Claude API key or connection failed' },
+          { status: 400 }
+        );
+      }
+    } else if (provider === 'gemini') {
+      // Gemini: Fetch models dynamically
+      try {
+        models = await fetchGeminiModels(apiKey);
+      } catch {
+        return NextResponse.json(
+          { error: 'Invalid Gemini API key or connection failed' },
           { status: 400 }
         );
       }

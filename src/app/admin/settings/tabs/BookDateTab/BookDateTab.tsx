@@ -90,6 +90,7 @@ export function BookDateTab({ onSuccess, onError }: BookDateTabProps) {
         >
           <option value="openai">OpenAI</option>
           <option value="claude">Claude (Anthropic)</option>
+          <option value="gemini">Google Gemini</option>
           <option value="custom">Custom (OpenAI-compatible)</option>
         </select>
       </div>
@@ -136,7 +137,7 @@ export function BookDateTab({ onSuccess, onError }: BookDateTabProps) {
               ? 'Leave blank for local models'
               : configured
                 ? '••••••••••••••••'
-                : (provider === 'openai' ? 'sk-...' : 'sk-ant-...')
+                : (provider === 'openai' ? 'sk-...' : provider === 'gemini' ? 'AIza...' : 'sk-ant-...')
           }
         />
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
