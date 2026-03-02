@@ -45,13 +45,31 @@ export class AppriseProvider implements INotificationProvider {
     const meta = getEventMeta(payload.event);
     const { title, body } = this.formatMessage(payload);
 
-    const serverUrl = appriseConfig.serverUrl.replace(/\/+$/, '');
-    const notificationType = SEVERITY_TYPES[meta.severity];
-
+    // Parse URL to extract embedded HTTP Basic Auth credentials (e.g. https://user:pass@host/)
+    let serverUrl: string;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
 
+    try {
+      const parsed = new URL(appriseConfig.serverUrl);
+      if (parsed.username) {
+        const username = decodeURIComponent(parsed.username);
+        const password = decodeURIComponent(parsed.password);
+        headers['Authorization'] = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
+        parsed.username = '';
+        parsed.password = '';
+        serverUrl = parsed.toString().replace(/\/+$/, '');
+      } else {
+        serverUrl = appriseConfig.serverUrl.replace(/\/+$/, '');
+      }
+    } catch {
+      serverUrl = appriseConfig.serverUrl.replace(/\/+$/, '');
+    }
+
+    const notificationType = SEVERITY_TYPES[meta.severity];
+
+    // Explicit authToken (Bearer) takes precedence over URL-embedded credentials
     if (appriseConfig.authToken) {
       headers['Authorization'] = `Bearer ${appriseConfig.authToken}`;
     }

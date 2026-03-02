@@ -246,6 +246,102 @@ describe('AppriseProvider', () => {
     });
   });
 
+  describe('send — URL with embedded credentials', () => {
+    it('extracts credentials and sends Basic auth header with clean URL', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        text: async () => 'ok',
+      });
+
+      const { AppriseProvider } = await import('@/lib/services/notification');
+      const provider = new AppriseProvider();
+
+      await provider.send(
+        {
+          serverUrl: 'http://myuser:mypass@apprise:8000',
+          urls: 'slack://token',
+        },
+        {
+          event: 'request_approved',
+          requestId: 'req-1',
+          title: 'Test Book',
+          author: 'Test Author',
+          userName: 'Test User',
+          timestamp: new Date(),
+        }
+      );
+
+      const fetchCall = fetchMock.mock.calls[0];
+      expect(fetchCall[0]).toBe('http://apprise:8000/notify/');
+      expect(fetchCall[1].headers['Authorization']).toBe(
+        `Basic ${Buffer.from('myuser:mypass').toString('base64')}`
+      );
+    });
+
+    it('decodes URL-encoded special characters in credentials', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        text: async () => 'ok',
+      });
+
+      const { AppriseProvider } = await import('@/lib/services/notification');
+      const provider = new AppriseProvider();
+
+      await provider.send(
+        {
+          serverUrl: 'http://user%40domain:p%40ss%3Aword@apprise:8000',
+          urls: 'slack://token',
+        },
+        {
+          event: 'request_approved',
+          requestId: 'req-1',
+          title: 'Test Book',
+          author: 'Test Author',
+          userName: 'Test User',
+          timestamp: new Date(),
+        }
+      );
+
+      const fetchCall = fetchMock.mock.calls[0];
+      expect(fetchCall[0]).toBe('http://apprise:8000/notify/');
+      expect(fetchCall[1].headers['Authorization']).toBe(
+        `Basic ${Buffer.from('user@domain:p@ss:word').toString('base64')}`
+      );
+    });
+
+    it('authToken (Bearer) takes precedence over URL-embedded credentials', async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        text: async () => 'ok',
+      });
+
+      const { AppriseProvider } = await import('@/lib/services/notification');
+      const provider = new AppriseProvider();
+
+      await provider.send(
+        {
+          serverUrl: 'http://myuser:mypass@apprise:8000',
+          urls: 'slack://token',
+          authToken: 'bearertoken123',
+        },
+        {
+          event: 'request_approved',
+          requestId: 'req-1',
+          title: 'Test Book',
+          author: 'Test Author',
+          userName: 'Test User',
+          timestamp: new Date(),
+        }
+      );
+
+      const fetchCall = fetchMock.mock.calls[0];
+      // URL should still be cleaned
+      expect(fetchCall[0]).toBe('http://apprise:8000/notify/');
+      // Bearer token wins over Basic
+      expect(fetchCall[1].headers['Authorization']).toBe('Bearer bearertoken123');
+    });
+  });
+
   describe('notification types by event', () => {
     it('maps event types to correct Apprise notification types', async () => {
       fetchMock.mockResolvedValue({

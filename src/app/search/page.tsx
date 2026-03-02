@@ -5,41 +5,48 @@
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from '@/components/layout/Header';
 import { AudiobookGrid } from '@/components/audiobooks/AudiobookGrid';
-import { useSearch } from '@/lib/hooks/useAudiobooks';
+import { LoadMoreBar } from '@/components/ui/LoadMoreBar';
+import { useSearch, Audiobook } from '@/lib/hooks/useAudiobooks';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-import { CardSizeControls } from '@/components/ui/CardSizeControls';
-import { SquareCoversToggle } from '@/components/ui/SquareCoversToggle';
+import { SectionToolbar } from '@/components/ui/SectionToolbar';
 import { usePreferences } from '@/contexts/PreferencesContext';
 
 export default function SearchPage() {
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [page, setPage] = useState(1);
-  const { cardSize, setCardSize, squareCovers, setSquareCovers } = usePreferences();
+  const { cardSize, setCardSize, squareCovers, setSquareCovers, hideAvailable, setHideAvailable } = usePreferences();
 
   // Debounce search query
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedQuery(query);
-      setPage(1); // Reset to first page on new search
     }, 500);
 
     return () => clearTimeout(timer);
   }, [query]);
 
-  const { results, totalResults, hasMore, isLoading } = useSearch(debouncedQuery, page);
+  const { results, totalResults, hasMore, isLoading, isLoadingMore, loadMore } = useSearch(debouncedQuery);
+
+  // Filter out available titles when hideAvailable is enabled
+  const filteredResults = useMemo(
+    () => hideAvailable ? results.filter((b: Audiobook) => !b.isAvailable && b.requestStatus !== 'completed') : results,
+    [results, hideAvailable]
+  );
 
   const handleSearch = useCallback((e: React.FormEvent) => {
     e.preventDefault();
-    setPage(1);
   }, []);
 
-  const handleLoadMore = useCallback(() => {
-    setPage((prev) => prev + 1);
-  }, []);
+  // Header count text: reflects filtered counts
+  const visibleCount = filteredResults.length;
+  const countText = hasMore && totalResults > 0
+    ? `${visibleCount.toLocaleString()} of ${totalResults.toLocaleString()} result${totalResults !== 1 ? 's' : ''}`
+    : visibleCount > 0
+      ? `${visibleCount.toLocaleString()} result${visibleCount !== 1 ? 's' : ''}`
+      : '';
 
   return (
     <ProtectedRoute>
@@ -113,45 +120,42 @@ export default function SearchPage() {
                   <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 truncate">
                     Search Results
                   </h2>
-                  {!isLoading && totalResults > 0 && (
+                  {!isLoading && countText && (
                     <span className="text-sm text-gray-600 dark:text-gray-400 hidden sm:inline whitespace-nowrap">
-                      ({totalResults.toLocaleString()} result{totalResults !== 1 ? 's' : ''})
+                      ({countText})
                     </span>
                   )}
-                  <div className="ml-auto flex items-center gap-1">
-                    <SquareCoversToggle enabled={squareCovers} onToggle={setSquareCovers} />
-                    <CardSizeControls size={cardSize} onSizeChange={setCardSize} />
-                  </div>
+                  <SectionToolbar
+                    hideAvailable={hideAvailable}
+                    onToggleHideAvailable={setHideAvailable}
+                    squareCovers={squareCovers}
+                    onToggleSquareCovers={setSquareCovers}
+                    cardSize={cardSize}
+                    onCardSizeChange={setCardSize}
+                  />
                 </div>
               </div>
             </div>
 
             {/* Results Grid */}
             <AudiobookGrid
-              audiobooks={results}
-              isLoading={!!(isLoading && page === 1)}
+              audiobooks={filteredResults}
+              isLoading={isLoading}
               emptyMessage={`No results found for "${debouncedQuery}"`}
               cardSize={cardSize}
               squareCovers={squareCovers}
             />
 
-            {/* Load More */}
-            {hasMore && !isLoading && (
-              <div className="flex justify-center">
-                <button
-                  onClick={handleLoadMore}
-                  className="px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  Load More Results
-                </button>
-              </div>
-            )}
-
-            {/* Loading More Indicator */}
-            {isLoading && page > 1 && (
-              <div className="flex justify-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-              </div>
+            {/* Load More Bar */}
+            {filteredResults.length > 0 && (
+              <LoadMoreBar
+                loadedCount={filteredResults.length}
+                totalCount={totalResults}
+                hasMore={hasMore}
+                isLoading={isLoadingMore}
+                onLoadMore={loadMore}
+                itemLabel="results"
+              />
             )}
           </div>
         ) : (

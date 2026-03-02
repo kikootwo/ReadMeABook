@@ -29,6 +29,10 @@ vi.mock('@/components/requests/InteractiveTorrentSearchModal', () => ({
   }) => (isOpen ? <div>Interactive search for {audiobook.title}</div> : null),
 }));
 
+vi.mock('@/app/admin/components/AdjustSearchTermsModal', () => ({
+  AdjustSearchTermsModal: () => null,
+}));
+
 describe('RequestActionsDropdown', () => {
   it('exposes manual search, interactive search, cancel, and delete actions', async () => {
     const onManualSearch = vi.fn().mockResolvedValue(undefined);

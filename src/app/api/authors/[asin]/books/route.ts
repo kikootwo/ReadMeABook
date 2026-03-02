@@ -46,23 +46,27 @@ export async function GET(
       );
     }
 
-    logger.info(`Fetching books for author "${authorName}" (ASIN: ${asin})`);
+    const page = parseInt(request.nextUrl.searchParams.get('page') || '1', 10);
+
+    logger.info(`Fetching books for author "${authorName}" (ASIN: ${asin}), page ${page}`);
 
     const audibleService = getAudibleService();
-    const books = await audibleService.searchByAuthorAsin(authorName.trim(), asin);
+    const result = await audibleService.searchByAuthorAsin(authorName.trim(), asin, page);
 
     // Enrich with library availability and request status
     const userId = currentUser.sub || undefined;
-    const enrichedBooks = await enrichAudiobooksWithMatches(books, userId);
+    const enrichedBooks = await enrichAudiobooksWithMatches(result.books, userId);
 
-    logger.info(`Author books complete: "${authorName}" → ${enrichedBooks.length} books`);
+    logger.info(`Author books complete: "${authorName}" → ${enrichedBooks.length} books (page ${page})`);
 
     return NextResponse.json({
       success: true,
       books: enrichedBooks,
       authorName: authorName.trim(),
       authorAsin: asin,
-      totalBooks: enrichedBooks.length,
+      totalBooks: result.totalResults || enrichedBooks.length,
+      hasMore: result.hasMore,
+      page: result.page,
     });
   } catch (error) {
     logger.error('Failed to fetch author books', { error: error instanceof Error ? error.message : String(error) });

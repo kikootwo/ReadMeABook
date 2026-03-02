@@ -34,6 +34,13 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       },
     });
 
+    // Check for custom search terms override
+    const requestRecord = await prisma.request.findUnique({
+      where: { id: requestId },
+      select: { customSearchTerms: true },
+    });
+    const effectiveSearchTitle = requestRecord?.customSearchTerms || audiobook.title;
+
     // Get enabled indexers from configuration
     const { getConfigService } = await import('../services/config.service');
     const configService = getConfigService();
@@ -77,7 +84,11 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     // Get Prowlarr service
     const prowlarr = await getProwlarrService();
 
-    logger.info(`Searching for: "${audiobook.title}" by "${audiobook.author}"`);
+    if (requestRecord?.customSearchTerms) {
+      logger.info(`Searching with custom terms: "${effectiveSearchTitle}" (original: "${audiobook.title}") by "${audiobook.author}"`);
+    } else {
+      logger.info(`Searching for: "${audiobook.title}" by "${audiobook.author}"`);
+    }
 
     // Search Prowlarr for each group and combine results
     const allResults = [];
@@ -87,7 +98,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       logger.info(`Searching group ${i + 1}/${groups.length}: ${getGroupDescription(group)}`);
 
       try {
-        const groupResults = await prowlarr.searchWithVariations(audiobook.title, audiobook.author, {
+        const groupResults = await prowlarr.searchWithVariations(effectiveSearchTitle, audiobook.author, {
           categories: group.categories,
           indexerIds: group.indexerIds,
           minSeeders: 1, // Only torrents with at least 1 seeder

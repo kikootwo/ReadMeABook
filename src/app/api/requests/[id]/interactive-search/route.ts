@@ -125,8 +125,8 @@ export async function POST(
         logger.info(`Skipping ${skippedIndexers.length} indexer(s) with no audiobook categories: ${skippedNames}`);
       }
 
-      // Use custom title if provided, otherwise use audiobook's title
-      const searchTitle = customTitle || requestRecord.audiobook.title;
+      // Use custom title if provided, then custom search terms, then audiobook's title
+      const searchTitle = customTitle || requestRecord.customSearchTerms || requestRecord.audiobook.title;
       const searchAuthor = requestRecord.audiobook.author;
 
       logger.info(`Searching ${indexersConfig.length - skippedIndexers.length} enabled indexers in ${groups.length} group${groups.length > 1 ? 's' : ''}`, { searchTitle });

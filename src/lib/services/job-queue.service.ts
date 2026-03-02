@@ -66,6 +66,7 @@ export interface MonitorDownloadPayload extends JobPayload {
   lastProgress?: number;  // Previous poll's progress (0-100) for stall detection
   stallCount?: number;    // Consecutive polls with no progress change (drives backoff)
   pathWaitCount?: number; // Consecutive polls waiting for content_path to relocate to save_path
+  connectionFailureCount?: number; // Consecutive polls where the download client was unreachable
 }
 
 export interface OrganizeFilesPayload extends JobPayload {
@@ -73,6 +74,7 @@ export interface OrganizeFilesPayload extends JobPayload {
   audiobookId: string;
   downloadPath: string;
   targetPath?: string; // Optional - not used by processor (reads from database config)
+  cleanupSource?: boolean; // If true, delete source files after successful import
 }
 
 export interface ScanPlexPayload extends JobPayload {
@@ -257,6 +259,29 @@ export class JobQueueService {
           }
         } catch (updateError) {
           logger.error('Failed to update request/download status', { error: updateError instanceof Error ? updateError.message : String(updateError) });
+        }
+      }
+
+      // Safety net for download_torrent: if the processor skipped marking the
+      // request as failed (e.g. connection error with Bull retries), ensure the
+      // request is marked failed after all retries are exhausted.
+      if (job.name === 'download_torrent' && job.data) {
+        const payload = job.data as DownloadTorrentPayload;
+        logger.error(`DownloadTorrent job permanently failed for request ${payload.requestId} after ${job.attemptsMade} attempts`);
+
+        try {
+          await prisma.request.update({
+            where: { id: payload.requestId },
+            data: {
+              status: 'failed',
+              errorMessage: error.message || 'Failed to add download after multiple retries',
+              updatedAt: new Date(),
+            },
+          });
+        } catch (updateError) {
+          logger.error('Failed to update request status after download_torrent failure', {
+            error: updateError instanceof Error ? updateError.message : String(updateError),
+          });
         }
       }
     });
@@ -569,7 +594,8 @@ export class JobQueueService {
     delaySeconds: number = 0,
     lastProgress?: number,
     stallCount?: number,
-    pathWaitCount?: number
+    pathWaitCount?: number,
+    connectionFailureCount?: number
   ): Promise<string> {
     return await this.addJob(
       'monitor_download',
@@ -581,6 +607,7 @@ export class JobQueueService {
         lastProgress,
         stallCount,
         pathWaitCount,
+        connectionFailureCount,
       } as MonitorDownloadPayload,
       {
         priority: 5, // Medium priority
@@ -597,7 +624,8 @@ export class JobQueueService {
     requestId: string,
     audiobookId: string,
     downloadPath: string,
-    targetPath?: string
+    targetPath?: string,
+    cleanupSource?: boolean
   ): Promise<string> {
     return await this.addJob(
       'organize_files',
@@ -606,6 +634,7 @@ export class JobQueueService {
         audiobookId,
         downloadPath,
         targetPath, // Not used by processor
+        cleanupSource,
       } as OrganizeFilesPayload,
       {
         priority: 8,

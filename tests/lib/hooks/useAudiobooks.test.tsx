@@ -10,10 +10,15 @@ import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const useSWRMock = vi.hoisted(() => vi.fn());
+const useSWRInfiniteMock = vi.hoisted(() => vi.fn());
 const authenticatedFetcherMock = vi.hoisted(() => vi.fn());
 
 vi.mock('swr', () => ({
   default: useSWRMock,
+}));
+
+vi.mock('swr/infinite', () => ({
+  default: useSWRInfiniteMock,
 }));
 
 vi.mock('@/lib/utils/api', () => ({
@@ -27,6 +32,7 @@ const HookProbe = ({ label, value }: { label: string; value: any }) => (
 describe('useAudiobooks hooks', () => {
   beforeEach(() => {
     useSWRMock.mockReset();
+    useSWRInfiniteMock.mockReset();
     authenticatedFetcherMock.mockReset();
     vi.resetModules();
   });
@@ -60,25 +66,30 @@ describe('useAudiobooks hooks', () => {
   });
 
   it('skips search when the query is empty', async () => {
-    useSWRMock.mockReturnValue({ data: null, error: null, isLoading: false });
+    useSWRInfiniteMock.mockReturnValue({
+      data: undefined,
+      error: null,
+      size: 1,
+      setSize: vi.fn(),
+      isLoading: false,
+      isValidating: false,
+    });
 
     const { useSearch } = await import('@/lib/hooks/useAudiobooks');
 
     const Probe = () => {
-      const result = useSearch('', 1);
+      const result = useSearch('');
       return <HookProbe label="search" value={result} />;
     };
 
     render(<Probe />);
 
-    expect(useSWRMock).toHaveBeenCalledWith(
-      null,
-      authenticatedFetcherMock,
-      expect.objectContaining({ dedupingInterval: 30000 })
-    );
+    // useSWRInfinite should be called with a key function
+    expect(useSWRInfiniteMock).toHaveBeenCalled();
 
     const parsed = JSON.parse(screen.getByTestId('search').textContent || '{}');
     expect(parsed.isLoading).toBeFalsy();
+    expect(parsed.results).toEqual([]);
   });
 
   it('requests audiobook details when an ASIN is provided', async () => {

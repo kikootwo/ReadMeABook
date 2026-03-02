@@ -5,16 +5,17 @@
 
 'use client';
 
-import { use, useCallback } from 'react';
+import { use, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Header } from '@/components/layout/Header';
 import { AudiobookGrid } from '@/components/audiobooks/AudiobookGrid';
+import { LoadMoreBar } from '@/components/ui/LoadMoreBar';
 import { AuthorDetailCard, AuthorDetailSkeleton } from '@/components/authors/AuthorDetailCard';
 import { SimilarAuthorsRow, SimilarAuthorsSkeleton } from '@/components/authors/SimilarAuthorsRow';
 import { useAuthorDetail, useAuthorBooks } from '@/lib/hooks/useAuthors';
+import { Audiobook } from '@/lib/hooks/useAudiobooks';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-import { CardSizeControls } from '@/components/ui/CardSizeControls';
-import { SquareCoversToggle } from '@/components/ui/SquareCoversToggle';
+import { SectionToolbar } from '@/components/ui/SectionToolbar';
 import { usePreferences } from '@/contexts/PreferencesContext';
 
 export default function AuthorDetailPage({
@@ -27,11 +28,11 @@ export default function AuthorDetailPage({
   const searchParams = useSearchParams();
   const fromAuthorName = searchParams.get('from');
   const { author, isLoading: authorLoading } = useAuthorDetail(asin);
-  const { books, totalBooks, isLoading: booksLoading } = useAuthorBooks(
+  const { books, totalBooks, hasMore, isLoading: booksLoading, isLoadingMore, loadMore } = useAuthorBooks(
     asin,
     author?.name || null
   );
-  const { cardSize, setCardSize, squareCovers, setSquareCovers } = usePreferences();
+  const { cardSize, setCardSize, squareCovers, setSquareCovers, hideAvailable, setHideAvailable } = usePreferences();
 
   const handleBack = useCallback(() => {
     // Use browser back if we came from within the app, otherwise fallback to /authors
@@ -41,6 +42,20 @@ export default function AuthorDetailPage({
       router.push('/authors');
     }
   }, [router]);
+
+  // Filter out available titles when hideAvailable is enabled
+  const filteredBooks = useMemo(
+    () => hideAvailable ? books.filter((b: Audiobook) => !b.isAvailable && b.requestStatus !== 'completed') : books,
+    [books, hideAvailable]
+  );
+
+  // Header count text: reflects filtered counts
+  const visibleCount = filteredBooks.length;
+  const booksCountText = hasMore && totalBooks > books.length
+    ? `${visibleCount.toLocaleString()} of ${totalBooks.toLocaleString()} title${totalBooks !== 1 ? 's' : ''}`
+    : visibleCount > 0
+      ? `${visibleCount.toLocaleString()} title${visibleCount !== 1 ? 's' : ''}`
+      : '';
 
   return (
     <ProtectedRoute>
@@ -91,27 +106,42 @@ export default function AuthorDetailPage({
                     <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 truncate">
                       Books
                     </h2>
-                    {!booksLoading && totalBooks > 0 && (
+                    {!booksLoading && booksCountText && (
                       <span className="text-sm text-gray-600 dark:text-gray-400 hidden sm:inline whitespace-nowrap">
-                        ({totalBooks} title{totalBooks !== 1 ? 's' : ''})
+                        ({booksCountText})
                       </span>
                     )}
-                    <div className="ml-auto flex items-center gap-1">
-                      <SquareCoversToggle enabled={squareCovers} onToggle={setSquareCovers} />
-                      <CardSizeControls size={cardSize} onSizeChange={setCardSize} />
-                    </div>
+                    <SectionToolbar
+                      hideAvailable={hideAvailable}
+                      onToggleHideAvailable={setHideAvailable}
+                      squareCovers={squareCovers}
+                      onToggleSquareCovers={setSquareCovers}
+                      cardSize={cardSize}
+                      onCardSizeChange={setCardSize}
+                    />
                   </div>
                 </div>
               </div>
 
               {/* Books Grid */}
               <AudiobookGrid
-                audiobooks={books}
+                audiobooks={filteredBooks}
                 isLoading={booksLoading}
                 emptyMessage={`No books found for ${author.name}`}
                 cardSize={cardSize}
                 squareCovers={squareCovers}
               />
+
+              {/* Load More Bar */}
+              {filteredBooks.length > 0 && (
+                <LoadMoreBar
+                  loadedCount={filteredBooks.length}
+                  totalCount={totalBooks > 0 ? totalBooks : undefined}
+                  hasMore={hasMore}
+                  isLoading={isLoadingMore}
+                  onLoadMore={loadMore}
+                />
+              )}
             </div>
           )}
         </main>

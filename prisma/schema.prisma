@@ -232,6 +232,7 @@ model Request {
   importAttempts   Int       @default(0) @map("import_attempts")
   maxImportRetries Int       @default(5) @map("max_import_retries")
   lastSearchAt     DateTime? @map("last_search_at")
+  customSearchTerms String?  @map("custom_search_terms") @db.Text
   lastImportAt     DateTime? @map("last_import_at")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")

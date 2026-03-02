@@ -28,6 +28,8 @@ interface RecentRequest {
   completedAt: Date | null;
   errorMessage: string | null;
   torrentUrl?: string | null;
+  downloadAttempts?: number;
+  customSearchTerms?: string | null;
 }
 
 interface User {
@@ -444,6 +446,29 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     }
   };
 
+  const handleRetryDownload = async (requestId: string) => {
+    try {
+      const response = await fetchWithAuth(`/api/admin/requests/${requestId}/retry-download`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        throw new Error(responseData.message || 'Failed to retry download');
+      }
+
+      toast.success(responseData.message || 'Download retry initiated');
+      await mutate(apiUrl);
+    } catch (error) {
+      console.error('[Admin] Failed to retry download:', error);
+      toast.error(`Failed to retry download: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
   // Render loading state
   if (isLoading && !data) {
     return (
@@ -638,6 +663,17 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                               Ebook
                             </span>
                           )}
+                          {request.customSearchTerms && (
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200"
+                              title={`Custom search: ${request.customSearchTerms}`}
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                              Custom Search
+                            </span>
+                          )}
                         </div>
                         <div className="text-sm text-gray-500 dark:text-gray-400">
                           {request.author}
@@ -673,12 +709,16 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                           type: request.type,
                           asin: request.asin,
                           torrentUrl: request.torrentUrl,
+                          downloadAttempts: request.downloadAttempts,
+                          customSearchTerms: request.customSearchTerms,
                         }}
                         onDelete={handleDeleteClick}
                         onManualSearch={handleManualSearch}
                         onCancel={handleCancel}
+                        onRetryDownload={handleRetryDownload}
                         onViewDetails={(asin) => handleViewDetails(asin, request.status)}
                         onFetchEbook={handleFetchEbook}
+                        onSearchTermsUpdated={() => mutate(apiUrl)}
                         ebookSidecarEnabled={ebookSidecarEnabled}
                         annasArchiveBaseUrl={annasArchiveBaseUrl}
                         isLoading={isDeleting || isFetchingEbook}
@@ -835,7 +875,6 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
           }}
           isAvailable={viewDetailsStatus === 'available' || viewDetailsStatus === 'completed'}
           requestStatus={viewDetailsStatus}
-          hideRequestActions
         />
       )}
     </div>

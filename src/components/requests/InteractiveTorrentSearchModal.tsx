@@ -34,6 +34,7 @@ interface InteractiveTorrentSearchModalProps {
     title: string;
     author: string;
   };
+  customSearchTerms?: string | null; // Optional - admin-set custom search terms override
   fullAudiobook?: Audiobook; // Optional - only provided when called from details modal
   onSuccess?: () => void;
   searchMode?: 'audiobook' | 'ebook'; // Search mode - defaults to audiobook
@@ -87,6 +88,7 @@ export function InteractiveTorrentSearchModal({
   requestId,
   asin,
   audiobook,
+  customSearchTerms,
   fullAudiobook,
   onSuccess,
   searchMode = 'audiobook',
@@ -114,7 +116,7 @@ export function InteractiveTorrentSearchModal({
 
   const [results, setResults] = useState<(RankedTorrent & { qualityScore?: number; source?: string; ebookFormat?: string })[]>([]);
   const [confirmTorrent, setConfirmTorrent] = useState<TorrentResult | null>(null);
-  const [searchTitle, setSearchTitle] = useState(audiobook.title);
+  const [searchTitle, setSearchTitle] = useState(customSearchTerms || audiobook.title);
   const [isCustomConfirming, setIsCustomConfirming] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -153,9 +155,9 @@ export function InteractiveTorrentSearchModal({
 
   // Reset search title when modal opens/closes or audiobook changes
   useEffect(() => {
-    setSearchTitle(audiobook.title);
+    setSearchTitle(customSearchTerms || audiobook.title);
     setResults([]);
-  }, [isOpen, audiobook.title]);
+  }, [isOpen, audiobook.title, customSearchTerms]);
 
   // Perform search when modal opens
   useEffect(() => {

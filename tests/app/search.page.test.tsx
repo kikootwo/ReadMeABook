@@ -11,14 +11,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetMockAuthState } from '../helpers/mock-auth';
 import { resetMockRouter } from '../helpers/mock-next-navigation';
 
+const loadMoreMock = vi.hoisted(() => vi.fn());
 const useSearchMock = vi.hoisted(() => vi.fn());
 const usePreferencesMock = vi.hoisted(() => ({
   cardSize: 5,
   setCardSize: vi.fn(),
+  squareCovers: false,
+  setSquareCovers: vi.fn(),
+  hideAvailable: false,
+  setHideAvailable: vi.fn(),
 }));
 
 vi.mock('@/lib/hooks/useAudiobooks', () => ({
   useSearch: useSearchMock,
+  Audiobook: {},
 }));
 
 vi.mock('@/contexts/PreferencesContext', () => ({
@@ -49,8 +55,30 @@ vi.mock('@/components/audiobooks/AudiobookGrid', () => ({
   ),
 }));
 
-vi.mock('@/components/ui/CardSizeControls', () => ({
-  CardSizeControls: ({ size }: { size: number }) => <div data-testid="card-size" data-size={size} />,
+vi.mock('@/components/ui/SectionToolbar', () => ({
+  SectionToolbar: () => <div data-testid="section-toolbar" />,
+}));
+
+vi.mock('@/components/ui/LoadMoreBar', () => ({
+  LoadMoreBar: ({
+    hasMore,
+    isLoading,
+    onLoadMore,
+  }: {
+    loadedCount: number;
+    totalCount?: number;
+    hasMore: boolean;
+    isLoading: boolean;
+    onLoadMore: () => void;
+    itemLabel?: string;
+  }) =>
+    hasMore ? (
+      <button onClick={onLoadMore} disabled={isLoading}>
+        Load more
+      </button>
+    ) : (
+      <div data-testid="all-loaded">All loaded</div>
+    ),
 }));
 
 describe('SearchPage', () => {
@@ -58,6 +86,7 @@ describe('SearchPage', () => {
     resetMockAuthState();
     resetMockRouter();
     useSearchMock.mockReset();
+    loadMoreMock.mockReset();
     usePreferencesMock.cardSize = 5;
     usePreferencesMock.setCardSize.mockReset();
     vi.useFakeTimers();
@@ -74,34 +103,25 @@ describe('SearchPage', () => {
       totalResults: 0,
       hasMore: false,
       isLoading: false,
+      isLoadingMore: false,
+      loadMore: loadMoreMock,
     });
 
     const { default: SearchPage } = await import('@/app/search/page');
     render(<SearchPage />);
 
     expect(screen.getByText('Start typing to search for audiobooks')).toBeInTheDocument();
-    expect(useSearchMock).toHaveBeenCalledWith('', 1);
+    expect(useSearchMock).toHaveBeenCalledWith('');
   });
 
   it('debounces search input and loads more results', async () => {
-    useSearchMock.mockImplementation((query: string, page: number) => {
-      if (!query) {
-        return { results: [], totalResults: 0, hasMore: false, isLoading: false };
-      }
-      if (page === 1) {
-        return {
-          results: [{ asin: 'a1', title: 'Book One', author: 'Author' }],
-          totalResults: 2,
-          hasMore: true,
-          isLoading: false,
-        };
-      }
-      return {
-        results: [{ asin: 'a2', title: 'Book Two', author: 'Author' }],
-        totalResults: 2,
-        hasMore: false,
-        isLoading: false,
-      };
+    useSearchMock.mockReturnValue({
+      results: [{ asin: 'a1', title: 'Book One', author: 'Author' }],
+      totalResults: 2,
+      hasMore: true,
+      isLoading: false,
+      isLoadingMore: false,
+      loadMore: loadMoreMock,
     });
 
     const { default: SearchPage } = await import('@/app/search/page');
@@ -115,11 +135,11 @@ describe('SearchPage', () => {
     });
 
     expect(screen.getByText('Search Results')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Load More Results' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeInTheDocument();
     expect(screen.getByTestId('grid')).toHaveAttribute('data-count', '1');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Load More Results' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
 
-    expect(useSearchMock).toHaveBeenCalledWith('Dune', 2);
+    expect(loadMoreMock).toHaveBeenCalled();
   });
 });

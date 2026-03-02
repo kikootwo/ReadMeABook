@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
         const fs = await import('fs/promises');
 
         const body = await request.json();
-        const { folderPath, asin } = body;
+        const { folderPath, asin, cleanupSource } = body;
         let { audiobookId } = body;
 
         // Validate required fields
@@ -242,7 +242,7 @@ export async function POST(request: NextRequest) {
 
         // Queue organize_files job
         const jobQueue = getJobQueueService();
-        await jobQueue.addOrganizeJob(requestId, audiobookId, normalizedPath);
+        await jobQueue.addOrganizeJob(requestId, audiobookId, normalizedPath, undefined, cleanupSource === true);
 
         logger.info(`Manual import queued: request=${requestId}, path=${normalizedPath}, audioFiles=${audioCheck.count}`);
 

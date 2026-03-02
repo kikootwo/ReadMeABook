@@ -5,20 +5,19 @@
 
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { Header } from '@/components/layout/Header';
 import { AudiobookGrid } from '@/components/audiobooks/AudiobookGrid';
-import { useAudiobooks } from '@/lib/hooks/useAudiobooks';
+import { useAudiobooks, Audiobook } from '@/lib/hooks/useAudiobooks';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { StickyPagination } from '@/components/ui/StickyPagination';
-import { CardSizeControls } from '@/components/ui/CardSizeControls';
-import { SquareCoversToggle } from '@/components/ui/SquareCoversToggle';
+import { SectionToolbar } from '@/components/ui/SectionToolbar';
 import { usePreferences } from '@/contexts/PreferencesContext';
 
 export default function HomePage() {
   const [popularPage, setPopularPage] = useState(1);
   const [newReleasesPage, setNewReleasesPage] = useState(1);
-  const { cardSize, setCardSize, squareCovers, setSquareCovers } = usePreferences();
+  const { cardSize, setCardSize, squareCovers, setSquareCovers, hideAvailable, setHideAvailable } = usePreferences();
 
   // Refs for auto-scrolling to section tops
   const popularSectionRef = useRef<HTMLElement>(null);
@@ -38,6 +37,16 @@ export default function HomePage() {
     totalPages: newReleasesTotalPages,
     message: newReleasesMessage,
   } = useAudiobooks('new-releases', 20, newReleasesPage);
+
+  // Filter out available titles when hideAvailable is enabled
+  const filteredPopular = useMemo(
+    () => hideAvailable ? popular.filter((b: Audiobook) => !b.isAvailable && b.requestStatus !== 'completed') : popular,
+    [popular, hideAvailable]
+  );
+  const filteredNewReleases = useMemo(
+    () => hideAvailable ? newReleases.filter((b: Audiobook) => !b.isAvailable && b.requestStatus !== 'completed') : newReleases,
+    [newReleases, hideAvailable]
+  );
 
   // Handle page changes with auto-scroll to section top
   const handlePopularPageChange = (page: number) => {
@@ -66,10 +75,14 @@ export default function HomePage() {
                 <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100 truncate">
                   Popular Audiobooks
                 </h2>
-                <div className="ml-auto flex items-center gap-1">
-                  <SquareCoversToggle enabled={squareCovers} onToggle={setSquareCovers} />
-                  <CardSizeControls size={cardSize} onSizeChange={setCardSize} />
-                </div>
+                <SectionToolbar
+                  hideAvailable={hideAvailable}
+                  onToggleHideAvailable={setHideAvailable}
+                  squareCovers={squareCovers}
+                  onToggleSquareCovers={setSquareCovers}
+                  cardSize={cardSize}
+                  onCardSizeChange={setCardSize}
+                />
               </div>
             </div>
           </div>
@@ -87,7 +100,7 @@ export default function HomePage() {
               </div>
             ) : (
               <AudiobookGrid
-                audiobooks={popular}
+                audiobooks={filteredPopular}
                 isLoading={loadingPopular}
                 emptyMessage="No popular audiobooks available"
                 cardSize={cardSize}
@@ -107,10 +120,14 @@ export default function HomePage() {
                 <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-gray-100 truncate">
                   New Releases
                 </h2>
-                <div className="ml-auto flex items-center gap-1">
-                  <SquareCoversToggle enabled={squareCovers} onToggle={setSquareCovers} />
-                  <CardSizeControls size={cardSize} onSizeChange={setCardSize} />
-                </div>
+                <SectionToolbar
+                  hideAvailable={hideAvailable}
+                  onToggleHideAvailable={setHideAvailable}
+                  squareCovers={squareCovers}
+                  onToggleSquareCovers={setSquareCovers}
+                  cardSize={cardSize}
+                  onCardSizeChange={setCardSize}
+                />
               </div>
             </div>
           </div>
@@ -128,7 +145,7 @@ export default function HomePage() {
               </div>
             ) : (
               <AudiobookGrid
-                audiobooks={newReleases}
+                audiobooks={filteredNewReleases}
                 isLoading={loadingNewReleases}
                 emptyMessage="No new releases available"
                 cardSize={cardSize}

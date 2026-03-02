@@ -59,6 +59,9 @@ export function ManualImportBrowser({
   const [isImporting, setIsImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
 
+  // Cleanup source toggle
+  const [cleanupSource, setCleanupSource] = useState(false);
+
   // Hover state for folder icon swap
   const [hoveredFolder, setHoveredFolder] = useState<string | null>(null);
 
@@ -188,6 +191,7 @@ export function ManualImportBrowser({
         body: JSON.stringify({
           asin: audiobook.asin,
           folderPath: selectedPath,
+          cleanupSource,
         }),
       });
       const data = await res.json();
@@ -288,6 +292,8 @@ export function ManualImportBrowser({
               isImporting={isImporting}
               importError={importError}
               slideClass={slideClass}
+              cleanupSource={cleanupSource}
+              onCleanupSourceChange={setCleanupSource}
               onBack={handleBackToBrowse}
               onStartImport={handleStartImport}
             />

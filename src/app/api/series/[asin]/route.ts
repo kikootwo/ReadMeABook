@@ -37,9 +37,11 @@ export async function GET(
       );
     }
 
-    logger.info(`Fetching series detail: ${asin}`);
+    const page = parseInt(request.nextUrl.searchParams.get('page') || '1', 10);
 
-    const detail = await scrapeSeriesPage(asin);
+    logger.info(`Fetching series detail: ${asin}, page ${page}`);
+
+    const detail = await scrapeSeriesPage(asin, page);
     if (!detail) {
       return NextResponse.json(
         { error: 'NotFound', message: 'Series not found' },
@@ -51,7 +53,7 @@ export async function GET(
     const userId = currentUser.sub || undefined;
     const enrichedBooks = await enrichAudiobooksWithMatches(detail.books, userId);
 
-    logger.info(`Series detail complete: "${detail.title}" (${enrichedBooks.length} books)`);
+    logger.info(`Series detail complete: "${detail.title}" (${enrichedBooks.length} books, page ${page})`);
 
     return NextResponse.json({
       success: true,
@@ -59,6 +61,8 @@ export async function GET(
         ...detail,
         books: enrichedBooks,
       },
+      hasMore: detail.hasMore,
+      page: detail.page,
     });
   } catch (error) {
     logger.error('Failed to fetch series detail', {

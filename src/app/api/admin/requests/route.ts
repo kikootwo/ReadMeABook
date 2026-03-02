@@ -139,6 +139,8 @@ export async function GET(request: NextRequest) {
           completedAt: request.completedAt,
           errorMessage: request.errorMessage,
           torrentUrl: request.downloadHistory[0]?.torrentUrl || null,
+          downloadAttempts: request.downloadAttempts,
+          customSearchTerms: request.customSearchTerms || null,
         }));
 
         return NextResponse.json({

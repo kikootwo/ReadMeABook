@@ -22,7 +22,7 @@ import { removeEmptyParentDirectories } from '../utils/cleanup-helpers';
  * Handles both audiobook and ebook request types with appropriate branching
  */
 export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promise<any> {
-  const { requestId, audiobookId, downloadPath, jobId } = payload;
+  const { requestId, audiobookId, downloadPath, jobId, cleanupSource } = payload;
 
   const logger = RMABLogger.forJob(jobId, 'OrganizeFiles');
 
@@ -264,6 +264,11 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     // Cleanup downloads if configured (uses IDownloadClient.postProcess for client-specific cleanup)
     await cleanupDownloadAfterOrganize(requestId, downloadPath, configService, jobId, logger);
 
+    // Cleanup source files if requested (manual import feature)
+    if (cleanupSource) {
+      await cleanupSourceAfterOrganize(downloadPath, configService, jobId, logger);
+    }
+
     return {
       success: true,
       message: 'Files organized successfully',
@@ -467,7 +472,7 @@ async function processEbookOrganization(
   request: { id: string; userId: string; type: string; user: { plexUsername: string | null } },
   logger: RMABLogger
 ): Promise<any> {
-  const { requestId, audiobookId, downloadPath, jobId } = payload;
+  const { requestId, audiobookId, downloadPath, jobId, cleanupSource } = payload;
 
   logger.info(`Processing ebook organization for request ${requestId}`);
 
@@ -725,6 +730,11 @@ async function processEbookOrganization(
 
   // Cleanup downloads if configured (uses IDownloadClient.postProcess for client-specific cleanup)
   await cleanupDownloadAfterOrganize(requestId, downloadPath, configService, jobId, logger);
+
+  // Cleanup source files if requested (manual import feature)
+  if (cleanupSource) {
+    await cleanupSourceAfterOrganize(downloadPath, configService, jobId, logger);
+  }
 
   return {
     success: true,
@@ -1000,6 +1010,68 @@ async function cleanupDownloadAfterOrganize(
         error: error instanceof Error ? error.stack : undefined,
       }
     );
+  }
+}
+
+// =========================================================================
+// SOURCE FILE CLEANUP (MANUAL IMPORT)
+// =========================================================================
+
+/**
+ * Delete source files after successful manual import.
+ * Non-fatal: logs a warning on failure but does not fail the job.
+ * Files are already safely copied to the media library at this point.
+ */
+async function cleanupSourceAfterOrganize(
+  downloadPath: string,
+  configService: any,
+  jobId: string | undefined,
+  logger: RMABLogger
+): Promise<void> {
+  try {
+    const fs = await import('fs/promises');
+
+    logger.info(`Cleaning up source files: ${downloadPath}`);
+
+    const stats = await fs.stat(downloadPath);
+    if (stats.isDirectory()) {
+      await fs.rm(downloadPath, { recursive: true, force: true });
+      logger.info(`Removed source directory: ${downloadPath}`);
+    } else {
+      await fs.unlink(downloadPath);
+      logger.info(`Removed source file: ${downloadPath}`);
+    }
+
+    // Determine boundary path based on download path prefix
+    const BOOKDROP_PATH = '/bookdrop';
+    const downloadDir = await configService.get('download_dir') || '/downloads';
+    const mediaDir = await configService.get('media_dir') || '/media';
+
+    let boundaryPath = downloadDir;
+    if (downloadPath.startsWith(BOOKDROP_PATH)) {
+      boundaryPath = BOOKDROP_PATH;
+    } else if (downloadPath.startsWith(mediaDir)) {
+      boundaryPath = mediaDir;
+    }
+
+    const cleanupResult = await removeEmptyParentDirectories(downloadPath, {
+      boundaryPath,
+      logContext: jobId ? { jobId, context: 'CleanupSourceParents' } : undefined,
+    });
+
+    if (cleanupResult.removedDirectories.length > 0) {
+      logger.info(`Cleaned up ${cleanupResult.removedDirectories.length} empty parent directories`);
+    }
+  } catch (error) {
+    // Non-fatal - files are already safely in the media library
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      logger.info(`Source path already deleted: ${downloadPath}`);
+    } else {
+      logger.warn(
+        `Failed to cleanup source files: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        { error: error instanceof Error ? error.stack : undefined }
+      );
+    }
   }
 }
 

@@ -5,7 +5,9 @@
 
 'use client';
 
+import { useRef, useEffect, useCallback } from 'react';
 import useSWR from 'swr';
+import useSWRInfinite from 'swr/infinite';
 import { authenticatedFetcher } from '@/lib/utils/api';
 
 export interface Audiobook {
@@ -57,20 +59,58 @@ export function useAudiobooks(type: 'popular' | 'new-releases', limit: number = 
   };
 }
 
-export function useSearch(query: string, page: number = 1) {
-  const shouldFetch = query && query.length > 0;
-  const endpoint = shouldFetch ? `/api/audiobooks/search?q=${encodeURIComponent(query)}&page=${page}` : null;
-
-  const { data, error, isLoading } = useSWR(endpoint, authenticatedFetcher, {
-    revalidateOnFocus: false,
-    dedupingInterval: 30000, // Cache for 30 seconds
+function dedupeByAsin<T extends { asin: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter(item => {
+    if (seen.has(item.asin)) return false;
+    seen.add(item.asin);
+    return true;
   });
+}
+
+export function useSearch(query: string) {
+  const prevQueryRef = useRef(query);
+
+  const { data, error, size, setSize, isLoading, isValidating } = useSWRInfinite(
+    (pageIndex, prevPageData) => {
+      if (!query || query.length === 0) return null;
+      if (pageIndex === 0) return `/api/audiobooks/search?q=${encodeURIComponent(query)}&page=1`;
+      if (!prevPageData?.hasMore) return null;
+      return `/api/audiobooks/search?q=${encodeURIComponent(query)}&page=${pageIndex + 1}`;
+    },
+    authenticatedFetcher,
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 30000,
+      revalidateFirstPage: false,
+    }
+  );
+
+  // Reset to page 1 when query changes
+  useEffect(() => {
+    if (query !== prevQueryRef.current) {
+      prevQueryRef.current = query;
+      setSize(1);
+    }
+  }, [query, setSize]);
+
+  const results = data ? dedupeByAsin(data.flatMap(page => page?.results || [])) : [];
+  const totalResults = data?.[0]?.totalResults || 0;
+  const hasMore = !!(data && data.length > 0 && data[data.length - 1]?.hasMore);
+  const isLoadingInitial = !data && !error && !!query;
+  const isLoadingMore = !!(data && typeof data[size - 1] === 'undefined' && isValidating);
+
+  const loadMore = useCallback(() => {
+    setSize(prev => prev + 1);
+  }, [setSize]);
 
   return {
-    results: data?.results || [],
-    totalResults: data?.totalResults || 0,
-    hasMore: data?.hasMore || false,
-    isLoading: shouldFetch && isLoading,
+    results,
+    totalResults,
+    hasMore,
+    isLoading: isLoadingInitial,
+    isLoadingMore,
+    loadMore,
     error,
   };
 }

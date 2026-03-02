@@ -5,16 +5,17 @@
 
 'use client';
 
-import { use, useCallback } from 'react';
+import { use, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Header } from '@/components/layout/Header';
 import { AudiobookGrid } from '@/components/audiobooks/AudiobookGrid';
+import { LoadMoreBar } from '@/components/ui/LoadMoreBar';
 import { SeriesDetailCard, SeriesDetailSkeleton } from '@/components/series/SeriesDetailCard';
 import { SimilarSeriesRow, SimilarSeriesSkeleton } from '@/components/series/SimilarSeriesRow';
 import { useSeriesDetail } from '@/lib/hooks/useSeries';
+import { Audiobook } from '@/lib/hooks/useAudiobooks';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-import { CardSizeControls } from '@/components/ui/CardSizeControls';
-import { SquareCoversToggle } from '@/components/ui/SquareCoversToggle';
+import { SectionToolbar } from '@/components/ui/SectionToolbar';
 import { usePreferences } from '@/contexts/PreferencesContext';
 
 export default function SeriesDetailPage({
@@ -26,8 +27,8 @@ export default function SeriesDetailPage({
   const router = useRouter();
   const searchParams = useSearchParams();
   const fromSeriesTitle = searchParams.get('from');
-  const { series, isLoading: seriesLoading } = useSeriesDetail(asin);
-  const { cardSize, setCardSize, squareCovers, setSquareCovers } = usePreferences();
+  const { series, hasMore, isLoading: seriesLoading, isLoadingMore, loadMore } = useSeriesDetail(asin);
+  const { cardSize, setCardSize, squareCovers, setSquareCovers, hideAvailable, setHideAvailable } = usePreferences();
 
   const handleBack = useCallback(() => {
     // Use browser back if we came from within the app, otherwise fallback to /series
@@ -37,6 +38,24 @@ export default function SeriesDetailPage({
       router.push('/series');
     }
   }, [router]);
+
+  // Filter out available titles when hideAvailable is enabled
+  const filteredBooks = useMemo(
+    () => series && hideAvailable
+      ? series.books.filter((b: Audiobook) => !b.isAvailable && b.requestStatus !== 'completed')
+      : series?.books ?? [],
+    [series, hideAvailable]
+  );
+
+  // Header count text: reflects filtered counts
+  const visibleCount = filteredBooks.length;
+  const booksCountText = series
+    ? hasMore && series.bookCount > series.books.length
+      ? `${visibleCount.toLocaleString()} of ${series.bookCount.toLocaleString()} title${series.bookCount !== 1 ? 's' : ''}`
+      : visibleCount > 0
+        ? `${visibleCount.toLocaleString()} title${visibleCount !== 1 ? 's' : ''}`
+        : ''
+    : '';
 
   return (
     <ProtectedRoute>
@@ -87,27 +106,42 @@ export default function SeriesDetailPage({
                     <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 truncate">
                       Books in Series
                     </h2>
-                    {series.books.length > 0 && (
+                    {booksCountText && (
                       <span className="text-sm text-gray-600 dark:text-gray-400 hidden sm:inline whitespace-nowrap">
-                        ({series.books.length} title{series.books.length !== 1 ? 's' : ''})
+                        ({booksCountText})
                       </span>
                     )}
-                    <div className="ml-auto flex items-center gap-1">
-                      <SquareCoversToggle enabled={squareCovers} onToggle={setSquareCovers} />
-                      <CardSizeControls size={cardSize} onSizeChange={setCardSize} />
-                    </div>
+                    <SectionToolbar
+                      hideAvailable={hideAvailable}
+                      onToggleHideAvailable={setHideAvailable}
+                      squareCovers={squareCovers}
+                      onToggleSquareCovers={setSquareCovers}
+                      cardSize={cardSize}
+                      onCardSizeChange={setCardSize}
+                    />
                   </div>
                 </div>
               </div>
 
               {/* Books Grid */}
               <AudiobookGrid
-                audiobooks={series.books}
+                audiobooks={filteredBooks}
                 isLoading={seriesLoading}
                 emptyMessage={`No books found for ${series.title}`}
                 cardSize={cardSize}
                 squareCovers={squareCovers}
               />
+
+              {/* Load More Bar */}
+              {filteredBooks.length > 0 && (
+                <LoadMoreBar
+                  loadedCount={filteredBooks.length}
+                  totalCount={series.bookCount > 0 ? series.bookCount : undefined}
+                  hasMore={hasMore}
+                  isLoading={isLoadingMore}
+                  onLoadMore={loadMore}
+                />
+              )}
             </div>
           )}
         </main>

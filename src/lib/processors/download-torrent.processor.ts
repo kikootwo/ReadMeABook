@@ -9,6 +9,7 @@ import { getConfigService } from '../services/config.service';
 import { getDownloadClientManager } from '../services/download-client-manager.service';
 import { ProwlarrService } from '../integrations/prowlarr.service';
 import { RMABLogger } from '../utils/logger';
+import { isTransientConnectionError } from '../utils/connection-errors';
 
 /**
  * Process download job
@@ -121,15 +122,22 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
-    // Update request status to failed
-    await prisma.request.update({
-      where: { id: requestId },
-      data: {
-        status: 'failed',
-        errorMessage: error instanceof Error ? error.message : 'Failed to add download to client',
-        updatedAt: new Date(),
-      },
-    });
+    if (isTransientConnectionError(error)) {
+      // Connection error — don't mark request as failed yet.
+      // Bull will retry this job (3 attempts with exponential backoff).
+      // If all retries are exhausted, the global failed handler marks it failed.
+      logger.warn(`Download client unreachable for request ${requestId}, allowing Bull to retry`);
+    } else {
+      // Permanent error — mark request as failed immediately
+      await prisma.request.update({
+        where: { id: requestId },
+        data: {
+          status: 'failed',
+          errorMessage: error instanceof Error ? error.message : 'Failed to add download to client',
+          updatedAt: new Date(),
+        },
+      });
+    }
 
     throw error;
   }

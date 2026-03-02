@@ -10,6 +10,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { InteractiveTorrentSearchModal } from '@/components/requests/InteractiveTorrentSearchModal';
+import { AdjustSearchTermsModal } from './AdjustSearchTermsModal';
 import { useSmartDropdownPosition } from '@/hooks/useSmartDropdownPosition';
 
 export interface RequestActionsDropdownProps {
@@ -21,12 +22,16 @@ export interface RequestActionsDropdownProps {
     type?: 'audiobook' | 'ebook';
     asin?: string | null;
     torrentUrl?: string | null;
+    downloadAttempts?: number;
+    customSearchTerms?: string | null;
   };
   onDelete: (requestId: string, title: string) => void;
   onManualSearch: (requestId: string) => Promise<void>;
   onCancel: (requestId: string) => Promise<void>;
+  onRetryDownload?: (requestId: string) => Promise<void>;
   onViewDetails?: (asin: string) => void;
   onFetchEbook?: (requestId: string) => Promise<void>;
+  onSearchTermsUpdated?: () => void;
   ebookSidecarEnabled?: boolean;
   annasArchiveBaseUrl?: string;
   isLoading?: boolean;
@@ -37,8 +42,10 @@ export function RequestActionsDropdown({
   onDelete,
   onManualSearch,
   onCancel,
+  onRetryDownload,
   onViewDetails,
   onFetchEbook,
+  onSearchTermsUpdated,
   ebookSidecarEnabled = false,
   annasArchiveBaseUrl = 'https://annas-archive.li',
   isLoading = false,
@@ -46,6 +53,7 @@ export function RequestActionsDropdown({
   const [isOpen, setIsOpen] = useState(false);
   const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
   const [showInteractiveSearchEbook, setShowInteractiveSearchEbook] = useState(false);
+  const [showAdjustSearchTerms, setShowAdjustSearchTerms] = useState(false);
   const { containerRef, dropdownRef, positionAbove, style } = useSmartDropdownPosition(isOpen);
 
   // Determine request type
@@ -57,6 +65,8 @@ export function RequestActionsDropdown({
   // Determine available actions based on status and type
   // Ebooks don't support manual/interactive search (Anna's Archive only)
   const canSearch = !isEbook && ['pending', 'failed', 'awaiting_search'].includes(request.status);
+  const canAdjustSearchTerms = !isEbook && ['pending', 'failed', 'awaiting_search', 'searching'].includes(request.status);
+  const canRetryDownload = request.status === 'failed' && (request.downloadAttempts ?? 0) > 0 && !!onRetryDownload;
   const canCancel = ['pending', 'searching', 'downloading'].includes(request.status);
   const canDelete = true; // Admins can always delete
 
@@ -123,9 +133,25 @@ export function RequestActionsDropdown({
     setShowInteractiveSearch(true);
   };
 
+  const handleAdjustSearchTerms = () => {
+    setIsOpen(false);
+    setShowAdjustSearchTerms(true);
+  };
+
   const handleInteractiveSearchEbook = () => {
     setIsOpen(false);
     setShowInteractiveSearchEbook(true);
+  };
+
+  const handleRetryDownload = async () => {
+    setIsOpen(false);
+    if (onRetryDownload) {
+      try {
+        await onRetryDownload(request.requestId);
+      } catch (error) {
+        console.error('Failed to retry download:', error);
+      }
+    }
   };
 
   const handleCancel = async () => {
@@ -253,6 +279,35 @@ export function RequestActionsDropdown({
               </button>
             )}
 
+            {/* Adjust Search Terms */}
+            {canAdjustSearchTerms && (
+              <button
+                onClick={handleAdjustSearchTerms}
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 transition-colors"
+                role="menuitem"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                  />
+                </svg>
+                <span className="flex items-center gap-1.5">
+                  Adjust Search Terms
+                  {request.customSearchTerms && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />
+                  )}
+                </span>
+              </button>
+            )}
+
             {/* View Source */}
             {canViewSource && viewSourceUrl && (
               <a
@@ -328,8 +383,32 @@ export function RequestActionsDropdown({
               </button>
             )}
 
-            {/* Divider if we have search/view actions and other actions */}
-            {(canSearch || canViewSource || canFetchEbook) && (canCancel || canDelete) && (
+            {/* Retry Download */}
+            {canRetryDownload && (
+              <button
+                onClick={handleRetryDownload}
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 transition-colors"
+                role="menuitem"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                  />
+                </svg>
+                Retry Download
+              </button>
+            )}
+
+            {/* Divider if we have search/view/retry actions and other actions */}
+            {(canSearch || canViewSource || canFetchEbook || canRetryDownload) && (canCancel || canDelete) && (
               <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
             )}
 
@@ -358,7 +437,7 @@ export function RequestActionsDropdown({
             )}
 
             {/* Divider before delete */}
-            {canDelete && (canSearch || canCancel) && (
+            {canDelete && (canSearch || canRetryDownload || canCancel) && (
               <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
             )}
 
@@ -421,6 +500,7 @@ export function RequestActionsDropdown({
           title: request.title,
           author: request.author,
         }}
+        customSearchTerms={request.customSearchTerms}
       />
 
       {/* Interactive Search Modal (Ebook) */}
@@ -433,6 +513,17 @@ export function RequestActionsDropdown({
           author: request.author,
         }}
         searchMode="ebook"
+      />
+
+      {/* Adjust Search Terms Modal */}
+      <AdjustSearchTermsModal
+        isOpen={showAdjustSearchTerms}
+        onClose={() => setShowAdjustSearchTerms(false)}
+        requestId={request.requestId}
+        title={request.title}
+        author={request.author}
+        currentSearchTerms={request.customSearchTerms}
+        onSuccess={onSearchTermsUpdated}
       />
     </>
   );

@@ -10,6 +10,7 @@ import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import { getConfigService } from '../services/config.service';
 import { getDownloadClientManager } from '../services/download-client-manager.service';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
+import { isTransientConnectionError } from '../utils/connection-errors';
 
 /**
  * Process monitor download job
@@ -20,6 +21,12 @@ import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-
 const BASE_POLL_INTERVAL = 10;
 /** Maximum polling interval in seconds (5 minutes) */
 const MAX_POLL_INTERVAL = 300;
+/**
+ * Maximum consecutive connection failures before permanently failing the download.
+ * With exponential backoff (10s base, 300s cap), 30 failures spans roughly 30-45 minutes —
+ * enough to survive a Docker restart, service update, or transient network outage.
+ */
+const MAX_CONNECTION_FAILURES = 30;
 
 /**
  * Compute next poll delay with exponential backoff for stalled downloads.
@@ -32,7 +39,8 @@ function getBackoffDelay(stallCount: number): number {
 
 export async function processMonitorDownload(payload: MonitorDownloadPayload): Promise<any> {
   const { requestId, downloadHistoryId, downloadClientId, downloadClient, jobId,
-          lastProgress: prevProgress, stallCount: prevStallCount, pathWaitCount: prevPathWaitCount } = payload;
+          lastProgress: prevProgress, stallCount: prevStallCount, pathWaitCount: prevPathWaitCount,
+          connectionFailureCount: prevConnectionFailures } = payload;
 
   const logger = RMABLogger.forJob(jobId, 'MonitorDownload');
 
@@ -288,51 +296,99 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
-    // Check if this is a transient "not found" error
     const errorMessage = error instanceof Error ? error.message : '';
     const isNotFound = errorMessage.includes('not found');
+    const isConnectionError = isTransientConnectionError(error);
 
     if (isNotFound) {
-      // Transient error - don't mark request as failed, let Bull retry
-      // The request stays in 'downloading' status until Bull exhausts all retries
+      // PATH 1: "Not found" — transient race condition.
+      // Don't mark request as failed; let Bull retry the same job.
       logger.warn(`Transient error for request ${requestId}, allowing Bull to retry`);
-    } else {
-      // Permanent error - mark request as failed immediately
-      const failureMessage = errorMessage || 'Monitor download failed';
-      await prisma.request.update({
-        where: { id: requestId },
-        data: {
-          status: 'failed',
-          errorMessage: failureMessage,
-          updatedAt: new Date(),
-        },
-      });
+      throw error;
+    }
 
-      // Send notification for request failure
-      const request = await prisma.request.findUnique({
-        where: { id: requestId },
-        include: {
-          audiobook: true,
-          user: { select: { plexUsername: true } },
-        },
-      });
+    if (isConnectionError) {
+      // PATH 2: Connection failure — download client is temporarily unreachable.
+      // Instead of failing the download, self-schedule the next poll with backoff.
+      // This reuses the same adaptive backoff as stalled downloads, giving the
+      // client time to recover (restart, network blip, update, etc.).
+      const failureCount = (prevConnectionFailures ?? 0) + 1;
 
-      if (request) {
+      if (failureCount >= MAX_CONNECTION_FAILURES) {
+        // Exhausted patience — treat as permanent failure
+        logger.error(
+          `Download client unreachable for ${failureCount} consecutive checks, giving up on request ${requestId}`
+        );
+        // Fall through to permanent failure handling below
+      } else {
+        const delay = getBackoffDelay(failureCount);
+        logger.warn(
+          `Download client unreachable (${failureCount}/${MAX_CONNECTION_FAILURES}), ` +
+          `retrying in ${delay}s for request ${requestId}`,
+          { error: errorMessage }
+        );
+
         const jobQueue = getJobQueueService();
-        await jobQueue.addNotificationJob(
-          'request_error',
-          request.id,
-          request.audiobook.title,
-          request.audiobook.author,
-          request.user.plexUsername || 'Unknown User',
-          failureMessage
-        ).catch((error) => {
-          logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
-        });
+        await jobQueue.addMonitorJob(
+          requestId,
+          downloadHistoryId,
+          downloadClientId,
+          downloadClient,
+          delay,
+          prevProgress,
+          prevStallCount ?? 0,
+          prevPathWaitCount,
+          failureCount
+        );
+
+        // Return success — the monitoring loop continues via the new job.
+        // Do NOT throw: that would trigger Bull's retry on this job as well.
+        return {
+          success: true,
+          completed: false,
+          message: `Download client unreachable, will retry in ${delay}s`,
+          requestId,
+          connectionFailureCount: failureCount,
+        };
       }
     }
 
-    // Rethrow to trigger Bull's retry mechanism
+    // PATH 3: Permanent error (or connection failures exhausted).
+    // Mark request as failed immediately.
+    const failureMessage = errorMessage || 'Monitor download failed';
+    await prisma.request.update({
+      where: { id: requestId },
+      data: {
+        status: 'failed',
+        errorMessage: failureMessage,
+        updatedAt: new Date(),
+      },
+    });
+
+    // Send notification for request failure
+    const request = await prisma.request.findUnique({
+      where: { id: requestId },
+      include: {
+        audiobook: true,
+        user: { select: { plexUsername: true } },
+      },
+    });
+
+    if (request) {
+      const jobQueue = getJobQueueService();
+      await jobQueue.addNotificationJob(
+        'request_error',
+        request.id,
+        request.audiobook.title,
+        request.audiobook.author,
+        request.user.plexUsername || 'Unknown User',
+        failureMessage
+      ).catch((notifError) => {
+        logger.error('Failed to queue notification', { error: notifError instanceof Error ? notifError.message : String(notifError) });
+      });
+    }
+
+    // Rethrow to trigger Bull's retry mechanism as a safety net
     throw error;
   }
 }
