@@ -4,11 +4,14 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { verifyAccessToken, TokenPayload } from '../utils/jwt';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 
 const logger = RMABLogger.create('Auth');
+
+const API_TOKEN_PREFIX = 'rmab_';
 
 export interface AuthenticatedRequest extends NextRequest {
   user?: TokenPayload & { id: string };
@@ -33,8 +36,46 @@ function extractToken(request: NextRequest): string | null {
 }
 
 /**
+ * Authenticate via static API token (rmab_ prefix).
+ * Returns a synthetic TokenPayload if valid, null otherwise.
+ * Updates lastUsedAt asynchronously.
+ */
+async function authenticateApiToken(token: string): Promise<(TokenPayload & { id: string }) | null> {
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+  const apiToken = await prisma.apiToken.findUnique({
+    where: { tokenHash },
+    include: { tokenUser: { select: { id: true, plexId: true, plexUsername: true, role: true } } },
+  });
+
+  if (!apiToken) return null;
+
+  // Check expiration
+  if (apiToken.expiresAt && apiToken.expiresAt < new Date()) {
+    logger.warn('API token expired', { tokenPrefix: apiToken.tokenPrefix });
+    return null;
+  }
+
+  // Update lastUsedAt (fire-and-forget)
+  prisma.apiToken.update({
+    where: { id: apiToken.id },
+    data: { lastUsedAt: new Date() },
+  }).catch(() => {});
+
+  // Use the token's target user (userId), not the creator (createdById)
+  const user = apiToken.tokenUser;
+  return {
+    sub: user.id,
+    id: user.id,
+    plexId: user.plexId,
+    username: user.plexUsername,
+    role: apiToken.role,
+  };
+}
+
+/**
  * Middleware: Require authentication
- * Verifies JWT token and adds user to request
+ * Verifies JWT token or static API token and adds user to request
  */
 export async function requireAuth(
   request: NextRequest,
@@ -53,6 +94,26 @@ export async function requireAuth(
     );
   }
 
+  // Check if this is a static API token
+  if (token.startsWith(API_TOKEN_PREFIX)) {
+    const apiUser = await authenticateApiToken(token);
+    if (!apiUser) {
+      logger.error('API token authentication failed');
+      return NextResponse.json(
+        {
+          error: 'Unauthorized',
+          message: 'Invalid or expired API token',
+        },
+        { status: 401 }
+      );
+    }
+
+    const authenticatedRequest = request as AuthenticatedRequest;
+    authenticatedRequest.user = apiUser;
+    return handler(authenticatedRequest);
+  }
+
+  // Fall back to JWT verification
   const payload = verifyAccessToken(token);
 
   if (!payload) {

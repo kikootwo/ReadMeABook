@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRequests } from '@/lib/hooks/useRequests';
 import { cn } from '@/lib/utils/cn';
 import { GoodreadsShelvesSection } from '@/components/profile/GoodreadsShelvesSection';
+import { ApiTokensSection } from '@/components/profile/ApiTokensSection';
 
 const statConfig = [
   { key: 'total', label: 'Total', color: 'text-gray-900 dark:text-white' },
@@ -233,6 +234,9 @@ export default function ProfilePage() {
             </div>
           )}
         </section>
+
+        {/* API Tokens */}
+        <ApiTokensSection />
       </main>
     </div>
   );
