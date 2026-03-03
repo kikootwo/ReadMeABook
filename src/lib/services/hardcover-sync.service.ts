@@ -45,18 +45,20 @@ export async function fetchHardcoverList(
     const statusId = parseInt(listIdStr.replace('status-', ''), 10);
     const query = `
       query GetStatusBooks($statusId: Int!) {
-        user_books(where: {status_id: {_eq: $statusId}}) {
-          book {
-            id
-            title
-            contributions {
-              author {
-                name
+        me {
+          user_books(where: {status_id: {_eq: $statusId}}, limit: 100, order_by: {id: desc}) {
+            book {
+              id
+              title
+              contributions {
+                author {
+                  name
+                }
               }
-            }
-            cached_image
-            image {
-              url
+              cached_image
+              image {
+                url
+              }
             }
           }
         }
@@ -81,7 +83,7 @@ export async function fetchHardcoverList(
       );
     }
 
-    const userBooks = response.data?.data?.user_books || [];
+    const userBooks = response.data?.data?.me?.[0]?.user_books || [];
     let listName = 'Hardcover Status List';
 
     // Map status numbers to names
@@ -143,7 +145,7 @@ export async function fetchHardcoverList(
 
     const query = `
       query GetListBooks($listId: Int!) {
-        list_books(where: {list_id: {_eq: $listId}}) {
+        list_books(where: {list_id: {_eq: $listId}}, limit: 100, order_by: {id: desc}) {
           list { name }
           book {
             id title cached_image image { url }
@@ -155,7 +157,7 @@ export async function fetchHardcoverList(
 
     const queryUuid = `
       query GetListBooksUuid($listId: uuid!) {
-        list_books(where: {list_id: {_eq: $listId}}) {
+        list_books(where: {list_id: {_eq: $listId}}, limit: 100, order_by: {id: desc}) {
           list { name }
           book {
             id title cached_image image { url }
@@ -169,7 +171,7 @@ export async function fetchHardcoverList(
       query GetListBooksBySlug($slug: String!) {
         lists(where: {slug: {_eq: $slug}}, limit: 1) {
           name
-          list_books {
+          list_books(limit: 100, order_by: {id: desc}) {
             book {
               id title cached_image image { url }
               contributions { author { name } }
