@@ -77,8 +77,7 @@ describe('SchedulerService', () => {
       ])
       .mockResolvedValue([]); // triggerOverdueJobs
 
-    const { SchedulerService } =
-      await import('@/lib/services/scheduler.service');
+    const { SchedulerService } = await import('@/lib/services/scheduler.service');
     const service = new SchedulerService();
     await service.start();
 
@@ -87,7 +86,7 @@ describe('SchedulerService', () => {
       'audible_refresh',
       { scheduledJobId: 'job-1' },
       '0 0 * * *',
-      'scheduled-job-1',
+      'scheduled-job-1'
     );
   });
 
@@ -306,8 +305,7 @@ describe('SchedulerService', () => {
     (jobQueueMock as any)[queueMethod].mockResolvedValue('bull-type');
     prismaMock.scheduledJob.update.mockResolvedValue({});
 
-    const { SchedulerService } =
-      await import('@/lib/services/scheduler.service');
+    const { SchedulerService } = await import('@/lib/services/scheduler.service');
     const service = new SchedulerService();
     const jobId = await service.triggerJobNow('job-type');
 
