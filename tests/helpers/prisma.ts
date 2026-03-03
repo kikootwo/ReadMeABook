@@ -47,6 +47,7 @@ export const createPrismaMock = () => ({
   bookDateSwipe: createModelMock(),
   goodreadsShelf: createModelMock(),
   goodreadsBookMapping: createModelMock(),
+  hardcoverShelf: createModelMock(),
   $queryRaw: vi.fn(),
   $disconnect: vi.fn(),
 });
