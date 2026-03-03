@@ -531,3 +531,43 @@ model GoodreadsBookMapping {
   @@index([audibleAsin])
   @@map("goodreads_book_mappings")
 }
+
+// ============================================================================
+// WORKS TABLE
+// Cross-ASIN audiobook identity mapping — links multiple Audible ASINs
+// to a single logical work for library matching across editions.
+// Documentation: documentation/integrations/audible.md
+// ============================================================================
+
+model Work {
+  id        String     @id @default(uuid())
+  title     String
+  author    String
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  // Relations
+  asins WorkAsin[]
+
+  @@index([title])
+  @@index([author])
+  @@map("works")
+}
+
+model WorkAsin {
+  id              String   @id @default(uuid())
+  workId          String   @map("work_id")
+  asin            String   @unique
+  narrator        String?
+  durationMinutes Int?     @map("duration_minutes")
+  isCanonical     Boolean  @default(false) @map("is_canonical")
+  source          String   // 'dedup_auto' | 'admin_manual'
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // Relations
+  work Work @relation(fields: [workId], references: [id], onDelete: Cascade)
+
+  @@index([workId])
+  @@index([asin])
+  @@map("work_asins")
+}

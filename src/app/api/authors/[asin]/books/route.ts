@@ -6,6 +6,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { enrichAudiobooksWithMatches } from '@/lib/utils/audiobook-matcher';
+import { deduplicateAndCollectGroups } from '@/lib/utils/deduplicate-audiobooks';
+import { persistDedupGroups } from '@/lib/services/works.service';
 import { getCurrentUser } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
 
@@ -53,9 +55,17 @@ export async function GET(
     const audibleService = getAudibleService();
     const result = await audibleService.searchByAuthorAsin(authorName.trim(), asin, page);
 
+    // Deduplicate before enrichment to avoid wasted DB queries on duplicate entries
+    const { books: dedupedBooks, groups } = deduplicateAndCollectGroups(result.books);
+
+    // Fire-and-forget: persist dedup groups to works table for cross-ASIN matching
+    if (groups.length > 0) {
+      persistDedupGroups(groups).catch(() => {});
+    }
+
     // Enrich with library availability and request status
     const userId = currentUser.sub || undefined;
-    const enrichedBooks = await enrichAudiobooksWithMatches(result.books, userId);
+    const enrichedBooks = await enrichAudiobooksWithMatches(dedupedBooks, userId);
 
     logger.info(`Author books complete: "${authorName}" → ${enrichedBooks.length} books (page ${page})`);
 
@@ -64,7 +74,7 @@ export async function GET(
       books: enrichedBooks,
       authorName: authorName.trim(),
       authorAsin: asin,
-      totalBooks: result.totalResults || enrichedBooks.length,
+      totalBooks: enrichedBooks.length,
       hasMore: result.hasMore,
       page: result.page,
     });

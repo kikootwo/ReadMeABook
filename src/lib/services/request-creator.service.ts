@@ -12,6 +12,7 @@ import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { seedAsin } from '@/lib/services/works.service';
 
 const logger = RMABLogger.create('RequestCreator');
 
@@ -146,6 +147,15 @@ export async function createRequestForUser(
       });
     }
   }
+
+  // Seed works table for cross-ASIN matching (Layer 2: request-time seeding)
+  seedAsin(
+    audiobook.asin,
+    audiobookRecord.title,
+    audiobookRecord.author,
+    audiobookRecord.narrator || undefined,
+    undefined // duration not available at request time
+  ).catch(() => {});
 
   // Check if user already has an active request for this audiobook
   const existingRequest = await prisma.request.findFirst({

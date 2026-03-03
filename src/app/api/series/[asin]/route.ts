@@ -8,6 +8,8 @@ import { getCurrentUser } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
 import { scrapeSeriesPage } from '@/lib/integrations/audible-series';
 import { enrichAudiobooksWithMatches } from '@/lib/utils/audiobook-matcher';
+import { deduplicateAndCollectGroups } from '@/lib/utils/deduplicate-audiobooks';
+import { persistDedupGroups } from '@/lib/services/works.service';
 
 const logger = RMABLogger.create('API.Series.Detail');
 
@@ -49,9 +51,17 @@ export async function GET(
       );
     }
 
+    // Deduplicate before enrichment to avoid wasted DB queries on duplicate entries
+    const { books: dedupedBooks, groups } = deduplicateAndCollectGroups(detail.books);
+
+    // Fire-and-forget: persist dedup groups to works table for cross-ASIN matching
+    if (groups.length > 0) {
+      persistDedupGroups(groups).catch(() => {});
+    }
+
     // Enrich books with library availability and request status
     const userId = currentUser.sub || undefined;
-    const enrichedBooks = await enrichAudiobooksWithMatches(detail.books, userId);
+    const enrichedBooks = await enrichAudiobooksWithMatches(dedupedBooks, userId);
 
     logger.info(`Series detail complete: "${detail.title}" (${enrichedBooks.length} books, page ${page})`);
 
