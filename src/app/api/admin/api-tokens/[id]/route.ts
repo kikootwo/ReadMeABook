@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { checkApiTokenRevokeRateLimit } from '@/lib/utils/apiTokenRateLimit';
 
 const logger = RMABLogger.create('API.Admin.ApiTokens');
 
@@ -21,6 +22,19 @@ export async function DELETE(
   return requireAuth(request, (req: AuthenticatedRequest) =>
     requireAdmin(req, async () => {
       try {
+        const rateLimit = checkApiTokenRevokeRateLimit(req.user!.id);
+        if (!rateLimit.allowed) {
+          return NextResponse.json(
+            { error: 'Too many API token revoke attempts. Please try again later.' },
+            {
+              status: 429,
+              headers: {
+                'Retry-After': String(rateLimit.retryAfterSeconds),
+              },
+            }
+          );
+        }
+
         const { id } = await params;
 
         const token = await prisma.apiToken.findUnique({ where: { id } });

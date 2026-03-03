@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { checkApiTokenCreateRateLimit } from '@/lib/utils/apiTokenRateLimit';
 import { z } from 'zod';
 
 const logger = RMABLogger.create('API.User.ApiTokens');
@@ -57,6 +58,19 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     try {
+      const rateLimit = checkApiTokenCreateRateLimit(req.user!.id);
+      if (!rateLimit.allowed) {
+        return NextResponse.json(
+          { error: 'Too many API token create attempts. Please try again later.' },
+          {
+            status: 429,
+            headers: {
+              'Retry-After': String(rateLimit.retryAfterSeconds),
+            },
+          }
+        );
+      }
+
       const body = await req.json();
       const { name, expiresAt } = CreateTokenSchema.parse(body);
 

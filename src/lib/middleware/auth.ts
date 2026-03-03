@@ -45,7 +45,17 @@ async function authenticateApiToken(token: string): Promise<(TokenPayload & { id
 
   const apiToken = await prisma.apiToken.findUnique({
     where: { tokenHash },
-    include: { tokenUser: { select: { id: true, plexId: true, plexUsername: true, role: true } } },
+    include: {
+      tokenUser: {
+        select: {
+          id: true,
+          plexId: true,
+          plexUsername: true,
+          role: true,
+          deletedAt: true,
+        },
+      },
+    },
   });
 
   if (!apiToken) return null;
@@ -56,6 +66,16 @@ async function authenticateApiToken(token: string): Promise<(TokenPayload & { id
     return null;
   }
 
+  // Reject tokens for soft-deleted users
+  const user = apiToken.tokenUser;
+  if (!user || user.deletedAt) {
+    logger.warn('API token used by deleted or missing user', {
+      tokenPrefix: apiToken.tokenPrefix,
+      userId: user?.id,
+    });
+    return null;
+  }
+
   // Update lastUsedAt (fire-and-forget)
   prisma.apiToken.update({
     where: { id: apiToken.id },
@@ -63,7 +83,6 @@ async function authenticateApiToken(token: string): Promise<(TokenPayload & { id
   }).catch(() => {});
 
   // Use the token's target user (userId), not the creator (createdById)
-  const user = apiToken.tokenUser;
   return {
     sub: user.id,
     id: user.id,
@@ -130,9 +149,13 @@ export async function requireAuth(
   // Verify user still exists in database
   const user = await prisma.user.findUnique({
     where: { id: payload.sub },
+    select: {
+      id: true,
+      deletedAt: true,
+    },
   });
 
-  if (!user) {
+  if (!user || user.deletedAt) {
     logger.error('User not found in database', { userId: payload.sub });
     return NextResponse.json(
       {
