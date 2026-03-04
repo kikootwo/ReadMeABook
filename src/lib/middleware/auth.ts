@@ -13,7 +13,7 @@ import { API_TOKEN_PREFIX, isEndpointAllowed } from '../constants/api-tokens';
 const logger = RMABLogger.create('Auth');
 
 export interface AuthenticatedRequest extends NextRequest {
-  user?: TokenPayload;
+  user?: TokenPayload & { id: string };
 }
 
 /**
@@ -89,7 +89,6 @@ async function authenticateApiToken(token: string): Promise<TokenPayload | null>
   // Use the token's target user (userId), not the creator (createdById)
   return {
     sub: user.id,
-    id: user.id,
     plexId: user.plexId,
     username: user.plexUsername,
     role: apiToken.role,
@@ -149,7 +148,7 @@ export async function requireAuth(
     }
 
     const authenticatedRequest = request as AuthenticatedRequest;
-    authenticatedRequest.user = apiUser;
+    authenticatedRequest.user = { ...apiUser, id: apiUser.sub };
     return handler(authenticatedRequest);
   }
 
@@ -191,7 +190,7 @@ export async function requireAuth(
   const authenticatedRequest = request as AuthenticatedRequest;
   authenticatedRequest.user = {
     ...payload,
-    id: user.id,
+    id: payload.sub,
   };
 
   return handler(authenticatedRequest);

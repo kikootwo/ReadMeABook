@@ -163,7 +163,6 @@ export async function POST(request: NextRequest) {
       // Generate JWT tokens for auto-login
       accessToken = generateAccessToken({
         sub: adminUser.id,
-        id: adminUser.id,
         plexId: adminUser.plexId,
         username: adminUser.plexUsername,
         role: adminUser.role,

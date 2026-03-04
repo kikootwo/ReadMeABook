@@ -17,7 +17,6 @@ const REFRESH_TOKEN_EXPIRY = '7d'; // 7 days
 
 export interface TokenPayload {
   sub: string; // User ID
-  id: string; // User ID (alias for sub, used by req.user.id throughout the codebase)
   plexId: string;
   username: string;
   role: string;

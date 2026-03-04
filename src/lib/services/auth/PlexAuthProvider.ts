@@ -250,7 +250,6 @@ export class PlexAuthProvider implements IAuthProvider {
   private async generateTokens(userInfo: UserInfo): Promise<AuthTokens> {
     const accessToken = generateAccessToken({
       sub: userInfo.id,
-      id: userInfo.id,
       plexId: userInfo.id, // For backwards compatibility
       username: userInfo.username,
       role: userInfo.role || 'user',

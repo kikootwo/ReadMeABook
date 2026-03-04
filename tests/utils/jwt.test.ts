@@ -17,7 +17,6 @@ describe('JWT utilities', () => {
   it('generates and verifies access tokens', () => {
     const token = generateAccessToken({
       sub: 'user-1',
-      id: 'user-1',
       plexId: 'plex-1',
       username: 'user',
       role: 'admin',
@@ -58,7 +57,6 @@ describe('JWT utilities', () => {
   it('decodes tokens without verification', () => {
     const token = generateAccessToken({
       sub: 'user-4',
-      id: 'user-4',
       plexId: 'plex-4',
       username: 'user',
       role: 'user',

@@ -60,7 +60,6 @@ export async function POST(request: NextRequest) {
     // Generate new access token
     const accessToken = generateAccessToken({
       sub: user.id,
-      id: user.id,
       plexId: user.plexId,
       username: user.plexUsername,
       role: user.role,
