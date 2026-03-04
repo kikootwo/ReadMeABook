@@ -8,6 +8,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchWithAuth } from '@/lib/utils/api';
 import { ConfirmDialog } from '@/app/admin/components/ConfirmDialog';
+import { useApiTokens } from '@/lib/hooks/useApiTokens';
+import { getInstanceUrl } from '@/lib/utils/client-url';
 import Link from 'next/link';
 import type { AdminApiToken } from '@/lib/types/api-tokens';
 
@@ -18,34 +20,12 @@ interface UserOption {
 }
 
 export function ApiTab() {
-  const [tokens, setTokens] = useState<AdminApiToken[]>([]);
+  const api = useApiTokens<AdminApiToken>({ basePath: '/api/admin/api-tokens' });
+
+  // Admin-specific state
   const [users, setUsers] = useState<UserOption[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [newTokenName, setNewTokenName] = useState('');
-  const [newTokenExpiry, setNewTokenExpiry] = useState('never');
   const [newTokenUserId, setNewTokenUserId] = useState('');
   const [newTokenRole, setNewTokenRole] = useState('');
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [createdToken, setCreatedToken] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
-
-  const fetchTokens = useCallback(async () => {
-    try {
-      const response = await fetchWithAuth('/api/admin/api-tokens');
-      if (response.ok) {
-        const data = await response.json();
-        setTokens(data.tokens);
-      }
-    } catch {
-      setError('Failed to load API tokens');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -60,110 +40,21 @@ export function ApiTab() {
   }, []);
 
   useEffect(() => {
-    fetchTokens();
     fetchUsers();
-  }, [fetchTokens, fetchUsers]);
+  }, [fetchUsers]);
 
   const handleCreate = async () => {
-    if (!newTokenName.trim()) {
-      setError('Token name is required');
-      return;
-    }
-
-    setCreating(true);
-    setError(null);
-
-    try {
-      let expiresAt: string | null = null;
-      if (newTokenExpiry !== 'never') {
-        const date = new Date();
-        switch (newTokenExpiry) {
-          case '30d': date.setDate(date.getDate() + 30); break;
-          case '90d': date.setDate(date.getDate() + 90); break;
-          case '1y': date.setFullYear(date.getFullYear() + 1); break;
-        }
-        expiresAt = date.toISOString();
-      }
-
-      const body: Record<string, any> = { name: newTokenName.trim(), expiresAt };
-      if (newTokenUserId) body.userId = newTokenUserId;
-      if (newTokenRole) body.role = newTokenRole;
-
-      const response = await fetchWithAuth('/api/admin/api-tokens', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setCreatedToken(data.fullToken);
-        setNewTokenName('');
-        setNewTokenExpiry('never');
-        setNewTokenUserId('');
-        setNewTokenRole('');
-        setShowCreateForm(false);
-        await fetchTokens();
-      } else {
-        const data = await response.json();
-        setError(data.error || 'Failed to create token');
-      }
-    } catch {
-      setError('Failed to create token');
-    } finally {
-      setCreating(false);
+    const extraBody: Record<string, string> = {};
+    if (newTokenUserId) extraBody.userId = newTokenUserId;
+    if (newTokenRole) extraBody.role = newTokenRole;
+    await api.handleCreate(extraBody);
+    // Reset admin-specific fields on success
+    if (!api.error) {
+      setNewTokenUserId('');
+      setNewTokenRole('');
     }
   };
 
-  const handleDeleteConfirmed = async () => {
-    const id = confirmRevokeId;
-    if (!id) return;
-
-    setConfirmRevokeId(null);
-    setDeletingId(id);
-    setError(null);
-
-    try {
-      const response = await fetchWithAuth(`/api/admin/api-tokens/${id}`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        setTokens(tokens.filter((t) => t.id !== id));
-      } else {
-        setError('Failed to revoke token');
-      }
-    } catch {
-      setError('Failed to revoke token');
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  const handleCopy = async () => {
-    if (createdToken) {
-      try {
-        await navigator.clipboard.writeText(createdToken);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      } catch {
-        setError('Failed to copy to clipboard. Please select and copy the token manually.');
-      }
-    }
-  };
-
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return 'Never';
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
-  // When a user is selected, default the role to their actual role
   const handleUserChange = (userId: string) => {
     setNewTokenUserId(userId);
     if (userId) {
@@ -176,7 +67,13 @@ export function ApiTab() {
     }
   };
 
-  if (loading) {
+  const handleCancel = () => {
+    api.resetForm();
+    setNewTokenUserId('');
+    setNewTokenRole('');
+  };
+
+  if (api.loading) {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -197,14 +94,14 @@ export function ApiTab() {
       </div>
 
       {/* Error display */}
-      {error && (
+      {api.error && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200 text-sm">
-          {error}
+          {api.error}
         </div>
       )}
 
       {/* Newly created token banner */}
-      {createdToken && (
+      {api.createdToken && (
         <div className="p-4 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
           <div className="flex items-start gap-3">
             <svg className="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -216,18 +113,18 @@ export function ApiTab() {
               </p>
               <div className="mt-2 flex items-center gap-2">
                 <code className="flex-1 text-sm bg-white dark:bg-gray-900 px-3 py-2 rounded border border-green-300 dark:border-green-700 text-gray-900 dark:text-gray-100 font-mono break-all">
-                  {createdToken}
+                  {api.createdToken}
                 </code>
                 <button
-                  onClick={handleCopy}
+                  onClick={api.handleCopy}
                   className="flex-shrink-0 px-3 py-2 text-sm font-medium rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors"
                 >
-                  {copied ? 'Copied!' : 'Copy'}
+                  {api.copied ? 'Copied!' : 'Copy'}
                 </button>
               </div>
             </div>
             <button
-              onClick={() => setCreatedToken(null)}
+              onClick={api.dismissCreatedToken}
               className="flex-shrink-0 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -239,7 +136,7 @@ export function ApiTab() {
       )}
 
       {/* Create token form */}
-      {showCreateForm ? (
+      {api.showCreateForm ? (
         <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 space-y-4">
           <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">Create New Token</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -249,8 +146,8 @@ export function ApiTab() {
               </label>
               <input
                 type="text"
-                value={newTokenName}
-                onChange={(e) => setNewTokenName(e.target.value)}
+                value={api.newTokenName}
+                onChange={(e) => api.setNewTokenName(e.target.value)}
                 placeholder="e.g., Home Assistant, Webhook"
                 className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
@@ -261,8 +158,8 @@ export function ApiTab() {
                 Expiration
               </label>
               <select
-                value={newTokenExpiry}
-                onChange={(e) => setNewTokenExpiry(e.target.value)}
+                value={api.newTokenExpiry}
+                onChange={(e) => api.setNewTokenExpiry(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               >
                 <option value="never">Never</option>
@@ -306,13 +203,13 @@ export function ApiTab() {
           <div className="flex gap-2">
             <button
               onClick={handleCreate}
-              disabled={creating || !newTokenName.trim()}
+              disabled={api.creating || !api.newTokenName.trim()}
               className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white transition-colors"
             >
-              {creating ? 'Creating...' : 'Create Token'}
+              {api.creating ? 'Creating...' : 'Create Token'}
             </button>
             <button
-              onClick={() => { setShowCreateForm(false); setNewTokenName(''); setNewTokenExpiry('never'); setNewTokenUserId(''); setNewTokenRole(''); }}
+              onClick={handleCancel}
               className="px-4 py-2 text-sm font-medium rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 transition-colors"
             >
               Cancel
@@ -321,7 +218,7 @@ export function ApiTab() {
         </div>
       ) : (
         <button
-          onClick={() => setShowCreateForm(true)}
+          onClick={() => api.setShowCreateForm(true)}
           className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
         >
           Create New Token
@@ -329,7 +226,7 @@ export function ApiTab() {
       )}
 
       {/* Token list */}
-      {tokens.length === 0 ? (
+      {api.tokens.length === 0 ? (
         <div className="text-center py-8 text-gray-500 dark:text-gray-400">
           <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
@@ -353,7 +250,7 @@ export function ApiTab() {
               </tr>
             </thead>
             <tbody>
-              {tokens.map((token) => (
+              {api.tokens.map((token) => (
                 <tr key={token.id} className="border-b border-gray-100 dark:border-gray-800">
                   <td className="py-3 px-2 text-gray-900 dark:text-gray-100 font-medium">{token.name}</td>
                   <td className="py-3 px-2">
@@ -372,11 +269,11 @@ export function ApiTab() {
                     </span>
                   </td>
                   <td className="py-3 px-2 text-gray-500 dark:text-gray-400">{token.createdBy}</td>
-                  <td className="py-3 px-2 text-gray-500 dark:text-gray-400">{formatDate(token.lastUsedAt)}</td>
+                  <td className="py-3 px-2 text-gray-500 dark:text-gray-400">{api.formatDate(token.lastUsedAt)}</td>
                   <td className="py-3 px-2 text-gray-500 dark:text-gray-400">
                     {token.expiresAt ? (
                       <span className={new Date(token.expiresAt) < new Date() ? 'text-red-500' : ''}>
-                        {formatDate(token.expiresAt)}
+                        {api.formatDate(token.expiresAt)}
                         {new Date(token.expiresAt) < new Date() && ' (expired)'}
                       </span>
                     ) : (
@@ -385,11 +282,11 @@ export function ApiTab() {
                   </td>
                   <td className="py-3 px-2 text-right">
                     <button
-                      onClick={() => setConfirmRevokeId(token.id)}
-                      disabled={deletingId === token.id}
+                      onClick={() => api.setConfirmRevokeId(token.id)}
+                      disabled={api.deletingId === token.id}
                       className="px-3 py-1 text-xs font-medium rounded-lg bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 transition-colors disabled:opacity-50"
                     >
-                      {deletingId === token.id ? 'Revoking...' : 'Revoke'}
+                      {api.deletingId === token.id ? 'Revoking...' : 'Revoke'}
                     </button>
                   </td>
                 </tr>
@@ -407,19 +304,19 @@ export function ApiTab() {
         </p>
         <pre className="text-xs bg-gray-900 dark:bg-black text-gray-100 p-3 rounded-lg overflow-x-auto">
 {`curl -H "Authorization: Bearer rmab_your_token_here" \\
-  ${typeof window !== 'undefined' ? window.location.origin : 'https://your-instance'}/api/requests`}
+  ${getInstanceUrl()}/api/requests`}
         </pre>
       </div>
 
       {/* Revoke confirmation dialog */}
       <ConfirmDialog
-        isOpen={confirmRevokeId !== null}
+        isOpen={api.confirmRevokeId !== null}
         title="Revoke API token"
         message={
           <>
             Are you sure you want to revoke{' '}
             <span className="font-medium text-gray-700 dark:text-gray-200">
-              &ldquo;{tokens.find((t) => t.id === confirmRevokeId)?.name ?? 'this token'}&rdquo;
+              &ldquo;{api.tokens.find((t) => t.id === api.confirmRevokeId)?.name ?? 'this token'}&rdquo;
             </span>
             ? Any integrations using this token will immediately lose access. This cannot be undone.
           </>
@@ -427,8 +324,8 @@ export function ApiTab() {
         confirmLabel="Revoke token"
         cancelLabel="Cancel"
         confirmVariant="danger"
-        onConfirm={handleDeleteConfirmed}
-        onCancel={() => setConfirmRevokeId(null)}
+        onConfirm={api.handleDeleteConfirmed}
+        onCancel={() => api.setConfirmRevokeId(null)}
       />
     </div>
   );

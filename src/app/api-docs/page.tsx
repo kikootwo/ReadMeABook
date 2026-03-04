@@ -15,6 +15,7 @@ import { TokenInput } from '@/components/api-docs/TokenInput';
 import { EndpointCard } from '@/components/api-docs/EndpointCard';
 import { API_TOKEN_ENDPOINT_DOCS } from '@/lib/constants/api-tokens';
 import { useAuth } from '@/contexts/AuthContext';
+import { getInstanceUrl } from '@/lib/utils/client-url';
 import Link from 'next/link';
 
 export default function ApiDocsPage() {
@@ -101,7 +102,7 @@ export default function ApiDocsPage() {
             </p>
             <pre className="text-xs bg-gray-900 dark:bg-black text-gray-100 p-4 rounded-xl overflow-x-auto font-mono leading-relaxed">
 {`curl -H "Authorization: Bearer rmab_your_token_here" \\
-  ${typeof window !== 'undefined' ? window.location.origin : 'https://your-instance'}/api/requests`}
+  ${getInstanceUrl()}/api/requests`}
             </pre>
           </div>
 

@@ -250,6 +250,7 @@ export class LocalAuthProvider implements IAuthProvider {
   private async generateTokens(userInfo: UserInfo & { plexId: string }): Promise<AuthTokens> {
     const tokenPayload = {
       sub: userInfo.id,
+      id: userInfo.id,
       plexId: userInfo.plexId,
       username: userInfo.username,
       role: userInfo.role || 'user',

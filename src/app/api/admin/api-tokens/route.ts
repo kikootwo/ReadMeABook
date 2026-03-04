@@ -123,6 +123,16 @@ export async function POST(request: NextRequest) {
         // Determine token role (defaults to target user's role)
         const tokenRole = role || targetUser.role;
 
+        // Log when admin explicitly overrides role to differ from user's actual role
+        if (role && role !== targetUser.role) {
+          logger.warn('Admin creating token with role different from user actual role', {
+            tokenRole: role,
+            userActualRole: targetUser.role,
+            targetUser: targetUser.plexUsername,
+            createdBy: req.user!.username,
+          });
+        }
+
         // Generate the token
         const { fullToken, tokenHash, tokenPrefix } = generateApiToken();
 

@@ -13,7 +13,7 @@ import { API_TOKEN_PREFIX, isEndpointAllowed } from '../constants/api-tokens';
 const logger = RMABLogger.create('Auth');
 
 export interface AuthenticatedRequest extends NextRequest {
-  user?: TokenPayload & { id: string };
+  user?: TokenPayload;
 }
 
 /**
@@ -39,7 +39,7 @@ function extractToken(request: NextRequest): string | null {
  * Returns a synthetic TokenPayload if valid, null otherwise.
  * Updates lastUsedAt asynchronously.
  */
-async function authenticateApiToken(token: string): Promise<(TokenPayload & { id: string }) | null> {
+async function authenticateApiToken(token: string): Promise<TokenPayload | null> {
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
   const apiToken = await prisma.apiToken.findUnique({
@@ -79,7 +79,12 @@ async function authenticateApiToken(token: string): Promise<(TokenPayload & { id
   prisma.apiToken.update({
     where: { id: apiToken.id },
     data: { lastUsedAt: new Date() },
-  }).catch(() => {});
+  }).catch((err) => {
+    logger.debug('Failed to update API token lastUsedAt', {
+      error: err instanceof Error ? err.message : String(err),
+      tokenId: apiToken.id,
+    });
+  });
 
   // Use the token's target user (userId), not the creator (createdById)
   return {
