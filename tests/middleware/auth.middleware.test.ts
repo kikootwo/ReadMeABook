@@ -3,9 +3,11 @@
  * Documentation: documentation/backend/services/auth.md
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextResponse } from 'next/server';
 import { createPrismaMock } from '../helpers/prisma';
+import crypto from 'crypto';
 
 const prismaMock = createPrismaMock();
 const verifyAccessTokenMock = vi.fn();
@@ -28,6 +30,11 @@ const makeRequest = (authHeader?: string) => ({
     },
   },
 });
+
+// Helper to create a valid API token hash for testing
+const createTestApiToken = (token: string) => {
+  return crypto.createHash('sha256').update(token).digest('hex');
+};
 
 describe('auth middleware', () => {
   beforeEach(() => {
@@ -157,6 +164,98 @@ describe('auth middleware', () => {
 
     const result = await isLocalAdmin('user-1');
     expect(result).toBe(true);
+  });
+
+  it('rejects JWT tokens for soft-deleted users', async () => {
+    verifyAccessTokenMock.mockReturnValue({
+      sub: 'user-1',
+      plexId: 'plex-1',
+      username: 'user',
+      role: 'user',
+      iat: 1,
+      exp: 2,
+    });
+    prismaMock.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      deletedAt: new Date(),
+    });
+    const { requireAuth } = await import('@/lib/middleware/auth');
+
+    const response = await requireAuth(makeRequest('Bearer token') as any, vi.fn());
+    const payload = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(payload.message).toMatch(/user not found/i);
+  });
+
+  describe('API token authentication', () => {
+    const testToken = 'rmab_test1234567890abcdef';
+    const testTokenHash = createTestApiToken(testToken);
+
+    it('rejects API tokens for soft-deleted users', async () => {
+      prismaMock.apiToken.findUnique.mockResolvedValue({
+        id: 'token-1',
+        tokenHash: testTokenHash,
+        role: 'user',
+        expiresAt: null,
+        tokenUser: {
+          id: 'user-1',
+          plexUsername: 'deleteduser',
+          role: 'user',
+          deletedAt: new Date(),
+        },
+      });
+      const { requireAuth } = await import('@/lib/middleware/auth');
+
+      const response = await requireAuth(makeRequest(`Bearer ${testToken}`) as any, vi.fn());
+      const payload = await response.json();
+
+      expect(response.status).toBe(401);
+      expect(payload.message).toMatch(/invalid.*expired/i);
+    });
+
+    it('rejects API tokens for missing users', async () => {
+      prismaMock.apiToken.findUnique.mockResolvedValue({
+        id: 'token-1',
+        tokenHash: testTokenHash,
+        role: 'user',
+        expiresAt: null,
+        tokenUser: null,
+      });
+      const { requireAuth } = await import('@/lib/middleware/auth');
+
+      const response = await requireAuth(makeRequest(`Bearer ${testToken}`) as any, vi.fn());
+      const payload = await response.json();
+
+      expect(response.status).toBe(401);
+      expect(payload.message).toMatch(/invalid.*expired/i);
+    });
+
+    it('accepts valid API tokens for active users', async () => {
+      prismaMock.apiToken.findUnique.mockResolvedValue({
+        id: 'token-1',
+        tokenHash: testTokenHash,
+        role: 'user',
+        expiresAt: null,
+        tokenUser: {
+          id: 'user-1',
+          plexUsername: 'activeuser',
+          role: 'user',
+          deletedAt: null,
+        },
+      });
+      prismaMock.apiToken.update.mockResolvedValue({});
+      const { requireAuth } = await import('@/lib/middleware/auth');
+
+      const handler = vi.fn(async (req: any) =>
+        NextResponse.json({ ok: true, userId: req.user?.id })
+      );
+      const response = await requireAuth(makeRequest(`Bearer ${testToken}`) as any, handler);
+      const payload = await response.json();
+
+      expect(handler).toHaveBeenCalled();
+      expect(payload.userId).toBe('user-1');
+    });
   });
 
   it('returns current user from token', async () => {

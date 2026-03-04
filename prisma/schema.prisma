@@ -68,6 +68,8 @@ model User {
   goodreadsShelves        GoodreadsShelf[]
   reportedIssues          ReportedIssue[]          @relation("Reporter")
   resolvedIssues          ReportedIssue[]          @relation("Resolver")
+  createdApiTokens        ApiToken[]  @relation("CreatedApiTokens")
+  apiTokens               ApiToken[]  @relation("UserApiTokens")
   watchedSeries           WatchedSeries[]
   watchedAuthors          WatchedAuthor[]
 
@@ -497,6 +499,34 @@ model ReportedIssue {
 // GOODREADS SYNC TABLES
 // Per-user Goodreads shelf subscriptions + global book-to-ASIN mapping cache
 // ============================================================================
+
+// ============================================================================
+// API TOKEN TABLE
+// Static API tokens for programmatic access (alternative to JWT)
+// Documentation: documentation/backend/services/api-tokens.md
+// ============================================================================
+
+model ApiToken {
+  id          String    @id @default(uuid())
+  name        String // User-friendly label (e.g., "Home Assistant", "Webhook")
+  tokenHash   String    @unique @map("token_hash") // SHA-256 hash of the token (never store plaintext)
+  tokenPrefix String    @map("token_prefix") // First 8 chars for display (e.g., "rmab_a1b2")
+  role        String    @default("user") // Token role: 'admin' or 'user'
+  createdById String    @map("created_by_id") // Who created the token (may differ from userId for admin-created tokens)
+  userId      String    @map("user_id") // The user identity this token acts as
+  lastUsedAt  DateTime? @map("last_used_at")
+  expiresAt   DateTime? @map("expires_at") // null = never expires
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  createdBy User @relation("CreatedApiTokens", fields: [createdById], references: [id], onDelete: Cascade)
+  tokenUser User @relation("UserApiTokens", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tokenHash])
+  @@index([createdById])
+  @@index([userId])
+  @@map("api_tokens")
+}
 
 model GoodreadsShelf {
   id         String    @id @default(uuid())
