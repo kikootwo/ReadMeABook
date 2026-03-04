@@ -54,10 +54,12 @@ export class LocalAuthProvider implements IAuthProvider {
         return { success: false, error: 'Username and password required' };
       }
 
+      const normalizedUsername = username.trim().toLowerCase();
+
       // Find user (exclude soft-deleted users)
       const user = await prisma.user.findFirst({
         where: {
-          plexUsername: username,
+          plexUsername: normalizedUsername,
           authProvider: 'local',
           deletedAt: null, // Exclude soft-deleted users
         },
@@ -144,9 +146,10 @@ export class LocalAuthProvider implements IAuthProvider {
   async register(params: RegisterParams): Promise<AuthResult> {
     try {
       const { username, password } = params;
+      const normalizedUsername = username?.trim().toLowerCase();
 
       // Validate
-      if (!username || username.length < 3) {
+      if (!normalizedUsername || normalizedUsername.length < 3) {
         return { success: false, error: 'Username must be at least 3 characters' };
       }
 
@@ -167,7 +170,7 @@ export class LocalAuthProvider implements IAuthProvider {
       // Check username uniqueness (only among non-deleted users)
       const existing = await prisma.user.findFirst({
         where: {
-          plexUsername: username,
+          plexUsername: normalizedUsername,
           authProvider: 'local',
           deletedAt: null, // Allow reuse of usernames from deleted accounts
         },
@@ -194,8 +197,8 @@ export class LocalAuthProvider implements IAuthProvider {
       // Create user
       const user = await prisma.user.create({
         data: {
-          plexId: `local-${username}`,
-          plexUsername: username,
+          plexId: `local-${normalizedUsername}`,
+          plexUsername: normalizedUsername,
           authToken: encryptedHash,
           authProvider: 'local',
           role: isFirstUser ? 'admin' : 'user',

@@ -140,14 +140,15 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const normalizedAdminUsername = admin.username.trim().toLowerCase();
       const hashedPassword = await bcrypt.hash(admin.password, 10);
       const encryptionService = getEncryptionService();
       const encryptedPassword = encryptionService.encrypt(hashedPassword);
 
       adminUser = await prisma.user.create({
         data: {
-          plexId: `local-${admin.username}`,
-          plexUsername: admin.username,
+          plexId: `local-${normalizedAdminUsername}`,
+          plexUsername: normalizedAdminUsername,
           plexEmail: null,
           role: 'admin',
           isSetupAdmin: true, // Mark as setup admin - role cannot be changed
