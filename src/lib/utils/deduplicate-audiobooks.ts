@@ -44,9 +44,11 @@ export function normalizeTitle(title: string): string {
   return t.replace(/\s+/g, ' ').trim();
 }
 
-/** Normalize narrator for comparison. */
+/** Normalize narrator for comparison. Sorts individual names so order doesn't matter. */
 function normalizeNarrator(narrator?: string): string {
-  return (narrator || '').toLowerCase().trim();
+  const raw = (narrator || '').toLowerCase().trim();
+  if (!raw) return raw;
+  return raw.split(',').map(n => n.trim()).filter(Boolean).sort().join(', ');
 }
 
 // ---------------------------------------------------------------------------

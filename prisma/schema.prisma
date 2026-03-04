@@ -68,6 +68,8 @@ model User {
   goodreadsShelves        GoodreadsShelf[]
   reportedIssues          ReportedIssue[]          @relation("Reporter")
   resolvedIssues          ReportedIssue[]          @relation("Resolver")
+  watchedSeries           WatchedSeries[]
+  watchedAuthors          WatchedAuthor[]
 
   @@index([plexId])
   @@index([role])
@@ -570,4 +572,48 @@ model WorkAsin {
   @@index([workId])
   @@index([asin])
   @@map("work_asins")
+}
+
+// ============================================================================
+// WATCHED LISTS TABLES
+// Per-user series and author subscriptions for automatic new-release requests.
+// Documentation: documentation/features/watched-lists.md
+// ============================================================================
+
+model WatchedSeries {
+  id            String    @id @default(uuid())
+  userId        String    @map("user_id")
+  seriesAsin    String    @map("series_asin")
+  seriesTitle   String    @map("series_title")
+  coverArtUrl   String?   @map("cover_art_url") @db.Text
+  lastCheckedAt DateTime? @map("last_checked_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, seriesAsin])
+  @@index([userId])
+  @@index([seriesAsin])
+  @@map("watched_series")
+}
+
+model WatchedAuthor {
+  id            String    @id @default(uuid())
+  userId        String    @map("user_id")
+  authorAsin    String    @map("author_asin")
+  authorName    String    @map("author_name")
+  coverArtUrl   String?   @map("cover_art_url") @db.Text
+  lastCheckedAt DateTime? @map("last_checked_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, authorAsin])
+  @@index([userId])
+  @@index([authorAsin])
+  @@map("watched_authors")
 }

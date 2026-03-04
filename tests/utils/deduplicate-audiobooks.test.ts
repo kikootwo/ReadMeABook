@@ -309,6 +309,23 @@ describe('deduplicateAudiobooks', () => {
     ];
     expect(deduplicateAudiobooks(books)).toHaveLength(2);
   });
+
+  it('collapses duplicates when narrators are listed in different order', () => {
+    const books = [
+      makeBook({
+        asin: 'A1', title: 'The Passengers', author: 'John Marrs',
+        narrator: 'Kristin Atherton, Roy McMillan, Clare Corbett, Tom Bateman, Patience Tomlinson, Shaheen Khan',
+        durationMinutes: 600,
+      }),
+      makeBook({
+        asin: 'A2', title: 'The Passengers', author: 'John Marrs',
+        narrator: 'Clare Corbett, Roy McMillan, Tom Bateman, Shaheen Khan, Kristin Atherton, Patience Tomlinson',
+        durationMinutes: 602,
+      }),
+    ];
+    const result = deduplicateAudiobooks(books);
+    expect(result).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
