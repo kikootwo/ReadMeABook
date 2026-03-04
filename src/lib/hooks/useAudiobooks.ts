@@ -35,11 +35,12 @@ export interface Audiobook {
   hasReportedIssue?: boolean;  // True if an open issue exists for this audiobook
 }
 
-export function useAudiobooks(type: 'popular' | 'new-releases', limit: number = 20, page: number = 1) {
+export function useAudiobooks(type: 'popular' | 'new-releases', limit: number = 20, page: number = 1, hideAvailable: boolean = false) {
+  const hideParam = hideAvailable ? '&hideAvailable=true' : '';
   const endpoint =
     type === 'popular'
-      ? `/api/audiobooks/popular?page=${page}&limit=${limit}`
-      : `/api/audiobooks/new-releases?page=${page}&limit=${limit}`;
+      ? `/api/audiobooks/popular?page=${page}&limit=${limit}${hideParam}`
+      : `/api/audiobooks/new-releases?page=${page}&limit=${limit}${hideParam}`;
 
   const { data, error, isLoading } = useSWR(endpoint, authenticatedFetcher, {
     revalidateOnFocus: false,

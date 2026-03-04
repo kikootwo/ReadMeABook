@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRequests } from '@/lib/hooks/useRequests';
 import { cn } from '@/lib/utils/cn';
 import { ShelvesSection } from '@/components/profile/ShelvesSection';
+import { WatchedSeriesSection, WatchedAuthorsSection } from '@/components/profile/WatchedListsSection';
 
 const statConfig = [
   { key: 'total', label: 'Total', color: 'text-gray-900 dark:text-white' },
@@ -141,6 +142,12 @@ export default function ProfilePage() {
 
         {/* Generic Shelves Section */}
         <ShelvesSection />
+
+        {/* Watched Series */}
+        <WatchedSeriesSection />
+
+        {/* Watched Authors */}
+        <WatchedAuthorsSection />
 
         {/* Active Downloads */}
         {activeDownloads.length > 0 && (

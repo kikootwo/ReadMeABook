@@ -8,6 +8,7 @@
 
 import { prisma } from '@/lib/db';
 import { LibraryItem } from '@/lib/services/library';
+import { getSiblingAsins } from '@/lib/services/works.service';
 import { RMABLogger } from './logger';
 
 // Module-level logger
@@ -178,6 +179,61 @@ export async function enrichAudiobooksWithMatches(
     }
   }
 
+  // Works-table sibling expansion: check if unmatched ASINs have siblings in the library
+  try {
+    const unmatchedAsins = results.filter(r => !r.isAvailable).map(r => r.asin);
+    if (unmatchedAsins.length > 0) {
+      const siblingMap = await getSiblingAsins(unmatchedAsins);
+      if (siblingMap.size > 0) {
+        // Collect all sibling ASINs for a single batch library query
+        const allSiblingAsins = new Set<string>();
+        for (const siblings of siblingMap.values()) {
+          for (const s of siblings) allSiblingAsins.add(s);
+        }
+
+        if (allSiblingAsins.size > 0) {
+          const siblingLibraryMatches = await prisma.plexLibrary.findMany({
+            where: { asin: { in: [...allSiblingAsins] } },
+            select: { asin: true, plexGuid: true },
+          });
+          const libraryAsinSet = new Set(
+            siblingLibraryMatches.filter(m => m.asin).map(m => m.asin!.toLowerCase())
+          );
+
+          // Update results where a sibling ASIN is found in the library
+          for (const result of results) {
+            if (result.isAvailable) continue;
+            const siblings = siblingMap.get(result.asin);
+            if (!siblings) continue;
+            const matchedSiblingAsin = siblings.find(s => libraryAsinSet.has(s.toLowerCase()));
+            if (matchedSiblingAsin) {
+              const libMatch = siblingLibraryMatches.find(
+                m => m.asin?.toLowerCase() === matchedSiblingAsin.toLowerCase()
+              );
+              (result as any).isAvailable = true;
+              (result as any).plexGuid = libMatch?.plexGuid || null;
+            }
+          }
+
+          const siblingMatchCount = results.filter(r => {
+            if (!r.isAvailable) return false;
+            return siblingMap.has(r.asin);
+          }).length;
+          logger.debug('Sibling expansion', {
+            unmatchedCount: unmatchedAsins.length,
+            siblingGroupsFound: siblingMap.size,
+            siblingMatches: siblingMatchCount,
+          });
+        }
+      }
+    }
+  } catch (error) {
+    // Works table expansion is best-effort — direct matches still work
+    logger.error('Sibling ASIN expansion failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   // Always enrich with request status (check ANY user's requests)
   const asins = audiobooks.map(book => book.asin);
 
@@ -270,6 +326,57 @@ export async function enrichAudiobooksWithMatches(
   });
 
   return results;
+}
+
+/**
+ * Get all ASINs that are considered "available" — present in library or have completed requests.
+ * Used by paginated API routes to exclude available items at the DB level.
+ */
+export async function getAvailableAsins(): Promise<Set<string>> {
+  const [libraryItems, completedRequests] = await Promise.all([
+    // ASINs present in the library (Plex or Audiobookshelf)
+    prisma.plexLibrary.findMany({
+      where: { asin: { not: null } },
+      select: { asin: true },
+      distinct: ['asin'],
+    }),
+    // ASINs with completed audiobook requests
+    prisma.audiobook.findMany({
+      where: {
+        audibleAsin: { not: null },
+        requests: {
+          some: {
+            status: 'completed',
+            type: 'audiobook',
+            deletedAt: null,
+          },
+        },
+      },
+      select: { audibleAsin: true },
+    }),
+  ]);
+
+  const asins = new Set<string>();
+  for (const item of libraryItems) {
+    if (item.asin) asins.add(item.asin);
+  }
+  for (const item of completedRequests) {
+    if (item.audibleAsin) asins.add(item.audibleAsin);
+  }
+
+  // Expand with works-table sibling ASINs
+  try {
+    if (asins.size > 0) {
+      const siblingMap = await getSiblingAsins([...asins]);
+      for (const siblings of siblingMap.values()) {
+        for (const s of siblings) asins.add(s);
+      }
+    }
+  } catch {
+    // Works table expansion is best-effort
+  }
+
+  return asins;
 }
 
 /**

@@ -10,7 +10,7 @@ import { RMABLogger } from '../utils/logger';
 
 const logger = RMABLogger.create('Scheduler');
 
-export type ScheduledJobType = 'plex_library_scan' | 'plex_recently_added_check' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'cleanup_seeded_torrents' | 'monitor_rss_feeds' | 'sync_reading_shelves';
+export type ScheduledJobType = 'plex_library_scan' | 'plex_recently_added_check' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'cleanup_seeded_torrents' | 'monitor_rss_feeds' | 'sync_reading_shelves' | 'check_watched_lists';
 
 export interface ScheduledJob {
   id: string;
@@ -133,6 +133,13 @@ export class SchedulerService {
         name: 'Sync Reading Shelves',
         type: 'sync_reading_shelves' as ScheduledJobType,
         schedule: '0 */6 * * *', // Every 6 hours
+        enabled: true, // Enable by default
+        payload: {},
+      },
+      {
+        name: 'Check Watched Lists',
+        type: 'check_watched_lists' as ScheduledJobType,
+        schedule: '0 0 * * *', // Daily at midnight (every 24 hours)
         enabled: true, // Enable by default
         payload: {},
       },
@@ -380,6 +387,9 @@ export class SchedulerService {
         break;
       case 'sync_reading_shelves':
         bullJobId = await this.triggerSyncShelves(job);
+        break;
+      case 'check_watched_lists':
+        bullJobId = await this.triggerCheckWatchedLists(job);
         break;
       default:
         throw new Error(`Unknown job type: ${job.type}`);
@@ -654,6 +664,13 @@ export class SchedulerService {
    */
   private async triggerSyncShelves(job: any): Promise<string> {
     return await this.jobQueue.addSyncShelvesJob(job.id);
+  }
+
+  /**
+   * Trigger watched lists check (watched series + watched authors)
+   */
+  private async triggerCheckWatchedLists(job: any): Promise<string> {
+    return await this.jobQueue.addCheckWatchedListsJob(job.id);
   }
 }
 

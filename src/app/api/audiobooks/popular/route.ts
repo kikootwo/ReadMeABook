@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { enrichAudiobooksWithMatches } from '@/lib/utils/audiobook-matcher';
+import { enrichAudiobooksWithMatches, getAvailableAsins } from '@/lib/utils/audiobook-matcher';
 import { getCurrentUser } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
 
@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = parseInt(searchParams.get('limit') || '20', 10);
+    const hideAvailable = searchParams.get('hideAvailable') === 'true';
 
     // Validate pagination parameters
     if (page < 1 || limit < 1 || limit > 100) {
@@ -38,12 +39,22 @@ export async function GET(request: NextRequest) {
 
     const skip = (page - 1) * limit;
 
+    // When hideAvailable is enabled, exclude ASINs that are in the library or have completed requests
+    let excludedAsins: string[] = [];
+    if (hideAvailable) {
+      const availableSet = await getAvailableAsins();
+      excludedAsins = [...availableSet];
+    }
+
+    const whereClause = {
+      isPopular: true,
+      ...(excludedAsins.length > 0 ? { asin: { notIn: excludedAsins } } : {}),
+    };
+
     // Query audible_cache for popular audiobooks
     const [audiobooks, totalCount] = await Promise.all([
       prisma.audibleCache.findMany({
-        where: {
-          isPopular: true,
-        },
+        where: whereClause,
         orderBy: {
           popularRank: 'asc',
         },
@@ -66,9 +77,7 @@ export async function GET(request: NextRequest) {
         },
       }),
       prisma.audibleCache.count({
-        where: {
-          isPopular: true,
-        },
+        where: whereClause,
       }),
     ]);
 

@@ -14,8 +14,10 @@ import {
   getLanguageForRegion,
   buildContainsSelector,
   stripPrefixes,
+  type LanguageConfig,
 } from '../constants/language-config';
 import { RMABLogger } from '../utils/logger';
+import { parseRuntime } from '../utils/parse-runtime';
 import { randomDelay } from '../utils/scrape-resilience';
 
 const logger = RMABLogger.create('Audible.Series');
@@ -311,7 +313,7 @@ export async function scrapeSeriesPage(asin: string, page: number = 1): Promise<
       undefined;
 
     // Parse all books from the series page
-    const books = parseSeriesBooks($, langConfig.scraping.authorPrefixes, langConfig.scraping.narratorPrefixes);
+    const books = parseSeriesBooks($, langConfig.scraping.authorPrefixes, langConfig.scraping.narratorPrefixes, langConfig);
 
     // Use actual book count if we got more from scraping
     const bookCount = Math.max(summary.bookCount, books.length);
@@ -403,7 +405,8 @@ function parseSeriesRating($: cheerio.CheerioAPI): { rating?: number; ratingCoun
 function parseSeriesBooks(
   $: cheerio.CheerioAPI,
   authorPrefixes: string[],
-  narratorPrefixes: string[]
+  narratorPrefixes: string[],
+  langConfig: LanguageConfig
 ): AudibleAudiobook[] {
   const books: AudibleAudiobook[] = [];
   const seenAsins = new Set<string>();
@@ -453,6 +456,11 @@ function parseSeriesBooks(
     const ratingMatch = ratingText ? ratingText.match(/(\d+[.,]?\d*)/) : null;
     const rating = ratingMatch ? parseFloat(ratingMatch[1].replace(',', '.')) : undefined;
 
+    // Duration
+    const runtimeText = $el.find('.runtimeLabel').text().trim() ||
+      $el.find(buildContainsSelector('span', langConfig.scraping.lengthLabels)).text().trim();
+    const durationMinutes = parseRuntime(runtimeText, langConfig);
+
     books.push({
       asin: bookAsin,
       title,
@@ -461,6 +469,7 @@ function parseSeriesBooks(
       narrator: stripPrefixes(narratorText, narratorPrefixes),
       coverArtUrl,
       rating,
+      durationMinutes,
     });
   });
 

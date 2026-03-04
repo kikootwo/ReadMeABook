@@ -47,17 +47,22 @@ vi.mock('@/components/ui/CardSizeControls', () => ({
   CardSizeControls: ({ size }: { size: number }) => <div data-testid="card-size" data-size={size} />,
 }));
 
-vi.mock('@/components/ui/StickyPagination', () => ({
-  StickyPagination: ({
-    label,
-    onPageChange,
+vi.mock('@/components/ui/UnifiedPagination', () => ({
+  UnifiedPagination: ({
+    sections,
   }: {
-    label: string;
-    onPageChange: (page: number) => void;
+    sections: Array<{
+      label: string;
+      onPageChange: (page: number) => void;
+    }>;
   }) => (
-    <button type="button" onClick={() => onPageChange(2)}>
-      {label} next
-    </button>
+    <div>
+      {sections.map((s) => (
+        <button key={s.label} type="button" onClick={() => s.onPageChange(2)}>
+          {s.label} next
+        </button>
+      ))}
+    </div>
   ),
 }));
 
@@ -113,7 +118,7 @@ describe('HomePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Popular Audiobooks next' }));
 
     await waitFor(() => {
-      expect(useAudiobooksMock).toHaveBeenCalledWith('popular', 20, 2);
+      expect(useAudiobooksMock).toHaveBeenCalledWith('popular', 20, 2, undefined);
     });
   });
 });

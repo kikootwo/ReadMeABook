@@ -27,6 +27,7 @@ export type JobType =
   | 'cleanup_seeded_torrents'
   | 'monitor_rss_feeds'
   | 'sync_reading_shelves'
+  | 'check_watched_lists'
   | 'send_notification'
   // Ebook-specific job types
   | 'search_ebook'
@@ -112,6 +113,16 @@ export interface SyncShelvesPayload extends JobPayload {
   shelfId?: string;
   shelfType?: 'goodreads' | 'hardcover';
   maxLookupsPerShelf?: number;
+}
+
+export interface CheckWatchedListsPayload extends JobPayload {
+  scheduledJobId?: string;
+  /** If set, only process watched items for this user */
+  userId?: string;
+  /** If set, only process this specific series */
+  seriesAsin?: string;
+  /** If set, only process this specific author */
+  authorAsin?: string;
 }
 
 // Ebook-specific payload interfaces
@@ -383,6 +394,12 @@ export class JobQueueService {
       const { processSyncShelves } = await import('../processors/sync-shelves.processor');
       const payloadWithJobId = await this.ensureJobRecord(job, 'sync_reading_shelves');
       return await processSyncShelves(payloadWithJobId);
+    });
+
+    this.queue.process('check_watched_lists', 1, async (job: BullJob<CheckWatchedListsPayload>) => {
+      const { processCheckWatchedLists } = await import('../processors/check-watched-lists.processor');
+      const payloadWithJobId = await this.ensureJobRecord(job, 'check_watched_lists');
+      return await processCheckWatchedLists(payloadWithJobId);
     });
 
     // Send notification processor
@@ -764,6 +781,39 @@ export class JobQueueService {
       } as SyncShelvesPayload,
       {
         priority: 7,
+      }
+    );
+  }
+
+  /**
+   * Add check watched lists job (watched series + watched authors)
+   */
+  async addCheckWatchedListsJob(scheduledJobId?: string): Promise<string> {
+    return await this.addJob(
+      'check_watched_lists',
+      {
+        scheduledJobId,
+      } as CheckWatchedListsPayload,
+      {
+        priority: 7,
+      }
+    );
+  }
+
+  /**
+   * Add a targeted check for a specific watched series or author for a specific user.
+   * Used for immediate processing when a user adds a new watch.
+   */
+  async addCheckWatchedItemJob(userId: string, seriesAsin?: string, authorAsin?: string): Promise<string> {
+    return await this.addJob(
+      'check_watched_lists',
+      {
+        userId,
+        seriesAsin,
+        authorAsin,
+      } as CheckWatchedListsPayload,
+      {
+        priority: 8, // Higher than scheduled (7) since user-initiated
       }
     );
   }

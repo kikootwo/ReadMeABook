@@ -23,6 +23,7 @@ import {
   AdaptivePacer,
   FetchResultMeta,
 } from '../utils/scrape-resilience';
+import { parseRuntime as parseRuntimeUtil } from '../utils/parse-runtime';
 
 // Module-level logger
 const logger = RMABLogger.create('Audible');
@@ -1134,33 +1135,11 @@ export class AudibleService {
   }
 
   /**
-   * Parse runtime text to minutes using language-specific patterns
+   * Parse runtime text to minutes using language-specific patterns.
+   * Delegates to shared utility in src/lib/utils/parse-runtime.ts.
    */
   private parseRuntime(runtimeText: string): number | undefined {
-    if (!runtimeText) return undefined;
-
-    const langConfig = this.getLangConfig();
-    let totalMinutes = 0;
-
-    // Try each hour pattern until one matches
-    for (const pattern of langConfig.scraping.runtimeHourPatterns) {
-      const match = runtimeText.match(pattern);
-      if (match) {
-        totalMinutes += parseInt(match[1]) * 60;
-        break;
-      }
-    }
-
-    // Try each minute pattern until one matches
-    for (const pattern of langConfig.scraping.runtimeMinutePatterns) {
-      const match = runtimeText.match(pattern);
-      if (match) {
-        totalMinutes += parseInt(match[1]);
-        break;
-      }
-    }
-
-    return totalMinutes > 0 ? totalMinutes : undefined;
+    return parseRuntimeUtil(runtimeText, this.getLangConfig());
   }
 
   /**

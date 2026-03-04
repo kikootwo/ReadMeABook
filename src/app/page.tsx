@@ -5,12 +5,12 @@
 
 'use client';
 
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Header } from '@/components/layout/Header';
 import { AudiobookGrid } from '@/components/audiobooks/AudiobookGrid';
-import { useAudiobooks, Audiobook } from '@/lib/hooks/useAudiobooks';
+import { useAudiobooks } from '@/lib/hooks/useAudiobooks';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
-import { StickyPagination } from '@/components/ui/StickyPagination';
+import { UnifiedPagination } from '@/components/ui/UnifiedPagination';
 import { SectionToolbar } from '@/components/ui/SectionToolbar';
 import { usePreferences } from '@/contexts/PreferencesContext';
 
@@ -29,24 +29,20 @@ export default function HomePage() {
     isLoading: loadingPopular,
     totalPages: popularTotalPages,
     message: popularMessage,
-  } = useAudiobooks('popular', 20, popularPage);
+  } = useAudiobooks('popular', 20, popularPage, hideAvailable);
 
   const {
     audiobooks: newReleases,
     isLoading: loadingNewReleases,
     totalPages: newReleasesTotalPages,
     message: newReleasesMessage,
-  } = useAudiobooks('new-releases', 20, newReleasesPage);
+  } = useAudiobooks('new-releases', 20, newReleasesPage, hideAvailable);
 
-  // Filter out available titles when hideAvailable is enabled
-  const filteredPopular = useMemo(
-    () => hideAvailable ? popular.filter((b: Audiobook) => !b.isAvailable && b.requestStatus !== 'completed') : popular,
-    [popular, hideAvailable]
-  );
-  const filteredNewReleases = useMemo(
-    () => hideAvailable ? newReleases.filter((b: Audiobook) => !b.isAvailable && b.requestStatus !== 'completed') : newReleases,
-    [newReleases, hideAvailable]
-  );
+  // Reset to page 1 when hideAvailable changes (total pages may differ)
+  useEffect(() => {
+    setPopularPage(1);
+    setNewReleasesPage(1);
+  }, [hideAvailable]);
 
   // Handle page changes with auto-scroll to section top
   const handlePopularPageChange = (page: number) => {
@@ -100,7 +96,7 @@ export default function HomePage() {
               </div>
             ) : (
               <AudiobookGrid
-                audiobooks={filteredPopular}
+                audiobooks={popular}
                 isLoading={loadingPopular}
                 emptyMessage="No popular audiobooks available"
                 cardSize={cardSize}
@@ -145,7 +141,7 @@ export default function HomePage() {
               </div>
             ) : (
               <AudiobookGrid
-                audiobooks={filteredNewReleases}
+                audiobooks={newReleases}
                 isLoading={loadingNewReleases}
                 emptyMessage="No new releases available"
                 cardSize={cardSize}
@@ -181,22 +177,31 @@ export default function HomePage() {
         </div>
       </footer>
 
-      {/* Sticky Pagination Controls */}
-      <StickyPagination
-        currentPage={popularPage}
-        totalPages={popularTotalPages}
-        onPageChange={handlePopularPageChange}
-        sectionRef={popularSectionRef}
+      {/* Unified Pagination — single context-aware pill for both sections */}
+      <UnifiedPagination
         footerRef={footerRef}
-        label="Popular Audiobooks"
-      />
-      <StickyPagination
-        currentPage={newReleasesPage}
-        totalPages={newReleasesTotalPages}
-        onPageChange={handleNewReleasesPageChange}
-        sectionRef={newReleasesSectionRef}
-        footerRef={footerRef}
-        label="New Releases"
+        sections={[
+          {
+            label: 'Popular Audiobooks',
+            accentColor: 'bg-blue-500',
+            currentPage: popularPage,
+            totalPages: popularTotalPages,
+            onPageChange: handlePopularPageChange,
+            sectionRef: popularSectionRef,
+            onScrollToSection: () =>
+              popularSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+          },
+          {
+            label: 'New Releases',
+            accentColor: 'bg-emerald-500',
+            currentPage: newReleasesPage,
+            totalPages: newReleasesTotalPages,
+            onPageChange: handleNewReleasesPageChange,
+            sectionRef: newReleasesSectionRef,
+            onScrollToSection: () =>
+              newReleasesSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+          },
+        ]}
       />
       </div>
     </ProtectedRoute>

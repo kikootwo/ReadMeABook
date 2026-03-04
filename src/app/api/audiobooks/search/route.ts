@@ -6,6 +6,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { enrichAudiobooksWithMatches } from '@/lib/utils/audiobook-matcher';
+import { deduplicateAndCollectGroups } from '@/lib/utils/deduplicate-audiobooks';
+import { persistDedupGroups } from '@/lib/services/works.service';
 import { getCurrentUser } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
 
@@ -38,14 +40,22 @@ export async function GET(request: NextRequest) {
     const currentUser = getCurrentUser(request);
     const userId = currentUser?.sub || undefined;
 
+    // Deduplicate before enrichment to avoid wasted DB queries on duplicate entries
+    const { books: dedupedResults, groups } = deduplicateAndCollectGroups(results.results);
+
+    // Fire-and-forget: persist dedup groups to works table for cross-ASIN matching
+    if (groups.length > 0) {
+      persistDedupGroups(groups).catch(() => {});
+    }
+
     // Enrich search results with availability and request status information
-    const enrichedResults = await enrichAudiobooksWithMatches(results.results, userId);
+    const enrichedResults = await enrichAudiobooksWithMatches(dedupedResults, userId);
 
     return NextResponse.json({
       success: true,
       query: results.query,
       results: enrichedResults,
-      totalResults: results.totalResults,
+      totalResults: enrichedResults.length,
       page: results.page,
       hasMore: results.hasMore,
     });
