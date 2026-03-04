@@ -46,7 +46,7 @@ export const createPrismaMock = () => ({
   bookDateRecommendation: createModelMock(),
   bookDateSwipe: createModelMock(),
   goodreadsShelf: createModelMock(),
-  goodreadsBookMapping: createModelMock(),
+  bookMapping: createModelMock(),
   hardcoverShelf: createModelMock(),
   work: createModelMock(),
   workAsin: createModelMock(),

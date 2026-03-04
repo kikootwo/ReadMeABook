@@ -1,3 +1,8 @@
+/**
+ * Component: Manage Shelf Modal
+ * Documentation: documentation/frontend/components.md
+ */
+
 'use client';
 
 import React, { useState } from 'react';
@@ -18,8 +23,8 @@ export function ManageShelfModal({ shelf, isOpen, onClose }: ManageShelfModalPro
   const [listId, setListId] = useState(shelf?.type === 'hardcover' ? shelf.sourceId : '');
   const [apiToken, setApiToken] = useState('');
 
-  const { updateShelf: updateGoodreads, isLoading: isUpdatingGoodreads } = useUpdateGoodreadsShelf();
-  const { updateShelf: updateHardcover, isLoading: isUpdatingHardcover } = useUpdateHardcoverShelf();
+  const { updateShelf: updateGoodreads, isLoading: isUpdatingGoodreads, error: goodreadsError } = useUpdateGoodreadsShelf();
+  const { updateShelf: updateHardcover, isLoading: isUpdatingHardcover, error: hardcoverError } = useUpdateHardcoverShelf();
 
   // Reset form when shelf changes
   React.useEffect(() => {
@@ -33,6 +38,7 @@ export function ManageShelfModal({ shelf, isOpen, onClose }: ManageShelfModalPro
   if (!shelf) return null;
 
   const isUpdating = isUpdatingGoodreads || isUpdatingHardcover;
+  const currentError = shelf.type === 'goodreads' ? goodreadsError : hardcoverError;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,6 +64,17 @@ export function ManageShelfModal({ shelf, isOpen, onClose }: ManageShelfModalPro
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={`Manage ${shelf.name}`}>
       <div className="space-y-6">
+        {currentError && (
+          <div className="flex items-center gap-3 p-3.5 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl">
+            <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-500/20 flex items-center justify-center flex-shrink-0">
+              <svg className="w-4 h-4 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+              </svg>
+            </div>
+            <p className="text-sm text-red-700 dark:text-red-300">{currentError}</p>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-5">
           {isGoodreads ? (
             <div>

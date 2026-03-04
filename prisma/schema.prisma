@@ -518,26 +518,34 @@ model GoodreadsShelf {
   @@map("goodreads_shelves")
 }
 
-model GoodreadsBookMapping {
-  id              String    @id @default(uuid())
-  goodreadsBookId String    @unique @map("goodreads_book_id")
-  title           String
-  author          String
-  audibleAsin     String?   @map("audible_asin")
-  coverUrl        String?   @map("cover_url") @db.Text
-  noMatch         Boolean   @default(false) @map("no_match")
-  lastSearchAt    DateTime? @map("last_search_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+// ============================================================================
+// UNIFIED BOOK MAPPING TABLE
+// Global book-to-ASIN mapping cache shared across all shelf providers.
+// Uses provider + externalBookId composite key for cross-provider dedup.
+// ============================================================================
 
-  @@index([goodreadsBookId])
+model BookMapping {
+  id             String    @id @default(uuid())
+  provider       String    // "goodreads", "hardcover", etc.
+  externalBookId String    @map("external_book_id")
+  title          String
+  author         String
+  audibleAsin    String?   @map("audible_asin")
+  coverUrl       String?   @map("cover_url") @db.Text
+  noMatch        Boolean   @default(false) @map("no_match")
+  lastSearchAt   DateTime? @map("last_search_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@unique([provider, externalBookId])
+  @@index([provider, externalBookId])
   @@index([audibleAsin])
-  @@map("goodreads_book_mappings")
+  @@map("book_mappings")
 }
 
 // ============================================================================
 // HARDCOVER SYNC TABLES
-// Per-user Hardcover list subscriptions + global book-to-ASIN mapping cache
+// Per-user Hardcover list subscriptions
 // ============================================================================
 
 model HardcoverShelf {
@@ -558,23 +566,6 @@ model HardcoverShelf {
   @@unique([userId, listId])
   @@index([userId])
   @@map("hardcover_shelves")
-}
-
-model HardcoverBookMapping {
-  id              String    @id @default(uuid())
-  hardcoverBookId String    @unique @map("hardcover_book_id") // Internal ID from Hardcover
-  title           String
-  author          String
-  audibleAsin     String?   @map("audible_asin")
-  coverUrl        String?   @map("cover_url") @db.Text
-  noMatch         Boolean   @default(false) @map("no_match")
-  lastSearchAt    DateTime? @map("last_search_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-
-  @@index([hardcoverBookId])
-  @@index([audibleAsin])
-  @@map("hardcover_book_mappings")
 }
 
 // ============================================================================

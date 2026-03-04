@@ -11,6 +11,7 @@ import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { z } from 'zod';
 import { RMABLogger } from '@/lib/utils/logger';
+import { processBooks } from '@/lib/utils/shelf-helpers';
 
 const logger = RMABLogger.create('API.HardcoverShelves');
 
@@ -36,29 +37,7 @@ export async function GET(request: NextRequest) {
       });
 
       const shelvesWithMeta = shelves.map((shelf) => {
-        let books: {
-          coverUrl: string;
-          asin: string | null;
-          title: string;
-          author: string;
-        }[] = [];
-        if (shelf.coverUrls) {
-          const parsed = JSON.parse(shelf.coverUrls);
-          if (Array.isArray(parsed)) {
-            books = parsed.map((item: unknown) => {
-              if (typeof item === 'string') {
-                return { coverUrl: item, asin: null, title: '', author: '' };
-              }
-              const obj = item as Record<string, unknown>;
-              return {
-                coverUrl: (obj.coverUrl as string) || '',
-                asin: (obj.asin as string) || null,
-                title: (obj.title as string) || '',
-                author: (obj.author as string) || '',
-              };
-            });
-          }
-        }
+        const books = processBooks(shelf.coverUrls);
 
         return {
           id: shelf.id,

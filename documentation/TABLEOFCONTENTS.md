@@ -32,6 +32,14 @@
 - **File hash matching for accurate ASIN** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md)
 - **OIDC authentication** → [backend/services/auth.md](backend/services/auth.md)
 
+## Reading Shelves (Goodreads, Hardcover)
+- **Goodreads shelf sync (RSS feeds)** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md)
+- **Hardcover shelf sync (GraphQL API)** → [backend/services/hardcover-sync.md](backend/services/hardcover-sync.md)
+- **Shared sync core (Audible lookup, request creation)** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#shared-sync-core)
+- **Combined shelves API, GenericShelf** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md)
+- **Hook factory (createShelfHooks)** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#hook-factory)
+- **Adding a new shelf provider** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#adding-a-new-provider)
+
 ## Audible Integration
 - **Web scraping (popular, new releases)** → [integrations/audible.md](integrations/audible.md)
 - **Database caching, real-time matching** → [integrations/audible.md](integrations/audible.md)
@@ -150,3 +158,7 @@
 **"Why do BookDate library books show placeholders?"** → [features/library-thumbnail-cache.md](features/library-thumbnail-cache.md)
 **"How does file hash matching work?"** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md)
 **"Why is ABS matching the wrong book?"** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md) (file hash prevents false positives)
+**"How do Goodreads shelves work?"** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md)
+**"How do Hardcover shelves work?"** → [backend/services/hardcover-sync.md](backend/services/hardcover-sync.md)
+**"How do I add a new shelf provider?"** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#adding-a-new-provider)
+**"How does the shelf sync core work?"** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#shared-sync-core)

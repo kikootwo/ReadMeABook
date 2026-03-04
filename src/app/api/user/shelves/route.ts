@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { processBooks } from '@/lib/utils/shelf-helpers';
 
 const logger = RMABLogger.create('API.Shelves');
 
@@ -31,33 +32,6 @@ export async function GET(request: NextRequest) {
           orderBy: { createdAt: 'desc' },
         }),
       ]);
-
-      const processBooks = (coverUrls: string | null) => {
-        let books: {
-          coverUrl: string;
-          asin: string | null;
-          title: string;
-          author: string;
-        }[] = [];
-        if (coverUrls) {
-          const parsed = JSON.parse(coverUrls);
-          if (Array.isArray(parsed)) {
-            books = parsed.map((item: unknown) => {
-              if (typeof item === 'string') {
-                return { coverUrl: item, asin: null, title: '', author: '' };
-              }
-              const obj = item as Record<string, unknown>;
-              return {
-                coverUrl: (obj.coverUrl as string) || '',
-                asin: (obj.asin as string) || null,
-                title: (obj.title as string) || '',
-                author: (obj.author as string) || '',
-              };
-            });
-          }
-        }
-        return books;
-      };
 
       const combined = [
         ...goodreads.map((s) => ({

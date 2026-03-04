@@ -354,8 +354,9 @@ function ShelfCard({
             <div className="flex items-center gap-1">
               <button
                 onClick={onManage}
-                className="p-2 text-gray-300 hover:text-blue-500 dark:text-gray-600 dark:hover:text-blue-400 transition-all duration-200 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-500/10 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                className="p-2 text-gray-400 hover:text-blue-500 dark:text-gray-500 dark:hover:text-blue-400 transition-all duration-200 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-500/10 opacity-40 hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-blue-500/40 outline-none"
                 title="Manage shelf"
+                aria-label="Manage shelf"
               >
                 <svg
                   className="w-[18px] h-[18px]"
@@ -373,8 +374,9 @@ function ShelfCard({
               </button>
               <button
                 onClick={onConfirmDelete}
-                className="p-2 text-gray-300 hover:text-red-400 dark:text-gray-600 dark:hover:text-red-400 transition-all duration-200 rounded-xl hover:bg-red-50 dark:hover:bg-red-500/10 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                className="p-2 text-gray-400 hover:text-red-400 dark:text-gray-500 dark:hover:text-red-400 transition-all duration-200 rounded-xl hover:bg-red-50 dark:hover:bg-red-500/10 opacity-40 hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-red-500/40 outline-none"
                 title="Remove shelf"
+                aria-label="Remove shelf"
               >
                 <svg
                   className="w-[18px] h-[18px]"

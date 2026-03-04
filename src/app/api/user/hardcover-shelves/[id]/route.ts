@@ -9,6 +9,7 @@ import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { getEncryptionService } from '@/lib/services/encryption.service';
+import { fetchHardcoverList } from '@/lib/services/hardcover-api.service';
 import { z } from 'zod';
 
 const logger = RMABLogger.create('API.HardcoverShelves');
@@ -90,21 +91,50 @@ export async function PATCH(
       const body = await request.json();
       const { listId, apiToken } = UpdateHardcoverSchema.parse(body);
 
-      const updateData: any = {};
+      const updateData: { listId?: string; apiToken?: string; lastSyncAt?: null; bookCount?: null; coverUrls?: null } = {};
       let needsResync = false;
 
-      if (listId && listId !== shelf.listId) {
-        updateData.listId = listId;
-        needsResync = true;
-      }
-
+      let cleanedToken: string | undefined;
       if (apiToken && apiToken.trim() !== '') {
-        const cleanedToken = apiToken.trim().toLowerCase().startsWith('bearer ')
+        cleanedToken = apiToken.trim().toLowerCase().startsWith('bearer ')
           ? apiToken.trim().slice(7).trim()
           : apiToken.trim();
+      }
+
+      const newListId = (listId && listId !== shelf.listId) ? listId : undefined;
+
+      // Validate token/listId by fetching the list before saving
+      if (cleanedToken || newListId) {
         const encryptionService = getEncryptionService();
-        updateData.apiToken = encryptionService.encrypt(cleanedToken);
-        needsResync = true;
+        const tokenToTest = cleanedToken || (() => {
+          try {
+            return encryptionService.isEncryptedFormat(shelf.apiToken)
+              ? encryptionService.decrypt(shelf.apiToken)
+              : shelf.apiToken;
+          } catch { return shelf.apiToken; }
+        })();
+        const listIdToTest = newListId || shelf.listId;
+
+        try {
+          await fetchHardcoverList(tokenToTest, listIdToTest);
+        } catch (error) {
+          return NextResponse.json(
+            {
+              error: 'InvalidHardcoverList',
+              message: `Could not fetch the Hardcover list. Check your Token and List ID: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            },
+            { status: 400 },
+          );
+        }
+
+        if (newListId) {
+          updateData.listId = newListId;
+          needsResync = true;
+        }
+        if (cleanedToken) {
+          updateData.apiToken = encryptionService.encrypt(cleanedToken);
+          needsResync = true;
+        }
       }
 
       // If we are forcing a resync due to a change, clear metadata

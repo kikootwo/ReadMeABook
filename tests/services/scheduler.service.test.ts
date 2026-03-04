@@ -18,7 +18,6 @@ const jobQueueMock = vi.hoisted(() => ({
   addRetryFailedImportsJob: vi.fn(),
   addCleanupSeededTorrentsJob: vi.fn(),
   addMonitorRssFeedsJob: vi.fn(),
-  addMonitorRssFeedsJob: vi.fn(),
   addSyncShelvesJob: vi.fn(),
 }));
 
