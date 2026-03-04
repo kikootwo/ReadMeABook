@@ -10,7 +10,7 @@ import { RMABLogger } from '../utils/logger';
 
 const logger = RMABLogger.create('Scheduler');
 
-export type ScheduledJobType = 'plex_library_scan' | 'plex_recently_added_check' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'cleanup_seeded_torrents' | 'monitor_rss_feeds' | 'sync_goodreads_shelves';
+export type ScheduledJobType = 'plex_library_scan' | 'plex_recently_added_check' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'cleanup_seeded_torrents' | 'monitor_rss_feeds' | 'sync_reading_shelves';
 
 export interface ScheduledJob {
   id: string;
@@ -58,6 +58,9 @@ export class SchedulerService {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+
+    // Clean up deprecated scheduled jobs
+    await this.cleanupDeprecatedJobs();
 
     // Create default jobs if they don't exist
     await this.ensureDefaultJobs();
@@ -127,8 +130,8 @@ export class SchedulerService {
         payload: {},
       },
       {
-        name: 'Sync Goodreads Shelves',
-        type: 'sync_goodreads_shelves' as ScheduledJobType,
+        name: 'Sync Reading Shelves',
+        type: 'sync_reading_shelves' as ScheduledJobType,
         schedule: '0 */6 * * *', // Every 6 hours
         enabled: true, // Enable by default
         payload: {},
@@ -164,6 +167,31 @@ export class SchedulerService {
       logger.warn(`Default jobs: ${created} created, ${failed} failed — failed jobs will be retried on next restart`);
     } else if (created > 0) {
       logger.info(`Default jobs: ${created} created`);
+    }
+  }
+
+  /**
+   * Remove any old jobs that are no longer supported
+   */
+  private async cleanupDeprecatedJobs(): Promise<void> {
+    try {
+      const deprecatedTypes = ['sync_goodreads_shelves'];
+
+      const obsoleteJobs = await prisma.scheduledJob.findMany({
+        where: { type: { in: deprecatedTypes } },
+      });
+
+      for (const job of obsoleteJobs) {
+        if (job.enabled) {
+          await this.unscheduleJob(job);
+        }
+        await prisma.scheduledJob.delete({ where: { id: job.id } });
+        logger.info(`Removed deprecated scheduled job: ${job.name} (${job.type})`);
+      }
+    } catch (error) {
+      logger.error('Failed to cleanup deprecated scheduled jobs', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -350,8 +378,8 @@ export class SchedulerService {
       case 'monitor_rss_feeds':
         bullJobId = await this.triggerMonitorRssFeeds(job);
         break;
-      case 'sync_goodreads_shelves':
-        bullJobId = await this.triggerSyncGoodreadsShelves(job);
+      case 'sync_reading_shelves':
+        bullJobId = await this.triggerSyncShelves(job);
         break;
       default:
         throw new Error(`Unknown job type: ${job.type}`);
@@ -622,10 +650,10 @@ export class SchedulerService {
   }
 
   /**
-   * Trigger Goodreads shelves sync
+   * Trigger Reading shelves sync
    */
-  private async triggerSyncGoodreadsShelves(job: any): Promise<string> {
-    return await this.jobQueue.addSyncGoodreadsShelvesJob(job.id);
+  private async triggerSyncShelves(job: any): Promise<string> {
+    return await this.jobQueue.addSyncShelvesJob(job.id);
   }
 }
 

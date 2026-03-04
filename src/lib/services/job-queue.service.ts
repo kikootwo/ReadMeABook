@@ -26,7 +26,7 @@ export type JobType =
   | 'retry_failed_imports'
   | 'cleanup_seeded_torrents'
   | 'monitor_rss_feeds'
-  | 'sync_goodreads_shelves'
+  | 'sync_reading_shelves'
   | 'send_notification'
   // Ebook-specific job types
   | 'search_ebook'
@@ -107,9 +107,10 @@ export interface CleanupSeededTorrentsPayload extends JobPayload {
   scheduledJobId?: string;
 }
 
-export interface SyncGoodreadsShelvesPayload extends JobPayload {
+export interface SyncShelvesPayload extends JobPayload {
   scheduledJobId?: string;
   shelfId?: string;
+  shelfType?: 'goodreads' | 'hardcover';
   maxLookupsPerShelf?: number;
 }
 
@@ -378,10 +379,10 @@ export class JobQueueService {
       return await processCleanupSeededTorrents(payloadWithJobId);
     });
 
-    this.queue.process('sync_goodreads_shelves', 1, async (job: BullJob<SyncGoodreadsShelvesPayload>) => {
-      const { processSyncGoodreadsShelves } = await import('../processors/sync-goodreads-shelves.processor');
-      const payloadWithJobId = await this.ensureJobRecord(job, 'sync_goodreads_shelves');
-      return await processSyncGoodreadsShelves(payloadWithJobId);
+    this.queue.process('sync_reading_shelves', 1, async (job: BullJob<SyncShelvesPayload>) => {
+      const { processSyncShelves } = await import('../processors/sync-shelves.processor');
+      const payloadWithJobId = await this.ensureJobRecord(job, 'sync_reading_shelves');
+      return await processSyncShelves(payloadWithJobId);
     });
 
     // Send notification processor
@@ -750,16 +751,17 @@ export class JobQueueService {
   }
 
   /**
-   * Add sync Goodreads shelves job
+   * Add sync reading shelves job
    */
-  async addSyncGoodreadsShelvesJob(scheduledJobId?: string, shelfId?: string, maxLookupsPerShelf?: number): Promise<string> {
+  async addSyncShelvesJob(scheduledJobId?: string, shelfId?: string, shelfType?: 'goodreads' | 'hardcover', maxLookupsPerShelf?: number): Promise<string> {
     return await this.addJob(
-      'sync_goodreads_shelves',
+      'sync_reading_shelves',
       {
         scheduledJobId,
         shelfId,
+        shelfType,
         maxLookupsPerShelf,
-      } as SyncGoodreadsShelvesPayload,
+      } as SyncShelvesPayload,
       {
         priority: 7,
       }

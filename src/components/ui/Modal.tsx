@@ -5,7 +5,8 @@
 
 'use client';
 
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils/cn';
 
 interface ModalProps {
@@ -25,6 +26,12 @@ export function Modal({
   size = 'md',
   showCloseButton = true,
 }: ModalProps) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Use ref to avoid re-running effect when onClose changes
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -53,7 +60,7 @@ export function Modal({
     };
   }, [isOpen, handleClose]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
   const sizeClasses = {
     sm: 'max-w-md',
@@ -63,8 +70,8 @@ export function Modal({
     full: 'max-w-[95vw]',
   };
 
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
+  const content = (
+    <div className="fixed inset-0 z-[100] overflow-y-auto">
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
@@ -77,7 +84,7 @@ export function Modal({
           className={cn(
             'relative w-full bg-white dark:bg-gray-800 rounded-lg shadow-xl',
             'transform transition-all',
-            sizeClasses[size]
+            sizeClasses[size],
           )}
           onClick={(e) => e.stopPropagation()}
         >
@@ -116,4 +123,6 @@ export function Modal({
       </div>
     </div>
   );
+
+  return createPortal(content, document.body);
 }
