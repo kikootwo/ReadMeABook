@@ -63,7 +63,7 @@ describe('processStartDirectDownload', () => {
     vi.clearAllMocks();
     configServiceMock.get.mockImplementation(async (key: string) => {
       if (key === 'downloads_dir') return '/downloads';
-      if (key === 'ebook_sidecar_base_url') return 'https://annas-archive.li';
+      if (key === 'ebook_sidecar_base_url') return 'https://annas-archive.gl';
       if (key === 'ebook_sidecar_preferred_format') return 'epub';
       return null;
     });
@@ -238,7 +238,7 @@ describe('processStartDirectDownload', () => {
 
     configServiceMock.get.mockImplementation(async (key: string) => {
       if (key === 'downloads_dir') return '/downloads';
-      if (key === 'ebook_sidecar_base_url') return 'https://annas-archive.li';
+      if (key === 'ebook_sidecar_base_url') return 'https://annas-archive.gl';
       if (key === 'ebook_sidecar_preferred_format') return 'epub';
       if (key === 'ebook_sidecar_flaresolverr_url') return 'http://flaresolverr:8191';
       return null;
@@ -286,7 +286,7 @@ describe('processStartDirectDownload', () => {
 
     expect(ebookScraperMock.extractDownloadUrl).toHaveBeenCalledWith(
       'https://slow.example.com/book',
-      'https://annas-archive.li',
+      'https://annas-archive.gl',
       'epub',
       expect.anything(),
       'http://flaresolverr:8191'

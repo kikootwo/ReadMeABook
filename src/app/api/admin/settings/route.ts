@@ -138,7 +138,7 @@ export async function GET(request: NextRequest) {
           (configMap.get('ebook_annas_archive_enabled') === undefined && configMap.get('ebook_sidecar_enabled') === 'true'),
         indexerSearchEnabled: configMap.get('ebook_indexer_search_enabled') === 'true',
         // Anna's Archive specific settings
-        baseUrl: configMap.get('ebook_sidecar_base_url') || 'https://annas-archive.li',
+        baseUrl: configMap.get('ebook_sidecar_base_url') || 'https://annas-archive.gl',
         flaresolverrUrl: configMap.get('ebook_sidecar_flaresolverr_url') || '',
         // General settings
         preferredFormat: configMap.get('ebook_sidecar_preferred_format') || 'epub',

@@ -51,7 +51,7 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `ebook_annas_archive_enabled` | `false` | Enable Anna's Archive downloads |
-| `ebook_sidecar_base_url` | `https://annas-archive.li` | Base URL for mirror |
+| `ebook_sidecar_base_url` | `https://annas-archive.gl` | Base URL for mirror |
 | `ebook_sidecar_flaresolverr_url` | `` (empty) | FlareSolverr proxy URL (optional) |
 
 #### Section 2: Indexer Search
@@ -180,18 +180,18 @@ Configure URL in Admin Settings → E-book Sidecar: `http://localhost:8191`
 
 ### Method 1: ASIN Search (exact match)
 ```
-Search: https://annas-archive.li/search?ext=epub&lang=en&q="asin:B09TWSRMCB"
+Search: https://annas-archive.gl/search?ext=epub&lang=en&q="asin:B09TWSRMCB"
   ↓
-MD5 Page: https://annas-archive.li/md5/[md5]
+MD5 Page: https://annas-archive.gl/md5/[md5]
   ↓
-Slow Download: https://annas-archive.li/slow_download/[md5]/0/5
+Slow Download: https://annas-archive.gl/slow_download/[md5]/0/5
   ↓
 File Server: http://[server]/path/to/file.epub
 ```
 
 ### Method 2: Title + Author (fallback)
 ```
-Search: https://annas-archive.li/search?q=Title+Author&ext=epub&lang=en
+Search: https://annas-archive.gl/search?q=Title+Author&ext=epub&lang=en
   ↓ (Same flow from MD5 page)
 ```
 

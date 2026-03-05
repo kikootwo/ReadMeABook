@@ -163,7 +163,7 @@ function getInitialParams(): {
   };
 }
 
-export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveBaseUrl = 'https://annas-archive.li' }: RecentRequestsTableProps) {
+export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveBaseUrl = 'https://annas-archive.gl' }: RecentRequestsTableProps) {
   const toast = useToast();
 
   // Get initial filter state from URL (only evaluated once due to lazy init)

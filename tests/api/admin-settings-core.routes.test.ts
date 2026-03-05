@@ -355,7 +355,7 @@ describe('Admin settings core routes', () => {
 
   it('updates ebook settings', async () => {
     const request = {
-      json: vi.fn().mockResolvedValue({ enabled: true, format: 'epub', baseUrl: 'https://annas-archive.li' }),
+      json: vi.fn().mockResolvedValue({ enabled: true, format: 'epub', baseUrl: 'https://annas-archive.gl' }),
     };
 
     const { PUT } = await import('@/app/api/admin/settings/ebook/route');

@@ -53,7 +53,7 @@ export function useEbookSettings({ ebook, onChange, onSuccess, onError, markAsSa
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: ebook.flaresolverrUrl,
-          baseUrl: ebook.baseUrl || 'https://annas-archive.li',
+          baseUrl: ebook.baseUrl || 'https://annas-archive.gl',
         }),
       });
 
@@ -83,7 +83,7 @@ export function useEbookSettings({ ebook, onChange, onSuccess, onError, markAsSa
           annasArchiveEnabled: ebook.annasArchiveEnabled || false,
           indexerSearchEnabled: ebook.indexerSearchEnabled || false,
           format: ebook.preferredFormat || 'epub',
-          baseUrl: ebook.baseUrl || 'https://annas-archive.li',
+          baseUrl: ebook.baseUrl || 'https://annas-archive.gl',
           flaresolverrUrl: ebook.flaresolverrUrl || '',
           autoGrabEnabled: ebook.autoGrabEnabled ?? true,
           kindleFixEnabled: ebook.kindleFixEnabled ?? false,

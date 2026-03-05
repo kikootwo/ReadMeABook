@@ -150,7 +150,7 @@ async function searchAnnasArchive(
   logger: RMABLogger
 ): Promise<EbookSearchResult | null> {
   const configService = getConfigService();
-  const baseUrl = await configService.get('ebook_sidecar_base_url') || 'https://annas-archive.li';
+  const baseUrl = await configService.get('ebook_sidecar_base_url') || 'https://annas-archive.gl';
   const flaresolverrUrl = await configService.get('ebook_sidecar_flaresolverr_url') || undefined;
 
   // Get language code from Audible region config

@@ -28,7 +28,7 @@ const renderHook = <T,>(hook: () => T) => {
 const baseEbook = {
   enabled: true,
   preferredFormat: 'epub',
-  baseUrl: 'https://annas-archive.li',
+  baseUrl: 'https://annas-archive.gl',
   flaresolverrUrl: 'http://flare',
 };
 
@@ -93,7 +93,7 @@ describe('useEbookSettings', () => {
     expect(result.current.flaresolverrTestResult?.success).toBe(true);
     // Verify baseUrl is included in the request body
     const callBody = JSON.parse(fetchWithAuthMock.mock.calls[0][1].body);
-    expect(callBody.baseUrl).toBe('https://annas-archive.li');
+    expect(callBody.baseUrl).toBe('https://annas-archive.gl');
     expect(callBody.url).toBe('http://flare');
   });
 

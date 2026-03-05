@@ -128,7 +128,7 @@ async function fetchHtml(
  */
 export async function testFlareSolverrConnection(
   flaresolverrUrl: string,
-  baseUrl: string = 'https://annas-archive.li'
+  baseUrl: string = 'https://annas-archive.gl'
 ): Promise<{ success: boolean; message: string; responseTime?: number }> {
   const startTime = Date.now();
 
@@ -168,7 +168,7 @@ export async function downloadEbook(
   author: string,
   targetDir: string,
   preferredFormat: string = 'epub',
-  baseUrl: string = 'https://annas-archive.li',
+  baseUrl: string = 'https://annas-archive.gl',
   logger?: RMABLogger,
   flaresolverrUrl?: string,
   languageCode: string = 'en'

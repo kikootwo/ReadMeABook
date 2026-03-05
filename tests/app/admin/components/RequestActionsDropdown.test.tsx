@@ -87,7 +87,7 @@ describe('RequestActionsDropdown', () => {
           author: 'Author',
           status: 'downloaded',
           type: 'ebook',
-          torrentUrl: JSON.stringify(['https://annas-archive.li/slow_download/abc123def456abc123def456abc123de/0/5']),
+          torrentUrl: JSON.stringify(['https://annas-archive.gl/slow_download/abc123def456abc123def456abc123de/0/5']),
         }}
         onManualSearch={vi.fn().mockResolvedValue(undefined)}
         onCancel={vi.fn().mockResolvedValue(undefined)}

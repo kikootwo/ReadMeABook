@@ -155,10 +155,42 @@ export async function POST(request: NextRequest) {
               audiobookId = newBook.id;
               logger.info(`Created audiobook record from cache for ASIN ${asin}: ${newBook.id}`);
             } else {
-              return NextResponse.json(
-                { error: 'Audiobook not found for the given ASIN' },
-                { status: 404 }
-              );
+              // Not in DB — fetch live from Audnexus and create a record
+              try {
+                const audibleService = getAudibleService();
+                const liveData = await audibleService.getAudiobookDetails(asin);
+                if (liveData) {
+                  const newBook = await prisma.audiobook.create({
+                    data: {
+                      audibleAsin: asin,
+                      title: liveData.title,
+                      author: liveData.author,
+                      coverArtUrl: liveData.coverArtUrl,
+                      narrator: liveData.narrator,
+                      series: liveData.series,
+                      seriesPart: liveData.seriesPart,
+                      seriesAsin: liveData.seriesAsin,
+                      year: liveData.releaseDate
+                        ? new Date(liveData.releaseDate).getFullYear() || undefined
+                        : undefined,
+                      status: 'pending',
+                    },
+                  });
+                  audiobookId = newBook.id;
+                  logger.info(`Created audiobook record from Audnexus for ASIN ${asin}: ${newBook.id}`);
+                } else {
+                  return NextResponse.json(
+                    { error: 'Audiobook not found for the given ASIN' },
+                    { status: 404 }
+                  );
+                }
+              } catch (audnexusError) {
+                logger.error(`Failed to fetch ASIN ${asin} from Audnexus: ${audnexusError instanceof Error ? audnexusError.message : String(audnexusError)}`);
+                return NextResponse.json(
+                  { error: 'Audiobook not found for the given ASIN' },
+                  { status: 404 }
+                );
+              }
             }
           }
         }

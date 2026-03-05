@@ -79,7 +79,7 @@ export async function processStartDirectDownload(payload: StartDirectDownloadPay
     // Get download configuration
     const configService = getConfigService();
     const downloadsDir = await configService.get('download_dir') || '/downloads';
-    const baseUrl = await configService.get('ebook_sidecar_base_url') || 'https://annas-archive.li';
+    const baseUrl = await configService.get('ebook_sidecar_base_url') || 'https://annas-archive.gl';
     const preferredFormat = await configService.get('ebook_sidecar_preferred_format') || 'epub';
     const flaresolverrUrl = await configService.get('ebook_sidecar_flaresolverr_url') || undefined;
 

@@ -90,9 +90,9 @@ export function EbookTab({ ebook, onChange, onSuccess, onError, markAsSaved }: E
                 </label>
                 <Input
                   type="text"
-                  value={ebook.baseUrl || 'https://annas-archive.li'}
+                  value={ebook.baseUrl || 'https://annas-archive.gl'}
                   onChange={(e) => updateEbook('baseUrl', e.target.value)}
-                  placeholder="https://annas-archive.li"
+                  placeholder="https://annas-archive.gl"
                   className="font-mono"
                 />
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">

@@ -227,7 +227,7 @@ export async function POST(
       const isAnnasArchiveEnabled = annasArchiveEnabled === 'true';
       const isIndexerSearchEnabled = indexerSearchEnabled === 'true';
       const format = preferredFormat || 'epub';
-      const annasBaseUrl = baseUrl || 'https://annas-archive.li';
+      const annasBaseUrl = baseUrl || 'https://annas-archive.gl';
 
       // Get language code from Audible region config
       const region = await configService.getAudibleRegion() as AudibleRegion;

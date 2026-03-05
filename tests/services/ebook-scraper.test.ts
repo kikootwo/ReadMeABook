@@ -63,7 +63,7 @@ describe('E-book sidecar', () => {
       },
     });
 
-    const result = await testFlareSolverrConnection('http://flare', 'https://annas-archive.li');
+    const result = await testFlareSolverrConnection('http://flare', 'https://annas-archive.gl');
 
     expect(result.success).toBe(true);
     expect(result.responseTime).toBeTypeOf('number');
@@ -95,7 +95,7 @@ describe('E-book sidecar', () => {
       },
     });
 
-    const result = await testFlareSolverrConnection('http://flare', 'https://annas-archive.li');
+    const result = await testFlareSolverrConnection('http://flare', 'https://annas-archive.gl');
 
     expect(result.success).toBe(false);
   });
@@ -103,7 +103,7 @@ describe('E-book sidecar', () => {
   it('returns error details when FlareSolverr request fails', async () => {
     axiosMock.post.mockRejectedValue(new Error('flare down'));
 
-    const result = await testFlareSolverrConnection('http://flare', 'https://annas-archive.li');
+    const result = await testFlareSolverrConnection('http://flare', 'https://annas-archive.gl');
 
     expect(result.success).toBe(false);
     expect(result.message).toContain('flare down');
@@ -117,7 +117,7 @@ describe('E-book sidecar', () => {
       },
     });
 
-    const result = await testFlareSolverrConnection('http://flare', 'https://annas-archive.li');
+    const result = await testFlareSolverrConnection('http://flare', 'https://annas-archive.gl');
 
     expect(result.success).toBe(false);
     expect(result.message).toContain('FlareSolverr error');
@@ -132,7 +132,7 @@ describe('E-book sidecar', () => {
       },
     });
 
-    const result = await testFlareSolverrConnection('http://flare', 'https://annas-archive.li');
+    const result = await testFlareSolverrConnection('http://flare', 'https://annas-archive.gl');
 
     expect(result.success).toBe(false);
     expect(result.message).toContain('FlareSolverr returned HTTP 403');
@@ -221,7 +221,7 @@ describe('E-book sidecar', () => {
       throw new Error(`Unexpected URL: ${url}`);
     });
 
-    const promise = downloadEbook('ASIN-NO', 'Title', 'Author', '/downloads', 'pdf', 'https://annas-archive.li', undefined, 'http://flare');
+    const promise = downloadEbook('ASIN-NO', 'Title', 'Author', '/downloads', 'pdf', 'https://annas-archive.gl', undefined, 'http://flare');
     await vi.runAllTimersAsync();
     const result = await promise;
 
@@ -417,7 +417,7 @@ describe('E-book sidecar', () => {
       'Author',
       '/downloads',
       'epub',
-      'https://annas-archive.li',
+      'https://annas-archive.gl',
       undefined,
       'http://flare'
     );

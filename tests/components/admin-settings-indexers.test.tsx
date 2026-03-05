@@ -115,7 +115,7 @@ describe('IndexersTab - Auto-load Indexers on Tab Activation', () => {
     ebook: {
       enabled: false,
       preferredFormat: 'epub',
-      baseUrl: 'https://annas-archive.li',
+      baseUrl: 'https://annas-archive.gl',
       flaresolverrUrl: '',
     },
   };

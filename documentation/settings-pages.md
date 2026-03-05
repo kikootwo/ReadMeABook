@@ -81,7 +81,7 @@ src/app/admin/settings/
 
 1. **Anna's Archive Section**
    - Enable toggle for Anna's Archive downloads
-   - Base URL (default: `https://annas-archive.li`)
+   - Base URL (default: `https://annas-archive.gl`)
    - FlareSolverr URL (optional, for Cloudflare bypass)
 
 2. **Indexer Search Section**
@@ -101,7 +101,7 @@ src/app/admin/settings/
 | `ebook_sidecar_preferred_format` | `epub` | Preferred format |
 | `ebook_auto_grab_enabled` | `true` | Auto-create ebook requests after audiobook downloads |
 | `ebook_kindle_fix_enabled` | `false` | Apply Kindle compatibility fixes to EPUB files |
-| `ebook_sidecar_base_url` | `https://annas-archive.li` | Anna's Archive mirror |
+| `ebook_sidecar_base_url` | `https://annas-archive.gl` | Anna's Archive mirror |
 | `ebook_sidecar_flaresolverr_url` | `` | FlareSolverr URL |
 
 **Behavior:**

@@ -43,7 +43,7 @@ describe('processSearchEbook', () => {
     configServiceMock.getAudibleRegion.mockResolvedValue('us');
     configServiceMock.get.mockImplementation(async (key: string) => {
       if (key === 'ebook_sidecar_preferred_format') return 'epub';
-      if (key === 'ebook_sidecar_base_url') return 'https://annas-archive.li';
+      if (key === 'ebook_sidecar_base_url') return 'https://annas-archive.gl';
       if (key === 'ebook_annas_archive_enabled') return 'true';
       if (key === 'ebook_indexer_search_enabled') return 'false';
       return null;
@@ -79,7 +79,7 @@ describe('processSearchEbook', () => {
     expect(ebookScraperMock.searchByAsin).toHaveBeenCalledWith(
       'B001ASIN',
       'epub',
-      'https://annas-archive.li',
+      'https://annas-archive.gl',
       expect.anything(),
       undefined,
       'en'
@@ -124,7 +124,7 @@ describe('processSearchEbook', () => {
       'Another Book',
       'Another Author',
       'epub',
-      'https://annas-archive.li',
+      'https://annas-archive.gl',
       expect.anything(),
       undefined,
       'en'
@@ -229,7 +229,7 @@ describe('processSearchEbook', () => {
 
     configServiceMock.get.mockImplementation(async (key: string) => {
       if (key === 'ebook_sidecar_preferred_format') return 'epub';
-      if (key === 'ebook_sidecar_base_url') return 'https://annas-archive.li';
+      if (key === 'ebook_sidecar_base_url') return 'https://annas-archive.gl';
       if (key === 'ebook_sidecar_flaresolverr_url') return 'http://flaresolverr:8191';
       if (key === 'ebook_annas_archive_enabled') return 'true';
       if (key === 'ebook_indexer_search_enabled') return 'false';
@@ -255,7 +255,7 @@ describe('processSearchEbook', () => {
     expect(ebookScraperMock.searchByAsin).toHaveBeenCalledWith(
       'B006ASIN',
       'epub',
-      'https://annas-archive.li',
+      'https://annas-archive.gl',
       expect.anything(),
       'http://flaresolverr:8191',
       'en'

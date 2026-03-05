@@ -47,7 +47,7 @@ export function RequestActionsDropdown({
   onFetchEbook,
   onSearchTermsUpdated,
   ebookSidecarEnabled = false,
-  annasArchiveBaseUrl = 'https://annas-archive.li',
+  annasArchiveBaseUrl = 'https://annas-archive.gl',
   isLoading = false,
 }: RequestActionsDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);

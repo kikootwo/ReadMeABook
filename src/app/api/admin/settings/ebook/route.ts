@@ -78,7 +78,7 @@ export async function PUT(request: NextRequest) {
           // Anna's Archive specific settings
           {
             key: 'ebook_sidecar_base_url',
-            value: baseUrl || 'https://annas-archive.li',
+            value: baseUrl || 'https://annas-archive.gl',
             category: 'ebook',
             description: 'Base URL for Anna\'s Archive',
           },
