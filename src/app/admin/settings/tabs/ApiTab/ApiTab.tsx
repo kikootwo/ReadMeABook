@@ -25,7 +25,6 @@ export function ApiTab() {
   // Admin-specific state
   const [users, setUsers] = useState<UserOption[]>([]);
   const [newTokenUserId, setNewTokenUserId] = useState('');
-  const [newTokenRole, setNewTokenRole] = useState('');
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -46,31 +45,16 @@ export function ApiTab() {
   const handleCreate = async () => {
     const extraBody: Record<string, string> = {};
     if (newTokenUserId) extraBody.userId = newTokenUserId;
-    if (newTokenRole) extraBody.role = newTokenRole;
-    await api.handleCreate(extraBody);
-    // Reset admin-specific fields on success
-    if (!api.error) {
+    const created = await api.handleCreate(extraBody);
+    // Reset admin-specific fields only when create succeeds
+    if (created) {
       setNewTokenUserId('');
-      setNewTokenRole('');
-    }
-  };
-
-  const handleUserChange = (userId: string) => {
-    setNewTokenUserId(userId);
-    if (userId) {
-      const selectedUser = users.find((u) => u.id === userId);
-      if (selectedUser && !newTokenRole) {
-        setNewTokenRole(selectedUser.role);
-      }
-    } else {
-      setNewTokenRole('');
     }
   };
 
   const handleCancel = () => {
     api.resetForm();
     setNewTokenUserId('');
-    setNewTokenRole('');
   };
 
   if (api.loading) {
@@ -86,7 +70,7 @@ export function ApiTab() {
       <div>
         <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">API Tokens</h2>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          Manage API tokens for all users. Create tokens for any user with any role for programmatic access.{' '}
+          Manage API tokens for all users. Create tokens for any user for programmatic access.{' '}
           <Link href="/api-docs" className="text-blue-600 dark:text-blue-400 hover:underline">
             View API documentation
           </Link>
@@ -123,10 +107,12 @@ export function ApiTab() {
                 </button>
               </div>
             </div>
-            <button
-              onClick={api.dismissCreatedToken}
-              className="flex-shrink-0 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200"
-            >
+                <button
+                  type="button"
+                  aria-label="Dismiss token banner"
+                  onClick={api.dismissCreatedToken}
+                  className="flex-shrink-0 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200"
+                >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -174,7 +160,7 @@ export function ApiTab() {
               </label>
               <select
                 value={newTokenUserId}
-                onChange={(e) => handleUserChange(e.target.value)}
+                onChange={(e) => setNewTokenUserId(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               >
                 <option value="">Current user (default)</option>
@@ -184,20 +170,9 @@ export function ApiTab() {
                   </option>
                 ))}
               </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Role override
-              </label>
-              <select
-                value={newTokenRole}
-                onChange={(e) => setNewTokenRole(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="">User&apos;s default role</option>
-                <option value="admin">Admin</option>
-                <option value="user">User</option>
-              </select>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Token will inherit the selected user&apos;s role
+              </p>
             </div>
           </div>
           <div className="flex gap-2">
