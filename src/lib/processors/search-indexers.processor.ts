@@ -166,9 +166,10 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
 
     // Rank results with indexer priorities and flag configs
     // Note: rankTorrents now filters out results < 20 MB internally
+    // Use effectiveSearchTitle so custom search terms are respected for ranking
     // requireAuthor: true (default) - strict filtering for automatic selection
     const rankedResults = ranker.rankTorrents(searchResults, {
-      title: audiobook.title,
+      title: effectiveSearchTitle,
       author: audiobook.author,
       durationMinutes,
     }, {
@@ -228,7 +229,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     // Log top 3 results with detailed breakdown
     const top3 = filteredResults.slice(0, 3);
     logger.info(`==================== RANKING DEBUG ====================`);
-    logger.info(`Requested Title: "${audiobook.title}"`);
+    logger.info(`Ranking Title: "${effectiveSearchTitle}"${effectiveSearchTitle !== audiobook.title ? ` (audiobook: "${audiobook.title}")` : ''}`);
     logger.info(`Requested Author: "${audiobook.author}"`);
     logger.info(`Top ${top3.length} results (out of ${filteredResults.length} above threshold):`);
     logger.info(`--------------------------------------------------------`);

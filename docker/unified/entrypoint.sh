@@ -403,6 +403,15 @@ echo "🔄 Running Prisma migrations..."
 cd /app
 su - node -c "cd /app && DATABASE_URL='$DATABASE_URL' npx prisma db push --skip-generate --accept-data-loss" || echo "⚠️  Migrations may have failed, continuing..."
 
+# Run data migrations (idempotent SQL scripts that prisma db push doesn't handle)
+echo "🔄 Running data migrations..."
+for sql_file in /app/prisma/data-migrations/*.sql; do
+    if [ -f "$sql_file" ]; then
+        echo "   Running $(basename "$sql_file")..."
+        su - node -c "cd /app && DATABASE_URL='$DATABASE_URL' npx prisma db execute --schema prisma/schema.prisma --file '$sql_file'" || echo "⚠️  Data migration $(basename "$sql_file") may have failed, continuing..."
+    fi
+done
+
 # Stop internal PostgreSQL (supervisord will restart it via wrapper)
 if [ "$USE_EXTERNAL_POSTGRES" = "false" ]; then
     echo "🔧 Stopping temporary PostgreSQL instance..."

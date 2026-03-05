@@ -196,10 +196,10 @@ export async function POST(
       const langConfig = getLanguageForRegion(region);
 
       // Rank torrents using the ranking algorithm with indexer priorities and flag configs
-      // Always use the audiobook's title/author for ranking (not custom search query)
+      // Use searchTitle for ranking so custom search terms and search bar overrides are respected
       // requireAuthor: false - interactive mode, show all results for user decision
       const rankedResults = rankTorrents(results, {
-        title: requestRecord.audiobook.title,
+        title: searchTitle,
         author: requestRecord.audiobook.author,
         durationMinutes,
       }, {
@@ -218,7 +218,7 @@ export async function POST(
       const top3 = rankedResults.slice(0, 3);
       if (top3.length > 0) {
         logger.debug('==================== RANKING DEBUG ====================');
-        logger.debug('Search parameters', { searchTitle, requestedTitle: requestRecord.audiobook.title, requestedAuthor: requestRecord.audiobook.author });
+        logger.debug('Search parameters', { searchTitle, rankingTitle: searchTitle, audiobookTitle: requestRecord.audiobook.title, requestedAuthor: requestRecord.audiobook.author });
         logger.debug(`Top ${top3.length} results (out of ${rankedResults.length} total)`);
         logger.debug('--------------------------------------------------------');
         top3.forEach((result, index) => {
