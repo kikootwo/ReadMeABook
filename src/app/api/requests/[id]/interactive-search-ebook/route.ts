@@ -71,41 +71,56 @@ export async function POST(
         const body = await request.json().catch(() => ({}));
         const customTitle = body.customTitle as string | undefined;
 
-        // Get the parent audiobook request
-        const parentRequest = await prisma.request.findUnique({
+        // Get the request (can be audiobook parent or direct ebook request)
+        const requestRecord = await prisma.request.findUnique({
           where: { id: parentRequestId },
           include: { audiobook: true },
         });
 
-        if (!parentRequest) {
+        if (!requestRecord) {
           return NextResponse.json({ error: 'Request not found' }, { status: 404 });
         }
 
-        if (parentRequest.type !== 'audiobook') {
-          return NextResponse.json({ error: 'Can only search ebooks for audiobook requests' }, { status: 400 });
+        // Support two flows:
+        // Flow A (sidecar): Audiobook request in downloaded/available state
+        // Flow B (direct):  Ebook request in pending/failed/awaiting_search state
+        const isDirectEbookSearch = requestRecord.type === 'ebook';
+        const isAudiobookSidecar = requestRecord.type === 'audiobook';
+
+        if (!isDirectEbookSearch && !isAudiobookSidecar) {
+          return NextResponse.json({ error: 'Invalid request type' }, { status: 400 });
         }
 
-        if (!['downloaded', 'available'].includes(parentRequest.status)) {
+        if (isAudiobookSidecar && !['downloaded', 'available'].includes(requestRecord.status)) {
           return NextResponse.json(
-            { error: `Cannot search ebooks for request in ${parentRequest.status} status` },
+            { error: `Cannot search ebooks for audiobook request in ${requestRecord.status} status` },
             { status: 400 }
           );
         }
 
-        // Check for existing non-retryable ebook request
-        const existingEbookRequest = await prisma.request.findFirst({
-          where: {
-            parentRequestId,
-            type: 'ebook',
-            deletedAt: null,
-          },
-        });
+        if (isDirectEbookSearch && !['pending', 'failed', 'awaiting_search'].includes(requestRecord.status)) {
+          return NextResponse.json(
+            { error: `Cannot search for ebook request in ${requestRecord.status} status` },
+            { status: 400 }
+          );
+        }
 
-        if (existingEbookRequest && !['failed', 'awaiting_search'].includes(existingEbookRequest.status)) {
-          return NextResponse.json({
-            error: `E-book request already exists (status: ${existingEbookRequest.status})`,
-            existingRequestId: existingEbookRequest.id,
-          }, { status: 400 });
+        // Check for existing child ebook requests (sidecar mode only)
+        if (isAudiobookSidecar) {
+          const existingEbookRequest = await prisma.request.findFirst({
+            where: {
+              parentRequestId,
+              type: 'ebook',
+              deletedAt: null,
+            },
+          });
+
+          if (existingEbookRequest && !['failed', 'awaiting_search'].includes(existingEbookRequest.status)) {
+            return NextResponse.json({
+              error: `E-book request already exists (status: ${existingEbookRequest.status})`,
+              existingRequestId: existingEbookRequest.id,
+            }, { status: 400 });
+          }
         }
 
         // Get ebook configuration
@@ -135,10 +150,10 @@ export async function POST(
           );
         }
 
-        const audiobook = parentRequest.audiobook;
+        const audiobook = requestRecord.audiobook;
         const searchTitle = customTitle || audiobook.title;
 
-        logger.info(`Interactive ebook search for "${searchTitle}" by ${audiobook.author}`);
+        logger.info(`Interactive ebook search for "${searchTitle}" by ${audiobook.author} (${isDirectEbookSearch ? 'direct' : 'sidecar'})`);
         logger.info(`Sources: Anna's Archive=${isAnnasArchiveEnabled}, Indexer=${isIndexerSearchEnabled}`);
 
         // Search both sources in parallel

@@ -62,10 +62,9 @@ export function RequestActionsDropdown({
   // View Details: available when ASIN exists (audiobook requests only)
   const canViewDetails = !isEbook && !!request.asin && !!onViewDetails;
 
-  // Determine available actions based on status and type
-  // Ebooks don't support manual/interactive search (Anna's Archive only)
-  const canSearch = !isEbook && ['pending', 'failed', 'awaiting_search'].includes(request.status);
-  const canAdjustSearchTerms = !isEbook && ['pending', 'failed', 'awaiting_search', 'searching'].includes(request.status);
+  // Determine available actions based on status
+  const canSearch = ['pending', 'failed', 'awaiting_search'].includes(request.status);
+  const canAdjustSearchTerms = ['pending', 'failed', 'awaiting_search', 'searching'].includes(request.status);
   const canRetryDownload = request.status === 'failed' && (request.downloadAttempts ?? 0) > 0 && !!onRetryDownload;
   const canCancel = ['pending', 'searching', 'downloading'].includes(request.status);
   const canDelete = true; // Admins can always delete
@@ -130,7 +129,11 @@ export function RequestActionsDropdown({
 
   const handleInteractiveSearch = () => {
     setIsOpen(false);
-    setShowInteractiveSearch(true);
+    if (isEbook) {
+      setShowInteractiveSearchEbook(true);
+    } else {
+      setShowInteractiveSearch(true);
+    }
   };
 
   const handleAdjustSearchTerms = () => {
@@ -513,6 +516,7 @@ export function RequestActionsDropdown({
           author: request.author,
         }}
         searchMode="ebook"
+        customSearchTerms={request.customSearchTerms}
       />
 
       {/* Adjust Search Terms Modal */}

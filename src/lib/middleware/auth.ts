@@ -4,9 +4,11 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { verifyAccessToken, TokenPayload } from '../utils/jwt';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
+import { API_TOKEN_PREFIX, isEndpointAllowed } from '../constants/api-tokens';
 
 const logger = RMABLogger.create('Auth');
 
@@ -33,8 +35,69 @@ function extractToken(request: NextRequest): string | null {
 }
 
 /**
+ * Authenticate via static API token (rmab_ prefix).
+ * Returns a synthetic TokenPayload if valid, null otherwise.
+ * Updates lastUsedAt asynchronously.
+ */
+async function authenticateApiToken(token: string): Promise<TokenPayload | null> {
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+  const apiToken = await prisma.apiToken.findUnique({
+    where: { tokenHash },
+    include: {
+      tokenUser: {
+        select: {
+          id: true,
+          plexId: true,
+          plexUsername: true,
+          role: true,
+          deletedAt: true,
+        },
+      },
+    },
+  });
+
+  if (!apiToken) return null;
+
+  // Check expiration
+  if (apiToken.expiresAt && apiToken.expiresAt < new Date()) {
+    logger.warn('API token expired', { tokenPrefix: apiToken.tokenPrefix });
+    return null;
+  }
+
+  // Reject tokens for soft-deleted users
+  const user = apiToken.tokenUser;
+  if (!user || user.deletedAt) {
+    logger.warn('API token used by deleted or missing user', {
+      tokenPrefix: apiToken.tokenPrefix,
+      userId: user?.id,
+    });
+    return null;
+  }
+
+  // Update lastUsedAt (fire-and-forget)
+  prisma.apiToken.update({
+    where: { id: apiToken.id },
+    data: { lastUsedAt: new Date() },
+  }).catch((err) => {
+    logger.debug('Failed to update API token lastUsedAt', {
+      error: err instanceof Error ? err.message : String(err),
+      tokenId: apiToken.id,
+    });
+  });
+
+  // Use the token's target user (userId), not the creator (createdById)
+  return {
+    sub: user.id,
+    plexId: user.plexId,
+    username: user.plexUsername,
+    role: apiToken.role,
+  };
+}
+
+/**
  * Middleware: Require authentication
- * Verifies JWT token and adds user to request
+ * Verifies JWT token or static API token and adds user to request
  */
 export async function requireAuth(
   request: NextRequest,
@@ -53,6 +116,43 @@ export async function requireAuth(
     );
   }
 
+  // Check if this is a static API token
+  if (token.startsWith(API_TOKEN_PREFIX)) {
+    const apiUser = await authenticateApiToken(token);
+    if (!apiUser) {
+      logger.error('API token authentication failed');
+      return NextResponse.json(
+        {
+          error: 'Unauthorized',
+          message: 'Invalid or expired API token',
+        },
+        { status: 401 }
+      );
+    }
+
+    // Enforce endpoint allowlist for API token auth
+    const pathname = request.nextUrl.pathname;
+    const method = request.method;
+    if (!isEndpointAllowed(method, pathname)) {
+      logger.warn('API token used on restricted endpoint', {
+        method,
+        path: pathname,
+      });
+      return NextResponse.json(
+        {
+          error: 'Forbidden',
+          message: 'This endpoint is not available via API token authentication',
+        },
+        { status: 403 }
+      );
+    }
+
+    const authenticatedRequest = request as AuthenticatedRequest;
+    authenticatedRequest.user = { ...apiUser, id: apiUser.sub };
+    return handler(authenticatedRequest);
+  }
+
+  // Fall back to JWT verification
   const payload = verifyAccessToken(token);
 
   if (!payload) {
@@ -69,9 +169,13 @@ export async function requireAuth(
   // Verify user still exists in database
   const user = await prisma.user.findUnique({
     where: { id: payload.sub },
+    select: {
+      id: true,
+      deletedAt: true,
+    },
   });
 
-  if (!user) {
+  if (!user || user.deletedAt) {
     logger.error('User not found in database', { userId: payload.sub });
     return NextResponse.json(
       {
@@ -86,7 +190,7 @@ export async function requireAuth(
   const authenticatedRequest = request as AuthenticatedRequest;
   authenticatedRequest.user = {
     ...payload,
-    id: user.id,
+    id: payload.sub,
   };
 
   return handler(authenticatedRequest);

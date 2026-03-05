@@ -34,6 +34,7 @@ interface AudiobookDetailsModalProps {
   requestedByUsername?: string | null;
   hideRequestActions?: boolean;
   hasReportedIssue?: boolean;
+  aiReason?: string | null;
 }
 
 // Status helper
@@ -74,6 +75,7 @@ export function AudiobookDetailsModal({
   requestedByUsername = null,
   hideRequestActions = false,
   hasReportedIssue = false,
+  aiReason = null,
 }: AudiobookDetailsModalProps) {
   const { user } = useAuth();
   const { squareCovers } = usePreferences();
@@ -452,6 +454,20 @@ export function AudiobookDetailsModal({
                   <p className="text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap text-[15px]">
                     {audiobook.description}
                   </p>
+                </div>
+              )}
+
+              {/* AI Recommendation Reasoning */}
+              {aiReason && (
+                <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700/50">
+                  <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+                    Why This Was Recommended
+                  </h3>
+                  <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl">
+                    <p className="text-sm text-blue-700 dark:text-blue-300 leading-relaxed">
+                      {aiReason}
+                    </p>
+                  </div>
                 </div>
               )}
 

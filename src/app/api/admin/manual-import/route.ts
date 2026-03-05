@@ -12,6 +12,7 @@ import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { AUDIO_EXTENSIONS } from '@/lib/constants/audio-formats';
+import { getAudibleService } from '@/lib/integrations/audible.service';
 
 const logger = RMABLogger.create('API.Admin.ManualImport');
 
@@ -172,6 +173,48 @@ export async function POST(request: NextRequest) {
             { error: 'Audiobook not found' },
             { status: 404 }
           );
+        }
+
+        // Enrich missing series/year data from Audnexus (mirrors request-creator.service.ts)
+        if (audiobook.audibleAsin && (!audiobook.series || !audiobook.year)) {
+          try {
+            const audibleService = getAudibleService();
+            const audnexusData = await audibleService.getAudiobookDetails(audiobook.audibleAsin);
+
+            if (audnexusData) {
+              const updates: Record<string, any> = {};
+
+              if (!audiobook.series && audnexusData.series) {
+                updates.series = audnexusData.series;
+              }
+              if (!audiobook.seriesPart && audnexusData.seriesPart) {
+                updates.seriesPart = audnexusData.seriesPart;
+              }
+              if (!audiobook.seriesAsin && audnexusData.seriesAsin) {
+                updates.seriesAsin = audnexusData.seriesAsin;
+              }
+              if (!audiobook.year && audnexusData.releaseDate) {
+                const releaseYear = new Date(audnexusData.releaseDate).getFullYear();
+                if (!isNaN(releaseYear)) {
+                  updates.year = releaseYear;
+                }
+              }
+              if (!audiobook.narrator && audnexusData.narrator) {
+                updates.narrator = audnexusData.narrator;
+              }
+
+              if (Object.keys(updates).length > 0) {
+                await prisma.audiobook.update({
+                  where: { id: audiobook.id },
+                  data: updates,
+                });
+                logger.info(`Enriched audiobook metadata from Audnexus for ASIN ${audiobook.audibleAsin}`, updates);
+              }
+            }
+          } catch (error) {
+            // Non-fatal: series enrichment failure should never block the import
+            logger.warn(`Failed to enrich metadata from Audnexus for ASIN ${audiobook.audibleAsin}: ${error instanceof Error ? error.message : String(error)}`);
+          }
         }
 
         // Check for existing requests

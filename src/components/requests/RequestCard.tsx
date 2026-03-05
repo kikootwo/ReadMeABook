@@ -9,11 +9,9 @@ import React from 'react';
 import Image from 'next/image';
 import { StatusBadge } from './StatusBadge';
 import { Button } from '@/components/ui/Button';
-import { useCancelRequest, useManualSearch } from '@/lib/hooks/useRequests';
+import { useCancelRequest } from '@/lib/hooks/useRequests';
 import { cn } from '@/lib/utils/cn';
 import { usePreferences } from '@/contexts/PreferencesContext';
-import { useAuth } from '@/contexts/AuthContext';
-import { InteractiveTorrentSearchModal } from './InteractiveTorrentSearchModal';
 import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsModal';
 import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
 
@@ -43,11 +41,8 @@ interface RequestCardProps {
 
 export function RequestCard({ request, showActions = true }: RequestCardProps) {
   const { cancelRequest, isLoading } = useCancelRequest();
-  const { triggerManualSearch, isLoading: isManualSearching } = useManualSearch();
   const { squareCovers } = usePreferences();
-  const { user } = useAuth();
   const [showError, setShowError] = React.useState(false);
-  const [showInteractiveSearch, setShowInteractiveSearch] = React.useState(false);
   const [showDetailsModal, setShowDetailsModal] = React.useState(false);
 
   const requestType = request.type || 'audiobook';
@@ -57,10 +52,6 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
   const canCancel = ['pending', 'searching', 'downloading'].includes(request.status);
   const isActive = ['searching', 'downloading', 'processing'].includes(request.status);
   const isFailed = request.status === 'failed';
-  // Ebook requests don't support interactive search (Anna's Archive only)
-  // Interactive search also requires the interactiveSearch permission
-  const hasInteractiveSearchAccess = user?.role === 'admin' || user?.permissions?.interactiveSearch !== false;
-  const canSearch = hasInteractiveSearchAccess && !isEbook && ['pending', 'failed', 'awaiting_search'].includes(request.status);
 
   const handleCancel = async () => {
     if (window.confirm('Are you sure you want to cancel this request?')) {
@@ -70,20 +61,6 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
         console.error('Failed to cancel request:', error);
       }
     }
-  };
-
-  const handleManualSearch = async () => {
-    try {
-      await triggerManualSearch(request.id);
-      // Request list will auto-refresh via SWR
-    } catch (error) {
-      console.error('Failed to trigger manual search:', error);
-      alert(error instanceof Error ? error.message : 'Failed to trigger manual search');
-    }
-  };
-
-  const handleInteractiveSearch = () => {
-    setShowInteractiveSearch(true);
   };
 
   const formatDate = (dateString: string) => {
@@ -255,27 +232,6 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
             {/* Action Buttons */}
             {showActions && (
               <div className="flex flex-wrap gap-2">
-                {canSearch && (
-                  <>
-                    <Button
-                      onClick={handleManualSearch}
-                      loading={isManualSearching}
-                      variant="outline"
-                      size="sm"
-                      className="text-xs sm:text-sm"
-                    >
-                      Manual Search
-                    </Button>
-                    <Button
-                      onClick={handleInteractiveSearch}
-                      variant="primary"
-                      size="sm"
-                      className="text-xs sm:text-sm"
-                    >
-                      Interactive Search
-                    </Button>
-                  </>
-                )}
                 {canCancel && (
                   <Button
                     onClick={handleCancel}
@@ -292,17 +248,6 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
           </div>
         </div>
       </div>
-
-      {/* Interactive Search Modal */}
-      <InteractiveTorrentSearchModal
-        isOpen={showInteractiveSearch}
-        onClose={() => setShowInteractiveSearch(false)}
-        requestId={request.id}
-        audiobook={{
-          title: request.audiobook.title,
-          author: request.audiobook.author,
-        }}
-      />
 
       {/* Audiobook Details Modal */}
       {request.audiobook.audibleAsin && (

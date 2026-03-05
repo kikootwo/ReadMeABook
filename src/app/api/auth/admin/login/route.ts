@@ -38,9 +38,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const normalizedUsername = username.trim().toLowerCase();
+
     // Find user by local admin identifier
     const user = await prisma.user.findUnique({
-      where: { plexId: `local-${username}` },
+      where: { plexId: `local-${normalizedUsername}` },
     });
 
     if (!user) {

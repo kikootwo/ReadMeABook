@@ -64,14 +64,20 @@ export async function POST(
         );
       }
 
-      // Trigger search job
+      // Trigger appropriate search job based on request type
       const jobQueue = getJobQueueService();
-      await jobQueue.addSearchJob(id, {
+      const audiobookData = {
         id: requestRecord.audiobook.id,
         title: requestRecord.audiobook.title,
         author: requestRecord.audiobook.author,
         asin: requestRecord.audiobook.audibleAsin || undefined,
-      });
+      };
+
+      if (requestRecord.type === 'ebook') {
+        await jobQueue.addSearchEbookJob(id, audiobookData);
+      } else {
+        await jobQueue.addSearchJob(id, audiobookData);
+      }
 
       // Update request status
       const updated = await prisma.request.update({

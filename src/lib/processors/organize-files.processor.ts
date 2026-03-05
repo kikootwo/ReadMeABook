@@ -15,6 +15,7 @@ import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import { generateFilesHash } from '../utils/files-hash';
 import { fixEpubForKindle, cleanupFixedEpub } from '../utils/epub-fixer';
 import { removeEmptyParentDirectories } from '../utils/cleanup-helpers';
+import { getAudibleService } from '../integrations/audible.service';
 
 /**
  * Process organize files job
@@ -118,7 +119,62 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       }
     }
 
-    logger.info(`Final metadata for path organization: year=${year || 'null'}, narrator=${narrator || 'null'}`)
+    // Enrich missing series data from Audnexus (safety net for records created without series)
+    let series = audiobook.series || undefined;
+    let seriesPart = audiobook.seriesPart || undefined;
+
+    if (audiobook.audibleAsin && !series) {
+      try {
+        logger.info(`Missing series data, fetching from Audnexus for ASIN: ${audiobook.audibleAsin}`);
+        const audibleService = getAudibleService();
+        const audnexusData = await audibleService.getAudiobookDetails(audiobook.audibleAsin);
+
+        if (audnexusData) {
+          const updates: Record<string, any> = {};
+
+          if (audnexusData.series) {
+            series = audnexusData.series;
+            updates.series = series;
+            logger.info(`Got series "${series}" from Audnexus`);
+          }
+          if (audnexusData.seriesPart) {
+            seriesPart = audnexusData.seriesPart;
+            updates.seriesPart = seriesPart;
+            logger.info(`Got seriesPart "${seriesPart}" from Audnexus`);
+          }
+          if (audnexusData.seriesAsin) {
+            updates.seriesAsin = audnexusData.seriesAsin;
+          }
+          // Also backfill year/narrator if still missing
+          if (!year && audnexusData.releaseDate) {
+            const releaseYear = new Date(audnexusData.releaseDate).getFullYear();
+            if (!isNaN(releaseYear)) {
+              year = releaseYear;
+              updates.year = year;
+              logger.info(`Got year ${year} from Audnexus`);
+            }
+          }
+          if (!narrator && audnexusData.narrator) {
+            narrator = audnexusData.narrator;
+            updates.narrator = narrator;
+            logger.info(`Got narrator "${narrator}" from Audnexus`);
+          }
+
+          if (Object.keys(updates).length > 0) {
+            await prisma.audiobook.update({
+              where: { id: audiobookId },
+              data: updates,
+            });
+            logger.info(`Updated audiobook record with Audnexus metadata`);
+          }
+        }
+      } catch (error) {
+        // Non-fatal: missing series won't block organization, just degrades path quality
+        logger.warn(`Failed to fetch Audnexus data for ASIN ${audiobook.audibleAsin}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    logger.info(`Final metadata for path organization: year=${year || 'null'}, narrator=${narrator || 'null'}, series=${series || 'null'}, seriesPart=${seriesPart || 'null'}`);
 
     // Get file organizer (reads media_dir from database config)
     const organizer = await getFileOrganizer();
@@ -151,8 +207,8 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
         coverArtUrl: audiobook.coverArtUrl || undefined,
         asin: audiobook.audibleAsin || undefined,
         year,
-        series: audiobook.series || undefined,
-        seriesPart: audiobook.seriesPart || undefined,
+        series,
+        seriesPart,
       },
       template,
       jobId ? { jobId, context: 'FileOrganizer' } : undefined,
@@ -542,6 +598,56 @@ async function processEbookOrganization(
       }
     } else {
       logger.info(`No AudibleCache entry found for ASIN ${book.audibleAsin}`);
+    }
+  }
+
+  // Enrich missing series data from Audnexus (safety net for records created without series)
+  if (book.audibleAsin && !series) {
+    try {
+      logger.info(`Missing series data for ebook, fetching from Audnexus for ASIN: ${book.audibleAsin}`);
+      const audibleService = getAudibleService();
+      const audnexusData = await audibleService.getAudiobookDetails(book.audibleAsin);
+
+      if (audnexusData) {
+        const updates: Record<string, any> = {};
+
+        if (audnexusData.series) {
+          series = audnexusData.series;
+          updates.series = series;
+          logger.info(`Got series "${series}" from Audnexus`);
+        }
+        if (audnexusData.seriesPart) {
+          seriesPart = audnexusData.seriesPart;
+          updates.seriesPart = seriesPart;
+          logger.info(`Got seriesPart "${seriesPart}" from Audnexus`);
+        }
+        if (audnexusData.seriesAsin) {
+          updates.seriesAsin = audnexusData.seriesAsin;
+        }
+        if (!year && audnexusData.releaseDate) {
+          const releaseYear = new Date(audnexusData.releaseDate).getFullYear();
+          if (!isNaN(releaseYear)) {
+            year = releaseYear;
+            updates.year = year;
+            logger.info(`Got year ${year} from Audnexus`);
+          }
+        }
+        if (!narrator && audnexusData.narrator) {
+          narrator = audnexusData.narrator;
+          updates.narrator = narrator;
+          logger.info(`Got narrator "${narrator}" from Audnexus`);
+        }
+
+        if (Object.keys(updates).length > 0) {
+          await prisma.audiobook.update({
+            where: { id: audiobookId },
+            data: updates,
+          });
+          logger.info(`Updated book record with Audnexus metadata`);
+        }
+      }
+    } catch (error) {
+      logger.warn(`Failed to fetch Audnexus data for ASIN ${book.audibleAsin}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

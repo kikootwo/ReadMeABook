@@ -167,6 +167,31 @@ describe('LocalAuthProvider', () => {
     expect(result.error).toMatch(/invalid username or password/i);
   });
 
+  it('normalizes username to lowercase on login', async () => {
+    prismaMock.user.findFirst.mockResolvedValue({
+      id: 'user-ci',
+      plexId: 'local-admin',
+      plexUsername: 'admin',
+      role: 'admin',
+      authProvider: 'local',
+      authToken: 'enc:hash',
+      registrationStatus: 'approved',
+      deletedAt: null,
+    });
+    prismaMock.user.update.mockResolvedValue({});
+    bcryptCompare.mockResolvedValue(true);
+
+    const { LocalAuthProvider } = await import('@/lib/services/auth/LocalAuthProvider');
+    const provider = new LocalAuthProvider();
+    await provider.handleCallback({ username: 'Admin', password: 'pass' });
+
+    expect(prismaMock.user.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ plexUsername: 'admin' }),
+      })
+    );
+  });
+
   it('blocks registration when disabled', async () => {
     configMock.get.mockResolvedValueOnce('false');
 
@@ -235,6 +260,51 @@ describe('LocalAuthProvider', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('Username already taken');
+  });
+
+  it('stores lowercase username and plexId on registration', async () => {
+    configMock.get.mockResolvedValueOnce('true'); // registration enabled
+    configMock.get.mockResolvedValueOnce('false'); // no admin approval
+    prismaMock.user.findFirst.mockResolvedValue(null);
+    prismaMock.user.count.mockResolvedValue(1);
+    prismaMock.user.create.mockResolvedValue({
+      id: 'user-ci2',
+      plexId: 'local-myuser',
+      plexUsername: 'myuser',
+      role: 'user',
+    });
+    bcryptHash.mockResolvedValue('hash');
+
+    const { LocalAuthProvider } = await import('@/lib/services/auth/LocalAuthProvider');
+    const provider = new LocalAuthProvider();
+    await provider.register({ username: 'MyUser', password: 'password123' });
+
+    expect(prismaMock.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          plexId: 'local-myuser',
+          plexUsername: 'myuser',
+        }),
+      })
+    );
+  });
+
+  it('rejects duplicate username case-insensitively on registration', async () => {
+    configMock.get.mockResolvedValueOnce('true'); // registration enabled
+    prismaMock.user.findFirst.mockResolvedValue({ id: 'user-existing' });
+
+    const { LocalAuthProvider } = await import('@/lib/services/auth/LocalAuthProvider');
+    const provider = new LocalAuthProvider();
+    const result = await provider.register({ username: 'User', password: 'password123' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Username already taken');
+    // The lookup should use the lowercased username
+    expect(prismaMock.user.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ plexUsername: 'user' }),
+      })
+    );
   });
 
   it('creates admin user on first registration', async () => {

@@ -197,6 +197,31 @@ body {
   animation: toast-slide-in 0.3s ease-out;
 }
 
+/* Confirmation Dialog */
+@keyframes dialog-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes dialog-panel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-dialog-backdrop {
+  animation: dialog-backdrop-in 0.15s ease-out forwards;
+}
+
+.animate-dialog-panel {
+  animation: dialog-panel-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 /* Hide scrollbar while keeping scroll functional */
 .scrollbar-hide {
   -ms-overflow-style: none;

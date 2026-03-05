@@ -216,7 +216,7 @@ describe('BookDatePage', () => {
     await screen.findByText(/Could not load recommendations/);
     fireEvent.click(screen.getByRole('button', { name: 'Go to Settings' }));
 
-    expect(routerMock.push).toHaveBeenCalledWith('/settings');
+    expect(routerMock.push).toHaveBeenCalledWith('/admin/settings');
   });
 
   it('shows empty state and triggers recommendation generation', async () => {

@@ -14,7 +14,7 @@ interface ConfirmModalProps {
   onClose: () => void;
   onConfirm: () => void;
   title: string;
-  message: string;
+  message: string | React.ReactNode;
   confirmText?: string;
   cancelText?: string;
   isLoading?: boolean;
@@ -35,7 +35,9 @@ export function ConfirmModal({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={title} size="sm" showCloseButton={false}>
       <div className="space-y-6">
-        <p className="text-gray-600 dark:text-gray-400">{message}</p>
+        <div className="text-gray-600 dark:text-gray-400">
+          {typeof message === 'string' ? <p>{message}</p> : message}
+        </div>
 
         <div className="flex gap-3 justify-end">
           <Button onClick={onClose} variant="outline" disabled={isLoading}>
