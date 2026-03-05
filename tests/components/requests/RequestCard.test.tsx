@@ -10,23 +10,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const cancelRequestMock = vi.hoisted(() => vi.fn());
-const manualSearchMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/hooks/useRequests', () => ({
   useCancelRequest: () => ({ cancelRequest: cancelRequestMock, isLoading: false }),
-  useManualSearch: () => ({ triggerManualSearch: manualSearchMock, isLoading: false }),
-}));
-
-vi.mock('@/components/requests/InteractiveTorrentSearchModal', () => ({
-  InteractiveTorrentSearchModal: ({
-    isOpen,
-    requestId,
-  }: {
-    isOpen: boolean;
-    requestId?: string;
-  }) => (
-    <div data-testid="interactive-modal" data-open={String(isOpen)} data-request-id={requestId} />
-  ),
 }));
 
 vi.mock('next/image', () => ({
@@ -40,7 +26,7 @@ vi.mock('@/contexts/PreferencesContext', () => ({
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({
-    user: { id: 'user-1', role: 'user', permissions: { interactiveSearch: true } },
+    user: { id: 'user-1', role: 'user' },
     accessToken: 'test-token',
     isLoading: false,
     login: vi.fn(),
@@ -66,7 +52,6 @@ const baseRequest = {
 describe('RequestCard', () => {
   beforeEach(() => {
     cancelRequestMock.mockReset();
-    manualSearchMock.mockReset();
   });
 
   afterEach(() => {
@@ -109,27 +94,27 @@ describe('RequestCard', () => {
     expect(await screen.findByText('Failure details')).toBeInTheDocument();
   });
 
-  it('triggers manual search, interactive search, and cancel actions', async () => {
+  it('triggers cancel action', async () => {
     const { RequestCard } = await import('@/components/requests/RequestCard');
 
-    manualSearchMock.mockResolvedValueOnce(undefined);
     cancelRequestMock.mockResolvedValueOnce(undefined);
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(<RequestCard request={baseRequest} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Manual Search' }));
-    await waitFor(() => {
-      expect(manualSearchMock).toHaveBeenCalledWith('req-1');
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Interactive Search' }));
-    expect(screen.getByTestId('interactive-modal')).toHaveAttribute('data-open', 'true');
-
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => {
       expect(cancelRequestMock).toHaveBeenCalledWith('req-1');
     });
+  });
+
+  it('does not show manual search or interactive search buttons', async () => {
+    const { RequestCard } = await import('@/components/requests/RequestCard');
+
+    render(<RequestCard request={baseRequest} />);
+
+    expect(screen.queryByRole('button', { name: 'Manual Search' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Interactive Search' })).toBeNull();
   });
 
   it('shows setup indicator when progress is zero', async () => {
@@ -153,23 +138,7 @@ describe('RequestCard', () => {
 
     render(<RequestCard request={baseRequest} showActions={false} />);
 
-    expect(screen.queryByRole('button', { name: 'Manual Search' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
-  });
-
-  it('alerts when manual search fails', async () => {
-    const { RequestCard } = await import('@/components/requests/RequestCard');
-
-    manualSearchMock.mockRejectedValueOnce(new Error('Search failed'));
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
-
-    render(<RequestCard request={baseRequest} />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Manual Search' }));
-
-    await waitFor(() => {
-      expect(alertSpy).toHaveBeenCalledWith('Search failed');
-    });
   });
 
   it('does not cancel when confirmation is declined', async () => {

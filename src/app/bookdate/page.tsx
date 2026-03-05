@@ -300,7 +300,7 @@ export default function BookDatePage() {
                 Try Again
               </button>
               <button
-                onClick={() => router.push('/settings')}
+                onClick={() => router.push('/admin/settings')}
                 className="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
               >
                 Go to Settings
