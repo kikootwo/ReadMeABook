@@ -18,7 +18,7 @@ const CreateTokenSchema = z.object({
   name: z.string().min(1).max(100),
   expiresAt: z.string().datetime().nullable().optional(),
   userId: z.string().uuid().optional(), // Admin can specify which user the token acts as
-  role: z.enum(['admin', 'user']).optional(), // Admin can override the token role
+  role: z.enum(['admin', 'user']).optional(), // Accepted for compatibility, but cannot differ from target user role
 });
 
 /**
@@ -66,7 +66,8 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/admin/api-tokens
- * Create a new API token. Admin can optionally specify userId and role.
+ * Create a new API token. Admin can optionally specify userId.
+ * Token role is always derived from the target user's current role.
  * Returns the full token ONCE.
  */
 export async function POST(request: NextRequest) {
@@ -120,18 +121,25 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // Determine token role (defaults to target user's role)
-        const tokenRole = role || targetUser.role;
-
-        // Log when admin explicitly overrides role to differ from user's actual role
+        // Security guard: token role must always match the target user's persisted role.
+        // This avoids role/identity mismatch (for example: acting as user A with admin role).
         if (role && role !== targetUser.role) {
-          logger.warn('Admin creating token with role different from user actual role', {
-            tokenRole: role,
+          logger.warn('Admin attempted token role override that differs from target user role', {
+            requestedRole: role,
             userActualRole: targetUser.role,
             targetUser: targetUser.plexUsername,
             createdBy: req.user!.username,
           });
+
+          return NextResponse.json(
+            {
+              error: `Token role must match target user's role (${targetUser.role}).`,
+            },
+            { status: 400 }
+          );
         }
+
+        const tokenRole = targetUser.role;
 
         // Generate the token
         const { fullToken, tokenHash, tokenPrefix } = generateApiToken();
