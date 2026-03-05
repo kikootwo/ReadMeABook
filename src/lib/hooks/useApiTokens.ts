@@ -39,7 +39,7 @@ export interface UseApiTokensReturn<T extends ApiToken = ApiToken> {
   confirmRevokeId: string | null;
   setConfirmRevokeId: (id: string | null) => void;
   fetchTokens: () => Promise<void>;
-  handleCreate: (extraBody?: Partial<CreateTokenBody>) => Promise<void>;
+  handleCreate: (extraBody?: Partial<CreateTokenBody>) => Promise<boolean>;
   handleDeleteConfirmed: () => Promise<void>;
   handleCopy: () => Promise<void>;
   dismissCreatedToken: () => void;
@@ -69,10 +69,21 @@ export function useApiTokens<T extends ApiToken = ApiToken>(
   const fetchTokens = useCallback(async () => {
     try {
       const response = await fetchWithAuth(config.basePath);
-      if (response.ok) {
-        const data = await response.json();
-        setTokens(data.tokens);
+      if (!response.ok) {
+        let message = 'Failed to load API tokens';
+        try {
+          const data = await response.json();
+          message = data.error || message;
+        } catch {
+          // Keep default message when response body is not JSON
+        }
+        setError(message);
+        return;
       }
+
+      const data = await response.json();
+      setTokens(data.tokens);
+      setError(null);
     } catch {
       setError('Failed to load API tokens');
     } finally {
@@ -98,7 +109,7 @@ export function useApiTokens<T extends ApiToken = ApiToken>(
   const handleCreate = async (extraBody?: Partial<CreateTokenBody>) => {
     if (!newTokenName.trim()) {
       setError('Token name is required');
-      return;
+      return false;
     }
 
     setCreating(true);
@@ -124,12 +135,15 @@ export function useApiTokens<T extends ApiToken = ApiToken>(
         setNewTokenExpiry('never');
         setShowCreateForm(false);
         await fetchTokens();
+        return true;
       } else {
         const data = await response.json();
         setError(data.error || 'Failed to create token');
+        return false;
       }
     } catch {
       setError('Failed to create token');
+      return false;
     } finally {
       setCreating(false);
     }

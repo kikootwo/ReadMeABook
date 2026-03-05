@@ -47,9 +47,9 @@ export function ApiTab() {
     const extraBody: Record<string, string> = {};
     if (newTokenUserId) extraBody.userId = newTokenUserId;
     if (newTokenRole) extraBody.role = newTokenRole;
-    await api.handleCreate(extraBody);
-    // Reset admin-specific fields on success
-    if (!api.error) {
+    const created = await api.handleCreate(extraBody);
+    // Reset admin-specific fields only when create succeeds
+    if (created) {
       setNewTokenUserId('');
       setNewTokenRole('');
     }
@@ -123,10 +123,12 @@ export function ApiTab() {
                 </button>
               </div>
             </div>
-            <button
-              onClick={api.dismissCreatedToken}
-              className="flex-shrink-0 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200"
-            >
+                <button
+                  type="button"
+                  aria-label="Dismiss token banner"
+                  onClick={api.dismissCreatedToken}
+                  className="flex-shrink-0 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200"
+                >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>

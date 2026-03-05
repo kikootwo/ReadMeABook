@@ -120,7 +120,7 @@ export default function ApiDocsPage() {
           <div className="space-y-4">
             {API_TOKEN_ENDPOINT_DOCS.map((endpoint) => (
               <EndpointCard
-                key={endpoint.path}
+                key={`${endpoint.method}:${endpoint.path}`}
                 endpoint={endpoint}
                 token={token}
                 useSession={useSession}

@@ -63,6 +63,8 @@ export function ApiTokensSection() {
                   </div>
                 </div>
                 <button
+                  type="button"
+                  aria-label="Dismiss token banner"
                   onClick={api.dismissCreatedToken}
                   className="flex-shrink-0 text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200"
                 >
