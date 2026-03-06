@@ -50,7 +50,7 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
   const isEbook = requestType === 'ebook';
 
   const isCompleted = COMPLETED_STATUSES.includes(request.status as typeof COMPLETED_STATUSES[number]);
-  const canCancel = ['pending', 'searching', 'downloading'].includes(request.status);
+  const canCancel = ['pending', 'searching', 'downloading', 'awaiting_search'].includes(request.status);
   const isActive = ['searching', 'downloading', 'processing'].includes(request.status);
   const isFailed = request.status === 'failed';
 

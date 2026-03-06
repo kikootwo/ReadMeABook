@@ -66,7 +66,7 @@ export function RequestActionsDropdown({
   const canSearch = ['pending', 'failed', 'awaiting_search'].includes(request.status);
   const canAdjustSearchTerms = ['pending', 'failed', 'awaiting_search', 'searching'].includes(request.status);
   const canRetryDownload = request.status === 'failed' && (request.downloadAttempts ?? 0) > 0 && !!onRetryDownload;
-  const canCancel = ['pending', 'searching', 'downloading'].includes(request.status);
+  const canCancel = ['pending', 'searching', 'downloading', 'awaiting_search'].includes(request.status);
   const canDelete = true; // Admins can always delete
 
   // View Source: For ebooks, extract MD5 from slow download URL and link to Anna's Archive

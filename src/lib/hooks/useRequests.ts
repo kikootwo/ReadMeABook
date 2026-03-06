@@ -5,8 +5,9 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import useSWR, { mutate } from 'swr';
+import useSWRInfinite from 'swr/infinite';
 import { useAuth } from '@/contexts/AuthContext';
 import { fetchWithAuth } from '@/lib/utils/api';
 import { Audiobook } from './useAudiobooks';
@@ -56,6 +57,95 @@ export function useRequests(status?: string, limit: number = 50, myOnly: boolean
     requests: data?.requests || [],
     isLoading,
     error,
+  };
+}
+
+// ── Active statuses that warrant live polling ────────────────────────────────
+const ACTIVE_STATUSES = new Set([
+  'pending', 'awaiting_search', 'awaiting_approval',
+  'searching', 'downloading', 'processing', 'awaiting_import',
+]);
+
+export type RequestFilterGroup = 'all' | 'active' | 'waiting' | 'completed' | 'failed' | 'cancelled';
+
+export interface RequestCounts {
+  all: number;
+  active: number;
+  waiting: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+}
+
+export interface RequestPage {
+  requests: Request[];
+  nextCursor: string | null;
+  counts: RequestCounts;
+}
+
+const PAGE_SIZE = 20;
+
+/**
+ * Paginated hook for "My Requests" page.
+ * Uses SWRInfinite for cursor-based pagination.
+ * Polls only when active requests are present.
+ */
+export function useMyRequests(filter: RequestFilterGroup) {
+  const { accessToken } = useAuth();
+
+  const getKey = (pageIndex: number, previousPage: RequestPage | null): string | null => {
+    if (!accessToken) return null;
+    if (previousPage && !previousPage.nextCursor) return null; // reached end
+
+    const params = new URLSearchParams();
+    params.set('myOnly', 'true');
+    params.set('take', String(PAGE_SIZE));
+    if (filter !== 'all') params.set('status', filter);
+    if (pageIndex > 0 && previousPage?.nextCursor) {
+      params.set('cursor', previousPage.nextCursor);
+    }
+    return `/api/requests?${params.toString()}`;
+  };
+
+  const { data, error, isLoading, isValidating, size, setSize, mutate: revalidate } =
+    useSWRInfinite<RequestPage>(getKey, fetcher, {
+      revalidateFirstPage: true,
+      revalidateOnFocus: false,
+      // Smart polling: refresh every 5s only when active requests exist
+      refreshInterval: (data) => {
+        if (!data) return 5000;
+        const hasActive = data.some(page =>
+          page.requests.some(r => ACTIVE_STATUSES.has(r.status))
+        );
+        return hasActive ? 5000 : 0;
+      },
+    });
+
+  const allRequests = useMemo(
+    () => data?.flatMap(page => page.requests) ?? [],
+    [data]
+  );
+
+  // Counts come from the first page (always the authoritative totals)
+  const counts: RequestCounts = data?.[0]?.counts ?? {
+    all: 0, active: 0, waiting: 0, completed: 0, failed: 0, cancelled: 0,
+  };
+
+  const hasMore = data ? !!data[data.length - 1]?.nextCursor : false;
+  const isLoadingMore = isValidating && size > 1 && !data?.[size - 1];
+  const isEmpty = !isLoading && allRequests.length === 0;
+
+  const loadMore = () => setSize(s => s + 1);
+
+  return {
+    requests: allRequests,
+    counts,
+    hasMore,
+    isLoading,
+    isLoadingMore,
+    isEmpty,
+    loadMore,
+    revalidate,
   };
 }
 

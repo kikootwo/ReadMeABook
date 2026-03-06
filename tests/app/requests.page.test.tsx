@@ -11,10 +11,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetMockAuthState, setMockAuthState } from '../helpers/mock-auth';
 import { resetMockRouter } from '../helpers/mock-next-navigation';
 
-const useRequestsMock = vi.hoisted(() => vi.fn());
+const useMyRequestsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/hooks/useRequests', () => ({
-  useRequests: useRequestsMock,
+  useMyRequests: useMyRequestsMock,
 }));
 
 vi.mock('@/components/layout/Header', () => ({
@@ -41,13 +41,18 @@ describe('RequestsPage', () => {
   beforeEach(() => {
     resetMockAuthState();
     resetMockRouter();
-    useRequestsMock.mockReset();
+    useMyRequestsMock.mockReset();
     vi.resetModules();
   });
 
+  const defaultCounts = { all: 0, active: 0, waiting: 0, completed: 0, failed: 0, cancelled: 0 };
+
   it('prompts for authentication when no user is available', async () => {
     setMockAuthState({ user: null });
-    useRequestsMock.mockReturnValue({ requests: [], isLoading: false });
+    useMyRequestsMock.mockReturnValue({
+      requests: [], counts: defaultCounts, hasMore: false,
+      isLoading: false, isLoadingMore: false, isEmpty: true, loadMore: vi.fn(),
+    });
 
     const { default: RequestsPage } = await import('@/app/requests/page');
     render(<RequestsPage />);
@@ -62,23 +67,35 @@ describe('RequestsPage', () => {
       isLoading: false,
     });
 
-    const requests = [
+    const allRequests = [
       { id: 'req-active', status: 'pending', audiobook: { title: 'Active', author: 'Author' } },
       { id: 'req-wait', status: 'awaiting_search', audiobook: { title: 'Wait', author: 'Author' } },
       { id: 'req-complete', status: 'downloaded', audiobook: { title: 'Done', author: 'Author' } },
       { id: 'req-failed', status: 'failed', audiobook: { title: 'Fail', author: 'Author' } },
     ];
 
-    useRequestsMock.mockReturnValue({ requests, isLoading: false });
+    const counts = { all: 4, active: 1, waiting: 1, completed: 1, failed: 1, cancelled: 0 };
+
+    // The hook is called with the current filter; mock returns different data per filter
+    useMyRequestsMock.mockImplementation((filter: string) => {
+      let requests = allRequests;
+      if (filter === 'active') requests = allRequests.filter(r => r.status === 'pending');
+      else if (filter === 'waiting') requests = allRequests.filter(r => r.status === 'awaiting_search');
+      return {
+        requests, counts, hasMore: false,
+        isLoading: false, isLoadingMore: false, isEmpty: requests.length === 0, loadMore: vi.fn(),
+      };
+    });
 
     const { default: RequestsPage } = await import('@/app/requests/page');
     render(<RequestsPage />);
 
-    const activeTab = screen.getByRole('button', { name: /Active/i });
-    const waitingTab = screen.getByRole('button', { name: /Waiting/i });
+    // Counts now render as badge numbers inside tabs, not "(1)" format
+    const activeTab = screen.getByRole('tab', { name: /Active/i });
+    const waitingTab = screen.getByRole('tab', { name: /Waiting/i });
 
-    expect(activeTab).toHaveTextContent('(1)');
-    expect(waitingTab).toHaveTextContent('(1)');
+    expect(activeTab).toHaveTextContent('1');
+    expect(waitingTab).toHaveTextContent('1');
 
     fireEvent.click(activeTab);
 

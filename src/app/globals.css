@@ -197,6 +197,23 @@ body {
   animation: toast-slide-in 0.3s ease-out;
 }
 
+/* Requests page list entry animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Confirmation Dialog */
 @keyframes dialog-backdrop-in {
   from { opacity: 0; }

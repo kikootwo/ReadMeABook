@@ -97,9 +97,27 @@ export async function POST(request: NextRequest) {
   });
 }
 
+// Status groups for server-side filtering and count aggregation
+const STATUS_GROUPS: Record<string, string[]> = {
+  active:    ['pending', 'searching', 'downloading', 'processing'],
+  waiting:   ['awaiting_search', 'awaiting_import', 'awaiting_approval'],
+  completed: ['available', 'downloaded'],
+  failed:    ['failed'],
+  cancelled: ['cancelled', 'denied'],
+};
+
 /**
- * GET /api/requests?status=pending&limit=50
- * Get user's audiobook requests (or all requests for admins)
+ * GET /api/requests
+ * Get user's audiobook requests with cursor-based pagination and accurate counts.
+ *
+ * Query params:
+ *   status   - filter group: 'active'|'waiting'|'completed'|'failed'|'cancelled'|specific status
+ *   cursor   - request ID for cursor-based pagination (exclusive start)
+ *   take     - page size (default 20, max 100)
+ *   myOnly   - 'true' to restrict to current user even for admins
+ *   type     - 'audiobook'|'ebook'
+ *
+ * Response: { requests, nextCursor, counts: { all, active, waiting, completed, failed, cancelled } }
  */
 export async function GET(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
@@ -112,61 +130,102 @@ export async function GET(request: NextRequest) {
       }
 
       const searchParams = req.nextUrl.searchParams;
-      const status = searchParams.get('status');
-      const limit = parseInt(searchParams.get('limit') || '50', 10);
+      const statusParam = searchParams.get('status');
+      const cursor = searchParams.get('cursor');
+      const take = Math.min(parseInt(searchParams.get('take') || '20', 10), 100);
+      // Legacy support: honour `limit` if `take` not supplied
+      const limit = searchParams.has('take')
+        ? take
+        : Math.min(parseInt(searchParams.get('limit') || '20', 10), 100);
       const myOnly = searchParams.get('myOnly') === 'true';
-      const type = searchParams.get('type'); // 'audiobook', 'ebook', or null for all
+      const type = searchParams.get('type');
       const isAdmin = req.user.role === 'admin';
 
-      // Build query
-      // If myOnly=true, always filter by current user (even for admins)
-      // Otherwise, admins see all requests, users see only their own
-      const where: any = myOnly || !isAdmin ? { userId: req.user.id } : {};
-      if (status) {
-        where.status = status;
-      }
-      // Filter by type if specified (otherwise returns all types)
-      if (type && ['audiobook', 'ebook'].includes(type)) {
-        where.type = type;
-      }
-      // Only show active (non-deleted) requests
-      where.deletedAt = null;
+      // Base ownership filter
+      const baseWhere: any = myOnly || !isAdmin ? { userId: req.user.id } : {};
+      baseWhere.deletedAt = null;
 
+      if (type && ['audiobook', 'ebook'].includes(type)) {
+        baseWhere.type = type;
+      }
+
+      // Resolve status filter
+      const statusFilter: any = {};
+      if (statusParam) {
+        const group = STATUS_GROUPS[statusParam];
+        if (group) {
+          statusFilter.status = { in: group };
+        } else {
+          // Treat as a specific status literal
+          statusFilter.status = statusParam;
+        }
+      }
+
+      const where = { ...baseWhere, ...statusFilter };
+
+      // ── Paginated request fetch ──────────────────────────────────────────
       const requests = await prisma.request.findMany({
         where,
         include: {
           audiobook: true,
           user: {
-            select: {
-              id: true,
-              plexUsername: true,
-            },
+            select: { id: true, plexUsername: true },
           },
         },
         orderBy: { createdAt: 'desc' },
-        take: limit,
+        take: limit + 1, // fetch one extra to determine if there's a next page
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       });
 
-      const enriched = requests.map(r => {
+      const hasNextPage = requests.length > limit;
+      const page = hasNextPage ? requests.slice(0, limit) : requests;
+      const nextCursor = hasNextPage ? page[page.length - 1].id : null;
+
+      const enriched = page.map(r => {
         const isCompleted = COMPLETED_STATUSES.includes(r.status as typeof COMPLETED_STATUSES[number]);
         const downloadAvailable = isCompleted && !!r.audiobook?.filePath;
-        // Strip server-side absolute path from client response
         const audiobook = r.audiobook ? { ...r.audiobook, filePath: undefined } : r.audiobook;
         return { ...r, audiobook, downloadAvailable };
       });
 
+      // ── Accurate counts per group (always scoped to ownership/type filter) ──
+      const countWhere = { ...baseWhere };
+
+      const [
+        totalAll,
+        totalActive,
+        totalWaiting,
+        totalCompleted,
+        totalFailed,
+        totalCancelled,
+      ] = await Promise.all([
+        prisma.request.count({ where: countWhere }),
+        prisma.request.count({ where: { ...countWhere, status: { in: STATUS_GROUPS.active } } }),
+        prisma.request.count({ where: { ...countWhere, status: { in: STATUS_GROUPS.waiting } } }),
+        prisma.request.count({ where: { ...countWhere, status: { in: STATUS_GROUPS.completed } } }),
+        prisma.request.count({ where: { ...countWhere, status: { in: STATUS_GROUPS.failed } } }),
+        prisma.request.count({ where: { ...countWhere, status: { in: STATUS_GROUPS.cancelled } } }),
+      ]);
+
       return NextResponse.json({
         success: true,
         requests: enriched,
+        nextCursor,
+        counts: {
+          all:       totalAll,
+          active:    totalActive,
+          waiting:   totalWaiting,
+          completed: totalCompleted,
+          failed:    totalFailed,
+          cancelled: totalCancelled,
+        },
+        // Legacy field for callers that still read `count`
         count: enriched.length,
       });
     } catch (error) {
       logger.error('Failed to get requests', { error: error instanceof Error ? error.message : String(error) });
       return NextResponse.json(
-        {
-          error: 'FetchError',
-          message: 'Failed to fetch requests',
-        },
+        { error: 'FetchError', message: 'Failed to fetch requests' },
         { status: 500 }
       );
     }

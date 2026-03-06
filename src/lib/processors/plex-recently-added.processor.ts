@@ -254,7 +254,7 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
     const matchableRequests = await prisma.request.findMany({
       where: {
         type: 'audiobook', // Only match audiobook requests (ebooks don't go to 'available')
-        status: { notIn: ['available', 'cancelled'] },
+        status: { notIn: ['available', 'cancelled', 'denied'] },
         deletedAt: null,
       },
       include: {

@@ -202,6 +202,7 @@ describe('Requests API routes', () => {
   it('filters requests for current user when not admin', async () => {
     authRequest.nextUrl = new URL('http://localhost/api/requests?status=pending&limit=5');
     prismaMock.request.findMany.mockResolvedValueOnce([]);
+    prismaMock.request.count.mockResolvedValue(0);
 
     const { GET } = await import('@/app/api/requests/route');
     const response = await GET({} as any);
@@ -212,7 +213,7 @@ describe('Requests API routes', () => {
     expect(prismaMock.request.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ userId: 'user-1', status: 'pending' }),
-        take: 5,
+        take: 6, // limit + 1 for cursor pagination next-page detection
       })
     );
   });
