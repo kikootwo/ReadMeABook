@@ -112,6 +112,7 @@ export interface SyncShelvesPayload extends JobPayload {
   scheduledJobId?: string;
   shelfId?: string;
   shelfType?: 'goodreads' | 'hardcover';
+  userId?: string;
   maxLookupsPerShelf?: number;
 }
 

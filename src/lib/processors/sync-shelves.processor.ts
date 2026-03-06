@@ -15,6 +15,8 @@ export interface SyncShelvesPayload {
   shelfId?: string;
   /** The type of shelf, if shelfId is specified */
   shelfType?: 'goodreads' | 'hardcover';
+  /** If set, only process shelves for this user */
+  userId?: string;
   /** Max Audible lookups per shelf. 0 = unlimited. */
   maxLookupsPerShelf?: number;
 }
@@ -22,7 +24,7 @@ export interface SyncShelvesPayload {
 export async function processSyncShelves(
   payload: SyncShelvesPayload,
 ): Promise<any> {
-  const { jobId, shelfId, shelfType, maxLookupsPerShelf } = payload;
+  const { jobId, shelfId, shelfType, userId, maxLookupsPerShelf } = payload;
   const logger = RMABLogger.forJob(jobId, 'SyncShelves');
 
   const stats = {
@@ -48,6 +50,7 @@ export async function processSyncShelves(
         await import('../services/goodreads-sync.service');
       const grStats = await processGoodreadsShelves(logger, {
         shelfId: shelfType === 'goodreads' ? shelfId : undefined,
+        userId,
         maxLookupsPerShelf: maxLookupsPerShelf ?? (shelfId ? 0 : undefined),
       });
 
@@ -70,6 +73,7 @@ export async function processSyncShelves(
         await import('../services/hardcover-sync.service');
       const hcStats = await processHardcoverShelves(logger, {
         shelfId: shelfType === 'hardcover' ? shelfId : undefined,
+        userId,
         maxLookupsPerShelf: maxLookupsPerShelf ?? (shelfId ? 0 : undefined),
       });
 

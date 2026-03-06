@@ -41,7 +41,7 @@ export function useUpdateHardcoverShelf() {
 
   const updateShelf = async (
     shelfId: string,
-    updates: { listId?: string; apiToken?: string },
+    updates: { listId?: string; apiToken?: string; forceSync?: boolean },
   ) => {
     return updateGeneric(shelfId, updates);
   };

@@ -118,7 +118,10 @@ export async function processGoodreadsShelves(
   const stats = createEmptyStats();
   const maxLookups = resolveMaxLookups(options);
 
-  const whereClause = options.shelfId ? { id: options.shelfId } : {};
+  const whereClause: any = {};
+  if (options.shelfId) whereClause.id = options.shelfId;
+  if (options.userId) whereClause.userId = options.userId;
+
   const shelves = await prisma.goodreadsShelf.findMany({
     where: whereClause,
     include: { user: { select: { id: true, plexUsername: true } } },

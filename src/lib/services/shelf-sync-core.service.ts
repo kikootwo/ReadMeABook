@@ -39,6 +39,7 @@ export interface ShelfSyncStats {
 /** Common sync options */
 export interface ShelfSyncOptions {
   shelfId?: string;
+  userId?: string;
   maxLookupsPerShelf?: number;
 }
 

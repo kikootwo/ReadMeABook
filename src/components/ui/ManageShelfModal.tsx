@@ -51,6 +51,7 @@ export function ManageShelfModal({ shelf, isOpen, onClose }: ManageShelfModalPro
         await updateHardcover(shelf.id, {
           listId: listId.trim(),
           apiToken: apiToken.trim() || undefined,
+          forceSync: true,
         });
       }
       onClose();
