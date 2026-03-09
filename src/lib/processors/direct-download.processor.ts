@@ -289,8 +289,11 @@ async function downloadFileWithProgress(
   logger: RMABLogger
 ): Promise<boolean> {
   try {
-    // Ensure target directory exists
-    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    // Ensure target directory exists with configured permissions
+    const configService = getConfigService();
+    const dirChmodStr = await configService.get('dir_chmod') || '775';
+    const dirMode = parseInt(dirChmodStr, 8);
+    await fs.mkdir(path.dirname(targetPath), { recursive: true, mode: dirMode });
 
     // Start download with axios streaming
     const response = await axios({

@@ -439,6 +439,54 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
         </div>
       </div>
 
+      {/* File Permissions */}
+      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
+          File Permissions
+        </h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Octal permissions applied when organizing files into the media library. These may be further restricted by the container&apos;s UMASK setting.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              File Permissions
+            </label>
+            <Input
+              type="text"
+              value={paths.fileChmod || '664'}
+              onChange={(e) => updatePath('fileChmod', e.target.value)}
+              placeholder="664"
+              className={`font-mono max-w-32 ${paths.fileChmod && !/^[0-7]{3,4}$/.test(paths.fileChmod) ? 'border-red-500 dark:border-red-500' : ''}`}
+            />
+            {paths.fileChmod && !/^[0-7]{3,4}$/.test(paths.fileChmod) && (
+              <p className="text-xs text-red-600 dark:text-red-400 mt-1">Must be 3-4 octal digits (0-7)</p>
+            )}
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              e.g. 664 = owner/group read-write, others read
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Directory Permissions
+            </label>
+            <Input
+              type="text"
+              value={paths.dirChmod || '775'}
+              onChange={(e) => updatePath('dirChmod', e.target.value)}
+              placeholder="775"
+              className={`font-mono max-w-32 ${paths.dirChmod && !/^[0-7]{3,4}$/.test(paths.dirChmod) ? 'border-red-500 dark:border-red-500' : ''}`}
+            />
+            {paths.dirChmod && !/^[0-7]{3,4}$/.test(paths.dirChmod) && (
+              <p className="text-xs text-red-600 dark:text-red-400 mt-1">Must be 3-4 octal digits (0-7)</p>
+            )}
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              e.g. 775 = owner/group full access, others read-execute
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Test Paths Button */}
       <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
         <Button

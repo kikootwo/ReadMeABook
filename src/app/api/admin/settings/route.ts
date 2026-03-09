@@ -130,6 +130,8 @@ export async function GET(request: NextRequest) {
         chapterMergingEnabled: configMap.get('chapter_merging_enabled') === 'true',
         fileRenameEnabled: configMap.get('file_rename_enabled') === 'true',
         fileRenameTemplate: configMap.get('file_rename_template') || '{title}',
+        fileChmod: configMap.get('file_chmod') || '664',
+        dirChmod: configMap.get('dir_chmod') || '775',
       },
       ebook: {
         // New granular source toggles (with migration from legacy ebook_sidecar_enabled)

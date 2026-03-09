@@ -50,6 +50,15 @@ services:
       PGID: 1000
 
       # ========================================================================
+      # OPTIONAL: File Permission Mask
+      # ========================================================================
+      # Set a umask to control default file permissions for all files created
+      # by the application. Common values:
+      # - 002: Group-writable (files: 664, dirs: 775) - recommended for shared access
+      # - 022: Group-readable only (files: 644, dirs: 755) - more restrictive
+      # UMASK: "002"
+
+      # ========================================================================
       # OPTIONAL: Secrets (auto-generated on first run if not provided)
       # ========================================================================
       # Uncomment and set these if you want to use custom secrets:

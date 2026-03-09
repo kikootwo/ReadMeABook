@@ -62,6 +62,7 @@ export interface MergeOptions {
   year?: number;
   asin?: string;
   outputPath: string;
+  dirMode?: number;
 }
 
 export interface MergeResult {
@@ -616,7 +617,7 @@ export async function mergeChapters(
     await logger?.info(`✓ All ${chapters.length} source files validated`);
 
     // Ensure temp directory exists
-    await fs.mkdir(tempDir, { recursive: true });
+    await fs.mkdir(tempDir, { recursive: true, ...(options.dirMode !== undefined && { mode: options.dirMode }) });
 
     // Create concat file
     const concatContent = chapters

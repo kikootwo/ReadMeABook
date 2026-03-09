@@ -8,7 +8,10 @@ import { createPrismaMock } from '../helpers/prisma';
 import { createJobQueueMock } from '../helpers/job-queue';
 
 const prismaMock = createPrismaMock();
-const configMock = vi.hoisted(() => ({ get: vi.fn() }));
+const configMock = vi.hoisted(() => ({
+  get: vi.fn(),
+  getMany: vi.fn().mockResolvedValue({ prowlarr_api_key: null }),
+}));
 const jobQueueMock = createJobQueueMock();
 const qbtMock = vi.hoisted(() => ({ addTorrent: vi.fn() }));
 const sabMock = vi.hoisted(() => ({ addNZB: vi.fn() }));
@@ -54,6 +57,8 @@ vi.mock('@/lib/integrations/prowlarr.service', () => ({
 describe('processDownloadTorrent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Restore default implementations cleared by clearAllMocks
+    configMock.getMany.mockResolvedValue({ prowlarr_api_key: null });
   });
 
   const torrentPayload = {

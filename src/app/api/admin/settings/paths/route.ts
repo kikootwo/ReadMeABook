@@ -15,7 +15,7 @@ export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { downloadDir, mediaDir, audiobookPathTemplate, ebookPathTemplate, metadataTaggingEnabled, chapterMergingEnabled, fileRenameEnabled, fileRenameTemplate } = await request.json();
+        const { downloadDir, mediaDir, audiobookPathTemplate, ebookPathTemplate, metadataTaggingEnabled, chapterMergingEnabled, fileRenameEnabled, fileRenameTemplate, fileChmod, dirChmod } = await request.json();
 
         if (!downloadDir || !mediaDir) {
           return NextResponse.json(
@@ -28,6 +28,21 @@ export async function PUT(request: NextRequest) {
         if (downloadDir === mediaDir) {
           return NextResponse.json(
             { error: 'Download and media directories must be different' },
+            { status: 400 }
+          );
+        }
+
+        // Validate octal permission strings (3-4 digits, each 0-7)
+        const octalRegex = /^[0-7]{3,4}$/;
+        if (fileChmod !== undefined && !octalRegex.test(fileChmod)) {
+          return NextResponse.json(
+            { error: 'File permissions must be 3-4 octal digits (0-7), e.g. 664' },
+            { status: 400 }
+          );
+        }
+        if (dirChmod !== undefined && !octalRegex.test(dirChmod)) {
+          return NextResponse.json(
+            { error: 'Directory permissions must be 3-4 octal digits (0-7), e.g. 775' },
             { status: 400 }
           );
         }
@@ -123,6 +138,34 @@ export async function PUT(request: NextRequest) {
           });
         }
 
+        // Update file permissions (octal chmod)
+        if (fileChmod !== undefined) {
+          await prisma.configuration.upsert({
+            where: { key: 'file_chmod' },
+            update: { value: fileChmod },
+            create: {
+              key: 'file_chmod',
+              value: fileChmod,
+              category: 'automation',
+              description: 'Octal permissions applied to organized files',
+            },
+          });
+        }
+
+        // Update directory permissions (octal chmod)
+        if (dirChmod !== undefined) {
+          await prisma.configuration.upsert({
+            where: { key: 'dir_chmod' },
+            update: { value: dirChmod },
+            create: {
+              key: 'dir_chmod',
+              value: dirChmod,
+              category: 'automation',
+              description: 'Octal permissions applied to created directories',
+            },
+          });
+        }
+
         logger.info('Paths settings updated');
 
         // Clear config cache for all updated keys so services get fresh values
@@ -135,6 +178,8 @@ export async function PUT(request: NextRequest) {
         configService.clearCache('chapter_merging_enabled');
         configService.clearCache('file_rename_enabled');
         configService.clearCache('file_rename_template');
+        configService.clearCache('file_chmod');
+        configService.clearCache('dir_chmod');
 
         // Invalidate all download client singletons to force reload of download_dir
         const { invalidateDownloadClientManager } = await import('@/lib/services/download-client-manager.service');

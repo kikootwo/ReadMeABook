@@ -17,6 +17,7 @@ import * as cheerio from 'cheerio';
 import path from 'path';
 import fs from 'fs/promises';
 import { RMABLogger } from './logger';
+import { getConfigService } from '../services/config.service';
 
 const moduleLogger = RMABLogger.create('EpubFixer');
 
@@ -204,7 +205,10 @@ export async function fixEpubForKindle(
     // Create unique temp subdirectory to avoid filename conflicts
     // This preserves the original filename for the final organized file
     const uniqueDir = path.join(tempDir, `kindle-fix-${Date.now()}`);
-    await fs.mkdir(uniqueDir, { recursive: true });
+    const configService = getConfigService();
+    const dirChmodStr = await configService.get('dir_chmod') || '775';
+    const dirMode = parseInt(dirChmodStr, 8);
+    await fs.mkdir(uniqueDir, { recursive: true, mode: dirMode });
 
     // Keep original filename
     const sourceFilename = path.basename(sourcePath);

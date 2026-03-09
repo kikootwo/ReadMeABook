@@ -102,6 +102,8 @@ export interface PathsSettings {
   chapterMergingEnabled: boolean;
   fileRenameEnabled: boolean;
   fileRenameTemplate?: string;
+  fileChmod?: string;
+  dirChmod?: string;
 }
 
 /**

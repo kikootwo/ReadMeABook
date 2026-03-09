@@ -64,10 +64,14 @@ export interface LoggerConfig {
 export class FileOrganizer {
   private mediaDir: string;
   private tempDir: string;
+  private fileMode: number;
+  private dirMode: number;
 
-  constructor(mediaDir: string = '/media/audiobooks', tempDir: string = '/tmp/readmeabook') {
+  constructor(mediaDir: string = '/media/audiobooks', tempDir: string = '/tmp/readmeabook', fileMode: number = 0o664, dirMode: number = 0o775) {
     this.mediaDir = mediaDir;
     this.tempDir = tempDir;
+    this.fileMode = fileMode;
+    this.dirMode = dirMode;
   }
 
   /**
@@ -166,6 +170,7 @@ export class FileOrganizer {
                       year: audiobook.year,
                       asin: audiobook.asin,
                       outputPath,
+                      dirMode: this.dirMode,
                     },
                     logger ?? undefined
                   );
@@ -293,7 +298,7 @@ export class FileOrganizer {
       await logger?.info(`Target path: ${targetPath}`);
 
       // Create target directory
-      await fs.mkdir(targetPath, { recursive: true });
+      await fs.mkdir(targetPath, { recursive: true, mode: this.dirMode });
 
       // Determine if file renaming should be applied
       const shouldRename = renameConfig?.enabled && renameConfig.template;
@@ -386,7 +391,7 @@ export class FileOrganizer {
           // Copy file via streams (avoids copy_file_range EPERM on NFS/FUSE)
           await copyFile(sourcePath, targetFilePath);
           // Set explicit permissions after copy
-          await fs.chmod(targetFilePath, 0o644);
+          await fs.chmod(targetFilePath, this.fileMode);
 
           result.audioFiles.push(targetFilePath);
           result.filesMovedCount++;
@@ -422,7 +427,7 @@ export class FileOrganizer {
             try {
               await fs.access(originalSourcePath, fs.constants.R_OK);
               await copyFile(originalSourcePath, targetFilePath);
-              await fs.chmod(targetFilePath, 0o644);
+              await fs.chmod(targetFilePath, this.fileMode);
               result.audioFiles.push(targetFilePath);
               result.filesMovedCount++;
               await logger?.info(`Fallback copy succeeded (without metadata tags): ${filename}`);
@@ -457,7 +462,7 @@ export class FileOrganizer {
         try {
           // Copy cover art (do NOT delete original)
           await copyFile(sourcePath, targetCoverPath);
-          await fs.chmod(targetCoverPath, 0o644);
+          await fs.chmod(targetCoverPath, this.fileMode);
           result.coverArtFile = targetCoverPath;
           result.filesMovedCount++;
           await logger?.info(`Copied cover art`);
@@ -718,7 +723,7 @@ export class FileOrganizer {
 
         // Copy from local cache instead of downloading
         await copyFile(cachedPath, targetPath);
-        await fs.chmod(targetPath, 0o644);
+        await fs.chmod(targetPath, this.fileMode);
         moduleLogger.debug(`Copied cover art from cache: ${filename}`);
       } else {
         // Download from external URL (e.g., Audible CDN)
@@ -846,7 +851,7 @@ export class FileOrganizer {
       await logger?.info(`Target directory: ${targetDir}`);
 
       // Create target directory
-      await fs.mkdir(targetDir, { recursive: true });
+      await fs.mkdir(targetDir, { recursive: true, mode: this.dirMode });
 
       // Build target filename (apply rename template if enabled, otherwise sanitize source filename)
       const sourceFilename = path.basename(ebookFile);
@@ -882,7 +887,7 @@ export class FileOrganizer {
 
       // Copy ebook file (do NOT delete original - may need for seeding or retry)
       await copyFile(sourceFilePath, targetPath);
-      await fs.chmod(targetPath, 0o644);
+      await fs.chmod(targetPath, this.fileMode);
 
       await logger?.info(`Copied ebook: ${targetFilename}`);
 
@@ -968,7 +973,7 @@ export class FileOrganizer {
 
 /**
  * Get FileOrganizer instance configured from database settings
- * Reads media_dir from database configuration, falls back to /media/audiobooks if not configured
+ * Reads media_dir, file_chmod, dir_chmod from database configuration
  */
 export async function getFileOrganizer(): Promise<FileOrganizer> {
   // Read media_dir from database config
@@ -979,7 +984,15 @@ export async function getFileOrganizer(): Promise<FileOrganizer> {
   const mediaDir = config?.value || process.env.MEDIA_DIR || '/media/audiobooks';
   const tempDir = process.env.TEMP_DIR || '/tmp/readmeabook';
 
-  return new FileOrganizer(mediaDir, tempDir);
+  // Read file/directory permission settings
+  const { getConfigService } = await import('../services/config.service');
+  const configService = getConfigService();
+  const fileChmodStr = await configService.get('file_chmod') || '664';
+  const dirChmodStr = await configService.get('dir_chmod') || '775';
+  const fileMode = parseInt(fileChmodStr, 8);
+  const dirMode = parseInt(dirChmodStr, 8);
+
+  return new FileOrganizer(mediaDir, tempDir, fileMode, dirMode);
 }
 
 /**

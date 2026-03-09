@@ -22,6 +22,12 @@ PGID=${PGID:-$(id -g node)}
 echo "[App] Starting Next.js server..."
 echo "[App] Process will run as UID:GID = $PUID:$PGID"
 
+# Apply UMASK if set (controls default file permissions)
+if [ -n "$UMASK" ]; then
+    echo "[App] Applying umask: $UMASK"
+    umask "$UMASK"
+fi
+
 cd /app
 
 # =============================================================================
