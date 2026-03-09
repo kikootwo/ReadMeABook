@@ -102,6 +102,8 @@ export interface AddDownloadOptions {
   priority?: string;
   /** Whether to add in paused state */
   paused?: boolean;
+  /** Headers to include when fetching the source file (e.g. Prowlarr API key for proxy URLs) */
+  sourceHeaders?: Record<string, string>;
 }
 
 /** Result of a connection test */

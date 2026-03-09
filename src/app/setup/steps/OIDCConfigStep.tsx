@@ -272,7 +272,7 @@ export function OIDCConfigStep({
               <ul className="text-sm text-blue-700 dark:text-blue-300 mt-1 space-y-1">
                 <li>• The redirect URI will be: {typeof window !== 'undefined' ? `${window.location.origin}/api/auth/oidc/callback` : '[Your Domain]/api/auth/oidc/callback'}</li>
                 <li>• Configure this redirect URI in your OIDC provider settings</li>
-                <li>• Required scopes: openid, profile, email, groups</li>
+                <li>• Required scopes: openid, profile, email (groups is added automatically when group-based access control is enabled)</li>
               </ul>
             </div>
           </div>

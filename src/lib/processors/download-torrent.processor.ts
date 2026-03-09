@@ -58,10 +58,19 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
 
     logger.info(`Routing to ${client.clientType} (${client.protocol})`);
 
+    // Include Prowlarr API key as source header so NZB/torrent downloads from
+    // Prowlarr proxy URLs are authenticated (fixes 403 for indexers like NZBFinder)
+    const prowlarrApiKey = (await config.getMany(['prowlarr_api_key'])).prowlarr_api_key || process.env.PROWLARR_API_KEY;
+    const sourceHeaders: Record<string, string> = {};
+    if (prowlarrApiKey) {
+      sourceHeaders['X-Api-Key'] = prowlarrApiKey;
+    }
+
     // Add download via unified interface
     const downloadClientId = await client.addDownload(torrent.downloadUrl, {
       category,
       priority: 'normal',
+      sourceHeaders,
     });
 
     logger.info(`Download added with ID: ${downloadClientId}`);

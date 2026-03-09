@@ -265,7 +265,7 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
           },
         },
       },
-      take: 100,
+
     });
 
     if (matchableRequests.length > 0) {

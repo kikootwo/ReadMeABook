@@ -4,6 +4,14 @@
 
 **ALWAYS DO:** When you feel work is complete, use the docker compose build readmebook to confirm you have no errors. If the build succeeds, then you can tell me it is ready to be tested.
 
+**NEVER implement without approval.** When asked to assess, investigate, or fix a problem:
+1. **Research & analyze** — Read code, trace the issue, identify root cause.
+2. **Present a solution plan** — Explain the root cause, list the specific files and changes needed, and describe the approach clearly.
+3. **Wait for explicit approval** — Do NOT write any code until the user confirms the plan.
+4. Only after approval: implement, build, and report results.
+
+This applies to bug fixes, feature requests, and any code changes. Investigation and analysis are always fine — writing code is not until approved.
+
 ---
 
 ## 1. Token-Efficient Documentation System

@@ -450,7 +450,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
           },
         },
       },
-      take: 100, // Increased from 50 to handle more eligible requests
+
     });
 
     logger.info(`Found ${matchableRequests.length} matchable requests (all non-terminal statuses)`);

@@ -226,6 +226,7 @@ export class NZBGetService implements IDownloadClient {
         responseType: 'arraybuffer',
         timeout: 30000,
         maxRedirects: 5,
+        headers: options?.sourceHeaders,
         httpsAgent: url.startsWith('https') ? this.httpsAgent : undefined,
       });
 

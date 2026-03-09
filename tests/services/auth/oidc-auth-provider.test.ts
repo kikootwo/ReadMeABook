@@ -128,6 +128,64 @@ describe('OIDCAuthProvider', () => {
     expect(result.state).toBe('state-1');
   });
 
+  it('omits groups scope when access control does not need it', async () => {
+    setConfig({
+      'oidc.issuer_url': 'https://issuer',
+      'oidc.client_id': 'client',
+      'oidc.client_secret': 'secret',
+      'oidc.access_control_method': 'open',
+    });
+
+    clientMock.authorizationUrl.mockReturnValue('https://issuer/auth');
+
+    const { OIDCAuthProvider } = await import('@/lib/services/auth/OIDCAuthProvider');
+    const provider = new OIDCAuthProvider();
+    await provider.initiateLogin();
+
+    expect(clientMock.authorizationUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: 'openid profile email' })
+    );
+  });
+
+  it('includes groups scope when access control uses group_claim', async () => {
+    setConfig({
+      'oidc.issuer_url': 'https://issuer',
+      'oidc.client_id': 'client',
+      'oidc.client_secret': 'secret',
+      'oidc.access_control_method': 'group_claim',
+    });
+
+    clientMock.authorizationUrl.mockReturnValue('https://issuer/auth');
+
+    const { OIDCAuthProvider } = await import('@/lib/services/auth/OIDCAuthProvider');
+    const provider = new OIDCAuthProvider();
+    await provider.initiateLogin();
+
+    expect(clientMock.authorizationUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: 'openid profile email groups' })
+    );
+  });
+
+  it('includes groups scope when admin claim is enabled', async () => {
+    setConfig({
+      'oidc.issuer_url': 'https://issuer',
+      'oidc.client_id': 'client',
+      'oidc.client_secret': 'secret',
+      'oidc.access_control_method': 'allowed_list',
+      'oidc.admin_claim_enabled': 'true',
+    });
+
+    clientMock.authorizationUrl.mockReturnValue('https://issuer/auth');
+
+    const { OIDCAuthProvider } = await import('@/lib/services/auth/OIDCAuthProvider');
+    const provider = new OIDCAuthProvider();
+    await provider.initiateLogin();
+
+    expect(clientMock.authorizationUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: 'openid profile email groups' })
+    );
+  });
+
   it('throws when OIDC is not fully configured', async () => {
     setConfig({
       'oidc.issuer_url': null,

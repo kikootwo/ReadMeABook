@@ -98,9 +98,15 @@ export class OIDCAuthProvider implements IAuthProvider {
         timestamp: Date.now(),
       });
 
+      // Only request 'groups' scope when group-based features are configured
+      const accessMethod = await this.configService.get('oidc.access_control_method');
+      const adminClaimEnabled = await this.configService.get('oidc.admin_claim_enabled');
+      const needsGroups = accessMethod === 'group_claim' || adminClaimEnabled === 'true';
+      const scope = needsGroups ? 'openid profile email groups' : 'openid profile email';
+
       // Generate authorization URL
       const redirectUrl = client.authorizationUrl({
-        scope: 'openid profile email groups',
+        scope,
         state,
         nonce,
         code_challenge: codeChallenge,

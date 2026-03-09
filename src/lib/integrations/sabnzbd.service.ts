@@ -24,6 +24,8 @@ export interface AddNZBOptions {
   category?: string;
   priority?: 'low' | 'normal' | 'high' | 'force';
   paused?: boolean;
+  /** Headers to include when fetching the NZB from the source URL */
+  sourceHeaders?: Record<string, string>;
 }
 
 export interface NZBInfo {
@@ -492,6 +494,7 @@ export class SABnzbdService implements IDownloadClient {
         responseType: 'arraybuffer',
         timeout: 30000,
         maxRedirects: 5,
+        headers: options?.sourceHeaders,
         // Use the same SSL settings as the SABnzbd client if the NZB URL
         // happens to be served over HTTPS with a self-signed cert
         httpsAgent: url.startsWith('https') ? this.httpsAgent : undefined,
@@ -787,6 +790,7 @@ export class SABnzbdService implements IDownloadClient {
       category: options?.category,
       priority: options?.priority ? priorityMap[options.priority] || 'normal' : undefined,
       paused: options?.paused,
+      sourceHeaders: options?.sourceHeaders,
     });
   }
 
