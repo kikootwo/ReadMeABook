@@ -785,6 +785,7 @@ export class JobQueueService {
         shelfId,
         shelfType,
         maxLookupsPerShelf,
+        userId,
       } as SyncShelvesPayload,
       {
         priority: 7,
