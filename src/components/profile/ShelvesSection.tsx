@@ -6,7 +6,11 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useShelves, GenericShelf } from '@/lib/hooks/useShelves';
+import {
+  useShelves,
+  GenericShelf,
+  useSyncShelves,
+} from '@/lib/hooks/useShelves';
 import { useDeleteGoodreadsShelf } from '@/lib/hooks/useGoodreadsShelves';
 import { useDeleteHardcoverShelf } from '@/lib/hooks/useHardcoverShelves';
 import { AddShelfModal } from '@/components/ui/AddShelfModal';
@@ -37,6 +41,7 @@ export function ShelvesSection() {
     useDeleteGoodreadsShelf();
   const { deleteShelf: deleteHardcover, isLoading: isDeletingHardcover } =
     useDeleteHardcoverShelf();
+  const { syncShelves, isSyncing: isSyncingAll } = useSyncShelves();
   const { squareCovers } = usePreferences();
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -93,25 +98,48 @@ export function ShelvesSection() {
         </div>
 
         {shelves.length > 0 && (
-          <button
-            onClick={() => setShowAddShelf(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/70 hover:border-gray-300 dark:hover:border-gray-600 transition-all duration-200 shadow-sm"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              strokeWidth={2}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => syncShelves()}
+              disabled={isSyncingAll}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-500/20 transition-all duration-200 shadow-sm disabled:opacity-50"
+              title="Resync all shelves"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 4.5v15m7.5-7.5h-15"
-              />
-            </svg>
-            Add Shelf
-          </button>
+              <svg
+                className={cn('w-4 h-4', isSyncingAll && 'animate-spin')}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+                />
+              </svg>
+              {isSyncingAll ? 'Syncing...' : 'Resync All'}
+            </button>
+            <button
+              onClick={() => setShowAddShelf(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/70 hover:border-gray-300 dark:hover:border-gray-600 transition-all duration-200 shadow-sm"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 4.5v15m7.5-7.5h-15"
+                />
+              </svg>
+              Add Shelf
+            </button>
+          </div>
         )}
       </div>
 
@@ -268,6 +296,7 @@ function ShelfCard({
   onManage,
   onBookClick,
 }: ShelfCardProps) {
+  const { syncShelves, isSyncing: isManualSyncing } = useSyncShelves();
   const displayBooks = shelf.books.slice(0, 6);
   const hasCovers = displayBooks.length > 0;
   const remainingCount = Math.max(
@@ -369,6 +398,30 @@ function ShelfCard({
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125"
+                  />
+                </svg>
+              </button>
+              <button
+                onClick={() => syncShelves(shelf.id, shelf.type)}
+                disabled={isManualSyncing}
+                className="p-2 text-gray-400 hover:text-emerald-500 dark:text-gray-500 dark:hover:text-emerald-400 transition-all duration-200 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-500/10 opacity-40 hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-emerald-500/40 outline-none disabled:opacity-30"
+                title="Resync shelf"
+                aria-label="Resync shelf"
+              >
+                <svg
+                  className={cn(
+                    'w-[18px] h-[18px]',
+                    isManualSyncing && 'animate-spin',
+                  )}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  strokeWidth={1.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
                   />
                 </svg>
               </button>

@@ -164,6 +164,40 @@ describe('PATCH /api/user/hardcover-shelves/[id]', () => {
     expect(jobQueueMock.addSyncShelvesJob).not.toHaveBeenCalled();
   });
 
+  it('triggers a sync when forceSync is true, even if no fields changed', async () => {
+    prismaMock.hardcoverShelf.findUnique.mockResolvedValueOnce(SHELF);
+    prismaMock.hardcoverShelf.update.mockResolvedValueOnce(SHELF);
+
+    const { PATCH } =
+      await import('@/app/api/user/hardcover-shelves/[id]/route');
+    const response = await PATCH(
+      {
+        json: vi
+          .fn()
+          .mockResolvedValue({ listId: SHELF.listId, forceSync: true }),
+      } as any,
+      { params: Promise.resolve({ id: 'hc-shelf-1' }) },
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(prismaMock.hardcoverShelf.update).toHaveBeenCalledWith({
+      where: { id: 'hc-shelf-1' },
+      data: expect.objectContaining({
+        lastSyncAt: null,
+        bookCount: null,
+        coverUrls: null,
+      }),
+    });
+    expect(jobQueueMock.addSyncShelvesJob).toHaveBeenCalledWith(
+      undefined,
+      SHELF.id,
+      'hardcover',
+      0,
+    );
+  });
+
   it('updates listId, clears metadata, and triggers a sync job', async () => {
     prismaMock.hardcoverShelf.findUnique.mockResolvedValueOnce(SHELF);
     const updated = { ...SHELF, listId: 'status-3', lastSyncAt: null };

@@ -7,6 +7,7 @@
  */
 
 import { prisma } from '@/lib/db';
+import { Prisma } from '@/generated/prisma/client';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { fetchHardcoverList, HardcoverApiBook } from '@/lib/services/hardcover-api.service';
@@ -38,8 +39,10 @@ export async function processHardcoverShelves(
   const log = jobLogger || logger;
   const stats = createEmptyStats();
   const maxLookups = resolveMaxLookups(options);
+  const whereClause: Prisma.HardcoverShelfWhereInput = {};
+  if (options.shelfId) whereClause.id = options.shelfId;
+  if (options.userId) whereClause.userId = options.userId;
 
-  const whereClause = options.shelfId ? { id: options.shelfId } : {};
   const shelves = await prisma.hardcoverShelf.findMany({
     where: whereClause,
     include: { user: { select: { id: true, plexUsername: true } } },

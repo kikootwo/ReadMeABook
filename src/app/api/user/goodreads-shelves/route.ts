@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
       // Trigger immediate sync for this shelf (unlimited lookups, process all books)
       try {
         const jobQueue = getJobQueueService();
-        await jobQueue.addSyncShelvesJob(undefined, shelf.id, 'goodreads', 0);
+        await jobQueue.addSyncShelvesJob(undefined, shelf.id, 'goodreads', 0, req.user.id);
         logger.info(`Triggered immediate sync for Goodreads shelf "${shelfName}" (${shelf.id})`);
       } catch (error) {
         logger.error('Failed to trigger immediate shelf sync', { error: error instanceof Error ? error.message : String(error) });
