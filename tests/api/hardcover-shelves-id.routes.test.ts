@@ -195,6 +195,7 @@ describe('PATCH /api/user/hardcover-shelves/[id]', () => {
       SHELF.id,
       'hardcover',
       0,
+      'user-1',
     );
   });
 
@@ -216,7 +217,7 @@ describe('PATCH /api/user/hardcover-shelves/[id]', () => {
       where: { id: 'hc-shelf-1' },
       data: expect.objectContaining({ listId: 'status-3', lastSyncAt: null }),
     });
-    expect(jobQueueMock.addSyncShelvesJob).toHaveBeenCalledWith(undefined, updated.id, 'hardcover', 0);
+    expect(jobQueueMock.addSyncShelvesJob).toHaveBeenCalledWith(undefined, updated.id, 'hardcover', 0, 'user-1');
   });
 
   it('encrypts the apiToken before persisting', async () => {

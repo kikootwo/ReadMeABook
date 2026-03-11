@@ -156,7 +156,7 @@ export async function PATCH(
       if (needsResync) {
         try {
           const jobQueue = getJobQueueService();
-          await jobQueue.addSyncShelvesJob(undefined, updated.id, 'hardcover', 0);
+          await jobQueue.addSyncShelvesJob(undefined, updated.id, 'hardcover', 0, req.user.id);
         } catch (error) {
           logger.error('Failed to trigger immediate list sync', {
             error: error instanceof Error ? error.message : String(error),

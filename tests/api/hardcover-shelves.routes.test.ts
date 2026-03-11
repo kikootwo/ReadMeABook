@@ -137,7 +137,7 @@ describe('POST /api/user/hardcover-shelves', () => {
     );
 
     // Immediate background sync must have been triggered
-    expect(jobQueueMock.addSyncShelvesJob).toHaveBeenCalledWith(undefined, 'new-shelf', 'hardcover', 0);
+    expect(jobQueueMock.addSyncShelvesJob).toHaveBeenCalledWith(undefined, 'new-shelf', 'hardcover', 0, 'user-1');
   });
 
   it('strips Bearer prefix from apiToken before encrypting', async () => {

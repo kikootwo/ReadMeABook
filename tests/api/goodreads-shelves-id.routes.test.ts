@@ -164,7 +164,7 @@ describe('PATCH /api/user/goodreads-shelves/[id]', () => {
       where: { id: 'shelf-1' },
       data: { rssUrl: NEW_RSS, lastSyncAt: null, bookCount: null, coverUrls: null },
     });
-    expect(jobQueueMock.addSyncShelvesJob).toHaveBeenCalledWith(undefined, updatedShelf.id, 'goodreads', 0);
+    expect(jobQueueMock.addSyncShelvesJob).toHaveBeenCalledWith(undefined, updatedShelf.id, 'goodreads', 0, 'user-1');
   });
 
   it('still returns 200 even when the sync job fails to enqueue', async () => {
