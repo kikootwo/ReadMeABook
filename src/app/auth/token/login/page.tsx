@@ -35,7 +35,7 @@ function TokenLoginContent() {
         localStorage.setItem('user', JSON.stringify(data.user));
 
         setAuthData(data.user, data.accessToken);
-        router.push('/');
+          window.location.href = '/';
       })
       .catch(() => {
         router.replace('/login');
