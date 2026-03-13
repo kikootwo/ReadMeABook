@@ -5,6 +5,7 @@
 ## Authentication & Users
 - **Plex OAuth, JWT sessions, RBAC** → [backend/services/auth.md](backend/services/auth.md)
 - **Local admin authentication, password change** → [backend/services/auth.md](backend/services/auth.md)
+- **Admin-generated login token per user (URL-login)** → [backend/services/auth.md](backend/services/auth.md)
 - **Route protection, auth guards** → [frontend/routing-auth.md](frontend/routing-auth.md)
 - **Login page UI/UX** → [frontend/pages/login.md](frontend/pages/login.md)
 

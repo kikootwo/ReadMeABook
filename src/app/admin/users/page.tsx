@@ -29,6 +29,7 @@ interface User {
   autoApproveRequests: boolean | null;
   interactiveSearchAccess: boolean | null;
   downloadAccess: boolean | null;
+  hasLoginToken: boolean;
   _count: {
     requests: number;
   };
@@ -220,6 +221,7 @@ function AdminUsersPageContent() {
   const [globalDownloadAccess, setGlobalDownloadAccess] = useState<boolean>(true);
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [permissionsUserId, setPermissionsUserId] = useState<string | null>(null);
+  const [generatedToken, setGeneratedToken] = useState<string | null>(null);
   const toast = useToast();
 
   const isLoading = !data && !error;
@@ -359,6 +361,24 @@ function AdminUsersPageContent() {
     } catch (err) {
       mutate({ users: previousUsers }, false);
       const errorMsg = err instanceof Error ? err.message : 'Failed to update user download access setting';
+      toast.error(errorMsg);
+    }
+  };
+
+  const handleToggleToken = async (user: { id: string; plexUsername: string }, newValue: boolean) => {
+    try {
+      if (newValue) {
+        const result = await fetchJSON(`/api/admin/users/${user.id}/login-token`, { method: 'POST' });
+        setGeneratedToken(result.fullToken);
+        toast.success(`Login token generated for ${user.plexUsername}`);
+      } else {
+        await fetchJSON(`/api/admin/users/${user.id}/login-token`, { method: 'DELETE' });
+        setGeneratedToken(null);
+        toast.success(`Login token revoked for ${user.plexUsername}`);
+      }
+      mutate();
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to update login token';
       toast.error(errorMsg);
     }
   };
@@ -968,11 +988,15 @@ function AdminUsersPageContent() {
         {/* User Permissions Modal */}
         <UserPermissionsModal
           isOpen={permissionsUser !== null}
-          onClose={() => setPermissionsUserId(null)}
+          onClose={() => {
+            setPermissionsUserId(null);
+            setGeneratedToken(null);
+          }}
           user={permissionsUser}
           globalAutoApprove={globalAutoApprove}
           globalInteractiveSearch={globalInteractiveSearch}
           globalDownloadAccess={globalDownloadAccess}
+          generatedToken={generatedToken}
           onToggleAutoApprove={(user, newValue) => {
             handleUserAutoApproveToggle(user as User, newValue);
           }}
@@ -981,6 +1005,9 @@ function AdminUsersPageContent() {
           }}
           onToggleDownloadAccess={(user, newValue) => {
             handleUserDownloadAccessToggle(user as User, newValue);
+          }}
+          onToggleToken={(user, newValue) => {
+            handleToggleToken(user, newValue);
           }}
         />
       </div>

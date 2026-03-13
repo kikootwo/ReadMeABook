@@ -6,6 +6,7 @@
 'use client';
 
 import { Modal } from '@/components/ui/Modal';
+import { useToast } from '@/components/ui/Toast';
 
 interface UserPermissionsUser {
   id: string;
@@ -16,6 +17,7 @@ interface UserPermissionsUser {
   autoApproveRequests: boolean | null;
   interactiveSearchAccess: boolean | null;
   downloadAccess: boolean | null;
+  hasLoginToken: boolean;
 }
 
 interface UserPermissionsModalProps {
@@ -25,9 +27,11 @@ interface UserPermissionsModalProps {
   globalAutoApprove: boolean;
   globalInteractiveSearch: boolean;
   globalDownloadAccess: boolean;
+  generatedToken: string | null;
   onToggleAutoApprove: (user: UserPermissionsUser, newValue: boolean) => void;
   onToggleInteractiveSearch: (user: UserPermissionsUser, newValue: boolean) => void;
   onToggleDownloadAccess: (user: UserPermissionsUser, newValue: boolean) => void;
+  onToggleToken: (user: UserPermissionsUser, newValue: boolean) => void;
 }
 
 interface PermissionToggleProps {
@@ -83,6 +87,79 @@ function PermissionToggle({ label, ariaLabel, value, disabled, disabledMessage, 
   );
 }
 
+interface LoginTokenRowProps {
+  value: boolean;
+  generatedToken: string | null;
+  onToggle: () => void;
+}
+
+function LoginTokenRow({ value, generatedToken, onToggle }: LoginTokenRowProps) {
+  const toast = useToast();
+  const loginUrl = generatedToken
+      ? `${typeof window !== 'undefined' ? window.location.origin : ''}/auth/token/login?token=${generatedToken}`
+      : null;
+
+  const copyUrl = async () => {
+    if (!loginUrl) return;
+    try {
+      await navigator.clipboard.writeText(loginUrl);
+    } catch {
+      toast.error('Failed to copy to clipboard');
+    }
+  };
+
+  return (
+      <div className="flex flex-col gap-2 p-3 border border-gray-200 dark:border-gray-700 rounded-lg">
+        <div className="flex items-start gap-4">
+          <button
+              onClick={onToggle}
+              className="relative inline-flex h-5 w-10 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 mt-0.5"
+              style={{ backgroundColor: value ? '#3b82f6' : '#d1d5db' }}
+              role="switch"
+              aria-checked={value}
+              aria-label="Login Token"
+          >
+          <span
+              className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                  value ? 'translate-x-6' : 'translate-x-1'
+              }`}
+          />
+          </button>
+          <div className="flex-1">
+            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+              Login Token
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              When enabled, this user can log in via a direct URL without credentials
+            </p>
+          </div>
+        </div>
+
+        {loginUrl && (
+            <div className="mt-1 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-md">
+              <p className="text-xs font-medium text-amber-800 dark:text-amber-300 mb-1">
+                Copy the login URL - it won&apos;t be shown again
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 text-xs font-mono text-amber-900 dark:text-amber-200 break-all select-all">
+                  {loginUrl}
+                </code>
+                <button
+                    onClick={copyUrl}
+                    className="flex-shrink-0 p-1.5 rounded text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-800/50 transition-colors"
+                    aria-label="Copy login URL"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+        )}
+      </div>
+  );
+}
+
 export function UserPermissionsModal({
   isOpen,
   onClose,
@@ -90,9 +167,11 @@ export function UserPermissionsModal({
   globalAutoApprove,
   globalInteractiveSearch,
   globalDownloadAccess,
+  generatedToken,
   onToggleAutoApprove,
   onToggleInteractiveSearch,
   onToggleDownloadAccess,
+  onToggleToken,
 }: UserPermissionsModalProps) {
   if (!user) return null;
 
@@ -200,6 +279,13 @@ export function UserPermissionsModal({
               )}
               description="When enabled, this user can download audiobook files directly"
               onToggle={() => onToggleDownloadAccess(user, !downloadValue)}
+            />
+
+            {/* Login Token */}
+            <LoginTokenRow
+                value={user.hasLoginToken || generatedToken !== null}
+                generatedToken={generatedToken}
+                onToggle={() => onToggleToken(user, !(user.hasLoginToken || generatedToken !== null))}
             />
           </div>
         </div>

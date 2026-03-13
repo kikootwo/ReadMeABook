@@ -249,6 +249,14 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 - **Admin Settings:** OIDC section in `/admin/settings` (auth tab)
 - **Library:** `openid-client` (OIDC discovery, token exchange, PKCE)
 
+## Admin-Generated Login Token
+
+- Login token stored as SHA-256 hash in `User.loginTokenHash`
+- Admin generates/revokes via user permissions modal
+- User navigates to `/auth/token/login?token=rmab_...` → page POSTs token to API in request body
+- API: `POST /api/auth/token/login` with `{ token }` in JSON body
+- Invalid token redirects to `/login`
+
 ## Security
 
 - Never log tokens

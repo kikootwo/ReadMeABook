@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
             autoApproveRequests: true,
             interactiveSearchAccess: true,
             downloadAccess: true,
+            loginTokenHash: true,
             _count: {
               select: {
                 requests: true,
@@ -44,7 +45,12 @@ export async function GET(request: NextRequest) {
           },
         });
 
-        return NextResponse.json({ users });
+        return NextResponse.json({
+          users: users.map(({ loginTokenHash, ...u }) => ({
+            ...u,
+            hasLoginToken: loginTokenHash !== null,
+          })),
+        });
       } catch (error) {
         logger.error('Failed to fetch users', { error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json(

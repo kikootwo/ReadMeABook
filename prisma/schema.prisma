@@ -57,6 +57,9 @@ model User {
   interactiveSearchAccess Boolean? @map("interactive_search_access") // null = use global setting, true = allow, false = deny
   downloadAccess          Boolean? @map("download_access")           // null = use global setting, true = allow, false = deny
 
+  // Login token (admin-generated, for direct URL login)
+  loginTokenHash String? @map("login_token_hash") // SHA-256 hash of the login token (never store plaintext)
+
   // Soft delete support
   deletedAt DateTime? @map("deleted_at")
   deletedBy String?   @map("deleted_by") // Admin user ID who deleted this user
