@@ -40,6 +40,7 @@ interface BrowsePhaseProps {
   currentPath: string | null;
   entries: DirectoryEntry[];
   currentAudioFiles: AudioFileEntry[];
+  checkedFiles: Set<string>;
   isLoading: boolean;
   error: string | null;
   hoveredFolder: string | null;
@@ -50,7 +51,8 @@ interface BrowsePhaseProps {
   onNavigateToRoot: () => void;
   onNavigateToBreadcrumb: (index: number) => void;
   onFolderClick: (entry: DirectoryEntry) => void;
-  onSelectCurrentFolder: () => void;
+  onSelectFiles: () => void;
+  onToggleFile: (fileName: string) => void;
   onHoverFolder: (name: string | null) => void;
   onRetry: () => void;
 }
@@ -60,6 +62,7 @@ export function BrowsePhase({
   currentPath,
   entries,
   currentAudioFiles,
+  checkedFiles,
   isLoading,
   error,
   hoveredFolder,
@@ -70,10 +73,16 @@ export function BrowsePhase({
   onNavigateToRoot,
   onNavigateToBreadcrumb,
   onFolderClick,
-  onSelectCurrentFolder,
+  onSelectFiles,
+  onToggleFile,
   onHoverFolder,
   onRetry,
 }: BrowsePhaseProps) {
+  const hasSelection = checkedFiles.size > 0;
+  const totalSize = currentAudioFiles.reduce((sum, f) => sum + f.size, 0);
+  const checkedSize = hasSelection
+    ? currentAudioFiles.filter((f) => checkedFiles.has(f.name)).reduce((sum, f) => sum + f.size, 0)
+    : totalSize;
   return (
     <div className="flex flex-col h-full">
       {/* Breadcrumb bar */}
@@ -165,7 +174,6 @@ export function BrowsePhase({
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
             {/* Subdirectories */}
             {entries.map((entry) => {
-              const hasAudio = entry.audioFileCount > 0;
               const isHovered = hoveredFolder === entry.name;
 
               return (
@@ -184,33 +192,9 @@ export function BrowsePhase({
                     )}
                   </div>
 
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                      {entry.name}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {entry.subfolderCount > 0 && (
-                        <span>{entry.subfolderCount} folder{entry.subfolderCount !== 1 ? 's' : ''}</span>
-                      )}
-                      {entry.subfolderCount > 0 && entry.audioFileCount > 0 && <span> &middot; </span>}
-                      {entry.audioFileCount > 0 && (
-                        <span>{entry.audioFileCount} audio file{entry.audioFileCount !== 1 ? 's' : ''}</span>
-                      )}
-                      {entry.totalSize > 0 && (
-                        <span> &middot; {formatBytes(entry.totalSize)}</span>
-                      )}
-                      {entry.subfolderCount === 0 && entry.audioFileCount === 0 && (
-                        <span className="italic">Empty</span>
-                      )}
-                    </p>
-                  </div>
-
-                  {hasAudio && (
-                    <span className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-medium">
-                      <MusicalNoteIcon className="w-3 h-3" />
-                      {entry.audioFileCount}
-                    </span>
-                  )}
+                  <p className="flex-1 min-w-0 text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                    {entry.name}
+                  </p>
 
                   <ChevronRightIcon className="w-4 h-4 text-gray-300 dark:text-gray-600 flex-shrink-0" />
                 </button>
@@ -221,24 +205,38 @@ export function BrowsePhase({
             {currentAudioFiles.length > 0 && entries.length > 0 && (
               <div className="px-4 py-2 bg-gray-50/50 dark:bg-gray-800/20">
                 <p className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                  Audio Files
+                  Audio Files {hasSelection && `\u00B7 click to select`}
                 </p>
               </div>
             )}
-            {currentAudioFiles.map((file) => (
-              <div
-                key={`file-${file.name}`}
-                className="flex items-center gap-3 px-4 py-2.5"
-              >
-                <MusicalNoteIcon className="w-4 h-4 text-blue-500 dark:text-blue-400 flex-shrink-0" />
-                <span className="flex-1 min-w-0 text-sm text-gray-700 dark:text-gray-300 truncate">
-                  {file.name}
-                </span>
-                <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">
-                  {formatBytes(file.size)}
-                </span>
-              </div>
-            ))}
+            {currentAudioFiles.map((file) => {
+              const isSelected = checkedFiles.has(file.name);
+              return (
+                <button
+                  key={`file-${file.name}`}
+                  onClick={() => onToggleFile(file.name)}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+                    isSelected
+                      ? 'bg-blue-50 dark:bg-blue-900/20 border-l-2 border-blue-500'
+                      : 'hover:bg-gray-50 dark:hover:bg-gray-800/50 border-l-2 border-transparent'
+                  }`}
+                >
+                  <MusicalNoteIcon className={`w-4 h-4 flex-shrink-0 ${
+                    isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-blue-500/50 dark:text-blue-400/50'
+                  }`} />
+                  <span className={`flex-1 min-w-0 text-sm truncate ${
+                    isSelected
+                      ? 'text-blue-900 dark:text-blue-100 font-medium'
+                      : 'text-gray-700 dark:text-gray-300'
+                  }`}>
+                    {file.name}
+                  </span>
+                  <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">
+                    {formatBytes(file.size)}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -258,18 +256,33 @@ export function BrowsePhase({
         )}
       </div>
 
-      {/* Footer: Select this folder */}
+      {/* Footer */}
       {currentPath && !isLoading && currentAudioFiles.length > 0 && (
         <div className="px-5 py-3.5 border-t border-gray-200 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-800/30 flex items-center justify-between gap-4">
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            <span className="font-medium text-gray-900 dark:text-gray-100">{currentAudioFiles.length}</span>
-            {' '}audio file{currentAudioFiles.length !== 1 ? 's' : ''} in this folder
+            {hasSelection ? (
+              <>
+                <span className="font-medium text-gray-900 dark:text-gray-100">{checkedFiles.size}</span>
+                {' '}of {currentAudioFiles.length} file{currentAudioFiles.length !== 1 ? 's' : ''} selected
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-gray-900 dark:text-gray-100">{currentAudioFiles.length}</span>
+                {' '}audio file{currentAudioFiles.length !== 1 ? 's' : ''} in this folder
+              </>
+            )}
+            {checkedSize > 0 && (
+              <span className="text-gray-400 dark:text-gray-500"> &middot; {formatBytes(checkedSize)}</span>
+            )}
           </p>
           <button
-            onClick={onSelectCurrentFolder}
+            onClick={onSelectFiles}
             className="flex-shrink-0 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-xl transition-colors"
           >
-            Select This Folder &rarr;
+            {hasSelection
+              ? `Select ${checkedFiles.size} File${checkedFiles.size !== 1 ? 's' : ''}`
+              : 'Select This Folder'
+            } &rarr;
           </button>
         </div>
       )}

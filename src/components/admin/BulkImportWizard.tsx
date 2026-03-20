@@ -205,6 +205,7 @@ export function BulkImportWizard({ isOpen, onClose }: BulkImportWizardProps) {
           imports: booksToImport.map((b) => ({
             folderPath: b.folderPath,
             asin: b.match!.asin,
+            audioFiles: b.audioFiles,
           })),
         }),
       });

@@ -12,9 +12,6 @@ export interface RootEntry {
 export interface DirectoryEntry {
   name: string;
   type: 'directory';
-  audioFileCount: number;
-  subfolderCount: number;
-  totalSize: number;
 }
 
 export interface AudioFileEntry {

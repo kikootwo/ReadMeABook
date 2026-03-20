@@ -31,6 +31,7 @@ const RECYCLABLE_STATUSES = [
 interface ImportItem {
   folderPath: string;
   asin: string;
+  audioFiles?: string[]; // Specific files to import (from scanner grouping)
 }
 
 interface ImportResult {
@@ -105,7 +106,7 @@ export async function POST(request: NextRequest) {
         const results: ImportResult[] = [];
 
         for (const item of imports) {
-          const { folderPath, asin } = item;
+          const { folderPath, asin, audioFiles: itemAudioFiles } = item;
 
           try {
             // Validate path
@@ -119,7 +120,7 @@ export async function POST(request: NextRequest) {
               continue;
             }
 
-            // Verify directory exists and has audio files
+            // Verify directory exists
             try {
               const stat = await fs.stat(normalizedPath);
               if (!stat.isDirectory()) {
@@ -131,10 +132,14 @@ export async function POST(request: NextRequest) {
               continue;
             }
 
-            const hasAudio = await hasAudioFiles(normalizedPath);
-            if (!hasAudio) {
-              results.push({ folderPath, asin, success: false, error: 'No audio files' });
-              continue;
+            // Verify audio files: if specific files provided, trust the scanner;
+            // otherwise fall back to folder-level check
+            if (!itemAudioFiles || itemAudioFiles.length === 0) {
+              const hasAudio = await hasAudioFiles(normalizedPath);
+              if (!hasAudio) {
+                results.push({ folderPath, asin, success: false, error: 'No audio files' });
+                continue;
+              }
             }
 
             // Resolve or create audiobook record
@@ -250,8 +255,15 @@ export async function POST(request: NextRequest) {
               requestId = newReq.id;
             }
 
-            // Queue organize_files job
-            await jobQueue.addOrganizeJob(requestId, audiobookId, normalizedPath);
+            // Queue organize_files job (pass specific files if scanner provided them)
+            await jobQueue.addOrganizeJob(
+              requestId,
+              audiobookId,
+              normalizedPath,
+              undefined,
+              false,
+              itemAudioFiles && itemAudioFiles.length > 0 ? itemAudioFiles : undefined
+            );
 
             results.push({ folderPath, asin, success: true, requestId });
             logger.info(`Bulk import queued: asin=${asin}, path=${normalizedPath}, request=${requestId}`);

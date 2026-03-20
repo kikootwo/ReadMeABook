@@ -55,8 +55,24 @@ export async function POST(request: NextRequest) {
         const fs = await import('fs/promises');
 
         const body = await request.json();
-        const { folderPath, asin, cleanupSource } = body;
+        const { folderPath, asin, cleanupSource, selectedFiles } = body;
         let { audiobookId } = body;
+
+        // Validate selectedFiles if provided
+        if (selectedFiles !== undefined) {
+          if (!Array.isArray(selectedFiles) || selectedFiles.length === 0) {
+            return NextResponse.json(
+              { error: 'selectedFiles must be a non-empty array of file names' },
+              { status: 400 }
+            );
+          }
+          if (!selectedFiles.every((f: unknown) => typeof f === 'string')) {
+            return NextResponse.json(
+              { error: 'selectedFiles must contain only strings' },
+              { status: 400 }
+            );
+          }
+        }
 
         // Validate required fields
         if ((!audiobookId && !asin) || !folderPath) {
@@ -120,13 +136,52 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // Verify folder contains audio files
-        const audioCheck = await hasAudioFiles(normalizedPath);
-        if (!audioCheck.found) {
-          return NextResponse.json(
-            { error: 'No audio files found in the selected directory' },
-            { status: 400 }
-          );
+        // Verify selected files exist and are audio files, or fall back to folder scan
+        let audioFileCount: number;
+        const validatedFiles: string[] = [];
+
+        if (selectedFiles && selectedFiles.length > 0) {
+          for (const fileName of selectedFiles as string[]) {
+            // Prevent path traversal
+            if (fileName.includes('/') || fileName.includes('\\') || fileName === '..' || fileName === '.') {
+              return NextResponse.json(
+                { error: `Invalid file name: ${fileName}` },
+                { status: 400 }
+              );
+            }
+            const ext = pathModule.extname(fileName).toLowerCase();
+            if (!(AUDIO_EXTENSIONS as readonly string[]).includes(ext)) {
+              return NextResponse.json(
+                { error: `Not an audio file: ${fileName}` },
+                { status: 400 }
+              );
+            }
+            try {
+              const fileStat = await fs.stat(pathModule.join(normalizedPath, fileName));
+              if (!fileStat.isFile()) {
+                return NextResponse.json(
+                  { error: `Not a file: ${fileName}` },
+                  { status: 400 }
+                );
+              }
+              validatedFiles.push(fileName);
+            } catch {
+              return NextResponse.json(
+                { error: `File not found: ${fileName}` },
+                { status: 404 }
+              );
+            }
+          }
+          audioFileCount = validatedFiles.length;
+        } else {
+          const audioCheck = await hasAudioFiles(normalizedPath);
+          if (!audioCheck.found) {
+            return NextResponse.json(
+              { error: 'No audio files found in the selected directory' },
+              { status: 400 }
+            );
+          }
+          audioFileCount = audioCheck.count;
         }
 
         // Resolve audiobook by ASIN if audiobookId not provided
@@ -317,9 +372,16 @@ export async function POST(request: NextRequest) {
 
         // Queue organize_files job
         const jobQueue = getJobQueueService();
-        await jobQueue.addOrganizeJob(requestId, audiobookId, normalizedPath, undefined, cleanupSource === true);
+        await jobQueue.addOrganizeJob(
+          requestId,
+          audiobookId,
+          normalizedPath,
+          undefined,
+          cleanupSource === true,
+          validatedFiles.length > 0 ? validatedFiles : undefined
+        );
 
-        logger.info(`Manual import queued: request=${requestId}, path=${normalizedPath}, audioFiles=${audioCheck.count}`);
+        logger.info(`Manual import queued: request=${requestId}, path=${normalizedPath}, audioFiles=${audioFileCount}`);
 
         return NextResponse.json({
           success: true,

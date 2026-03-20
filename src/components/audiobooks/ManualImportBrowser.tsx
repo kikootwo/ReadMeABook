@@ -47,8 +47,6 @@ export function ManualImportBrowser({
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [selectedAudioCount, setSelectedAudioCount] = useState(0);
-  const [selectedSize, setSelectedSize] = useState(0);
   const [selectedAudioFiles, setSelectedAudioFiles] = useState<AudioFileEntry[]>([]);
   const [currentAudioFiles, setCurrentAudioFiles] = useState<AudioFileEntry[]>([]);
   const [pathHistory, setPathHistory] = useState<string[]>([]);
@@ -61,6 +59,9 @@ export function ManualImportBrowser({
 
   // Cleanup source toggle
   const [cleanupSource, setCleanupSource] = useState(false);
+
+  // File selection state (shared between BrowsePhase and ConfirmPhase)
+  const [checkedFiles, setCheckedFiles] = useState<Set<string>>(new Set());
 
   // Hover state for folder icon swap
   const [hoveredFolder, setHoveredFolder] = useState<string | null>(null);
@@ -96,6 +97,7 @@ export function ManualImportBrowser({
   const fetchDirectory = useCallback(async (dirPath: string) => {
     setIsLoading(true);
     setError(null);
+    setCheckedFiles(new Set());
     try {
       const res = await fetchWithAuth(
         `/api/admin/filesystem/browse?path=${encodeURIComponent(dirPath)}`
@@ -105,8 +107,9 @@ export function ManualImportBrowser({
         throw new Error(data.error || 'Failed to browse directory');
       }
       const data = await res.json();
+      const audioFiles: AudioFileEntry[] = data.audioFiles || [];
       setEntries(data.entries || []);
-      setCurrentAudioFiles(data.audioFiles || []);
+      setCurrentAudioFiles(audioFiles);
       setCurrentPath(data.path || dirPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to browse directory');
@@ -165,12 +168,38 @@ export function ManualImportBrowser({
     navigateInto(fullPath);
   };
 
-  const handleSelectCurrentFolder = () => {
+  const handleToggleFile = (fileName: string) => {
+    setCheckedFiles((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileName)) {
+        next.delete(fileName);
+      } else {
+        next.add(fileName);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleAll = () => {
+    // In confirm phase, toggle against selectedAudioFiles; in browse phase, against currentAudioFiles
+    const files = phase === 'confirm' ? selectedAudioFiles : currentAudioFiles;
+    if (checkedFiles.size === files.length) {
+      setCheckedFiles(new Set());
+    } else {
+      setCheckedFiles(new Set(files.map((f) => f.name)));
+    }
+  };
+
+  const handleSelectFiles = () => {
     if (!currentPath || currentAudioFiles.length === 0) return;
+    // No individual selection = whole folder; otherwise only checked files
+    const selected = checkedFiles.size > 0
+      ? currentAudioFiles.filter((f) => checkedFiles.has(f.name))
+      : currentAudioFiles;
     setSelectedPath(currentPath);
-    setSelectedAudioCount(currentAudioFiles.length);
-    setSelectedSize(currentAudioFiles.reduce((sum, f) => sum + f.size, 0));
-    setSelectedAudioFiles(currentAudioFiles);
+    setSelectedAudioFiles(selected);
+    // Ensure checkedFiles reflects what we're importing for ConfirmPhase
+    setCheckedFiles(new Set(selected.map((f) => f.name)));
     setSlideDirection('right');
     setPhase('confirm');
   };
@@ -185,12 +214,18 @@ export function ManualImportBrowser({
     setIsImporting(true);
     setImportError(null);
     try {
+      // Send only the files that are still checked in ConfirmPhase
+      const fileNames = selectedAudioFiles
+        .filter((f) => checkedFiles.has(f.name))
+        .map((f) => f.name);
+      if (fileNames.length === 0) return;
       const res = await fetchWithAuth('/api/admin/manual-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           asin: audiobook.asin,
           folderPath: selectedPath,
+          selectedFiles: fileNames,
           cleanupSource,
         }),
       });
@@ -268,6 +303,7 @@ export function ManualImportBrowser({
               currentPath={currentPath}
               entries={entries}
               currentAudioFiles={currentAudioFiles}
+              checkedFiles={checkedFiles}
               isLoading={isLoading}
               error={error}
               hoveredFolder={hoveredFolder}
@@ -278,7 +314,8 @@ export function ManualImportBrowser({
               onNavigateToRoot={navigateToRoot}
               onNavigateToBreadcrumb={navigateToBreadcrumb}
               onFolderClick={handleFolderClick}
-              onSelectCurrentFolder={handleSelectCurrentFolder}
+              onSelectFiles={handleSelectFiles}
+              onToggleFile={handleToggleFile}
               onHoverFolder={setHoveredFolder}
               onRetry={currentPath ? () => fetchDirectory(currentPath) : fetchRoots}
             />
@@ -286,14 +323,15 @@ export function ManualImportBrowser({
             <ConfirmPhase
               audiobook={audiobook}
               selectedPath={selectedPath!}
-              audioFileCount={selectedAudioCount}
-              totalSize={selectedSize}
               audioFiles={selectedAudioFiles}
+              checkedFiles={checkedFiles}
               isImporting={isImporting}
               importError={importError}
               slideClass={slideClass}
               cleanupSource={cleanupSource}
               onCleanupSourceChange={setCleanupSource}
+              onToggleFile={handleToggleFile}
+              onToggleAll={handleToggleAll}
               onBack={handleBackToBrowse}
               onStartImport={handleStartImport}
             />

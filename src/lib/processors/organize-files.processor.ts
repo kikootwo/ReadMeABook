@@ -23,7 +23,7 @@ import { getAudibleService } from '../integrations/audible.service';
  * Handles both audiobook and ebook request types with appropriate branching
  */
 export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promise<any> {
-  const { requestId, audiobookId, downloadPath, jobId, cleanupSource } = payload;
+  const { requestId, audiobookId, downloadPath, jobId, cleanupSource, selectedFiles } = payload;
 
   const logger = RMABLogger.forJob(jobId, 'OrganizeFiles');
 
@@ -212,7 +212,8 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       },
       template,
       jobId ? { jobId, context: 'FileOrganizer' } : undefined,
-      renameConfig
+      renameConfig,
+      selectedFiles
     );
 
     if (!result.success) {
@@ -322,7 +323,7 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
 
     // Cleanup source files if requested (manual import feature)
     if (cleanupSource) {
-      await cleanupSourceAfterOrganize(downloadPath, configService, jobId, logger);
+      await cleanupSourceAfterOrganize(downloadPath, configService, jobId, logger, selectedFiles);
     }
 
     return {
@@ -1132,20 +1133,38 @@ async function cleanupSourceAfterOrganize(
   downloadPath: string,
   configService: any,
   jobId: string | undefined,
-  logger: RMABLogger
+  logger: RMABLogger,
+  selectedFiles?: string[]
 ): Promise<void> {
   try {
     const fs = await import('fs/promises');
+    const pathModule = await import('path');
 
     logger.info(`Cleaning up source files: ${downloadPath}`);
 
-    const stats = await fs.stat(downloadPath);
-    if (stats.isDirectory()) {
-      await fs.rm(downloadPath, { recursive: true, force: true });
-      logger.info(`Removed source directory: ${downloadPath}`);
+    if (selectedFiles && selectedFiles.length > 0) {
+      // Only delete the specific files that were imported, not the entire directory
+      for (const fileName of selectedFiles) {
+        const filePath = pathModule.join(downloadPath, fileName);
+        try {
+          await fs.unlink(filePath);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+            logger.warn(`Failed to delete source file: ${filePath}`);
+          }
+        }
+      }
+      logger.info(`Removed ${selectedFiles.length} selected source files from ${downloadPath}`);
     } else {
-      await fs.unlink(downloadPath);
-      logger.info(`Removed source file: ${downloadPath}`);
+      // No file filter — delete entire source path (original behavior)
+      const stats = await fs.stat(downloadPath);
+      if (stats.isDirectory()) {
+        await fs.rm(downloadPath, { recursive: true, force: true });
+        logger.info(`Removed source directory: ${downloadPath}`);
+      } else {
+        await fs.unlink(downloadPath);
+        logger.info(`Removed source file: ${downloadPath}`);
+      }
     }
 
     // Determine boundary path based on download path prefix

@@ -76,6 +76,7 @@ export interface OrganizeFilesPayload extends JobPayload {
   downloadPath: string;
   targetPath?: string; // Optional - not used by processor (reads from database config)
   cleanupSource?: boolean; // If true, delete source files after successful import
+  selectedFiles?: string[]; // If set, only import these specific files from downloadPath
 }
 
 export interface ScanPlexPayload extends JobPayload {
@@ -644,7 +645,8 @@ export class JobQueueService {
     audiobookId: string,
     downloadPath: string,
     targetPath?: string,
-    cleanupSource?: boolean
+    cleanupSource?: boolean,
+    selectedFiles?: string[]
   ): Promise<string> {
     return await this.addJob(
       'organize_files',
@@ -654,6 +656,7 @@ export class JobQueueService {
         downloadPath,
         targetPath, // Not used by processor
         cleanupSource,
+        selectedFiles,
       } as OrganizeFilesPayload,
       {
         priority: 8,

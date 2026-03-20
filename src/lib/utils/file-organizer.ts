@@ -82,7 +82,8 @@ export class FileOrganizer {
     audiobook: AudiobookMetadata,
     template: string,
     loggerConfig?: LoggerConfig,
-    renameConfig?: { enabled: boolean; template: string }
+    renameConfig?: { enabled: boolean; template: string },
+    selectedFiles?: string[]
   ): Promise<OrganizationResult> {
     // Create logger if config provided
     const logger = loggerConfig ? RMABLogger.forJob(loggerConfig.jobId, loggerConfig.context) : null;
@@ -99,7 +100,14 @@ export class FileOrganizer {
       await logger?.info(`Organizing: ${downloadPath}`);
 
       // Find audiobook files
-      const { audioFiles, coverFile, isFile } = await this.findAudiobookFiles(downloadPath);
+      let { audioFiles, coverFile, isFile } = await this.findAudiobookFiles(downloadPath);
+
+      // Filter to only selected files if specified
+      if (selectedFiles && selectedFiles.length > 0) {
+        const selectedSet = new Set(selectedFiles);
+        audioFiles = audioFiles.filter((f) => selectedSet.has(f));
+        await logger?.info(`Filtered to ${audioFiles.length} selected files`);
+      }
 
       if (audioFiles.length === 0) {
         throw new Error('No audiobook files found in download');

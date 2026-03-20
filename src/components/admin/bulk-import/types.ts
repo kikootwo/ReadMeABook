@@ -14,9 +14,6 @@ export interface RootEntry {
 export interface DirectoryEntry {
   name: string;
   type: 'directory';
-  audioFileCount: number;
-  subfolderCount: number;
-  totalSize: number;
 }
 
 /** Audible match data for a discovered audiobook. */
@@ -39,6 +36,7 @@ export interface ScannedBook {
   totalSizeBytes: number;
   metadataSource: 'tags' | 'file_name';
   searchTerm: string;
+  audioFiles: string[];
   match: AudibleMatch | null;
   inLibrary: boolean;
   hasActiveRequest: boolean;
@@ -48,7 +46,7 @@ export interface ScannedBook {
 
 /** Progress event from the SSE scan stream. */
 export interface ScanProgressEvent {
-  phase: 'discovering' | 'reading_metadata';
+  phase: 'discovering' | 'reading_metadata' | 'grouping';
   foldersScanned: number;
   audiobooksFound: number;
   currentFolder?: string;

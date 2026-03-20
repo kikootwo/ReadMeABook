@@ -17,47 +17,6 @@ const logger = RMABLogger.create('API.Admin.Filesystem.Browse');
 interface DirectoryEntry {
   name: string;
   type: 'directory';
-  audioFileCount: number;
-  subfolderCount: number;
-  totalSize: number;
-}
-
-/**
- * Scan immediate children of a directory to gather audio file and subfolder stats.
- */
-async function getDirectoryStats(
-  dirPath: string
-): Promise<{ audioFileCount: number; subfolderCount: number; totalSize: number }> {
-  const fs = await import('fs/promises');
-  const pathModule = await import('path');
-
-  let audioFileCount = 0;
-  let subfolderCount = 0;
-  let totalSize = 0;
-
-  try {
-    const children = await fs.readdir(dirPath, { withFileTypes: true });
-    for (const child of children) {
-      if (child.isDirectory()) {
-        subfolderCount++;
-      } else if (child.isFile()) {
-        const ext = pathModule.extname(child.name).toLowerCase();
-        if ((AUDIO_EXTENSIONS as readonly string[]).includes(ext)) {
-          audioFileCount++;
-          try {
-            const stat = await fs.stat(pathModule.join(dirPath, child.name));
-            totalSize += stat.size;
-          } catch {
-            /* skip unreadable files */
-          }
-        }
-      }
-    }
-  } catch {
-    /* directory not readable */
-  }
-
-  return { audioFileCount, subfolderCount, totalSize };
 }
 
 /**
@@ -152,20 +111,11 @@ export async function GET(request: NextRequest) {
         // Read directory entries
         const dirEntries = await fs.readdir(normalizedPath, { withFileTypes: true });
 
-        // Gather stats for each subdirectory (parallel for performance)
-        const directoryEntries = dirEntries.filter((e) => e.isDirectory());
-        const statsPromises = directoryEntries.map(async (entry): Promise<DirectoryEntry> => {
-          const fullPath = pathModule.join(normalizedPath, entry.name);
-          const stats = await getDirectoryStats(fullPath);
-          return {
-            name: entry.name,
-            type: 'directory',
-            ...stats,
-          };
-        });
-
-        const entries = await Promise.all(statsPromises);
-        entries.sort((a, b) => a.name.localeCompare(b.name));
+        // List subdirectories (no nested stat calls — keeps browsing fast)
+        const entries: DirectoryEntry[] = dirEntries
+          .filter((e) => e.isDirectory())
+          .map((entry) => ({ name: entry.name, type: 'directory' as const }))
+          .sort((a, b) => a.name.localeCompare(b.name));
 
         // Gather audio files in the current directory
         const audioFiles: Array<{ name: string; size: number }> = [];

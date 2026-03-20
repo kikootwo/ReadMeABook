@@ -209,6 +209,7 @@ export async function POST(request: NextRequest) {
                 totalSizeBytes: book.totalSizeBytes,
                 metadataSource: book.metadataSource,
                 searchTerm: book.searchTerm,
+                audioFiles: book.audioFiles,
                 match: match
                   ? {
                       asin: match.asin,

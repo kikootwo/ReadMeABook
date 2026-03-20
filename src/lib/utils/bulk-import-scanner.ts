@@ -3,7 +3,8 @@
  * Documentation: documentation/features/bulk-import.md
  *
  * Recursively discovers audiobook folders, reads embedded metadata via ffprobe,
- * and prepares search terms for Audible matching. Used by the bulk import API.
+ * groups loose audio files by metadata, and prepares search terms for Audible
+ * matching. Used by the bulk import API.
  */
 
 import { exec } from 'child_process';
@@ -16,6 +17,9 @@ const execPromise = promisify(exec);
 
 /** Maximum recursion depth for folder scanning. */
 export const MAX_SCAN_DEPTH = 10;
+
+/** Maximum concurrent ffprobe calls for metadata reads. */
+const METADATA_CONCURRENCY = 10;
 
 /** Metadata extracted from an audio file via ffprobe. */
 export interface AudioFileMetadata {
@@ -36,11 +40,13 @@ export interface DiscoveredAudiobook {
   metadata: AudioFileMetadata;
   searchTerm: string;         // Constructed search query for Audible
   metadataSource: 'tags' | 'file_name';  // Where the search term came from
+  audioFiles: string[];       // File names (relative to folderPath) belonging to this book
+  groupingKey: string;        // Normalized key for cross-folder deduplication
 }
 
 /** Progress callback for streaming updates to the caller. */
 export interface ScanProgress {
-  phase: 'discovering' | 'reading_metadata';
+  phase: 'discovering' | 'reading_metadata' | 'grouping';
   foldersScanned: number;
   audiobooksFound: number;
   currentFolder?: string;
@@ -173,7 +179,25 @@ export function buildSearchTerm(
 }
 
 /**
- * Scan a single directory for audio files.
+ * Build a normalized grouping key from metadata.
+ * Used to determine which files belong to the same book.
+ * Returns null if metadata has no title (ungroupable).
+ */
+function buildGroupingKey(metadata: AudioFileMetadata): string | null {
+  if (!metadata.title) return null;
+
+  const normalize = (s?: string) =>
+    (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  return [
+    normalize(metadata.title),
+    normalize(metadata.author),
+    normalize(metadata.narrator),
+  ].join('|');
+}
+
+/**
+ * Scan a single directory for audio files (immediate children only).
  * Returns audio file names and total size, or null if no audio files found.
  */
 async function scanDirectoryForAudio(
@@ -206,11 +230,216 @@ async function scanDirectoryForAudio(
 }
 
 /**
- * Recursively discover audiobook folders starting from a root path.
+ * Run async tasks with a concurrency limit.
+ */
+async function asyncPool<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = [];
+  let index = 0;
+
+  async function worker() {
+    while (index < items.length) {
+      const i = index++;
+      results[i] = await fn(items[i]);
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    () => worker()
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+/**
+ * Group audio files in a directory by their metadata.
+ * Reads metadata from all files using a concurrency pool, then groups them
+ * by a normalized key of title + author + narrator.
+ * Files with no metadata title each become their own group.
+ */
+async function groupAudioFilesByMetadata(
+  dirPath: string,
+  audioFiles: string[],
+  audioSizes: Map<string, number>
+): Promise<Array<{
+  files: string[];
+  totalSize: number;
+  metadata: AudioFileMetadata;
+  metadataSource: 'tags' | 'file_name';
+  searchTerm: string;
+  groupingKey: string;
+}>> {
+  // Read metadata from all files with concurrency limit
+  const metadataResults = await asyncPool(
+    audioFiles,
+    METADATA_CONCURRENCY,
+    async (fileName) => {
+      const filePath = path.join(dirPath, fileName);
+      const metadata = await readAudioMetadata(filePath);
+      return { fileName, metadata };
+    }
+  );
+
+  // Group by metadata key
+  const groups = new Map<string, {
+    files: string[];
+    totalSize: number;
+    metadata: AudioFileMetadata;
+  }>();
+
+  let ungroupedCounter = 0;
+
+  for (const { fileName, metadata } of metadataResults) {
+    const key = buildGroupingKey(metadata);
+    const fileSize = audioSizes.get(fileName) || 0;
+
+    if (key) {
+      // Has metadata — group with others sharing the same key
+      const existing = groups.get(key);
+      if (existing) {
+        existing.files.push(fileName);
+        existing.totalSize += fileSize;
+      } else {
+        groups.set(key, {
+          files: [fileName],
+          totalSize: fileSize,
+          metadata,
+        });
+      }
+    } else {
+      // No title metadata — treat as individual book
+      const uniqueKey = `__ungrouped_${ungroupedCounter++}`;
+      groups.set(uniqueKey, {
+        files: [fileName],
+        totalSize: fileSize,
+        metadata,
+      });
+    }
+  }
+
+  // Build result with search terms
+  return Array.from(groups.entries()).map(([groupingKey, group]) => {
+    group.files.sort((a, b) => a.localeCompare(b));
+    const { searchTerm, source } = buildSearchTerm(group.metadata, group.files[0]);
+    return {
+      files: group.files,
+      totalSize: group.totalSize,
+      metadata: group.metadata,
+      metadataSource: source,
+      searchTerm,
+      groupingKey,
+    };
+  });
+}
+
+/**
+ * Merge discoveries that share the same grouping key across different folders.
+ * Handles the multi-CD case (e.g., CD1/ and CD2/ with same metadata).
+ */
+function deduplicateDiscoveries(
+  discoveries: DiscoveredAudiobook[]
+): DiscoveredAudiobook[] {
+  const byKey = new Map<string, DiscoveredAudiobook[]>();
+
+  for (const disc of discoveries) {
+    // Skip ungrouped entries (each is unique)
+    if (disc.groupingKey.startsWith('__ungrouped_')) {
+      const key = `${disc.folderPath}::${disc.groupingKey}`;
+      byKey.set(key, [disc]);
+      continue;
+    }
+
+    const existing = byKey.get(disc.groupingKey);
+    if (existing) {
+      existing.push(disc);
+    } else {
+      byKey.set(disc.groupingKey, [disc]);
+    }
+  }
+
+  const merged: DiscoveredAudiobook[] = [];
+
+  for (const group of byKey.values()) {
+    if (group.length === 1) {
+      merged.push(group[0]);
+      continue;
+    }
+
+    // Merge multiple discoveries with the same key
+    // Use the common parent directory as the folder path
+    const allPaths = group.map((d) => d.folderPath);
+    const commonParent = findCommonParent(allPaths);
+    const first = group[0];
+
+    // Combine audio files with relative paths from the common parent
+    const combinedFiles: string[] = [];
+    let combinedSize = 0;
+    let combinedCount = 0;
+
+    for (const disc of group) {
+      const relPrefix = path.relative(commonParent, disc.folderPath).replace(/\\/g, '/');
+      for (const file of disc.audioFiles) {
+        combinedFiles.push(relPrefix ? `${relPrefix}/${file}` : file);
+      }
+      combinedSize += disc.totalSizeBytes;
+      combinedCount += disc.audioFileCount;
+    }
+
+    merged.push({
+      folderPath: commonParent,
+      folderName: path.basename(commonParent),
+      relativePath: first.relativePath.split('/').slice(0, -1).join('/') || path.basename(commonParent),
+      audioFileCount: combinedCount,
+      totalSizeBytes: combinedSize,
+      metadata: first.metadata,
+      searchTerm: first.searchTerm,
+      metadataSource: first.metadataSource,
+      audioFiles: combinedFiles,
+      groupingKey: first.groupingKey,
+    });
+  }
+
+  return merged;
+}
+
+/**
+ * Find the longest common parent directory among a set of paths.
+ */
+function findCommonParent(paths: string[]): string {
+  if (paths.length === 0) return '';
+  if (paths.length === 1) return paths[0];
+
+  const normalized = paths.map((p) => p.replace(/\\/g, '/'));
+  const parts = normalized.map((p) => p.split('/'));
+  const minLen = Math.min(...parts.map((p) => p.length));
+
+  let commonParts = 0;
+  for (let i = 0; i < minLen; i++) {
+    if (parts.every((p) => p[i] === parts[0][i])) {
+      commonParts = i + 1;
+    } else {
+      break;
+    }
+  }
+
+  return parts[0].slice(0, commonParts).join('/');
+}
+
+/**
+ * Recursively discover audiobooks starting from a root path.
  *
- * A folder is classified as an "audiobook folder" if it contains audio files.
- * Once a folder is classified as an audiobook, its subfolders are NOT scanned
- * further (the audio-containing folder is the audiobook boundary).
+ * Scans every folder for audio files. When audio files are found, they are
+ * grouped by metadata (title + author + narrator) — each group becomes a
+ * separate discovered audiobook. Files with no metadata are treated as
+ * individual books. Scanning ALWAYS recurses into subfolders regardless of
+ * whether the current folder has audio files.
+ *
+ * After the full walk, discoveries sharing the same grouping key across
+ * different folders (e.g., CD1/ and CD2/) are merged.
  *
  * @param rootPath - The root directory to scan
  * @param onProgress - Optional callback for progress updates
@@ -242,38 +471,58 @@ export async function discoverAudiobooks(
     const audioResult = await scanDirectoryForAudio(currentPath);
 
     if (audioResult) {
-      // This is an audiobook folder — read metadata and add to results
-      const firstFile = path.join(currentPath, audioResult.audioFiles[0]);
-      const metadata = await readAudioMetadata(firstFile);
+      // Build size lookup for grouping
+      const audioSizes = new Map<string, number>();
+      for (const fileName of audioResult.audioFiles) {
+        try {
+          const stat = await fs.stat(path.join(currentPath, fileName));
+          audioSizes.set(fileName, stat.size);
+        } catch {
+          audioSizes.set(fileName, 0);
+        }
+      }
+
+      onProgress?.({
+        phase: 'grouping',
+        foldersScanned,
+        audiobooksFound: results.length,
+        currentFolder: path.basename(currentPath),
+      });
+
+      // Group audio files by metadata
+      const groups = await groupAudioFilesByMetadata(
+        currentPath,
+        audioResult.audioFiles,
+        audioSizes
+      );
+
+      const folderName = path.basename(currentPath);
+      const relativePath = path.relative(rootPath, currentPath).replace(/\\/g, '/');
+
+      for (const group of groups) {
+        results.push({
+          folderPath: currentPath.replace(/\\/g, '/'),
+          folderName,
+          relativePath: relativePath || folderName,
+          audioFileCount: group.files.length,
+          totalSizeBytes: group.totalSize,
+          metadata: group.metadata,
+          searchTerm: group.searchTerm,
+          metadataSource: group.metadataSource,
+          audioFiles: group.files,
+          groupingKey: group.groupingKey,
+        });
+      }
 
       onProgress?.({
         phase: 'reading_metadata',
         foldersScanned,
-        audiobooksFound: results.length + 1,
+        audiobooksFound: results.length,
         currentFolder: path.basename(currentPath),
       });
-
-      const folderName = path.basename(currentPath);
-      const relativePath = path.relative(rootPath, currentPath).replace(/\\/g, '/');
-      const firstFileName = audioResult.audioFiles[0];
-      const { searchTerm, source } = buildSearchTerm(metadata, firstFileName);
-
-      results.push({
-        folderPath: currentPath.replace(/\\/g, '/'),
-        folderName,
-        relativePath: relativePath || folderName,
-        audioFileCount: audioResult.audioFiles.length,
-        totalSizeBytes: audioResult.totalSize,
-        metadata,
-        searchTerm,
-        metadataSource: source,
-      });
-
-      // Do NOT recurse into subfolders of audiobook folders
-      return;
     }
 
-    // No audio files here — recurse into subfolders
+    // Always recurse into subfolders
     try {
       const children = await fs.readdir(currentPath, { withFileTypes: true });
       const subdirs = children
@@ -290,5 +539,7 @@ export async function discoverAudiobooks(
   }
 
   await walk(rootPath, 0);
-  return results;
+
+  // Post-scan: merge discoveries with the same grouping key across folders
+  return deduplicateDiscoveries(results);
 }

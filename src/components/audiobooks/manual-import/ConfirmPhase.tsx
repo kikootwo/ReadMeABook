@@ -16,14 +16,15 @@ import { AudioFileEntry, formatBytes } from './types';
 interface ConfirmPhaseProps {
   audiobook: { asin: string; title: string; author: string; coverArtUrl?: string };
   selectedPath: string;
-  audioFileCount: number;
-  totalSize: number;
   audioFiles: AudioFileEntry[];
+  checkedFiles: Set<string>;
   isImporting: boolean;
   importError: string | null;
   slideClass: string;
   cleanupSource: boolean;
   onCleanupSourceChange: (value: boolean) => void;
+  onToggleFile: (fileName: string) => void;
+  onToggleAll: () => void;
   onBack: () => void;
   onStartImport: () => void;
 }
@@ -31,17 +32,23 @@ interface ConfirmPhaseProps {
 export function ConfirmPhase({
   audiobook,
   selectedPath,
-  audioFileCount,
-  totalSize,
   audioFiles,
+  checkedFiles,
   isImporting,
   importError,
   slideClass,
   cleanupSource,
   onCleanupSourceChange,
+  onToggleFile,
+  onToggleAll,
   onBack,
   onStartImport,
 }: ConfirmPhaseProps) {
+  const allChecked = audioFiles.length > 0 && checkedFiles.size === audioFiles.length;
+  const someChecked = checkedFiles.size > 0 && !allChecked;
+  const checkedSize = audioFiles
+    .filter((f) => checkedFiles.has(f.name))
+    .reduce((sum, f) => sum + f.size, 0);
   return (
     <div className={`flex flex-col h-full ${slideClass}`}>
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -79,28 +86,51 @@ export function ConfirmPhase({
             {selectedPath}
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">
-            {audioFileCount} audio file{audioFileCount !== 1 ? 's' : ''}
-            {totalSize > 0 ? ` \u00B7 ${formatBytes(totalSize)}` : ''}
+            {checkedFiles.size} of {audioFiles.length} file{audioFiles.length !== 1 ? 's' : ''} selected
+            {checkedSize > 0 ? ` \u00B7 ${formatBytes(checkedSize)}` : ''}
           </p>
         </div>
 
         {/* Audio files to import */}
         <div>
-          <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
-            Files to import
-          </h4>
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
-            {audioFiles.map((file) => (
-              <div key={file.name} className="flex items-center gap-3 px-3.5 py-2.5">
-                <MusicalNoteIcon className="w-4 h-4 text-blue-500 dark:text-blue-400 flex-shrink-0" />
-                <span className="flex-1 min-w-0 text-sm text-gray-700 dark:text-gray-300 truncate">
-                  {file.name}
-                </span>
-                <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">
-                  {formatBytes(file.size)}
-                </span>
-              </div>
-            ))}
+          <div className="flex items-center gap-3 mb-3">
+            <input
+              type="checkbox"
+              checked={allChecked}
+              ref={(el) => { if (el) el.indeterminate = someChecked; }}
+              onChange={onToggleAll}
+              disabled={isImporting}
+              className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 cursor-pointer"
+            />
+            <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+              Files to import
+            </h4>
+          </div>
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden max-h-48 overflow-y-auto">
+            {audioFiles.map((file) => {
+              const isChecked = checkedFiles.has(file.name);
+              return (
+                <label
+                  key={file.name}
+                  className={`flex items-center gap-3 px-3.5 py-2.5 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${!isChecked ? 'opacity-50' : ''}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => onToggleFile(file.name)}
+                    disabled={isImporting}
+                    className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <MusicalNoteIcon className="w-4 h-4 text-blue-500 dark:text-blue-400 flex-shrink-0" />
+                  <span className="flex-1 min-w-0 text-sm text-gray-700 dark:text-gray-300 truncate">
+                    {file.name}
+                  </span>
+                  <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">
+                    {formatBytes(file.size)}
+                  </span>
+                </label>
+              );
+            })}
           </div>
         </div>
 
@@ -149,7 +179,7 @@ export function ConfirmPhase({
         </button>
         <button
           onClick={onStartImport}
-          disabled={isImporting}
+          disabled={isImporting || checkedFiles.size === 0}
           className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-xl transition-colors disabled:opacity-70 flex items-center gap-2"
         >
           {isImporting ? (

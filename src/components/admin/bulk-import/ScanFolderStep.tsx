@@ -18,13 +18,12 @@ import {
   HomeIcon,
   ChevronRightIcon,
   ArrowLeftIcon,
-  MusicalNoteIcon,
   ExclamationTriangleIcon,
   ArrowPathIcon,
   MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
 import { fetchWithAuth } from '@/lib/utils/api';
-import { RootEntry, DirectoryEntry, formatBytes } from './types';
+import { RootEntry, DirectoryEntry } from './types';
 
 function SkeletonRow() {
   return (
@@ -149,9 +148,8 @@ export function ScanFolderStep({ onFolderSelected }: ScanFolderStepProps) {
     ];
   })();
 
-  // Count total audio files and subfolders in current listing
-  const totalSubfolders = entries.reduce((sum, e) => sum + e.subfolderCount, 0);
-  const totalAudioInChildren = entries.reduce((sum, e) => sum + e.audioFileCount, 0);
+  // Count subfolders in current listing
+  const totalSubfolders = entries.length;
 
   return (
     <div className="flex flex-col h-full">
@@ -248,7 +246,6 @@ export function ScanFolderStep({ onFolderSelected }: ScanFolderStepProps) {
         {currentPath && !isLoading && !error && entries.length > 0 && (
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
             {entries.map((entry) => {
-              const hasAudio = entry.audioFileCount > 0;
               const isHovered = hoveredFolder === entry.name;
 
               return (
@@ -267,33 +264,9 @@ export function ScanFolderStep({ onFolderSelected }: ScanFolderStepProps) {
                     )}
                   </div>
 
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                      {entry.name}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {entry.subfolderCount > 0 && (
-                        <span>{entry.subfolderCount} folder{entry.subfolderCount !== 1 ? 's' : ''}</span>
-                      )}
-                      {entry.subfolderCount > 0 && entry.audioFileCount > 0 && <span> &middot; </span>}
-                      {entry.audioFileCount > 0 && (
-                        <span>{entry.audioFileCount} audio file{entry.audioFileCount !== 1 ? 's' : ''}</span>
-                      )}
-                      {entry.totalSize > 0 && (
-                        <span> &middot; {formatBytes(entry.totalSize)}</span>
-                      )}
-                      {entry.subfolderCount === 0 && entry.audioFileCount === 0 && (
-                        <span className="italic">Empty</span>
-                      )}
-                    </p>
-                  </div>
-
-                  {hasAudio && (
-                    <span className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-medium">
-                      <MusicalNoteIcon className="w-3 h-3" />
-                      {entry.audioFileCount}
-                    </span>
-                  )}
+                  <p className="flex-1 min-w-0 text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                    {entry.name}
+                  </p>
 
                   <ChevronRightIcon className="w-4 h-4 text-gray-300 dark:text-gray-600 flex-shrink-0" />
                 </button>
@@ -325,10 +298,7 @@ export function ScanFolderStep({ onFolderSelected }: ScanFolderStepProps) {
             <p className="font-mono text-xs text-gray-500 dark:text-gray-500 truncate">{currentPath}</p>
             {entries.length > 0 && (
               <p className="mt-0.5">
-                {entries.length} subfolder{entries.length !== 1 ? 's' : ''}
-                {totalAudioInChildren > 0 && (
-                  <span> &middot; {totalAudioInChildren} audio files visible</span>
-                )}
+                {totalSubfolders} subfolder{totalSubfolders !== 1 ? 's' : ''}
               </p>
             )}
           </div>
