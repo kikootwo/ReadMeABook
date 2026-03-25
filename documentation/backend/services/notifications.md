@@ -7,7 +7,7 @@ Sends notifications for audiobook request events (pending approval, approved, av
 
 ## Key Details
 - **Backends:** Apprise (API), Discord (webhooks), ntfy (API), Pushover (API)
-- **Events:** request_pending_approval, request_approved, request_available, request_error, issue_reported
+- **Events:** request_pending_approval, request_approved, request_grabbed, request_available, request_error, issue_reported
 - **Encryption:** AES-256-GCM for sensitive config (webhook URLs, API keys, notification URLs)
 - **Delivery:** Async via Bull job queue (priority 5)
 - **Failure Handling:** Non-blocking, Promise.allSettled (one backend fails, others succeed)
@@ -33,11 +33,14 @@ model NotificationBackend {
 |-------|---------|------------------------|
 | request_pending_approval | User creates request | Request needs admin approval |
 | request_approved | Admin approves OR auto-approval | Request approved (manual or auto) |
+| request_grabbed | Torrent/NZB added to download client | Download handed off to configured download client (title resolves by type) |
 | request_available | Plex/ABS scan or ebook download completes | Request available (title resolves by type) |
 | request_error | Download/import fails | Request failed at any stage |
 | issue_reported | User reports issue | User reports problem with available audiobook |
 
 **Dynamic Titles:** Events can define `titleByRequestType` in `notification-events.ts` for type-specific titles.
+- `request_grabbed` + `requestType: 'audiobook'` → "Audiobook Grabbed"
+- `request_grabbed` + `requestType: 'ebook'` → "Ebook Grabbed"
 - `request_available` + `requestType: 'audiobook'` → "Audiobook Available"
 - `request_available` + `requestType: 'ebook'` → "Ebook Available"
 - `request_available` + no requestType → "Request Available" (fallback)
@@ -65,6 +68,11 @@ model NotificationBackend {
 **Admin Approval (POST /api/admin/requests/[id]/approve)**
 - Approve (with or without pre-selected torrent): After job triggered → request_approved
 - Deny: No notification
+
+**Download Grabbed (processor: download-torrent)**
+- After `client.addDownload()` succeeds and `DownloadHistory` record created → request_grabbed
+- `message` field: `"${torrent.title} via ${indexer} (${clientType})"`
+- `requestType`: from `request.type` (audiobook/ebook)
 
 **Audiobook Available (processors: scan-plex, plex-recently-added)**
 - After `status: 'available'` update → request_available (requestType: 'audiobook')

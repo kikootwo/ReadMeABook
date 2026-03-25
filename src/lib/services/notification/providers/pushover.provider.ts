@@ -91,7 +91,9 @@ export class PushoverProvider implements INotificationProvider {
     ];
 
     if (message) {
-      messageLines.push('', isIssue ? `\u{1F4DD} Reason: ${message}` : `\u26A0\uFE0F Error: ${message}`);
+      const messageLabel = meta.messageLabel ?? 'Error';
+      const msgEmoji = meta.severity === 'error' ? '\u26A0\uFE0F' : '\u{1F4DD}';
+      messageLines.push('', `${msgEmoji} ${messageLabel}: ${message}`);
     }
 
     return {
