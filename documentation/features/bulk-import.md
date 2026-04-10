@@ -13,9 +13,13 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 ## Key Details
 - **Access:** Admin-only, modal opened from admin dashboard Quick Actions
 - **Audio detection:** Uses `AUDIO_EXTENSIONS` from `src/lib/constants/audio-formats.ts`
-- **Audiobook boundary:** A folder containing audio files = one audiobook; subfolders not scanned further
-- **Metadata extraction:** ffprobe reads `album` (title), `album_artist` (author), `composer` (narrator) from first audio file
-- **Fallback:** If metadata tags are empty, folder name used as search term; "Low Confidence" badge shown
+- **Audiobook boundary:** A folder containing audio files = one audiobook. Files with matching metadata tags are grouped by title+author+narrator. Files with no metadata title tag are all grouped together per folder (one entry, not one per file).
+- **Metadata extraction:** ffprobe reads `album` (title), `album_artist` (author), `composer` (narrator) from all audio files in folder
+- **Search term fallback chain** (when no `album` tag):
+  1. **ASIN in folder name** — scans folder name for pattern `B[A-Z0-9]{9}` bounded by bracket/paren/space; if found, uses direct ASIN lookup instead of text search; no badge shown
+  2. **Folder name** — cleaned (strips bracketed ASIN/year, underscores→spaces); skipped if generic (CD1, Disc 2, Part 3, Vol 1, etc.); shows "Low Confidence" badge
+  3. **First file name** — last resort; shows "Low Confidence" badge
+- **Generic folder detection:** `/^(cd|disc|disk|part|vol(ume)?)\s*\d+$/i` — these names are skipped as search terms
 - **Author/narrator dedup:** Splits on `,;& ` delimiters, removes names appearing in both fields
 - **Scan depth:** Max 10 levels recursion
 - **Rate limiting:** 1.5s delay between Audible searches (same as existing scraping rate limit)
@@ -56,7 +60,8 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 | Already in library | 40% opacity, green "In Library" badge, toggle disabled |
 | Active request exists | 40% opacity, purple "Requested" badge, toggle disabled |
 | No Audible match | Red "No Match" badge, folder name shown, pre-skipped |
-| Low confidence (folder name fallback) | Amber "Low Confidence" badge |
+| ASIN extracted from folder name | No badge (high confidence — direct ASIN lookup) |
+| Low confidence (folder name or file name fallback, no ASIN) | Amber "Low Confidence" badge |
 
 ## Files
 

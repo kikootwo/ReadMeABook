@@ -21,6 +21,12 @@ export const MAX_SCAN_DEPTH = 10;
 /** Maximum concurrent ffprobe calls for metadata reads. */
 const METADATA_CONCURRENCY = 10;
 
+/**
+ * Folder names matching this pattern are considered generic and should not be
+ * used as Audible search terms (e.g. "CD1", "Disc 2", "Part 3", "Volume 1").
+ */
+const GENERIC_FOLDER_NAME_RE = /^(cd|disc|disk|part|vol(ume)?)\s*\d+$/i;
+
 /** Metadata extracted from an audio file via ffprobe. */
 export interface AudioFileMetadata {
   title?: string;              // From 'album' tag (book title)
@@ -39,7 +45,8 @@ export interface DiscoveredAudiobook {
   totalSizeBytes: number;
   metadata: AudioFileMetadata;
   searchTerm: string;         // Constructed search query for Audible
-  metadataSource: 'tags' | 'file_name';  // Where the search term came from
+  metadataSource: 'tags' | 'folder_name' | 'file_name';  // Where the search term came from
+  extractedAsin?: string;     // ASIN extracted directly from folder name, if present
   audioFiles: string[];       // File names (relative to folderPath) belonging to this book
   groupingKey: string;        // Normalized key for cross-folder deduplication
 }
@@ -58,6 +65,18 @@ export interface ScanProgress {
 function isAudioFile(filename: string): boolean {
   const ext = path.extname(filename).toLowerCase();
   return (AUDIO_EXTENSIONS as readonly string[]).includes(ext);
+}
+
+/**
+ * Extract an Audible ASIN from a string (typically a folder name).
+ * Audible ASINs start with 'B' and are exactly 10 alphanumeric characters.
+ * The ASIN must be bounded by a bracket, parenthesis, whitespace, or string
+ * boundary to avoid false positives from random alphanumeric sequences.
+ * Returns the ASIN string or null if not found.
+ */
+export function extractAsinFromString(str: string): string | null {
+  const match = str.match(/(?:^|[\s\[\(])([B][A-Z0-9]{9})(?:$|[\s\]\)])/);
+  return match ? match[1] : null;
 }
 
 /**
@@ -140,15 +159,36 @@ export function deduplicateNames(
 }
 
 /**
- * Build a search term from metadata or file name.
+ * Clean a raw string (folder name or file name) for use as an Audible search term.
+ * Strips file extension, bracketed ASINs, bracketed years, leading track numbers,
+ * underscores, and collapses whitespace.
+ */
+function cleanSearchString(raw: string): string {
+  return raw
+    .replace(/\.[^.]+$/, '')                       // Remove file extension
+    .replace(/[\[\(][A-Z0-9]{10}[\]\)]/g, '')     // Remove ASIN in brackets
+    .replace(/[\[\(]\d{4}[\]\)]/g, '')             // Remove year in brackets
+    .replace(/^\d+[\s._-]+/, '')                   // Remove leading track numbers
+    .replace(/[_]/g, ' ')                           // Underscores to spaces
+    .replace(/\s+/g, ' ')                           // Collapse whitespace
+    .trim();
+}
+
+/**
+ * Build a search term from metadata or folder/file name.
  * Returns the search term and the source it was derived from.
+ *
+ * Fallback chain (when no album metadata tag is present):
+ *   1. Folder name — if provided and not a generic name (CD1, Disc 2, Part 3, etc.)
+ *   2. First audio file name — last resort, always available
+ *
  * When metadata tags are present, constructs "Title Author Narrator ContributingArtists".
- * When tags are empty, falls back to the first audio file's name (cleaned).
  */
 export function buildSearchTerm(
   metadata: AudioFileMetadata,
-  firstFileName: string
-): { searchTerm: string; source: 'tags' | 'file_name' } {
+  firstFileName: string,
+  folderName?: string
+): { searchTerm: string; source: 'tags' | 'folder_name' | 'file_name' } {
   const { author, narrator, contributingArtists } = deduplicateNames(
     metadata.author,
     metadata.narrator,
@@ -165,23 +205,23 @@ export function buildSearchTerm(
     return { searchTerm: parts.join(' '), source: 'tags' };
   }
 
-  // Fallback: clean up the first audio file name and use it as search term
-  const cleaned = firstFileName
-    .replace(/\.[^.]+$/, '')                       // Remove file extension
-    .replace(/[\[\(][A-Z0-9]{10}[\]\)]/g, '')     // Remove ASIN in brackets
-    .replace(/[\[\(]\d{4}[\]\)]/g, '')             // Remove year in brackets
-    .replace(/^\d+[\s._-]+/, '')                   // Remove leading track numbers
-    .replace(/[_]/g, ' ')                           // Underscores to spaces
-    .replace(/\s+/g, ' ')                           // Collapse whitespace
-    .trim();
+  // Fallback 1: folder name (if provided and not generic)
+  if (folderName && !GENERIC_FOLDER_NAME_RE.test(folderName.trim())) {
+    const cleaned = cleanSearchString(folderName);
+    if (cleaned) {
+      return { searchTerm: cleaned, source: 'folder_name' };
+    }
+  }
 
+  // Fallback 2: first audio file name
+  const cleaned = cleanSearchString(firstFileName);
   return { searchTerm: cleaned || firstFileName, source: 'file_name' };
 }
 
 /**
  * Build a normalized grouping key from metadata.
  * Used to determine which files belong to the same book.
- * Returns null if metadata has no title (ungroupable).
+ * Returns null if metadata has no title (ungroupable by metadata).
  */
 function buildGroupingKey(metadata: AudioFileMetadata): string | null {
   if (!metadata.title) return null;
@@ -259,17 +299,23 @@ async function asyncPool<T, R>(
  * Group audio files in a directory by their metadata.
  * Reads metadata from all files using a concurrency pool, then groups them
  * by a normalized key of title + author + narrator.
- * Files with no metadata title each become their own group.
+ *
+ * Files with a metadata title are grouped by their shared key. Files with no
+ * metadata title are all grouped together under a single '__ungrouped_folder'
+ * key (rather than one entry per file), treating the folder as one book.
+ * If a folder contains both tagged and untagged files, the untagged files form
+ * one extra group alongside the tagged groups.
  */
 async function groupAudioFilesByMetadata(
   dirPath: string,
   audioFiles: string[],
-  audioSizes: Map<string, number>
+  audioSizes: Map<string, number>,
+  folderName: string
 ): Promise<Array<{
   files: string[];
   totalSize: number;
   metadata: AudioFileMetadata;
-  metadataSource: 'tags' | 'file_name';
+  metadataSource: 'tags' | 'folder_name' | 'file_name';
   searchTerm: string;
   groupingKey: string;
 }>> {
@@ -291,14 +337,12 @@ async function groupAudioFilesByMetadata(
     metadata: AudioFileMetadata;
   }>();
 
-  let ungroupedCounter = 0;
-
   for (const { fileName, metadata } of metadataResults) {
     const key = buildGroupingKey(metadata);
     const fileSize = audioSizes.get(fileName) || 0;
 
     if (key) {
-      // Has metadata — group with others sharing the same key
+      // Has metadata title — group with others sharing the same key
       const existing = groups.get(key);
       if (existing) {
         existing.files.push(fileName);
@@ -311,20 +355,28 @@ async function groupAudioFilesByMetadata(
         });
       }
     } else {
-      // No title metadata — treat as individual book
-      const uniqueKey = `__ungrouped_${ungroupedCounter++}`;
-      groups.set(uniqueKey, {
-        files: [fileName],
-        totalSize: fileSize,
-        metadata,
-      });
+      // No title metadata — collect all such files under one folder-level group.
+      // Key must start with '__ungrouped_' so deduplicateDiscoveries treats it
+      // as unique per folder (prefixes it with folderPath before deduplication).
+      const ungroupedKey = '__ungrouped_folder';
+      const existing = groups.get(ungroupedKey);
+      if (existing) {
+        existing.files.push(fileName);
+        existing.totalSize += fileSize;
+      } else {
+        groups.set(ungroupedKey, {
+          files: [fileName],
+          totalSize: fileSize,
+          metadata,
+        });
+      }
     }
   }
 
   // Build result with search terms
   return Array.from(groups.entries()).map(([groupingKey, group]) => {
     group.files.sort((a, b) => a.localeCompare(b));
-    const { searchTerm, source } = buildSearchTerm(group.metadata, group.files[0]);
+    const { searchTerm, source } = buildSearchTerm(group.metadata, group.files[0], folderName);
     return {
       files: group.files,
       totalSize: group.totalSize,
@@ -398,6 +450,7 @@ function deduplicateDiscoveries(
       metadata: first.metadata,
       searchTerm: first.searchTerm,
       metadataSource: first.metadataSource,
+      extractedAsin: first.extractedAsin,
       audioFiles: combinedFiles,
       groupingKey: first.groupingKey,
     });
@@ -434,9 +487,10 @@ function findCommonParent(paths: string[]): string {
  *
  * Scans every folder for audio files. When audio files are found, they are
  * grouped by metadata (title + author + narrator) — each group becomes a
- * separate discovered audiobook. Files with no metadata are treated as
- * individual books. Scanning ALWAYS recurses into subfolders regardless of
- * whether the current folder has audio files.
+ * separate discovered audiobook. Files with no metadata are all grouped
+ * together per folder (treated as one book) rather than one entry per file.
+ * Scanning ALWAYS recurses into subfolders regardless of whether the current
+ * folder has audio files.
  *
  * After the full walk, discoveries sharing the same grouping key across
  * different folders (e.g., CD1/ and CD2/) are merged.
@@ -460,11 +514,13 @@ export async function discoverAudiobooks(
 
     foldersScanned++;
 
+    const folderName = path.basename(currentPath);
+
     onProgress?.({
       phase: 'discovering',
       foldersScanned,
       audiobooksFound: results.length,
-      currentFolder: path.basename(currentPath),
+      currentFolder: folderName,
     });
 
     // Check if this folder contains audio files
@@ -486,18 +542,21 @@ export async function discoverAudiobooks(
         phase: 'grouping',
         foldersScanned,
         audiobooksFound: results.length,
-        currentFolder: path.basename(currentPath),
+        currentFolder: folderName,
       });
 
-      // Group audio files by metadata
+      // Group audio files by metadata, passing folder name for fallback search terms
       const groups = await groupAudioFilesByMetadata(
         currentPath,
         audioResult.audioFiles,
-        audioSizes
+        audioSizes,
+        folderName
       );
 
-      const folderName = path.basename(currentPath);
       const relativePath = path.relative(rootPath, currentPath).replace(/\\/g, '/');
+
+      // Extract ASIN from folder name once for all groups in this folder
+      const extractedAsin = extractAsinFromString(folderName) ?? undefined;
 
       for (const group of groups) {
         results.push({
@@ -509,6 +568,7 @@ export async function discoverAudiobooks(
           metadata: group.metadata,
           searchTerm: group.searchTerm,
           metadataSource: group.metadataSource,
+          extractedAsin,
           audioFiles: group.files,
           groupingKey: group.groupingKey,
         });
@@ -518,7 +578,7 @@ export async function discoverAudiobooks(
         phase: 'reading_metadata',
         foldersScanned,
         audiobooksFound: results.length,
-        currentFolder: path.basename(currentPath),
+        currentFolder: folderName,
       });
     }
 
