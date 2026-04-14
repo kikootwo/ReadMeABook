@@ -108,6 +108,7 @@ export class QBittorrentService implements IDownloadClient {
   private username: string;
   private password: string;
   private cookie?: string;
+  private authOptional: boolean = false;
   private defaultSavePath: string;
   private defaultCategory: string;
   private disableSSLVerify: boolean;
@@ -207,26 +208,22 @@ export class QBittorrentService implements IDownloadClient {
       }
 
       if (!this.cookie) {
-        logger.error('[QBittorrent] No cookie received in response');
-        throw new Error('Failed to authenticate with qBittorrent');
+        logger.info('[QBittorrent] No cookie received — server may not require authentication, proceeding without auth');
+        this.authOptional = true;
+      } else {
+        logger.info('Successfully authenticated');
       }
-
-      logger.info('Successfully authenticated');
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        logger.error('[QBittorrent] Login failed with axios error', {
+        logger.warn('[QBittorrent] Login failed, proceeding without auth (server may not require it)', {
           message: error.message,
           code: error.code,
           status: error.response?.status,
-          statusText: error.response?.statusText,
-          responseData: error.response?.data,
-          requestUrl: error.config?.url,
-          requestHeaders: error.config?.headers,
         });
       } else {
-        logger.error('Login failed', { error: error instanceof Error ? error.message : String(error) });
+        logger.warn('[QBittorrent] Login failed, proceeding without auth', { error: error instanceof Error ? error.message : String(error) });
       }
-      throw new Error('Failed to authenticate with qBittorrent');
+      this.authOptional = true;
     }
   }
 
@@ -241,7 +238,7 @@ export class QBittorrentService implements IDownloadClient {
     }
 
     // Ensure we're authenticated
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
@@ -322,7 +319,7 @@ export class QBittorrentService implements IDownloadClient {
 
     const response = await this.client.post('/torrents/add', form, {
       headers: {
-        Cookie: this.cookie,
+        ...(this.cookie ? { Cookie: this.cookie } : {}),
         'Content-Type': 'application/x-www-form-urlencoded',
       },
     });
@@ -470,7 +467,7 @@ export class QBittorrentService implements IDownloadClient {
 
     const response = await this.client.post('/torrents/add', formData, {
       headers: {
-        Cookie: this.cookie,
+        ...(this.cookie ? { Cookie: this.cookie } : {}),
         ...formData.getHeaders(),
       },
       maxBodyLength: Infinity,
@@ -491,7 +488,7 @@ export class QBittorrentService implements IDownloadClient {
    * Applies reverse path mapping (local → remote) for remote seedbox scenarios
    */
   protected async ensureCategory(category: string): Promise<void> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
@@ -501,7 +498,7 @@ export class QBittorrentService implements IDownloadClient {
     try {
       // First, get all categories to check if it exists and what save path it has
       const categoriesResponse = await this.client.get('/torrents/categories', {
-        headers: { Cookie: this.cookie },
+        headers: { ...(this.cookie ? { Cookie: this.cookie } : {}) },
       });
 
       const categories = categoriesResponse.data;
@@ -519,7 +516,7 @@ export class QBittorrentService implements IDownloadClient {
           }),
           {
             headers: {
-              Cookie: this.cookie,
+              ...(this.cookie ? { Cookie: this.cookie } : {}),
               'Content-Type': 'application/x-www-form-urlencoded',
             },
           }
@@ -541,7 +538,7 @@ export class QBittorrentService implements IDownloadClient {
             }),
             {
               headers: {
-                Cookie: this.cookie,
+                ...(this.cookie ? { Cookie: this.cookie } : {}),
                 'Content-Type': 'application/x-www-form-urlencoded',
               },
             }
@@ -572,13 +569,13 @@ export class QBittorrentService implements IDownloadClient {
    * Get torrent status and progress
    */
   async getTorrent(hash: string): Promise<TorrentInfo> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
     try {
       const response = await this.client.get('/torrents/info', {
-        headers: { Cookie: this.cookie },
+        headers: { ...(this.cookie ? { Cookie: this.cookie } : {}) },
         params: { hashes: hash },
       });
 
@@ -610,7 +607,7 @@ export class QBittorrentService implements IDownloadClient {
    * Get all torrents (optionally filtered by category)
    */
   async getTorrents(category?: string): Promise<TorrentInfo[]> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
@@ -621,7 +618,7 @@ export class QBittorrentService implements IDownloadClient {
       }
 
       const response = await this.client.get('/torrents/info', {
-        headers: { Cookie: this.cookie },
+        headers: { ...(this.cookie ? { Cookie: this.cookie } : {}) },
         params,
       });
 
@@ -636,7 +633,7 @@ export class QBittorrentService implements IDownloadClient {
    * Pause torrent
    */
   async pauseTorrent(hash: string): Promise<void> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
@@ -646,7 +643,7 @@ export class QBittorrentService implements IDownloadClient {
         new URLSearchParams({ hashes: hash }),
         {
           headers: {
-            Cookie: this.cookie,
+            ...(this.cookie ? { Cookie: this.cookie } : {}),
             'Content-Type': 'application/x-www-form-urlencoded',
           },
         }
@@ -663,7 +660,7 @@ export class QBittorrentService implements IDownloadClient {
    * Resume torrent
    */
   async resumeTorrent(hash: string): Promise<void> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
@@ -673,7 +670,7 @@ export class QBittorrentService implements IDownloadClient {
         new URLSearchParams({ hashes: hash }),
         {
           headers: {
-            Cookie: this.cookie,
+            ...(this.cookie ? { Cookie: this.cookie } : {}),
             'Content-Type': 'application/x-www-form-urlencoded',
           },
         }
@@ -690,7 +687,7 @@ export class QBittorrentService implements IDownloadClient {
    * Delete torrent
    */
   async deleteTorrent(hash: string, deleteFiles: boolean = false): Promise<void> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
@@ -703,7 +700,7 @@ export class QBittorrentService implements IDownloadClient {
         }),
         {
           headers: {
-            Cookie: this.cookie,
+            ...(this.cookie ? { Cookie: this.cookie } : {}),
             'Content-Type': 'application/x-www-form-urlencoded',
           },
         }
@@ -720,13 +717,13 @@ export class QBittorrentService implements IDownloadClient {
    * Get files in torrent
    */
   async getFiles(hash: string): Promise<TorrentFile[]> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
     try {
       const response = await this.client.get('/torrents/files', {
-        headers: { Cookie: this.cookie },
+        headers: { ...(this.cookie ? { Cookie: this.cookie } : {}) },
         params: { hash },
       });
 
@@ -741,13 +738,13 @@ export class QBittorrentService implements IDownloadClient {
    * Get all configured categories from qBittorrent
    */
   async getCategories(): Promise<string[]> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
     try {
       const response = await this.client.get('/torrents/categories', {
-        headers: { Cookie: this.cookie },
+        headers: { ...(this.cookie ? { Cookie: this.cookie } : {}) },
       });
 
       return Object.keys(response.data || {});
@@ -761,7 +758,7 @@ export class QBittorrentService implements IDownloadClient {
    * Set category for torrent
    */
   async setCategory(hash: string, category: string): Promise<void> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
@@ -774,7 +771,7 @@ export class QBittorrentService implements IDownloadClient {
         }),
         {
           headers: {
-            Cookie: this.cookie,
+            ...(this.cookie ? { Cookie: this.cookie } : {}),
             'Content-Type': 'application/x-www-form-urlencoded',
           },
         }
@@ -798,7 +795,7 @@ export class QBittorrentService implements IDownloadClient {
       let version: string | undefined;
       try {
         const versionResponse = await this.client.get('/app/version', {
-          headers: { Cookie: this.cookie },
+          headers: { ...(this.cookie ? { Cookie: this.cookie } : {}) },
         });
         const raw = versionResponse.data || '';
         version = typeof raw === 'string' ? raw.replace(/^v/i, '') : undefined;
