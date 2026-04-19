@@ -34,7 +34,9 @@ export interface ScannedBook {
   relativePath: string;
   audioFileCount: number;
   totalSizeBytes: number;
-  metadataSource: 'tags' | 'file_name';
+  metadataSource: 'tags' | 'folder_name' | 'file_name';
+  /** ASIN extracted directly from the folder name, if present. */
+  extractedAsin?: string;
   searchTerm: string;
   audioFiles: string[];
   match: AudibleMatch | null;

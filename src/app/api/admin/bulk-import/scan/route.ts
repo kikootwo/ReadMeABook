@@ -159,10 +159,42 @@ export async function POST(request: NextRequest) {
               let hasActiveRequest = false;
 
               try {
-                const searchResult = await audibleService.search(book.searchTerm);
+                // If the scanner extracted an ASIN directly from the folder name,
+                // use a direct ASIN lookup (Audnexus API) — more reliable than a
+                // keyword text search. Fall back to text search if the lookup fails.
+                if (book.extractedAsin) {
+                  try {
+                    const asinResult = await audibleService.lookupAsinFast(book.extractedAsin);
+                    if (asinResult) {
+                      match = asinResult;
+                    }
+                  } catch {
+                    /* ASIN lookup failed — fall through to text search */
+                  }
+                }
 
-                if (searchResult.results.length > 0) {
-                  match = searchResult.results[0];
+                if (!match) {
+                  // When an ASIN was extracted from the folder name but the direct
+                  // lookup failed, prefer the folder name as the text search term
+                  // over book.searchTerm. book.searchTerm may come from a single
+                  // tagged file whose album tag is unreliable (e.g. a series name
+                  // or intro track), whereas the folder name is the human-assigned
+                  // title and is more likely to be accurate.
+                  const textSearchTerm = book.extractedAsin
+                    ? book.folderName
+                        .replace(/[\[\(][A-Z0-9]{10}[\]\)]/g, '') // strip ASIN
+                        .replace(/[\[\(]\d{4}[\]\)]/g, '')         // strip year
+                        .replace(/[_]/g, ' ')
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                    : book.searchTerm;
+                  const searchResult = await audibleService.search(textSearchTerm);
+                  if (searchResult.results.length > 0) {
+                    match = searchResult.results[0];
+                  }
+                }
+
+                if (match) {
 
                   // Check library availability
                   const plexMatch = await findPlexMatch({
@@ -208,6 +240,7 @@ export async function POST(request: NextRequest) {
                 audioFileCount: book.audioFileCount,
                 totalSizeBytes: book.totalSizeBytes,
                 metadataSource: book.metadataSource,
+                extractedAsin: book.extractedAsin,
                 searchTerm: book.searchTerm,
                 audioFiles: book.audioFiles,
                 match: match

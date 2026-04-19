@@ -39,7 +39,12 @@ function BookRow({
   const isDisabled = book.inLibrary || book.hasActiveRequest;
   const isSkipped = book.skipped;
   const hasMatch = book.match !== null;
-  const isLowConfidence = book.metadataSource === 'file_name';
+  // Low confidence when search term came from a filename or folder name fallback,
+  // BUT not when an ASIN was extracted directly from the folder name (that's a
+  // direct lookup and is as reliable as embedded metadata tags).
+  const isLowConfidence =
+    (book.metadataSource === 'file_name' || book.metadataSource === 'folder_name') &&
+    !book.extractedAsin;
 
   return (
     <div

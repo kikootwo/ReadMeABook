@@ -739,6 +739,56 @@ export class AudibleService {
   }
 
   /**
+   * Fast ASIN lookup for bulk import contexts.
+   * Tries Audnexus first (5s timeout, 1 retry), then Audible scraping once (0 retries).
+   * Fails fast so the caller can fall back to a text search quickly.
+   */
+  async lookupAsinFast(asin: string): Promise<AudibleAudiobook | null> {
+    await this.initialize();
+
+    // 1. Try Audnexus with tight limits
+    try {
+      const audnexusRegion = AUDIBLE_REGIONS[this.region].audnexusParam;
+      const response = await this.externalFetchWithRetry(
+        `https://api.audnex.us/books/${asin}`,
+        {
+          params: { region: audnexusRegion },
+          timeout: 5000,
+          headers: { 'User-Agent': 'ReadMeABook/1.0' },
+        },
+        1 // 1 retry max
+      );
+      const data = response.data;
+      const result: AudibleAudiobook = {
+        asin,
+        title: data.title || '',
+        author: data.authors?.map((a: any) => a.name).join(', ') || '',
+        authorAsin: data.authors?.[0]?.asin || undefined,
+        narrator: data.narrators?.map((n: any) => n.name).join(', ') || '',
+        description: data.description || data.summary || '',
+        coverArtUrl: data.image || '',
+        durationMinutes: data.runtimeLengthMin ? parseInt(data.runtimeLengthMin) : undefined,
+        releaseDate: data.releaseDate || undefined,
+        rating: data.rating ? parseFloat(data.rating) : undefined,
+        genres: data.genres?.map((g: any) => typeof g === 'string' ? g : g.name).slice(0, 5) || undefined,
+        series: data.seriesPrimary?.name || undefined,
+        seriesPart: data.seriesPrimary?.position || undefined,
+        seriesAsin: data.seriesPrimary?.asin || undefined,
+      };
+      if (result.coverArtUrl && !result.coverArtUrl.includes('_SL500_')) {
+        result.coverArtUrl = result.coverArtUrl.replace(/\._.*_\./, '._SL500_.');
+      }
+      logger.info(` lookupAsinFast: Audnexus hit for "${result.title}" (${asin})`);
+      return result;
+    } catch {
+      logger.debug(` lookupAsinFast: Audnexus miss for ${asin}, trying Audible scraping...`);
+    }
+
+    // 2. Try Audible scraping once — no retries
+    return await this.scrapeAudibleDetails(asin, 0);
+  }
+
+  /**
    * Fetch audiobook details from Audnexus API
    */
   private async fetchFromAudnexus(asin: string): Promise<AudibleAudiobook | null> {
@@ -807,14 +857,15 @@ export class AudibleService {
 
   /**
    * Scrape audiobook details from Audible (fallback method)
+   * @param maxRetries - Maximum retry attempts (default 5). Pass 0 for a single attempt with no retries.
    */
-  private async scrapeAudibleDetails(asin: string): Promise<AudibleAudiobook | null> {
+  private async scrapeAudibleDetails(asin: string, maxRetries: number = 5): Promise<AudibleAudiobook | null> {
     try {
       const { data: response } = await this.fetchWithRetry(`/pd/${asin}`, {
         params: {
           ipRedirectOverride: 'true', // Explicitly include to prevent IP-based region redirects
         },
-      });
+      }, maxRetries);
       const $ = cheerio.load(response.data);
 
       // Initialize result object
