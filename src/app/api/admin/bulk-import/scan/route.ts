@@ -160,31 +160,27 @@ export async function POST(request: NextRequest) {
 
               try {
                 // If the scanner extracted an ASIN directly from the folder name,
-                // try an exact ASIN lookup first — faster and more accurate than
-                // a text search. Fall back to text search if it fails or returns
-                // no result.
-                let searchResult: Awaited<ReturnType<typeof audibleService.search>> | null = null;
-
+                // use a direct ASIN lookup (Audnexus API) — more reliable than a
+                // keyword text search. Fall back to text search if the lookup fails.
                 if (book.extractedAsin) {
                   try {
-                    const asinResult = await audibleService.search(book.extractedAsin);
-                    if (
-                      asinResult.results.length > 0 &&
-                      asinResult.results[0].asin === book.extractedAsin
-                    ) {
-                      searchResult = asinResult;
+                    const asinResult = await audibleService.getAudiobookDetails(book.extractedAsin);
+                    if (asinResult) {
+                      match = asinResult;
                     }
                   } catch {
                     /* ASIN lookup failed — fall through to text search */
                   }
                 }
 
-                if (!searchResult) {
-                  searchResult = await audibleService.search(book.searchTerm);
+                if (!match) {
+                  const searchResult = await audibleService.search(book.searchTerm);
+                  if (searchResult.results.length > 0) {
+                    match = searchResult.results[0];
+                  }
                 }
 
-                if (searchResult.results.length > 0) {
-                  match = searchResult.results[0];
+                if (match) {
 
                   // Check library availability
                   const plexMatch = await findPlexMatch({
