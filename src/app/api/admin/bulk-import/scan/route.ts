@@ -174,7 +174,21 @@ export async function POST(request: NextRequest) {
                 }
 
                 if (!match) {
-                  const searchResult = await audibleService.search(book.searchTerm);
+                  // When an ASIN was extracted from the folder name but the direct
+                  // lookup failed, prefer the folder name as the text search term
+                  // over book.searchTerm. book.searchTerm may come from a single
+                  // tagged file whose album tag is unreliable (e.g. a series name
+                  // or intro track), whereas the folder name is the human-assigned
+                  // title and is more likely to be accurate.
+                  const textSearchTerm = book.extractedAsin
+                    ? book.folderName
+                        .replace(/[\[\(][A-Z0-9]{10}[\]\)]/g, '') // strip ASIN
+                        .replace(/[\[\(]\d{4}[\]\)]/g, '')         // strip year
+                        .replace(/[_]/g, ' ')
+                        .replace(/\s+/g, ' ')
+                        .trim()
+                    : book.searchTerm;
+                  const searchResult = await audibleService.search(textSearchTerm);
                   if (searchResult.results.length > 0) {
                     match = searchResult.results[0];
                   }
