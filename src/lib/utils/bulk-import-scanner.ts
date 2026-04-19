@@ -373,6 +373,23 @@ async function groupAudioFilesByMetadata(
     }
   }
 
+  // If there is exactly one tagged group alongside an ungrouped group, absorb
+  // the untagged files into the tagged group. Untagged files in the same folder
+  // almost certainly belong to the same book (e.g. one chapter was ripped
+  // without tags, or a cover/intro file carries different metadata).
+  // Only do this when there is a single tagged group — multiple tagged groups
+  // mean genuinely different books are mixed in the folder, so keep them separate.
+  const ungrouped = groups.get('__ungrouped_folder');
+  if (ungrouped) {
+    const taggedKeys = Array.from(groups.keys()).filter((k) => k !== '__ungrouped_folder');
+    if (taggedKeys.length === 1) {
+      const taggedGroup = groups.get(taggedKeys[0])!;
+      taggedGroup.files.push(...ungrouped.files);
+      taggedGroup.totalSize += ungrouped.totalSize;
+      groups.delete('__ungrouped_folder');
+    }
+  }
+
   // Build result with search terms
   return Array.from(groups.entries()).map(([groupingKey, group]) => {
     group.files.sort((a, b) => a.localeCompare(b));
