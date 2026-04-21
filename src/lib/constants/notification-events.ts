@@ -19,6 +19,7 @@ export type NotificationPriority = 'normal' | 'high';
  * - `emoji`:              Emoji prefix for notification titles
  * - `severity`:           Drives provider formatting (colors, Apprise types, ntfy tags)
  * - `priority`:           Drives notification urgency (Pushover/ntfy priority levels)
+ * - `messageLabel`:       Optional label for the `message` payload field (defaults to "Error" if omitted)
  */
 export const NOTIFICATION_EVENTS = {
   request_pending_approval: {
@@ -34,6 +35,18 @@ export const NOTIFICATION_EVENTS = {
     emoji: '\u2705',
     severity: 'success' as const,
     priority: 'normal' as const,
+  },
+  request_grabbed: {
+    label: 'Request Grabbed',
+    title: 'Download Grabbed',
+    titleByRequestType: {
+      audiobook: 'Audiobook Grabbed',
+      ebook: 'Ebook Grabbed',
+    } as Record<string, string>,
+    emoji: '\u{1F4E5}',
+    severity: 'info' as const,
+    priority: 'normal' as const,
+    messageLabel: 'Details',
   },
   request_available: {
     label: 'Request Available',
@@ -59,6 +72,7 @@ export const NOTIFICATION_EVENTS = {
     emoji: '\u{1F6A9}',
     severity: 'warning' as const,
     priority: 'high' as const,
+    messageLabel: 'Reason',
   },
 } as const;
 
@@ -71,9 +85,24 @@ export const NOTIFICATION_EVENT_KEYS = Object.keys(NOTIFICATION_EVENTS) as [Noti
 /** Metadata shape for a single notification event */
 export type NotificationEventMeta = (typeof NOTIFICATION_EVENTS)[NotificationEvent];
 
+/**
+ * Normalized interface for event metadata consumed by providers.
+ * Broadens the `as const` literal union to make optional fields accessible.
+ */
+export interface NotificationEventConfig {
+  label: string;
+  title: string;
+  titleByRequestType?: Record<string, string>;
+  emoji: string;
+  severity: NotificationSeverity;
+  priority: NotificationPriority;
+  /** Label for the `message` payload field. Defaults to "Error" in providers when absent. */
+  messageLabel?: string;
+}
+
 /** Helper: get event metadata by key */
-export function getEventMeta(event: NotificationEvent) {
-  return NOTIFICATION_EVENTS[event];
+export function getEventMeta(event: NotificationEvent): NotificationEventConfig {
+  return NOTIFICATION_EVENTS[event] as NotificationEventConfig;
 }
 
 /**

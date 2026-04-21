@@ -71,7 +71,7 @@ export class DiscordProvider implements INotificationProvider {
     ];
 
     if (message) {
-      fields.push({ name: isIssue ? 'Reason' : 'Error', value: message, inline: false });
+      fields.push({ name: meta.messageLabel ?? 'Error', value: message, inline: false });
     }
 
     return {
