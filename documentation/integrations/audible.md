@@ -1,104 +1,120 @@
 # Audible Integration
 
-**Status:** ✅ Implemented (Audnexus API + Web Scraping)
+**Status:** Implemented | Unauthenticated Audible JSON catalog API (primary) + Audnexus API (per-ASIN details)
 
-Audiobook metadata from Audnexus API (primary) and Audible.com scraping (fallback) for discovery, search, and detail pages.
+## Overview
 
-## Detail Page Strategy
+Audiobook metadata for discovery, search, and detail pages. All catalog operations (search, popular, new releases, categories, category books, author books, single-product details) now call Audible's unauthenticated public JSON catalog API (`api.audible.<tld>/1.0/catalog/*`). Per-ASIN detail lookups prefer Audnexus; the catalog API is used as fallback.
 
-**Primary: Audnexus API**
-- Endpoint: `https://api.audnex.us/books/{asin}`
-- Structured JSON response (no parsing needed)
-- Provides: title, authors, narrators, description, duration, rating, genres, cover art
-- Free, no API key required
-- ~95% success rate for popular audiobooks
+## Architecture
 
-**Fallback: Audible Scraping**
-- Used when Audnexus returns 404
-- Parse Audible HTML with Cheerio
-- Multiple selector strategies with promotional text filtering
-- Extract JSON-LD structured data when available
+- **Primary data source:** Audible JSON catalog API, same endpoint used by the official Audible mobile apps. No authentication, no API key, no user credentials, no special headers.
+- **Per-ASIN details:** Audnexus (`api.audnex.us/books/{asin}`) remains primary; catalog API (`/1.0/catalog/products/{asin}`) is the fallback when Audnexus returns 404.
+- **HTML scraping:** Removed from `audible.service.ts`. The only remaining HTML path is `audible-series.ts` (series-page scraping, out of scope).
+- **`www.audible.<tld>`:** Still used by `audible-series.ts` and by `getBaseUrl()` for "View on Audible" link generation. Not used for any catalog operation.
+
+## Data Sources
+
+All catalog operations are HTTP GET against `{apiBaseUrl}` (region-dependent, e.g. `https://api.audible.com`):
+
+| Operation | Endpoint | Key params |
+|---|---|---|
+| Search | `/1.0/catalog/products` | `keywords=<q>` |
+| Author books | `/1.0/catalog/products` | `author=<name>` (name, NOT ASIN) |
+| Popular | `/1.0/catalog/products` | `products_sort_by=BestSellers` |
+| New releases | `/1.0/catalog/products` | `products_sort_by=-ReleaseDate` |
+| Category books | `/1.0/catalog/products` | `category_id=<id>&products_sort_by=BestSellers` |
+| Categories listing | `/1.0/catalog/categories` | (none) |
+| Single product | `/1.0/catalog/products/{asin}` | — |
+| Audnexus (per-ASIN) | `https://api.audnex.us/books/{asin}` | `region={audnexusParam}` |
+
+All `products` endpoints share:
+- `num_results` — max **50** (service constant `AUDIBLE_PAGE_SIZE = 50`)
+- `page` — **0-indexed at the API** (service public interface is 1-indexed; the service subtracts 1 at the call site). See Gotchas.
+- `response_groups=<CATALOG_RESPONSE_GROUPS>`
+
+## `response_groups` Constant
+
+`CATALOG_RESPONSE_GROUPS = 'contributors,product_desc,product_attrs,product_extended_attrs,media,rating,series,category_ladders,product_details'`
+
+Populates every `AudibleAudiobook` field. Covered:
+- `contributors` → authors (with ASINs), narrators
+- `product_desc` → `publisher_summary`, `merchandising_summary`
+- `product_attrs` / `product_extended_attrs` / `product_details` → title, release_date, language, runtime_length_min
+- `media` → `product_images` (cover URLs, uses `500` variant)
+- `rating` → `overall_distribution.display_stars`
+- `series` → array of `{asin, title, sequence}`
+- `category_ladders` → genre names (deduped, capped at 5)
+
+## Gotchas
+
+- **`author=` takes a name, not an ASIN.** The catalog API has no ASIN-based author param. `searchByAuthorAsin()` queries by name, then filters client-side: keeps only products where `products[].authors[].asin === authorAsin`. Preserves ASIN-authoritative author identity. Also filters by `product.language` via `isAcceptedLanguage()` for the configured region.
+- **Invalid ASIN returns HTTP 200 with stub body.** `/1.0/catalog/products/{asin}` responds 200 with `{product: {asin: INPUT}}` and no other fields. `fetchAudibleDetailsFromApi()` detects this via missing `product.title` and returns `null`.
+- **`publisher_summary` is HTML.** Service strips tags via inline `stripHtml()` helper (regex-based, no cheerio) before populating `description`. Falls back to `merchandising_summary` (plain text) if `publisher_summary` missing.
+- **Series is an array.** `products[].series[]` — a book may belong to multiple series. Service picks the first entry with non-empty `sequence`, else the first entry. `sequence` is cleaned by extracting first `/\d+(?:\.\d+)?/` match for numeric ordering.
+- **Stub `product_images`:** cover URL reads from `product_images['500']`; missing keys fall back to `undefined`.
+- **`page` is 0-indexed.** Despite the default value appearing to be 1, the API returns items `(page * num_results)` through `((page + 1) * num_results - 1)`. So `page=1` fetches items 51–100, not 1–50. All service methods accept a 1-indexed `page` and subtract 1 at the axios call. The symptom of getting this wrong is silent: queries whose `total_results ≤ num_results` return an empty `products` array while `total_results` is populated (e.g. author searches for small catalogues).
+
+## Rate Limiting & Resilience
+
+- 503s still possible but dramatically less frequent than the HTML surface.
+- `fetchWithRetry()` — jittered exponential backoff, 5 retries, retries on 503/429/5xx.
+- `AdaptivePacer` circuit-breaker preserved.
+- Inter-page base delay on API paths: **500–1500ms** (down from 2000–4000ms for HTML).
+- API responses include `Cache-Control: private, max-age=1800`.
 
 ## Region Configuration
 
-**Status:** ✅ Implemented
+**Status:** Implemented
 
-Configurable Audible region for accurate metadata matching across different international Audible stores.
+Configurable Audible region for accurate metadata matching across international stores.
 
 **Supported Regions:**
-- United States (`us`) - `audible.com` (default, English)
-- Canada (`ca`) - `audible.ca` (English)
-- United Kingdom (`uk`) - `audible.co.uk` (English)
-- Australia (`au`) - `audible.com.au` (English)
-- India (`in`) - `audible.in` (English)
-- Germany (`de`) - `audible.de` (non-English)
-- Spain (`es`) - `audible.es` (non-English)
-- French (`fr`) - `audible.fr` (non-English)
 
-**`isEnglish` Flag:**
-- Each region has `isEnglish: boolean` in `AudibleRegionConfig`
-- Non-English regions (`isEnglish: false`) display an amber warning in all region dropdowns (setup wizard + admin settings)
-- Warning text: "Many features such as search, discovery, and metadata matching are not yet fully supported for non-English regions."
-- Dropdown options for non-English regions show `*` suffix (e.g., "Germany *")
+| Code | Name | HTML baseUrl | apiBaseUrl | isEnglish |
+|---|---|---|---|---|
+| `us` | United States | `https://www.audible.com` | `https://api.audible.com` | true (default) |
+| `ca` | Canada | `https://www.audible.ca` | `https://api.audible.ca` | true |
+| `uk` | United Kingdom | `https://www.audible.co.uk` | `https://api.audible.co.uk` | true |
+| `au` | Australia | `https://www.audible.com.au` | `https://api.audible.com.au` | true |
+| `in` | India | `https://www.audible.in` | `https://api.audible.in` | true |
+| `de` | Germany | `https://www.audible.de` | `https://api.audible.de` | false |
+| `es` | Spain | `https://www.audible.es` | `https://api.audible.es` | false |
+| `fr` | France | `https://www.audible.fr` | `https://api.audible.fr` | false |
 
-**Why Regions Matter:**
-- Each Audible region uses different ASINs for the same audiobook
-- Metadata engines (Audnexus/Audible Agent) in Plex/Audiobookshelf must match RMAB's region
-- Mismatched regions cause poor search results and failed metadata matching
+**`AudibleRegionConfig` fields:** `code`, `name`, `baseUrl`, `apiBaseUrl`, `audnexusParam`, `language`.
+
+**`isEnglish` flag:**
+- Non-English regions show amber warning in region dropdowns (setup wizard + admin settings): "Many features such as search, discovery, and metadata matching are not yet fully supported for non-English regions."
+- Dropdown options for non-English regions show `*` suffix.
+
+**Why regions matter:**
+- Each Audible region uses different ASINs for the same audiobook.
+- Metadata engines (Audnexus / Audible Agent) in Plex / Audiobookshelf must match RMAB's region.
 
 **Configuration:**
 - Key: `audible.region` (stored in database)
 - Default: `us`
 - Set during: Setup wizard (Backend Selection step) or Admin Settings (Library tab)
-- Help text instructs users to match their metadata engine region
+- Auto-detection: Service checks config before each request and re-initializes if region changed.
+- Cache clearing: Region change clears ConfigService cache and AudibleService state.
+- Automatic refresh: Region change triggers `audible_refresh` job.
 
-**Implementation:**
-- `AudibleService` loads region from config on initialization
-- Dynamically builds base URL: `AUDIBLE_REGIONS[region].baseUrl`
-- Audnexus API calls include region parameter: `?region={code}`
-- IP redirect prevention: `?ipRedirectOverride=true` on all Audible requests (region only)
-- **Locale enforcement:** `?language=english` query parameter on all Audible requests (forces English content regardless of server IP geolocation)
-- Configuration service helper: `getAudibleRegion()` returns configured region
-- **Auto-detection of region changes**: Service checks config before each request and re-initializes if region changed
-- **Cache clearing**: When region changes, ConfigService cache and AudibleService initialization are cleared
-- **Automatic refresh**: Changing region automatically triggers `audible_refresh` job to fetch new data
+**Per-region HTTP clients (on init):**
+- `apiClient` — `baseURL=apiBaseUrl`, `Accept: application/json`, `User-Agent: ReadMeABook/1.0`, no language/ipRedirect params.
+- `htmlClient` — `baseURL=baseUrl`, browser headers, default params `ipRedirectOverride=true` + `language=<audibleLocaleParam>`. Used only by `audible-series.ts` and `getBaseUrl()`-based link generation.
+- Audnexus calls include `region=<audnexusParam>`.
 
 **Files:**
 - Types: `src/lib/types/audible.ts`
 - Service: `src/lib/integrations/audible.service.ts`
+- Series (HTML): `src/lib/integrations/audible-series.ts`
 - Config: `src/lib/services/config.service.ts`
 - API: `src/app/api/admin/settings/audible/route.ts`
 
-## Discovery Strategy (Popular/New/Search)
-
-- Parse Audible HTML with Cheerio
-- Multi-page scraping (20 items/page)
-- Rate limit: max 10 req/min, 1.5s delay between pages
-- Cache results in database (24hr TTL)
-
-## Data Sources
-
-URLs dynamically built based on configured region:
-
-1. **Best Sellers:** `{baseUrl}/adblbestsellers`
-2. **New Releases:** `{baseUrl}/newreleases`
-3. **Search:** `{baseUrl}/search?keywords={query}&ipRedirectOverride=true`
-4. **Detail Page:** `{baseUrl}/pd/{asin}?ipRedirectOverride=true`
-5. **Audnexus API:** `https://api.audnex.us/books/{asin}?region={code}`
-
-Where `{baseUrl}` is determined by configured region (e.g., `https://www.audible.co.uk` for UK).
-
-## Metadata Extracted
-
-- ASIN (Audible ID)
-- Title, author, narrator
-- Duration (minutes), release date, rating
-- Description, cover art URL
-- Genres/categories
-
 ## Unified Matching (`audiobook-matcher.ts`)
 
-**Status:** ✅ Production Ready (ASIN-Only Matching)
+**Status:** Production Ready (ASIN-Only Matching)
 
 Single matching algorithm used everywhere (search, popular, new-releases, jobs).
 
@@ -112,50 +128,42 @@ Single matching algorithm used everywhere (search, popular, new-releases, jobs).
 - `findPlexMatch()`: ASIN (field) → ASIN (GUID) → null
 - `matchAudiobook()`: ASIN → ISBN → null
 
-**Benefits:**
-- Real-time matching at query time (not pre-matched)
-- 100% confidence matches only (eliminates false positives)
-- O(1) indexed lookups (faster than fuzzy matching)
-- Solves race condition with Audiobookshelf ASIN population
-- Used by all APIs for consistency
-
-**Note:** Fuzzy matching (70% threshold) is preserved in `ranking-algorithm.ts` for Prowlarr torrent ranking, where it's needed to score multiple release candidates. Library availability checks require exact ASIN matches only.
+**Note:** Fuzzy matching (70% threshold) is preserved in `ranking-algorithm.ts` for Prowlarr torrent ranking. Library availability checks require exact ASIN matches only.
 
 ## Database-First Approach
 
-**Status:** ✅ Implemented
+**Status:** Implemented
 
 Discovery APIs serve cached data from DB with real-time matching.
 
 **Flow:**
-1. `audible_refresh` job runs daily → fetches 200 popular + 200 new releases + user-configured categories
-2. Downloads and caches cover thumbnails locally (reduces Audible load)
-3. Stores metadata in `audible_cache`, ranked entries in `audible_cache_categories` with reserved IDs (`__popular__`, `__new_releases__`) and user category IDs
-4. Cleans up unused thumbnails after sync
-5. API routes query `AudibleCacheCategory` by categoryId → join with `AudibleCache` metadata → apply real-time matching → return enriched results
-6. Homepage loads instantly (no Audible API hits)
+1. `audible_refresh` cron runs daily → fetches 200 popular + 200 new releases + user-configured categories via catalog API.
+2. Downloads and caches cover thumbnails locally.
+3. Stores metadata in `audible_cache`, ranked entries in `audible_cache_categories` with reserved IDs (`__popular__`, `__new_releases__`) and user category IDs.
+4. Cleans up unused thumbnails after sync.
+5. API routes query `AudibleCacheCategory` by categoryId → join with `AudibleCache` metadata → apply real-time matching → return enriched results.
+6. Homepage loads instantly (no Audible API hits).
 
 ## Thumbnail Caching
 
-**Status:** ✅ Implemented
+**Status:** Implemented
 
-Cover images cached locally to reduce external requests and improve performance.
+Cover images cached locally to reduce external requests.
 
-**Features:**
-- Downloads covers during `audible_refresh` job
-- Stores in `/app/cache/thumbnails` (Docker volume)
-- Serves via `/api/cache/thumbnails/[filename]`
-- Auto-cleanup of unused thumbnails
-- Falls back to original URL if cache fails
-- 24-hour browser cache headers
+- Downloads covers during `audible_refresh` job.
+- Stores in `/app/cache/thumbnails` (Docker volume).
+- Serves via `/api/cache/thumbnails/[filename]`.
+- Auto-cleanup of unused thumbnails.
+- Falls back to original URL if cache fails.
+- 24-hour browser cache headers.
+- Filename: `{asin}.{ext}` (e.g. `B08G9PRS1K.jpg`).
 
-**Implementation:**
+**Files:**
 - Service: `src/lib/services/thumbnail-cache.service.ts`
 - API Route: `src/app/api/cache/thumbnails/[filename]/route.ts`
 - Storage: Docker volume `cache` mounted at `/app/cache`
-- Filename: `{asin}.{ext}` (e.g., `B08G9PRS1K.jpg`)
 
-**API Endpoints:**
+## App-Level API Endpoints
 
 **GET /api/audiobooks/popular?page=1&limit=20**
 **GET /api/audiobooks/new-releases?page=1&limit=20**
@@ -182,6 +190,7 @@ interface AudibleAudiobook {
   asin: string;
   title: string;
   author: string;
+  authorAsin?: string;
   narrator?: string;
   description?: string;
   coverArtUrl?: string;
@@ -189,6 +198,9 @@ interface AudibleAudiobook {
   releaseDate?: string;
   rating?: number;
   genres?: string[];
+  series?: string;
+  seriesPart?: string;
+  seriesAsin?: string;
 }
 
 interface EnrichedAudibleAudiobook extends AudibleAudiobook {
@@ -197,48 +209,45 @@ interface EnrichedAudibleAudiobook extends AudibleAudiobook {
   plexGuid: string | null;
   dbId: string;
 }
+
+interface AudibleSearchResult {
+  query: string;
+  results: AudibleAudiobook[];
+  totalResults: number;
+  page: number;
+  hasMore: boolean;
+}
+
+interface AuthorBooksResult {
+  books: AudibleAudiobook[];
+  hasMore: boolean;
+  page: number;
+  totalResults: number;
+}
 ```
 
 ## Tech Stack
 
-- axios (HTTP)
-- cheerio (HTML parsing)
-- Redis (caching, optional)
-- Database (PostgreSQL)
-- string-similarity (matching)
+- `axios` (HTTP, two clients: `apiClient` for JSON catalog, `htmlClient` for series-page scraping only)
+- Audnexus API (per-ASIN details, primary)
+- PostgreSQL (`audible_cache`, `audible_cache_categories`)
 
 ## Fixed Issues
 
-**Search returning empty results (2026-01-07)**
-- **Problem:** Audible changed HTML structure for search results from `.productListItem` to `.s-result-item`
-- **Impact:** All search queries returned 0 results
-- **Fix:** Updated `search()` method to support both `.s-result-item` (current) and `.productListItem` (legacy)
-- **Selectors updated:**
-  - Main: `.s-result-item, .productListItem`
-  - Title: `h2` (new) or `h3 a` (legacy)
-  - Author: `a[href*="/author/"]` (new) or `.authorLabel` (legacy)
-  - Narrator: `a[href*="searchNarrator="]` (new) or `.narratorLabel` (legacy)
-  - Runtime: `span:contains("Length:")` (new) or `.runtimeLabel` (legacy)
-  - Rating: `.a-icon-star span` (new) or `.ratingsLabel` (legacy)
-- **Location:** `src/lib/integrations/audible.service.ts:235`
-
-**Some audiobooks missing from search results (2026-01-07)**
-- **Problem:** ASIN extraction only matched `/pd/` URLs but some audiobooks use `/ac/` URLs
-- **Impact:** Books like "Beatitude" by DJ Krimmer (ASIN: B0DVH7XL36) were skipped
-- **Fix:** Updated ASIN regex to match both `/pd/` and `/ac/` URL patterns: `/\/(?:pd|ac)\/[^\/]+\/([A-Z0-9]{10})/`
-- **Location:** `src/lib/integrations/audible.service.ts:75, 161, 240`
-- **Affects:** `getPopularAudiobooks()`, `getNewReleases()`, `search()` methods
-
 **Audiobookshelf metadata matching not respecting configured region (2026-01-28)**
-- **Problem:** `triggerABSItemMatch()` hardcoded `'audible'` provider (audible.com) instead of respecting user's configured Audible region
-- **Impact:** Users with non-US regions (CA, UK, AU, IN) had incorrect metadata matching in Audiobookshelf, causing wrong ASINs and poor search results
-- **Fix:** Added `mapRegionToABSProvider()` to convert RMAB region codes to AudiobookShelf provider values. US → `'audible'`, others → `'audible.{region}'` (e.g., `'audible.ca'`, `'audible.uk'`)
+- **Problem:** `triggerABSItemMatch()` hardcoded `'audible'` provider (audible.com) instead of respecting user's configured Audible region.
+- **Impact:** Users with non-US regions (CA, UK, AU, IN) had incorrect metadata matching in Audiobookshelf, causing wrong ASINs.
+- **Fix:** Added `mapRegionToABSProvider()` to convert RMAB region codes to Audiobookshelf provider values. US → `'audible'`, others → `'audible.{region}'` (e.g. `'audible.ca'`, `'audible.uk'`).
 - **Location:** `src/lib/services/audiobookshelf/api.ts:14, 147`
-- **Affects:** All Audiobookshelf metadata matching operations
 
 **Non-English locale pages served to users outside US (2026-02-05)**
-- **Problem:** Audible uses IP geolocation to serve locale-specific pages (e.g., Spanish content for Dominican Republic IPs). `ipRedirectOverride=true` only prevents region redirects (audible.com → audible.co.uk), NOT language/locale changes.
-- **Impact:** Users self-hosting from non-English-speaking countries got non-English bestsellers/new releases on their homepage.
-- **Fix:** Added `language=english` query parameter to all Audible requests via axios default params. Audible respects this parameter and serves English content regardless of IP geolocation. Fails gracefully for regions where English isn't available.
-- **Location:** `src/lib/integrations/audible.service.ts` — `initialize()` (axios default params)
-- **Affects:** All Audible scraping: popular, new releases, search, detail pages
+- **Problem:** Audible uses IP geolocation to serve locale-specific pages. `ipRedirectOverride=true` only prevents region redirects, NOT language/locale changes.
+- **Impact:** Users self-hosting from non-English-speaking countries got non-English content on HTML-scraped surfaces.
+- **Fix:** Added `language=<audibleLocaleParam>` default param on `htmlClient` (axios default params). Still in effect for the remaining HTML path (`audible-series.ts`). **Not applied to `apiClient`** — the catalog JSON API is region-bound via `apiBaseUrl` and does not require the language param.
+- **Location:** `src/lib/integrations/audible.service.ts` — `initialize()` (htmlClient params)
+
+## Related
+
+- [Audiobookshelf Integration](./audiobookshelf.md)
+- [Plex Integration](./plex.md)
+- [Ranking Algorithm](../phase3/ranking-algorithm.md)
