@@ -42,6 +42,9 @@ export interface AudibleAudiobook {
   series?: string;
   seriesPart?: string;
   seriesAsin?: string;
+  language?: string;
+  formatType?: string;
+  publisherName?: string;
 }
 
 export interface AudibleSearchResult {
@@ -677,6 +680,9 @@ export class AudibleService {
         series: data.seriesPrimary?.name || undefined,
         seriesPart: data.seriesPrimary?.position || undefined,
         seriesAsin: data.seriesPrimary?.asin || undefined,
+        language: data.language || undefined,
+        formatType: data.formatType || undefined,
+        publisherName: data.publisherName || undefined,
       };
 
       if (result.coverArtUrl && !result.coverArtUrl.includes('_SL500_')) {
