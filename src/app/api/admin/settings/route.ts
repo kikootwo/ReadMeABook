@@ -124,6 +124,7 @@ export async function GET(request: NextRequest) {
       paths: {
         downloadDir: configMap.get('download_dir') || '/downloads',
         mediaDir: configMap.get('media_dir') || '/media/audiobooks',
+        autoOrganizeEnabled: configMap.get('auto_organize_enabled') !== 'false',
         audiobookPathTemplate: configMap.get('audiobook_path_template') || '{author}/{title} {asin}',
         ebookPathTemplate: configMap.get('ebook_path_template') || configMap.get('audiobook_path_template') || '{author}/{title} {asin}',
         metadataTaggingEnabled: configMap.get('metadata_tagging_enabled') === 'true',

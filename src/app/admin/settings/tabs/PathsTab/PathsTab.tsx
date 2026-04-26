@@ -157,6 +157,30 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
         </p>
       </div>
 
+      {/* Auto Organize Toggle */}
+      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+        <div className="flex items-start gap-4">
+          <input
+            type="checkbox"
+            id="auto-organize-settings"
+            checked={paths.autoOrganizeEnabled !== false}
+            onChange={(e) => updatePath('autoOrganizeEnabled', e.target.checked)}
+            className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <div className="flex-1">
+            <label
+              htmlFor="auto-organize-settings"
+              className="block text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer"
+            >
+              Enable Automatic File Organization
+            </label>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              Automatically organize downloaded files from the download directory into the media directory using the templates defined below.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Audiobook Organization Template */}
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -168,6 +192,7 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
           onChange={(e) => updatePath('audiobookPathTemplate', e.target.value)}
           placeholder="{author}/{title} {asin}"
           className="font-mono"
+          disabled={paths.autoOrganizeEnabled === false}
         />
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
           Customize how audiobooks are organized within the media directory
@@ -185,7 +210,7 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
 
         {/* Audiobook Preview Examples */}
         {audiobookPreview && audiobookPreview.isValid && audiobookPreview.previewPaths && (
-          <div className="mt-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+          <div className="mt-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 opacity-75">
             <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
               Preview Examples
             </h4>
@@ -212,11 +237,12 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
             onChange={(e) => updatePath('ebookPathTemplate', e.target.value)}
             placeholder="{author}/{title} {asin}"
             className="font-mono flex-1"
+            disabled={paths.autoOrganizeEnabled === false}
           />
           <Button
             variant="outline"
             onClick={() => updatePath('ebookPathTemplate', paths.audiobookPathTemplate || '{author}/{title} {asin}')}
-            disabled={ebookMatchesAudiobook}
+            disabled={ebookMatchesAudiobook || paths.autoOrganizeEnabled === false}
             className="whitespace-nowrap text-sm"
           >
             Match Audiobook
@@ -238,7 +264,7 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
 
         {/* Ebook Preview Examples */}
         {ebookPreview && ebookPreview.isValid && ebookPreview.previewPaths && (
-          <div className="mt-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+          <div className="mt-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 opacity-75">
             <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
               Preview Examples
             </h4>
@@ -254,13 +280,14 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
       </div>
 
       {/* File Rename Toggle */}
-      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+      <div className={`bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 ${paths.autoOrganizeEnabled === false ? 'opacity-50' : ''}`}>
         <div className="flex items-start gap-4">
           <input
             type="checkbox"
             id="file-rename-settings"
             checked={paths.fileRenameEnabled}
             onChange={(e) => updatePath('fileRenameEnabled', e.target.checked)}
+            disabled={paths.autoOrganizeEnabled === false}
             className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
           />
           <div className="flex-1">
@@ -289,6 +316,7 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
               onChange={(e) => updatePath('fileRenameTemplate', e.target.value)}
               placeholder="{title}"
               className="font-mono"
+              disabled={paths.autoOrganizeEnabled === false}
             />
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Uses the same variables as the organization template. Do not include the file extension.
@@ -306,7 +334,7 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
 
             {/* Filename Preview */}
             {filenamePreview && filenamePreview.isValid && (
-              <div className="mt-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+              <div className="mt-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
                 <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
                   Single File
                 </h4>
@@ -389,13 +417,14 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
       </div>
 
       {/* Metadata Tagging Toggle */}
-      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+      <div className={`bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 ${paths.autoOrganizeEnabled === false ? 'opacity-50' : ''}`}>
         <div className="flex items-start gap-4">
           <input
             type="checkbox"
             id="metadata-tagging-settings"
             checked={paths.metadataTaggingEnabled}
             onChange={(e) => updatePath('metadataTaggingEnabled', e.target.checked)}
+            disabled={paths.autoOrganizeEnabled === false}
             className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
           />
           <div className="flex-1">
@@ -415,13 +444,14 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
       </div>
 
       {/* Chapter Merging Toggle */}
-      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+      <div className={`bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 ${paths.autoOrganizeEnabled === false ? 'opacity-50' : ''}`}>
         <div className="flex items-start gap-4">
           <input
             type="checkbox"
             id="chapter-merging-settings"
             checked={paths.chapterMergingEnabled}
             onChange={(e) => updatePath('chapterMergingEnabled', e.target.checked)}
+            disabled={paths.autoOrganizeEnabled === false}
             className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
           />
           <div className="flex-1">
@@ -440,7 +470,7 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
       </div>
 
       {/* File Permissions */}
-      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+      <div className={`bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 ${paths.autoOrganizeEnabled === false ? 'opacity-50' : ''}`}>
         <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
           File Permissions
         </h3>
@@ -457,6 +487,7 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
               value={paths.fileChmod || '664'}
               onChange={(e) => updatePath('fileChmod', e.target.value)}
               placeholder="664"
+              disabled={paths.autoOrganizeEnabled === false}
               className={`font-mono max-w-32 ${paths.fileChmod && !/^[0-7]{3,4}$/.test(paths.fileChmod) ? 'border-red-500 dark:border-red-500' : ''}`}
             />
             {paths.fileChmod && !/^[0-7]{3,4}$/.test(paths.fileChmod) && (
@@ -475,6 +506,7 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
               value={paths.dirChmod || '775'}
               onChange={(e) => updatePath('dirChmod', e.target.value)}
               placeholder="775"
+              disabled={paths.autoOrganizeEnabled === false}
               className={`font-mono max-w-32 ${paths.dirChmod && !/^[0-7]{3,4}$/.test(paths.dirChmod) ? 'border-red-500 dark:border-red-500' : ''}`}
             />
             {paths.dirChmod && !/^[0-7]{3,4}$/.test(paths.dirChmod) && (

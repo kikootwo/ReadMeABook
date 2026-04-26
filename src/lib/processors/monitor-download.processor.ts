@@ -175,24 +175,62 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         throw new Error('Request or audiobook not found or deleted');
       }
 
-      // Trigger organize files job with properly constructed path
-      const jobQueue = getJobQueueService();
-      await jobQueue.addOrganizeJob(
-        requestId,
-        request.audiobook.id,
-        organizePath
-      );
+      // Check if auto-organization is enabled
+      const autoOrganizeEnabled = await configService.get('auto_organize_enabled') !== 'false';
 
-      logger.info(`Triggered organize_files job for request ${requestId}`);
+      if (autoOrganizeEnabled) {
+        // Trigger organize files job with properly constructed path
+        const jobQueue = getJobQueueService();
+        await jobQueue.addOrganizeJob(
+          requestId,
+          request.audiobook.id,
+          organizePath
+        );
 
-      return {
-        success: true,
-        completed: true,
-        message: 'Download completed, organizing files',
-        requestId,
-        progress: 100,
-        downloadPath: organizePath,
-      };
+        logger.info(`Triggered organize_files job for request ${requestId}`);
+
+        return {
+          success: true,
+          completed: true,
+          message: 'Download completed, organizing files',
+          requestId,
+          progress: 100,
+          downloadPath: organizePath,
+        };
+      } else {
+        logger.info(`Auto-organization is disabled. Leaving files at ${organizePath}`);
+
+        // Update Request to downloaded
+        await prisma.request.update({
+          where: { id: requestId },
+          data: {
+            status: 'downloaded',
+            progress: 100,
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          },
+        });
+
+        // Update Audiobook so UI knows where files are located
+        await prisma.audiobook.update({
+          where: { id: request.audiobook.id },
+          data: {
+            filePath: organizePath,
+            status: 'completed',
+            completedAt: new Date(),
+            updatedAt: new Date()
+          }
+        });
+
+        return {
+          success: true,
+          completed: true,
+          message: 'Download completed (auto-organize disabled)',
+          requestId,
+          progress: 100,
+          downloadPath: organizePath,
+        };
+      }
     } else if (progressState === 'failed') {
       logger.error(`Download failed for request ${requestId}`);
 
