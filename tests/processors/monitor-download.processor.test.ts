@@ -18,6 +18,7 @@ const sabMock = vi.hoisted(() => ({
 }));
 const configMock = vi.hoisted(() => ({
   getMany: vi.fn(),
+  get: vi.fn().mockResolvedValue(true),
 }));
 const downloadClientManagerMock = vi.hoisted(() => ({
   getClientForProtocol: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock('@/lib/integrations/sabnzbd.service', () => ({
 
 vi.mock('@/lib/services/config.service', () => ({
   getConfigService: () => configMock,
+  configService: configMock,
 }));
 
 vi.mock('@/lib/services/download-client-manager.service', () => ({
@@ -446,5 +448,3 @@ describe('processMonitorDownload', () => {
     );
   });
 });
-
-
