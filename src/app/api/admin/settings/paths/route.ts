@@ -15,7 +15,7 @@ export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { downloadDir, mediaDir, audiobookPathTemplate, ebookPathTemplate, metadataTaggingEnabled, chapterMergingEnabled, fileRenameEnabled, fileRenameTemplate, fileChmod, dirChmod } = await request.json();
+        const { downloadDir, mediaDir, autoOrganizeEnabled, audiobookPathTemplate, ebookPathTemplate, metadataTaggingEnabled, chapterMergingEnabled, fileRenameEnabled, fileRenameTemplate, fileChmod, dirChmod } = await request.json();
 
         if (!downloadDir || !mediaDir) {
           return NextResponse.json(
@@ -58,6 +58,18 @@ export async function PUT(request: NextRequest) {
           where: { key: 'media_dir' },
           update: { value: mediaDir },
           create: { key: 'media_dir', value: mediaDir },
+        });
+
+        // Update auto-organize setting
+        await prisma.configuration.upsert({
+          where: { key: 'auto_organize_enabled' },
+          update: { value: String(autoOrganizeEnabled ?? true) },
+          create: {
+            key: 'auto_organize_enabled',
+            value: String(autoOrganizeEnabled ?? true),
+            category: 'automation',
+            description: 'Automatically organize downloaded files into the media directory',
+          },
         });
 
         // Update audiobook path template
@@ -172,6 +184,7 @@ export async function PUT(request: NextRequest) {
         const configService = getConfigService();
         configService.clearCache('download_dir');
         configService.clearCache('media_dir');
+        configService.clearCache('auto_organize_enabled');
         configService.clearCache('audiobook_path_template');
         configService.clearCache('ebook_path_template');
         configService.clearCache('metadata_tagging_enabled');

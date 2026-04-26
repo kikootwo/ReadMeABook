@@ -96,6 +96,7 @@ export interface DownloadClientSettings {
 export interface PathsSettings {
   downloadDir: string;
   mediaDir: string;
+  autoOrganizeEnabled: boolean;
   audiobookPathTemplate?: string;
   ebookPathTemplate?: string;
   metadataTaggingEnabled: boolean;
