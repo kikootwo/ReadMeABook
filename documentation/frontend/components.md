@@ -113,6 +113,7 @@ interface AudiobookDetailsModalProps {
   requestStatus?: string | null;
   isAvailable?: boolean;
   requestedByUsername?: string | null;
+  adminActions?: React.ReactNode; // Optional admin buttons (Approve/Search/Deny) rendered as second row in action bar
 }
 
 interface RequestCardProps {

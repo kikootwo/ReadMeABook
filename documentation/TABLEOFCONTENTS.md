@@ -144,6 +144,7 @@
 **"How do I delete requests?"** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
 **"How do I approve/deny user requests?"** → [admin-features/request-approval.md](admin-features/request-approval.md)
 **"How do I enable auto-approve for requests?"** → [admin-features/request-approval.md](admin-features/request-approval.md)
+**"How does the admin book info modal work?"** → [admin-features/request-approval.md](admin-features/request-approval.md#ui-features), [frontend/components.md](frontend/components.md#component-apis)
 **"How do I customize audiobook folder organization?"** → [settings-pages.md](settings-pages.md#audiobook-organization-template), [phase3/file-organization.md](phase3/file-organization.md#target-structure)
 **"How do I deploy?"** → [deployment/docker.md](deployment/docker.md) (multi-container), [deployment/unified.md](deployment/unified.md) (all-in-one)
 **"How do I use the unified container?"** → [deployment/unified.md](deployment/unified.md)

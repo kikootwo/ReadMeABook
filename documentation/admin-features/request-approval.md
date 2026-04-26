@@ -259,8 +259,11 @@ Update user (includes autoApproveRequests field)
   - Title and author
   - User avatar and username
   - Request timestamp (relative: "2 hours ago")
+  - Info button (ⓘ, top-right corner) — opens AudiobookDetailsModal for full book details
   - Approve button (green, checkmark icon)
+  - Search button (blue, magnifier icon) — opens InteractiveTorrentSearchModal
   - Deny button (red, X icon)
+- **Info modal:** `AudiobookDetailsModal` rendered with `adminActions` prop containing Approve/Search/Deny buttons, allowing admin to review full book details (cover, description, series, genres, narrator, etc.) without leaving the approval workflow
 - Auto-refreshes every 10 seconds (SWR)
 - Loading states on buttons during approval/denial
 - Success/error toast notifications

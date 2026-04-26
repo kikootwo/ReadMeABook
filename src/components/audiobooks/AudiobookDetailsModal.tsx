@@ -38,6 +38,8 @@ interface AudiobookDetailsModalProps {
   hideRequestActions?: boolean;
   hasReportedIssue?: boolean;
   aiReason?: string | null;
+  /** Optional admin action buttons (Approve / Search / Deny) rendered as a second row in the action bar */
+  adminActions?: React.ReactNode;
 }
 
 // Status helper
@@ -80,6 +82,7 @@ export function AudiobookDetailsModal({
   hideRequestActions = false,
   hasReportedIssue = false,
   aiReason = null,
+  adminActions,
 }: AudiobookDetailsModalProps) {
   const { user } = useAuth();
   const { squareCovers } = usePreferences();
@@ -739,6 +742,13 @@ export function AudiobookDetailsModal({
               )}
 
             </div>
+
+            {/* Admin Actions Row (Approve / Search / Deny) — injected by admin pages */}
+            {adminActions && (
+              <div className="flex items-center gap-2 mt-3 pt-3 border-t border-amber-200 dark:border-amber-700/50">
+                {adminActions}
+              </div>
+            )}
           </div>
         )}
 
