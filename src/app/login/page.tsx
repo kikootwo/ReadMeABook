@@ -265,10 +265,14 @@ function LoginContent() {
       }
 
       // Poll for authorization
-      await login(pinId);
+      const loginResult = await login(pinId);
 
       // Close popup
       authWindow.close();
+
+      if (loginResult === 'profile-selection-required') {
+        return;
+      }
 
       // Redirect to intended page or homepage
       const redirect = searchParams.get('redirect') || '/';

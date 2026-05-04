@@ -20,13 +20,15 @@ vi.mock('@/lib/utils/jwt-client', () => ({
 
 function TestConsumer() {
   const { user, accessToken, isLoading, login, logout, refreshToken, setAuthData } = useAuth();
+  const [loginResult, setLoginResult] = React.useState('none');
 
   return (
     <div>
       <div data-testid="loading">{String(isLoading)}</div>
       <div data-testid="user">{user?.username ?? 'none'}</div>
       <div data-testid="token">{accessToken ?? 'none'}</div>
-      <button type="button" onClick={() => void login(123)}>
+      <div data-testid="login-result">{loginResult}</div>
+      <button type="button" onClick={() => void login(123).then(setLoginResult)}>
         login
       </button>
       <button type="button" onClick={logout}>
@@ -188,6 +190,34 @@ describe('AuthProvider', () => {
     expect(screen.getByTestId('token')).toHaveTextContent('login-access');
     expect(localStorage.getItem('accessToken')).toBe('login-access');
     expect(localStorage.getItem('refreshToken')).toBe('login-refresh');
+    expect(screen.getByTestId('login-result')).toHaveTextContent('authenticated');
+  });
+
+  it('returns profile selection result without storing auth data for Plex Home users', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        authorized: true,
+        requiresProfileSelection: true,
+        redirectUrl: '/auth/select-profile?pinId=123',
+      }),
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderAuthProvider();
+
+    fireEvent.click(screen.getByRole('button', { name: 'login' }));
+
+    await waitFor(() => expect(screen.getByTestId('login-result')).toHaveTextContent('profile-selection-required'));
+
+    expect(locationStub.href).toBe('/auth/select-profile?pinId=123');
+    expect(screen.getByTestId('user')).toHaveTextContent('none');
+    expect(screen.getByTestId('token')).toHaveTextContent('none');
+    expect(localStorage.getItem('accessToken')).toBeNull();
+    expect(localStorage.getItem('refreshToken')).toBeNull();
   });
 
   it('logs out by clearing storage and redirecting to the login page', () => {
