@@ -24,11 +24,13 @@ interface User {
   permissions?: UserPermissions;
 }
 
+export type LoginResult = 'authenticated' | 'profile-selection-required';
+
 interface AuthContextType {
   user: User | null;
   accessToken: string | null;
   isLoading: boolean;
-  login: (pinId: number) => Promise<void>;
+  login: (pinId: number) => Promise<LoginResult>;
   logout: () => void;
   refreshToken: () => Promise<void>;
   setAuthData: (user: User, accessToken: string) => void;
@@ -182,7 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // Poll Plex OAuth callback during login
-  const login = async (pinId: number) => {
+  const login = async (pinId: number): Promise<LoginResult> => {
     const maxAttempts = 60; // 2 minutes total
     let attempts = 0;
 
@@ -211,7 +213,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Redirect to profile selection page
             // Note: Plex token is stored server-side for security, not in sessionStorage
             window.location.href = data.redirectUrl;
-            return;
+            return 'profile-selection-required';
           }
 
           // Login successful (no profile selection needed)
@@ -226,7 +228,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Schedule auto-refresh
           scheduleTokenRefresh(data.accessToken);
 
-          return;
+          return 'authenticated';
         }
 
         // Still waiting for authorization

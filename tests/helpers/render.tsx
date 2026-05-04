@@ -14,7 +14,7 @@ type RenderWithProvidersOptions = Omit<RenderOptions, 'wrapper'> & {
     user: MockUser | null;
     accessToken: string | null;
     isLoading: boolean;
-    login: (pinId: number) => Promise<void>;
+    login: (pinId: number) => Promise<'authenticated' | 'profile-selection-required'>;
     logout: () => void;
     refreshToken: () => Promise<void>;
     setAuthData: (user: MockUser, accessToken: string) => void;
