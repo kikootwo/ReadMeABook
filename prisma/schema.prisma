@@ -132,7 +132,7 @@ model PlexLibrary {
   author     String
   narrator   String?
   summary    String?  @db.Text
-  duration   Int? // Duration in milliseconds (Plex format)
+  duration   BigInt? // Duration in milliseconds (Plex format)
   year       Int?
   userRating Decimal? @map("user_rating") @db.Decimal(3, 1) // User's rating (0-10 scale from Plex)
 

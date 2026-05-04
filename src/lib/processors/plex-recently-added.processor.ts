@@ -106,7 +106,7 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
             author: item.author || 'Unknown Author',
             narrator: item.narrator,
             summary: item.description,
-            duration: item.duration ? item.duration * 1000 : null, // Convert seconds to milliseconds
+            duration: item.duration ? BigInt(Math.round(item.duration * 1000)) : null, // Convert seconds to milliseconds
             year: item.year,
             asin: item.asin,  // Store ASIN from library backend
             isbn: item.isbn,  // Store ISBN from library backend
@@ -146,7 +146,7 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
             author: item.author || existing.author,
             narrator: item.narrator || existing.narrator,
             summary: item.description || existing.summary,
-            duration: item.duration ? item.duration * 1000 : existing.duration,
+            duration: item.duration ? BigInt(Math.round(item.duration * 1000)) : existing.duration,
             year: item.year || existing.year,
             asin: item.asin || existing.asin,  // Update ASIN if available
             isbn: item.isbn || existing.isbn,  // Update ISBN if available
