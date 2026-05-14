@@ -548,6 +548,30 @@ export function AudiobookDetailsModal({
                     </a>
                   </div>
 
+                  {/* Language */}
+                  {audiobook.language && (
+                    <div>
+                      <p className="text-gray-500 dark:text-gray-400">Language</p>
+                      <p className="text-gray-900 dark:text-gray-100">{audiobook.language.charAt(0).toUpperCase() + audiobook.language.slice(1)}</p>
+                    </div>
+                  )}
+
+                  {/* Format */}
+                  {audiobook.formatType && (
+                    <div>
+                      <p className="text-gray-500 dark:text-gray-400">Format</p>
+                      <p className="text-gray-900 dark:text-gray-100">{audiobook.formatType.charAt(0).toUpperCase() + audiobook.formatType.slice(1)}</p>
+                    </div>
+                  )}
+
+                  {/* Publisher */}
+                  {audiobook.publisherName && (
+                    <div>
+                      <p className="text-gray-500 dark:text-gray-400">Publisher</p>
+                      <p className="text-gray-900 dark:text-gray-100">{audiobook.publisherName}</p>
+                    </div>
+                  )}
+
                   {/* Download Link - subtle utility, visible from any context */}
                   {isAvailable && downloadAvailable && requestId && user?.permissions?.download !== false && (
                     <div>
