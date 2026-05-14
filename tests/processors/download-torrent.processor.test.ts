@@ -59,6 +59,7 @@ describe('processDownloadTorrent', () => {
     vi.clearAllMocks();
     // Restore default implementations cleared by clearAllMocks
     configMock.getMany.mockResolvedValue({ prowlarr_api_key: null });
+    jobQueueMock.addNotificationJob.mockResolvedValue(undefined);
   });
 
   const torrentPayload = {
@@ -110,7 +111,7 @@ describe('processDownloadTorrent', () => {
       enabled: true,
       category: 'readmeabook',
     });
-    prismaMock.request.update.mockResolvedValue({});
+    prismaMock.request.update.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
     prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-1' });
 
     const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
@@ -141,7 +142,7 @@ describe('processDownloadTorrent', () => {
       enabled: true,
       category: 'readmeabook',
     });
-    prismaMock.request.update.mockResolvedValue({});
+    prismaMock.request.update.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
     prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-2' });
 
     const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
@@ -186,7 +187,7 @@ describe('processDownloadTorrent', () => {
       enabled: true,
       category: 'readmeabook',
     });
-    prismaMock.request.update.mockResolvedValue({});
+    prismaMock.request.update.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
     prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-1' });
 
     const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
