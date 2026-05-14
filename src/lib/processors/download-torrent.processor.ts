@@ -103,8 +103,32 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
 
     logger.info(`Created download history record: ${downloadHistory.id}`);
 
-    // Trigger monitor download job with initial delay
+    // Send grab notification
+    const requestWithUser = await prisma.request.findUnique({
+      where: { id: requestId },
+      include: {
+        user: { select: { plexUsername: true } },
+      },
+    });
+
     const jobQueue = getJobQueueService();
+
+    if (requestWithUser) {
+      const grabMessage = `${torrent.title} via ${torrent.indexer} (${client.clientType})`;
+      await jobQueue.addNotificationJob(
+        'request_grabbed',
+        requestId,
+        audiobook.title,
+        audiobook.author,
+        requestWithUser.user.plexUsername || 'Unknown User',
+        grabMessage,
+        requestWithUser.type
+      ).catch((error) => {
+        logger.error('Failed to queue grab notification', { error: error instanceof Error ? error.message : String(error) });
+      });
+    }
+
+    // Trigger monitor download job with initial delay
     await jobQueue.addMonitorJob(
       requestId,
       downloadHistory.id,

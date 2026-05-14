@@ -127,6 +127,7 @@ export class AppriseProvider implements INotificationProvider {
 
   private formatMessage(payload: NotificationPayload): { title: string; body: string } {
     const { event, title, author, userName, message, requestType } = payload;
+    const meta = getEventMeta(event);
 
     const isIssue = event === 'issue_reported';
     const messageLines = [
@@ -136,7 +137,9 @@ export class AppriseProvider implements INotificationProvider {
     ];
 
     if (message) {
-      messageLines.push(isIssue ? `\u{1F4DD} Reason: ${message}` : `\u26A0\uFE0F Error: ${message}`);
+      const messageLabel = meta.messageLabel ?? 'Error';
+      const msgEmoji = meta.severity === 'error' ? '\u26A0\uFE0F' : '\u{1F4DD}';
+      messageLines.push(`${msgEmoji} ${messageLabel}: ${message}`);
     }
 
     return {
