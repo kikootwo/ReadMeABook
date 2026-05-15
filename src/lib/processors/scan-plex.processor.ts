@@ -90,7 +90,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
               author: item.author || existing.author,
               narrator: item.narrator || existing.narrator,
               summary: item.description || existing.summary,
-              duration: item.duration ? item.duration * 1000 : existing.duration, // Convert seconds to milliseconds
+              duration: item.duration ? BigInt(Math.round(item.duration * 1000)) : existing.duration, // Convert seconds to milliseconds
               year: item.year || existing.year,
               asin: item.asin || existing.asin,  // Store ASIN from library backend
               isbn: item.isbn || existing.isbn,  // Store ISBN from library backend
@@ -132,7 +132,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
               author: item.author || 'Unknown Author',
               narrator: item.narrator,
               summary: item.description,
-              duration: item.duration ? item.duration * 1000 : null, // Convert seconds to milliseconds
+              duration: item.duration ? BigInt(Math.round(item.duration * 1000)) : null, // Convert seconds to milliseconds
               year: item.year,
               asin: item.asin,  // Store ASIN from library backend (Plex or Audiobookshelf)
               isbn: item.isbn,  // Store ISBN from library backend
