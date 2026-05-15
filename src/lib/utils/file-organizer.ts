@@ -252,6 +252,8 @@ export class FileOrganizer {
               narrator: audiobook.narrator,
               year: audiobook.year,
               asin: audiobook.asin,
+              series: audiobook.series,
+              seriesPart: audiobook.seriesPart,
             });
 
             const successCount = taggingResults.filter((r) => r.success).length;
