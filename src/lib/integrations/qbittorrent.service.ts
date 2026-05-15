@@ -108,6 +108,7 @@ export class QBittorrentService implements IDownloadClient {
   private username: string;
   private password: string;
   private cookie?: string;
+  private authOptional: boolean;
   private defaultSavePath: string;
   private defaultCategory: string;
   private disableSSLVerify: boolean;
@@ -126,10 +127,15 @@ export class QBittorrentService implements IDownloadClient {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.username = username;
     this.password = password;
+    this.authOptional = !username && !password;
     this.defaultSavePath = defaultSavePath;
     this.defaultCategory = defaultCategory;
     this.disableSSLVerify = disableSSLVerify;
     this.pathMappingConfig = pathMappingConfig || { enabled: false, remotePath: '', localPath: '' };
+
+    if (this.authOptional) {
+      logger.info('[QBittorrent] No credentials configured — running in auth-optional mode (suitable for IP-whitelisted qBittorrent or auth-less proxies like Decypharr)');
+    }
 
     // Create HTTPS agent if SSL verification is disabled
     if (disableSSLVerify && this.baseUrl.startsWith('https')) {
@@ -152,9 +158,23 @@ export class QBittorrentService implements IDownloadClient {
   }
 
   /**
-   * Authenticate and establish session
+   * Build request headers including the session cookie when one exists.
+   * In auth-optional mode no cookie is set and the Cookie header is omitted.
+   */
+  private authHeaders(): Record<string, string> {
+    return this.cookie ? { Cookie: this.cookie } : {};
+  }
+
+  /**
+   * Authenticate and establish session.
+   * In auth-optional mode (no username/password configured) this is a no-op.
    */
   async login(): Promise<void> {
+    if (this.authOptional) {
+      logger.debug('[QBittorrent] Skipping login — auth-optional mode');
+      return;
+    }
+
     const loginUrl = `${this.baseUrl}/api/v2/auth/login`;
 
     logger.debug('[QBittorrent] Attempting login', {
@@ -241,7 +261,7 @@ export class QBittorrentService implements IDownloadClient {
     }
 
     // Ensure we're authenticated
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
@@ -260,8 +280,10 @@ export class QBittorrentService implements IDownloadClient {
         return await this.addTorrentFile(url, category, options);
       }
     } catch (error) {
-      // Try re-authenticating once if we get a 403
-      if (!retried && axios.isAxiosError(error) && error.response?.status === 403) {
+      // Try re-authenticating once if we get a 403 — only meaningful when credentials are configured.
+      // In auth-optional mode a 403 means the server actually wants auth (e.g. IP no longer whitelisted),
+      // so retrying login is pointless and would mask the real error.
+      if (!retried && !this.authOptional && axios.isAxiosError(error) && error.response?.status === 403) {
         logger.info('[QBittorrent] Session expired, re-authenticating...');
         await this.login();
         return this.addTorrent(url, options, true);
@@ -322,7 +344,7 @@ export class QBittorrentService implements IDownloadClient {
 
     const response = await this.client.post('/torrents/add', form, {
       headers: {
-        Cookie: this.cookie,
+        ...this.authHeaders(),
         'Content-Type': 'application/x-www-form-urlencoded',
       },
     });
@@ -470,7 +492,7 @@ export class QBittorrentService implements IDownloadClient {
 
     const response = await this.client.post('/torrents/add', formData, {
       headers: {
-        Cookie: this.cookie,
+        ...this.authHeaders(),
         ...formData.getHeaders(),
       },
       maxBodyLength: Infinity,
@@ -491,7 +513,7 @@ export class QBittorrentService implements IDownloadClient {
    * Applies reverse path mapping (local → remote) for remote seedbox scenarios
    */
   protected async ensureCategory(category: string): Promise<void> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
@@ -501,7 +523,7 @@ export class QBittorrentService implements IDownloadClient {
     try {
       // First, get all categories to check if it exists and what save path it has
       const categoriesResponse = await this.client.get('/torrents/categories', {
-        headers: { Cookie: this.cookie },
+        headers: this.authHeaders(),
       });
 
       const categories = categoriesResponse.data;
@@ -519,7 +541,7 @@ export class QBittorrentService implements IDownloadClient {
           }),
           {
             headers: {
-              Cookie: this.cookie,
+              ...this.authHeaders(),
               'Content-Type': 'application/x-www-form-urlencoded',
             },
           }
@@ -541,7 +563,7 @@ export class QBittorrentService implements IDownloadClient {
             }),
             {
               headers: {
-                Cookie: this.cookie,
+                ...this.authHeaders(),
                 'Content-Type': 'application/x-www-form-urlencoded',
               },
             }
@@ -572,13 +594,13 @@ export class QBittorrentService implements IDownloadClient {
    * Get torrent status and progress
    */
   async getTorrent(hash: string): Promise<TorrentInfo> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
     try {
       const response = await this.client.get('/torrents/info', {
-        headers: { Cookie: this.cookie },
+        headers: this.authHeaders(),
         params: { hashes: hash },
       });
 
@@ -610,7 +632,7 @@ export class QBittorrentService implements IDownloadClient {
    * Get all torrents (optionally filtered by category)
    */
   async getTorrents(category?: string): Promise<TorrentInfo[]> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
@@ -621,7 +643,7 @@ export class QBittorrentService implements IDownloadClient {
       }
 
       const response = await this.client.get('/torrents/info', {
-        headers: { Cookie: this.cookie },
+        headers: this.authHeaders(),
         params,
       });
 
@@ -636,7 +658,7 @@ export class QBittorrentService implements IDownloadClient {
    * Pause torrent
    */
   async pauseTorrent(hash: string): Promise<void> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
@@ -646,7 +668,7 @@ export class QBittorrentService implements IDownloadClient {
         new URLSearchParams({ hashes: hash }),
         {
           headers: {
-            Cookie: this.cookie,
+            ...this.authHeaders(),
             'Content-Type': 'application/x-www-form-urlencoded',
           },
         }
@@ -663,7 +685,7 @@ export class QBittorrentService implements IDownloadClient {
    * Resume torrent
    */
   async resumeTorrent(hash: string): Promise<void> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
@@ -673,7 +695,7 @@ export class QBittorrentService implements IDownloadClient {
         new URLSearchParams({ hashes: hash }),
         {
           headers: {
-            Cookie: this.cookie,
+            ...this.authHeaders(),
             'Content-Type': 'application/x-www-form-urlencoded',
           },
         }
@@ -690,7 +712,7 @@ export class QBittorrentService implements IDownloadClient {
    * Delete torrent
    */
   async deleteTorrent(hash: string, deleteFiles: boolean = false): Promise<void> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
@@ -703,7 +725,7 @@ export class QBittorrentService implements IDownloadClient {
         }),
         {
           headers: {
-            Cookie: this.cookie,
+            ...this.authHeaders(),
             'Content-Type': 'application/x-www-form-urlencoded',
           },
         }
@@ -720,13 +742,13 @@ export class QBittorrentService implements IDownloadClient {
    * Get files in torrent
    */
   async getFiles(hash: string): Promise<TorrentFile[]> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
     try {
       const response = await this.client.get('/torrents/files', {
-        headers: { Cookie: this.cookie },
+        headers: this.authHeaders(),
         params: { hash },
       });
 
@@ -741,13 +763,13 @@ export class QBittorrentService implements IDownloadClient {
    * Get all configured categories from qBittorrent
    */
   async getCategories(): Promise<string[]> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
     try {
       const response = await this.client.get('/torrents/categories', {
-        headers: { Cookie: this.cookie },
+        headers: this.authHeaders(),
       });
 
       return Object.keys(response.data || {});
@@ -761,7 +783,7 @@ export class QBittorrentService implements IDownloadClient {
    * Set category for torrent
    */
   async setCategory(hash: string, category: string): Promise<void> {
-    if (!this.cookie) {
+    if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
@@ -774,7 +796,7 @@ export class QBittorrentService implements IDownloadClient {
         }),
         {
           headers: {
-            Cookie: this.cookie,
+            ...this.authHeaders(),
             'Content-Type': 'application/x-www-form-urlencoded',
           },
         }
@@ -788,26 +810,36 @@ export class QBittorrentService implements IDownloadClient {
   }
 
   /**
-   * Test connection to qBittorrent
+   * Test connection to qBittorrent.
+   * In auth-optional mode the /app/version probe IS the connectivity check, so it must succeed.
+   * In credentialed mode login() is the connectivity check and version is best-effort.
    */
   async testConnection(): Promise<ConnectionTestResult> {
     try {
-      await this.login();
+      await this.login(); // no-op when authOptional; throws on real auth failure
 
-      // Fetch version after successful login
-      let version: string | undefined;
       try {
         const versionResponse = await this.client.get('/app/version', {
-          headers: { Cookie: this.cookie },
+          headers: this.authHeaders(),
         });
         const raw = versionResponse.data || '';
-        version = typeof raw === 'string' ? raw.replace(/^v/i, '') : undefined;
-      } catch {
-        // Version fetch is non-critical - connection is still valid
+        const version = typeof raw === 'string' ? raw.replace(/^v/i, '') : undefined;
+        return { success: true, version, message: `Connected to qBittorrent${version ? ` ${version}` : ''}` };
+      } catch (versionError) {
+        if (this.authOptional) {
+          // No login happened — version probe was our only connectivity signal.
+          const status = axios.isAxiosError(versionError) ? versionError.response?.status : undefined;
+          const baseMessage = versionError instanceof Error ? versionError.message : 'Connection failed';
+          const message = status === 401 || status === 403
+            ? `qBittorrent requires authentication (HTTP ${status}). Provide username/password or whitelist this app's IP in qBittorrent.`
+            : `Failed to reach qBittorrent: ${baseMessage}`;
+          logger.error('[QBittorrent] Auth-optional connection probe failed', { status, message: baseMessage });
+          return { success: false, message };
+        }
+        // Credentialed path: login already succeeded, version is nice-to-have.
         logger.debug('Could not fetch qBittorrent version');
+        return { success: true, message: 'Connected to qBittorrent' };
       }
-
-      return { success: true, version, message: `Connected to qBittorrent${version ? ` ${version}` : ''}` };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Connection failed';
       logger.error('Connection test failed', { error: message });
@@ -826,6 +858,7 @@ export class QBittorrentService implements IDownloadClient {
   ): Promise<string> {
     const baseUrl = url.replace(/\/$/, '');
     const loginUrl = `${baseUrl}/api/v2/auth/login`;
+    const authOptional = !username && !password;
 
     // Create HTTPS agent if SSL verification is disabled
     let httpsAgent: https.Agent | undefined;
@@ -844,9 +877,25 @@ export class QBittorrentService implements IDownloadClient {
       passwordLength: password?.length,
       sslVerifyDisabled: disableSSLVerify,
       hasHttpsAgent: !!httpsAgent,
+      authOptional,
     });
 
     try {
+      if (authOptional) {
+        // No credentials provided — skip /auth/login and probe /app/version directly.
+        // Works for IP-whitelisted qBittorrent and auth-less qBit-compatible proxies (e.g. Decypharr).
+        logger.info('[QBittorrent] No credentials provided, probing /app/version directly');
+        const versionResponse = await axios.get(`${baseUrl}/api/v2/app/version`, {
+          httpsAgent,
+          timeout: DOWNLOAD_CLIENT_TIMEOUT,
+        });
+        logger.info('[QBittorrent] Auth-optional version check successful', {
+          version: versionResponse.data,
+        });
+        const rawVersion = versionResponse.data || '';
+        return typeof rawVersion === 'string' ? rawVersion.replace(/^v/i, '') || 'Connected' : 'Connected';
+      }
+
       const requestBody = new URLSearchParams({ username, password });
       const requestHeaders = {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -980,6 +1029,11 @@ export class QBittorrentService implements IDownloadClient {
 
         // HTTP status errors
         if (status === 401 || status === 403) {
+          if (authOptional) {
+            throw new Error(
+              `qBittorrent requires authentication (HTTP ${status}). Provide username/password, or whitelist this app's IP in qBittorrent's Web UI settings.`
+            );
+          }
           throw new Error(
             `Authentication failed (HTTP ${status}). Check your username and password.`
           );

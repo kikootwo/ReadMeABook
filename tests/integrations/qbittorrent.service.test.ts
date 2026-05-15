@@ -1217,4 +1217,124 @@ describe('QBittorrentService', () => {
     expect(result.success).toBe(true);
     expect(loginSpy).toHaveBeenCalled();
   });
+
+  describe('auth-optional mode (blank credentials)', () => {
+    it('flags service as auth-optional when both credentials are blank', () => {
+      const service = new QBittorrentService('http://qb', '', '');
+      expect((service as any).authOptional).toBe(true);
+    });
+
+    it('flags service as credentialed when any credential is provided', () => {
+      const withUser = new QBittorrentService('http://qb', 'user', '');
+      const withPass = new QBittorrentService('http://qb', '', 'pass');
+      expect((withUser as any).authOptional).toBe(false);
+      expect((withPass as any).authOptional).toBe(false);
+    });
+
+    it('login() is a no-op when auth-optional', async () => {
+      const service = new QBittorrentService('http://qb', '', '');
+      await service.login();
+      expect(axiosMock.post).not.toHaveBeenCalled();
+      expect((service as any).cookie).toBeUndefined();
+    });
+
+    it('testConnection() succeeds when /app/version returns a version (auth-optional)', async () => {
+      const service = new QBittorrentService('http://qb', '', '');
+      clientMock.get.mockResolvedValueOnce({ data: 'v4.6.0' });
+
+      const result = await service.testConnection();
+
+      expect(result.success).toBe(true);
+      expect(result.version).toBe('4.6.0');
+      expect(axiosMock.post).not.toHaveBeenCalled();
+      expect(clientMock.get).toHaveBeenCalledWith('/app/version', expect.objectContaining({
+        headers: {},
+      }));
+    });
+
+    it('testConnection() returns failure when /app/version returns 401 (auth-optional)', async () => {
+      const service = new QBittorrentService('http://qb', '', '');
+      clientMock.get.mockRejectedValueOnce({
+        isAxiosError: true,
+        response: { status: 401 },
+        message: 'Unauthorized',
+      });
+
+      const result = await service.testConnection();
+
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/requires authentication/i);
+    });
+
+    it('testConnection() returns failure when /app/version is unreachable (auth-optional)', async () => {
+      const service = new QBittorrentService('http://qb', '', '');
+      clientMock.get.mockRejectedValueOnce({
+        isAxiosError: true,
+        code: 'ECONNREFUSED',
+        message: 'connect ECONNREFUSED',
+      });
+
+      const result = await service.testConnection();
+
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/Failed to reach qBittorrent/i);
+    });
+
+    it('testConnectionWithCredentials() probes /app/version directly when both creds blank', async () => {
+      axiosMock.get.mockResolvedValueOnce({ data: 'v4.6.0' });
+
+      const version = await QBittorrentService.testConnectionWithCredentials('http://qb', '', '');
+
+      expect(version).toBe('4.6.0');
+      expect(axiosMock.post).not.toHaveBeenCalled();
+      expect(axiosMock.get).toHaveBeenCalledWith(
+        'http://qb/api/v2/app/version',
+        expect.objectContaining({ httpsAgent: undefined })
+      );
+    });
+
+    it('testConnectionWithCredentials() reports auth-required when blank creds get 401', async () => {
+      axiosMock.get.mockRejectedValueOnce({
+        isAxiosError: true,
+        response: { status: 401 },
+        message: 'Unauthorized',
+        config: { url: 'http://qb/api/v2/app/version' },
+      });
+
+      await expect(
+        QBittorrentService.testConnectionWithCredentials('http://qb', '', '')
+      ).rejects.toThrow(/requires authentication/i);
+    });
+
+    it('addTorrent does not attempt re-login on 403 when auth-optional', async () => {
+      const service = new QBittorrentService('http://qb', '', '');
+      vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(undefined);
+      const loginSpy = vi.spyOn(service, 'login');
+      vi.spyOn(service as any, 'addMagnetLink').mockRejectedValueOnce({
+        isAxiosError: true,
+        response: { status: 403 },
+      });
+
+      await expect(
+        service.addTorrent('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567')
+      ).rejects.toThrow('Failed to add torrent');
+
+      expect(loginSpy).not.toHaveBeenCalled();
+    });
+
+    it('omits Cookie header on requests when auth-optional', async () => {
+      const service = new QBittorrentService('http://qb', '', '');
+      vi.spyOn(service as any, 'getTorrent').mockRejectedValue(new Error('not found'));
+      clientMock.post.mockResolvedValue({ data: 'Ok.' });
+
+      await (service as any).addMagnetLink(
+        'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567',
+        'readmeabook'
+      );
+
+      const headers = clientMock.post.mock.calls[0][2].headers;
+      expect(headers.Cookie).toBeUndefined();
+      expect(headers['Content-Type']).toBe('application/x-www-form-urlencoded');
+    });
+  });
 });
