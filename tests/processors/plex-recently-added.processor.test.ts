@@ -125,6 +125,72 @@ describe('processPlexRecentlyAddedCheck', () => {
     expect(prismaMock.plexLibrary.update).toHaveBeenCalled();
   });
 
+  it('persists durations exceeding INT4 max as BigInt on both create and update paths (regression for #193)', async () => {
+    configMock.getBackendMode.mockResolvedValue('plex');
+    configMock.getMany.mockResolvedValue({
+      plex_url: 'http://plex',
+      plex_token: 'token',
+      plex_audiobook_library_id: 'lib-1',
+    });
+    configMock.get.mockResolvedValue('lib-1');
+
+    libraryServiceMock.getCoverCachingParams.mockResolvedValue({
+      backendBaseUrl: 'http://plex',
+      authToken: 'token',
+      backendMode: 'plex',
+    });
+
+    thumbnailCacheServiceMock.cacheLibraryThumbnail.mockResolvedValue(null);
+
+    // Production-observed overflow value: ~4_082_750 seconds → 4_082_750_000 ms (> INT4 max 2_147_483_647)
+    const overflowSeconds = 4_082_750;
+    const overflowMs = BigInt(overflowSeconds * 1000);
+
+    libraryServiceMock.getRecentlyAdded.mockResolvedValue([
+      {
+        id: 'rating-new',
+        externalId: 'guid-new',
+        title: 'Long Audiobook (new)',
+        author: 'Author',
+        duration: overflowSeconds,
+        addedAt: new Date(),
+      },
+      {
+        id: 'rating-existing',
+        externalId: 'guid-existing',
+        title: 'Long Audiobook (existing)',
+        author: 'Author',
+        duration: overflowSeconds,
+        addedAt: new Date(),
+      },
+    ]);
+
+    prismaMock.plexLibrary.findUnique.mockImplementation(async (query: any) => {
+      if (query.where.plexGuid === 'guid-existing') {
+        return { id: 'existing-id', plexGuid: 'guid-existing', author: 'Author', duration: null };
+      }
+      return null;
+    });
+    prismaMock.plexLibrary.create.mockResolvedValue({});
+    prismaMock.plexLibrary.update.mockResolvedValue({});
+    prismaMock.request.findMany.mockResolvedValue([]);
+
+    const { processPlexRecentlyAddedCheck } = await import('@/lib/processors/plex-recently-added.processor');
+    await processPlexRecentlyAddedCheck({ jobId: 'job-overflow' });
+
+    expect(prismaMock.plexLibrary.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ duration: overflowMs }),
+      })
+    );
+    expect(prismaMock.plexLibrary.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { plexGuid: 'guid-existing' },
+        data: expect.objectContaining({ duration: overflowMs }),
+      })
+    );
+  });
+
   it('matches requests without re-triggering ABS metadata match for audiobookshelf', async () => {
     const matcher = await import('@/lib/utils/audiobook-matcher');
     const absApi = await import('@/lib/services/audiobookshelf/api');
