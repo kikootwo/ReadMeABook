@@ -206,7 +206,7 @@ export async function deleteRequest(
       const configService = getConfigService();
       const mediaDir = (await configService.get('media_dir')) || '/media/audiobooks';
       // Use ebook-specific template for ebook requests, with fallback to audiobook template
-      const audiobookTemplate = (await configService.get('audiobook_path_template')) || '{author}/{title} {asin}';
+      const audiobookTemplate = (await configService.get('audiobook_path_template')) || '{author}/{title} {[asin]}';
       const template = isEbook
         ? (await configService.get('ebook_path_template')) || audiobookTemplate
         : audiobookTemplate;

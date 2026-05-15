@@ -291,7 +291,7 @@ describe('file organizer', () => {
     });
 
     const sourcePath = path.join('/downloads', 'book', 'book.m4b');
-    const expectedDir = path.join('/media', 'Author', 'Book ASIN123');
+    const expectedDir = path.join('/media', 'Author', 'Book [ASIN123]');
     const targetFile = path.join(expectedDir, 'book.m4b');
 
     fsMock.access.mockImplementation(async (filePath: string) => {
@@ -310,7 +310,7 @@ describe('file organizer', () => {
       author: 'Author',
       asin: 'ASIN123',
       coverArtUrl: 'https://images.example/cover.jpg',
-    }, '{author}/{title} {asin}');
+    }, '{author}/{title} {[asin]}');
 
     expect(result.success).toBe(true);
     expect(result.coverArtFile).toBe(path.join(expectedDir, 'cover.jpg'));

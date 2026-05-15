@@ -10,14 +10,14 @@ Target directory read from database config `media_dir` (configurable in setup wi
 
 **Template-based organization:**
 - Config key: `audiobook_path_template`
-- Default: `{author}/{title} {asin}`
+- Default: `{author}/{title} {[asin]}`
 - Variables: `{author}`, `{title}`, `{narrator}`, `{asin}`, `{year}`
 - Optional variables (narrator, asin, year) are removed if not available
 
 **Examples:**
 ```
-Template: {author}/{title} {asin}
-Result: Douglas Adams/The Hitchhiker's Guide to the Galaxy B0009JKV9W/
+Template: {author}/{title} {[asin]}
+Result: Douglas Adams/The Hitchhiker's Guide to the Galaxy [B0009JKV9W]/
 
 Template: {author}/{title} ({year})
 Result: Douglas Adams/The Hitchhiker's Guide to the Galaxy (2005)/
@@ -200,7 +200,7 @@ async function organize(
 ## Configuration
 
 - **Media directory:** Read from database config key `media_dir` (set in setup wizard or settings)
-- **Path template:** Read from database config key `audiobook_path_template` (default: `{author}/{title} {asin}`)
+- **Path template:** Read from database config key `audiobook_path_template` (default: `{author}/{title} {[asin]}`)
 - **Metadata tagging:** `metadata_tagging_enabled` (boolean, default: true)
 - **Chapter merging:** `chapter_merging_enabled` (boolean, default: false)
 - **Fallback:** `/media/audiobooks` if media_dir not configured

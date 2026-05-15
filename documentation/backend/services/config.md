@@ -101,7 +101,7 @@ const CONFIG_DEFAULTS = {
   'system.log_level': 'info',
   'paths.downloads': '/downloads',
   'paths.media_library': '/media',
-  'audiobook_path_template': '{author}/{title} {asin}'
+  'audiobook_path_template': '{author}/{title} {[asin]}'
 };
 ```
 

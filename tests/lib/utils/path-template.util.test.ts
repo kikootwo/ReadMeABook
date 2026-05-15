@@ -16,7 +16,7 @@ import {
 
 describe('substituteTemplate', () => {
   it('should substitute all valid variables', () => {
-    const template = '{author}/{title}/{narrator}/{asin}';
+    const template = '{author}/{title}/{narrator}/{[asin]}';
     const variables: TemplateVariables = {
       author: 'Brandon Sanderson',
       title: 'Mistborn',
@@ -25,7 +25,7 @@ describe('substituteTemplate', () => {
     };
 
     const result = substituteTemplate(template, variables);
-    expect(result).toBe('Brandon Sanderson/Mistborn/Michael Kramer/B002UZMLXM');
+    expect(result).toBe('Brandon Sanderson/Mistborn/Michael Kramer/[B002UZMLXM]');
   });
 
   it('should handle missing optional variables gracefully', () => {
@@ -361,7 +361,7 @@ describe('validateTemplate', () => {
       '{author}/{title}/{narrator}',
       'Audiobooks/{author}/{title}',
       '{author} - {title}',
-      '{author}/{title}/{asin}'
+      '{author}/{title}/{[asin]}'
     ];
 
     templates.forEach(template => {
@@ -556,25 +556,25 @@ describe('generateMockPreviews', () => {
   });
 
   it('should include ASIN in examples when requested', () => {
-    const template = '{author}/{title}/{asin}';
+    const template = '{author}/{title}/{[asin]}';
     const previews = generateMockPreviews(template);
 
     // All examples should have ASIN (mock data includes it)
     previews.forEach(preview => {
       const parts = preview.split('/');
       expect(parts.length).toBe(3);
-      expect(parts[2]).toMatch(/^B[A-Z0-9]+$/); // ASIN format
+      expect(parts[2]).toMatch(/^\[B[A-Z0-9]+\]$/); // ASIN format with brackets
     });
   });
 
   it('should handle complex templates with static text', () => {
-    const template = 'Library/{author}/Books/{title} - {asin}';
+    const template = 'Library/{author}/Books/{title} - {[asin]}';
     const previews = generateMockPreviews(template);
 
     previews.forEach(preview => {
       expect(preview).toContain('Library/');
       expect(preview).toContain('/Books/');
-      expect(preview).toContain(' - B');
+      expect(preview).toContain(' - [B');
     });
   });
 

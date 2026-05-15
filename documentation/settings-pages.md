@@ -162,14 +162,14 @@ src/app/admin/settings/
 **Purpose:** Customize how audiobooks are organized within the media directory using variable-based templates.
 
 **Configuration:**
-- Key: `audiobook_path_template` (string, default: `{author}/{title} {asin}`)
+- Key: `audiobook_path_template` (string, default: `{author}/{title} {[asin]}`)
 - Variables: `{author}`, `{title}`, `{narrator}`, `{asin}`, `{year}`
 - Optional variables (narrator, asin, year) removed if not available
 - Template validated on test, shows preview examples
 
 **UI (PathsTab):**
 - Text input with monospace font
-- Placeholder: `{author}/{title} {asin}`
+- Placeholder: `{author}/{title} {[asin]}`
 - Variable reference panel showing all available variables
 - Template validation on "Test Paths" with success/error feedback
 - Preview examples showing 2-3 sample paths with actual data
@@ -181,7 +181,7 @@ src/app/admin/settings/
 - Valid templates show preview paths
 
 **Examples:**
-- `{author}/{title} {asin}` → `Douglas Adams/The Hitchhiker's Guide to the Galaxy B0009JKV9W/`
+- `{author}/{title} {[asin]}` → `Douglas Adams/The Hitchhiker's Guide to the Galaxy [B0009JKV9W]/`
 - `{author}/{title} ({year})` → `Douglas Adams/The Hitchhiker's Guide to the Galaxy (2005)/`
 - `{author}/{narrator}/{title}` → `Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/`
 

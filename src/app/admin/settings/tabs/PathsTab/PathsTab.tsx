@@ -46,7 +46,7 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
 
   // Update audiobook live preview whenever template changes
   useEffect(() => {
-    const template = paths.audiobookPathTemplate || '{author}/{title} {asin}';
+    const template = paths.audiobookPathTemplate || '{author}/{title} {[asin]}';
     const validation = validateTemplate(template);
 
     if (validation.valid) {
@@ -64,7 +64,7 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
 
   // Update ebook live preview whenever template changes
   useEffect(() => {
-    const template = paths.ebookPathTemplate || '{author}/{title} {asin}';
+    const template = paths.ebookPathTemplate || '{author}/{title} {[asin]}';
     const validation = validateTemplate(template);
 
     if (validation.valid) {
@@ -108,8 +108,8 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
     }
   }, [paths.fileRenameTemplate, paths.fileRenameEnabled]);
 
-  const audiobookTemplate = paths.audiobookPathTemplate || '{author}/{title} {asin}';
-  const ebookTemplate = paths.ebookPathTemplate || '{author}/{title} {asin}';
+  const audiobookTemplate = paths.audiobookPathTemplate || '{author}/{title} {[asin]}';
+  const ebookTemplate = paths.ebookPathTemplate || '{author}/{title} {[asin]}';
   const ebookMatchesAudiobook = ebookTemplate === audiobookTemplate;
 
   return (
@@ -164,9 +164,9 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
         </label>
         <Input
           type="text"
-          value={paths.audiobookPathTemplate || '{author}/{title} {asin}'}
+          value={paths.audiobookPathTemplate || '{author}/{title} {[asin]}'}
           onChange={(e) => updatePath('audiobookPathTemplate', e.target.value)}
-          placeholder="{author}/{title} {asin}"
+          placeholder="{author}/{title} {[asin]}"
           className="font-mono"
         />
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -208,14 +208,14 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
         <div className="flex gap-2">
           <Input
             type="text"
-            value={paths.ebookPathTemplate || '{author}/{title} {asin}'}
+            value={paths.ebookPathTemplate || '{author}/{title} {[asin]}'}
             onChange={(e) => updatePath('ebookPathTemplate', e.target.value)}
-            placeholder="{author}/{title} {asin}"
+            placeholder="{author}/{title} {[asin]}"
             className="font-mono flex-1"
           />
           <Button
             variant="outline"
-            onClick={() => updatePath('ebookPathTemplate', paths.audiobookPathTemplate || '{author}/{title} {asin}')}
+            onClick={() => updatePath('ebookPathTemplate', paths.audiobookPathTemplate || '{author}/{title} {[asin]}')}
             disabled={ebookMatchesAudiobook}
             className="whitespace-nowrap text-sm"
           >

@@ -1008,7 +1008,7 @@ export async function getFileOrganizer(): Promise<FileOrganizer> {
  * Standalone function for use by other modules (e.g., fetch-ebook route, request-delete service)
  *
  * @param baseDir - Base directory for audiobooks (e.g., /media/audiobooks)
- * @param template - Path template string (e.g., "{author}/{title} {asin}")
+ * @param template - Path template string (e.g., "{author}/{title} {[asin]}")
  * @param variables - Object containing variable values (author, title, narrator, asin)
  * @returns Full path to audiobook directory
  *
@@ -1016,10 +1016,10 @@ export async function getFileOrganizer(): Promise<FileOrganizer> {
  * ```typescript
  * const path = buildAudiobookPath(
  *   '/media/audiobooks',
- *   '{author}/{title} {asin}',
+ *   '{author}/{title} {[asin]}',
  *   { author: 'Brandon Sanderson', title: 'Mistborn', asin: 'B002UZMLXM' }
  * );
- * // Returns: "/media/audiobooks/Brandon Sanderson/Mistborn B002UZMLXM"
+ * // Returns: "/media/audiobooks/Brandon Sanderson/Mistborn [B002UZMLXM]"
  * ```
  */
 export function buildAudiobookPath(

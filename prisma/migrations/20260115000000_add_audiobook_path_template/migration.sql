@@ -7,10 +7,10 @@ INSERT INTO configuration (id, key, value, encrypted, category, description, cre
 VALUES (
   gen_random_uuid(),
   'audiobook_path_template',
-  '{author}/{title} {asin}',
+  '{author}/{title} {[asin]}',
   false,
   'automation',
-  'Template for organizing audiobook file paths. Supports placeholders: {author}, {title}, {asin}. Example: "{author}/{title} {asin}" creates "Author Name/Book Title ASIN/audiobook.m4b"',
+  'Template for organizing audiobook file paths. Supports placeholders: {author}, {title}, {asin}. Example: "{author}/{title} {[asin]}" creates "Author Name/Book Title [ASIN]/audiobook.m4b"',
   NOW(),
   NOW()
 )

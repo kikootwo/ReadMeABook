@@ -71,7 +71,7 @@ describe('processOrganizeFiles', () => {
     configMock.get.mockImplementation(async (key: string) => {
       if (key === 'plex.trigger_scan_after_import') return 'true';
       if (key === 'plex_audiobook_library_id') return 'lib-1';
-      if (key === 'audiobook_path_template') return '{author}/{title} {asin}';
+      if (key === 'audiobook_path_template') return '{author}/{title} {[asin]}';
       return null;
     });
 
@@ -225,7 +225,7 @@ describe('processOrganizeFiles', () => {
       deletedAt: null,
     });
     configMock.get.mockImplementation(async (key: string) => {
-      if (key === 'audiobook_path_template') return '{author}/{title} {asin}';
+      if (key === 'audiobook_path_template') return '{author}/{title} {[asin]}';
       return null;
     });
 
@@ -373,7 +373,7 @@ describe('processOrganizeFiles', () => {
       deletedAt: null,
     });
     configMock.get.mockImplementation(async (key: string) => {
-      if (key === 'audiobook_path_template') return '{author}/{title} {asin}';
+      if (key === 'audiobook_path_template') return '{author}/{title} {[asin]}';
       return null;
     });
 

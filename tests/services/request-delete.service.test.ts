@@ -91,7 +91,7 @@ describe('deleteRequest', () => {
         return '/media';
       }
       if (key === 'audiobook_path_template') {
-        return '{author}/{title} {asin}';
+        return '{author}/{title} {[asin]}';
       }
       return null;
     });
@@ -236,7 +236,7 @@ describe('deleteRequest', () => {
         return '/media';
       }
       if (key === 'audiobook_path_template') {
-        return '{author}/{title} {asin}';
+        return '{author}/{title} {[asin]}';
       }
       return null;
     });
@@ -409,7 +409,7 @@ describe('deleteRequest', () => {
         return '/media';
       }
       if (key === 'audiobook_path_template') {
-        return '{author}/{title} {asin}';
+        return '{author}/{title} {[asin]}';
       }
       return null;
     });

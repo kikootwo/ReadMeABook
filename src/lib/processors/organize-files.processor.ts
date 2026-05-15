@@ -183,7 +183,7 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     const templateConfig = await prisma.configuration.findUnique({
       where: { key: 'audiobook_path_template' },
     });
-    const template = templateConfig?.value || '{author}/{title} {asin}';
+    const template = templateConfig?.value || '{author}/{title} {[asin]}';
 
     // Read file rename configuration
     const fileRenameEnabledConfig = await prisma.configuration.findUnique({
@@ -674,7 +674,7 @@ async function processEbookOrganization(
     const audiobookTemplateConfig = await prisma.configuration.findUnique({
       where: { key: 'audiobook_path_template' },
     });
-    template = audiobookTemplateConfig?.value || '{author}/{title} {asin}';
+    template = audiobookTemplateConfig?.value || '{author}/{title} {[asin]}';
   }
 
   // Check if Kindle EPUB fix is needed
