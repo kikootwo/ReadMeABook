@@ -66,7 +66,7 @@ export function RequestActionsDropdown({
   const canSearch = ['pending', 'failed', 'awaiting_search'].includes(request.status);
   const canAdjustSearchTerms = ['pending', 'failed', 'awaiting_search', 'searching'].includes(request.status);
   const canRetryDownload = request.status === 'failed' && (request.downloadAttempts ?? 0) > 0 && !!onRetryDownload;
-  const canCancel = ['pending', 'searching', 'downloading', 'awaiting_search'].includes(request.status);
+  const canCancel = ['pending', 'searching', 'downloading', 'awaiting_search', 'awaiting_approval'].includes(request.status);
   const canDelete = true; // Admins can always delete
 
   // View Source: For ebooks, extract MD5 from slow download URL and link to Anna's Archive
@@ -159,7 +159,11 @@ export function RequestActionsDropdown({
 
   const handleCancel = async () => {
     setIsOpen(false);
-    if (window.confirm(`Are you sure you want to cancel the request for "${request.title}"?`)) {
+    const statusNote = request.status === 'awaiting_approval'
+      ? ' It is pending admin approval and will be withdrawn.'
+      : ' It has already been approved and is actively being processed/monitored.';
+    const message = `Are you sure you want to cancel this request?${statusNote}`;
+    if (window.confirm(message)) {
       try {
         await onCancel(request.requestId);
       } catch (error) {

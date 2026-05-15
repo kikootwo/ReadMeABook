@@ -9,7 +9,7 @@ import { createPrismaMock } from '../helpers/prisma';
 let authRequest: any;
 
 const prismaMock = createPrismaMock();
-const jobQueueMock = vi.hoisted(() => ({ addSearchJob: vi.fn(), addOrganizeJob: vi.fn() }));
+const jobQueueMock = vi.hoisted(() => ({ addSearchJob: vi.fn(), addOrganizeJob: vi.fn(), addNotificationJob: vi.fn().mockResolvedValue(undefined) }));
 const requireAuthMock = vi.hoisted(() => vi.fn());
 const qbtMock = vi.hoisted(() => ({ getTorrent: vi.fn() }));
 const sabnzbdMock = vi.hoisted(() => ({ getNZB: vi.fn() }));
@@ -115,11 +115,13 @@ describe('Request by ID API routes', () => {
       id: 'req-2',
       userId: 'user-1',
       status: 'pending',
+      user: { plexUsername: 'testuser' },
+      audiobook: { id: 'ab-1', title: 'Test Book', author: 'Test Author' },
     });
     prismaMock.request.update.mockResolvedValueOnce({
       id: 'req-2',
       status: 'cancelled',
-      audiobook: { id: 'ab-1' },
+      audiobook: { id: 'ab-1', title: 'Test Book', author: 'Test Author' },
     });
 
     const { PATCH } = await import('@/app/api/requests/[id]/route');
@@ -128,6 +130,66 @@ describe('Request by ID API routes', () => {
 
     expect(response.status).toBe(200);
     expect(payload.request.status).toBe('cancelled');
+    expect(jobQueueMock.addNotificationJob).toHaveBeenCalledWith(
+      'request_cancelled',
+      'req-2',
+      'Test Book',
+      'Test Author',
+      'testuser'
+    );
+  });
+
+  it('cancels an awaiting_approval request and clears selectedTorrent', async () => {
+    authRequest.json.mockResolvedValue({ action: 'cancel' });
+    prismaMock.request.findFirst.mockResolvedValueOnce({
+      id: 'req-ap',
+      userId: 'user-1',
+      status: 'awaiting_approval',
+      user: { plexUsername: 'testuser' },
+      audiobook: { id: 'ab-ap', title: 'Approval Book', author: 'Some Author' },
+    });
+    prismaMock.request.update.mockResolvedValueOnce({
+      id: 'req-ap',
+      status: 'cancelled',
+      audiobook: { id: 'ab-ap', title: 'Approval Book', author: 'Some Author' },
+    });
+
+    const { PATCH } = await import('@/app/api/requests/[id]/route');
+    const response = await PATCH({} as any, { params: Promise.resolve({ id: 'req-ap' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.request.status).toBe('cancelled');
+    expect(prismaMock.request.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ selectedTorrent: null }),
+      })
+    );
+    expect(jobQueueMock.addNotificationJob).toHaveBeenCalledWith(
+      'request_cancelled',
+      'req-ap',
+      'Approval Book',
+      'Some Author',
+      'testuser'
+    );
+  });
+
+  it('returns 400 when cancelling a request in a non-cancellable status', async () => {
+    authRequest.json.mockResolvedValue({ action: 'cancel' });
+    prismaMock.request.findFirst.mockResolvedValueOnce({
+      id: 'req-2',
+      userId: 'user-1',
+      status: 'available',
+      user: { plexUsername: 'testuser' },
+      audiobook: { id: 'ab-1', title: 'Test Book', author: 'Test Author' },
+    });
+
+    const { PATCH } = await import('@/app/api/requests/[id]/route');
+    const response = await PATCH({} as any, { params: Promise.resolve({ id: 'req-2' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe('ValidationError');
   });
 
   it('returns 400 for invalid actions', async () => {
