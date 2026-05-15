@@ -222,6 +222,25 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
 
     logger.info(`Successfully moved ${result.filesMovedCount} files to ${result.targetPath}`);
 
+    const coercionConfig = await prisma.configuration.findUnique({
+      where: { key: 'plex_format_coercion_enabled' },
+    });
+    const coercionEnabled = coercionConfig?.value !== 'false';
+
+    if (coercionEnabled && result.audioFiles.length > 0) {
+      try {
+        const { coerceToPlexCompatible } = await import('../utils/format-coercion');
+        const coercion = await coerceToPlexCompatible(result.audioFiles, logger);
+        if (coercion.renamed.length > 0) {
+          logger.info(`Plex format coercion: renamed ${coercion.renamed.length} file(s)`);
+          result.audioFiles = coercion.finalAudioFiles;
+        }
+        coercion.warnings.forEach(w => logger.warn(`Plex format coercion: ${w}`));
+      } catch (err) {
+        logger.warn(`Plex format coercion failed (non-fatal): ${err instanceof Error ? err.message : 'unknown'}`);
+      }
+    }
+
     // Generate hash from organized audio files for library matching
     const filesHash = generateFilesHash(result.audioFiles);
     if (filesHash) {

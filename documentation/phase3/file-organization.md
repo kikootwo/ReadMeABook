@@ -44,10 +44,11 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 5. **Copy** files (not move - originals stay for seeding)
 6. **Tag metadata** (if enabled) - writes correct title, author, narrator, ASIN to audio files
 7. Copy cover art if found, else download from Audible
-8. **Generate file hash** - SHA256 of sorted audio filenames for library matching (see: [fixes/file-hash-matching.md](../fixes/file-hash-matching.md))
-9. Update request status to `downloaded` and store file hash in `audiobooks.files_hash`
-10. **Trigger filesystem scan** (if enabled) - tells Plex/ABS to scan for new files
-11. Originals remain until seeding requirements met
+8. **Coerce file formats** (if enabled) - rename .mp4 → .m4b and single-file .m4a → .m4b for Plex compatibility (see: Plex Format Coercion below)
+9. **Generate file hash** - SHA256 of sorted audio filenames for library matching (see: [fixes/file-hash-matching.md](../fixes/file-hash-matching.md))
+10. Update request status to `downloaded` and store file hash in `audiobooks.files_hash`
+11. **Trigger filesystem scan** (if enabled) - tells Plex/ABS to scan for new files
+12. Originals remain until seeding requirements met
 
 ## Filesystem Scan Triggering
 
@@ -150,6 +151,61 @@ exiftool "audiobook.m4b" | grep -i asin
   - Multi-container: `docker exec readmeabook ffmpeg -version`
   - Unified: `docker exec readmeabook-unified ffmpeg -version`
 
+## Plex Format Coercion
+
+**Status:** ✅ Implemented | Issue #166
+
+**Purpose:** Rename audiobook files to Plex-recognized extensions before the library scan. Plex silently ignores `.mp4` files in audiobook libraries; this step prevents that silent-failure mode. Rename-only — no transcoding.
+
+**When:** After file organization and metadata tagging, before file-hash generation and before library scan trigger.
+
+**Scope:** Audio path only. Not applied to ebook organization.
+
+**Coercion Table:**
+
+| Source ext | Action |
+|---|---|
+| `.mp4` | Rename to `.m4b` |
+| `.m4a` (single audio file in folder) | Rename to `.m4b` |
+| `.m4a` (multi-file folder) | No-op |
+| `.m4b`, `.mp3`, `.flac`, `.aac`, `.wav`, `.alac` | No-op |
+| `.aa`, `.aax` | No-op + warn ("DRM, Plex cannot import") |
+| `.ogg`, `.opus`, `.wma`, other | No-op + warn ("requires transcode, not supported in v1") |
+
+**Configuration:**
+- Key: `plex_format_coercion_enabled` (Configuration table)
+- Default: `true`
+- Read contract: `value !== 'false'` enables (default-on semantics)
+- Configurable in: Setup wizard (Paths step), Admin settings (Paths tab)
+
+**Behavior:**
+- Each audio file evaluated independently (mixed-format folders supported).
+- Pre-rename collision check: if target exists → no-op + info log. Never overwrites.
+- Idempotent: re-running on already-coerced folder is a no-op (extension is the signal — no marker files).
+- Operates on `targetPath` (organized library files) only — never touches `/downloads` (seeding-safe).
+
+**Failure Isolation:**
+- Coercion wrapped in try/catch at processor level.
+- Any failure (e.g., EPERM) logs a warning; request remains organized; original file untouched.
+- A failed rename never regresses the request to "stuck."
+
+**Tech Stack:**
+- `src/lib/utils/format-coercion.ts` — coercion module
+- `src/lib/constants/audio-formats.ts` — `PLEX_COMPATIBLE_EXTENSIONS`, `COERCION_RENAME_MAP`, `DRM_EXTENSIONS`, `TRANSCODE_REQUIRED_EXTENSIONS`
+- Invoked from `src/lib/processors/organize-files.processor.ts` between file organization and `generateFilesHash`
+- `fs.rename` (same filesystem — no cross-mount issues)
+
+**Hash Interaction:**
+- File hash (`audiobooks.files_hash`) is generated AFTER coercion → reflects post-coercion filenames.
+- See: [fixes/file-hash-matching.md](../fixes/file-hash-matching.md) for hash semantics.
+
+**Out of Scope (v1):**
+- Transcoding (`.ogg`, `.opus`, `.wma`)
+- DRM decoding (`.aa`, `.aax`)
+- FLAC → M4B (already Plex-recognized)
+- Per-request override UI
+- Retroactive library sweep (new downloads only)
+
 ## Seeding Support
 
 **Config:** `seeding_time_minutes` (0 = unlimited, never cleanup)
@@ -203,6 +259,7 @@ async function organize(
 - **Path template:** Read from database config key `audiobook_path_template` (default: `{author}/{title} {asin}`)
 - **Metadata tagging:** `metadata_tagging_enabled` (boolean, default: true)
 - **Chapter merging:** `chapter_merging_enabled` (boolean, default: false)
+- **Plex format coercion:** `plex_format_coercion_enabled` (boolean, default: true)
 - **Fallback:** `/media/audiobooks` if media_dir not configured
 - **Temp directory:** `/tmp/readmeabook` (or `TEMP_DIR` env var)
 

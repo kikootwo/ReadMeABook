@@ -15,7 +15,7 @@ export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { downloadDir, mediaDir, audiobookPathTemplate, ebookPathTemplate, metadataTaggingEnabled, chapterMergingEnabled, fileRenameEnabled, fileRenameTemplate, fileChmod, dirChmod } = await request.json();
+        const { downloadDir, mediaDir, audiobookPathTemplate, ebookPathTemplate, metadataTaggingEnabled, chapterMergingEnabled, plexFormatCoercionEnabled, fileRenameEnabled, fileRenameTemplate, fileChmod, dirChmod } = await request.json();
 
         if (!downloadDir || !mediaDir) {
           return NextResponse.json(
@@ -112,6 +112,19 @@ export async function PUT(request: NextRequest) {
           },
         });
 
+        // Update Plex format coercion setting (issue #166: silently rename .mp4/.m4a to .m4b
+        // post-organize so Plex's audiobook library recognizes them without transcoding)
+        await prisma.configuration.upsert({
+          where: { key: 'plex_format_coercion_enabled' },
+          update: { value: String(plexFormatCoercionEnabled ?? true) },
+          create: {
+            key: 'plex_format_coercion_enabled',
+            value: String(plexFormatCoercionEnabled ?? true),
+            category: 'automation',
+            description: 'Rename audio files to Plex-compatible extensions (.mp4/.m4a -> .m4b) after organization to avoid silent library-scan failures',
+          },
+        });
+
         // Update file rename setting
         await prisma.configuration.upsert({
           where: { key: 'file_rename_enabled' },
@@ -176,6 +189,7 @@ export async function PUT(request: NextRequest) {
         configService.clearCache('ebook_path_template');
         configService.clearCache('metadata_tagging_enabled');
         configService.clearCache('chapter_merging_enabled');
+        configService.clearCache('plex_format_coercion_enabled');
         configService.clearCache('file_rename_enabled');
         configService.clearCache('file_rename_template');
         configService.clearCache('file_chmod');

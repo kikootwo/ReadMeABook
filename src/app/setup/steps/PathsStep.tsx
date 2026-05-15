@@ -13,6 +13,7 @@ interface PathsStepProps {
   downloadDir: string;
   mediaDir: string;
   metadataTaggingEnabled: boolean;
+  plexFormatCoercionEnabled: boolean;
   chapterMergingEnabled: boolean;
   pathsTested: boolean;
   onUpdate: (field: string, value: any) => void;
@@ -24,6 +25,7 @@ export function PathsStep({
   downloadDir,
   mediaDir,
   metadataTaggingEnabled,
+  plexFormatCoercionEnabled,
   chapterMergingEnabled,
   pathsTested,
   onUpdate,
@@ -241,6 +243,30 @@ export function PathsStep({
                 Automatically write correct title, author, and narrator metadata to m4b and mp3 files
                 during file organization. This significantly improves Plex matching accuracy for audiobooks
                 with missing or incorrect metadata. Recommended: enabled.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Plex Format Coercion Toggle */}
+        <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+          <div className="flex items-start gap-4">
+            <input
+              type="checkbox"
+              id="plex-format-coercion"
+              checked={plexFormatCoercionEnabled}
+              onChange={(e) => onUpdate('plexFormatCoercionEnabled', e.target.checked)}
+              className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <div className="flex-1">
+              <label
+                htmlFor="plex-format-coercion"
+                className="block text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer"
+              >
+                Coerce file formats for Plex compatibility
+              </label>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Rename .mp4 audiobook files (and single-file .m4a) to .m4b before Plex scans. No re-encoding.
               </p>
             </div>
           </div>

@@ -154,6 +154,12 @@ model Audiobook {
 - Hash generated AFTER merging
 - **Works correctly:** Hash reflects final organized state
 
+### Coerced Files (Plex Format Coercion)
+- Files renamed from `.mp4` → `.m4b` (or single-file `.m4a` → `.m4b`) by Plex format coercion
+- Hash generated AFTER coercion → reflects post-coercion filenames
+- **Works correctly going forward:** ABS sees post-coercion names, hash matches
+- **Pre-existing library entries** hashed before coercion was enabled will NOT match post-coercion files — retroactive library sweep is out of scope (see issue #166)
+
 ### Multiple Downloads (Same Book)
 - User re-downloads same audiobook (different edition/request)
 - Multiple records with same `filesHash`

@@ -113,6 +113,7 @@ export interface PathsSettings {
   audiobookPathTemplate?: string;
   ebookPathTemplate?: string;
   metadataTaggingEnabled: boolean;
+  plexFormatCoercionEnabled: boolean;
   chapterMergingEnabled: boolean;
   fileRenameEnabled: boolean;
   fileRenameTemplate?: string;

@@ -69,6 +69,7 @@
 - **qBittorrent integration (torrents)** → [phase3/qbittorrent.md](phase3/qbittorrent.md)
 - **SABnzbd integration (Usenet/NZB)** → [phase3/sabnzbd.md](phase3/sabnzbd.md)
 - **File organization, seeding** → [phase3/file-organization.md](phase3/file-organization.md)
+- **Plex-compatible format coercion (.mp4 → .m4b)** → [phase3/file-organization.md](phase3/file-organization.md#plex-format-coercion)
 - **Chapter merging (auto-merge to M4B)** → [features/chapter-merging.md](features/chapter-merging.md)
 
 ## Background Jobs

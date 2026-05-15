@@ -68,7 +68,7 @@ src/app/admin/settings/
 2. **Audiobookshelf** - URL, API token (masked), library ID, Audible region, filesystem scan trigger toggle
 3. **Prowlarr** - URL, API key (masked), indexer selection with priority, seeding time, RSS monitoring toggle, **audiobook/ebook categories per indexer**
 4. **Download Client** - Type (qBittorrent, Transmission, SABnzbd), URL, credentials (masked), custom download path (per-client relative sub-path with live preview)
-5. **Paths** - Download + media directories, audiobook organization template, metadata tagging toggle, chapter merging toggle
+5. **Paths** - Download + media directories, audiobook organization template, metadata tagging toggle, chapter merging toggle, Plex format coercion toggle
 6. **E-book Sidecar** - Multi-source ebook downloads (Anna's Archive + Indexer Search), preferred format
 7. **BookDate** - AI provider, API key (encrypted), model selection, library scope, custom prompt, swipe history
 8. **Notifications** - Multiple backends (Discord, Pushover), event subscriptions, test functionality
@@ -221,6 +221,27 @@ src/app/admin/settings/
 - When enabled: After `organize_files` job completes, RMAB triggers filesystem scan in media server
 - When disabled: User relies on media server's filesystem watcher or manual scans
 - Error handling: Scan failures logged but don't fail organize job (graceful degradation)
+
+## Plex Format Coercion
+
+**Purpose:** Rename audiobook files to Plex-recognized extensions (`.mp4` → `.m4b`, single-file `.m4a` → `.m4b`) before the library scan. Prevents Plex silently ignoring `.mp4` audiobooks. Rename-only — no transcoding. See: [phase3/file-organization.md](phase3/file-organization.md#plex-format-coercion).
+
+**Configuration:**
+- Key: `plex_format_coercion_enabled` (boolean, default: `true`)
+- Read contract: `value !== 'false'` enables (default-on)
+- Configurable in: Setup wizard (Paths step), Admin settings (Paths tab)
+
+**UI:**
+- Checkbox toggle in PathsTab, between metadata tagging and chapter merging
+- Default: Checked (enabled)
+- Label: "Coerce file formats for Plex compatibility"
+- Sub-text: "Rename .mp4 audiobook files (and single-file .m4a) to .m4b before Plex scans. No re-encoding."
+
+**Behavior:**
+- When enabled: After organize, rename files per coercion table before scan trigger
+- When disabled: Files left as-is (Plex may silently skip `.mp4`)
+- Failure isolation: Rename errors logged but don't fail organize job
+- Universal (Plex + ABS) — rename is lossless, no per-backend distinction
 
 ## Validation Flow
 

@@ -87,6 +87,7 @@ interface SetupState {
   downloadDir: string;
   mediaDir: string;
   metadataTaggingEnabled: boolean;
+  plexFormatCoercionEnabled: boolean;
   chapterMergingEnabled: boolean;
   bookdateProvider: string;
   bookdateApiKey: string;
@@ -161,6 +162,7 @@ export default function SetupWizard() {
     downloadDir: '/downloads',
     mediaDir: '/media/audiobooks',
     metadataTaggingEnabled: true,
+    plexFormatCoercionEnabled: true,
     chapterMergingEnabled: false,
     bookdateProvider: 'openai',
     bookdateApiKey: '',
@@ -237,6 +239,7 @@ export default function SetupWizard() {
           download_dir: state.downloadDir,
           media_dir: state.mediaDir,
           metadata_tagging_enabled: state.metadataTaggingEnabled,
+          plex_format_coercion_enabled: state.plexFormatCoercionEnabled,
           chapter_merging_enabled: state.chapterMergingEnabled,
         },
         bookdate: state.bookdateConfigured ? {
@@ -537,6 +540,7 @@ export default function SetupWizard() {
           downloadDir={state.downloadDir}
           mediaDir={state.mediaDir}
           metadataTaggingEnabled={state.metadataTaggingEnabled}
+          plexFormatCoercionEnabled={state.plexFormatCoercionEnabled}
           chapterMergingEnabled={state.chapterMergingEnabled}
           pathsTested={state.pathsTested}
           onUpdate={updateField}

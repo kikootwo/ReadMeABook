@@ -414,6 +414,30 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
         </div>
       </div>
 
+      {/* Plex Format Coercion Toggle */}
+      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+        <div className="flex items-start gap-4">
+          <input
+            type="checkbox"
+            id="plex-format-coercion-settings"
+            checked={paths.plexFormatCoercionEnabled}
+            onChange={(e) => updatePath('plexFormatCoercionEnabled', e.target.checked)}
+            className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <div className="flex-1">
+            <label
+              htmlFor="plex-format-coercion-settings"
+              className="block text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer"
+            >
+              Coerce file formats for Plex compatibility
+            </label>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              Rename .mp4 audiobook files (and single-file .m4a) to .m4b before Plex scans. No re-encoding.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Chapter Merging Toggle */}
       <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
         <div className="flex items-start gap-4">

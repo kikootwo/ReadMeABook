@@ -69,6 +69,42 @@ export type TorrentTitleFormat = (typeof TORRENT_TITLE_FORMATS)[number];
 export type AudioFormat = TorrentTitleFormat | 'OTHER';
 
 /**
+ * Plex audiobook-library recognized extensions.
+ * Used by Plex format coercion to determine which formats are silently passed through.
+ * Research-grounded — see issue #166 for context on Plex's silent-failure behavior.
+ * Note: includes formats not yet in `AUDIO_EXTENSIONS` (.aac/.wav/.alac) for future-proofing.
+ */
+export const PLEX_COMPATIBLE_EXTENSIONS = [
+  '.m4b',
+  '.m4a',
+  '.mp3',
+  '.flac',
+  '.aac',
+  '.wav',
+  '.alac',
+] as const;
+
+/**
+ * Unambiguous rename targets for Plex format coercion.
+ * `.mp4` → `.m4b` always. `.m4a` → `.m4b` is conditional (single-file only) and handled in coercion logic.
+ */
+export const COERCION_RENAME_MAP: Record<string, string> = {
+  '.mp4': '.m4b',
+};
+
+/**
+ * DRM-protected formats that cannot be decoded without keys.
+ * Plex format coercion logs a warning and skips these.
+ */
+export const DRM_EXTENSIONS = ['.aa', '.aax'] as const;
+
+/**
+ * Formats that would require a full transcode to become Plex-compatible.
+ * Out of scope for v1 Plex format coercion — logs a warning and skips.
+ */
+export const TRANSCODE_REQUIRED_EXTENSIONS = ['.ogg', '.opus', '.wma'] as const;
+
+/**
  * All supported ebook file extensions for ebook detection and file serving.
  */
 export const EBOOK_EXTENSIONS = [

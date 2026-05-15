@@ -23,6 +23,7 @@ const PathsHarness = ({
     downloadDir: '/downloads',
     mediaDir: '/media/audiobooks',
     metadataTaggingEnabled: true,
+    plexFormatCoercionEnabled: true,
     chapterMergingEnabled: false,
     ...initialState,
   });
@@ -84,7 +85,11 @@ describe('PathsStep', () => {
       <PathsHarness
         onNext={vi.fn()}
         onBack={vi.fn()}
-        initialState={{ metadataTaggingEnabled: false, chapterMergingEnabled: false }}
+        initialState={{
+          metadataTaggingEnabled: false,
+          plexFormatCoercionEnabled: false,
+          chapterMergingEnabled: false,
+        }}
       />
     );
 
@@ -96,5 +101,19 @@ describe('PathsStep', () => {
 
     expect(metadataToggle).toBeChecked();
     expect(chapterToggle).toBeChecked();
+  });
+
+  it('renders plex format coercion toggle with default checked and toggles state', async () => {
+    render(<PathsHarness onNext={vi.fn()} onBack={vi.fn()} />);
+
+    const coercionToggle = screen.getByLabelText('Coerce file formats for Plex compatibility');
+
+    expect(coercionToggle).toBeChecked();
+
+    fireEvent.click(coercionToggle);
+    expect(coercionToggle).not.toBeChecked();
+
+    fireEvent.click(coercionToggle);
+    expect(coercionToggle).toBeChecked();
   });
 });

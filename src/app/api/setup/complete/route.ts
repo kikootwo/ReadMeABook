@@ -469,6 +469,19 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // Plex format coercion configuration (issue #166: silently rename .mp4/.m4a to .m4b
+    // post-organize so Plex's audiobook library recognizes them without transcoding)
+    await prisma.configuration.upsert({
+      where: { key: 'plex_format_coercion_enabled' },
+      update: { value: String(paths.plex_format_coercion_enabled ?? true) },
+      create: {
+        key: 'plex_format_coercion_enabled',
+        value: String(paths.plex_format_coercion_enabled ?? true),
+        category: 'automation',
+        description: 'Rename audio files to Plex-compatible extensions (.mp4/.m4a -> .m4b) after organization to avoid silent library-scan failures'
+      },
+    });
+
     // BookDate configuration (optional, global for all users)
     // Note: libraryScope and customPrompt are now per-user settings, not required here
     if (bookdate && bookdate.provider && bookdate.apiKey && bookdate.model) {
