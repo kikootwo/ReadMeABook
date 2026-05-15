@@ -112,6 +112,10 @@ export async function PATCH(
           id,
           deletedAt: null, // Only allow updates to active requests
         },
+        include: {
+          audiobook: true,
+          user: { select: { plexUsername: true } },
+        },
       });
 
       if (!requestRecord) {
@@ -130,17 +134,44 @@ export async function PATCH(
       }
 
       if (action === 'cancel') {
-        // Cancel the request
+        const cancellableStatuses = ['pending', 'searching', 'downloading', 'awaiting_search', 'awaiting_approval'];
+        if (!cancellableStatuses.includes(requestRecord.status)) {
+          return NextResponse.json(
+            {
+              error: 'ValidationError',
+              message: `Cannot cancel request with status: ${requestRecord.status}`,
+            },
+            { status: 400 }
+          );
+        }
+
+        const isAwaitingApproval = requestRecord.status === 'awaiting_approval';
+
         const updated = await prisma.request.update({
           where: { id },
           data: {
             status: 'cancelled',
             updatedAt: new Date(),
+            ...(isAwaitingApproval && { selectedTorrent: null as any }),
           },
           include: {
             audiobook: true,
           },
         });
+
+        try {
+          const { getJobQueueService } = await import('@/lib/services/job-queue.service');
+          const jobQueue = getJobQueueService();
+          await jobQueue.addNotificationJob(
+            'request_cancelled',
+            updated.id,
+            updated.audiobook.title,
+            updated.audiobook.author,
+            requestRecord.user.plexUsername || 'Unknown User'
+          );
+        } catch (error) {
+          logger.error('Failed to queue cancellation notification', { error });
+        }
 
         return NextResponse.json({
           success: true,

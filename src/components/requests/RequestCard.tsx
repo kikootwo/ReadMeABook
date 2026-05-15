@@ -50,12 +50,16 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
   const isEbook = requestType === 'ebook';
 
   const isCompleted = COMPLETED_STATUSES.includes(request.status as typeof COMPLETED_STATUSES[number]);
-  const canCancel = ['pending', 'searching', 'downloading', 'awaiting_search'].includes(request.status);
+  const canCancel = ['pending', 'searching', 'downloading', 'awaiting_search', 'awaiting_approval'].includes(request.status);
   const isActive = ['searching', 'downloading', 'processing'].includes(request.status);
   const isFailed = request.status === 'failed';
 
   const handleCancel = async () => {
-    if (window.confirm('Are you sure you want to cancel this request?')) {
+    const statusNote = request.status === 'awaiting_approval'
+      ? ' It is pending admin approval and will be withdrawn.'
+      : ' It has already been approved and is actively being processed/monitored.';
+    const message = `Are you sure you want to cancel this request?${statusNote}`;
+    if (window.confirm(message)) {
       try {
         await cancelRequest(request.id);
       } catch (error) {

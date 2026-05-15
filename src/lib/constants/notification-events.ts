@@ -77,6 +77,13 @@ export const NOTIFICATION_EVENTS = {
     severity: 'error' as const,
     priority: 'high' as const,
   },
+  request_cancelled: {
+    label: 'Request Cancelled',
+    title: 'Request Cancelled',
+    emoji: '\u{1F6AB}',
+    severity: 'warning' as const,
+    priority: 'normal' as const,
+  },
   issue_reported: {
     label: 'Issue Reported',
     title: 'Issue Reported',
