@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
-import { discoverAudiobooks } from '@/lib/utils/bulk-import-scanner';
+import { discoverAudiobooks, cleanSearchString } from '@/lib/utils/bulk-import-scanner';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 
@@ -181,12 +181,7 @@ export async function POST(request: NextRequest) {
                   // or intro track), whereas the folder name is the human-assigned
                   // title and is more likely to be accurate.
                   const textSearchTerm = book.extractedAsin
-                    ? book.folderName
-                        .replace(/[\[\(][A-Z0-9]{10}[\]\)]/g, '') // strip ASIN
-                        .replace(/[\[\(]\d{4}[\]\)]/g, '')         // strip year
-                        .replace(/[_]/g, ' ')
-                        .replace(/\s+/g, ' ')
-                        .trim()
+                    ? cleanSearchString(book.folderName)
                     : book.searchTerm;
                   const searchResult = await audibleService.search(textSearchTerm);
                   if (searchResult.results.length > 0) {

@@ -75,8 +75,8 @@ function isAudioFile(filename: string): boolean {
  * Returns the ASIN string or null if not found.
  */
 export function extractAsinFromString(str: string): string | null {
-  const match = str.match(/(?:^|[\s\[\(])([B][A-Z0-9]{9})(?:$|[\s\]\)])/);
-  return match ? match[1] : null;
+  const match = str.match(/(?:^|[^A-Z0-9])(B[A-Z0-9]{9})(?:$|[^A-Z0-9])/i);
+  return match ? match[1].toUpperCase() : null;
 }
 
 /**
@@ -163,7 +163,7 @@ export function deduplicateNames(
  * Strips file extension, bracketed ASINs, bracketed years, leading track numbers,
  * underscores, and collapses whitespace.
  */
-function cleanSearchString(raw: string): string {
+export function cleanSearchString(raw: string): string {
   return raw
     .replace(/\.[^.]+$/, '')                       // Remove file extension
     .replace(/[\[\(][A-Z0-9]{10}[\]\)]/g, '')     // Remove ASIN in brackets
@@ -458,16 +458,17 @@ function deduplicateDiscoveries(
       combinedCount += disc.audioFileCount;
     }
 
+    const mergedFolderName = path.basename(commonParent);
     merged.push({
       folderPath: commonParent,
-      folderName: path.basename(commonParent),
-      relativePath: first.relativePath.split('/').slice(0, -1).join('/') || path.basename(commonParent),
+      folderName: mergedFolderName,
+      relativePath: first.relativePath.split('/').slice(0, -1).join('/') || mergedFolderName,
       audioFileCount: combinedCount,
       totalSizeBytes: combinedSize,
       metadata: first.metadata,
       searchTerm: first.searchTerm,
       metadataSource: first.metadataSource,
-      extractedAsin: first.extractedAsin,
+      extractedAsin: extractAsinFromString(mergedFolderName) ?? first.extractedAsin,
       audioFiles: combinedFiles,
       groupingKey: first.groupingKey,
     });
