@@ -6,6 +6,7 @@
 'use client';
 
 import React, { useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils/cn';
 
 interface ModalProps {
@@ -54,6 +55,7 @@ export function Modal({
   }, [isOpen, handleClose]);
 
   if (!isOpen) return null;
+  if (typeof document === 'undefined') return null;
 
   const sizeClasses = {
     sm: 'max-w-md',
@@ -63,7 +65,7 @@ export function Modal({
     full: 'max-w-[95vw]',
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
       {/* Backdrop */}
       <div
@@ -114,6 +116,7 @@ export function Modal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
