@@ -278,6 +278,7 @@ export class TransmissionService implements IDownloadClient {
         maxRedirects: 0,
         validateStatus: (status) => status >= 200 && status < 300,
         timeout: DOWNLOAD_CLIENT_TIMEOUT,
+        headers: { 'User-Agent': RMAB_USER_AGENT },
       });
 
       // Check if response body is a magnet link
@@ -307,6 +308,7 @@ export class TransmissionService implements IDownloadClient {
               responseType: 'arraybuffer',
               timeout: DOWNLOAD_CLIENT_TIMEOUT,
               maxRedirects: 5,
+              headers: { 'User-Agent': RMAB_USER_AGENT },
             });
           } catch {
             throw new Error('Failed to download torrent file after redirect');

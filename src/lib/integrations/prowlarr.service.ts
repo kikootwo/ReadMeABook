@@ -318,7 +318,7 @@ export class ProwlarrService {
           extended: 1,
         },
         headers: {
-          'User-Agent': 'ReadMeABook',
+          'User-Agent': RMAB_USER_AGENT,
         },
         timeout: DOWNLOAD_CLIENT_TIMEOUT,
         responseType: 'text', // Get XML as text
