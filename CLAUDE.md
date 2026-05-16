@@ -2,7 +2,11 @@
 
 **Critical:** This document defines AI-optimized documentation standards and development workflow. **NEVER PERFORM COMMITS ON THE REPOSITORY.**
 
-**ALWAYS DO:** When you feel work is complete, use the docker compose build readmebook to confirm you have no errors. If the build succeeds, then you can tell me it is ready to be tested.
+**ALWAYS DO:** When you feel work is complete, you MUST verify BOTH of the following pass before reporting the work as ready to test:
+1. `docker compose build readmeabook` — must succeed with no errors.
+2. `npm run test` — the FULL test suite must pass (0 failures). Running a subset is not sufficient; the entire suite must be green.
+
+Only after BOTH succeed may you tell the user the work is ready to be tested.
 
 **NEVER implement without approval.** When asked to assess, investigate, or fix a problem:
 1. **Research & analyze** — Read code, trace the issue, identify root cause.

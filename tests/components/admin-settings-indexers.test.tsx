@@ -96,6 +96,9 @@ describe('IndexersTab - Auto-load Indexers on Tab Activation', () => {
       url: 'http://prowlarr.local:9696',
       apiKey: 'test-api-key',
     },
+    indexerOptions: {
+      skipUnreleased: true,
+    },
     downloadClient: {
       type: 'qbittorrent',
       url: 'http://localhost:8080',
