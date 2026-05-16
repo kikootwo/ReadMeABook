@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
+import { RMAB_USER_AGENT } from '@/lib/utils/user-agent';
 import https from 'https';
 import FormData from 'form-data';
 import { RMABLogger } from '@/lib/utils/logger';
@@ -132,6 +133,7 @@ export class SABnzbdService implements IDownloadClient {
       baseURL: this.baseUrl,
       timeout: 30000,
       httpsAgent: this.httpsAgent,
+      headers: { 'User-Agent': RMAB_USER_AGENT },
     });
   }
 
@@ -494,7 +496,10 @@ export class SABnzbdService implements IDownloadClient {
         responseType: 'arraybuffer',
         timeout: 30000,
         maxRedirects: 5,
-        headers: options?.sourceHeaders,
+        headers: {
+          'User-Agent': RMAB_USER_AGENT,
+          ...options?.sourceHeaders,
+        },
         // Use the same SSL settings as the SABnzbd client if the NZB URL
         // happens to be served over HTTPS with a self-signed cert
         httpsAgent: url.startsWith('https') ? this.httpsAgent : undefined,

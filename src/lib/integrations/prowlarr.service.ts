@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
+import { RMAB_USER_AGENT } from '../utils/user-agent';
 import { XMLParser } from 'fast-xml-parser';
 import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
 import { TorrentResult } from '../utils/ranking-algorithm';
@@ -86,6 +87,7 @@ export class ProwlarrService {
     this.client = axios.create({
       baseURL: `${this.baseUrl}/api/v1`,
       headers: {
+        'User-Agent': RMAB_USER_AGENT,
         'X-Api-Key': this.apiKey,
       },
       timeout: DOWNLOAD_CLIENT_TIMEOUT,

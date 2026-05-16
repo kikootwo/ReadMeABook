@@ -7,13 +7,14 @@
  */
 
 import axios from 'axios';
+import { RMAB_USER_AGENT } from '@/lib/utils/user-agent';
 import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('Audnexus.Authors');
 
 const AUDNEXUS_BASE = 'https://api.audnex.us';
 const AUDNEXUS_TIMEOUT = 10000;
-const AUDNEXUS_HEADERS = { 'User-Agent': 'ReadMeABook/1.0' };
+const AUDNEXUS_HEADERS = { 'User-Agent': RMAB_USER_AGENT };
 
 export interface AudnexusAuthorSearch {
   asin: string;

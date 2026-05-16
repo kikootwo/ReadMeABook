@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosError } from 'axios';
+import { RMAB_USER_AGENT } from '../utils/user-agent';
 import * as cheerio from 'cheerio';
 import fs from 'fs/promises';
 import path from 'path';
@@ -19,7 +20,7 @@ export interface EbookDownloadResult {
   error?: string;
 }
 
-const USER_AGENT = 'ReadMeABook/1.0 (Audiobook Automation)';
+const USER_AGENT = RMAB_USER_AGENT;
 const REQUEST_DELAY_MS = 1500; // 1.5 second delay between requests
 const DOWNLOAD_TIMEOUT_MS = 60000; // 60 seconds per download attempt
 const MAX_SLOW_LINK_ATTEMPTS = 5;

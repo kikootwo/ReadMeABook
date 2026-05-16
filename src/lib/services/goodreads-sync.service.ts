@@ -7,6 +7,7 @@
  */
 
 import axios from 'axios';
+import { RMAB_USER_AGENT } from '@/lib/utils/user-agent';
 import { XMLParser } from 'fast-xml-parser';
 import { prisma } from '@/lib/db';
 import { Prisma } from '@/generated/prisma/client';
@@ -83,7 +84,7 @@ export async function fetchAndValidateRss(rssUrl: string): Promise<{ shelfName: 
   for (let page = 1; page <= MAX_PAGES; page++) {
     url.searchParams.set('page', page.toString());
 
-    const response = await axios.get(url.toString(), { timeout: 15000 });
+    const response = await axios.get(url.toString(), { timeout: 15000, headers: { 'User-Agent': RMAB_USER_AGENT } });
     const parsed = parseGoodreadsRss(response.data);
 
     if (page === 1) {

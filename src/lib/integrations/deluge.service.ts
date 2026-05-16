@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
+import { RMAB_USER_AGENT } from '../utils/user-agent';
 import https from 'https';
 import path from 'path';
 import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
@@ -50,7 +51,7 @@ export class DelugeService implements IDownloadClient {
       ? new https.Agent({ rejectUnauthorized: false }) : undefined;
     if (httpsAgent) logger.info('[Deluge] SSL certificate verification disabled');
 
-    this.client = axios.create({ baseURL: this.baseUrl, timeout: DOWNLOAD_CLIENT_TIMEOUT, httpsAgent });
+    this.client = axios.create({ baseURL: this.baseUrl, timeout: DOWNLOAD_CLIENT_TIMEOUT, httpsAgent, headers: { 'User-Agent': RMAB_USER_AGENT } });
   }
 
   /** JSON-RPC call with automatic re-authentication on auth failure */

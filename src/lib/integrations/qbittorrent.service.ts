@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
+import { RMAB_USER_AGENT } from '../utils/user-agent';
 import https from 'https';
 import path from 'path';
 import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
@@ -149,6 +150,7 @@ export class QBittorrentService implements IDownloadClient {
       baseURL: `${this.baseUrl}/api/v2`,
       timeout: DOWNLOAD_CLIENT_TIMEOUT,
       httpsAgent: this.httpsAgent,
+      headers: { 'User-Agent': RMAB_USER_AGENT },
       // Support nginx/Apache reverse proxy with HTTP Basic Auth
       auth: {
         username: this.username,

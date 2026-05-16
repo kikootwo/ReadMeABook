@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
+import { RMAB_USER_AGENT } from '../utils/user-agent';
 import * as cheerio from 'cheerio';
 import { RMABLogger } from '../utils/logger';
 import { getConfigService } from '../services/config.service';
@@ -273,7 +274,7 @@ export class AudibleService {
         timeout: 10000,
         headers: {
           Accept: 'application/json',
-          'User-Agent': 'ReadMeABook/1.0',
+          'User-Agent': RMAB_USER_AGENT,
         },
       });
 
@@ -305,7 +306,7 @@ export class AudibleService {
         timeout: 10000,
         headers: {
           Accept: 'application/json',
-          'User-Agent': 'ReadMeABook/1.0',
+          'User-Agent': RMAB_USER_AGENT,
         },
       });
 

@@ -7,6 +7,7 @@
  */
 
 import axios from 'axios';
+import { RMAB_USER_AGENT } from '@/lib/utils/user-agent';
 import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('HardcoverAPI');
@@ -120,6 +121,7 @@ export async function fetchHardcoverList(
           headers: {
             Authorization: `Bearer ${apiToken}`,
             'Content-Type': 'application/json',
+            'User-Agent': RMAB_USER_AGENT,
           },
           timeout: 30000,
         },
