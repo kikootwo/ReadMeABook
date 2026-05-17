@@ -72,6 +72,10 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
 - *Auto-grab is automatically disabled if no ebook sources are enabled. Manual fetch via admin buttons still works.*
 - *Kindle fix toggle only visible when preferred format is EPUB.*
 
+### Safety-Net: Find Missing Ebooks Job
+
+A scheduled `find_missing_ebooks` job (daily midnight, enabled by default) backstops the auto-grab path for cases where it silently misses books (race conditions, transient indexer failures, requests created before sources were configured, books from Goodreads/Hardcover sync). Per run it scans up to 50 audiobook requests in `downloaded`/`available` status and triggers the existing ebook fetch flow for any audiobook missing a successful ebook companion. **Lifetime auto-retry cap: 5 per audiobook** — after 5 failed auto-attempts the job stops retrying that audiobook (admin Manual "Fetch Ebook" remains available). Counter is tracked in `Request.ebookAutoRetryCount` and is **processor-private**: manual Fetch Ebook routes never read, write, or reset it. Gated by `ebook_auto_grab_enabled` AND at least one source enabled; logs no-op runs honestly. See `documentation/backend/services/scheduler.md` for full details.
+
 ### Kindle EPUB Fix
 
 **Purpose:** Apply compatibility fixes to EPUB files before organizing, ensuring successful Kindle import.

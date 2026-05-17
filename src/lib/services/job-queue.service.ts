@@ -24,6 +24,7 @@ export type JobType =
   | 'audible_refresh'
   | 'retry_missing_torrents'
   | 'retry_failed_imports'
+  | 'find_missing_ebooks'
   | 'cleanup_seeded_torrents'
   | 'monitor_rss_feeds'
   | 'sync_reading_shelves'
@@ -102,6 +103,10 @@ export interface RetryMissingTorrentsPayload extends JobPayload {
 }
 
 export interface RetryFailedImportsPayload extends JobPayload {
+  scheduledJobId?: string;
+}
+
+export interface FindMissingEbooksPayload extends JobPayload {
   scheduledJobId?: string;
 }
 
@@ -384,6 +389,12 @@ export class JobQueueService {
       const { processRetryFailedImports } = await import('../processors/retry-failed-imports.processor');
       const payloadWithJobId = await this.ensureJobRecord(job, 'retry_failed_imports');
       return await processRetryFailedImports(payloadWithJobId);
+    });
+
+    this.queue.process('find_missing_ebooks', 1, async (job: BullJob<FindMissingEbooksPayload>) => {
+      const { processFindMissingEbooks } = await import('../processors/find-missing-ebooks.processor');
+      const payloadWithJobId = await this.ensureJobRecord(job, 'find_missing_ebooks');
+      return await processFindMissingEbooks(payloadWithJobId);
     });
 
     this.queue.process('cleanup_seeded_torrents', 1, async (job: BullJob<CleanupSeededTorrentsPayload>) => {
@@ -750,6 +761,21 @@ export class JobQueueService {
       {
         scheduledJobId,
       } as RetryFailedImportsPayload,
+      {
+        priority: 7,
+      }
+    );
+  }
+
+  /**
+   * Add find missing ebooks job
+   */
+  async addFindMissingEbooksJob(scheduledJobId?: string): Promise<string> {
+    return await this.addJob(
+      'find_missing_ebooks',
+      {
+        scheduledJobId,
+      } as FindMissingEbooksPayload,
       {
         priority: 7,
       }

@@ -10,7 +10,7 @@ import { RMABLogger } from '../utils/logger';
 
 const logger = RMABLogger.create('Scheduler');
 
-export type ScheduledJobType = 'plex_library_scan' | 'plex_recently_added_check' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'cleanup_seeded_torrents' | 'monitor_rss_feeds' | 'sync_reading_shelves' | 'check_watched_lists';
+export type ScheduledJobType = 'plex_library_scan' | 'plex_recently_added_check' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'find_missing_ebooks' | 'cleanup_seeded_torrents' | 'monitor_rss_feeds' | 'sync_reading_shelves' | 'check_watched_lists';
 
 export interface ScheduledJob {
   id: string;
@@ -113,6 +113,13 @@ export class SchedulerService {
         type: 'retry_failed_imports' as ScheduledJobType,
         schedule: '0 */6 * * *', // Every 6 hours
         enabled: true, // Enable by default
+        payload: {},
+      },
+      {
+        name: 'Find Missing Ebooks',
+        type: 'find_missing_ebooks' as ScheduledJobType,
+        schedule: '0 0 * * *', // Daily at midnight
+        enabled: true, // Enable by default; gated by ebook_auto_grab_enabled + source-enablement at run time
         payload: {},
       },
       {
@@ -379,6 +386,9 @@ export class SchedulerService {
       case 'retry_failed_imports':
         bullJobId = await this.triggerRetryFailedImports(job);
         break;
+      case 'find_missing_ebooks':
+        bullJobId = await this.triggerFindMissingEbooks(job);
+        break;
       case 'cleanup_seeded_torrents':
         bullJobId = await this.triggerCleanupSeededTorrents(job);
         break;
@@ -643,6 +653,13 @@ export class SchedulerService {
    */
   private async triggerRetryFailedImports(job: any): Promise<string> {
     return await this.jobQueue.addRetryFailedImportsJob(job.id);
+  }
+
+  /**
+   * Trigger find missing ebooks safety-net pass
+   */
+  private async triggerFindMissingEbooks(job: any): Promise<string> {
+    return await this.jobQueue.addFindMissingEbooksJob(job.id);
   }
 
   /**

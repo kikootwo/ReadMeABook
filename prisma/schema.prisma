@@ -234,6 +234,7 @@ model Request {
   downloadAttempts Int       @default(0) @map("download_attempts")
   importAttempts   Int       @default(0) @map("import_attempts")
   maxImportRetries Int       @default(5) @map("max_import_retries")
+  ebookAutoRetryCount Int?   @map("ebook_auto_retry_count")
   lastSearchAt     DateTime? @map("last_search_at")
   customSearchTerms String?  @map("custom_search_terms") @db.Text
   lastImportAt     DateTime? @map("last_import_at")
