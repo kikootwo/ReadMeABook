@@ -169,6 +169,7 @@ export interface IndexerConfig {
   enabled: boolean;
   priority: number;
   seedingTimeMinutes?: number; // Torrents only
+  ratioLimit?: number; // Torrents only (0 = no ratio requirement)
   removeAfterProcessing?: boolean; // Usenet only
   rssEnabled: boolean;
   audiobookCategories?: number[]; // Category IDs for audiobook searches (default: [3030])
@@ -185,6 +186,7 @@ export interface SavedIndexerConfig {
   protocol: string;
   priority: number;
   seedingTimeMinutes?: number; // Torrents only
+  ratioLimit?: number; // Torrents only (0 = no ratio requirement)
   removeAfterProcessing?: boolean; // Usenet only
   rssEnabled: boolean;
   audiobookCategories: number[]; // Category IDs for audiobook searches (default: [3030])

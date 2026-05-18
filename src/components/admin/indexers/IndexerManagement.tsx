@@ -26,6 +26,7 @@ interface SavedIndexerConfig {
   protocol: string;
   priority: number;
   seedingTimeMinutes?: number; // Torrents only
+  ratioLimit?: number; // Torrents only (0 = no ratio requirement)
   removeAfterProcessing?: boolean; // Usenet only
   rssEnabled: boolean;
   audiobookCategories: number[]; // Categories for audiobook searches

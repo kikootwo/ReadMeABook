@@ -17,6 +17,7 @@ interface SavedIndexerConfig {
   protocol: string;
   priority: number;
   seedingTimeMinutes?: number; // Torrents only
+  ratioLimit?: number; // Torrents only (0 = no ratio requirement)
   removeAfterProcessing?: boolean; // Usenet only
   rssEnabled?: boolean;
   audiobookCategories?: number[]; // Array of category IDs for audiobooks (default: [3030])
@@ -79,6 +80,7 @@ export async function GET(request: NextRequest) {
           // Add protocol-specific fields
           if (isTorrent) {
             config.seedingTimeMinutes = saved?.seedingTimeMinutes ?? 0;
+            config.ratioLimit = saved?.ratioLimit ?? 0;
           } else {
             config.removeAfterProcessing = saved?.removeAfterProcessing ?? true;
           }
@@ -134,6 +136,7 @@ export async function PUT(request: NextRequest) {
             const isTorrent = indexer.protocol?.toLowerCase() === 'torrent';
             if (isTorrent) {
               config.seedingTimeMinutes = indexer.seedingTimeMinutes ?? 0;
+              config.ratioLimit = indexer.ratioLimit ?? 0;
             } else {
               config.removeAfterProcessing = indexer.removeAfterProcessing ?? true;
             }

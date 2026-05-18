@@ -1,9 +1,6 @@
 /**
  * Component: Indexer Configuration Modal
  * Documentation: documentation/frontend/components.md
- *
- * Supports separate category configurations for AudioBook and EBook searches
- * via tabbed interface in the Categories section.
  */
 
 'use client';
@@ -13,6 +10,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { CategoryTreeView } from './CategoryTreeView';
+import { TorrentSeedingFields } from './IndexerConfigModalTorrentFields';
 import { DEFAULT_AUDIOBOOK_CATEGORIES, DEFAULT_EBOOK_CATEGORIES } from '@/lib/utils/torrent-categories';
 
 type CategoryTab = 'audiobook' | 'ebook';
@@ -30,6 +28,7 @@ interface IndexerConfigModalProps {
   initialConfig?: {
     priority: number;
     seedingTimeMinutes?: number;
+    ratioLimit?: number;
     removeAfterProcessing?: boolean;
     rssEnabled: boolean;
     audiobookCategories: number[];
@@ -41,6 +40,7 @@ interface IndexerConfigModalProps {
     protocol: string;
     priority: number;
     seedingTimeMinutes?: number;
+    ratioLimit?: number;
     removeAfterProcessing?: boolean;
     rssEnabled: boolean;
     audiobookCategories: number[];
@@ -61,6 +61,7 @@ export function IndexerConfigModal({
   const defaults = {
     priority: 10,
     seedingTimeMinutes: 0,
+    ratioLimit: 0,
     removeAfterProcessing: true, // Default to true for Usenet
     rssEnabled: indexer.supportsRss,
     audiobookCategories: DEFAULT_AUDIOBOOK_CATEGORIES,
@@ -73,6 +74,9 @@ export function IndexerConfigModal({
   );
   const [seedingTimeMinutes, setSeedingTimeMinutes] = useState(
     initialConfig?.seedingTimeMinutes ?? defaults.seedingTimeMinutes
+  );
+  const [ratioLimit, setRatioLimit] = useState(
+    initialConfig?.ratioLimit ?? defaults.ratioLimit
   );
   const [removeAfterProcessing, setRemoveAfterProcessing] = useState(
     initialConfig?.removeAfterProcessing ?? defaults.removeAfterProcessing
@@ -89,21 +93,20 @@ export function IndexerConfigModal({
     initialConfig?.ebookCategories ?? defaults.ebookCategories
   );
 
-  // Tab state for categories
   const [activeTab, setActiveTab] = useState<CategoryTab>('audiobook');
 
-  // Validation errors
   const [errors, setErrors] = useState<{
     priority?: string;
     seedingTimeMinutes?: string;
+    ratioLimit?: string;
   }>({});
 
-  // Reset form when modal opens or indexer changes
   useEffect(() => {
     if (isOpen) {
       if (mode === 'add') {
         setPriority(defaults.priority);
         setSeedingTimeMinutes(defaults.seedingTimeMinutes);
+        setRatioLimit(defaults.ratioLimit);
         setRemoveAfterProcessing(defaults.removeAfterProcessing);
         setRssEnabled(defaults.rssEnabled);
         setAudiobookCategories(defaults.audiobookCategories);
@@ -111,6 +114,7 @@ export function IndexerConfigModal({
       } else {
         setPriority(initialConfig?.priority ?? defaults.priority);
         setSeedingTimeMinutes(initialConfig?.seedingTimeMinutes ?? defaults.seedingTimeMinutes);
+        setRatioLimit(initialConfig?.ratioLimit ?? defaults.ratioLimit);
         setRemoveAfterProcessing(initialConfig?.removeAfterProcessing ?? defaults.removeAfterProcessing);
         setRssEnabled(initialConfig?.rssEnabled ?? defaults.rssEnabled);
         setAudiobookCategories(initialConfig?.audiobookCategories ?? defaults.audiobookCategories);
@@ -130,6 +134,10 @@ export function IndexerConfigModal({
 
     if (isTorrent && seedingTimeMinutes < 0) {
       newErrors.seedingTimeMinutes = 'Seeding time cannot be negative';
+    }
+
+    if (isTorrent && ratioLimit < 0) {
+      newErrors.ratioLimit = 'Ratio limit cannot be negative';
     }
 
     setErrors(newErrors);
@@ -154,6 +162,7 @@ export function IndexerConfigModal({
     // Add protocol-specific fields
     if (isTorrent) {
       config.seedingTimeMinutes = seedingTimeMinutes;
+      config.ratioLimit = ratioLimit;
     } else {
       config.removeAfterProcessing = removeAfterProcessing;
     }
@@ -179,6 +188,17 @@ export function IndexerConfigModal({
       const parsed = parseInt(value);
       if (!isNaN(parsed)) {
         setSeedingTimeMinutes(Math.max(0, parsed));
+      }
+    }
+  };
+
+  const handleRatioLimitChange = (value: string) => {
+    if (value === '') {
+      setRatioLimit(0);
+    } else {
+      const parsed = parseFloat(value);
+      if (!isNaN(parsed)) {
+        setRatioLimit(Math.max(0, parsed));
       }
     }
   };
@@ -238,30 +258,15 @@ export function IndexerConfigModal({
           )}
         </div>
 
-        {/* Seeding Time (Torrents only) */}
+        {/* Seeding Time + Ratio Limit (Torrents only) */}
         {isTorrent && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Seeding Time (minutes)
-            </label>
-            <Input
-              type="number"
-              min="0"
-              step="1"
-              value={seedingTimeMinutes}
-              onChange={(e) => handleSeedingTimeChange(e.target.value)}
-              placeholder="0"
-              className={errors.seedingTimeMinutes ? 'border-red-500' : ''}
-            />
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              0 = unlimited seeding (files remain seeded indefinitely)
-            </p>
-            {errors.seedingTimeMinutes && (
-              <p className="text-sm text-red-600 dark:text-red-400 mt-1">
-                {errors.seedingTimeMinutes}
-              </p>
-            )}
-          </div>
+          <TorrentSeedingFields
+            seedingTimeMinutes={seedingTimeMinutes}
+            ratioLimit={ratioLimit}
+            errors={errors}
+            onSeedingTimeChange={handleSeedingTimeChange}
+            onRatioLimitChange={handleRatioLimitChange}
+          />
         )}
 
         {/* Remove After Processing (Usenet only) */}

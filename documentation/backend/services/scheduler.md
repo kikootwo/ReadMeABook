@@ -22,7 +22,7 @@ Manages recurring/scheduled jobs providing automated tasks (Plex scans, Audible 
 4. **retry_missing_torrents** - Default: daily midnight, processes union of `awaiting_search` ∪ `awaiting_release` (limit 50), handles both audiobook and ebook requests. Bidirectional transitions: `awaiting_search` → `awaiting_release` when release date is future + `indexer.skip_unreleased` ON; `awaiting_release` → `awaiting_search` + run search when release date has passed or setting OFF. Sole owner of these transitions. Enabled by default.
 5. **retry_failed_imports** - Default: every 6 hours, re-attempts 'awaiting_import' status (limit 50), enabled by default
 6. **find_missing_ebooks** - Default: daily midnight, scans `downloaded` ∪ `available` audiobook requests (limit 50) for missing ebook companions and triggers the existing ebook fetch flow (`addSearchEbookJob`). Gated by `ebook_auto_grab_enabled` AND at least one ebook source enabled (`ebook_annas_archive_enabled` or `ebook_indexer_search_enabled`; legacy `ebook_sidecar_enabled` accepted as Anna's fallback). Skips ebook children in-flight (`pending`, `awaiting_approval`, `searching`, `downloading`, `processing`, `awaiting_search`, `awaiting_release`) or `cancelled`. Retries `failed`/`warn` children up to **5 lifetime auto-retries** per audiobook, tracked in `Request.ebookAutoRetryCount` (nullable; processor-private — manual "Fetch Ebook" never reads/writes it). Per-candidate writes are wrapped in `prisma.$transaction` for race-safety with concurrent auto-grab; counter rolls back if `addSearchEbookJob` throws. Enabled by default. Returns `{ scanned, gapsFound, triggered, created, retried, skippedInFlight, skippedCancelled, skippedCapHit }`.
-7. **cleanup_seeded_torrents** - Default: every 30 mins, deletes torrents after seeding requirements met, respects `seeding_time_minutes` config (0 = never), enabled by default
+7. **cleanup_seeded_torrents** - Default: every 30 mins, deletes torrents after seeding requirements met. Respects per-indexer `seedingTimeMinutes` AND `ratioLimit` (BOTH required when set; `0` disables that criterion; both `0` = never cleaned up). Undefined ratio with `ratioLimit > 0` = not met (safe-deny). Enabled by default.
 8. **monitor_rss_feeds** - Default: every 15 mins, checks RSS feeds from enabled indexers, matches against `awaiting_search` requests (audiobook and ebook, limit 100). Query is unchanged — release-date gate is applied AFTER a match is found: if matched book is unreleased + `indexer.skip_unreleased` ON, the match is skipped and request status is NOT mutated (retry job owns transitions). Enabled by default.
 
 ## Architecture: Bull + Cron
@@ -157,6 +157,7 @@ interface ScheduledJob {
 - ✅ Failed requests blocking re-requests → allow re-requesting failed/warn/cancelled
 - ✅ Files deleted immediately → kept until seeding requirements met
 - ✅ No seeding time config → added `seeding_time_minutes`
+- ✅ No ratio-based seeding policy → added per-indexer `ratioLimit` (AND-semantics with `seedingTimeMinutes`; `0` disables; undefined client ratio = safe-deny)
 - ✅ Scheduled jobs not running on schedule → implemented Bull repeatable jobs with cron scheduling
 - ✅ MaxListenersExceededWarning → increased maxListeners to 20 on both Redis client and Bull queue
 - ✅ Cron expressions not user-friendly → added human-readable descriptions and visual schedule builder

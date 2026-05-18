@@ -15,6 +15,7 @@ const indexersMock = [
     name: 'Indexer',
     priority: 10,
     seedingTimeMinutes: 0,
+    ratioLimit: 1.5,
     rssEnabled: true,
     categories: [],
   },

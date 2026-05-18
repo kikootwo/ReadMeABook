@@ -133,8 +133,12 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
         // Find matching indexer configuration by name
         const seedingConfig = indexerConfigMap.get(indexerName);
 
-        // If no config found or seeding time is 0 (unlimited)
-        if (!seedingConfig || seedingConfig.seedingTimeMinutes === 0) {
+        // Per-indexer thresholds. 0 disables that criterion; both 0 = unlimited.
+        const seedingMin: number = seedingConfig?.seedingTimeMinutes ?? 0;
+        const ratioMin: number = seedingConfig?.ratioLimit ?? 0;
+
+        // If no config found or both criteria are 0 (unlimited)
+        if (!seedingConfig || (seedingMin === 0 && ratioMin === 0)) {
           // For soft-deleted requests with unlimited seeding, hard delete immediately
           if (request.deletedAt) {
             await prisma.request.delete({ where: { id: request.id } });
@@ -144,7 +148,7 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
           continue;
         }
 
-        const seedingTimeSeconds = seedingConfig.seedingTimeMinutes * 60;
+        const seedingTimeSeconds = seedingMin * 60;
 
         // Skip if this torrent was already deleted earlier in this run
         if (deletedHashes.has(clientId.toLowerCase())) {
@@ -178,17 +182,30 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
           continue;
         }
 
-        // Check if seeding time requirement is met
-        const actualSeedingTime = downloadInfo.seedingTime || 0;
-        const hasMetRequirement = actualSeedingTime >= seedingTimeSeconds;
+        // Check seeding requirements: AND-semantics across time and ratio.
+        // Each criterion is "met" when disabled (0) or when actual meets/exceeds it.
+        // Undefined ratio with ratioMin > 0 is treated as not-met (safe-deny).
+        const actualSeedingTime = downloadInfo.seedingTime ?? 0;
+        const actualRatio = downloadInfo.ratio;
+        const timeMet = seedingMin === 0 || actualSeedingTime >= seedingTimeSeconds;
+        const ratioMet = ratioMin === 0 || (typeof actualRatio === 'number' && actualRatio >= ratioMin);
+        const hasMetRequirement = timeMet && ratioMet;
+
+        const ratioPart = ratioMin === 0
+          ? '--/--'
+          : `${(typeof actualRatio === 'number' ? actualRatio : 0).toFixed(2)}/${ratioMin.toFixed(2)}`;
+        const timePart = seedingMin === 0
+          ? '--/--'
+          : `${Math.floor(actualSeedingTime / 60)}/${seedingMin}`;
+        const progress = `ratio ${ratioPart}, time ${timePart} min`;
 
         if (!hasMetRequirement) {
-          const remaining = Math.ceil((seedingTimeSeconds - actualSeedingTime) / 60);
+          logger.debug(`Download ${downloadInfo.name} (${indexerName}) still seeding: ${progress}`);
           skipped++;
           continue;
         }
 
-        logger.info(`Download ${downloadInfo.name} (${indexerName}) has met seeding requirement (${Math.floor(actualSeedingTime / 60)}/${seedingConfig.seedingTimeMinutes} minutes)`);
+        logger.info(`Download ${downloadInfo.name} (${indexerName}) has met seeding requirement: ${progress}`);
 
         // CRITICAL: Check if any other active (non-deleted) request is using this same download
         const hashToCheck = downloadHistory.torrentHash;

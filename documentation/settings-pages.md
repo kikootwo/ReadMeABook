@@ -374,7 +374,7 @@ src/app/admin/settings/
 ## Validation
 
 **Plex:** Valid HTTP/HTTPS URL, non-empty token, library ID selected
-**Prowlarr:** Valid URL, non-empty API key, ≥1 indexer configured, priority 1-25, seedingTimeMinutes ≥0, rssEnabled boolean
+**Prowlarr:** Valid URL, non-empty API key, ≥1 indexer configured, priority 1-25, seedingTimeMinutes ≥0, ratioLimit ≥0 (torrents only; decimal, `0` = no requirement), rssEnabled boolean
 **Download Client:** Valid URL, credentials required, type must be 'qbittorrent', 'transmission', or 'sabnzbd'
 **Paths:** Absolute paths, exist or creatable, writable, cannot be same directory, template must contain `{author}` or `{title}`
 

@@ -53,7 +53,7 @@ describe('Admin Prowlarr indexers route', () => {
 
   it('saves indexer configuration', async () => {
     authRequest.json.mockResolvedValue({
-      indexers: [{ id: 1, name: 'Indexer', protocol: 'torrent', enabled: true, priority: 10, seedingTimeMinutes: 0 }],
+      indexers: [{ id: 1, name: 'Indexer', protocol: 'torrent', enabled: true, priority: 10, seedingTimeMinutes: 0, ratioLimit: 1.5 }],
       flagConfigs: [],
     });
 
@@ -63,6 +63,11 @@ describe('Admin Prowlarr indexers route', () => {
 
     expect(payload.success).toBe(true);
     expect(configServiceMock.setMany).toHaveBeenCalled();
+    const setManyArg = configServiceMock.setMany.mock.calls[0][0];
+    const indexersEntry = setManyArg.find((e: any) => e.key === 'prowlarr_indexers');
+    expect(indexersEntry).toBeDefined();
+    const persisted = JSON.parse(indexersEntry.value);
+    expect(persisted[0]).toMatchObject({ id: 1, ratioLimit: 1.5, seedingTimeMinutes: 0 });
   });
 });
 

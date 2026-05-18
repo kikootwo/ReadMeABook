@@ -217,6 +217,251 @@ describe('processCleanupSeededTorrents', () => {
     expect(qbtClientMock.deleteDownload).toHaveBeenCalledWith('hash-ebook-1', true);
   });
 
+  it('cleans up when ratio-only requirement is met', async () => {
+    configMock.get.mockResolvedValue(
+      JSON.stringify([{ name: 'RatioIndexer', seedingTimeMinutes: 0, ratioLimit: 1.0 }])
+    );
+    const qbtClientMock = {
+      clientType: 'qbittorrent',
+      protocol: 'torrent',
+      getDownload: vi.fn().mockResolvedValue({
+        id: 'hash-ratio-1',
+        name: 'Ratio Torrent',
+        size: 0,
+        bytesDownloaded: 0,
+        progress: 1.0,
+        status: 'seeding',
+        downloadSpeed: 0,
+        eta: 0,
+        category: 'readmeabook',
+        seedingTime: 60,
+        ratio: 1.5,
+      }),
+      deleteDownload: vi.fn().mockResolvedValue(undefined),
+    };
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(qbtClientMock);
+    prismaMock.request.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'req-ratio-1',
+          deletedAt: null,
+          downloadHistory: [
+            {
+              selected: true,
+              downloadStatus: 'completed',
+              indexerName: 'RatioIndexer',
+              torrentHash: 'hash-ratio-1',
+              downloadClientId: 'hash-ratio-1',
+              downloadClient: 'qbittorrent',
+            },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
+    const result = await processCleanupSeededTorrents({ jobId: 'job-ratio-1' });
+
+    expect(result.cleaned).toBe(1);
+    expect(qbtClientMock.deleteDownload).toHaveBeenCalledWith('hash-ratio-1', true);
+  });
+
+  it('skips when both criteria set, time met but ratio not met', async () => {
+    configMock.get.mockResolvedValue(
+      JSON.stringify([{ name: 'BothIndexer', seedingTimeMinutes: 30, ratioLimit: 1.0 }])
+    );
+    const qbtClientMock = {
+      clientType: 'qbittorrent',
+      protocol: 'torrent',
+      getDownload: vi.fn().mockResolvedValue({
+        id: 'hash-both-1',
+        name: 'Both Torrent',
+        size: 0,
+        bytesDownloaded: 0,
+        progress: 1.0,
+        status: 'seeding',
+        downloadSpeed: 0,
+        eta: 0,
+        category: 'readmeabook',
+        seedingTime: 60 * 40,
+        ratio: 0.5,
+      }),
+      deleteDownload: vi.fn(),
+    };
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(qbtClientMock);
+    prismaMock.request.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'req-both-1',
+          deletedAt: null,
+          downloadHistory: [
+            {
+              selected: true,
+              downloadStatus: 'completed',
+              indexerName: 'BothIndexer',
+              torrentHash: 'hash-both-1',
+              downloadClientId: 'hash-both-1',
+              downloadClient: 'qbittorrent',
+            },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
+    const result = await processCleanupSeededTorrents({ jobId: 'job-both-1' });
+
+    expect(result.skipped).toBe(1);
+    expect(qbtClientMock.deleteDownload).not.toHaveBeenCalled();
+  });
+
+  it('skips when both criteria set, ratio met but time not met', async () => {
+    configMock.get.mockResolvedValue(
+      JSON.stringify([{ name: 'BothIndexer', seedingTimeMinutes: 30, ratioLimit: 1.0 }])
+    );
+    const qbtClientMock = {
+      clientType: 'qbittorrent',
+      protocol: 'torrent',
+      getDownload: vi.fn().mockResolvedValue({
+        id: 'hash-both-2',
+        name: 'Both Torrent',
+        size: 0,
+        bytesDownloaded: 0,
+        progress: 1.0,
+        status: 'seeding',
+        downloadSpeed: 0,
+        eta: 0,
+        category: 'readmeabook',
+        seedingTime: 60 * 10,
+        ratio: 1.5,
+      }),
+      deleteDownload: vi.fn(),
+    };
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(qbtClientMock);
+    prismaMock.request.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'req-both-2',
+          deletedAt: null,
+          downloadHistory: [
+            {
+              selected: true,
+              downloadStatus: 'completed',
+              indexerName: 'BothIndexer',
+              torrentHash: 'hash-both-2',
+              downloadClientId: 'hash-both-2',
+              downloadClient: 'qbittorrent',
+            },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
+    const result = await processCleanupSeededTorrents({ jobId: 'job-both-2' });
+
+    expect(result.skipped).toBe(1);
+    expect(qbtClientMock.deleteDownload).not.toHaveBeenCalled();
+  });
+
+  it('cleans up when both criteria set and both met', async () => {
+    configMock.get.mockResolvedValue(
+      JSON.stringify([{ name: 'BothIndexer', seedingTimeMinutes: 30, ratioLimit: 1.0 }])
+    );
+    const qbtClientMock = {
+      clientType: 'qbittorrent',
+      protocol: 'torrent',
+      getDownload: vi.fn().mockResolvedValue({
+        id: 'hash-both-3',
+        name: 'Both Torrent',
+        size: 0,
+        bytesDownloaded: 0,
+        progress: 1.0,
+        status: 'seeding',
+        downloadSpeed: 0,
+        eta: 0,
+        category: 'readmeabook',
+        seedingTime: 60 * 40,
+        ratio: 1.5,
+      }),
+      deleteDownload: vi.fn().mockResolvedValue(undefined),
+    };
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(qbtClientMock);
+    prismaMock.request.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'req-both-3',
+          deletedAt: null,
+          downloadHistory: [
+            {
+              selected: true,
+              downloadStatus: 'completed',
+              indexerName: 'BothIndexer',
+              torrentHash: 'hash-both-3',
+              downloadClientId: 'hash-both-3',
+              downloadClient: 'qbittorrent',
+            },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
+    const result = await processCleanupSeededTorrents({ jobId: 'job-both-3' });
+
+    expect(result.cleaned).toBe(1);
+    expect(qbtClientMock.deleteDownload).toHaveBeenCalledWith('hash-both-3', true);
+  });
+
+  it('skips when ratio-only requirement set but client reports no ratio', async () => {
+    configMock.get.mockResolvedValue(
+      JSON.stringify([{ name: 'RatioIndexer', seedingTimeMinutes: 0, ratioLimit: 1.0 }])
+    );
+    const qbtClientMock = {
+      clientType: 'qbittorrent',
+      protocol: 'torrent',
+      getDownload: vi.fn().mockResolvedValue({
+        id: 'hash-noratio-1',
+        name: 'No-Ratio Torrent',
+        size: 0,
+        bytesDownloaded: 0,
+        progress: 1.0,
+        status: 'seeding',
+        downloadSpeed: 0,
+        eta: 0,
+        category: 'readmeabook',
+        seedingTime: 60 * 100,
+        // ratio intentionally omitted (undefined)
+      }),
+      deleteDownload: vi.fn(),
+    };
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(qbtClientMock);
+    prismaMock.request.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'req-noratio-1',
+          deletedAt: null,
+          downloadHistory: [
+            {
+              selected: true,
+              downloadStatus: 'completed',
+              indexerName: 'RatioIndexer',
+              torrentHash: 'hash-noratio-1',
+              downloadClientId: 'hash-noratio-1',
+              downloadClient: 'qbittorrent',
+            },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
+    const result = await processCleanupSeededTorrents({ jobId: 'job-noratio-1' });
+
+    expect(result.skipped).toBe(1);
+    expect(qbtClientMock.deleteDownload).not.toHaveBeenCalled();
+  });
+
   it('detects shared torrents across audiobook and ebook requests', async () => {
     configMock.get.mockResolvedValue(
       JSON.stringify([{ name: 'SharedIndexer', seedingTimeMinutes: 10 }])

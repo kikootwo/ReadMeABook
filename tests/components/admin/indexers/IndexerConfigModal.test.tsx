@@ -24,13 +24,19 @@ describe('IndexerConfigModal', () => {
       />
     );
 
-    const [priorityInput, seedingInput] = screen.getAllByRole('spinbutton');
+    const [priorityInput, seedingInput, ratioInput] = screen.getAllByRole('spinbutton');
 
     fireEvent.change(priorityInput, { target: { value: '99' } });
     expect(priorityInput).toHaveValue(25);
 
     fireEvent.change(seedingInput, { target: { value: '-5' } });
     expect(seedingInput).toHaveValue(0);
+
+    fireEvent.change(ratioInput, { target: { value: '-0.5' } });
+    expect(ratioInput).toHaveValue(0);
+
+    fireEvent.change(ratioInput, { target: { value: '1.5' } });
+    expect(ratioInput).toHaveValue(1.5);
 
     const rssToggle = screen.getByRole('checkbox');
     fireEvent.click(rssToggle);
@@ -43,6 +49,7 @@ describe('IndexerConfigModal', () => {
         name: 'Prowlarr',
         priority: 25,
         seedingTimeMinutes: 0,
+        ratioLimit: 1.5,
         rssEnabled: false,
         audiobookCategories: expect.arrayContaining([3030]),
         ebookCategories: expect.arrayContaining([7020]),
