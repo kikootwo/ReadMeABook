@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
+import { RMAB_USER_AGENT } from '../utils/user-agent';
 import { parseStringPromise } from 'xml2js';
 import { RMABLogger } from '../utils/logger';
 
@@ -83,6 +84,7 @@ export class PlexService {
   constructor() {
     this.client = axios.create({
       timeout: 10000,
+      headers: { 'User-Agent': RMAB_USER_AGENT },
     });
   }
 

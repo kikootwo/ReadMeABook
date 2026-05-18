@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
+import { RMAB_USER_AGENT } from '@/lib/utils/user-agent';
 import https from 'https';
 import zlib from 'zlib';
 import { RMABLogger } from '@/lib/utils/logger';
@@ -140,6 +141,7 @@ export class NZBGetService implements IDownloadClient {
       baseURL: this.baseUrl,
       timeout: 30000,
       httpsAgent: this.httpsAgent,
+      headers: { 'User-Agent': RMAB_USER_AGENT },
       auth: {
         username: this.username,
         password: this.password,
@@ -226,7 +228,10 @@ export class NZBGetService implements IDownloadClient {
         responseType: 'arraybuffer',
         timeout: 30000,
         maxRedirects: 5,
-        headers: options?.sourceHeaders,
+        headers: {
+          'User-Agent': RMAB_USER_AGENT,
+          ...options?.sourceHeaders,
+        },
         httpsAgent: url.startsWith('https') ? this.httpsAgent : undefined,
       });
 

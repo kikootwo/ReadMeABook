@@ -6,6 +6,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import axios from 'axios';
+import { RMAB_USER_AGENT } from './user-agent';
 import { tagMultipleFiles, checkFfmpegAvailable } from './metadata-tagger';
 import { RMABLogger } from './logger';
 import { copyFile } from './copy-file';
@@ -740,6 +741,7 @@ export class FileOrganizer {
         const response = await axios.get(url, {
           responseType: 'arraybuffer',
           timeout: 30000,
+          headers: { 'User-Agent': RMAB_USER_AGENT },
         });
 
         await fs.writeFile(targetPath, response.data);

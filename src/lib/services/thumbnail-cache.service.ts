@@ -7,6 +7,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import axios from 'axios';
+import { RMAB_USER_AGENT } from '../utils/user-agent';
 import { RMABLogger } from '../utils/logger';
 
 const logger = RMABLogger.create('ThumbnailCache');
@@ -110,7 +111,7 @@ export class ThumbnailCacheService {
         timeout: TIMEOUT_MS,
         maxContentLength: MAX_FILE_SIZE,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'User-Agent': RMAB_USER_AGENT,
         },
       });
 
@@ -185,7 +186,7 @@ export class ThumbnailCacheService {
         timeout: TIMEOUT_MS,
         maxContentLength: MAX_FILE_SIZE,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'User-Agent': RMAB_USER_AGENT,
           ...(backendMode === 'audiobookshelf' && { Authorization: `Bearer ${authToken}` }),
         },
       });

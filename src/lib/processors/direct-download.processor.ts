@@ -12,6 +12,7 @@ import { getConfigService } from '../services/config.service';
 import { RMABLogger } from '../utils/logger';
 import { extractDownloadUrl, ExtractedDownload } from '../services/ebook-scraper';
 import axios from 'axios';
+import { RMAB_USER_AGENT } from '../utils/user-agent';
 import fs from 'fs/promises';
 import { createWriteStream } from 'fs';
 import path from 'path';
@@ -302,7 +303,7 @@ async function downloadFileWithProgress(
       responseType: 'stream',
       timeout: DOWNLOAD_TIMEOUT_MS,
       headers: {
-        'User-Agent': 'ReadMeABook/1.0 (Audiobook Automation)',
+        'User-Agent': RMAB_USER_AGENT,
       },
     });
 

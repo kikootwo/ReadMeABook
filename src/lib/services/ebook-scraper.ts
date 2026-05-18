@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosError } from 'axios';
+import { RMAB_USER_AGENT } from '../utils/user-agent';
 import * as cheerio from 'cheerio';
 import fs from 'fs/promises';
 import path from 'path';
@@ -19,7 +20,6 @@ export interface EbookDownloadResult {
   error?: string;
 }
 
-const USER_AGENT = 'ReadMeABook/1.0 (Audiobook Automation)';
 const REQUEST_DELAY_MS = 1500; // 1.5 second delay between requests
 const DOWNLOAD_TIMEOUT_MS = 60000; // 60 seconds per download attempt
 const MAX_SLOW_LINK_ATTEMPTS = 5;
@@ -113,7 +113,7 @@ async function fetchHtml(
   moduleLogger.debug(`Using direct request for: ${url}`);
   const response = await retryRequest(() =>
     axios.get(url, {
-      headers: { 'User-Agent': USER_AGENT },
+      headers: { 'User-Agent': RMAB_USER_AGENT },
       timeout: 30000,
     })
   );
@@ -654,7 +654,7 @@ async function downloadFile(
     const response = await axios.get(url, {
       responseType: 'stream',
       timeout: DOWNLOAD_TIMEOUT_MS,
-      headers: { 'User-Agent': USER_AGENT },
+      headers: { 'User-Agent': RMAB_USER_AGENT },
       maxRedirects: 5,
     });
 
