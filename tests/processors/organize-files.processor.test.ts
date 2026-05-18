@@ -256,9 +256,11 @@ describe('processOrganizeFiles', () => {
         data: expect.objectContaining({ status: 'awaiting_import' }),
       })
     );
+    // Auto-block must NOT fire on a retry — only on the terminal warn transition.
+    expect(prismaMock.blockedRelease.upsert).not.toHaveBeenCalled();
   });
 
-  it('marks request as warn when max retries exceeded and notifies user', async () => {
+  it('marks request as warn when max retries exceeded, auto-blocks the release, and notifies user', async () => {
     prismaMock.request.update.mockResolvedValue({});
     prismaMock.audiobook.findUnique.mockResolvedValue({
       id: 'a6',
@@ -285,6 +287,20 @@ describe('processOrganizeFiles', () => {
       audiobook: { title: 'Book', author: 'Author' },
       user: { plexUsername: 'user' },
     });
+    prismaMock.downloadHistory.findFirst.mockResolvedValue({
+      id: 'dh-6',
+      torrentName: 'Book by Author [M4B]',
+      torrentHash: 'hash-6',
+      nzbId: null,
+      indexerName: 'TestIndexer',
+      indexerId: 7,
+    });
+    prismaMock.blockedRelease.upsert.mockResolvedValue({
+      id: 'block-6',
+      releaseName: 'Book by Author [M4B]',
+      releaseKey: 'book by author [m4b]',
+      createdAt: new Date(),
+    });
     configMock.get.mockResolvedValue(null);
 
     const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
@@ -308,6 +324,23 @@ describe('processOrganizeFiles', () => {
       'Author',
       'user',
       expect.stringContaining('Max retries')
+    );
+    // Terminal warn writes a single blocklist row keyed on the selected download.
+    expect(prismaMock.blockedRelease.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { requestId_releaseKey: { requestId: 'req-6', releaseKey: 'book by author [m4b]' } },
+        create: expect.objectContaining({
+          requestId: 'req-6',
+          releaseName: 'Book by Author [M4B]',
+          releaseKey: 'book by author [m4b]',
+          releaseHash: 'hash-6',
+          indexerName: 'TestIndexer',
+          indexerId: 7,
+          source: 'organize_fail',
+          reason: 'No audiobook files found',
+          downloadHistoryId: 'dh-6',
+        }),
+      })
     );
   });
 
@@ -357,6 +390,8 @@ describe('processOrganizeFiles', () => {
       'user',
       expect.stringContaining('File organization failed')
     );
+    // Non-retryable failures do not auto-block — only terminal warn does.
+    expect(prismaMock.blockedRelease.upsert).not.toHaveBeenCalled();
   });
 
   it('queues retry when organizer returns EPERM copy failure', async () => {

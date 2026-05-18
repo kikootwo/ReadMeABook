@@ -111,12 +111,32 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - Indexes: `job_id`, `created_at`
 - **Purpose:** Store detailed event logs for job operations (shown in admin logs UI)
 
+### Blocked_Releases
+- `id` (UUID PK), `request_id` (FK → Requests, CASCADE on hard delete)
+- `release_name` (text) - original release title as the indexer returned it
+- `release_key` (text) - normalized lookup key: `trim().toLowerCase()` of release_name
+- `release_hash` (nullable) - `torrentHash` (qBit) OR `nzbId` (SAB/NZBGet); mutually exclusive in source
+- `indexer_name` (nullable), `indexer_id` (int, nullable)
+- `source` ('organize_fail'|'download_fail'|'manual'; 'manual' reserved for v2)
+- `reason` (text) - short, e.g. "No audiobook files found", "Download failed (par2)"
+- `reason_detail` (text, nullable) - raw client error string (SAB failMessage, NZBGet Par/Unpack code)
+- `download_history_id` (nullable) - traceability to the DownloadHistory row that drove the block
+- `job_id` (nullable) - origin job; also drives JobEvent emission via RMABLogger.forJob
+- `created_at` (timestamp)
+- Unique: `(request_id, release_key)` - idempotency for concurrent auto-block writes
+- Indexes: `request_id`, `release_key`, `release_hash`, `created_at DESC`
+- **Purpose:** Per-request blocklist. Search processors filter their candidate set against this table so future searches skip releases that have already failed for the same request.
+- **Soft/hard delete:** Soft-delete (sets `requests.deleted_at`) does NOT cascade - blocklist entries survive. Hard-delete cascades and wipes entries.
+- **Match rules:** Case-insensitive exact match on `release_key` OR exact match on `release_hash`.
+- **Service:** Single writer is `src/lib/services/blocklist.service.ts` (`addAutoBlock` is idempotent via upsert; never throws).
+
 ## Relationships
 
 - User → Requests (1:many)
 - Audiobook → Requests (1:many)
 - Request → Download History (1:many)
 - Request → Jobs (1:many, nullable)
+- Request → Blocked Releases (1:many, CASCADE on hard delete)
 - Job → Job Events (1:many, CASCADE delete)
 
 ## Setup Strategy

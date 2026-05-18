@@ -16,6 +16,7 @@ import { generateFilesHash } from '../utils/files-hash';
 import { fixEpubForKindle, cleanupFixedEpub } from '../utils/epub-fixer';
 import { removeEmptyParentDirectories } from '../utils/cleanup-helpers';
 import { getAudibleService } from '../integrations/audible.service';
+import { addAutoBlock } from '../services/blocklist.service';
 
 /**
  * Process organize files job
@@ -461,6 +462,34 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
             updatedAt: new Date(),
           },
         });
+
+        // Auto-block the selected release on this request's blocklist so the
+        // next search won't pick it again. Terminal warn only — never on retry.
+        // Substring matching on errorMessage is intentional: the throw strings
+        // live in file-organizer.ts and are stable today.
+        const selectedDownload = await prisma.downloadHistory.findFirst({
+          where: { requestId, selected: true },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (selectedDownload?.torrentName) {
+          const blockReason = errorMessage.includes('No audiobook files found')
+            ? 'No audiobook files found'
+            : errorMessage.includes('No ebook files found')
+              ? 'No ebook files found'
+              : 'Organize failed';
+          await addAutoBlock({
+            requestId,
+            releaseName: selectedDownload.torrentName,
+            releaseHash: selectedDownload.torrentHash ?? selectedDownload.nzbId ?? null,
+            indexerName: selectedDownload.indexerName ?? null,
+            indexerId: selectedDownload.indexerId ?? null,
+            source: 'organize_fail',
+            reason: blockReason,
+            reasonDetail: errorMessage,
+            downloadHistoryId: selectedDownload.id,
+            jobId,
+          });
+        }
 
         // Send notification for request failure
         const request = await prisma.request.findUnique({

@@ -15,6 +15,7 @@ import { getProwlarrService } from '../integrations/prowlarr.service';
 import { rankEbookTorrents, RankedEbookTorrent } from '../utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer-grouping';
 import { getLanguageForRegion } from '../constants/language-config';
+import { filterBlockedResults } from '../utils/filter-blocked-results';
 import type { AudibleRegion } from '../types/audible';
 
 // Import ebook scraper functions for Anna's Archive
@@ -310,9 +311,20 @@ async function searchIndexers(
     return null;
   }
 
+  // Strip blocklisted releases before ranking.
+  const { kept: nonBlockedResults, blockedCount } = await filterBlockedResults(requestId, allResults);
+  if (blockedCount > 0) {
+    logger.debug(`Filtered out ${blockedCount} blocklisted release(s) before ranking`);
+  }
+
+  if (nonBlockedResults.length === 0) {
+    logger.warn(`All ${allResults.length} ebook candidates were blocklisted`);
+    return null;
+  }
+
   // Log filter info (ebooks > 20MB will be filtered)
-  const preFilterCount = allResults.length;
-  const aboveThreshold = allResults.filter(r => (r.size / (1024 * 1024)) > 20);
+  const preFilterCount = nonBlockedResults.length;
+  const aboveThreshold = nonBlockedResults.filter(r => (r.size / (1024 * 1024)) > 20);
   if (aboveThreshold.length > 0) {
     logger.info(`Will filter ${aboveThreshold.length} results > 20 MB (too large for ebooks)`);
   }
@@ -323,7 +335,7 @@ async function searchIndexers(
 
   // Rank results with ebook-specific scoring
   // This filters out > 20MB and uses inverted size scoring
-  const rankedResults = rankEbookTorrents(allResults, {
+  const rankedResults = rankEbookTorrents(nonBlockedResults, {
     title: audiobook.title,
     author: audiobook.author,
     preferredFormat,

@@ -9,6 +9,8 @@ import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { getJobQueueService } from '../services/job-queue.service';
 import { shouldSkipAutoSearch } from '../utils/release-date';
+import { getBlocklistForRequest } from '../services/blocklist.service';
+import { normalizeReleaseKey } from '../utils/release-key';
 
 export interface MonitorRssFeedsPayload {
   jobId?: string;
@@ -89,6 +91,13 @@ export async function processMonitorRssFeeds(payload: MonitorRssFeedsPayload): P
     const authorWords = audiobook.author.toLowerCase().split(' ');
     const titleWords = audiobook.title.toLowerCase().split(' ').slice(0, 3);
 
+    // Hoist blocklist lookup outside the per-torrent loop: one query per request.
+    const blocklist = await getBlocklistForRequest(request.id);
+    const blockedKeys = new Set(blocklist.map(b => b.releaseKey));
+    const blockedHashes = new Set(
+      blocklist.filter(b => b.releaseHash).map(b => b.releaseHash as string)
+    );
+
     for (const torrent of rssResults) {
       const torrentTitle = torrent.title.toLowerCase();
 
@@ -97,6 +106,18 @@ export async function processMonitorRssFeeds(payload: MonitorRssFeedsPayload): P
       const titleMatchCount = titleWords.filter(word => word.length > 2 && torrentTitle.includes(word)).length;
 
       if (hasAuthor && titleMatchCount >= 2) {
+        // Blocklist guard: skip RSS-driven auto-grab of a release that was already
+        // blocked for this request. Otherwise a previously bad release re-enters
+        // the pipeline via RSS and defeats the blocklist's purpose.
+        const torrentInfoHash = (torrent as { infoHash?: string }).infoHash;
+        if (
+          blockedKeys.has(normalizeReleaseKey(torrent.title)) ||
+          (torrentInfoHash && blockedHashes.has(torrentInfoHash))
+        ) {
+          logger.debug(`Skipped blocklisted RSS match for request ${request.id}: ${torrent.title}`);
+          continue;
+        }
+
         logger.info(`Match found! "${audiobook.title}" by ${audiobook.author} matches torrent: ${torrent.title}`);
 
         // Release-date gate: skip RSS-driven auto-search for unreleased books.

@@ -58,6 +58,7 @@ export const createPrismaMock = () => ({
   userHomeSection: createModelMock(),
   audibleCacheCategory: createModelMock(),
   ignoredAudiobook: createModelMock(),
+  blockedRelease: createModelMock(),
   $queryRaw: vi.fn(),
   $transaction: vi.fn(),
   $disconnect: vi.fn(),

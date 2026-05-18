@@ -107,6 +107,7 @@
 - **Jobs management UI** → [backend/services/scheduler.md](backend/services/scheduler.md)
 - **Request deletion (soft delete, seeding awareness)** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
 - **Request approval system, auto-approve settings** → [admin-features/request-approval.md](admin-features/request-approval.md)
+- **Release blocklist (auto-block failed releases, /admin/blocklist)** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md)
 
 ## Fixes & Improvements
 - **File hash-based library matching (ABS)** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md)
@@ -150,6 +151,9 @@
 **"How do I delete requests?"** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
 **"How do I approve/deny user requests?"** → [admin-features/request-approval.md](admin-features/request-approval.md)
 **"How do I enable auto-approve for requests?"** → [admin-features/request-approval.md](admin-features/request-approval.md)
+**"How does the release blocklist work?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md)
+**"Why does the same bad release keep getting re-downloaded?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md) (it shouldn't anymore — auto-blocked on permanent failure)
+**"How do I unblock a release?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md) (admin → /admin/blocklist → Unblock, or chip on the request row)
 **"How does the admin book info modal work?"** → [admin-features/request-approval.md](admin-features/request-approval.md#ui-features), [frontend/components.md](frontend/components.md#component-apis)
 **"How do I customize audiobook folder organization?"** → [settings-pages.md](settings-pages.md#audiobook-organization-template), [phase3/file-organization.md](phase3/file-organization.md#target-structure)
 **"How do I deploy?"** → [deployment/docker.md](deployment/docker.md) (multi-container), [deployment/unified.md](deployment/unified.md) (all-in-one)

@@ -119,6 +119,11 @@ export async function GET(request: NextRequest) {
               },
               take: 1,
             },
+            _count: {
+              select: {
+                blockedReleases: true,
+              },
+            },
           },
           orderBy,
           skip: (page - 1) * pageSize,
@@ -141,6 +146,7 @@ export async function GET(request: NextRequest) {
           torrentUrl: request.downloadHistory[0]?.torrentUrl || null,
           downloadAttempts: request.downloadAttempts,
           customSearchTerms: request.customSearchTerms || null,
+          blockedCount: request._count?.blockedReleases ?? 0,
         }));
 
         return NextResponse.json({

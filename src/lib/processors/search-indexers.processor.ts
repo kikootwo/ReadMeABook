@@ -10,6 +10,7 @@ import { getRankingAlgorithm } from '../utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer-grouping';
 import { RMABLogger } from '../utils/logger';
 import { getLanguageForRegion } from '../constants/language-config';
+import { filterBlockedResults } from '../utils/filter-blocked-results';
 import type { AudibleRegion } from '../types/audible';
 
 /**
@@ -113,18 +114,29 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       }
     }
 
-    const searchResults = allResults;
-    logger.info(`Found ${searchResults.length} total results from ${groups.length} group${groups.length > 1 ? 's' : ''}`);
+    const preBlocklistCount = allResults.length;
+    const { kept: searchResults, blockedCount } = await filterBlockedResults(requestId, allResults);
+    if (blockedCount > 0) {
+      logger.debug(`Filtered out ${blockedCount} blocklisted release(s) before ranking`);
+    }
+    logger.info(`Found ${searchResults.length} total results from ${groups.length} group${groups.length > 1 ? 's' : ''}${blockedCount > 0 ? ` (${blockedCount} blocked)` : ''}`);
 
     if (searchResults.length === 0) {
-      // No results found - queue for re-search instead of failing
-      logger.warn(`No torrents/nzbs found for request ${requestId}, marking as awaiting_search`);
+      // No usable results — either Prowlarr returned nothing, or the blocklist
+      // removed everything it returned. Surface a blocklist-specific message in
+      // the latter case so admins know to unblock (or accept it as terminal).
+      const allBlocked = blockedCount > 0 && preBlocklistCount > 0;
+      const errorMessage = allBlocked
+        ? `No usable releases — ${preBlocklistCount} candidates tried, all blocked`
+        : 'No torrents/nzbs found. Will retry automatically.';
+
+      logger.warn(`${errorMessage} for request ${requestId}, marking as awaiting_search`);
 
       await prisma.request.update({
         where: { id: requestId },
         data: {
           status: 'awaiting_search',
-          errorMessage: 'No torrents/nzbs found. Will retry automatically.',
+          errorMessage,
           lastSearchAt: new Date(),
           updatedAt: new Date(),
         },
@@ -132,7 +144,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
 
       return {
         success: false,
-        message: 'No torrents/nzbs found, queued for re-search',
+        message: allBlocked ? errorMessage : 'No torrents/nzbs found, queued for re-search',
         requestId,
       };
     }

@@ -14,6 +14,7 @@ import { mutate } from 'swr';
 import { authenticatedFetcher, fetchWithAuth } from '@/lib/utils/api';
 import { useToast } from '@/components/ui/Toast';
 import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsModal';
+import { BlockedReleasesChip } from './BlockedReleasesChip';
 
 interface RecentRequest {
   requestId: string;
@@ -30,6 +31,7 @@ interface RecentRequest {
   torrentUrl?: string | null;
   downloadAttempts?: number;
   customSearchTerms?: string | null;
+  blockedCount?: number;
 }
 
 interface User {
@@ -676,6 +678,13 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                               </svg>
                               Custom Search
                             </span>
+                          )}
+                          {(request.blockedCount ?? 0) > 0 && (
+                            <BlockedReleasesChip
+                              requestId={request.requestId}
+                              blockedCount={request.blockedCount ?? 0}
+                              onChange={() => mutate(apiUrl)}
+                            />
                           )}
                         </div>
                         <div className="text-sm text-gray-500 dark:text-gray-400">

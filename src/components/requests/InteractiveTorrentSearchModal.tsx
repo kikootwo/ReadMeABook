@@ -26,6 +26,20 @@ import {
 } from '@/lib/hooks/useRequests';
 import { useReplaceWithTorrent } from '@/lib/hooks/useReportedIssues';
 import { Audiobook } from '@/lib/hooks/useAudiobooks';
+import { fetchWithAuth } from '@/lib/utils/api';
+import { normalizeReleaseKey } from '@/lib/utils/release-key';
+
+interface BlockedReleaseLookup {
+  /** normalized release key → reason text */
+  byKey: Map<string, string>;
+  /** release hash (torrentHash / nzbId / infoHash) → reason text */
+  byHash: Map<string, string>;
+}
+
+const EMPTY_BLOCKED_LOOKUP: BlockedReleaseLookup = {
+  byKey: new Map(),
+  byHash: new Map(),
+};
 
 interface InteractiveTorrentSearchModalProps {
   isOpen: boolean;
@@ -118,6 +132,14 @@ export function InteractiveTorrentSearchModal({
 
   const [results, setResults] = useState<(RankedTorrent & { qualityScore?: number; source?: string; ebookFormat?: string })[]>([]);
   const [confirmTorrent, setConfirmTorrent] = useState<TorrentResult | null>(null);
+  const [blockedLookup, setBlockedLookup] = useState<BlockedReleaseLookup>(EMPTY_BLOCKED_LOOKUP);
+
+  // Per locked decision #3, interactive search is NOT filtered — it shows
+  // everything; we just mark blocked rows visually so admins know. The admin
+  // endpoint enforces auth/role; non-admin users silently get a 403 and no
+  // badges are rendered. We only attempt the fetch when we have a requestId
+  // (the ASIN-based ebook flow has no per-request blocklist context).
+  const canFetchBlocklist = !!requestId && isOpen;
   const [searchTitle, setSearchTitle] = useState(customSearchTerms || audiobook.title);
   const [isCustomConfirming, setIsCustomConfirming] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -162,6 +184,42 @@ export function InteractiveTorrentSearchModal({
     setResults([]);
     setExpandedGuids(new Set());
   }, [isOpen, audiobook.title, customSearchTerms]);
+
+  // Reset blocklist lookup when modal closes; fetch when admin opens it.
+  useEffect(() => {
+    if (!canFetchBlocklist) {
+      setBlockedLookup(EMPTY_BLOCKED_LOOKUP);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetchWithAuth(
+          `/api/admin/blocklist/by-request/${requestId}`
+        );
+        if (!response.ok) {
+          // 403 (non-admin via API token, etc.) silently leaves badge off.
+          return;
+        }
+        const data: {
+          entries: Array<{ releaseName: string; releaseHash: string | null; reason: string }>;
+        } = await response.json();
+        if (cancelled) return;
+        const byKey = new Map<string, string>();
+        const byHash = new Map<string, string>();
+        for (const entry of data.entries) {
+          byKey.set(normalizeReleaseKey(entry.releaseName), entry.reason);
+          if (entry.releaseHash) byHash.set(entry.releaseHash.toLowerCase(), entry.reason);
+        }
+        setBlockedLookup({ byKey, byHash });
+      } catch {
+        // Network errors — leave badge off rather than disrupt search UI.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canFetchBlocklist, requestId]);
 
   // Perform search when modal opens
   useEffect(() => {
@@ -392,6 +450,7 @@ export function InteractiveTorrentSearchModal({
                     isEbookMode={isEbookMode}
                     isExpanded={expandedGuids.has(result.guid)}
                     isDownloading={isDownloading}
+                    blockedReason={resolveBlockedReason(result, blockedLookup)}
                     onToggleExpand={() => {
                       setExpandedGuids((prev) => {
                         const next = new Set(prev);
@@ -520,11 +579,27 @@ export function InteractiveTorrentSearchModal({
   return createPortal(modalContent, document.body);
 }
 
+function resolveBlockedReason(
+  result: RankedTorrent & { source?: string },
+  lookup: BlockedReleaseLookup
+): string | null {
+  if (lookup.byKey.size === 0 && lookup.byHash.size === 0) return null;
+  const byName = lookup.byKey.get(normalizeReleaseKey(result.title));
+  if (byName) return byName;
+  if (result.infoHash) {
+    const byHash = lookup.byHash.get(result.infoHash.toLowerCase());
+    if (byHash) return byHash;
+  }
+  return null;
+}
+
 interface ResultRowProps {
   result: RankedTorrent & { qualityScore?: number; source?: string; ebookFormat?: string };
   isEbookMode: boolean;
   isExpanded: boolean;
   isDownloading: boolean;
+  /** Non-null when this result matches a blocklist entry for the current request. */
+  blockedReason: string | null;
   onToggleExpand: () => void;
   onDownload: () => void;
 }
@@ -534,6 +609,7 @@ function ResultRow({
   isEbookMode,
   isExpanded,
   isDownloading,
+  blockedReason,
   onToggleExpand,
   onDownload,
 }: ResultRowProps) {
@@ -566,6 +642,21 @@ function ResultRow({
 
       {/* Content */}
       <div className="flex-1 min-w-0">
+        {/* Blocked badge — informational, NOT a warning. Per zach.md "displayed
+            source data stays true to source" — the badge adds context, the
+            title above is rendered verbatim either way. */}
+        {blockedReason && (
+          <div
+            className="inline-flex items-center gap-1 mb-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+            title={`Already blocked for this request: ${blockedReason}`}
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+            </svg>
+            <span>Already blocked &mdash; {blockedReason}</span>
+          </div>
+        )}
+
         {/* Title Row */}
         <div className="flex items-center gap-1.5 min-w-0">
           <a

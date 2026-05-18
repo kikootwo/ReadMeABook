@@ -35,6 +35,8 @@ function futureDate(days = 30): Date {
 describe('processMonitorRssFeeds', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default to empty blocklist so the filter is a no-op unless a test overrides.
+    prismaMock.blockedRelease.findMany.mockResolvedValue([]);
   });
 
   it('matches RSS items and queues search jobs', async () => {
@@ -106,6 +108,42 @@ describe('processMonitorRssFeeds', () => {
     expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
     // Request status must not be mutated by RSS processor.
     expect(prismaMock.request.update).not.toHaveBeenCalled();
+  });
+
+  it('does not queue a search when the matching RSS release is on the request blocklist', async () => {
+    configMock.get.mockImplementation(async (key: string) => {
+      if (key === 'prowlarr_indexers') {
+        return JSON.stringify([{ id: 1, name: 'Indexer', rssEnabled: true }]);
+      }
+      if (key === 'indexer.skip_unreleased') return null;
+      return null;
+    });
+
+    prowlarrMock.getAllRssFeeds.mockResolvedValue([
+      { title: 'Great Book - Author Name' },
+    ]);
+
+    prismaMock.request.findMany.mockResolvedValue([
+      {
+        id: 'req-blocked',
+        type: 'audiobook',
+        status: 'awaiting_search',
+        releaseDate: null,
+        audiobook: { id: 'a1', title: 'Great Book', author: 'Author Name', audibleAsin: 'ASIN1' },
+      },
+    ]);
+
+    // The RSS torrent's normalized name is on the request's blocklist.
+    prismaMock.blockedRelease.findMany.mockResolvedValue([
+      { id: 'b1', releaseKey: 'great book - author name', releaseHash: null },
+    ]);
+
+    const { processMonitorRssFeeds } = await import('@/lib/processors/monitor-rss-feeds.processor');
+    const result = await processMonitorRssFeeds({ jobId: 'job-rss-blocked' });
+
+    expect(result.success).toBe(true);
+    expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
+    expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
   });
 
   it('runs RSS search when matched book is unreleased but setting is OFF', async () => {

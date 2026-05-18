@@ -156,7 +156,7 @@ describe('processMonitorDownload', () => {
     );
   });
 
-  it('marks request failed when download fails', async () => {
+  it('marks request failed when download fails and auto-blocks the release', async () => {
     const qbtClientMock = {
       clientType: 'qbittorrent',
       protocol: 'torrent',
@@ -180,6 +180,20 @@ describe('processMonitorDownload', () => {
       audiobook: { title: 'Book', author: 'Author' },
       user: { plexUsername: 'user' },
     });
+    prismaMock.downloadHistory.findUnique.mockResolvedValue({
+      id: 'dh-3',
+      torrentName: 'Book - Author [M4B]',
+      torrentHash: 'hash-3',
+      nzbId: null,
+      indexerName: 'TestIndexer',
+      indexerId: 4,
+    });
+    prismaMock.blockedRelease.upsert.mockResolvedValue({
+      id: 'block-3',
+      releaseName: 'Book - Author [M4B]',
+      releaseKey: 'book - author [m4b]',
+      createdAt: new Date(),
+    });
 
     const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
     const result = await processMonitorDownload({
@@ -196,6 +210,60 @@ describe('processMonitorDownload', () => {
         data: expect.objectContaining({ status: 'failed' }),
       })
     );
+    expect(prismaMock.blockedRelease.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { requestId_releaseKey: { requestId: 'req-3', releaseKey: 'book - author [m4b]' } },
+        create: expect.objectContaining({
+          requestId: 'req-3',
+          releaseName: 'Book - Author [M4B]',
+          releaseHash: 'hash-3',
+          source: 'download_fail',
+          downloadHistoryId: 'dh-3',
+        }),
+      })
+    );
+  });
+
+  it('does not auto-block when permanent failure is from connection-exhaustion path', async () => {
+    // Simulate the connection-failure-exhausted fallthrough: getDownload rejects
+    // with a transient connection error AND prevConnectionFailureCount is already
+    // at the cap, so the processor enters PATH 3 (permanent error) without the
+    // client ever reporting `failed`. That path must NOT auto-block.
+    const econn = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:8080'), {
+      code: 'ECONNREFUSED',
+    });
+    const qbtClientMock = {
+      clientType: 'qbittorrent',
+      protocol: 'torrent',
+      getDownload: vi.fn().mockRejectedValue(econn),
+    };
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(qbtClientMock);
+    prismaMock.request.update.mockResolvedValue({});
+    prismaMock.request.findUnique.mockResolvedValue({
+      id: 'req-conn',
+      audiobook: { title: 'Book', author: 'Author' },
+      user: { plexUsername: 'user' },
+    });
+
+    const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+    await expect(processMonitorDownload({
+      requestId: 'req-conn',
+      downloadHistoryId: 'dh-conn',
+      downloadClientId: 'hash-conn',
+      downloadClient: 'qbittorrent',
+      jobId: 'job-conn',
+      // Already at the cap — next call enters PATH 3 (permanent), not the
+      // self-rescheduling retry branch.
+      connectionFailureCount: 30,
+    })).rejects.toThrow();
+
+    expect(prismaMock.request.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'failed' }),
+      })
+    );
+    // CRITICAL: connection exhaustion is transient infra, not a release problem.
+    expect(prismaMock.blockedRelease.upsert).not.toHaveBeenCalled();
   });
 
   it('handles SABnzbd completion and queues organize job', async () => {

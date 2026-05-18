@@ -259,6 +259,7 @@ model Request {
   jobs            Job[]
   parentRequest   Request?          @relation("EbookParent", fields: [parentRequestId], references: [id], onDelete: SetNull)
   childRequests   Request[]         @relation("EbookParent")
+  blockedReleases BlockedRelease[]
 
   @@index([userId])
   @@index([audiobookId])
@@ -268,6 +269,42 @@ model Request {
   @@index([type])
   @@index([parentRequestId])
   @@map("requests")
+}
+
+// ============================================================================
+// BLOCKED RELEASES TABLE
+// Per-request blocklist of failed releases (organize-fail or download-fail).
+// Search processors filter their candidate set against this table so future
+// searches skip releases that have already failed for the same request.
+// Documentation: documentation/backend/database.md
+// ============================================================================
+
+model BlockedRelease {
+  id                String   @id @default(uuid())
+  requestId         String   @map("request_id")
+  releaseName       String   @map("release_name") @db.Text
+  releaseKey        String   @map("release_key") @db.Text // normalized: trim + lowercase
+  releaseHash       String?  @map("release_hash") // torrentHash OR nzbId (mutually exclusive in source)
+  indexerName       String?  @map("indexer_name")
+  indexerId         Int?     @map("indexer_id")
+  source            String // 'organize_fail' | 'download_fail' | 'manual' (manual reserved for v2)
+  reason            String   @db.Text // short reason, e.g. "No audiobook files found"
+  reasonDetail      String?  @map("reason_detail") @db.Text // raw client error (SAB failMessage, NZBGet Par/Unpack)
+  downloadHistoryId String?  @map("download_history_id") // traceability to the DownloadHistory row that failed
+  jobId             String?  @map("job_id") // origin job (also drives JobEvent emission via logger)
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  // Relations
+  // Cascade: hard-delete of Request wipes its blocklist rows.
+  // Soft-delete (Request.deletedAt) does NOT cascade — entries survive.
+  request Request @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, releaseKey]) // idempotency: one row per (request, normalized name)
+  @@index([requestId])
+  @@index([releaseKey])
+  @@index([releaseHash])
+  @@index([createdAt(sort: Desc)])
+  @@map("blocked_releases")
 }
 
 model DownloadHistory {

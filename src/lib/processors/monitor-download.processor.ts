@@ -11,6 +11,25 @@ import { getConfigService } from '../services/config.service';
 import { getDownloadClientManager } from '../services/download-client-manager.service';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 import { isTransientConnectionError } from '../utils/connection-errors';
+import { addAutoBlock } from '../services/blocklist.service';
+
+/**
+ * Map a download client's error signal to a coarse, human-readable reason
+ * for the blocklist row. Substring matching on the unified `errorMessage` is
+ * intentional and acceptable per locked engineering decisions #5 and #6 —
+ * the raw client string is preserved in `reasonDetail`.
+ */
+function classifyDownloadFailure(errorMessage: string | null | undefined): string {
+  const text = (errorMessage ?? '').toLowerCase();
+  if (!text) return 'Download failed';
+  if (text.includes('par') || text.includes('repair')) return 'Download failed (par2)';
+  if (text.includes('missing articles') || text.includes('failed articles')) return 'Download failed (missing articles)';
+  if (text.includes('unpack')) return 'Download failed (unpack)';
+  if (text.includes('password') || text.includes('encrypted')) return 'Download failed (password)';
+  if (text.includes('missingfiles') || text.includes('missing files')) return 'Download failed (missing files)';
+  if (text.includes('torrent') && text.includes('error')) return 'Download failed (torrent error)';
+  return 'Download failed';
+}
 
 /**
  * Process monitor download job
@@ -197,6 +216,7 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
       logger.error(`Download failed for request ${requestId}`);
 
       const errorMessage = `Download failed in ${client.clientType}`;
+      const clientErrorDetail = info.errorMessage ?? null;
 
       // Update request to failed
       await prisma.request.update({
@@ -216,6 +236,27 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
           downloadError: errorMessage,
         },
       });
+
+      // Auto-block this release. The client itself reported `failed`, so this
+      // is a real release problem — distinct from the connection-exhausted
+      // path below at line ~317 which we deliberately do NOT block on.
+      const failedDownload = await prisma.downloadHistory.findUnique({
+        where: { id: downloadHistoryId },
+      });
+      if (failedDownload?.torrentName) {
+        await addAutoBlock({
+          requestId,
+          releaseName: failedDownload.torrentName,
+          releaseHash: failedDownload.torrentHash ?? failedDownload.nzbId ?? null,
+          indexerName: failedDownload.indexerName ?? null,
+          indexerId: failedDownload.indexerId ?? null,
+          source: 'download_fail',
+          reason: classifyDownloadFailure(clientErrorDetail),
+          reasonDetail: clientErrorDetail,
+          downloadHistoryId: failedDownload.id,
+          jobId,
+        });
+      }
 
       // Send notification for request failure
       const request = await prisma.request.findUnique({
