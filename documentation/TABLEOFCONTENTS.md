@@ -6,7 +6,6 @@
 - **Plex OAuth, JWT sessions, RBAC** → [backend/services/auth.md](backend/services/auth.md)
 - **Local admin authentication, password change** → [backend/services/auth.md](backend/services/auth.md)
 - **Admin-generated login token per user (URL-login)** → [backend/services/auth.md](backend/services/auth.md)
-- **API tokens (allowlist, write capability, /api-docs)** → [backend/services/api-tokens.md](backend/services/api-tokens.md)
 - **Route protection, auth guards** → [frontend/routing-auth.md](frontend/routing-auth.md)
 - **Login page UI/UX** → [frontend/pages/login.md](frontend/pages/login.md)
 - **Credential recovery (lost CONFIG_ENCRYPTION_KEY, locked-out admin)** → [admin-features/credential-recovery.md](admin-features/credential-recovery.md)
@@ -60,7 +59,6 @@
 - **Ebook delete behavior (files only, torrents seed)** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#delete-behavior)
 - **Ebook settings (3-section UI)** → [settings-pages.md](settings-pages.md#e-book-sidecar)
 - **Indexer categories (audiobook/ebook tabs)** → [settings-pages.md](settings-pages.md#indexer-categories-tabbed)
-- **Auto-search behavior toggle (skip unreleased books)** → [settings-pages.md](settings-pages.md#auto-search-behavior-indexers-tab)
 
 ## Automation Pipeline
 - **Full pipeline overview** → [phase3/README.md](phase3/README.md)
@@ -70,7 +68,6 @@
 - **qBittorrent integration (torrents)** → [phase3/qbittorrent.md](phase3/qbittorrent.md)
 - **SABnzbd integration (Usenet/NZB)** → [phase3/sabnzbd.md](phase3/sabnzbd.md)
 - **File organization, seeding** → [phase3/file-organization.md](phase3/file-organization.md)
-- **Plex-compatible format coercion (.mp4 → .m4b)** → [phase3/file-organization.md](phase3/file-organization.md#plex-format-coercion)
 - **Chapter merging (auto-merge to M4B)** → [features/chapter-merging.md](features/chapter-merging.md)
 
 ## Background Jobs
@@ -105,6 +102,7 @@
 
 ## Admin Features
 - **Dashboard (metrics, downloads, requests)** → [admin-dashboard.md](admin-dashboard.md)
+- **System logs (filters, search, pagination, /api/admin/logs)** → [admin-dashboard.md](admin-dashboard.md)
 - **Bulk import (scan folders, match Audible, batch import)** → [features/bulk-import.md](features/bulk-import.md)
 - **Jobs management UI** → [backend/services/scheduler.md](backend/services/scheduler.md)
 - **Request deletion (soft delete, seeding awareness)** → [admin-features/request-deletion.md](admin-features/request-deletion.md)

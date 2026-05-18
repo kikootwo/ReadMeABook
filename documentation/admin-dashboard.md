@@ -57,9 +57,18 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - Update global auto-approve setting (boolean)
 
 **GET /api/admin/logs**
-- Query params: page, limit, status, type
-- Returns: Job logs with request/audiobook/user details, pagination info
-- Filters: status (all/pending/active/completed/failed/delayed/stuck), type (all job types)
+- Query params: page, limit, status, type, search, dateFrom, dateTo, hasError, userId, audiobookQuery
+- limit: one of 25/50/100 (default 50; invalid values clamp to 50)
+- status: 'all' or one of pending/active/completed/failed/delayed/stuck
+- type: 'all' or any job type key
+- dateFrom / dateTo: ISO UTC strings; invalid dates silently dropped
+- hasError: 'true' or '1' → `status in (failed, stuck) OR errorMessage IS NOT NULL`
+- userId: uuid → filters via `request.userId`
+- audiobookQuery: free text → OR-contains (case-insensitive) on `request.audiobook.{title,author}`
+- search: free text → 6-column OR: bullJobId (startsWith, case-sensitive), errorMessage (contains-i), events.some.message (contains-i), request.audiobook.title/author (contains-i), request.user.plexUsername (contains-i)
+- hasError + search combine under top-level `AND`; other filters compose via AND on `where`
+- Where-builder: exported `buildLogsWhere(params)` in route file (pure, testable)
+- Returns: `{ logs, pagination: { page, limit, total, totalPages } }`
 
 ## Request Management Features
 
@@ -112,15 +121,21 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 
 ## System Logs Features
 
-- Real-time job monitoring (10s refresh)
-- Filter by status (pending/active/completed/failed/delayed/stuck)
-- Filter by job type (search_indexers/monitor_download/organize_files/scan_plex/match_plex)
+- Real-time job monitoring (10s SWR refresh; pauses on interact)
+- **Filter row (5 pickers):** Status · Job Type · Date Range · User typeahead · Audiobook free-text
+  - Status: dropdown over VALID_STATUSES (from `src/app/admin/logs/types.ts`); labels via `STATUS_OPTIONS` in `src/lib/constants/log-filters.ts`
+  - Job Type: dropdown over `JOB_TYPE_LABELS` insertion order (`src/lib/constants/job-labels.ts`)
+  - Date Range: presets (Last hour / 24h / 7d / 30d / Custom / All time) — default = Last 7 days (Zach #1); Custom uses `<input type="datetime-local">` rendered as local time, wired as UTC ISO
+  - User: typeahead via `useUserSearch` (fetch-once from `/api/admin/users`, SWR-cached, in-memory filter, max 10 suggestions); selection sets `userId = User.id`
+  - Audiobook: free-text → server-side OR-contains on title/author (Zach #4 — no picker)
+- **Active filter chips:** dismissable `<button aria-label="Remove filter: X">` strip; NOT sticky (Zach #6 — scrolls with content). Errors-only renders as a chip when active.
+- **Clear all filters:** visible only when ≥1 filter or the search input is non-default
+- **Pause-on-interact reasons (registered to `useAutoRefreshControl`):**
+  - `logs-status-dropdown`, `logs-type-dropdown`, `logs-date-picker`, `logs-user-typeahead`, `logs-book-input`
+- **URL = source of truth** via `useLogsUrlState` (`src/app/admin/logs/hooks/`); param names exported as `LOG_PARAMS`; same names used by `/api/admin/logs`
 - Shows related audiobook/user for request jobs
-- Expandable error messages
-- Duration calculation
-- Attempt tracking (current/max)
-- Pagination (50 logs per page)
-- Shows Bull job ID
+- Expandable error messages, duration calc, attempt tracking, Bull job ID
+- Pagination: page-size selector (25 / 50 / 100), default 50
 
 ## Tech Stack
 
