@@ -1,0 +1,6 @@
+# ReadMeABook Community Scripts
+
+This directory is intended for utility scripts that extend RMAB functionality or integrate it with third-party services.
+
+### Available Scripts:
+- **abs-tag-sync**: Automates the tagging of Audiobookshelf library items based on RMAB request history. Includes email-based user mapping for ABS/Plex/OIDC.
