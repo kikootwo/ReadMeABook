@@ -38,8 +38,12 @@ vi.mock('@/lib/hooks/useRequests', () => ({
 }));
 
 vi.mock('@/components/requests/InteractiveTorrentSearchModal', () => ({
-  InteractiveTorrentSearchModal: ({ isOpen }: { isOpen: boolean }) => (
-    <div data-testid="interactive-modal" data-open={String(isOpen)} />
+  InteractiveTorrentSearchModal: ({ isOpen, requestId }: { isOpen: boolean; requestId?: string }) => (
+    <div
+      data-testid="interactive-modal"
+      data-open={String(isOpen)}
+      data-request-id={requestId ?? ''}
+    />
   ),
 }));
 
@@ -326,5 +330,89 @@ describe('AudiobookDetailsModal', () => {
     expect(statusPill).toBeDisabled();
     expect(screen.getByTitle('Interactive Search')).toBeInTheDocument();
     expect(screen.getByTitle('Manual Import')).toBeInTheDocument();
+  });
+
+  describe('Interactive Search routing (advance vs. create)', () => {
+    const openInteractiveAndReadForwardedRequestId = async (props: {
+      user: { id: string; username: string; role?: string };
+      requestStatus?: string | null;
+      requestId?: string | null;
+      requestedByUserId?: string | null;
+    }) => {
+      useAuthMock.mockReturnValue({ user: props.user });
+      const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+      render(
+        <AudiobookDetailsModal
+          asin="ASIN123"
+          isOpen={true}
+          onClose={vi.fn()}
+          requestStatus={props.requestStatus ?? null}
+          requestId={props.requestId ?? null}
+          requestedByUserId={props.requestedByUserId ?? null}
+        />
+      );
+
+      await act(async () => {});
+      fireEvent.click(screen.getByTitle('Interactive Search'));
+      const modal = screen.getByTestId('interactive-modal');
+      return modal.getAttribute('data-request-id') ?? '';
+    };
+
+    it.each(['pending', 'failed', 'awaiting_search', 'awaiting_release'])(
+      'forwards requestId when own user has an advanceable %s request',
+      async (status) => {
+        const forwarded = await openInteractiveAndReadForwardedRequestId({
+          user: { id: 'user-1', username: 'u' },
+          requestStatus: status,
+          requestId: 'req-advance',
+          requestedByUserId: 'user-1',
+        });
+        expect(forwarded).toBe('req-advance');
+      }
+    );
+
+    it.each(['awaiting_approval', 'searching', 'downloading', 'processing', 'denied'])(
+      'does NOT forward requestId when own status is %s (blocked / non-advanceable)',
+      async (status) => {
+        const forwarded = await openInteractiveAndReadForwardedRequestId({
+          user: { id: 'user-1', username: 'u' },
+          requestStatus: status,
+          requestId: 'req-x',
+          requestedByUserId: 'user-1',
+        });
+        expect(forwarded).toBe('');
+      }
+    );
+
+    it('does NOT forward requestId for a non-admin viewing another user\'s awaiting_search request', async () => {
+      const forwarded = await openInteractiveAndReadForwardedRequestId({
+        user: { id: 'user-2', username: 'other' },
+        requestStatus: 'awaiting_search',
+        requestId: 'req-from-user-1',
+        requestedByUserId: 'user-1',
+      });
+      expect(forwarded).toBe('');
+    });
+
+    it('forwards requestId for an admin viewing another user\'s awaiting_search request', async () => {
+      const forwarded = await openInteractiveAndReadForwardedRequestId({
+        user: { id: 'admin-1', username: 'admin', role: 'admin' },
+        requestStatus: 'awaiting_search',
+        requestId: 'req-from-user-1',
+        requestedByUserId: 'user-1',
+      });
+      expect(forwarded).toBe('req-from-user-1');
+    });
+
+    it('does NOT forward requestId when caller omits requestId entirely', async () => {
+      const forwarded = await openInteractiveAndReadForwardedRequestId({
+        user: { id: 'user-1', username: 'u' },
+        requestStatus: 'awaiting_search',
+        requestId: null,
+        requestedByUserId: 'user-1',
+      });
+      expect(forwarded).toBe('');
+    });
   });
 });

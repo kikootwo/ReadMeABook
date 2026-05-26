@@ -198,6 +198,8 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
   // View Details modal state
   const [viewDetailsAsin, setViewDetailsAsin] = useState<string | null>(null);
   const [viewDetailsStatus, setViewDetailsStatus] = useState<string | null>(null);
+  const [viewDetailsRequestId, setViewDetailsRequestId] = useState<string | null>(null);
+  const [viewDetailsUserId, setViewDetailsUserId] = useState<string | null>(null);
 
   // Build API URL with current local filters
   const apiUrl = `/api/admin/requests?page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(debouncedSearch)}&status=${status}&userId=${userId}&sortBy=${sortBy}&sortOrder=${sortOrder}`;
@@ -328,9 +330,16 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
   const hasActiveFilters = debouncedSearch || status !== 'all' || userId;
 
   // Action handlers
-  const handleViewDetails = (asin: string, requestStatus?: string) => {
+  const handleViewDetails = (
+    asin: string,
+    requestStatus?: string,
+    requestId?: string,
+    userId?: string,
+  ) => {
     setViewDetailsAsin(asin);
     setViewDetailsStatus(requestStatus || null);
+    setViewDetailsRequestId(requestId || null);
+    setViewDetailsUserId(userId || null);
   };
 
   const handleDeleteClick = (requestId: string, title: string) => {
@@ -728,7 +737,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                         onManualSearch={handleManualSearch}
                         onCancel={handleCancel}
                         onRetryDownload={handleRetryDownload}
-                        onViewDetails={(asin) => handleViewDetails(asin, request.status)}
+                        onViewDetails={(asin) => handleViewDetails(asin, request.status, request.requestId, request.userId)}
                         onFetchEbook={handleFetchEbook}
                         onSearchTermsUpdated={() => mutate(apiUrl)}
                         ebookSidecarEnabled={ebookSidecarEnabled}
@@ -884,9 +893,13 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
           onClose={() => {
             setViewDetailsAsin(null);
             setViewDetailsStatus(null);
+            setViewDetailsRequestId(null);
+            setViewDetailsUserId(null);
           }}
           isAvailable={viewDetailsStatus === 'available' || viewDetailsStatus === 'completed'}
           requestStatus={viewDetailsStatus}
+          requestId={viewDetailsRequestId}
+          requestedByUserId={viewDetailsUserId}
         />
       )}
     </div>

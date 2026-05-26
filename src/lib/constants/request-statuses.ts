@@ -15,3 +15,15 @@ export const CANCELLABLE_STATUSES = [
   'awaiting_approval',
   'awaiting_release',
 ] as const;
+
+/**
+ * Statuses where an own (or admin-acted) request can be advanced via Interactive
+ * Search → Download by routing to /api/requests/[id]/select-torrent.
+ * Outside this set, the modal falls back to today's create-new-request path.
+ */
+export const ADVANCEABLE_FROM_INTERACTIVE_SEARCH = [
+  'pending',
+  'failed',
+  'awaiting_search',
+  'awaiting_release',
+] as const;

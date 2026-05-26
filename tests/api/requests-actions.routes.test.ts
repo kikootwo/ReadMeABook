@@ -409,6 +409,69 @@ describe('Request action routes', () => {
     expect(jobQueueMock.addNotificationJob).toHaveBeenCalled();
   });
 
+  // awaiting_release happy-path coverage — Interactive Search → Download from
+  // AudiobookDetailsModal now routes through select-torrent for own/admin
+  // advanceable requests; the release-date gate is intentionally bypassed.
+  it('selects a torrent and queues download from awaiting_release (admin)', async () => {
+    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100 } });
+    prismaMock.request.findUnique.mockResolvedValueOnce({
+      id: 'req-ar-admin',
+      userId: 'user-1',
+      status: 'awaiting_release',
+      audiobook: { id: 'ab-ar-1', title: 'Title', author: 'Author' },
+    } as any);
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      id: 'user-1',
+      role: 'admin',
+      autoApproveRequests: null,
+      plexUsername: 'adminuser',
+    } as any);
+    prismaMock.request.update.mockResolvedValueOnce({
+      id: 'req-ar-admin',
+      status: 'downloading',
+      audiobook: { title: 'Title', author: 'Author' },
+    } as any);
+
+    const { POST } = await import('@/app/api/requests/[id]/select-torrent/route');
+    const response = await POST({} as any, { params: Promise.resolve({ id: 'req-ar-admin' }) });
+    const payload = await response.json();
+
+    expect(payload.success).toBe(true);
+    expect(jobQueueMock.addDownloadJob).toHaveBeenCalled();
+    expect(jobQueueMock.addNotificationJob).toHaveBeenCalled();
+  });
+
+  it('stores selected torrent on awaiting_release when approval is required', async () => {
+    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100 } });
+    configState.values.set('auto_approve_requests', 'false');
+    prismaMock.request.findUnique.mockResolvedValueOnce({
+      id: 'req-ar-user',
+      userId: 'user-1',
+      status: 'awaiting_release',
+      audiobook: { id: 'ab-ar-2', title: 'Title', author: 'Author' },
+    } as any);
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      id: 'user-1',
+      role: 'user',
+      autoApproveRequests: null,
+      plexUsername: 'plexuser',
+    } as any);
+    prismaMock.request.update.mockResolvedValueOnce({
+      id: 'req-ar-user',
+      status: 'awaiting_approval',
+      audiobook: { title: 'Title', author: 'Author' },
+    } as any);
+
+    const { POST } = await import('@/app/api/requests/[id]/select-torrent/route');
+    const response = await POST({} as any, { params: Promise.resolve({ id: 'req-ar-user' }) });
+    const payload = await response.json();
+
+    expect(payload.success).toBe(true);
+    expect(payload.message).toMatch(/approval/i);
+    expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
+    expect(jobQueueMock.addNotificationJob).toHaveBeenCalled();
+  });
+
   it('returns error when ebook sidecar is disabled', async () => {
     configState.values.set('ebook_sidecar_enabled', 'false');
 
