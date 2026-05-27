@@ -471,6 +471,218 @@ describe('processMonitorDownload', () => {
     );
   });
 
+  // ---------------------------------------------------------------------------
+  // TempPathEnabled relocation check (#209): the completion branch must treat a
+  // download as relocated when downloadPath is equal-to/under savePath, comparing
+  // separator-agnostically so Windows backslash paths organize immediately. When
+  // the file is genuinely still in a temp dir outside savePath, the existing
+  // wait/retry protection must be preserved byte-for-byte.
+  // ---------------------------------------------------------------------------
+
+  /** Build a `completed` torrent client mock with the given save/download paths. */
+  const relocationClientMock = (savePath: string, downloadPath: string) => ({
+    clientType: 'qbittorrent',
+    protocol: 'torrent',
+    getDownload: vi.fn().mockResolvedValue({
+      id: 'hash-reloc',
+      name: 'Book',
+      size: 0,
+      bytesDownloaded: 0,
+      progress: 1.0,
+      status: 'completed',
+      downloadSpeed: 0,
+      eta: 0,
+      category: 'readmeabook',
+      savePath,
+      downloadPath,
+    }),
+  });
+
+  /** Stub the deps the completion branch needs to reach addOrganizeJob. */
+  const stubCompletionDeps = () => {
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-reloc',
+      type: 'qbittorrent',
+      name: 'qBittorrent',
+      enabled: true,
+      remotePathMappingEnabled: false,
+    });
+    prismaMock.request.update.mockResolvedValue({});
+    prismaMock.downloadHistory.update.mockResolvedValue({});
+    prismaMock.request.findFirst.mockResolvedValue({
+      id: 'req-reloc',
+      audiobook: { id: 'a-reloc' },
+      deletedAt: null,
+    });
+  };
+
+  it('organizes immediately when a Windows backslash path is already relocated (#209)', async () => {
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(
+      relocationClientMock('E:\\Torrents\\ReadMeABook', 'E:\\Torrents\\ReadMeABook\\Book.m4b')
+    );
+    stubCompletionDeps();
+
+    const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+    const result = await processMonitorDownload({
+      requestId: 'req-reloc',
+      downloadHistoryId: 'dh-reloc',
+      downloadClientId: 'hash-reloc',
+      downloadClient: 'qbittorrent',
+      jobId: 'job-reloc',
+    });
+
+    expect(result.completed).toBe(true);
+    expect(jobQueueMock.addOrganizeJob).toHaveBeenCalled();
+    // Must NOT re-schedule a relocation wait.
+    expect(jobQueueMock.addMonitorJob).not.toHaveBeenCalled();
+  });
+
+  it('preserves the wait/retry protection when a Windows file is still in a temp dir (#209)', async () => {
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(
+      relocationClientMock('E:\\Torrents\\ReadMeABook', 'E:\\Torrents\\incomplete\\Book')
+    );
+    prismaMock.request.update.mockResolvedValue({});
+    prismaMock.downloadHistory.update.mockResolvedValue({});
+
+    const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+    const result = await processMonitorDownload({
+      requestId: 'req-reloc',
+      downloadHistoryId: 'dh-reloc',
+      downloadClientId: 'hash-reloc',
+      downloadClient: 'qbittorrent',
+      jobId: 'job-reloc',
+    });
+
+    // Exact existing behavior: completed:false + pathWaitCount:1, no organize.
+    expect(result).toMatchObject({ success: true, completed: false, pathWaitCount: 1 });
+    expect(jobQueueMock.addOrganizeJob).not.toHaveBeenCalled();
+    // Re-scheduled with the same delay/arg shape: first wait → delay 2, lastProgress 100,
+    // stallCount 0, pathWaitCount 1.
+    expect(jobQueueMock.addMonitorJob).toHaveBeenCalledWith(
+      'req-reloc', 'dh-reloc', 'hash-reloc', 'qbittorrent', 2, 100, 0, 1
+    );
+  });
+
+  it('treats trailing-separator save paths as relocated (#209)', async () => {
+    // Backslash trailing form.
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(
+      relocationClientMock('E:\\Torrents\\ReadMeABook\\', 'E:\\Torrents\\ReadMeABook\\Book.m4b')
+    );
+    stubCompletionDeps();
+
+    const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+    let result = await processMonitorDownload({
+      requestId: 'req-reloc',
+      downloadHistoryId: 'dh-reloc',
+      downloadClientId: 'hash-reloc',
+      downloadClient: 'qbittorrent',
+      jobId: 'job-reloc',
+    });
+    expect(result.completed).toBe(true);
+    expect(jobQueueMock.addMonitorJob).not.toHaveBeenCalled();
+
+    // Forward-slash trailing form.
+    vi.clearAllMocks();
+    jobQueueMock.addNotificationJob.mockResolvedValue(undefined);
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(
+      relocationClientMock('/downloads/', '/downloads/Book.m4b')
+    );
+    stubCompletionDeps();
+
+    result = await processMonitorDownload({
+      requestId: 'req-reloc',
+      downloadHistoryId: 'dh-reloc',
+      downloadClientId: 'hash-reloc',
+      downloadClient: 'qbittorrent',
+      jobId: 'job-reloc',
+    });
+    expect(result.completed).toBe(true);
+    expect(jobQueueMock.addMonitorJob).not.toHaveBeenCalled();
+  });
+
+  it('leaves forward-slash (Linux/Docker) relocation behavior unchanged (#209)', async () => {
+    // Already-relocated forward-slash path organizes.
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(
+      relocationClientMock('/downloads/readmeabook', '/downloads/readmeabook/Book')
+    );
+    stubCompletionDeps();
+
+    const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+    let result = await processMonitorDownload({
+      requestId: 'req-reloc',
+      downloadHistoryId: 'dh-reloc',
+      downloadClientId: 'hash-reloc',
+      downloadClient: 'qbittorrent',
+      jobId: 'job-reloc',
+    });
+    expect(result.completed).toBe(true);
+    expect(jobQueueMock.addMonitorJob).not.toHaveBeenCalled();
+
+    // Forward-slash genuine temp path still waits (protection preserved).
+    vi.clearAllMocks();
+    jobQueueMock.addNotificationJob.mockResolvedValue(undefined);
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(
+      relocationClientMock('/downloads/readmeabook', '/downloads/incomplete/Book')
+    );
+    prismaMock.request.update.mockResolvedValue({});
+    prismaMock.downloadHistory.update.mockResolvedValue({});
+
+    result = await processMonitorDownload({
+      requestId: 'req-reloc',
+      downloadHistoryId: 'dh-reloc',
+      downloadClientId: 'hash-reloc',
+      downloadClient: 'qbittorrent',
+      jobId: 'job-reloc',
+    });
+    expect(result).toMatchObject({ success: true, completed: false, pathWaitCount: 1 });
+    expect(jobQueueMock.addMonitorJob).toHaveBeenCalledWith(
+      'req-reloc', 'dh-reloc', 'hash-reloc', 'qbittorrent', 2, 100, 0, 1
+    );
+  });
+
+  it('treats an exact-equal single-file path as relocated (#209)', async () => {
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(
+      relocationClientMock('E:\\Torrents\\ReadMeABook\\Book.m4b', 'E:\\Torrents\\ReadMeABook\\Book.m4b')
+    );
+    stubCompletionDeps();
+
+    const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+    const result = await processMonitorDownload({
+      requestId: 'req-reloc',
+      downloadHistoryId: 'dh-reloc',
+      downloadClientId: 'hash-reloc',
+      downloadClient: 'qbittorrent',
+      jobId: 'job-reloc',
+    });
+
+    expect(result.completed).toBe(true);
+    expect(jobQueueMock.addMonitorJob).not.toHaveBeenCalled();
+  });
+
+  it('does not match a sibling-prefix save path as relocated (#209)', async () => {
+    // /downloads2 must NOT be treated as under /downloads — proves the `+ '/'` boundary.
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(
+      relocationClientMock('/downloads', '/downloads2/Book')
+    );
+    prismaMock.request.update.mockResolvedValue({});
+    prismaMock.downloadHistory.update.mockResolvedValue({});
+
+    const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+    const result = await processMonitorDownload({
+      requestId: 'req-reloc',
+      downloadHistoryId: 'dh-reloc',
+      downloadClientId: 'hash-reloc',
+      downloadClient: 'qbittorrent',
+      jobId: 'job-reloc',
+    });
+
+    expect(result).toMatchObject({ success: true, completed: false, pathWaitCount: 1 });
+    expect(jobQueueMock.addOrganizeJob).not.toHaveBeenCalled();
+    expect(jobQueueMock.addMonitorJob).toHaveBeenCalledWith(
+      'req-reloc', 'dh-reloc', 'hash-reloc', 'qbittorrent', 2, 100, 0, 1
+    );
+  });
+
   it('converts SABnzbd progress from 0.0-1.0 to 0-100 percentage', async () => {
     const sabClientMock = {
       clientType: 'sabnzbd',
