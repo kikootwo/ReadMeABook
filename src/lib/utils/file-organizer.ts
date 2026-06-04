@@ -222,9 +222,40 @@ export class FileOrganizer {
 
       // Organization modes.
       // Defaults preserve existing RMAB behavior.
-      const metadataWriteMode = process.env.RMAB_METADATA_WRITE_MODE || 'embedded';
-      const filePlacementMode = (process.env.RMAB_FILE_PLACEMENT_MODE || 'copy') as FilePlacementMode;
-      const hardlinkFallbackMode = (process.env.RMAB_HARDLINK_FALLBACK_MODE || 'copy') as HardlinkFallbackMode;
+      const [
+        metadataTaggingConfig,
+        metadataWriteModeConfig,
+        filePlacementModeConfig,
+        hardlinkFallbackModeConfig,
+      ] = await Promise.all([
+        prisma.configuration.findUnique({ where: { key: 'metadata_tagging_enabled' } }),
+        prisma.configuration.findUnique({ where: { key: 'metadata_write_mode' } }),
+        prisma.configuration.findUnique({ where: { key: 'file_placement_mode' } }),
+        prisma.configuration.findUnique({ where: { key: 'hardlink_fallback_mode' } }),
+      ]);
+
+      const metadataTaggingEnabledSetting = metadataTaggingConfig?.value === 'true';
+
+      const configuredMetadataWriteMode =
+        metadataWriteModeConfig?.value ||
+        process.env.RMAB_METADATA_WRITE_MODE ||
+        'embedded';
+
+      const metadataWriteMode = metadataTaggingEnabledSetting
+        ? configuredMetadataWriteMode
+        : 'disabled';
+
+      const filePlacementMode = (
+        filePlacementModeConfig?.value ||
+        process.env.RMAB_FILE_PLACEMENT_MODE ||
+        'copy'
+      ) as FilePlacementMode;
+
+      const hardlinkFallbackMode = (
+        hardlinkFallbackModeConfig?.value ||
+        process.env.RMAB_HARDLINK_FALLBACK_MODE ||
+        'copy'
+      ) as HardlinkFallbackMode;
 
       const useEmbeddedMetadata =
         metadataWriteMode === 'embedded' || metadataWriteMode === 'both';
@@ -237,13 +268,10 @@ export class FileOrganizer {
       const taggedFileMap = new Map<string, string>();
 
       try {
-        const config = await prisma.configuration.findUnique({
-          where: { key: 'metadata_tagging_enabled' },
-        });
+        const shouldTagEmbeddedMetadata =
+          metadataTaggingEnabledSetting && useEmbeddedMetadata;
 
-        const metadataTaggingEnabled = config?.value === 'true' && useEmbeddedMetadata;
-
-        if (metadataTaggingEnabled && audioFiles.length > 0) {
+        if (shouldTagEmbeddedMetadata && audioFiles.length > 0) {
           await logger?.info(`Metadata tagging enabled, checking ffmpeg availability...`);
 
           const ffmpegAvailable = await checkFfmpegAvailable();

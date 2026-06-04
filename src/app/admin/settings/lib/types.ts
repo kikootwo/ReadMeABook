@@ -119,6 +119,9 @@ export interface PathsSettings {
   fileRenameTemplate?: string;
   fileChmod?: string;
   dirChmod?: string;
+  metadataWriteMode: 'embedded' | 'opf' | 'both' | 'disabled';
+  filePlacementMode: 'copy' | 'hardlink';
+  hardlinkFallbackMode: 'copy' | 'fail';
 }
 
 /**

@@ -15,7 +15,22 @@ export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { downloadDir, mediaDir, audiobookPathTemplate, ebookPathTemplate, metadataTaggingEnabled, chapterMergingEnabled, plexFormatCoercionEnabled, fileRenameEnabled, fileRenameTemplate, fileChmod, dirChmod } = await request.json();
+        const {
+          downloadDir,
+          mediaDir,
+          audiobookPathTemplate,
+          ebookPathTemplate,
+          metadataTaggingEnabled,
+          metadataWriteMode,
+          filePlacementMode,
+          hardlinkFallbackMode,
+          chapterMergingEnabled,
+          plexFormatCoercionEnabled,
+          fileRenameEnabled,
+          fileRenameTemplate,
+          fileChmod,
+          dirChmod
+        } = await request.json();
 
         if (!downloadDir || !mediaDir) {
           return NextResponse.json(
@@ -43,6 +58,39 @@ export async function PUT(request: NextRequest) {
         if (dirChmod !== undefined && !octalRegex.test(dirChmod)) {
           return NextResponse.json(
             { error: 'Directory permissions must be 3-4 octal digits (0-7), e.g. 775' },
+            { status: 400 }
+          );
+        }
+        
+        const validMetadataWriteModes = ['embedded', 'opf', 'both'];
+        const validFilePlacementModes = ['copy', 'hardlink'];
+        const validHardlinkFallbackModes = ['copy', 'fail'];
+        if (
+          metadataWriteMode !== undefined &&
+          !validMetadataWriteModes.includes(metadataWriteMode)
+        ) {
+          return NextResponse.json(
+            { error: 'Metadata write mode must be embedded, opf, or both' },
+            { status: 400 }
+          );
+        }
+
+        if (
+          filePlacementMode !== undefined &&
+          !validFilePlacementModes.includes(filePlacementMode)
+        ) {
+          return NextResponse.json(
+            { error: 'File placement mode must be copy or hardlink' },
+            { status: 400 }
+          );
+        }
+
+        if (
+          hardlinkFallbackMode !== undefined &&
+          !validHardlinkFallbackModes.includes(hardlinkFallbackMode)
+        ) {
+          return NextResponse.json(
+            { error: 'Hardlink fallback mode must be copy or fail' },
             { status: 400 }
           );
         }
@@ -97,6 +145,39 @@ export async function PUT(request: NextRequest) {
             value: String(metadataTaggingEnabled ?? true),
             category: 'automation',
             description: 'Automatically tag audio files with correct metadata during file organization',
+          },
+        });
+
+        await prisma.configuration.upsert({
+          where: { key: 'metadata_write_mode' },
+          update: { value: metadataWriteMode || 'embedded' },
+          create: {
+            key: 'metadata_write_mode',
+            value: metadataWriteMode || 'embedded',
+            category: 'automation',
+            description: 'Controls whether RMAB writes embedded metadata, OPF sidecar metadata, or both during file organization',
+          },
+        });
+
+        await prisma.configuration.upsert({
+          where: { key: 'file_placement_mode' },
+          update: { value: filePlacementMode || 'copy' },
+          create: {
+            key: 'file_placement_mode',
+            value: filePlacementMode || 'copy',
+            category: 'automation',
+            description: 'Controls whether organized files are copied or hardlinked into the media library',
+          },
+        });
+
+        await prisma.configuration.upsert({
+          where: { key: 'hardlink_fallback_mode' },
+          update: { value: hardlinkFallbackMode || 'copy' },
+          create: {
+            key: 'hardlink_fallback_mode',
+            value: hardlinkFallbackMode || 'copy',
+            category: 'automation',
+            description: 'Controls whether hardlink placement falls back to copy or fails the import when hardlinking fails',
           },
         });
 
@@ -188,6 +269,9 @@ export async function PUT(request: NextRequest) {
         configService.clearCache('audiobook_path_template');
         configService.clearCache('ebook_path_template');
         configService.clearCache('metadata_tagging_enabled');
+        configService.clearCache('metadata_write_mode');
+        configService.clearCache('file_placement_mode');
+        configService.clearCache('hardlink_fallback_mode');
         configService.clearCache('chapter_merging_enabled');
         configService.clearCache('plex_format_coercion_enabled');
         configService.clearCache('file_rename_enabled');
