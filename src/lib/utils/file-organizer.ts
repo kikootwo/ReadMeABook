@@ -10,6 +10,8 @@ import { RMAB_USER_AGENT } from './user-agent';
 import { tagMultipleFiles, checkFfmpegAvailable } from './metadata-tagger';
 import { RMABLogger } from './logger';
 import { copyFile } from './copy-file';
+import { placeFile, type FilePlacementMode, type HardlinkFallbackMode } from './file-placement';
+import { writeOpfMetadata } from './opf-writer';
 
 const moduleLogger = RMABLogger.create('FileOrganizer');
 import {
@@ -218,18 +220,58 @@ export class FileOrganizer {
         await logger?.info(`Single audio file detected - no chapter merging needed`);
       }
 
+      // Organization modes.
+      // Defaults preserve existing RMAB behavior.
+      const [
+        metadataTaggingConfig,
+        metadataWriteModeConfig,
+        filePlacementModeConfig,
+        hardlinkFallbackModeConfig,
+      ] = await Promise.all([
+        prisma.configuration.findUnique({ where: { key: 'metadata_tagging_enabled' } }),
+        prisma.configuration.findUnique({ where: { key: 'metadata_write_mode' } }),
+        prisma.configuration.findUnique({ where: { key: 'file_placement_mode' } }),
+        prisma.configuration.findUnique({ where: { key: 'hardlink_fallback_mode' } }),
+      ]);
+
+      const metadataTaggingEnabledSetting = metadataTaggingConfig?.value === 'true';
+
+      const configuredMetadataWriteMode =
+        metadataWriteModeConfig?.value ||
+        process.env.RMAB_METADATA_WRITE_MODE ||
+        'embedded';
+
+      const metadataWriteMode = metadataTaggingEnabledSetting
+        ? configuredMetadataWriteMode
+        : 'disabled';
+
+      const filePlacementMode = (
+        filePlacementModeConfig?.value ||
+        process.env.RMAB_FILE_PLACEMENT_MODE ||
+        'copy'
+      ) as FilePlacementMode;
+
+      const hardlinkFallbackMode = (
+        hardlinkFallbackModeConfig?.value ||
+        process.env.RMAB_HARDLINK_FALLBACK_MODE ||
+        'copy'
+      ) as HardlinkFallbackMode;
+
+      const useEmbeddedMetadata =
+        metadataWriteMode === 'embedded' || metadataWriteMode === 'both';
+
+      const useOpfMetadata =
+        metadataWriteMode === 'opf' || metadataWriteMode === 'both';
+
       // Tag metadata BEFORE moving files (prevents Plex race condition)
       // Map from original file path to tagged file path (for successful tags)
       const taggedFileMap = new Map<string, string>();
 
       try {
-        const config = await prisma.configuration.findUnique({
-          where: { key: 'metadata_tagging_enabled' },
-        });
+        const shouldTagEmbeddedMetadata =
+          metadataTaggingEnabledSetting && useEmbeddedMetadata;
 
-        const metadataTaggingEnabled = config?.value === 'true';
-
-        if (metadataTaggingEnabled && audioFiles.length > 0) {
+        if (shouldTagEmbeddedMetadata && audioFiles.length > 0) {
           await logger?.info(`Metadata tagging enabled, checking ffmpeg availability...`);
 
           const ffmpegAvailable = await checkFfmpegAvailable();
@@ -399,10 +441,23 @@ export class FileOrganizer {
 
         // Copy file (do NOT delete original - needed for seeding)
         try {
-          // Copy file via streams (avoids copy_file_range EPERM on NFS/FUSE)
-          await copyFile(sourcePath, targetFilePath);
-          // Set explicit permissions after copy
-          await fs.chmod(targetFilePath, this.fileMode);
+          const effectivePlacementMode =
+            taggedFilePath || tempMergedFile
+              ? 'copy'
+              : filePlacementMode;
+
+          if (effectivePlacementMode === 'hardlink' && taggedFilePath) {
+            throw new Error('Hardlink mode is incompatible with embedded metadata tagging');
+          }
+
+          const placementResult = await placeFile(sourcePath, targetFilePath, {
+            mode: effectivePlacementMode,
+            hardlinkFallback: hardlinkFallbackMode,
+          });
+
+          if (placementResult !== 'hardlinked' && placementResult !== 'already-exists') {
+            await fs.chmod(targetFilePath, this.fileMode);
+          }
 
           result.audioFiles.push(targetFilePath);
           result.filesMovedCount++;
@@ -417,7 +472,7 @@ export class FileOrganizer {
               await logger?.warn(`Failed to clean up temp file: ${path.basename(taggedFilePath)}`);
             }
           } else {
-            await logger?.info(`Copied: ${filename}`);
+            await logger?.info(`${placementResult}: ${filename}`);          
           }
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -462,6 +517,18 @@ export class FileOrganizer {
           await logger?.info(`Cleaned up temp merged file: ${path.basename(tempMergedFile)}`);
         } catch (cleanupError) {
           await logger?.warn(`Failed to clean up temp merged file: ${path.basename(tempMergedFile)}`);
+        }
+      }
+
+      if (useOpfMetadata && result.audioFiles.length > 0) {
+        try {
+          const opfPath = await writeOpfMetadata(targetPath, audiobook);
+          await fs.chmod(opfPath, this.fileMode);
+          await logger?.info(`Wrote OPF metadata sidecar: ${path.basename(opfPath)}`);
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          await logger?.error(`Failed to write OPF metadata: ${errorMsg}`);
+          result.errors.push(`Failed to write OPF metadata: ${errorMsg}`);
         }
       }
 
