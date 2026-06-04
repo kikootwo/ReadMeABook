@@ -95,6 +95,13 @@ export async function PUT(request: NextRequest) {
           );
         }
 
+        const effectiveFilePlacementMode =
+          metadataTaggingEnabled &&
+          metadataWriteMode !== 'opf' &&
+          filePlacementMode === 'hardlink'
+            ? 'copy'
+            : filePlacementMode;
+
         // Update configuration
         await prisma.configuration.upsert({
           where: { key: 'download_dir' },
@@ -161,10 +168,10 @@ export async function PUT(request: NextRequest) {
 
         await prisma.configuration.upsert({
           where: { key: 'file_placement_mode' },
-          update: { value: filePlacementMode || 'copy' },
+          update: { value: effectiveFilePlacementMode || 'copy' },
           create: {
             key: 'file_placement_mode',
-            value: filePlacementMode || 'copy',
+            value: effectiveFilePlacementMode || 'copy',
             category: 'automation',
             description: 'Controls whether organized files are copied or hardlinked into the media library',
           },

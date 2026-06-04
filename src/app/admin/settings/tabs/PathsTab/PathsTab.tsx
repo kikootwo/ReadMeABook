@@ -112,6 +112,14 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
   const ebookTemplate = paths.ebookPathTemplate || '{author}/{title} {asin}';
   const ebookMatchesAudiobook = ebookTemplate === audiobookTemplate;
 
+  const hardlinkCompatibleMetadataMode =
+    !paths.metadataTaggingEnabled || paths.metadataWriteMode === 'opf';
+
+  const hardlinkDisabledReason =
+    paths.metadataTaggingEnabled && paths.metadataWriteMode !== 'opf'
+      ? 'Hardlinking requires Metadata Write Mode to be OPF sidecar file. Embedded metadata creates a modified temporary file, so RMAB must copy instead.'
+      : null;
+
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
@@ -423,7 +431,15 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
 
           <select
             value={paths.metadataWriteMode || 'embedded'}
-            onChange={(e) => updatePath('metadataWriteMode', e.target.value)}
+            onChange={(e) => {
+              const nextMode = e.target.value;
+
+              updatePath('metadataWriteMode', nextMode);
+
+              if (paths.filePlacementMode === 'hardlink' && nextMode !== 'opf') {
+                updatePath('filePlacementMode', 'copy');
+              }
+            }}
             className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"
           >
             <option value="embedded">Embedded audio tags</option>
@@ -444,17 +460,37 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
         </label>
 
         <select
-          value={paths.filePlacementMode || 'copy'}
-          onChange={(e) => updatePath('filePlacementMode', e.target.value)}
+          value={
+            paths.filePlacementMode === 'hardlink' && !hardlinkCompatibleMetadataMode
+              ? 'copy'
+              : paths.filePlacementMode || 'copy'
+          }
+          onChange={(e) => {
+            const nextMode = e.target.value;
+
+            if (nextMode === 'hardlink' && !hardlinkCompatibleMetadataMode) {
+              return;
+            }
+
+            updatePath('filePlacementMode', nextMode);
+          }}
           className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"
         >
           <option value="copy">Copy files</option>
-          <option value="hardlink">Hardlink files</option>
+          <option value="hardlink" disabled={!hardlinkCompatibleMetadataMode}>
+            Hardlink files
+          </option>
         </select>
 
         <p className="text-sm text-gray-600 dark:text-gray-400">
           Hardlinking avoids duplicate storage, but only works when the download and library paths are on the same filesystem.
         </p>
+
+        {hardlinkDisabledReason && (
+          <p className="text-sm text-amber-700 dark:text-amber-300">
+            {hardlinkDisabledReason}
+          </p>
+        )}
       </div>
 
       {paths.filePlacementMode === 'hardlink' && (
