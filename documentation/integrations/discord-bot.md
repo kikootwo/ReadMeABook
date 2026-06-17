@@ -9,6 +9,7 @@ A persistent discord.js gateway bot lets linked users request and manage titles 
 - **discord.js gateway** (persistent WebSocket), NOT an HTTP interactions endpoint. No public URL/signature needed.
 - Singleton started once at app init: `getDiscordBotService().start()` in [src/app/api/init/route.ts](../../src/app/api/init/route.ts) — same process as Bull workers. Idempotent; gated on config.
 - Server-only: `discord.js` in `serverExternalPackages` + client-alias `false` in [next.config.ts](../../next.config.ts). Never import the bot from client components.
+- **Lazy-loaded:** `discord.js` and the command/router modules are pulled via dynamic `import()` inside `start()`/`registerCommands()` — never at module scope (`Client` is a type-only import, erased at build). When the bot is **disabled**, importing the service (e.g. from `/api/init`) loads **nothing** from discord.js → zero runtime footprint until enabled.
 - **Single-guild** assumption: commands registered guild-scoped (instant propagation) for the configured `guildId`.
 
 ## Config (category `discord`, Configuration table)
@@ -57,8 +58,14 @@ Typed accessor: [src/lib/services/discord/discord-config.ts](../../src/lib/servi
 ## Logging
 Handlers log via `RMABLogger.create('Discord.*')` with actor context `{ discordUserId, discordUsername, rmabUserId }`.
 
+## Enable/Disable lifecycle
+- Toggled via the **Enable Discord bot** checkbox in the Discord settings tab.
+- **Off:** saving persists `discord.enabled='false'` then calls `restart()` → `stop()` (`client.destroy()` closes the gateway WebSocket, nulls the client/listeners) → `start()` short-circuits on the `enabled` gate. No connection, no client, no listeners. Combined with lazy loading, discord.js isn't even loaded when disabled at boot.
+- **On:** saving persists `enabled='true'` then `restart()` → `start()` dynamically imports discord.js, logs in, registers commands. Takes effect immediately (no container restart).
+
 ## Edge cases
-Bot disabled/unconfigured → init skips start. Unlinked user → ephemeral guidance. Invalid token → caught at start + surfaced by Test. Gateway auto-reconnects; commands re-registered on each `ready`. Stale/double approval → status guard + buttons disabled. DM closed → logged, non-fatal.
+
+Bot disabled/unconfigured → init skips start (and skips loading discord.js). Unlinked user → ephemeral guidance. Invalid token → caught at start + surfaced by Test. Gateway auto-reconnects; commands re-registered on each `ready`. Stale/double approval → status guard + buttons disabled. DM closed → logged, non-fatal.
 
 ## Deferred
 Per-user library tags (Plex labels / ABS tags) for filter/sort by RMAB user — design settled (apply at scan-plex mark-available for all requests) but not built, pending project-head decision.

@@ -6,20 +6,17 @@
  * init when the bot is configured + enabled; registers guild-scoped slash commands on `ready` and
  * routes every interaction to the interaction router. All failures are caught and logged so a
  * misconfigured or unreachable bot never affects the rest of the app.
+ *
+ * Lazy loading: `discord.js` and the bot's command/router modules are loaded via dynamic `import()`
+ * inside start()/registerCommands(), never at module scope. The `Client` type below is a type-only
+ * import, which is erased at compile time. This means that when the bot is disabled, importing this
+ * service (e.g. from /api/init) pulls in nothing from discord.js — zero runtime footprint until the
+ * bot is actually enabled and started.
  */
 
-import {
-  Client,
-  Events,
-  GatewayIntentBits,
-  Partials,
-  REST,
-  Routes,
-} from 'discord.js';
 import { RMABLogger } from '@/lib/utils/logger';
 import { getDiscordConfig, isDiscordBotConfigured, type DiscordConfig } from './discord-config';
-import { commandDefinitions } from './command-definitions';
-import { routeInteraction } from './interaction-router';
+import type { Client } from 'discord.js';
 
 const logger = RMABLogger.create('Discord.Bot');
 
@@ -50,6 +47,10 @@ class DiscordBotService {
 
     this.starting = true;
     try {
+      // Lazy-load discord.js + the bot's router only once we know the bot is enabled.
+      const { Client, Events, GatewayIntentBits, Partials } = await import('discord.js');
+      const { routeInteraction } = await import('./interaction-router');
+
       const client = new Client({
         intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
         // DMChannel partial lets us send approval DMs to users we haven't cached
@@ -123,6 +124,8 @@ class DiscordBotService {
   private async registerCommands(config: DiscordConfig, applicationId: string): Promise<void> {
     if (!config.botToken || !config.guildId) return;
 
+    const { REST, Routes } = await import('discord.js');
+    const { commandDefinitions } = await import('./command-definitions');
     const rest = new REST({ version: '10' }).setToken(config.botToken);
     await rest.put(Routes.applicationGuildCommands(applicationId, config.guildId), {
       body: commandDefinitions,
