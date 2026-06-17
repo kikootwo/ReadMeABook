@@ -18,7 +18,10 @@ import {
 } from './handlers/request.handler';
 import {
   handleStatusCommand,
+  handleStatusPage,
+  handleStatusCancel,
   handleDeleteCommand,
+  handleDeletePage,
   handleDeleteSelect,
 } from './handlers/status-delete.handler';
 import { handleApprovalButton, handleCancelRequestButton } from './handlers/approval.handler';
@@ -61,6 +64,8 @@ export async function routeInteraction(interaction: Interaction): Promise<void> 
       const decoded = decodeCustomId(interaction.customId);
       if (decoded?.kind === 'request_select') {
         await handleRequestSelect(interaction, decoded.mediaType);
+      } else if (decoded?.kind === 'status_cancel') {
+        await handleStatusCancel(interaction, decoded.page, decoded.scopeAll);
       } else if (decoded?.kind === 'delete_select') {
         await handleDeleteSelect(interaction);
       }
@@ -80,6 +85,10 @@ export async function routeInteraction(interaction: Interaction): Promise<void> 
         await handleApprovalButton(interaction, decoded.action, decoded.requestId);
       } else if (decoded.kind === 'cancel_request') {
         await handleCancelRequestButton(interaction, decoded.requestId);
+      } else if (decoded.kind === 'status_page') {
+        await handleStatusPage(interaction, decoded.page, decoded.scopeAll);
+      } else if (decoded.kind === 'delete_page') {
+        await handleDeletePage(interaction, decoded.page, decoded.scopeAll);
       }
       return;
     }

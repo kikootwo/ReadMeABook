@@ -23,7 +23,13 @@ export type DiscordCustomId =
   /** Approve/Deny buttons on an admin approval message. */
   | { kind: 'approval'; action: 'approve' | 'deny'; requestId: string }
   /** Cancel Request button on a live request card (requester or admin). */
-  | { kind: 'cancel_request'; requestId: string };
+  | { kind: 'cancel_request'; requestId: string }
+  /** Pagination buttons on /status. */
+  | { kind: 'status_page'; page: number; scopeAll: boolean }
+  /** Cancel-from-status select menu; option values are request IDs. */
+  | { kind: 'status_cancel'; page: number; scopeAll: boolean }
+  /** Pagination buttons on /delete. */
+  | { kind: 'delete_page'; page: number; scopeAll: boolean };
 
 const PREFIX = {
   request_modal: 'req:modal',
@@ -33,6 +39,9 @@ const PREFIX = {
   delete_select: 'del:sel',
   approval: 'appr',
   cancel_request: 'crq',
+  status_page: 'st:pg',
+  status_cancel: 'st:cx',
+  delete_page: 'del:pg',
 } as const;
 
 /** Encode a structured custom ID into a Discord-safe string (≤100 chars). */
@@ -52,6 +61,12 @@ export function encodeCustomId(id: DiscordCustomId): string {
       return `${PREFIX.approval}:${id.action}:${id.requestId}`;
     case 'cancel_request':
       return `${PREFIX.cancel_request}:${id.requestId}`;
+    case 'status_page':
+      return `${PREFIX.status_page}:${id.page}:${id.scopeAll ? '1' : '0'}`;
+    case 'status_cancel':
+      return `${PREFIX.status_cancel}:${id.page}:${id.scopeAll ? '1' : '0'}`;
+    case 'delete_page':
+      return `${PREFIX.delete_page}:${id.page}:${id.scopeAll ? '1' : '0'}`;
   }
 }
 
@@ -99,6 +114,27 @@ export function decodeCustomId(raw: string): DiscordCustomId | null {
   if (raw.startsWith(`${PREFIX.cancel_request}:`)) {
     const requestId = parts.slice(1).join(':');
     return requestId ? { kind: 'cancel_request', requestId } : null;
+  }
+
+  // st:pg:<page>:<scopeAll>
+  if (raw.startsWith(`${PREFIX.status_page}:`)) {
+    const page = Number(parts[2]);
+    const scopeAll = parts[3] === '1';
+    return Number.isFinite(page) ? { kind: 'status_page', page, scopeAll } : null;
+  }
+
+  // st:cx:<page>:<scopeAll>
+  if (raw.startsWith(`${PREFIX.status_cancel}:`)) {
+    const page = Number(parts[2]);
+    const scopeAll = parts[3] === '1';
+    return Number.isFinite(page) ? { kind: 'status_cancel', page, scopeAll } : null;
+  }
+
+  // del:pg:<page>:<scopeAll>
+  if (raw.startsWith(`${PREFIX.delete_page}:`)) {
+    const page = Number(parts[2]);
+    const scopeAll = parts[3] === '1';
+    return Number.isFinite(page) ? { kind: 'delete_page', page, scopeAll } : null;
   }
 
   return null;

@@ -55,9 +55,21 @@ export async function fetchOutstandingRequests(
       status: { in: [...OUTSTANDING_STATUSES] },
       ...(scopeAll ? {} : { userId: rmabUserId }),
     },
-    include: { audiobook: { select: { title: true, author: true } } },
+    include: {
+      audiobook: {
+        select: {
+          title: true,
+          author: true,
+          narrator: true,
+          year: true,
+          series: true,
+          seriesPart: true,
+          coverArtUrl: true,
+        },
+      },
+      user: { select: { plexUsername: true } },
+    },
     orderBy: { createdAt: 'desc' },
-    take: 25, // Discord select-menu cap
   });
 
   return requests.map((r) => ({
@@ -67,6 +79,12 @@ export async function fetchOutstandingRequests(
     type: r.type,
     status: r.status,
     createdAt: r.createdAt,
+    narrator: r.audiobook.narrator,
+    year: r.audiobook.year,
+    series: r.audiobook.series,
+    seriesPart: r.audiobook.seriesPart,
+    coverArtUrl: r.audiobook.coverArtUrl,
+    requestedBy: scopeAll ? r.user.plexUsername : null,
   }));
 }
 
@@ -113,9 +131,21 @@ export async function fetchDeletableRequests(
       status: { in: [...DELETABLE_STATUSES] },
       ...(scopeAll ? {} : { userId: rmabUserId }),
     },
-    include: { audiobook: { select: { title: true, author: true } } },
+    include: {
+      audiobook: {
+        select: {
+          title: true,
+          author: true,
+          narrator: true,
+          year: true,
+          series: true,
+          seriesPart: true,
+          coverArtUrl: true,
+        },
+      },
+      user: { select: { plexUsername: true } },
+    },
     orderBy: { createdAt: 'desc' },
-    take: 25,
   });
 
   return requests.map((r) => ({
@@ -125,6 +155,12 @@ export async function fetchDeletableRequests(
     type: r.type,
     status: r.status,
     createdAt: r.createdAt,
+    narrator: r.audiobook.narrator,
+    year: r.audiobook.year,
+    series: r.audiobook.series,
+    seriesPart: r.audiobook.seriesPart,
+    coverArtUrl: r.audiobook.coverArtUrl,
+    requestedBy: scopeAll ? r.user.plexUsername : null,
   }));
 }
 

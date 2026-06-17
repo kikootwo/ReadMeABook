@@ -37,6 +37,12 @@ export interface RequestListItem {
   type: string; // 'audiobook' | 'ebook'
   status: string;
   createdAt: Date;
+  narrator?: string | null;
+  year?: number | null;
+  series?: string | null;
+  seriesPart?: string | null;
+  coverArtUrl?: string | null;
+  requestedBy?: string | null;
 }
 
 /** Simple informational embed. */
@@ -450,43 +456,117 @@ export function applyApprovalCancellation(existing: Embed, cancelledByDiscordId:
     .addFields({ name: 'Cancelled by', value: `<@${cancelledByDiscordId}>`, inline: true });
 }
 
-const STATUS_EMOJI: Record<string, string> = {
-  pending: '🕐',
-  awaiting_approval: '⏳',
-  awaiting_search: '🕐',
-  awaiting_release: '📅',
-  searching: '🔎',
-  downloading: '⬇️',
-  processing: '⚙️',
-  downloaded: '📦',
-  available: '✅',
-  failed: '❌',
-  denied: '🚫',
-  warn: '⚠️',
-};
+const ITEMS_PER_PAGE = 10;
 
-function formatRequestLine(item: RequestListItem, includeOwnerHint = false): string {
-  const emoji = STATUS_EMOJI[item.status] ?? '•';
-  const typeLabel = item.type === 'ebook' ? 'E-book' : 'Audiobook';
-  void includeOwnerHint;
-  return `${emoji} **${truncate(item.title, 80)}** — ${item.author}\n   ${typeLabel} · \`${item.status}\``;
+function buildItemEmbed(item: RequestListItem): EmbedBuilder {
+  const embed = new EmbedBuilder()
+    .setColor(colorForStatus(item.status))
+    .setTitle(titleWithYear(item.title, item.year));
+
+  const isEbook = item.type === 'ebook';
+  embed.addFields({ name: 'Author', value: firstPerson(item.author) || 'Unknown', inline: true });
+  embed.addFields({ name: 'Type', value: isEbook ? 'E-book' : 'Audiobook', inline: true });
+  if (!isEbook && item.narrator) {
+    embed.addFields({ name: 'Narrator', value: truncate(firstPerson(item.narrator), 256), inline: true });
+  }
+  if (item.series) {
+    const series = item.seriesPart ? `${item.series} #${item.seriesPart}` : item.series;
+    embed.addFields({ name: 'Series', value: truncate(series, 256), inline: true });
+  }
+  if (item.requestedBy) {
+    embed.addFields({ name: 'Requested By', value: item.requestedBy, inline: true });
+  }
+  if (item.coverArtUrl) embed.setThumbnail(item.coverArtUrl);
+  embed.setFooter({ text: requestStatusFooter(item.status) });
+
+  return embed;
+}
+
+function buildPaginationRow(
+  kind: 'status_page' | 'delete_page',
+  page: number,
+  totalPages: number,
+  scopeAll: boolean
+): ActionRowBuilder<ButtonBuilder> {
+  const prev = new ButtonBuilder()
+    .setCustomId(encodeCustomId({ kind, page: page - 1, scopeAll }))
+    .setLabel('Previous')
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(page === 0);
+  const indicator = new ButtonBuilder()
+    .setCustomId(`page_indicator_${kind}`)
+    .setLabel(`Page ${page + 1} / ${totalPages}`)
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(true);
+  const next = new ButtonBuilder()
+    .setCustomId(encodeCustomId({ kind, page: page + 1, scopeAll }))
+    .setLabel('Next')
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(page >= totalPages - 1);
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(prev, indicator, next);
 }
 
 /**
- * Build a read-only list embed for /status.
+ * Build a paginated /status reply: up to 10 rich embeds per page, a cancel select dropdown for
+ * cancellable items, and Previous/Next buttons.
  */
-export function buildStatusEmbed(items: RequestListItem[], scopeAll: boolean): EmbedBuilder {
-  const embed = new EmbedBuilder()
-    .setColor(COLOR.brand)
-    .setTitle(scopeAll ? '📋 All outstanding requests' : '📋 Your outstanding requests');
-
+export function buildStatusPage(
+  items: RequestListItem[],
+  scopeAll: boolean,
+  page: number
+): {
+  embeds: EmbedBuilder[];
+  components: (ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>)[];
+} {
   if (items.length === 0) {
-    embed.setDescription('No outstanding requests.');
-    return embed;
+    const empty = new EmbedBuilder()
+      .setColor(COLOR.brand)
+      .setTitle(scopeAll ? '📋 All outstanding requests' : '📋 Your outstanding requests')
+      .setDescription('No outstanding requests.');
+    return { embeds: [empty], components: [] };
   }
 
-  embed.setDescription(items.map((i) => formatRequestLine(i)).join('\n\n'));
-  return embed;
+  const totalPages = Math.ceil(items.length / ITEMS_PER_PAGE);
+  const safePage = Math.max(0, Math.min(page, totalPages - 1));
+  const pageItems = items.slice(safePage * ITEMS_PER_PAGE, (safePage + 1) * ITEMS_PER_PAGE);
+
+  const header = new EmbedBuilder()
+    .setColor(COLOR.brand)
+    .setTitle(scopeAll ? '📋 All outstanding requests' : '📋 Your outstanding requests')
+    .setDescription(`Showing ${items.length} request${items.length === 1 ? '' : 's'}`);
+
+  const embeds = [header, ...pageItems.map(buildItemEmbed)];
+
+  const components: (ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>)[] = [];
+  const cancelRow = buildStatusCancelSelect(pageItems, safePage, scopeAll);
+  if (cancelRow) components.push(cancelRow);
+  if (totalPages > 1) components.push(buildPaginationRow('status_page', safePage, totalPages, scopeAll));
+
+  return { embeds, components };
+}
+
+function buildStatusCancelSelect(
+  pageItems: RequestListItem[],
+  page: number,
+  scopeAll: boolean
+): ActionRowBuilder<StringSelectMenuBuilder> | null {
+  const cancellable = pageItems.filter((item) => isCancellableStatus(item.status));
+  if (cancellable.length === 0) return null;
+
+  const options = cancellable.slice(0, MAX_SELECT_OPTIONS).map((item) => {
+    const typeLabel = item.type === 'ebook' ? 'E-book' : 'Audiobook';
+    return new StringSelectMenuOptionBuilder()
+      .setLabel(truncate(item.title, 100))
+      .setDescription(truncate(`${typeLabel} • ${requestStatusFooter(item.status)} • ${item.author}`, 100))
+      .setValue(item.id);
+  });
+
+  const menu = new StringSelectMenuBuilder()
+    .setCustomId(encodeCustomId({ kind: 'status_cancel', page, scopeAll }))
+    .setPlaceholder('Cancel a request…')
+    .addOptions(options);
+
+  return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
 }
 
 /**
@@ -511,4 +591,64 @@ export function buildDeleteSelect(
     .addOptions(options);
 
   return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
+}
+
+/**
+ * Build a paginated /delete reply: rich embeds for each request on the current page, plus the
+ * select dropdown and optional pagination buttons.
+ */
+export function buildDeletePage(
+  items: RequestListItem[],
+  scopeAll: boolean,
+  page: number
+): {
+  embeds: EmbedBuilder[];
+  components: (ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>)[];
+} {
+  if (items.length === 0) {
+    return {
+      embeds: [infoEmbed('Nothing to delete', 'You have no requests to delete.')],
+      components: [],
+    };
+  }
+
+  const totalPages = Math.ceil(items.length / ITEMS_PER_PAGE);
+  const safePage = Math.max(0, Math.min(page, totalPages - 1));
+  const pageItems = items.slice(safePage * ITEMS_PER_PAGE, (safePage + 1) * ITEMS_PER_PAGE);
+
+  const header = new EmbedBuilder()
+    .setColor(COLOR.brand)
+    .setTitle(scopeAll ? '🗑️ Delete a request' : '🗑️ Delete one of your requests')
+    .setDescription('Select a request below to remove it from ReadMeABook.');
+
+  const embeds = [header, ...pageItems.map(buildItemEmbed)];
+
+  const selectRow = buildDeleteSelect(pageItems);
+  const components: (ActionRowBuilder<ButtonBuilder> | ActionRowBuilder<StringSelectMenuBuilder>)[] = [];
+  if (selectRow) components.push(selectRow);
+  if (totalPages > 1) components.push(buildPaginationRow('delete_page', safePage, totalPages, scopeAll));
+
+  return { embeds, components };
+}
+
+/** Build a rich confirmation embed after a successful /delete. */
+export function buildDeleteConfirmEmbed(item: RequestListItem): EmbedBuilder {
+  const embed = new EmbedBuilder()
+    .setColor(COLOR.success)
+    .setTitle(titleWithYear(item.title, item.year));
+
+  const isEbook = item.type === 'ebook';
+  embed.addFields({ name: 'Author', value: firstPerson(item.author) || 'Unknown', inline: true });
+  embed.addFields({ name: 'Type', value: isEbook ? 'E-book' : 'Audiobook', inline: true });
+  if (!isEbook && item.narrator) {
+    embed.addFields({ name: 'Narrator', value: truncate(firstPerson(item.narrator), 256), inline: true });
+  }
+  if (item.series) {
+    const series = item.seriesPart ? `${item.series} #${item.seriesPart}` : item.series;
+    embed.addFields({ name: 'Series', value: truncate(series, 256), inline: true });
+  }
+  if (item.coverArtUrl) embed.setThumbnail(item.coverArtUrl);
+  embed.setFooter({ text: '🗑️ Request Deleted' }).setTimestamp(new Date());
+
+  return embed;
 }

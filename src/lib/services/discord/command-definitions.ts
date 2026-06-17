@@ -23,6 +23,13 @@ export function buildCommandDefinitions(deletePermission: DeletePermission) {
             { name: 'Audiobook', value: 'audiobook' },
             { name: 'E-book', value: 'ebook' }
           )
+      )
+      .addStringOption((option) =>
+        option
+          .setName('query')
+          .setDescription('Search term (skips the popup)')
+          .setRequired(false)
+          .setMaxLength(200)
       ),
     new SlashCommandBuilder()
       .setName('status')

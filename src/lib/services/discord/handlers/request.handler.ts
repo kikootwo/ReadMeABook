@@ -71,6 +71,38 @@ export async function handleRequestCommand(
     }
   }
 
+  const query = interaction.options.getString('query')?.trim();
+  if (query) {
+    await interaction.deferReply({ ephemeral: true });
+    const meta = actorMeta(interaction.user, resolved.user.id);
+    logger.info('Request search (inline)', { ...meta, mediaType, query });
+
+    try {
+      const audible = getAudibleService();
+      const result = await audible.search(query, 1);
+
+      if (!result.results.length) {
+        await interaction.editReply({
+          embeds: [infoEmbed('No results', `No titles found for **${query}**. Try different keywords.`)],
+        });
+        return;
+      }
+
+      const row = buildSearchSelect(result.results, mediaType);
+      await interaction.editReply({
+        embeds: [infoEmbed('Select a title', `Showing results for **${query}**.`)],
+        components: [row],
+      });
+    } catch (error) {
+      logger.error('Request search failed', {
+        ...actorMeta(interaction.user, resolved.user.id),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await interaction.editReply({ embeds: [errorEmbed('Search failed. Please try again later.')] });
+    }
+    return;
+  }
+
   const modal = new ModalBuilder()
     .setCustomId(encodeCustomId({ kind: 'request_modal', mediaType }))
     .setTitle(mediaType === 'ebook' ? 'Search for an e-book' : 'Search for an audiobook');
