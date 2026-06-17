@@ -28,7 +28,7 @@ interface MapUsersModalProps {
 }
 
 /** Deterministic, stable pill colors derived from a Discord user ID. */
-function pillStyle(id: string): React.CSSProperties {
+export function pillStyle(id: string): React.CSSProperties {
   let hue = 0;
   for (let i = 0; i < id.length; i++) {
     hue = (hue * 31 + id.charCodeAt(i)) % 360;

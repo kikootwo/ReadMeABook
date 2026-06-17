@@ -65,7 +65,9 @@ Typed accessor: [src/lib/services/discord/discord-config.ts](../../src/lib/servi
 
 ## Settings UI
 - Tab: [DiscordTab](../../src/app/admin/settings/tabs/DiscordTab/DiscordTab.tsx) (self-contained). Enable toggle, bot token (+ Test Token), guild/channel/role IDs, optional notify channel, optional requester role, **Request card delivery** (public/dm/both), **Resolve Names** (confirms IDs → human names), **Link Discord Usernames** ([MapUsersModal](../../src/app/admin/settings/tabs/DiscordTab/MapUsersModal.tsx)).
+- **Bot identity pill:** a successful **Test Token** renders an avatar pill (next to the button) of the connected bot; it links to `https://discord.com/developers/applications/{botId}/bot` (bot user ID == application ID) → the bot's config in the Discord Developer Portal. `fetchBotUser` returns `{id, username, avatarUrl}`; surfaced by `test-discord` as `botId/botUsername/botAvatarUrl`.
 - Routes: `PUT /api/admin/settings/discord` (save; restarts bot), `POST /api/admin/settings/test-discord` (validate token), `POST /api/admin/settings/discord/resolve` (role/channel/user names). Token masked as `••••` on read.
+- **Cache invalidation on save:** the save route upserts config directly (bypassing `configService.setMany`), so it explicitly `clearCache`s every `discord.*` key before `restart()`. Without this, a disable→re-enable within the config service's 60s cache TTL would read the stale `enabled='false'` and the bot would silently fail to reconnect ("application did not respond").
 
 ## Logging
 Handlers log via `RMABLogger.create('Discord.*')` with actor context `{ discordUserId, discordUsername, rmabUserId }`.

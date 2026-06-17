@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { getEncryptionService } from '@/lib/services/encryption.service';
+import { getConfigService } from '@/lib/services/config.service';
 import { getDiscordBotService } from '@/lib/services/discord/discord-bot.service';
 import { DISCORD_CONFIG_KEYS, asRequestCardMode } from '@/lib/services/discord/discord-config';
 import { RMABLogger } from '@/lib/utils/logger';
@@ -59,6 +60,15 @@ export async function PUT(request: NextRequest) {
             update: { value: encrypted, encrypted: true },
             create: { key: DISCORD_CONFIG_KEYS.botToken, value: encrypted, encrypted: true, category: 'discord' },
           });
+        }
+
+        // These upserts wrote straight to the DB, bypassing the config service's cache invalidation.
+        // Clear the cached discord.* values so the restart below reads the freshly persisted config
+        // (otherwise a re-enable within the 60s cache TTL reads the stale 'disabled' value and the
+        // bot never reconnects). See getConfigService() cache in config.service.ts.
+        const configService = getConfigService();
+        for (const key of Object.values(DISCORD_CONFIG_KEYS)) {
+          configService.clearCache(key);
         }
 
         // Apply immediately: restart the gateway client with the new config

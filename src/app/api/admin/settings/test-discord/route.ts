@@ -47,6 +47,7 @@ export async function POST(request: NextRequest) {
           success: true,
           botUsername: bot.username,
           botId: bot.id,
+          botAvatarUrl: bot.avatarUrl,
         });
       } catch (error) {
         logger.error('Discord token test failed', {

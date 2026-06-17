@@ -9,11 +9,12 @@
 
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchWithAuth } from '@/lib/utils/api';
 import type { DiscordSettings } from '../../lib/types';
 
 export interface ResolvedNames {
+  guild?: { name: string | null; error?: string };
   role?: { name: string | null; error?: string };
   channel?: { name: string | null; error?: string };
   adminNotifyChannel?: { name: string | null; error?: string };
@@ -24,6 +25,13 @@ export interface ResolvedNames {
 export interface DiscordMessage {
   type: 'success' | 'error';
   text: string;
+}
+
+/** The connected bot's identity, resolved by a successful token test. */
+export interface BotIdentity {
+  id: string;
+  username: string;
+  avatarUrl: string;
 }
 
 const EMPTY: DiscordSettings = {
@@ -43,9 +51,12 @@ export function useDiscordSettings() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<DiscordMessage | null>(null);
+  const [botIdentity, setBotIdentity] = useState<BotIdentity | null>(null);
   const [resolving, setResolving] = useState(false);
   const [resolvedNames, setResolvedNames] = useState<ResolvedNames | null>(null);
   const [message, setMessage] = useState<DiscordMessage | null>(null);
+
+  const autoRanRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -55,7 +66,59 @@ export function useDiscordSettings() {
         if (res.ok) {
           const data = await res.json();
           if (active && data.discord) {
-            setSettings({ ...EMPTY, ...data.discord });
+            const loaded: DiscordSettings = { ...EMPTY, ...data.discord };
+            setSettings(loaded);
+
+            if (!autoRanRef.current) {
+              autoRanRef.current = true;
+              // Auto-test token if one is configured
+              if (loaded.botToken) {
+                setTesting(true);
+                try {
+                  const testRes = await fetchWithAuth('/api/admin/settings/test-discord', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ botToken: loaded.botToken }),
+                  });
+                  const testData = await testRes.json();
+                  if (active && testRes.ok && testData.success) {
+                    setBotIdentity({
+                      id: testData.botId,
+                      username: testData.botUsername,
+                      avatarUrl: testData.botAvatarUrl,
+                    });
+                  }
+                } catch { /* best-effort */ } finally {
+                  if (active) setTesting(false);
+                }
+              }
+              // Auto-resolve IDs if any are configured
+              const hasIds = loaded.guildId || loaded.requestChannelId || loaded.adminRoleId
+                || loaded.adminNotifyChannelId || loaded.requesterRoleId;
+              if (loaded.botToken && hasIds) {
+                setResolving(true);
+                try {
+                  const resolveRes = await fetchWithAuth('/api/admin/settings/discord/resolve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      botToken: loaded.botToken,
+                      guildId: loaded.guildId,
+                      roleId: loaded.adminRoleId,
+                      channelId: loaded.requestChannelId,
+                      adminNotifyChannelId: loaded.adminNotifyChannelId,
+                      requesterRoleId: loaded.requesterRoleId,
+                    }),
+                  });
+                  const resolveData = await resolveRes.json();
+                  if (active && resolveRes.ok && resolveData.success) {
+                    setResolvedNames(resolveData.results || {});
+                  }
+                } catch { /* best-effort */ } finally {
+                  if (active) setResolving(false);
+                }
+              }
+            }
           }
         }
       } finally {
@@ -70,11 +133,17 @@ export function useDiscordSettings() {
   const update = useCallback(<K extends keyof DiscordSettings>(key: K, value: DiscordSettings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
     setMessage(null);
+    // A changed token invalidates the previously resolved bot identity.
+    if (key === 'botToken') {
+      setBotIdentity(null);
+      setTestResult(null);
+    }
   }, []);
 
   const testToken = useCallback(async () => {
     setTesting(true);
     setTestResult(null);
+    setBotIdentity(null);
     try {
       const res = await fetchWithAuth('/api/admin/settings/test-discord', {
         method: 'POST',
@@ -83,7 +152,7 @@ export function useDiscordSettings() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setTestResult({ type: 'success', text: `Connected as ${data.botUsername}` });
+        setBotIdentity({ id: data.botId, username: data.botUsername, avatarUrl: data.botAvatarUrl });
       } else {
         setTestResult({ type: 'error', text: data.error || 'Token test failed' });
       }
@@ -151,6 +220,7 @@ export function useDiscordSettings() {
     saving,
     testing,
     testResult,
+    botIdentity,
     resolving,
     resolvedNames,
     message,

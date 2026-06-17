@@ -142,11 +142,25 @@ export async function searchGuildMembers(
     });
 }
 
-/** Validate a bot token by fetching the bot's own user. Throws on invalid token. */
-export async function fetchBotUser(token: string): Promise<{ id: string; username: string }> {
+/**
+ * Validate a bot token by fetching the bot's own user. Throws on invalid token.
+ * Returns the bot's id (== its application id for bot accounts), username, and a 64px avatar URL.
+ */
+export async function fetchBotUser(
+  token: string
+): Promise<{ id: string; username: string; avatarUrl: string }> {
   const rest = makeRest(token);
-  const user = (await rest.get(Routes.user('@me'))) as { id: string; username: string };
-  return { id: user.id, username: user.username };
+  const user = (await rest.get(Routes.user('@me'))) as {
+    id: string;
+    username: string;
+    avatar?: string | null;
+    discriminator?: string;
+  };
+  return {
+    id: user.id,
+    username: user.username,
+    avatarUrl: memberAvatarUrl('', { user }),
+  };
 }
 
 /**
@@ -189,6 +203,13 @@ export async function resolveUser(token: string, userId: string): Promise<Resolv
     global_name?: string | null;
   };
   return { id: user.id, name: user.global_name || user.username };
+}
+
+/** Resolve a guild (server) ID to its name. */
+export async function resolveGuild(token: string, guildId: string): Promise<ResolvedName> {
+  const rest = makeRest(token);
+  const guild = (await rest.get(`/guilds/${guildId}`)) as { id: string; name: string };
+  return { id: guild.id, name: guild.name };
 }
 
 /** Resolve a role ID (within a guild) to its name. */

@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import type { DiscordSettings } from '../../lib/types';
 import { useDiscordSettings } from './useDiscordSettings';
-import { MapUsersModal } from './MapUsersModal';
+import { MapUsersModal, pillStyle } from './MapUsersModal';
 
 export function DiscordTab() {
   const {
@@ -23,6 +23,7 @@ export function DiscordTab() {
     saving,
     testing,
     testResult,
+    botIdentity,
     resolving,
     resolvedNames,
     message,
@@ -88,12 +89,50 @@ export function DiscordTab() {
           value={settings.botToken}
           onChange={(e) => update('botToken', e.target.value)}
           placeholder="Bot token from the Discord Developer Portal"
-          helperText="Create an application → Bot → Reset Token. Enable the Server Members intent."
+          helperText={
+            <>
+              <a
+                href="https://discord.com/developers/applications"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 dark:text-blue-400 underline hover:text-blue-800 dark:hover:text-blue-300"
+              >
+                Create an application
+              </a>
+              {' → Bot → Reset Token. Enable the Server Members intent.'}
+            </>
+          }
         />
         <div className="flex items-center gap-3">
           <Button variant="outline" onClick={testToken} disabled={testing || !settings.botToken}>
             {testing ? 'Testing…' : 'Test Token'}
           </Button>
+          {botIdentity && (
+            <a
+              href={`https://discord.com/developers/applications/${botIdentity.id}/bot`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open this bot's configuration in the Discord Developer Portal"
+              className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium hover:brightness-95 transition"
+              style={pillStyle(botIdentity.id)}
+            >
+              <img
+                src={botIdentity.avatarUrl}
+                alt=""
+                className="h-4 w-4 rounded-full object-cover"
+              />
+              {botIdentity.username}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                className="h-3 w-3 opacity-60"
+              >
+                <path d="M8.5 2.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0V3.707L8.354 8.854a.5.5 0 1 1-.708-.708L12.293 3H9a.5.5 0 0 1-.5-.5z" />
+                <path d="M3.5 4A1.5 1.5 0 0 0 2 5.5v7A1.5 1.5 0 0 0 3.5 14h7a1.5 1.5 0 0 0 1.5-1.5V9a.5.5 0 0 1 1 0v3.5A2.5 2.5 0 0 1 11 15H3.5A2.5 2.5 0 0 1 1 12.5v-7A2.5 2.5 0 0 1 3.5 3H7a.5.5 0 0 1 0 1H3.5z" />
+              </svg>
+            </a>
+          )}
           {testResult && (
             <span
               className={`text-sm ${
@@ -114,6 +153,7 @@ export function DiscordTab() {
         value={settings.guildId}
         onChange={(e) => update('guildId', e.target.value)}
         placeholder="e.g. 123456789012345678"
+        helperText={resolvedHint(resolvedNames?.guild)}
       />
       <Input
         label="Request Channel ID"

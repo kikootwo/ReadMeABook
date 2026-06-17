@@ -12,6 +12,7 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { getConfigService } from '@/lib/services/config.service';
 import {
   resolveChannel,
+  resolveGuild,
   resolveRole,
   resolveUser,
 } from '@/lib/services/discord/discord-rest.helper';
@@ -62,6 +63,9 @@ export async function POST(request: NextRequest) {
 
         const results: Record<string, ResolveField> = {};
 
+        if (guildId) {
+          results.guild = await safeResolve(() => resolveGuild(token!, guildId));
+        }
         if (roleId) {
           if (!guildId) {
             results.role = { name: null, error: 'Server (guild) ID is required to resolve a role' };
