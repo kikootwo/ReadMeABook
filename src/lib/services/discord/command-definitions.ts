@@ -6,26 +6,40 @@
  * `ready` event (guild commands propagate instantly, unlike global commands).
  */
 
-import { SlashCommandBuilder } from 'discord.js';
+import { PermissionFlagsBits, SlashCommandBuilder, type SlashCommandOptionsOnlyBuilder } from 'discord.js';
+import type { DeletePermission } from './discord-config';
 
-export const commandDefinitions = [
-  new SlashCommandBuilder()
-    .setName('request')
-    .setDescription('Request a title from ReadMeABook')
-    .addStringOption((option) =>
-      option
-        .setName('type')
-        .setDescription('What kind of media to request')
-        .setRequired(true)
-        .addChoices(
-          { name: 'Audiobook', value: 'audiobook' },
-          { name: 'E-book', value: 'ebook' }
-        )
-    ),
-  new SlashCommandBuilder()
-    .setName('status')
-    .setDescription('See the status of your outstanding requests'),
-  new SlashCommandBuilder()
-    .setName('delete')
-    .setDescription('Remove one of your outstanding requests'),
-].map((command) => command.toJSON());
+export function buildCommandDefinitions(deletePermission: DeletePermission) {
+  const commands: (SlashCommandBuilder | SlashCommandOptionsOnlyBuilder)[] = [
+    new SlashCommandBuilder()
+      .setName('request')
+      .setDescription('Request a title from ReadMeABook')
+      .addStringOption((option) =>
+        option
+          .setName('type')
+          .setDescription('What kind of media to request')
+          .setRequired(true)
+          .addChoices(
+            { name: 'Audiobook', value: 'audiobook' },
+            { name: 'E-book', value: 'ebook' }
+          )
+      ),
+    new SlashCommandBuilder()
+      .setName('status')
+      .setDescription('See the status of your outstanding requests'),
+  ];
+
+  if (deletePermission !== 'disabled') {
+    const del = new SlashCommandBuilder()
+      .setName('delete')
+      .setDescription('Remove one of your requests from ReadMeABook');
+
+    if (deletePermission === 'admin_only') {
+      del.setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+    }
+
+    commands.push(del);
+  }
+
+  return commands.map((command) => command.toJSON());
+}

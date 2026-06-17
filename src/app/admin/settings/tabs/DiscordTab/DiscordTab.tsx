@@ -258,6 +258,15 @@ export function DiscordTab() {
           Controls who can use the <code>/delete</code> command and which requests they can remove.
           Admins always have full access unless the command is disabled entirely.
         </p>
+        {settings.deletePermission === 'admin_only' && (
+          <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
+            <strong>Note:</strong> This hides <code>/delete</code> from non-administrators in
+            Discord. If your admins don&apos;t have Discord&apos;s built-in Administrator permission,
+            they&apos;ll need a per-command exception: <strong>Server Settings → Integrations →{' '}
+            {botIdentity ? botIdentity.username : 'your bot'} → /delete</strong>, then add the admin
+            role or specific users who should have access.
+          </div>
+        )}
       </div>
 
       {/* Save */}

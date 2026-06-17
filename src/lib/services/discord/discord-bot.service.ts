@@ -133,12 +133,13 @@ class DiscordBotService {
     if (!config.botToken || !config.guildId) return;
 
     const { REST, Routes } = await import('discord.js');
-    const { commandDefinitions } = await import('./command-definitions');
+    const { buildCommandDefinitions } = await import('./command-definitions');
+    const commands = buildCommandDefinitions(config.deletePermission);
     const rest = new REST({ version: '10' }).setToken(config.botToken);
     await rest.put(Routes.applicationGuildCommands(applicationId, config.guildId), {
-      body: commandDefinitions,
+      body: commands,
     });
-    logger.info('Registered slash commands', { guildId: config.guildId, count: commandDefinitions.length });
+    logger.info('Registered slash commands', { guildId: config.guildId, count: commands.length });
   }
 }
 
