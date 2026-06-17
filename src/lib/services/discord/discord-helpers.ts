@@ -9,7 +9,7 @@ import type { ChatInputCommandInteraction } from 'discord.js';
 import { prisma } from '@/lib/db';
 import type { RequestListItem } from './embeds';
 
-/** Statuses considered "outstanding/ongoing" for /status and /delete. */
+/** Statuses considered "outstanding/ongoing" for /status. */
 export const OUTSTANDING_STATUSES = [
   'pending',
   'awaiting_approval',
@@ -20,6 +20,13 @@ export const OUTSTANDING_STATUSES = [
   'awaiting_import',
   'awaiting_release',
   'warn',
+] as const;
+
+/** Statuses shown in the /delete dropdown (outstanding + completed). */
+export const DELETABLE_STATUSES = [
+  ...OUTSTANDING_STATUSES,
+  'available',
+  'downloaded',
 ] as const;
 
 /** Build a consistent actor context for logs (Discord ID + display name + RMAB user when known). */
@@ -90,6 +97,35 @@ export async function memberHasRole(
     // Member not fetchable (left guild, missing intent) — treat as not holding the role.
   }
   return false;
+}
+
+/**
+ * Fetch deletable requests for the /delete dropdown. Includes completed (available/downloaded)
+ * requests in addition to outstanding ones. Scoping controlled by deletePermission config.
+ */
+export async function fetchDeletableRequests(
+  rmabUserId: string,
+  scopeAll: boolean
+): Promise<RequestListItem[]> {
+  const requests = await prisma.request.findMany({
+    where: {
+      deletedAt: null,
+      status: { in: [...DELETABLE_STATUSES] },
+      ...(scopeAll ? {} : { userId: rmabUserId }),
+    },
+    include: { audiobook: { select: { title: true, author: true } } },
+    orderBy: { createdAt: 'desc' },
+    take: 25,
+  });
+
+  return requests.map((r) => ({
+    id: r.id,
+    title: r.audiobook.title,
+    author: r.audiobook.author,
+    type: r.type,
+    status: r.status,
+    createdAt: r.createdAt,
+  }));
 }
 
 /** Return the owning userId of a non-deleted request, or null. Used to authorize /delete. */

@@ -233,6 +233,33 @@ export function DiscordTab() {
         </p>
       </div>
 
+      {/* Delete permission */}
+      <div className="space-y-1">
+        <label
+          htmlFor="discord-delete-perm"
+          className="block text-sm font-medium text-gray-900 dark:text-gray-100"
+        >
+          /delete command permissions
+        </label>
+        <select
+          id="discord-delete-perm"
+          value={settings.deletePermission}
+          onChange={(e) =>
+            update('deletePermission', e.target.value as DiscordSettings['deletePermission'])
+          }
+          className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+        >
+          <option value="own_only">Users can delete their own requests (default)</option>
+          <option value="anyone_any">Anyone can delete any request</option>
+          <option value="admin_only">Only admins can use /delete</option>
+          <option value="disabled">Disable /delete entirely</option>
+        </select>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Controls who can use the <code>/delete</code> command and which requests they can remove.
+          Admins always have full access unless the command is disabled entirely.
+        </p>
+      </div>
+
       {/* Save */}
       <div className="flex items-center gap-4 pt-2">
         <Button variant="primary" onClick={save} disabled={saving}>

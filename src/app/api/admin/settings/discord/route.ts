@@ -13,7 +13,7 @@ import { prisma } from '@/lib/db';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { getConfigService } from '@/lib/services/config.service';
 import { getDiscordBotService } from '@/lib/services/discord/discord-bot.service';
-import { DISCORD_CONFIG_KEYS, asRequestCardMode } from '@/lib/services/discord/discord-config';
+import { DISCORD_CONFIG_KEYS, asRequestCardMode, asDeletePermission } from '@/lib/services/discord/discord-config';
 import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('API.Admin.Settings.Discord');
@@ -31,6 +31,7 @@ export async function PUT(request: NextRequest) {
           adminNotifyChannelId,
           requestCardMode,
           requesterRoleId,
+          deletePermission,
         } = await request.json();
 
         // Plain (non-secret) keys
@@ -42,6 +43,7 @@ export async function PUT(request: NextRequest) {
           { key: DISCORD_CONFIG_KEYS.adminNotifyChannelId, value: (adminNotifyChannelId || '').trim() },
           { key: DISCORD_CONFIG_KEYS.requestCardMode, value: asRequestCardMode(requestCardMode) },
           { key: DISCORD_CONFIG_KEYS.requesterRoleId, value: (requesterRoleId || '').trim() },
+          { key: DISCORD_CONFIG_KEYS.deletePermission, value: asDeletePermission(deletePermission) },
         ];
 
         for (const { key, value } of plainUpdates) {

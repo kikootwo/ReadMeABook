@@ -23,6 +23,7 @@ A persistent discord.js gateway bot lets linked users request and manage titles 
 | `discord.admin_notify_channel_id` | optional; approval pings go here, else request channel |
 | `discord.request_card_mode` | `public` (default) / `dm` / `both` — where the live request card is posted |
 | `discord.requester_role_id` | optional; restricts who may `/request` (blank = any linked user; admins always pass) |
+| `discord.delete_permission` | `own_only` (default) / `anyone_any` / `admin_only` / `disabled` — who may `/delete` |
 
 Typed accessor: [src/lib/services/discord/discord-config.ts](../../src/lib/services/discord/discord-config.ts) (`getDiscordConfig`, `isDiscordBotConfigured`, `getApprovalChannelId`).
 
@@ -38,9 +39,16 @@ Typed accessor: [src/lib/services/discord/discord-config.ts](../../src/lib/servi
   - audiobook → `createRequestForUser` ([request-creator.service.ts](../../src/lib/services/request-creator.service.ts), `bypassIgnore: true`).
   - ebook → `createEbookRequestForUser` ([ebook-request-creator.service.ts](../../src/lib/services/ebook-request-creator.service.ts)). **Sidecar rule:** the audiobook must already be in the library, else it's rejected (same as the Web "Fetch Ebook" button).
 - **/status**: lists invoker's outstanding requests (admins see all). Read-only.
-- **/delete**: dropdown of invoker's outstanding requests (admins see all) → `deleteRequest`. Non-admins can only delete their own (ownership re-checked on select).
+- **/delete**: dropdown of invoker's deletable requests → `deleteRequest` (cascading soft-delete: files, library backend, download client). Gated by `discord.delete_permission`:
+  - `own_only` (default): users see/delete their own; admins see/delete all.
+  - `anyone_any`: all linked users see and can delete any request.
+  - `admin_only`: only RMAB admins may use the command.
+  - `disabled`: command responds with an error for everyone.
+  Ownership re-checked at select time (guards against stale dropdowns).
 
-"Outstanding" statuses: pending, awaiting_approval, searching, downloading, processing, awaiting_search, awaiting_import, awaiting_release, warn.
+"Outstanding" statuses (for /status): pending, awaiting_approval, searching, downloading, processing, awaiting_search, awaiting_import, awaiting_release, warn.
+
+"Deletable" statuses (for /delete): all outstanding statuses + available, downloaded.
 
 ## Request Card (live, auto-updating)
 - On `/request` confirm, the bot posts a **persistent rich card** (cover thumbnail, description, Author/Narrator/Series #/Format/Duration/Genre, Requested By) with the current status in the **footer**. The release **year is appended to the embed title** in parentheses (e.g. `Lonesome Dove (2025)`); there is no standalone Year field. **Author/Narrator show only the top-listed person.** **Narrator, Duration, and Format are audiobook-only** (omitted for ebooks). Genre lists up to two genres when present. Delivery per `discord.request_card_mode`: `public` (configured request channel), `dm` (requester), or `both`.
@@ -64,7 +72,7 @@ Typed accessor: [src/lib/services/discord/discord-config.ts](../../src/lib/servi
 - `handlers/request.handler.ts`, `handlers/status-delete.handler.ts`, `handlers/approval.handler.ts`.
 
 ## Settings UI
-- Tab: [DiscordTab](../../src/app/admin/settings/tabs/DiscordTab/DiscordTab.tsx) (self-contained). Enable toggle, bot token (+ Test Token), guild/channel/role IDs, optional notify channel, optional requester role, **Request card delivery** (public/dm/both), **Resolve Names** (confirms IDs → human names), **Link Discord Usernames** ([MapUsersModal](../../src/app/admin/settings/tabs/DiscordTab/MapUsersModal.tsx)).
+- Tab: [DiscordTab](../../src/app/admin/settings/tabs/DiscordTab/DiscordTab.tsx) (self-contained). Enable toggle, bot token (+ Test Token), guild/channel/role IDs, optional notify channel, optional requester role, **Request card delivery** (public/dm/both), **/delete command permissions** (own_only/anyone_any/admin_only/disabled), **Resolve Names** (confirms IDs → human names), **Link Discord Usernames** ([MapUsersModal](../../src/app/admin/settings/tabs/DiscordTab/MapUsersModal.tsx)).
 - **Bot identity pill:** a successful **Test Token** renders an avatar pill (next to the button) of the connected bot; it links to `https://discord.com/developers/applications/{botId}/bot` (bot user ID == application ID) → the bot's config in the Discord Developer Portal. `fetchBotUser` returns `{id, username, avatarUrl}`; surfaced by `test-discord` as `botId/botUsername/botAvatarUrl`.
 - Routes: `PUT /api/admin/settings/discord` (save; restarts bot), `POST /api/admin/settings/test-discord` (validate token), `POST /api/admin/settings/discord/resolve` (role/channel/user names). Token masked as `••••` on read.
 - **Cache invalidation on save:** the save route upserts config directly (bypassing `configService.setMany`), so it explicitly `clearCache`s every `discord.*` key before `restart()`. Without this, a disable→re-enable within the config service's 60s cache TTL would read the stale `enabled='false'` and the bot would silently fail to reconnect ("application did not respond").

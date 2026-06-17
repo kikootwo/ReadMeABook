@@ -52,6 +52,7 @@ export const API_TOKEN_ALLOWED_ENDPOINTS: readonly AllowedEndpoint[] = [
   { method: 'GET', path: '/api/requests' },
   { method: 'POST', path: '/api/requests' },
   { method: 'GET', path: '/api/requests/:id' },
+  { method: 'DELETE', path: '/api/requests/:id' },
   { method: 'GET', path: '/api/admin/metrics' },
   { method: 'GET', path: '/api/admin/downloads/active' },
   { method: 'GET', path: '/api/admin/requests/recent' },
@@ -102,6 +103,15 @@ export const API_TOKEN_ENDPOINT_DOCS: readonly EndpointDoc[] = [
     description:
       'Returns a single audiobook request including audiobook details, download history, and recent job state. Users may only fetch requests they own; admins may fetch any.',
     requiresAdmin: false,
+  },
+  {
+    method: 'DELETE',
+    path: '/api/requests/:id',
+    title: 'Delete request',
+    description:
+      'Soft-deletes a request with cascading cleanup: removes media files from disk, deletes the library item from Audiobookshelf/Plex, and handles download client torrents/NZBs respecting seeding configuration. Users may only delete requests they own; admins may delete any. The request can be re-created after deletion.',
+    requiresAdmin: false,
+    isWrite: true,
   },
   {
     method: 'GET',

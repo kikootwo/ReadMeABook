@@ -38,6 +38,8 @@ export interface DiscordSettings {
   requestCardMode: 'public' | 'dm' | 'both';
   /** Optional role that gates who may make requests (blank = anyone linked; admins always pass). */
   requesterRoleId: string;
+  /** Who may use the /delete command: 'anyone_any' | 'own_only' | 'admin_only' | 'disabled'. */
+  deletePermission: 'anyone_any' | 'own_only' | 'admin_only' | 'disabled';
 }
 
 /**

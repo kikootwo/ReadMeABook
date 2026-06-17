@@ -165,6 +165,7 @@ export async function GET(request: NextRequest) {
         adminNotifyChannelId: configMap.get('discord.admin_notify_channel_id') || '',
         requestCardMode: configMap.get('discord.request_card_mode') || 'public',
         requesterRoleId: configMap.get('discord.requester_role_id') || '',
+        deletePermission: configMap.get('discord.delete_permission') || 'own_only',
       },
       general: {
         appName: configMap.get('app_name') || 'ReadMeABook',

@@ -14,9 +14,11 @@ import { prisma } from '@/lib/db';
 import { deleteRequest } from '@/lib/services/request-delete.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { cancelApprovalMessage } from '../discord-cards';
+import { getDiscordConfig } from '../discord-config';
 import { resolveRmabUser } from '../discord-user.resolver';
 import {
   actorMeta,
+  fetchDeletableRequests,
   fetchOutstandingRequests,
   getRequestOwner,
 } from '../discord-helpers';
@@ -48,11 +50,21 @@ export async function handleStatusCommand(
   await interaction.editReply({ embeds: [buildStatusEmbed(items, resolved.isAdmin)] });
 }
 
-/** /delete: present a dropdown of removable requests. */
+/** /delete: present a dropdown of removable requests, gated by deletePermission config. */
 export async function handleDeleteCommand(
   interaction: ChatInputCommandInteraction
 ): Promise<void> {
   await interaction.deferReply({ ephemeral: true });
+
+  const config = await getDiscordConfig();
+  const perm = config.deletePermission;
+
+  if (perm === 'disabled') {
+    await interaction.editReply({
+      embeds: [errorEmbed('The /delete command is disabled by the server administrator.')],
+    });
+    return;
+  }
 
   const resolved = await resolveRmabUser(interaction.user.id);
   if (!resolved) {
@@ -60,12 +72,24 @@ export async function handleDeleteCommand(
     return;
   }
 
-  const items = await fetchOutstandingRequests(resolved.user.id, resolved.isAdmin);
+  if (perm === 'admin_only' && !resolved.isAdmin) {
+    await interaction.editReply({
+      embeds: [errorEmbed('Only admins can use /delete on this server.')],
+    });
+    return;
+  }
+
+  // anyone_any: admins see all, non-admins see all too
+  // own_only: admins see all, non-admins see only their own
+  // admin_only: only admins reach here (checked above), always see all
+  const scopeAll = resolved.isAdmin || perm === 'anyone_any';
+
+  const items = await fetchDeletableRequests(resolved.user.id, scopeAll);
   const row = buildDeleteSelect(items);
 
   if (!row) {
     await interaction.editReply({
-      embeds: [infoEmbed('Nothing to delete', 'You have no outstanding requests.')],
+      embeds: [infoEmbed('Nothing to delete', 'You have no requests to delete.')],
     });
     return;
   }
@@ -73,7 +97,7 @@ export async function handleDeleteCommand(
   await interaction.editReply({
     embeds: [
       infoEmbed(
-        resolved.isAdmin ? 'Delete a request' : 'Delete one of your requests',
+        scopeAll ? 'Delete a request' : 'Delete one of your requests',
         'Select a request below to remove it from ReadMeABook.'
       ),
     ],
@@ -81,11 +105,22 @@ export async function handleDeleteCommand(
   });
 }
 
-/** Dropdown select for /delete: authorize ownership, then delete. */
+/** Dropdown select for /delete: authorize ownership + permission level, then delete. */
 export async function handleDeleteSelect(
   interaction: StringSelectMenuInteraction
 ): Promise<void> {
   await interaction.deferUpdate();
+
+  const config = await getDiscordConfig();
+  const perm = config.deletePermission;
+
+  if (perm === 'disabled') {
+    await interaction.editReply({
+      embeds: [errorEmbed('The /delete command is disabled by the server administrator.')],
+      components: [],
+    });
+    return;
+  }
 
   const resolved = await resolveRmabUser(interaction.user.id);
   if (!resolved) {
@@ -93,11 +128,19 @@ export async function handleDeleteSelect(
     return;
   }
 
+  if (perm === 'admin_only' && !resolved.isAdmin) {
+    await interaction.editReply({
+      embeds: [errorEmbed('Only admins can use /delete on this server.')],
+      components: [],
+    });
+    return;
+  }
+
   const requestId = interaction.values[0];
   const meta = actorMeta(interaction.user, resolved.user.id);
 
-  // Non-admins may only delete their own requests
-  if (!resolved.isAdmin) {
+  // Ownership check: anyone_any skips it for non-admins; own_only enforces it
+  if (!resolved.isAdmin && perm !== 'anyone_any') {
     const ownerId = await getRequestOwner(requestId);
     if (ownerId !== resolved.user.id) {
       await interaction.editReply({
