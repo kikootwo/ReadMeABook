@@ -25,9 +25,33 @@ export async function fetchBotUser(token: string): Promise<{ id: string; usernam
   return { id: user.id, username: user.username };
 }
 
-/** Resolve a channel ID to its name (e.g. "general"). */
-export async function resolveChannel(token: string, channelId: string): Promise<ResolvedName> {
+/**
+ * Resolve a channel ID to its name (e.g. "#general").
+ *
+ * Prefers the guild-level listing (`GET /guilds/{id}/channels`), which returns every channel for a
+ * bot that's a member of the guild regardless of per-channel View permission. This is consistent
+ * with role resolution and avoids 50001 "Missing Access" when confirming a restricted/private
+ * channel the bot can't directly fetch. Falls back to the direct channel fetch when no guildId is
+ * available (or the channel isn't in the listing, e.g. a thread).
+ */
+export async function resolveChannel(
+  token: string,
+  channelId: string,
+  guildId?: string
+): Promise<ResolvedName> {
   const rest = makeRest(token);
+
+  if (guildId) {
+    const channels = (await rest.get(Routes.guildChannels(guildId))) as Array<{
+      id: string;
+      name?: string;
+    }>;
+    const match = channels.find((c) => c.id === channelId);
+    if (match) {
+      return { id: match.id, name: match.name ? `#${match.name}` : match.id };
+    }
+  }
+
   const channel = (await rest.get(Routes.channel(channelId))) as { id: string; name?: string };
   return { id: channel.id, name: channel.name ? `#${channel.name}` : channel.id };
 }

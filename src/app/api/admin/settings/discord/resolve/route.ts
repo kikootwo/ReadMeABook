@@ -69,10 +69,12 @@ export async function POST(request: NextRequest) {
           }
         }
         if (channelId) {
-          results.channel = await safeResolve(() => resolveChannel(token!, channelId));
+          results.channel = await safeResolve(() => resolveChannel(token!, channelId, guildId));
         }
         if (adminNotifyChannelId) {
-          results.adminNotifyChannel = await safeResolve(() => resolveChannel(token!, adminNotifyChannelId));
+          results.adminNotifyChannel = await safeResolve(() =>
+            resolveChannel(token!, adminNotifyChannelId, guildId)
+          );
         }
         if (userId) {
           results.user = await safeResolve(() => resolveUser(token!, userId));
