@@ -68,55 +68,54 @@ export function useDiscordSettings() {
           if (active && data.discord) {
             const loaded: DiscordSettings = { ...EMPTY, ...data.discord };
             setSettings(loaded);
+            setLoading(false);
 
             if (!autoRanRef.current) {
               autoRanRef.current = true;
-              // Auto-test token if one is configured
               if (loaded.botToken) {
                 setTesting(true);
-                try {
-                  const testRes = await fetchWithAuth('/api/admin/settings/test-discord', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ botToken: loaded.botToken }),
-                  });
-                  const testData = await testRes.json();
-                  if (active && testRes.ok && testData.success) {
-                    setBotIdentity({
-                      id: testData.botId,
-                      username: testData.botUsername,
-                      avatarUrl: testData.botAvatarUrl,
-                    });
-                  }
-                } catch { /* best-effort */ } finally {
-                  if (active) setTesting(false);
-                }
+                fetchWithAuth('/api/admin/settings/test-discord', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ botToken: loaded.botToken }),
+                })
+                  .then(async (testRes) => {
+                    const testData = await testRes.json();
+                    if (active && testRes.ok && testData.success) {
+                      setBotIdentity({
+                        id: testData.botId,
+                        username: testData.botUsername,
+                        avatarUrl: testData.botAvatarUrl,
+                      });
+                    }
+                  })
+                  .catch(() => { /* best-effort */ })
+                  .finally(() => { if (active) setTesting(false); });
               }
-              // Auto-resolve IDs if any are configured
               const hasIds = loaded.guildId || loaded.requestChannelId || loaded.adminRoleId
                 || loaded.adminNotifyChannelId || loaded.requesterRoleId;
               if (loaded.botToken && hasIds) {
                 setResolving(true);
-                try {
-                  const resolveRes = await fetchWithAuth('/api/admin/settings/discord/resolve', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      botToken: loaded.botToken,
-                      guildId: loaded.guildId,
-                      roleId: loaded.adminRoleId,
-                      channelId: loaded.requestChannelId,
-                      adminNotifyChannelId: loaded.adminNotifyChannelId,
-                      requesterRoleId: loaded.requesterRoleId,
-                    }),
-                  });
-                  const resolveData = await resolveRes.json();
-                  if (active && resolveRes.ok && resolveData.success) {
-                    setResolvedNames(resolveData.results || {});
-                  }
-                } catch { /* best-effort */ } finally {
-                  if (active) setResolving(false);
-                }
+                fetchWithAuth('/api/admin/settings/discord/resolve', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    botToken: loaded.botToken,
+                    guildId: loaded.guildId,
+                    roleId: loaded.adminRoleId,
+                    channelId: loaded.requestChannelId,
+                    adminNotifyChannelId: loaded.adminNotifyChannelId,
+                    requesterRoleId: loaded.requesterRoleId,
+                  }),
+                })
+                  .then(async (resolveRes) => {
+                    const resolveData = await resolveRes.json();
+                    if (active && resolveRes.ok && resolveData.success) {
+                      setResolvedNames(resolveData.results || {});
+                    }
+                  })
+                  .catch(() => { /* best-effort */ })
+                  .finally(() => { if (active) setResolving(false); });
               }
             }
           }
