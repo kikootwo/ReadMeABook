@@ -17,6 +17,7 @@ export interface ResolvedNames {
   role?: { name: string | null; error?: string };
   channel?: { name: string | null; error?: string };
   adminNotifyChannel?: { name: string | null; error?: string };
+  requesterRole?: { name: string | null; error?: string };
   user?: { name: string | null; error?: string };
 }
 
@@ -32,6 +33,8 @@ const EMPTY: DiscordSettings = {
   requestChannelId: '',
   adminRoleId: '',
   adminNotifyChannelId: '',
+  requestCardMode: 'public',
+  requesterRoleId: '',
 };
 
 export function useDiscordSettings() {
@@ -104,6 +107,7 @@ export function useDiscordSettings() {
           roleId: settings.adminRoleId,
           channelId: settings.requestChannelId,
           adminNotifyChannelId: settings.adminNotifyChannelId,
+          requesterRoleId: settings.requesterRoleId,
         }),
       });
       const data = await res.json();

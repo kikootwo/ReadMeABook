@@ -256,6 +256,11 @@ model Request {
   deletedAt DateTime? @map("deleted_at")
   deletedBy String?   @map("deleted_by") // Admin user ID
 
+  // Discord request card(s): persisted message refs for the live, auto-updating embed posted on
+  // /checkout. JSON array of { kind: 'public' | 'dm', channelId, messageId }. Null if not from Discord
+  // or card delivery disabled. The notification processor edits these in place as status changes.
+  discordCards Json? @map("discord_cards")
+
   // Relations
   user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   audiobook       Audiobook         @relation(fields: [audiobookId], references: [id], onDelete: Cascade)

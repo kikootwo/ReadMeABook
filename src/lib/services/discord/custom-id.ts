@@ -10,43 +10,48 @@
 export type MediaType = 'audiobook' | 'ebook';
 
 export type DiscordCustomId =
-  /** Search-term modal opened by /checkout <type>. */
-  | { kind: 'checkout_modal'; mediaType: MediaType }
+  /** Search-term modal opened by /request <type>. */
+  | { kind: 'request_modal'; mediaType: MediaType }
   /** Result dropdown after a search; option values are ASINs. */
-  | { kind: 'checkout_select'; mediaType: MediaType }
+  | { kind: 'request_select'; mediaType: MediaType }
   /** Confirm button on the selected title. */
-  | { kind: 'checkout_confirm'; mediaType: MediaType; asin: string }
+  | { kind: 'request_confirm'; mediaType: MediaType; asin: string }
   /** Cancel button (any flow). */
   | { kind: 'cancel' }
   /** Request dropdown for /delete; option values are request IDs. */
   | { kind: 'delete_select' }
   /** Approve/Deny buttons on an admin approval message. */
-  | { kind: 'approval'; action: 'approve' | 'deny'; requestId: string };
+  | { kind: 'approval'; action: 'approve' | 'deny'; requestId: string }
+  /** Cancel Request button on a live request card (requester or admin). */
+  | { kind: 'cancel_request'; requestId: string };
 
 const PREFIX = {
-  checkout_modal: 'co:modal',
-  checkout_select: 'co:sel',
-  checkout_confirm: 'co:cf',
-  cancel: 'co:cancel',
+  request_modal: 'req:modal',
+  request_select: 'req:sel',
+  request_confirm: 'req:cf',
+  cancel: 'req:cancel',
   delete_select: 'del:sel',
   approval: 'appr',
+  cancel_request: 'crq',
 } as const;
 
 /** Encode a structured custom ID into a Discord-safe string (≤100 chars). */
 export function encodeCustomId(id: DiscordCustomId): string {
   switch (id.kind) {
-    case 'checkout_modal':
-      return `${PREFIX.checkout_modal}:${id.mediaType}`;
-    case 'checkout_select':
-      return `${PREFIX.checkout_select}:${id.mediaType}`;
-    case 'checkout_confirm':
-      return `${PREFIX.checkout_confirm}:${id.mediaType}:${id.asin}`;
+    case 'request_modal':
+      return `${PREFIX.request_modal}:${id.mediaType}`;
+    case 'request_select':
+      return `${PREFIX.request_select}:${id.mediaType}`;
+    case 'request_confirm':
+      return `${PREFIX.request_confirm}:${id.mediaType}:${id.asin}`;
     case 'cancel':
       return PREFIX.cancel;
     case 'delete_select':
       return PREFIX.delete_select;
     case 'approval':
       return `${PREFIX.approval}:${id.action}:${id.requestId}`;
+    case 'cancel_request':
+      return `${PREFIX.cancel_request}:${id.requestId}`;
   }
 }
 
@@ -61,23 +66,23 @@ export function decodeCustomId(raw: string): DiscordCustomId | null {
 
   const parts = raw.split(':');
 
-  // co:modal:<type>
-  if (raw.startsWith(`${PREFIX.checkout_modal}:`)) {
+  // req:modal:<type>
+  if (raw.startsWith(`${PREFIX.request_modal}:`)) {
     const mediaType = asMediaType(parts[2]);
-    return mediaType ? { kind: 'checkout_modal', mediaType } : null;
+    return mediaType ? { kind: 'request_modal', mediaType } : null;
   }
 
-  // co:sel:<type>
-  if (raw.startsWith(`${PREFIX.checkout_select}:`)) {
+  // req:sel:<type>
+  if (raw.startsWith(`${PREFIX.request_select}:`)) {
     const mediaType = asMediaType(parts[2]);
-    return mediaType ? { kind: 'checkout_select', mediaType } : null;
+    return mediaType ? { kind: 'request_select', mediaType } : null;
   }
 
-  // co:cf:<type>:<asin>
-  if (raw.startsWith(`${PREFIX.checkout_confirm}:`)) {
+  // req:cf:<type>:<asin>
+  if (raw.startsWith(`${PREFIX.request_confirm}:`)) {
     const mediaType = asMediaType(parts[2]);
     const asin = parts[3];
-    return mediaType && asin ? { kind: 'checkout_confirm', mediaType, asin } : null;
+    return mediaType && asin ? { kind: 'request_confirm', mediaType, asin } : null;
   }
 
   // appr:<action>:<requestId>
@@ -88,6 +93,12 @@ export function decodeCustomId(raw: string): DiscordCustomId | null {
       return { kind: 'approval', action, requestId };
     }
     return null;
+  }
+
+  // crq:<requestId>
+  if (raw.startsWith(`${PREFIX.cancel_request}:`)) {
+    const requestId = parts.slice(1).join(':');
+    return requestId ? { kind: 'cancel_request', requestId } : null;
   }
 
   return null;

@@ -10,8 +10,10 @@ import type {
   ChatInputCommandInteraction,
   StringSelectMenuInteraction,
 } from 'discord.js';
+import { prisma } from '@/lib/db';
 import { deleteRequest } from '@/lib/services/request-delete.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { cancelApprovalMessage } from '../discord-cards';
 import { resolveRmabUser } from '../discord-user.resolver';
 import {
   actorMeta,
@@ -108,8 +110,18 @@ export async function handleDeleteSelect(
   }
 
   try {
+    // Capture status before deletion so we can update the approval message if it was still pending.
+    const before = await prisma.request.findUnique({
+      where: { id: requestId },
+      select: { status: true },
+    });
+
     const result = await deleteRequest(requestId, resolved.user.id);
     logger.info('Request deleted via Discord', { ...meta, requestId, success: result.success });
+
+    if (result.success && before?.status === 'awaiting_approval') {
+      await cancelApprovalMessage(requestId, interaction.user.id).catch(() => undefined);
+    }
 
     await interaction.editReply({
       embeds: [

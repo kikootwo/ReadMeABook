@@ -231,7 +231,7 @@ export default function AdminSettings() {
 
         {/* Tab Navigation */}
         <div className="mb-6 border-b border-gray-200 dark:border-gray-700">
-          <nav className="flex space-x-8 overflow-x-auto" aria-label="Tabs">
+          <nav className="flex space-x-8 overflow-x-auto scrollbar-themed" aria-label="Tabs">
             {tabs.map((tab) => (
               <button
                 key={tab.id}

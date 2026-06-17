@@ -21,8 +21,10 @@ export async function PUT(
         const body = await request.json();
         const { role, autoApproveRequests, interactiveSearchAccess, downloadAccess, discordUserId } = body;
 
-        // Validate role
-        if (!role || (role !== 'user' && role !== 'admin')) {
+        // Validate role IF provided. Role is optional: partial updates (e.g. only mapping a Discord
+        // ID from the Link Discord Usernames modal) may omit it entirely.
+        const roleProvided = role !== undefined && role !== null;
+        if (roleProvided && role !== 'user' && role !== 'admin') {
           return NextResponse.json(
             { error: 'Invalid role. Must be "user" or "admin"' },
             { status: 400 }
@@ -68,8 +70,9 @@ export async function PUT(
           }
         }
 
-        // Prevent user from demoting themselves
-        if (req.user && id === req.user.sub) {
+        // Prevent a user from changing their OWN role. Uses the authenticated user's role so it
+        // doesn't depend on the lookup below. Other self-updates (e.g. Discord mapping) are allowed.
+        if (req.user && id === req.user.sub && roleProvided && req.user.role !== role) {
           return NextResponse.json(
             { error: 'You cannot change your own role' },
             { status: 403 }
@@ -103,8 +106,10 @@ export async function PUT(
           );
         }
 
-        // Detect if role is being changed
-        const isRoleChange = targetUser.role !== role;
+        // Detect if role is being changed (only when a role was actually supplied)
+        const isRoleChange = roleProvided && targetUser.role !== role;
+        // The role to enforce admin-permission rules against (incoming role, else the existing one)
+        const effectiveRole = roleProvided ? role : targetUser.role;
 
         // Prevent changing setup admin role (only if role is actually being changed)
         if (targetUser.isSetupAdmin && isRoleChange && role !== 'admin') {
@@ -123,27 +128,30 @@ export async function PUT(
         }
 
         // Validate that admins cannot have permissions set to false
-        if (role === 'admin' && autoApproveRequests === false) {
+        if (effectiveRole === 'admin' && autoApproveRequests === false) {
           return NextResponse.json(
             { error: 'Admins must always auto-approve requests. Cannot set autoApproveRequests to false for admin users.' },
             { status: 400 }
           );
         }
-        if (role === 'admin' && interactiveSearchAccess === false) {
+        if (effectiveRole === 'admin' && interactiveSearchAccess === false) {
           return NextResponse.json(
             { error: 'Admins always have interactive search access. Cannot set interactiveSearchAccess to false for admin users.' },
             { status: 400 }
           );
         }
-        if (role === 'admin' && downloadAccess === false) {
+        if (effectiveRole === 'admin' && downloadAccess === false) {
           return NextResponse.json(
             { error: 'Admins always have download access. Cannot set downloadAccess to false for admin users.' },
             { status: 400 }
           );
         }
 
-        // Prepare update data
-        const updateData: { role: string; autoApproveRequests?: boolean | null; interactiveSearchAccess?: boolean | null; downloadAccess?: boolean | null; discordUserId?: string | null } = { role };
+        // Prepare update data (role only when supplied)
+        const updateData: { role?: string; autoApproveRequests?: boolean | null; interactiveSearchAccess?: boolean | null; downloadAccess?: boolean | null; discordUserId?: string | null } = {};
+        if (roleProvided) {
+          updateData.role = role;
+        }
         if (autoApproveRequests !== undefined) {
           updateData.autoApproveRequests = autoApproveRequests;
         }

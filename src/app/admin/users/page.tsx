@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type CSSProperties } from 'react';
 import useSWR from 'swr';
 import Link from 'next/link';
 import { authenticatedFetcher, fetchJSON } from '@/lib/utils/api';
@@ -13,6 +13,20 @@ import { ToastProvider, useToast } from '@/components/ui/Toast';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { GlobalUserSettingsModal } from '@/components/admin/users/GlobalUserSettingsModal';
 import { UserPermissionsModal } from '@/components/admin/users/UserPermissionsModal';
+import { resolveMembers, type DiscordMember } from '@/lib/utils/discordMemberCache';
+
+/** Deterministic, stable pill colors derived from a Discord user ID (matches the Discord settings tab). */
+function discordPillStyle(id: string): CSSProperties {
+  let hue = 0;
+  for (let i = 0; i < id.length; i++) {
+    hue = (hue * 31 + id.charCodeAt(i)) % 360;
+  }
+  return {
+    backgroundColor: `hsl(${hue} 70% 92%)`,
+    color: `hsl(${hue} 65% 28%)`,
+    borderColor: `hsl(${hue} 60% 72%)`,
+  };
+}
 
 interface User {
   id: string;
@@ -206,6 +220,7 @@ function AdminUsersPageContent() {
   }>({ isOpen: false, user: null });
   const [editRole, setEditRole] = useState<'user' | 'admin'>('user');
   const [editDiscordUserId, setEditDiscordUserId] = useState<string>('');
+  const [editDiscordMember, setEditDiscordMember] = useState<DiscordMember | null>(null);
   const [saving, setSaving] = useState(false);
   const [processingUserId, setProcessingUserId] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -213,6 +228,26 @@ function AdminUsersPageContent() {
     type: 'approve' | 'reject' | null;
     user: PendingUser | null;
   }>({ isOpen: false, type: null, user: null });
+
+  // Resolve the entered Discord ID to a name/avatar pill (cached) while the edit dialog is open.
+  useEffect(() => {
+    if (!editDialog.isOpen) {
+      setEditDiscordMember(null);
+      return;
+    }
+    const id = editDiscordUserId.trim();
+    if (!/^\d{15,25}$/.test(id)) {
+      setEditDiscordMember(null);
+      return;
+    }
+    let active = true;
+    resolveMembers([id]).then((map) => {
+      if (active) setEditDiscordMember(map[id] ?? null);
+    });
+    return () => {
+      active = false;
+    };
+  }, [editDialog.isOpen, editDiscordUserId]);
   const [deleteDialog, setDeleteDialog] = useState<{
     isOpen: boolean;
     user: User | null;
@@ -836,7 +871,7 @@ function AdminUsersPageContent() {
 
         {/* Edit User Dialog — bottom sheet on mobile */}
         {editDialog.isOpen && editDialog.user && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black bg-opacity-50 p-0 sm:p-4">
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4">
             <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-md">
               {/* Dialog header */}
               <div className="sticky top-0 bg-white dark:bg-gray-800 px-5 py-4 border-b border-gray-200 dark:border-gray-700 rounded-t-2xl flex items-center justify-between">
@@ -926,14 +961,30 @@ function AdminUsersPageContent() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Discord User ID
                   </label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={editDiscordUserId}
-                    onChange={(e) => setEditDiscordUserId(e.target.value)}
-                    placeholder="e.g. 123456789012345678"
-                    className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
+                  <div className="relative">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={editDiscordUserId}
+                      onChange={(e) => setEditDiscordUserId(e.target.value)}
+                      placeholder="e.g. 123456789012345678"
+                      className={`w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${editDiscordMember ? 'pr-40' : ''}`}
+                    />
+                    {editDiscordMember && (
+                      <span
+                        className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium max-w-[9rem]"
+                        style={discordPillStyle(editDiscordMember.id)}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={editDiscordMember.avatarUrl}
+                          alt=""
+                          className="h-4 w-4 rounded-full object-cover flex-shrink-0"
+                        />
+                        <span className="truncate">{editDiscordMember.displayName}</span>
+                      </span>
+                    )}
+                  </div>
                   <div className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">
                     Links this user&apos;s Discord account so they can request via Discord slash commands. Leave blank to unlink. In Discord, enable Developer Mode then right-click the user → Copy User ID.
                   </div>

@@ -11,17 +11,17 @@ import type { Interaction } from 'discord.js';
 import { RMABLogger } from '@/lib/utils/logger';
 import { decodeCustomId, type MediaType } from './custom-id';
 import {
-  handleCheckoutCommand,
-  handleCheckoutModal,
-  handleCheckoutSelect,
-  handleCheckoutConfirm,
-} from './handlers/checkout.handler';
+  handleRequestCommand,
+  handleRequestModal,
+  handleRequestSelect,
+  handleRequestConfirm,
+} from './handlers/request.handler';
 import {
   handleStatusCommand,
   handleDeleteCommand,
   handleDeleteSelect,
 } from './handlers/status-delete.handler';
-import { handleApprovalButton } from './handlers/approval.handler';
+import { handleApprovalButton, handleCancelRequestButton } from './handlers/approval.handler';
 import { infoEmbed } from './embeds';
 
 const logger = RMABLogger.create('Discord.Router');
@@ -31,9 +31,9 @@ export async function routeInteraction(interaction: Interaction): Promise<void> 
     // Slash commands
     if (interaction.isChatInputCommand()) {
       switch (interaction.commandName) {
-        case 'checkout': {
+        case 'request': {
           const mediaType = interaction.options.getString('type', true) as MediaType;
-          await handleCheckoutCommand(interaction, mediaType);
+          await handleRequestCommand(interaction, mediaType);
           return;
         }
         case 'status':
@@ -50,8 +50,8 @@ export async function routeInteraction(interaction: Interaction): Promise<void> 
     // Search-term modal submit
     if (interaction.isModalSubmit()) {
       const decoded = decodeCustomId(interaction.customId);
-      if (decoded?.kind === 'checkout_modal') {
-        await handleCheckoutModal(interaction, decoded.mediaType);
+      if (decoded?.kind === 'request_modal') {
+        await handleRequestModal(interaction, decoded.mediaType);
       }
       return;
     }
@@ -59,8 +59,8 @@ export async function routeInteraction(interaction: Interaction): Promise<void> 
     // Select menus
     if (interaction.isStringSelectMenu()) {
       const decoded = decodeCustomId(interaction.customId);
-      if (decoded?.kind === 'checkout_select') {
-        await handleCheckoutSelect(interaction, decoded.mediaType);
+      if (decoded?.kind === 'request_select') {
+        await handleRequestSelect(interaction, decoded.mediaType);
       } else if (decoded?.kind === 'delete_select') {
         await handleDeleteSelect(interaction);
       }
@@ -72,12 +72,14 @@ export async function routeInteraction(interaction: Interaction): Promise<void> 
       const decoded = decodeCustomId(interaction.customId);
       if (!decoded) return;
 
-      if (decoded.kind === 'checkout_confirm') {
-        await handleCheckoutConfirm(interaction, decoded.mediaType, decoded.asin);
+      if (decoded.kind === 'request_confirm') {
+        await handleRequestConfirm(interaction, decoded.mediaType, decoded.asin);
       } else if (decoded.kind === 'cancel') {
         await interaction.update({ embeds: [infoEmbed('Cancelled', 'Request cancelled.')], components: [] }).catch(() => undefined);
       } else if (decoded.kind === 'approval') {
         await handleApprovalButton(interaction, decoded.action, decoded.requestId);
+      } else if (decoded.kind === 'cancel_request') {
+        await handleCancelRequestButton(interaction, decoded.requestId);
       }
       return;
     }

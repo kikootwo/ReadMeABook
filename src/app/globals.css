@@ -25,6 +25,38 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* Themed main page scrollbar (the body is the document scroll container): transparent track so it
+   blends with the background, with a subtle thumb (gray in light mode, white in dark/Night mode). */
+body {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(107, 114, 128, 0.5) transparent;
+}
+body::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+body::-webkit-scrollbar-track {
+  background: transparent;
+}
+body::-webkit-scrollbar-thumb {
+  background-color: rgba(107, 114, 128, 0.5);
+  border-radius: 9999px;
+}
+body::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(107, 114, 128, 0.7);
+}
+@media (prefers-color-scheme: dark) {
+  body {
+    scrollbar-color: rgba(255, 255, 255, 0.85) transparent;
+  }
+  body::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.85);
+  }
+  body::-webkit-scrollbar-thumb:hover {
+    background-color: #ffffff;
+  }
+}
+
 @keyframes slide-in-right {
   from {
     transform: translateX(100%);
@@ -246,4 +278,36 @@ body {
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+
+/* Slim, theme-aware scrollbar: transparent track so it blends with the background behind it,
+   with a subtle thumb (gray in light mode, white in dark/Night mode). */
+.scrollbar-themed {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(107, 114, 128, 0.5) transparent; /* thumb track */
+}
+.scrollbar-themed::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.scrollbar-themed::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-themed::-webkit-scrollbar-thumb {
+  background-color: rgba(107, 114, 128, 0.5);
+  border-radius: 9999px;
+}
+.scrollbar-themed::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(107, 114, 128, 0.7);
+}
+@media (prefers-color-scheme: dark) {
+  .scrollbar-themed {
+    scrollbar-color: rgba(255, 255, 255, 0.85) transparent;
+  }
+  .scrollbar-themed::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.85);
+  }
+  .scrollbar-themed::-webkit-scrollbar-thumb:hover {
+    background-color: #ffffff;
+  }
 }

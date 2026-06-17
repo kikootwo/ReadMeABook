@@ -4,7 +4,7 @@
  *
  * Shared logic for creating an e-book request for an audiobook the user already owns (e-books are
  * a sidecar to an available audiobook). Extracted from the fetch-ebook API route so both the Web
- * UI and the Discord /checkout ebook flow run an identical code path, including the approval gate.
+ * UI and the Discord /request ebook flow run an identical code path, including the approval gate.
  */
 
 import { prisma } from '@/lib/db';

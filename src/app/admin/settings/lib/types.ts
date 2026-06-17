@@ -34,6 +34,10 @@ export interface DiscordSettings {
   requestChannelId: string;
   adminRoleId: string;
   adminNotifyChannelId: string;
+  /** Delivery mode for the persistent request card: 'public' | 'dm' | 'both'. */
+  requestCardMode: 'public' | 'dm' | 'both';
+  /** Optional role that gates who may make requests (blank = anyone linked; admins always pass). */
+  requesterRoleId: string;
 }
 
 /**

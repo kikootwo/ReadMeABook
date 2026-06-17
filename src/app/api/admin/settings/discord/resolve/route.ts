@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
           roleId,
           channelId,
           adminNotifyChannelId,
+          requesterRoleId,
           userId,
         } = await request.json();
 
@@ -66,6 +67,18 @@ export async function POST(request: NextRequest) {
             results.role = { name: null, error: 'Server (guild) ID is required to resolve a role' };
           } else {
             results.role = await safeResolve(() => resolveRole(token!, guildId, roleId));
+          }
+        }
+        if (requesterRoleId) {
+          if (!guildId) {
+            results.requesterRole = {
+              name: null,
+              error: 'Server (guild) ID is required to resolve a role',
+            };
+          } else {
+            results.requesterRole = await safeResolve(() =>
+              resolveRole(token!, guildId, requesterRoleId)
+            );
           }
         }
         if (channelId) {

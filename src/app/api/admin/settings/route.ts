@@ -163,6 +163,8 @@ export async function GET(request: NextRequest) {
         requestChannelId: configMap.get('discord.request_channel_id') || '',
         adminRoleId: configMap.get('discord.admin_role_id') || '',
         adminNotifyChannelId: configMap.get('discord.admin_notify_channel_id') || '',
+        requestCardMode: configMap.get('discord.request_card_mode') || 'public',
+        requesterRoleId: configMap.get('discord.requester_role_id') || '',
       },
       general: {
         appName: configMap.get('app_name') || 'ReadMeABook',

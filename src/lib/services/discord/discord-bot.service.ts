@@ -31,6 +31,14 @@ class DiscordBotService {
   }
 
   /**
+   * The live gateway client, or null when the bot is stopped/not ready. Used by background work
+   * (e.g. the notification hook that edits request cards) to act outside an interaction.
+   */
+  getClient(): Client | null {
+    return this.ready ? this.client : null;
+  }
+
+  /**
    * Start the bot if configured + enabled. Idempotent: repeated calls while running/starting are
    * no-ops. Safe to call from /api/init on every container start.
    */

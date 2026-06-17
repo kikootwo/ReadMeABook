@@ -10,7 +10,7 @@ import { SlashCommandBuilder } from 'discord.js';
 
 export const commandDefinitions = [
   new SlashCommandBuilder()
-    .setName('checkout')
+    .setName('request')
     .setDescription('Request a title from ReadMeABook')
     .addStringOption((option) =>
       option

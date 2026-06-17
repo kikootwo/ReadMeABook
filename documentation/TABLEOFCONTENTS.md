@@ -86,7 +86,7 @@
 - **Notification settings UI** → [settings-pages.md](settings-pages.md)
 
 ## Discord Bot (Slash-Command Requesting)
-- **In-Discord requesting (/checkout, /status, /delete)** → [integrations/discord-bot.md](integrations/discord-bot.md)
+- **In-Discord requesting (/request, /status, /delete)** → [integrations/discord-bot.md](integrations/discord-bot.md)
 - **Gateway bot architecture, startup, single-guild** → [integrations/discord-bot.md](integrations/discord-bot.md)
 - **Discord ↔ RMAB user mapping (discordUserId)** → [integrations/discord-bot.md](integrations/discord-bot.md)
 - **Discord approval flow (role ping, Approve/Deny buttons)** → [integrations/discord-bot.md](integrations/discord-bot.md)

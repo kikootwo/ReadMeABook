@@ -5,6 +5,7 @@
  * Shared constants, actor-logging context, and request queries used by the bot's command handlers.
  */
 
+import type { ChatInputCommandInteraction } from 'discord.js';
 import { prisma } from '@/lib/db';
 import type { RequestListItem } from './embeds';
 
@@ -60,6 +61,35 @@ export async function fetchOutstandingRequests(
     status: r.status,
     createdAt: r.createdAt,
   }));
+}
+
+/**
+ * Whether the member who triggered a command holds the given role. Handles both a cached GuildMember
+ * (roles manager) and the raw APIInteractionGuildMember (string[] of role IDs), falling back to a
+ * guild member fetch when neither is available.
+ */
+export async function memberHasRole(
+  interaction: ChatInputCommandInteraction,
+  roleId: string
+): Promise<boolean> {
+  const member = interaction.member;
+  if (member) {
+    const roles = (member as { roles?: unknown }).roles;
+    if (Array.isArray(roles)) return roles.includes(roleId);
+    if (roles && typeof roles === 'object' && 'cache' in roles) {
+      const cache = (roles as { cache: { has(id: string): boolean } }).cache;
+      if (cache.has(roleId)) return true;
+    }
+  }
+  try {
+    if (interaction.guild) {
+      const fetched = await interaction.guild.members.fetch(interaction.user.id);
+      return fetched.roles.cache.has(roleId);
+    }
+  } catch {
+    // Member not fetchable (left guild, missing intent) — treat as not holding the role.
+  }
+  return false;
 }
 
 /** Return the owning userId of a non-deleted request, or null. Used to authorize /delete. */

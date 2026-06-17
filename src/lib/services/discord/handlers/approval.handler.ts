@@ -16,10 +16,12 @@ import {
 } from 'discord.js';
 import { prisma } from '@/lib/db';
 import { processRequestApproval } from '@/lib/services/request-approval.service';
+import { deleteRequest } from '@/lib/services/request-delete.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { getDiscordConfig, getApprovalChannelId } from '../discord-config';
 import { resolveRmabUser } from '../discord-user.resolver';
-import { buildApprovalMessage, errorEmbed, infoEmbed } from '../embeds';
+import { applyApprovalDecision, buildApprovalMessage, errorEmbed, infoEmbed } from '../embeds';
+import { cancelApprovalMessage, editRequestCards, recordApprovalMessage } from '../discord-cards';
 import { actorMeta } from '../discord-helpers';
 
 const logger = RMABLogger.create('Discord.Approval');
@@ -36,8 +38,13 @@ export async function postApprovalRequest(
     author: string;
     mediaType: string;
     requestedBy: string;
+    narrator?: string | null;
+    durationMinutes?: number | null;
     year?: number | null;
     series?: string | null;
+    seriesPart?: string | null;
+    formatType?: string | null;
+    genres?: string[] | null;
     coverArtUrl?: string | null;
   }
 ): Promise<void> {
@@ -61,7 +68,10 @@ export async function postApprovalRequest(
     const { embed, row } = buildApprovalMessage(params);
     const content = config.adminRoleId ? `<@&${config.adminRoleId}>` : undefined;
 
-    await channel.send({ content, embeds: [embed], components: [row] });
+    const sent = await channel.send({ content, embeds: [embed], components: [row] });
+    // Persist the approval message location so it can be rewritten if the request is cancelled
+    // before a decision is made.
+    await recordApprovalMessage(params.requestId, sent.channelId, sent.id);
     logger.info('Posted approval request to admin channel', {
       requestId: params.requestId,
       channelId,
@@ -150,12 +160,12 @@ export async function handleApprovalButton(
     return;
   }
 
-  // Lock the original message and append the outcome
-  const outcome = action === 'approve' ? '✅ Approved' : '🚫 Denied';
-  const decidedBy = interaction.user.username;
+  // Lock the original approval message: rewrite the embed title to reflect the decision (preserving
+  // the book detail fields) and disable the buttons.
+  const existing = interaction.message.embeds[0];
   await interaction.message
     .edit({
-      content: `${outcome} by ${decidedBy}`,
+      embeds: existing ? [applyApprovalDecision(existing, action, interaction.user.id)] : undefined,
       components: [disabledDecisionRow()],
     })
     .catch(() => undefined);
@@ -167,9 +177,85 @@ export async function handleApprovalButton(
     action,
   });
 
+  // Reflect the decision on the requester's live request card (best-effort).
+  await editRequestCards(requestId).catch(() => undefined);
+
   // Notify the requester via DM (best-effort)
   if (action === 'approve') {
     await notifyRequester(interaction.client, requestId).catch(() => undefined);
+  }
+}
+
+/**
+ * Handle the "Cancel Request" button on a live request card. Authorized for the original requester
+ * or any admin (RMAB admin / admin role). Cancels via the shared deleteRequest service (stops
+ * search/download, handles seeding) and re-renders the card(s) to the cancelled state.
+ */
+export async function handleCancelRequestButton(
+  interaction: ButtonInteraction,
+  requestId: string
+): Promise<void> {
+  await interaction.deferUpdate();
+
+  const request = await prisma.request.findFirst({
+    where: { id: requestId, deletedAt: null },
+    select: { userId: true, status: true },
+  });
+
+  if (!request) {
+    await interaction.followUp({
+      embeds: [errorEmbed('That request no longer exists.')],
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // Authorize: the original requester, or an admin (RMAB admin / admin role).
+  const resolved = await resolveRmabUser(interaction.user.id);
+  let authorized = !!resolved && resolved.user.id === request.userId;
+  let rmabUserId = resolved?.user.id;
+  if (!authorized) {
+    const adminCheck = await isAuthorizedApprover(interaction);
+    authorized = adminCheck.authorized;
+    rmabUserId = rmabUserId ?? adminCheck.rmabUserId;
+  }
+
+  if (!authorized) {
+    await interaction.followUp({
+      embeds: [errorEmbed('You can only cancel your own requests (admins can cancel any).')],
+      ephemeral: true,
+    });
+    logger.warn('Unauthorized cancel attempt', {
+      ...actorMeta(interaction.user, rmabUserId),
+      requestId,
+    });
+    return;
+  }
+
+  const wasAwaitingApproval = request.status === 'awaiting_approval';
+  const actorId = rmabUserId ?? `discord:${interaction.user.id}`;
+  const result = await deleteRequest(requestId, actorId);
+  logger.info('Request cancelled via Discord', {
+    ...actorMeta(interaction.user, rmabUserId),
+    requestId,
+    success: result.success,
+  });
+
+  if (!result.success) {
+    await interaction.followUp({
+      embeds: [errorEmbed(result.message || 'Could not cancel the request.')],
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // deleteRequest soft-deletes without changing status, so force the cancelled render on the card(s).
+  await editRequestCards(requestId, 'cancelled').catch(() => undefined);
+
+  // If it was still awaiting a decision, mark the admin approval message cancelled and drop its
+  // Approve/Deny buttons (leaving the embed for reference).
+  if (wasAwaitingApproval) {
+    await cancelApprovalMessage(requestId, interaction.user.id).catch(() => undefined);
   }
 }
 

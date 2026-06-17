@@ -3,7 +3,7 @@
  * Documentation: documentation/integrations/ebook-sidecar.md
  *
  * Thin HTTP wrapper around createEbookRequestForUser() (src/lib/services/ebook-request-creator.service.ts).
- * The shared service is also used by the Discord /checkout ebook flow so both surfaces run an
+ * The shared service is also used by the Discord /request ebook flow so both surfaces run an
  * identical code path (including the approval gate and the "must already own the audiobook" rule).
  */
 

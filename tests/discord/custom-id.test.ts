@@ -12,14 +12,15 @@ import {
 
 describe('Discord custom ID codec', () => {
   const cases: DiscordCustomId[] = [
-    { kind: 'checkout_modal', mediaType: 'audiobook' },
-    { kind: 'checkout_modal', mediaType: 'ebook' },
-    { kind: 'checkout_select', mediaType: 'audiobook' },
-    { kind: 'checkout_confirm', mediaType: 'ebook', asin: 'B0ABCDEFGH' },
+    { kind: 'request_modal', mediaType: 'audiobook' },
+    { kind: 'request_modal', mediaType: 'ebook' },
+    { kind: 'request_select', mediaType: 'audiobook' },
+    { kind: 'request_confirm', mediaType: 'ebook', asin: 'B0ABCDEFGH' },
     { kind: 'cancel' },
     { kind: 'delete_select' },
     { kind: 'approval', action: 'approve', requestId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' },
     { kind: 'approval', action: 'deny', requestId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' },
+    { kind: 'cancel_request', requestId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' },
   ];
 
   it('round-trips every custom ID kind', () => {
@@ -36,9 +37,9 @@ describe('Discord custom ID codec', () => {
 
   it('returns null for unknown or malformed custom IDs', () => {
     expect(decodeCustomId('totally-unknown')).toBeNull();
-    expect(decodeCustomId('co:modal:movie')).toBeNull(); // invalid media type
+    expect(decodeCustomId('req:modal:movie')).toBeNull(); // invalid media type
     expect(decodeCustomId('appr:maybe:123')).toBeNull(); // invalid action
-    expect(decodeCustomId('co:cf:audiobook')).toBeNull(); // missing asin
+    expect(decodeCustomId('req:cf:audiobook')).toBeNull(); // missing asin
   });
 
   it('decodes approval actions distinctly', () => {

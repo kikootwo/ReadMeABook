@@ -18,6 +18,130 @@ export interface ResolvedName {
   name: string;
 }
 
+/** A guild member matched by the member-search endpoint, shaped for the user-mapping UI. */
+export interface DiscordMemberResult {
+  id: string;
+  /** Discord account username (the global handle). */
+  username: string;
+  /** Best display name: server nickname → global display name → username. */
+  displayName: string;
+  /** A 64px avatar URL (guild avatar → user avatar → default embed avatar). */
+  avatarUrl: string;
+}
+
+interface RawGuildMember {
+  user?: {
+    id: string;
+    username: string;
+    global_name?: string | null;
+    avatar?: string | null;
+    discriminator?: string;
+  };
+  nick?: string | null;
+  avatar?: string | null;
+  roles?: string[];
+}
+
+/** Resolve a 64px avatar URL for a guild member (guild avatar → user avatar → default). */
+function memberAvatarUrl(guildId: string, member: RawGuildMember): string {
+  const user = member.user!;
+  if (member.avatar) {
+    return `https://cdn.discordapp.com/guilds/${guildId}/users/${user.id}/avatars/${member.avatar}.png?size=64`;
+  }
+  if (user.avatar) {
+    return `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=64`;
+  }
+  let index = 0;
+  if (user.discriminator && user.discriminator !== '0') {
+    index = Number(user.discriminator) % 5;
+  } else {
+    try {
+      index = Number((BigInt(user.id) >> BigInt(22)) % BigInt(6));
+    } catch {
+      index = 0;
+    }
+  }
+  return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
+}
+
+/** Resolve a single member by ID to the mapping-UI shape. Falls back to a bare user fetch, then ID. */
+export async function resolveMemberById(
+  token: string,
+  guildId: string,
+  userId: string
+): Promise<DiscordMemberResult> {
+  const rest = makeRest(token);
+  try {
+    const member = (await rest.get(Routes.guildMember(guildId, userId))) as RawGuildMember;
+    if (member.user) {
+      return {
+        id: member.user.id,
+        username: member.user.username,
+        displayName: member.nick || member.user.global_name || member.user.username,
+        avatarUrl: memberAvatarUrl(guildId, member),
+      };
+    }
+  } catch {
+    // Not a guild member (or no access) — fall through to a plain user lookup.
+  }
+  try {
+    const user = (await rest.get(Routes.user(userId))) as RawGuildMember['user'];
+    if (user) {
+      return {
+        id: user.id,
+        username: user.username,
+        displayName: user.global_name || user.username,
+        avatarUrl: memberAvatarUrl(guildId, { user }),
+      };
+    }
+  } catch {
+    // Unknown user — return a minimal placeholder so the UI still renders something.
+  }
+  return {
+    id: userId,
+    username: userId,
+    displayName: userId,
+    avatarUrl: memberAvatarUrl(guildId, { user: { id: userId, username: userId } }),
+  };
+}
+
+/** Resolve many member IDs at once (best-effort per ID). */
+export async function resolveMembersByIds(
+  token: string,
+  guildId: string,
+  ids: string[]
+): Promise<DiscordMemberResult[]> {
+  return Promise.all(ids.map((id) => resolveMemberById(token, guildId, id)));
+}
+
+/**
+ * Search a guild's members by name (matches username and server nickname). Optionally restrict to
+ * members holding `roleId`. Requires the bot to be in the guild with the Server Members intent.
+ */
+export async function searchGuildMembers(
+  token: string,
+  guildId: string,
+  query: string,
+  roleId?: string | null
+): Promise<DiscordMemberResult[]> {
+  const rest = makeRest(token);
+  const members = (await rest.get(`/guilds/${guildId}/members/search`, {
+    query: new URLSearchParams({ query, limit: '10' }),
+  })) as RawGuildMember[];
+
+  return members
+    .filter((m) => m.user && (!roleId || (m.roles ?? []).includes(roleId)))
+    .map((m) => {
+      const user = m.user!;
+      return {
+        id: user.id,
+        username: user.username,
+        displayName: m.nick || user.global_name || user.username,
+        avatarUrl: memberAvatarUrl(guildId, m),
+      };
+    });
+}
+
 /** Validate a bot token by fetching the bot's own user. Throws on invalid token. */
 export async function fetchBotUser(token: string): Promise<{ id: string; username: string }> {
   const rest = makeRest(token);
