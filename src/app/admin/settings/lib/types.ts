@@ -20,6 +20,20 @@ export interface Settings {
   downloadClient: DownloadClientSettings;
   paths: PathsSettings;
   ebook: EbookSettings;
+  discord: DiscordSettings;
+}
+
+/**
+ * Discord bot configuration (slash-command requesting).
+ * Persisted via `/api/admin/settings/discord` (category 'discord').
+ */
+export interface DiscordSettings {
+  enabled: boolean;
+  botToken: string;
+  guildId: string;
+  requestChannelId: string;
+  adminRoleId: string;
+  adminNotifyChannelId: string;
 }
 
 /**
@@ -262,4 +276,4 @@ export interface BookDateModel {
 /**
  * Tab identifier type
  */
-export type SettingsTab = 'library' | 'auth' | 'prowlarr' | 'download' | 'paths' | 'ebook' | 'bookdate' | 'notifications' | 'api';
+export type SettingsTab = 'library' | 'auth' | 'prowlarr' | 'download' | 'paths' | 'ebook' | 'bookdate' | 'notifications' | 'discord' | 'api';

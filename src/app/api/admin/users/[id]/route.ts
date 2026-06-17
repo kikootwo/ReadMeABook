@@ -19,7 +19,7 @@ export async function PUT(
       try {
         const { id } = await params;
         const body = await request.json();
-        const { role, autoApproveRequests, interactiveSearchAccess, downloadAccess } = body;
+        const { role, autoApproveRequests, interactiveSearchAccess, downloadAccess, discordUserId } = body;
 
         // Validate role
         if (!role || (role !== 'user' && role !== 'admin')) {
@@ -51,6 +51,21 @@ export async function PUT(
             { error: 'Invalid downloadAccess. Must be a boolean or null' },
             { status: 400 }
           );
+        }
+
+        // Validate discordUserId (optional): null/empty clears the mapping, otherwise a numeric Discord snowflake
+        let normalizedDiscordUserId: string | null | undefined = undefined;
+        if (discordUserId !== undefined) {
+          if (discordUserId === null || discordUserId === '') {
+            normalizedDiscordUserId = null;
+          } else if (typeof discordUserId === 'string' && /^\d{15,25}$/.test(discordUserId.trim())) {
+            normalizedDiscordUserId = discordUserId.trim();
+          } else {
+            return NextResponse.json(
+              { error: 'Invalid discordUserId. Must be a numeric Discord user ID (snowflake) or null.' },
+              { status: 400 }
+            );
+          }
         }
 
         // Prevent user from demoting themselves
@@ -128,7 +143,7 @@ export async function PUT(
         }
 
         // Prepare update data
-        const updateData: { role: string; autoApproveRequests?: boolean | null; interactiveSearchAccess?: boolean | null; downloadAccess?: boolean | null } = { role };
+        const updateData: { role: string; autoApproveRequests?: boolean | null; interactiveSearchAccess?: boolean | null; downloadAccess?: boolean | null; discordUserId?: string | null } = { role };
         if (autoApproveRequests !== undefined) {
           updateData.autoApproveRequests = autoApproveRequests;
         }
@@ -138,20 +153,36 @@ export async function PUT(
         if (downloadAccess !== undefined) {
           updateData.downloadAccess = downloadAccess;
         }
+        if (normalizedDiscordUserId !== undefined) {
+          updateData.discordUserId = normalizedDiscordUserId;
+        }
 
         // Update user
-        const updatedUser = await prisma.user.update({
-          where: { id },
-          data: updateData,
-          select: {
-            id: true,
-            plexUsername: true,
-            role: true,
-            autoApproveRequests: true,
-            interactiveSearchAccess: true,
-            downloadAccess: true,
-          },
-        });
+        let updatedUser;
+        try {
+          updatedUser = await prisma.user.update({
+            where: { id },
+            data: updateData,
+            select: {
+              id: true,
+              plexUsername: true,
+              role: true,
+              autoApproveRequests: true,
+              interactiveSearchAccess: true,
+              downloadAccess: true,
+              discordUserId: true,
+            },
+          });
+        } catch (updateError: any) {
+          // P2002 = unique constraint violation (another user already has this Discord ID)
+          if (updateError?.code === 'P2002') {
+            return NextResponse.json(
+              { error: 'That Discord user ID is already linked to another account.' },
+              { status: 409 }
+            );
+          }
+          throw updateError;
+        }
 
         return NextResponse.json({ user: updatedUser });
       } catch (error) {

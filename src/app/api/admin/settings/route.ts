@@ -156,6 +156,14 @@ export async function GET(request: NextRequest) {
         // Kindle compatibility fixes: default false
         kindleFixEnabled: configMap.get('ebook_kindle_fix_enabled') === 'true',
       },
+      discord: {
+        enabled: configMap.get('discord.enabled') === 'true',
+        botToken: maskValue('token', configMap.get('discord.bot_token')),
+        guildId: configMap.get('discord.guild_id') || '',
+        requestChannelId: configMap.get('discord.request_channel_id') || '',
+        adminRoleId: configMap.get('discord.admin_role_id') || '',
+        adminNotifyChannelId: configMap.get('discord.admin_notify_channel_id') || '',
+      },
       general: {
         appName: configMap.get('app_name') || 'ReadMeABook',
         allowRegistrations: configMap.get('allow_registrations') === 'true',

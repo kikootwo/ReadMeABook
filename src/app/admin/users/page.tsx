@@ -29,6 +29,7 @@ interface User {
   autoApproveRequests: boolean | null;
   interactiveSearchAccess: boolean | null;
   downloadAccess: boolean | null;
+  discordUserId: string | null;
   hasLoginToken: boolean;
   _count: {
     requests: number;
@@ -204,6 +205,7 @@ function AdminUsersPageContent() {
     user: User | null;
   }>({ isOpen: false, user: null });
   const [editRole, setEditRole] = useState<'user' | 'admin'>('user');
+  const [editDiscordUserId, setEditDiscordUserId] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [processingUserId, setProcessingUserId] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -385,6 +387,7 @@ function AdminUsersPageContent() {
 
   const showEditDialog = (user: User) => {
     setEditRole(user.role);
+    setEditDiscordUserId(user.discordUserId ?? '');
     setEditDialog({ isOpen: true, user });
   };
 
@@ -398,7 +401,8 @@ function AdminUsersPageContent() {
       setSaving(true);
       await fetchJSON(`/api/admin/users/${editDialog.user.id}`, {
         method: 'PUT',
-        body: JSON.stringify({ role: editRole }),
+        // Send discordUserId as null when cleared so the mapping is removed
+        body: JSON.stringify({ role: editRole, discordUserId: editDiscordUserId.trim() || null }),
       });
       toast.success(`User "${editDialog.user.plexUsername}" updated successfully`);
       hideEditDialog();
@@ -914,6 +918,24 @@ function AdminUsersPageContent() {
                         </div>
                       </div>
                     </label>
+                  </div>
+                </div>
+
+                {/* Discord account mapping */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Discord User ID
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={editDiscordUserId}
+                    onChange={(e) => setEditDiscordUserId(e.target.value)}
+                    placeholder="e.g. 123456789012345678"
+                    className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">
+                    Links this user&apos;s Discord account so they can request via Discord slash commands. Leave blank to unlink. In Discord, enable Developer Mode then right-click the user → Copy User ID.
                   </div>
                 </div>
               </div>

@@ -5,6 +5,8 @@
 ## Overview
 Allows admins to review and approve/deny user requests before they are processed. Supports global auto-approve toggle and per-user auto-approve overrides. Interactive search requests store pre-selected torrents when approval is required.
 
+**Shared service:** Approve/deny logic lives in `src/lib/services/request-approval.service.ts` (`processRequestApproval`). The Web approve route (`POST /api/admin/requests/[id]/approve`) and the Discord bot's Approve/Deny buttons both call it, so the two surfaces stay in lock-step. See [integrations/discord-bot.md](../integrations/discord-bot.md).
+
 ## Key Details
 
 ### Request Statuses

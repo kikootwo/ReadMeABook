@@ -470,6 +470,7 @@ describe('Request Approval Workflow', () => {
           autoApproveRequests: true,
           interactiveSearchAccess: true,
           downloadAccess: true,
+          discordUserId: true,
         },
       });
     });

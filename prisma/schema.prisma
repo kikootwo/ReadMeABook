@@ -57,6 +57,9 @@ model User {
   interactiveSearchAccess Boolean? @map("interactive_search_access") // null = use global setting, true = allow, false = deny
   downloadAccess          Boolean? @map("download_access")           // null = use global setting, true = allow, false = deny
 
+  // Discord integration (maps a Discord account to this RMAB user for slash-command requesting)
+  discordUserId String? @unique @map("discord_user_id") // Discord snowflake; null = not linked
+
   // Login token (admin-generated, for direct URL login)
   loginTokenHash String? @map("login_token_hash") // SHA-256 hash of the login token (never store plaintext)
 
@@ -85,6 +88,7 @@ model User {
   @@index([plexId])
   @@index([role])
   @@index([deletedAt])
+  @@index([discordUserId])
   @@map("users")
 }
 

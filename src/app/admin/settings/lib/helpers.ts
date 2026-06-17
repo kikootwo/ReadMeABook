@@ -240,5 +240,6 @@ export const getTabs = (backendMode: 'plex' | 'audiobookshelf') => [
   { id: 'ebook' as const, label: 'E-book Sidecar', icon: '📖' },
   { id: 'bookdate' as const, label: 'BookDate', icon: '📚' },
   { id: 'notifications' as const, label: 'Notifications', icon: '🔔' },
+  { id: 'discord' as const, label: 'Discord', icon: '🤖' },
   { id: 'api' as const, label: 'API', icon: '🔑' },
 ];

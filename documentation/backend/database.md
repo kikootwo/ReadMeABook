@@ -23,7 +23,9 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
   - `bookdate_library_scope` ('full'|'rated', default 'full') - Library scope for recommendations
   - `bookdate_custom_prompt` (text, optional, max 1000 chars) - Custom preferences for AI
   - `bookdate_onboarding_complete` (bool, default false) - Whether user has completed BookDate onboarding
-- Indexes: `plex_id`, `role`
+- **Discord integration:**
+  - `discord_user_id` (string, unique, nullable) - Linked Discord account for slash-command requesting (null = not linked). See [integrations/discord-bot.md](../integrations/discord-bot.md)
+- Indexes: `plex_id`, `role`, `discord_user_id`
 
 ### Audible_Cache
 - `id` (UUID PK), `asin` (unique, Audible ID), `title`, `author`, `narrator`, `description`
