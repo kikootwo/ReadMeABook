@@ -160,7 +160,8 @@ export async function handleApprovalButton(
     })
     .catch(() => undefined);
 
-  logger.info(`Request ${action}d via Discord`, {
+  const pastTense = action === 'approve' ? 'approved' : 'denied';
+  logger.info(`Request ${pastTense} via Discord`, {
     ...actorMeta(interaction.user, rmabUserId),
     requestId,
     action,
