@@ -39,12 +39,13 @@ Typed accessor: [src/lib/services/discord/discord-config.ts](../../src/lib/servi
   - audiobook → `createRequestForUser` ([request-creator.service.ts](../../src/lib/services/request-creator.service.ts), `bypassIgnore: true`).
   - ebook → `createEbookRequestForUser` ([ebook-request-creator.service.ts](../../src/lib/services/ebook-request-creator.service.ts)). **Sidecar rule:** the audiobook must already be in the library, else it's rejected (same as the Web "Fetch Ebook" button).
 - **/status**: lists invoker's outstanding requests (admins see all). Read-only.
-- **/delete**: dropdown of invoker's deletable requests → `deleteRequest` (cascading soft-delete: files, library backend, download client). Gated by `discord.delete_permission`:
+- **/delete**: dropdown of invoker's deletable requests → select shows a **confirmation preview** (warning-colored embed enriched with Duration/Series/Format/Genre/File Size + cover) with **Confirm Delete** / **Cancel** buttons. The dropdown stays open, so re-selecting another title re-renders the preview. Only **Confirm Delete** commits `deleteRequest` (cascading soft-delete: files, library backend, download client); **Cancel** dismisses without removing anything. Gated by `discord.delete_permission`:
   - `own_only` (default): users see/delete their own; admins see/delete all.
   - `anyone_any`: all linked users see and can delete any request.
   - `admin_only`: only RMAB admins may use the command.
   - `disabled`: command responds with an error for everyone.
-  Ownership re-checked at select time (guards against stale dropdowns).
+  Permission + ownership are re-checked at **both** select and confirm time (the Confirm button's customId is untrusted; guards against stale dropdowns).
+  - Preview enrichment: Duration/Format(abridgement)/Genre aren't persisted in the DB — they're best-effort merged from live Audible metadata (`getAudiobookDetails(audibleAsin)`); File Size/Format come from the cached `audiobook.fileSizeBytes`/`fileFormat` (populated post-download). Enrichment failures degrade gracefully to cached fields (`fetchDeletePreviewItem`).
 
 "Outstanding" statuses (for /status): pending, awaiting_approval, searching, downloading, processing, awaiting_search, awaiting_import, awaiting_release, warn.
 
@@ -66,7 +67,7 @@ Typed accessor: [src/lib/services/discord/discord-config.ts](../../src/lib/servi
 - `interaction-router.ts` — dispatch by command name / decoded customId; defers within 3s.
 - `command-definitions.ts` — SlashCommandBuilder defs (guild-scoped JSON).
 - `custom-id.ts` — encode/decode all cross-interaction state into ≤100-char customIds (no server session). Paginated kinds parse the page via `parsePage` (rejects empty/negative/non-integer from tampered IDs → decode returns null).
-- `embeds/` — embed/select/button builders, split to stay under the per-file size cap, re-exported via `embeds/index.ts` (import surface stays `./embeds`): `book-fields.ts` (palette, text helpers, `BookEmbedFields`, shared `addBookFields`, status footer/color/cancellability), `request-cards.ts` (search select, confirm/live request card), `approval.ts` (approval message + decision/cancel rewrites), `lists.ts` (/status & /delete paginated lists, the shared request-select builder, delete-confirm). All list/card field rendering goes through `addBookFields` for one consistent field set.
+- `embeds/` — embed/select/button builders, split to stay under the per-file size cap, re-exported via `embeds/index.ts` (import surface stays `./embeds`): `book-fields.ts` (palette, text helpers, `BookEmbedFields`, shared `addBookFields`, status footer/color/cancellability), `request-cards.ts` (search select, confirm/live request card), `approval.ts` (approval message + decision/cancel rewrites), `lists.ts` (/status & /delete paginated lists, the shared request-select builder, the /delete confirmation preview + Confirm/Cancel buttons, post-delete confirm embed). All list/card field rendering goes through `addBookFields` for one consistent field set.
 - `discord-cards.ts` — post/update the live request card (public + DM); `postRequestCards`, `editRequestCards`.
 - `discord-helpers.ts` — outstanding-status list, actor log context, request queries.
 - `discord-rest.helper.ts` — token-based REST for settings Test/Resolve (no gateway needed).

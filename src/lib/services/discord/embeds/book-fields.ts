@@ -36,6 +36,13 @@ export interface RequestListItem {
   seriesPart?: string | null;
   coverArtUrl?: string | null;
   requestedBy?: string | null;
+  // Rich detail used by the /delete confirmation preview. The list queries don't populate these
+  // (they aren't stored in the DB); they're merged in from live Audible metadata + the cached file.
+  durationMinutes?: number | null;
+  formatType?: string | null;
+  genres?: string[] | null;
+  fileSizeBytes?: number | null;
+  fileFormat?: string | null;
 }
 
 /** The rich book metadata shared by the confirm card, request card, and approval embed. */
@@ -179,19 +186,36 @@ export function toBookFields(book: AudibleAudiobook, mediaType: MediaType): Book
   };
 }
 
-/** Map a normalized RequestListItem into the shared BookEmbedFields shape (list rows carry no
- * duration/format/genre, which addBookFields simply omits). */
+/** Map a normalized RequestListItem into the shared BookEmbedFields shape. List rows usually carry
+ * no duration/format/genre (addBookFields simply omits them); the /delete preview enriches them. */
 export function listItemToBookFields(item: RequestListItem): BookEmbedFields {
   return {
     title: item.title,
     author: item.author,
     mediaType: item.type,
     narrator: item.narrator ?? null,
+    durationMinutes: item.durationMinutes ?? null,
     year: item.year ?? null,
     series: item.series ?? null,
     seriesPart: item.seriesPart ?? null,
+    formatType: item.formatType ?? null,
+    genres: item.genres ?? null,
     coverArtUrl: item.coverArtUrl ?? null,
   };
+}
+
+/** Format a byte count as a human-readable size (e.g. "1.2 GB", "340 MB"), or null when unknown. */
+export function formatFileSize(bytes?: number | null): string | null {
+  if (!bytes || bytes <= 0) return null;
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  const rounded = unit === 0 ? value : Math.round(value * 10) / 10;
+  return `${rounded} ${units[unit]}`;
 }
 
 // ============================================================================

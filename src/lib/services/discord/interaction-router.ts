@@ -23,6 +23,8 @@ import {
   handleDeleteCommand,
   handleDeletePage,
   handleDeleteSelect,
+  handleDeleteConfirm,
+  handleDeleteCancel,
 } from './handlers/status-delete.handler';
 import { handleApprovalButton, handleCancelRequestButton } from './handlers/approval.handler';
 import { infoEmbed } from './embeds';
@@ -89,6 +91,10 @@ export async function routeInteraction(interaction: Interaction): Promise<void> 
         await handleStatusPage(interaction, decoded.page, decoded.scopeAll);
       } else if (decoded.kind === 'delete_page') {
         await handleDeletePage(interaction, decoded.page, decoded.scopeAll);
+      } else if (decoded.kind === 'delete_confirm') {
+        await handleDeleteConfirm(interaction, decoded.requestId);
+      } else if (decoded.kind === 'delete_cancel') {
+        await handleDeleteCancel(interaction);
       }
       return;
     }

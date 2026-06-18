@@ -20,6 +20,10 @@ export type DiscordCustomId =
   | { kind: 'cancel' }
   /** Request dropdown for /delete; option values are request IDs. */
   | { kind: 'delete_select' }
+  /** Confirm button on the /delete preview; commits the deletion of the selected request. */
+  | { kind: 'delete_confirm'; requestId: string }
+  /** Cancel button on the /delete preview; dismisses without deleting. */
+  | { kind: 'delete_cancel' }
   /** Approve/Deny buttons on an admin approval message. */
   | { kind: 'approval'; action: 'approve' | 'deny'; requestId: string }
   /** Cancel Request button on a live request card (requester or admin). */
@@ -37,6 +41,8 @@ const PREFIX = {
   request_confirm: 'req:cf',
   cancel: 'req:cancel',
   delete_select: 'del:sel',
+  delete_confirm: 'del:cf',
+  delete_cancel: 'del:cx',
   approval: 'appr',
   cancel_request: 'crq',
   status_page: 'st:pg',
@@ -57,6 +63,10 @@ export function encodeCustomId(id: DiscordCustomId): string {
       return PREFIX.cancel;
     case 'delete_select':
       return PREFIX.delete_select;
+    case 'delete_confirm':
+      return `${PREFIX.delete_confirm}:${id.requestId}`;
+    case 'delete_cancel':
+      return PREFIX.delete_cancel;
     case 'approval':
       return `${PREFIX.approval}:${id.action}:${id.requestId}`;
     case 'cancel_request':
@@ -88,8 +98,15 @@ function parsePage(value: string | undefined): number | null {
 export function decodeCustomId(raw: string): DiscordCustomId | null {
   if (raw === PREFIX.cancel) return { kind: 'cancel' };
   if (raw === PREFIX.delete_select) return { kind: 'delete_select' };
+  if (raw === PREFIX.delete_cancel) return { kind: 'delete_cancel' };
 
   const parts = raw.split(':');
+
+  // del:cf:<requestId>
+  if (raw.startsWith(`${PREFIX.delete_confirm}:`)) {
+    const requestId = parts.slice(2).join(':'); // UUIDs have no ':', but be defensive
+    return requestId ? { kind: 'delete_confirm', requestId } : null;
+  }
 
   // req:modal:<type>
   if (raw.startsWith(`${PREFIX.request_modal}:`)) {

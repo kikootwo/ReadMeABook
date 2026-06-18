@@ -22,6 +22,7 @@ import {
   type RequestListItem,
   addBookFields,
   colorForStatus,
+  formatFileSize,
   infoEmbed,
   isCancellableStatus,
   listItemToBookFields,
@@ -200,12 +201,51 @@ export function buildDeletePage(
   return { embeds, components };
 }
 
+/** Append a File Size field (size + format when known) to a /delete embed, when available. */
+function addFileSizeField(embed: EmbedBuilder, item: RequestListItem): void {
+  const size = formatFileSize(item.fileSizeBytes);
+  if (!size) return;
+  const value = item.fileFormat ? `${size} • ${item.fileFormat.toUpperCase()}` : size;
+  embed.addFields({ name: 'File Size', value, inline: true });
+}
+
+/**
+ * Build the /delete confirmation preview shown after a title is selected (before it is deleted):
+ * a warning-colored embed with the enriched book detail (duration, series, format, genre, file
+ * size) and a cover thumbnail. The dropdown stays so the user can switch titles; the Confirm/Cancel
+ * buttons are built separately by buildDeleteConfirmButtons.
+ */
+export function buildDeletePreviewEmbed(item: RequestListItem): EmbedBuilder {
+  const embed = new EmbedBuilder()
+    .setColor(COLOR.warning)
+    .setTitle(titleWithYear(item.title, item.year));
+  addBookFields(embed, listItemToBookFields(item));
+  addFileSizeField(embed, item);
+  if (item.coverArtUrl) embed.setThumbnail(item.coverArtUrl);
+  embed.setFooter({ text: '⚠️ Confirm deletion — this removes the request from ReadMeABook.' });
+  return embed;
+}
+
+/** Build the Confirm/Cancel button row for the /delete confirmation preview. */
+export function buildDeleteConfirmButtons(requestId: string): ActionRowBuilder<ButtonBuilder> {
+  const confirm = new ButtonBuilder()
+    .setCustomId(encodeCustomId({ kind: 'delete_confirm', requestId }))
+    .setLabel('Confirm Delete')
+    .setStyle(ButtonStyle.Danger);
+  const cancel = new ButtonBuilder()
+    .setCustomId(encodeCustomId({ kind: 'delete_cancel' }))
+    .setLabel('Cancel')
+    .setStyle(ButtonStyle.Secondary);
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(confirm, cancel);
+}
+
 /** Build a rich confirmation embed after a successful /delete. */
 export function buildDeleteConfirmEmbed(item: RequestListItem): EmbedBuilder {
   const embed = new EmbedBuilder()
     .setColor(COLOR.success)
     .setTitle(titleWithYear(item.title, item.year));
   addBookFields(embed, listItemToBookFields(item));
+  addFileSizeField(embed, item);
   if (item.coverArtUrl) embed.setThumbnail(item.coverArtUrl);
   embed.setFooter({ text: '🗑️ Request Deleted' }).setTimestamp(new Date());
   return embed;

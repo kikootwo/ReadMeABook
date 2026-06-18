@@ -18,6 +18,8 @@ describe('Discord custom ID codec', () => {
     { kind: 'request_confirm', mediaType: 'ebook', asin: 'B0ABCDEFGH' },
     { kind: 'cancel' },
     { kind: 'delete_select' },
+    { kind: 'delete_confirm', requestId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' },
+    { kind: 'delete_cancel' },
     { kind: 'approval', action: 'approve', requestId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' },
     { kind: 'approval', action: 'deny', requestId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' },
     { kind: 'cancel_request', requestId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' },

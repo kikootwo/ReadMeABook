@@ -16,20 +16,24 @@ import { deleteRequest } from '@/lib/services/request-delete.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { cancelApprovalMessage, editRequestCards } from '../discord-cards';
 import { getDiscordConfig } from '../discord-config';
-import { resolveRmabUser } from '../discord-user.resolver';
+import { resolveRmabUser, type ResolvedDiscordUser } from '../discord-user.resolver';
 import {
   actorMeta,
   fetchDeletableRequests,
+  fetchDeletePreviewItem,
   fetchOutstandingRequests,
   getRequestOwner,
 } from '../discord-helpers';
 import {
+  buildDeleteConfirmButtons,
   buildDeleteConfirmEmbed,
   buildDeletePage,
+  buildDeletePreviewEmbed,
+  buildDeleteSelect,
   buildStatusPage,
   errorEmbed,
+  infoEmbed,
   notLinkedEmbed,
-  type RequestListItem,
 } from '../embeds';
 
 const logger = RMABLogger.create('Discord.StatusDelete');
@@ -204,12 +208,15 @@ export async function handleDeletePage(
   await interaction.editReply({ embeds, components });
 }
 
-/** Dropdown select for /delete: authorize ownership + permission level, then delete. */
-export async function handleDeleteSelect(
-  interaction: StringSelectMenuInteraction
-): Promise<void> {
-  await interaction.deferUpdate();
-
+/**
+ * Shared gate for the /delete select + confirm interactions: enforces the deletePermission config
+ * and (for non-admins, unless anyone_any) ownership of the target request. Replies with the
+ * appropriate error and returns null when the actor isn't authorized.
+ */
+async function authorizeDelete(
+  interaction: StringSelectMenuInteraction | ButtonInteraction,
+  requestId: string
+): Promise<{ resolved: ResolvedDiscordUser; scopeAll: boolean } | null> {
   const config = await getDiscordConfig();
   const perm = config.deletePermission;
 
@@ -218,13 +225,13 @@ export async function handleDeleteSelect(
       embeds: [errorEmbed('The /delete command is disabled by the server administrator.')],
       components: [],
     });
-    return;
+    return null;
   }
 
   const resolved = await resolveRmabUser(interaction.user.id);
   if (!resolved) {
     await interaction.editReply({ embeds: [notLinkedEmbed()], components: [] });
-    return;
+    return null;
   }
 
   if (perm === 'admin_only' && !resolved.isAdmin) {
@@ -232,13 +239,10 @@ export async function handleDeleteSelect(
       embeds: [errorEmbed('Only admins can use /delete on this server.')],
       components: [],
     });
-    return;
+    return null;
   }
 
-  const requestId = interaction.values[0];
-  const meta = actorMeta(interaction.user, resolved.user.id);
-
-  // Ownership check: anyone_any skips it for non-admins; own_only enforces it
+  // Ownership check: anyone_any skips it for non-admins; own_only enforces it.
   if (!resolved.isAdmin && perm !== 'anyone_any') {
     const ownerId = await getRequestOwner(requestId);
     if (ownerId !== resolved.user.id) {
@@ -246,62 +250,93 @@ export async function handleDeleteSelect(
         embeds: [errorEmbed('You can only delete your own requests.')],
         components: [],
       });
-      logger.warn('Blocked cross-user delete attempt', { ...meta, requestId });
-      return;
+      logger.warn('Blocked cross-user delete attempt', {
+        ...actorMeta(interaction.user, resolved.user.id),
+        requestId,
+      });
+      return null;
     }
   }
 
-  try {
-    const before = await prisma.request.findUnique({
-      where: { id: requestId },
-      select: {
-        status: true,
-        type: true,
-        audiobook: {
-          select: {
-            title: true,
-            author: true,
-            narrator: true,
-            year: true,
-            series: true,
-            seriesPart: true,
-            coverArtUrl: true,
-          },
-        },
-      },
+  return { resolved, scopeAll: resolved.isAdmin || perm === 'anyone_any' };
+}
+
+/**
+ * Dropdown select for /delete: authorize, then render a confirmation preview (enriched with
+ * duration/series/format/genre/file size) with Confirm/Cancel buttons. Nothing is deleted yet — the
+ * dropdown stays so the user can switch titles, and only the Confirm button commits the deletion.
+ */
+export async function handleDeleteSelect(
+  interaction: StringSelectMenuInteraction
+): Promise<void> {
+  await interaction.deferUpdate();
+
+  const requestId = interaction.values[0];
+  const auth = await authorizeDelete(interaction, requestId);
+  if (!auth) return;
+
+  // Re-fetch the deletable set so the dropdown persists (letting the user pick a different title)
+  // and to recover the requester name shown to admins.
+  const items = await fetchDeletableRequests(auth.resolved.user.id, auth.scopeAll);
+  const requestedBy = items.find((i) => i.id === requestId)?.requestedBy ?? null;
+
+  const previewItem = await fetchDeletePreviewItem(requestId, requestedBy);
+  if (!previewItem) {
+    await interaction.editReply({
+      embeds: [errorEmbed('That request no longer exists.')],
+      components: [],
     });
+    return;
+  }
 
-    const result = await deleteRequest(requestId, resolved.user.id);
-    logger.info('Request deleted via Discord', { ...meta, requestId, success: result.success });
+  const components = [];
+  const selectRow = buildDeleteSelect(items);
+  if (selectRow) components.push(selectRow);
+  components.push(buildDeleteConfirmButtons(requestId));
 
-    if (result.success && before?.status === 'awaiting_approval') {
-      await cancelApprovalMessage(requestId, interaction.user.id).catch(() => undefined);
-    }
+  await interaction.editReply({ embeds: [buildDeletePreviewEmbed(previewItem)], components });
+}
 
-    if (result.success && before) {
-      const item: RequestListItem = {
-        id: requestId,
-        title: before.audiobook.title,
-        author: before.audiobook.author,
-        type: before.type,
-        status: before.status,
-        createdAt: new Date(),
-        narrator: before.audiobook.narrator,
-        year: before.audiobook.year,
-        series: before.audiobook.series,
-        seriesPart: before.audiobook.seriesPart,
-        coverArtUrl: before.audiobook.coverArtUrl,
-      };
+/** Confirm button on the /delete preview: re-authorize (the customId is untrusted) and delete. */
+export async function handleDeleteConfirm(
+  interaction: ButtonInteraction,
+  requestId: string
+): Promise<void> {
+  await interaction.deferUpdate();
+
+  const auth = await authorizeDelete(interaction, requestId);
+  if (!auth) return;
+
+  const meta = actorMeta(interaction.user, auth.resolved.user.id);
+
+  try {
+    // Capture the enriched item while the request still exists, so the final embed matches the
+    // preview the user confirmed (and we know whether to retract a pending approval message).
+    const item = await fetchDeletePreviewItem(requestId);
+    if (!item) {
       await interaction.editReply({
-        embeds: [buildDeleteConfirmEmbed(item)],
+        embeds: [errorEmbed('That request no longer exists.')],
         components: [],
       });
-    } else {
+      return;
+    }
+
+    const result = await deleteRequest(requestId, auth.resolved.user.id);
+    logger.info('Request deleted via Discord', { ...meta, requestId, success: result.success });
+
+    if (!result.success) {
       await interaction.editReply({
         embeds: [errorEmbed(result.message || 'Failed to delete the request.')],
         components: [],
       });
+      return;
     }
+
+    if (item.status === 'awaiting_approval') {
+      await cancelApprovalMessage(requestId, interaction.user.id).catch(() => undefined);
+    }
+
+    await interaction.editReply({ embeds: [buildDeleteConfirmEmbed(item)], components: [] });
   } catch (error) {
     logger.error('Failed to delete request', {
       ...meta,
@@ -313,4 +348,12 @@ export async function handleDeleteSelect(
       components: [],
     });
   }
+}
+
+/** Cancel button on the /delete preview: dismiss without deleting anything. */
+export async function handleDeleteCancel(interaction: ButtonInteraction): Promise<void> {
+  await interaction.update({
+    embeds: [infoEmbed('Deletion cancelled', 'Nothing was removed.')],
+    components: [],
+  }).catch(() => undefined);
 }
