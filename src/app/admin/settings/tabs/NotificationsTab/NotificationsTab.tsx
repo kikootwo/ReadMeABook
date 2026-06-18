@@ -63,6 +63,7 @@ export function NotificationsTab() {
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [testAllEvents, setTestAllEvents] = useState(false);
 
   useEffect(() => {
     fetchBackends();
@@ -126,6 +127,7 @@ export function NotificationsTab() {
       enabled: true,
     });
     setTestResult(null);
+    setTestAllEvents(false);
   };
 
   const openEditModal = (backend: NotificationBackend) => {
@@ -137,11 +139,13 @@ export function NotificationsTab() {
       enabled: backend.enabled,
     });
     setTestResult(null);
+    setTestAllEvents(false);
   };
 
   const closeModal = () => {
     setModalState({ isOpen: false, mode: 'add' });
     setTestResult(null);
+    setTestAllEvents(false);
   };
 
   const handleTest = async () => {
@@ -154,8 +158,8 @@ export function NotificationsTab() {
       // In edit mode, use backend ID to test with real config (masked values won't work)
       // In add mode, use the form config directly
       const testPayload = modalState.mode === 'edit' && modalState.backend
-        ? { backendId: modalState.backend.id }
-        : { type: modalState.selectedType, config: formData.config };
+        ? { backendId: modalState.backend.id, allEvents: testAllEvents }
+        : { type: modalState.selectedType, config: formData.config, allEvents: testAllEvents };
 
       const response = await fetchWithAuth('/api/admin/notifications/test', {
         method: 'POST',
@@ -165,7 +169,7 @@ export function NotificationsTab() {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        setTestResult({ success: true, message: 'Test notification sent successfully!' });
+        setTestResult({ success: true, message: data.message || 'Test notification sent successfully!' });
       } else {
         setTestResult({ success: false, message: data.message || 'Failed to send test notification' });
       }
@@ -433,13 +437,24 @@ export function NotificationsTab() {
 
                 {/* Actions */}
                 <div className="flex justify-between pt-4 border-t border-gray-200 dark:border-gray-700">
-                  <button
-                    onClick={handleTest}
-                    disabled={isTesting}
-                    className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
-                  >
-                    {isTesting ? 'Testing...' : 'Send Test'}
-                  </button>
+                  <div className="flex items-center space-x-3">
+                    <button
+                      onClick={handleTest}
+                      disabled={isTesting}
+                      className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                    >
+                      {isTesting ? 'Testing...' : 'Send Test'}
+                    </button>
+                    <label className="flex items-center space-x-2 cursor-pointer" title="Send one test notification for every event type">
+                      <input
+                        type="checkbox"
+                        checked={testAllEvents}
+                        onChange={(e) => setTestAllEvents(e.target.checked)}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">Test all event types</span>
+                    </label>
+                  </div>
                   <div className="flex space-x-2">
                     <button
                       onClick={closeModal}

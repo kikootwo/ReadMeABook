@@ -7,6 +7,7 @@
  */
 
 import { getNotificationService } from '../services/notification';
+import { enrichBookMeta } from '../services/notification/notification-enrichment';
 import { getDiscordBotService } from '../services/discord/discord-bot.service';
 import { RMABLogger } from '../utils/logger';
 import type { SendNotificationPayload } from '../services/job-queue.service';
@@ -27,6 +28,11 @@ export async function processSendNotification(payload: SendNotificationPayload):
 
   try {
     const notificationService = getNotificationService();
+
+    // Best-effort rich metadata (cover, narrator, series, genres, duration) for embed-capable
+    // backends. DB-only — independent of the Discord bot. Never blocks the notification.
+    const book = await enrichBookMeta(requestId);
+
     await notificationService.sendNotification({
       event,
       requestId,
@@ -36,6 +42,7 @@ export async function processSendNotification(payload: SendNotificationPayload):
       userName,
       message,
       requestType,
+      book,
       timestamp: new Date(),
     });
 

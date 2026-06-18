@@ -62,6 +62,34 @@ beforeAll(() => {
   }
 
   if (typeof window !== 'undefined') {
+    // jsdom 27 under vitest 4 exposes localStorage/sessionStorage as an empty object without the
+    // Storage API (getItem/setItem/clear are missing). Install an in-memory polyfill when the real
+    // one is incomplete — no-ops automatically if a future vitest/jsdom fixes the wiring.
+    const ensureStorage = (key: 'localStorage' | 'sessionStorage') => {
+      const existing = (window as unknown as Record<string, unknown>)[key] as Storage | undefined;
+      if (existing && typeof existing.getItem === 'function') return;
+
+      const store = new Map<string, string>();
+      const storage: Storage = {
+        get length() {
+          return store.size;
+        },
+        clear: () => store.clear(),
+        getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+        key: (i: number) => Array.from(store.keys())[i] ?? null,
+        removeItem: (k: string) => {
+          store.delete(k);
+        },
+        setItem: (k: string, v: string) => {
+          store.set(k, String(v));
+        },
+      };
+      Object.defineProperty(window, key, { value: storage, configurable: true, writable: true });
+      Object.defineProperty(globalThis, key, { value: storage, configurable: true, writable: true });
+    };
+    ensureStorage('localStorage');
+    ensureStorage('sessionStorage');
+
     window.scrollTo = window.scrollTo || vi.fn();
     window.open = window.open || vi.fn();
     window.matchMedia = window.matchMedia || ((query: string) => ({
