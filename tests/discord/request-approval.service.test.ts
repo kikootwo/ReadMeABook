@@ -66,17 +66,16 @@ describe('processRequestApproval', () => {
 
   it('approves with automatic search for an audiobook (no pre-selected torrent)', async () => {
     prismaMock.request.findUnique.mockResolvedValue(baseRequest);
-    prismaMock.request.update.mockResolvedValue({
-      ...baseRequest,
-      status: 'pending',
-    });
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.request.findUniqueOrThrow.mockResolvedValue({ ...baseRequest, status: 'pending' });
 
     const { processRequestApproval } = await loadService();
     const result = await processRequestApproval({ requestId: 'req-1', action: 'approve', adminUserId: 'admin-1' });
 
     expect(result.success).toBe(true);
-    expect(prismaMock.request.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'req-1' }, data: { status: 'pending' } })
+    // The transition is claimed atomically, gated on the current status.
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'req-1', status: 'awaiting_approval' }, data: { status: 'pending' } })
     );
     expect(jobQueueMock.addSearchJob).toHaveBeenCalledTimes(1);
     expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
@@ -85,13 +84,16 @@ describe('processRequestApproval', () => {
       'req-1',
       'The Hobbit',
       'Tolkien',
-      'alice'
+      'alice',
+      undefined,
+      'audiobook'
     );
   });
 
-  it('approves an ebook with the ebook search job', async () => {
+  it('approves an ebook with the ebook search job and ebook notification typing', async () => {
     prismaMock.request.findUnique.mockResolvedValue({ ...baseRequest, type: 'ebook' });
-    prismaMock.request.update.mockResolvedValue({ ...baseRequest, type: 'ebook', status: 'pending' });
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.request.findUniqueOrThrow.mockResolvedValue({ ...baseRequest, type: 'ebook', status: 'pending' });
 
     const { processRequestApproval } = await loadService();
     const result = await processRequestApproval({ requestId: 'req-1', action: 'approve', adminUserId: 'admin-1' });
@@ -99,6 +101,16 @@ describe('processRequestApproval', () => {
     expect(result.success).toBe(true);
     expect(jobQueueMock.addSearchEbookJob).toHaveBeenCalledTimes(1);
     expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
+    // requestType must be 'ebook' so the notification embed omits audiobook-only fields.
+    expect(jobQueueMock.addNotificationJob).toHaveBeenCalledWith(
+      'request_approved',
+      'req-1',
+      'The Hobbit (Ebook)',
+      'Tolkien',
+      'alice',
+      undefined,
+      'ebook'
+    );
   });
 
   it('downloads directly when a torrent is pre-selected', async () => {
@@ -106,31 +118,57 @@ describe('processRequestApproval', () => {
       ...baseRequest,
       selectedTorrent: { source: 'prowlarr', title: 'pick' },
     });
-    prismaMock.request.update.mockResolvedValue({ ...baseRequest, status: 'downloading' });
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.request.findUniqueOrThrow.mockResolvedValue({ ...baseRequest, status: 'downloading' });
 
     const { processRequestApproval } = await loadService();
     const result = await processRequestApproval({ requestId: 'req-1', action: 'approve', adminUserId: 'admin-1' });
 
     expect(result.success).toBe(true);
     expect(jobQueueMock.addDownloadJob).toHaveBeenCalledTimes(1);
-    expect(prismaMock.request.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ status: 'downloading' }) })
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'req-1', status: 'awaiting_approval' },
+        data: expect.objectContaining({ status: 'downloading' }),
+      })
     );
   });
 
   it('denies a request without triggering jobs or notifications', async () => {
     prismaMock.request.findUnique.mockResolvedValue(baseRequest);
-    prismaMock.request.update.mockResolvedValue({ ...baseRequest, status: 'denied' });
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.request.findUniqueOrThrow.mockResolvedValue({ ...baseRequest, status: 'denied' });
 
     const { processRequestApproval } = await loadService();
     const result = await processRequestApproval({ requestId: 'req-1', action: 'deny', adminUserId: 'admin-1' });
 
     expect(result.success).toBe(true);
     expect(result).toMatchObject({ message: 'Request denied' });
-    expect(prismaMock.request.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: 'denied' } })
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'req-1', status: 'awaiting_approval' }, data: { status: 'denied' } })
     );
     expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
+    expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+  });
+
+  it('bails as invalid_status when a concurrent actor already claimed the request', async () => {
+    // Initial read still sees 'awaiting_approval', but the atomic claim loses the race (count 0).
+    prismaMock.request.findUnique
+      .mockResolvedValueOnce(baseRequest)
+      .mockResolvedValueOnce({ status: 'downloading' });
+    prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
+
+    const { processRequestApproval } = await loadService();
+    const result = await processRequestApproval({ requestId: 'req-1', action: 'approve', adminUserId: 'admin-1' });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.reason).toBe('invalid_status');
+      expect(result.currentStatus).toBe('downloading');
+    }
+    // No jobs or notifications must fire for the losing actor.
+    expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
+    expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
     expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
   });
 });

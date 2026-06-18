@@ -64,13 +64,16 @@ function memberAvatarUrl(guildId: string, member: RawGuildMember): string {
   return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
 }
 
-/** Resolve a single member by ID to the mapping-UI shape. Falls back to a bare user fetch, then ID. */
-export async function resolveMemberById(
-  token: string,
+/**
+ * Resolve a single member by ID to the mapping-UI shape, reusing a caller-supplied REST client.
+ * Sharing one client across a batch lets discord.js coordinate rate-limit buckets (separate clients
+ * each track limits independently and would burst into 429s). Falls back to a bare user fetch, then ID.
+ */
+async function resolveMemberWithRest(
+  rest: REST,
   guildId: string,
   userId: string
 ): Promise<DiscordMemberResult> {
-  const rest = makeRest(token);
   try {
     const member = (await rest.get(Routes.guildMember(guildId, userId))) as RawGuildMember;
     if (member.user) {
@@ -105,13 +108,27 @@ export async function resolveMemberById(
   };
 }
 
-/** Resolve many member IDs at once (best-effort per ID). */
+/** Resolve a single member by ID to the mapping-UI shape. Falls back to a bare user fetch, then ID. */
+export async function resolveMemberById(
+  token: string,
+  guildId: string,
+  userId: string
+): Promise<DiscordMemberResult> {
+  return resolveMemberWithRest(makeRest(token), guildId, userId);
+}
+
+/**
+ * Resolve many member IDs at once (best-effort per ID). Uses a single shared REST client so
+ * discord.js throttles the batch through one set of rate-limit buckets instead of bursting one
+ * unthrottled client per ID.
+ */
 export async function resolveMembersByIds(
   token: string,
   guildId: string,
   ids: string[]
 ): Promise<DiscordMemberResult[]> {
-  return Promise.all(ids.map((id) => resolveMemberById(token, guildId, id)));
+  const rest = makeRest(token);
+  return Promise.all(ids.map((id) => resolveMemberWithRest(rest, guildId, id)));
 }
 
 /**

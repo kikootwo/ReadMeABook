@@ -7,6 +7,8 @@ Allows admins to review and approve/deny user requests before they are processed
 
 **Shared service:** Approve/deny logic lives in `src/lib/services/request-approval.service.ts` (`processRequestApproval`). The Web approve route (`POST /api/admin/requests/[id]/approve`) and the Discord bot's Approve/Deny buttons both call it, so the two surfaces stay in lock-step. See [integrations/discord-bot.md](../integrations/discord-bot.md).
 
+**Concurrency-safe:** The transition out of `awaiting_approval` is claimed atomically with a conditional `updateMany({ where: { id, status: 'awaiting_approval' } })`. Only the actor whose update flips the row enqueues jobs/notifications; concurrent approvals (e.g. Discord button + Web UI, or two admins) see `count === 0` and return `invalid_status` instead of double-processing. The notification carries `requestType` (`'audiobook'`/`'ebook'`) so ebook approvals render ebook-typed embeds.
+
 ## Key Details
 
 ### Request Statuses

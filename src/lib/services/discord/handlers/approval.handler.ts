@@ -233,8 +233,9 @@ export async function handleCancelRequestButton(
   }
 
   const wasAwaitingApproval = request.status === 'awaiting_approval';
-  const actorId = rmabUserId ?? `discord:${interaction.user.id}`;
-  const result = await deleteRequest(requestId, actorId);
+  // Record the RMAB user id as the actor; null when an admin-role holder has no linked account so we
+  // never persist a non-RMAB identifier as deletedBy.
+  const result = await deleteRequest(requestId, rmabUserId ?? null);
   logger.info('Request cancelled via Discord', {
     ...actorMeta(interaction.user, rmabUserId),
     requestId,

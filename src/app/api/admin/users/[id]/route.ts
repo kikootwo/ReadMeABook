@@ -70,15 +70,6 @@ export async function PUT(
           }
         }
 
-        // Prevent a user from changing their OWN role. Uses the authenticated user's role so it
-        // doesn't depend on the lookup below. Other self-updates (e.g. Discord mapping) are allowed.
-        if (req.user && id === req.user.sub && roleProvided && req.user.role !== role) {
-          return NextResponse.json(
-            { error: 'You cannot change your own role' },
-            { status: 403 }
-          );
-        }
-
         // Check if user is the setup admin, OIDC user, or deleted
         const targetUser = await prisma.user.findUnique({
           where: { id },
@@ -110,6 +101,17 @@ export async function PUT(
         const isRoleChange = roleProvided && targetUser.role !== role;
         // The role to enforce admin-permission rules against (incoming role, else the existing one)
         const effectiveRole = roleProvided ? role : targetUser.role;
+
+        // Prevent a user from changing their OWN role. Compare against the target's CURRENT DB role
+        // (targetUser.role), never the caller's JWT role — a stale token (e.g. an admin demoted in
+        // another session) must not be able to re-promote itself. Other self-updates (e.g. mapping a
+        // Discord ID) are still allowed.
+        if (req.user && id === req.user.sub && isRoleChange) {
+          return NextResponse.json(
+            { error: 'You cannot change your own role' },
+            { status: 403 }
+          );
+        }
 
         // Prevent changing setup admin role (only if role is actually being changed)
         if (targetUser.isSetupAdmin && isRoleChange && role !== 'admin') {

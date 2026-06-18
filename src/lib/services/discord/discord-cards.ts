@@ -103,10 +103,21 @@ export async function postRequestCards(
 ): Promise<DiscordCardRef[]> {
   const config = await getDiscordConfig();
   const mode = config.requestCardMode;
+
+  // The creating service enqueues a notification (which triggers editRequestCards) before this runs,
+  // and background jobs may advance the request meanwhile. Those edits no-op until the refs below are
+  // persisted, so read the live status here rather than trusting the status captured at call time —
+  // otherwise the freshly-posted card could show a stale status that no edit corrects.
+  const live = await prisma.request.findUnique({
+    where: { id: opts.requestId },
+    select: { status: true },
+  });
+  const status = live?.status ?? opts.status;
+
   const { embed, components } = buildRequestCard(
     opts.book,
     opts.mediaType,
-    opts.status,
+    status,
     opts.requestId,
     opts.requestedBy
   );

@@ -74,6 +74,16 @@ function asMediaType(value: string | undefined): MediaType | null {
   return value === 'audiobook' || value === 'ebook' ? value : null;
 }
 
+/**
+ * Parse a pagination page segment to a non-negative integer, or null if malformed. Guards against
+ * Number('') === 0 (a missing segment) and crafted negative/fractional values from tampered customIds.
+ */
+function parsePage(value: string | undefined): number | null {
+  if (value === undefined || value === '') return null;
+  const page = Number(value);
+  return Number.isInteger(page) && page >= 0 ? page : null;
+}
+
 /** Decode a Discord custom ID back into a structured value, or null if unrecognized. */
 export function decodeCustomId(raw: string): DiscordCustomId | null {
   if (raw === PREFIX.cancel) return { kind: 'cancel' };
@@ -118,23 +128,23 @@ export function decodeCustomId(raw: string): DiscordCustomId | null {
 
   // st:pg:<page>:<scopeAll>
   if (raw.startsWith(`${PREFIX.status_page}:`)) {
-    const page = Number(parts[2]);
+    const page = parsePage(parts[2]);
     const scopeAll = parts[3] === '1';
-    return Number.isFinite(page) ? { kind: 'status_page', page, scopeAll } : null;
+    return page !== null ? { kind: 'status_page', page, scopeAll } : null;
   }
 
   // st:cx:<page>:<scopeAll>
   if (raw.startsWith(`${PREFIX.status_cancel}:`)) {
-    const page = Number(parts[2]);
+    const page = parsePage(parts[2]);
     const scopeAll = parts[3] === '1';
-    return Number.isFinite(page) ? { kind: 'status_cancel', page, scopeAll } : null;
+    return page !== null ? { kind: 'status_cancel', page, scopeAll } : null;
   }
 
   // del:pg:<page>:<scopeAll>
   if (raw.startsWith(`${PREFIX.delete_page}:`)) {
-    const page = Number(parts[2]);
+    const page = parsePage(parts[2]);
     const scopeAll = parts[3] === '1';
-    return Number.isFinite(page) ? { kind: 'delete_page', page, scopeAll } : null;
+    return page !== null ? { kind: 'delete_page', page, scopeAll } : null;
   }
 
   return null;

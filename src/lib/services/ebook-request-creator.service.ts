@@ -254,7 +254,9 @@ export async function createEbookRequestForUser(
         ebookRequest.id,
         `${audiobook.title} (Ebook)`,
         audiobook.author,
-        user.plexUsername || 'Unknown User'
+        user.plexUsername || 'Unknown User',
+        undefined,
+        'ebook'
       ).catch((error) => {
         logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
       });
@@ -296,7 +298,9 @@ export async function createEbookRequestForUser(
       ebookRequest.id,
       `${audiobook.title} (Ebook)`,
       audiobook.author,
-      user.plexUsername || 'Unknown User'
+      user.plexUsername || 'Unknown User',
+      undefined,
+      'ebook'
     ).catch((error) => {
       logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
     });

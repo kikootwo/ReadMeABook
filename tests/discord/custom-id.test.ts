@@ -21,6 +21,9 @@ describe('Discord custom ID codec', () => {
     { kind: 'approval', action: 'approve', requestId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' },
     { kind: 'approval', action: 'deny', requestId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' },
     { kind: 'cancel_request', requestId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' },
+    { kind: 'status_page', page: 0, scopeAll: false },
+    { kind: 'status_cancel', page: 2, scopeAll: true },
+    { kind: 'delete_page', page: 1, scopeAll: false },
   ];
 
   it('round-trips every custom ID kind', () => {
@@ -40,6 +43,10 @@ describe('Discord custom ID codec', () => {
     expect(decodeCustomId('req:modal:movie')).toBeNull(); // invalid media type
     expect(decodeCustomId('appr:maybe:123')).toBeNull(); // invalid action
     expect(decodeCustomId('req:cf:audiobook')).toBeNull(); // missing asin
+    expect(decodeCustomId('st:pg::1')).toBeNull(); // empty page segment (Number('') === 0)
+    expect(decodeCustomId('st:pg:-5:1')).toBeNull(); // negative page
+    expect(decodeCustomId('del:pg:1.5:0')).toBeNull(); // fractional page
+    expect(decodeCustomId('st:cx:abc:0')).toBeNull(); // non-numeric page
   });
 
   it('decodes approval actions distinctly', () => {

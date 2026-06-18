@@ -36,6 +36,20 @@ export type ApprovalResult =
     };
 
 /**
+ * Result for when the atomic claim found the request no longer 'awaiting_approval' (a concurrent
+ * actor already approved/denied it). Reports the current status so the caller can surface it.
+ */
+async function staleStatusResult(id: string): Promise<ApprovalResult> {
+  const current = await prisma.request.findUnique({ where: { id }, select: { status: true } });
+  return {
+    success: false,
+    reason: 'invalid_status',
+    message: `Request is not awaiting approval (current status: ${current?.status ?? 'unknown'})`,
+    currentStatus: current?.status,
+  };
+}
+
+/**
  * Process an approve/deny action for a request awaiting approval.
  *
  * Behavior mirrors the original inline route logic exactly:
@@ -78,13 +92,28 @@ export async function processRequestApproval(
       };
     }
 
+    const jobQueue = getJobQueueService();
+    const isEbookRequest = existingRequest.type === 'ebook';
+    const requestType = isEbookRequest ? 'ebook' : 'audiobook';
+
     // Update request based on action
     if (action === 'approve') {
-      const jobQueue = getJobQueueService();
-      const isEbookRequest = existingRequest.type === 'ebook';
-
       // Use admin-provided torrent (from admin interactive search) or fall back to user's pre-selected torrent
       const effectiveTorrent = adminSelectedTorrent || existingRequest.selectedTorrent;
+
+      // Atomically claim the transition out of 'awaiting_approval' BEFORE enqueuing any jobs, so two
+      // concurrent approvals (e.g. the Discord Approve button and the Web UI, or two admins) can't
+      // both pass the status check and double-enqueue download/search jobs + notifications. Only the
+      // actor whose conditional update actually flips the row proceeds; the loser bails as stale.
+      const claim = await prisma.request.updateMany({
+        where: { id, status: 'awaiting_approval' },
+        data: effectiveTorrent
+          ? { status: 'downloading', selectedTorrent: null as any }
+          : { status: 'pending' },
+      });
+      if (claim.count === 0) {
+        return staleStatusResult(id);
+      }
 
       if (effectiveTorrent) {
         const selectedTorrent = effectiveTorrent as any;
@@ -146,23 +175,9 @@ export async function processRequestApproval(
           );
         }
 
-        // Update status to 'downloading' and clear selectedTorrent
-        const updatedRequest = await prisma.request.update({
-          where: { id },
-          data: {
-            status: 'downloading',
-            selectedTorrent: null as any, // Clear after use
-          },
-          include: {
-            audiobook: true,
-            user: {
-              select: {
-                id: true,
-                plexUsername: true,
-              },
-            },
-          },
-        });
+        // The atomic claim already flipped the row to 'downloading' and cleared selectedTorrent;
+        // derive the updated view from the data we already read (no extra round-trip needed).
+        const updatedRequest = { ...existingRequest, status: 'downloading', selectedTorrent: null };
 
         // Send notification for manual approval
         await jobQueue.addNotificationJob(
@@ -170,7 +185,9 @@ export async function processRequestApproval(
           updatedRequest.id,
           isEbookRequest ? `${existingRequest.audiobook.title} (Ebook)` : existingRequest.audiobook.title,
           existingRequest.audiobook.author,
-          existingRequest.user.plexUsername || 'Unknown User'
+          existingRequest.user.plexUsername || 'Unknown User',
+          undefined,
+          requestType
         ).catch((error) => {
           logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
         });
@@ -200,19 +217,8 @@ export async function processRequestApproval(
           type: existingRequest.type,
         });
 
-        const updatedRequest = await prisma.request.update({
-          where: { id },
-          data: { status: 'pending' },
-          include: {
-            audiobook: true,
-            user: {
-              select: {
-                id: true,
-                plexUsername: true,
-              },
-            },
-          },
-        });
+        // The atomic claim already flipped the row to 'pending'; derive the updated view.
+        const updatedRequest = { ...existingRequest, status: 'pending' };
 
         // Trigger appropriate search job based on request type
         if (isEbookRequest) {
@@ -237,7 +243,9 @@ export async function processRequestApproval(
           updatedRequest.id,
           isEbookRequest ? `${updatedRequest.audiobook.title} (Ebook)` : updatedRequest.audiobook.title,
           updatedRequest.audiobook.author,
-          updatedRequest.user.plexUsername || 'Unknown User'
+          updatedRequest.user.plexUsername || 'Unknown User',
+          undefined,
+          requestType
         ).catch((error) => {
           logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
         });
@@ -259,20 +267,17 @@ export async function processRequestApproval(
         };
       }
     } else {
-      // Deny: Change status to 'denied'
-      const updatedRequest = await prisma.request.update({
-        where: { id },
+      // Deny: atomically claim the transition to 'denied' so a concurrent approve/deny can't both
+      // act on the same request.
+      const claim = await prisma.request.updateMany({
+        where: { id, status: 'awaiting_approval' },
         data: { status: 'denied' },
-        include: {
-          audiobook: true,
-          user: {
-            select: {
-              id: true,
-              plexUsername: true,
-            },
-          },
-        },
       });
+      if (claim.count === 0) {
+        return staleStatusResult(id);
+      }
+
+      const updatedRequest = { ...existingRequest, status: 'denied' };
 
       logger.info(`Request ${id} denied by admin ${adminUserId}`, {
         requestId: id,

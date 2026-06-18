@@ -542,13 +542,7 @@ describe('Request Approval Workflow', () => {
         user: { id: 'user-1', plexUsername: 'testuser' },
       } as any);
 
-      prismaMock.request.update.mockResolvedValue({
-        id: 'req-1',
-        status: 'pending',
-        userId: 'user-1',
-        audiobook: { id: 'ab-1', title: 'Test Book', author: 'Test Author', audibleAsin: 'ASIN-1' },
-        user: { id: 'user-1', plexUsername: 'testuser' },
-      } as any);
+      prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
 
       const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
       const response = await POST(mockRequest as any, { params: Promise.resolve({ id: 'req-1' }) });
@@ -557,18 +551,10 @@ describe('Request Approval Workflow', () => {
       expect(response.status).toBe(200);
       expect(payload.success).toBe(true);
       expect(payload.message).toContain('approved');
-      expect(prismaMock.request.update).toHaveBeenCalledWith({
-        where: { id: 'req-1' },
+      // The transition is claimed atomically, gated on the current status.
+      expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+        where: { id: 'req-1', status: 'awaiting_approval' },
         data: { status: 'pending' },
-        include: {
-          audiobook: true,
-          user: {
-            select: {
-              id: true,
-              plexUsername: true,
-            },
-          },
-        },
       });
       expect(jobQueueMock.addSearchJob).toHaveBeenCalledWith('req-1', {
         id: 'ab-1',
@@ -592,13 +578,7 @@ describe('Request Approval Workflow', () => {
         user: { id: 'user-1', plexUsername: 'testuser' },
       } as any);
 
-      prismaMock.request.update.mockResolvedValue({
-        id: 'req-2',
-        status: 'denied',
-        userId: 'user-1',
-        audiobook: { id: 'ab-2', title: 'Test Book 2', author: 'Test Author 2', audibleAsin: 'ASIN-2' },
-        user: { id: 'user-1', plexUsername: 'testuser' },
-      } as any);
+      prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
 
       const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
       const response = await POST(mockRequest as any, { params: Promise.resolve({ id: 'req-2' }) });
@@ -607,18 +587,10 @@ describe('Request Approval Workflow', () => {
       expect(response.status).toBe(200);
       expect(payload.success).toBe(true);
       expect(payload.message).toContain('denied');
-      expect(prismaMock.request.update).toHaveBeenCalledWith({
-        where: { id: 'req-2' },
+      // The transition is claimed atomically, gated on the current status.
+      expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+        where: { id: 'req-2', status: 'awaiting_approval' },
         data: { status: 'denied' },
-        include: {
-          audiobook: true,
-          user: {
-            select: {
-              id: true,
-              plexUsername: true,
-            },
-          },
-        },
       });
       expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
     });
