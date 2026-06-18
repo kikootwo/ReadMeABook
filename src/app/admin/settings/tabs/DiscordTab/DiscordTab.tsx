@@ -58,6 +58,8 @@ export function DiscordTab() {
     ? `https://discord.com/oauth2/authorize?client_id=${botIdentity.id}&permissions=84992&scope=bot%20applications.commands`
     : null;
 
+  const botName = botIdentity ? botIdentity.username : 'Bot Name';
+
   const resolvedHint = (field?: { name: string | null; error?: string }) => {
     if (!field) return undefined;
     if (field.name) {
@@ -197,6 +199,20 @@ export function DiscordTab() {
         </div>
       </div>
 
+      {/* Permissions reminder */}
+      <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-800/60 dark:bg-blue-950/40 dark:text-blue-200">
+        <strong>Important:</strong> 
+        <br />
+        For the bot to work, it must be able to
+        view and post in the Request and Admin Notify channels you enroll below. 
+        Check the Discord channel permissions for the enrolled bot if messages aren&apos;t appearing, especially if its private.
+        <br />
+        <br />
+        You also need to explicitly enable the bot&apos;s slash commands (<code>/request</code>,{' '}
+        <code>/status</code>, <code>/delete</code>) for the channels and roles that should use them:{' '}
+        <strong>Server Settings → Integrations → {botName}</strong>.
+      </div>
+
       {/* IDs */}
       <Input
         label="Server (Guild) ID"
@@ -313,8 +329,8 @@ export function DiscordTab() {
             <strong>Note:</strong> This hides <code>/delete</code> from non-administrators in
             Discord. If your admins don&apos;t have Discord&apos;s built-in Administrator permission,
             they&apos;ll need a per-command exception: <strong>Server Settings → Integrations →{' '}
-            {botIdentity ? botIdentity.username : 'your bot'} → /delete</strong>, then add the admin
-            role or specific users who should have access.
+            {botName} → /delete</strong>, then add the admin role or specific users who should have
+            access.
           </div>
         )}
       </div>
