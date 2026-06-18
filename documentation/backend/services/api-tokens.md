@@ -27,6 +27,8 @@ Static `rmab_`-prefixed tokens act with the owner's full user-level permissions 
 | GET | `/api/admin/metrics` | System metrics | | ✓ |
 | GET | `/api/admin/downloads/active` | Active downloads | | ✓ |
 | GET | `/api/admin/requests/recent` | Recent requests | | ✓ |
+| GET | `/api/admin/requests/pending-approval` | Pending approvals | | ✓ |
+| POST | `/api/admin/requests/:id/approve` | Approve or deny request | ✓ | ✓ |
 
 Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS`, `API_TOKEN_ENDPOINT_DOCS`).
 
@@ -56,6 +58,16 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - Soft-deleted requests (`deletedAt != null`) return 404.
 - Response: `200 { success: true, message, details: { filesDeleted, torrentsRemoved, torrentsKeptSeeding, torrentsKeptUnlimited } }`
 - The request can be re-created after deletion (soft delete preserves audit trail).
+
+## GET `/api/admin/requests/pending-approval` (admin)
+- Returns requests in `awaiting_approval` with audiobook metadata + requester info (id, Plex username, avatar).
+- Handler (`src/app/api/admin/requests/pending-approval/route.ts`) enforces `requireAdmin` → admin-owned token required.
+
+## POST `/api/admin/requests/:id/approve` (Write, admin)
+- Body: `{ "action": "approve" | "deny" }`.
+- Approve → status `pending` + search job queued, or `downloading` if a release was pre-selected; deny → status `denied`.
+- Handler (`src/app/api/admin/requests/[id]/approve/route.ts`) enforces `requireAdmin` → admin-owned token required.
+- Returns `400` if the request is not in `awaiting_approval`, `404` if not found.
 
 ## GET `/api/audiobooks/search`
 - Auth is optional, NOT gated by allowlist (route never calls `requireAuth`).

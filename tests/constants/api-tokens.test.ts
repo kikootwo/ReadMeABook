@@ -22,6 +22,8 @@ describe('isEndpointAllowed', () => {
       ['GET', '/api/admin/metrics'],
       ['GET', '/api/admin/downloads/active'],
       ['GET', '/api/admin/requests/recent'],
+      ['GET', '/api/admin/requests/pending-approval'],
+      ['POST', '/api/admin/requests/abc-uuid-123/approve'],
     ];
 
     it.each(cases)('%s %s is allowed', (method, path) => {

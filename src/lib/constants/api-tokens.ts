@@ -56,6 +56,8 @@ export const API_TOKEN_ALLOWED_ENDPOINTS: readonly AllowedEndpoint[] = [
   { method: 'GET', path: '/api/admin/metrics' },
   { method: 'GET', path: '/api/admin/downloads/active' },
   { method: 'GET', path: '/api/admin/requests/recent' },
+  { method: 'GET', path: '/api/admin/requests/pending-approval' },
+  { method: 'POST', path: '/api/admin/requests/:id/approve' },
 ] as const;
 
 /**
@@ -136,6 +138,23 @@ export const API_TOKEN_ENDPOINT_DOCS: readonly EndpointDoc[] = [
     description:
       'Returns the most recent audiobook requests across all users.',
     requiresAdmin: true,
+  },
+  {
+    method: 'GET',
+    path: '/api/admin/requests/pending-approval',
+    title: 'Pending approvals',
+    description:
+      'Returns requests awaiting admin approval, including audiobook metadata and requester info (id, Plex username, avatar).',
+    requiresAdmin: true,
+  },
+  {
+    method: 'POST',
+    path: '/api/admin/requests/:id/approve',
+    title: 'Approve or deny request',
+    description:
+      'Approve or deny a request that is awaiting approval. Body: `{ "action": "approve" | "deny" }`. Approve triggers a search (status → `pending`), or goes straight to `downloading` if a release was pre-selected; deny sets status → `denied`. Returns 400 if the request is not in `awaiting_approval`.',
+    requiresAdmin: true,
+    isWrite: true,
   },
 ] as const;
 
