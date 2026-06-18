@@ -16,6 +16,21 @@ import type { DiscordSettings } from '../../lib/types';
 import { useDiscordSettings } from './useDiscordSettings';
 import { MapUsersModal, pillStyle } from './MapUsersModal';
 
+function resolveDiagnostic(error: string): string | null {
+  const e = error.toLowerCase();
+  if (e.includes('unknown guild'))
+    return 'the bot is not a member of this server. Invite it using the button above.';
+  if (e.includes('missing access'))
+    return 'the bot is in the server but lacks permission to view this resource.';
+  if (e.includes('unknown channel'))
+    return 'no channel with this ID exists in the server. Double-check the ID.';
+  if (e.includes('role not found') || e.includes('unknown role'))
+    return 'no role with this ID exists in the server. Double-check the ID.';
+  if (e.includes('invalid') && e.includes('token'))
+    return 'the bot token is invalid or has been regenerated. Paste a fresh token and re-test.';
+  return null;
+}
+
 export function DiscordTab() {
   const {
     settings,
@@ -39,9 +54,25 @@ export function DiscordTab() {
     return <div className="text-gray-500 dark:text-gray-400">Loading…</div>;
   }
 
+  const inviteUrl = botIdentity
+    ? `https://discord.com/oauth2/authorize?client_id=${botIdentity.id}&permissions=84992&scope=bot%20applications.commands`
+    : null;
+
   const resolvedHint = (field?: { name: string | null; error?: string }) => {
     if (!field) return undefined;
-    return field.name ? `Resolved: ${field.name}` : field.error || 'Could not resolve';
+    if (field.name) {
+      return (
+        <span className="text-green-600 dark:text-green-400 font-medium">&#10003; {field.name}</span>
+      );
+    }
+    const error = field.error || 'Could not resolve';
+    const tip = resolveDiagnostic(error);
+    return (
+      <span className="text-red-600 dark:text-red-400">
+        &#10007; {error}
+        {tip && <span className="text-red-500/80 dark:text-red-400/80"> &mdash; {tip}</span>}
+      </span>
+    );
   };
 
   return (
@@ -108,30 +139,49 @@ export function DiscordTab() {
             {testing ? 'Testing…' : 'Test Token'}
           </Button>
           {botIdentity && (
-            <a
-              href={`https://discord.com/developers/applications/${botIdentity.id}/bot`}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Open this bot's configuration in the Discord Developer Portal"
-              className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium hover:brightness-95 transition"
-              style={pillStyle(botIdentity.id)}
-            >
-              <img
-                src={botIdentity.avatarUrl}
-                alt=""
-                className="h-4 w-4 rounded-full object-cover"
-              />
-              {botIdentity.username}
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                className="h-3 w-3 opacity-60"
+            <>
+              <a
+                href={`https://discord.com/developers/applications/${botIdentity.id}/bot`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open this bot's configuration in the Discord Developer Portal"
+                className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium hover:brightness-95 transition"
+                style={pillStyle(botIdentity.id)}
               >
-                <path d="M8.5 2.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0V3.707L8.354 8.854a.5.5 0 1 1-.708-.708L12.293 3H9a.5.5 0 0 1-.5-.5z" />
-                <path d="M3.5 4A1.5 1.5 0 0 0 2 5.5v7A1.5 1.5 0 0 0 3.5 14h7a1.5 1.5 0 0 0 1.5-1.5V9a.5.5 0 0 1 1 0v3.5A2.5 2.5 0 0 1 11 15H3.5A2.5 2.5 0 0 1 1 12.5v-7A2.5 2.5 0 0 1 3.5 3H7a.5.5 0 0 1 0 1H3.5z" />
-              </svg>
-            </a>
+                <img
+                  src={botIdentity.avatarUrl}
+                  alt=""
+                  className="h-4 w-4 rounded-full object-cover"
+                />
+                {botIdentity.username}
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                  className="h-3 w-3 opacity-60"
+                >
+                  <path d="M8.5 2.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0V3.707L8.354 8.854a.5.5 0 1 1-.708-.708L12.293 3H9a.5.5 0 0 1-.5-.5z" />
+                  <path d="M3.5 4A1.5 1.5 0 0 0 2 5.5v7A1.5 1.5 0 0 0 3.5 14h7a1.5 1.5 0 0 0 1.5-1.5V9a.5.5 0 0 1 1 0v3.5A2.5 2.5 0 0 1 11 15H3.5A2.5 2.5 0 0 1 1 12.5v-7A2.5 2.5 0 0 1 3.5 3H7a.5.5 0 0 1 0 1H3.5z" />
+                </svg>
+              </a>
+              <a
+                href={inviteUrl!}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Invite the bot to your Discord server with the required permissions"
+                className="inline-flex items-center gap-1.5 rounded-md border border-indigo-300 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-950 px-2.5 py-1 text-xs font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 transition"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  className="h-3.5 w-3.5"
+                >
+                  <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+                </svg>
+                Invite to Server
+              </a>
+            </>
           )}
           {testResult && (
             <span
