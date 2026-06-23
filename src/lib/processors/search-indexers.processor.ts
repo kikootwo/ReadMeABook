@@ -14,6 +14,23 @@ import { filterBlockedResults } from '../utils/filter-blocked-results';
 import type { AudibleRegion } from '../types/audible';
 
 /**
+ * Minimum acceptable quality score (0-100, base + final).
+ * Lowered from 50 → 40: on a single high-quality indexer (e.g. MAM) genuinely
+ * low-quality torrents are rare, so the old bar mostly rejected correct books
+ * with modest size/seeder scores. Wrong books are still excluded because they
+ * earn matchScore=0 (failed title/author gate) — see MIN_MATCH_SCORE.
+ */
+const MIN_QUALITY_SCORE = 40;
+
+/**
+ * A correctly-identified book must clear the title/author match gate.
+ * matchScore is 0 when the author is absent or <80% of required title words
+ * are present, so requiring >0 keeps wrong-book torrents out even though the
+ * overall quality bar is relaxed.
+ */
+const MIN_MATCH_SCORE = 1;
+
+/**
  * Process search indexers job
  * Searches configured indexers for audiobook torrents
  */
@@ -199,24 +216,28 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     }
 
     // Dual threshold filtering:
-    // 1. Base score must be >= 50 (quality minimum)
-    // 2. Final score must be >= 50 (not disqualified by negative bonuses)
+    // 1. Base score must be >= MIN_QUALITY_SCORE (quality minimum)
+    // 2. Final score must be >= MIN_QUALITY_SCORE (not disqualified by negative bonuses)
+    // 3. Title/author match gate must have passed (matchScore > 0) so the
+    //    relaxed quality bar can't admit a wrong book.
     const filteredResults = rankedResults.filter(result =>
-      result.score >= 50 && result.finalScore >= 50
+      result.score >= MIN_QUALITY_SCORE &&
+      result.finalScore >= MIN_QUALITY_SCORE &&
+      result.breakdown.matchScore >= MIN_MATCH_SCORE
     );
 
     const disqualifiedByNegativeBonus = rankedResults.filter(result =>
-      result.score >= 50 && result.finalScore < 50
+      result.score >= MIN_QUALITY_SCORE && result.finalScore < MIN_QUALITY_SCORE
     ).length;
 
-    logger.info(`Ranked ${rankedResults.length} results, ${filteredResults.length} above threshold (50/100 base + final)`);
+    logger.info(`Ranked ${rankedResults.length} results, ${filteredResults.length} above threshold (${MIN_QUALITY_SCORE}/100 base + final, match>0)`);
     if (disqualifiedByNegativeBonus > 0) {
       logger.info(`${disqualifiedByNegativeBonus} torrents disqualified by negative flag bonuses`);
     }
 
     if (filteredResults.length === 0) {
       // No quality results found - queue for re-search instead of failing
-      logger.warn(`No quality matches found for request ${requestId} (all below 50/100), marking as awaiting_search`);
+      logger.warn(`No quality matches found for request ${requestId} (all below ${MIN_QUALITY_SCORE}/100 or failed title/author match), marking as awaiting_search`);
 
       await prisma.request.update({
         where: { id: requestId },

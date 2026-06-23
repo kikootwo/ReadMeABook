@@ -1398,6 +1398,87 @@ describe('ranking-algorithm', () => {
       expect(ranked[0].bonusModifiers.length).toBeGreaterThan(0);
     });
   });
+
+  describe('Author Initials Normalization', () => {
+    const algorithm = new RankingAlgorithm();
+
+    it('matches compacted author initials against spaced initials (TJ Klune ≡ T J Klune)', () => {
+      const torrent = {
+        ...baseTorrent,
+        title: 'Olive Juice by T J Klune [ENG / M4B]',
+      };
+
+      const breakdown = algorithm.getScoreBreakdown(torrent, {
+        title: 'Olive Juice',
+        author: 'TJ Klune',
+      });
+
+      // Author gate must pass and full title match must score
+      expect(breakdown.matchScore).toBeGreaterThan(50);
+    });
+
+    it('matches spaced initials against compacted (J D Robb ≡ JD Robb)', () => {
+      const torrent = {
+        ...baseTorrent,
+        title: 'Naked in Death by JD Robb',
+      };
+
+      const breakdown = algorithm.getScoreBreakdown(torrent, {
+        title: 'Naked in Death',
+        author: 'J D Robb',
+      });
+
+      expect(breakdown.matchScore).toBeGreaterThan(50);
+    });
+
+    it('matches three-part initials (George R R Martin ≡ George RR Martin)', () => {
+      const torrent = {
+        ...baseTorrent,
+        title: 'A Game of Thrones by George RR Martin',
+      };
+
+      const breakdown = algorithm.getScoreBreakdown(torrent, {
+        title: 'A Game of Thrones',
+        author: 'George R R Martin',
+      });
+
+      expect(breakdown.matchScore).toBeGreaterThan(50);
+    });
+
+    it('still rejects a wrong author even with initials normalization', () => {
+      const torrent = {
+        ...baseTorrent,
+        title: 'Some Other Book by Jane Doe',
+      };
+
+      const breakdown = algorithm.getScoreBreakdown(torrent, {
+        title: 'Olive Juice',
+        author: 'TJ Klune',
+      });
+
+      // Author gate fails → entire match block zeroed
+      expect(breakdown.matchScore).toBe(0);
+    });
+
+    it('selects the real Olive Juice torrent end-to-end (regression)', () => {
+      // Real MAM result: 141 MB M4B, 36 seeders, runtime 311 min
+      const torrent = {
+        ...baseTorrent,
+        title: 'Olive Juice by T J Klune [ENG / M4B]',
+        size: 148268640,
+        seeders: 36,
+      };
+
+      const ranked = rankTorrents(
+        [torrent],
+        { title: 'Olive Juice', author: 'TJ Klune', durationMinutes: 311 }
+      );
+
+      expect(ranked).toHaveLength(1);
+      // Base score comfortably clears the lowered 40/100 bar
+      expect(ranked[0].score).toBeGreaterThan(40);
+    });
+  });
 });
 
 
