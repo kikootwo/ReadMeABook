@@ -61,6 +61,7 @@
 - **Indexer categories (audiobook/ebook tabs)** → [settings-pages.md](settings-pages.md#indexer-categories-tabbed)
 
 ## Automation Pipeline
+- **Series bundle decomposition (split a series box-set into per-book requests)** → [features/series-bundle-decomposition.md](features/series-bundle-decomposition.md)
 - **Full pipeline overview** → [phase3/README.md](phase3/README.md)
 - **Search via Prowlarr (torrents + NZBs)** → [phase3/prowlarr.md](phase3/prowlarr.md)
 - **Torrent ranking/selection** → [phase3/ranking-algorithm.md](phase3/ranking-algorithm.md)
@@ -140,6 +141,9 @@
 **"How do I configure ebook categories per indexer?"** → [settings-pages.md](settings-pages.md#indexer-categories-tabbed)
 **"How does ebook ranking work?"** → [phase3/ranking-algorithm.md](phase3/ranking-algorithm.md#ebook-torrent-ranking)
 **"What happens when I delete an ebook request?"** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#delete-behavior)
+**"How do ebooks get sent to my Kindle / e-reader?"** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#e-reader-delivery)
+**"How do I enroll a user's e-reader devices?"** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#e-reader-delivery) (Admin → Users)
+**"How do I save ebooks to a different folder/library?"** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#section-4-ebook-destination)
 **"Why do ebook requests have an orange badge?"** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#ui-representation)
 **"How do scheduled jobs work?"** → [backend/services/scheduler.md](backend/services/scheduler.md)
 **"How do I configure external services?"** → [setup-wizard.md](setup-wizard.md), [settings-pages.md](settings-pages.md)
@@ -179,6 +183,8 @@
 **"How do Hardcover shelves work?"** → [backend/services/hardcover-sync.md](backend/services/hardcover-sync.md)
 **"How do I add a new shelf provider?"** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#adding-a-new-provider)
 **"How does the shelf sync core work?"** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#shared-sync-core)
+**"Why does requesting a 'Trilogy' or 'Complete Series' fail?"** → [features/series-bundle-decomposition.md](features/series-bundle-decomposition.md) (it's auto-split into per-book requests)
+**"How do series box-sets get split into individual books?"** → [features/series-bundle-decomposition.md](features/series-bundle-decomposition.md)
 **"How does bulk import work?"** → [features/bulk-import.md](features/bulk-import.md)
 **"How do I import multiple audiobooks at once?"** → [features/bulk-import.md](features/bulk-import.md)
 **"How does the bulk import scanner detect audiobooks?"** → [features/bulk-import.md](features/bulk-import.md)

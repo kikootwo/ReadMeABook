@@ -211,7 +211,9 @@ export function useCreateRequest() {
       // Revalidate audiobook lists to update button states
       mutate((key) => typeof key === 'string' && key.includes('/api/audiobooks'));
 
-      return data.request;
+      // Return the full response so callers can detect a series-bundle split
+      // ({ decomposed, count, books, message }) vs a normal single request ({ request }).
+      return data;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       setError(message);

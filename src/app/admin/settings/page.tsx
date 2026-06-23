@@ -329,6 +329,7 @@ export default function AdminSettings() {
           {activeTab === 'ebook' && (
             <EbookTab
               ebook={settings.ebook}
+              backendMode={settings.backendMode}
               onChange={(ebook) => setSettings({ ...settings, ebook })}
               onSuccess={(msg) => setMessage({ type: 'success', text: msg })}
               onError={(msg) => setMessage({ type: 'error', text: msg })}

@@ -56,6 +56,7 @@ export function AudiobookCard({
   const { user } = useAuth();
   const { createRequest, isLoading } = useCreateRequest();
   const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('Request created!');
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [localRequestStatus, setLocalRequestStatus] = useState<string | undefined>(undefined);
@@ -78,8 +79,15 @@ export function AudiobookCard({
     }
 
     try {
-      await createRequest(audiobook);
-      setLocalRequestStatus('pending');
+      const result = await createRequest(audiobook);
+      // A series bundle was split into individual per-book requests — don't mark
+      // the (un-requested) bundle item itself as pending.
+      if (result?.decomposed) {
+        setToastMessage(result.message || 'Series bundle split into individual book requests');
+      } else {
+        setLocalRequestStatus('pending');
+        setToastMessage('Request created!');
+      }
       setShowToast(true);
       setTimeout(() => setShowToast(false), 2500);
       onRequestSuccess?.();
@@ -255,7 +263,7 @@ export function AudiobookCard({
             ${showToast ? 'bg-emerald-500/95 text-white' : 'bg-red-500/95 text-white'}
           `}>
             <p className="text-sm font-medium">
-              {showToast ? 'Request created!' : error}
+              {showToast ? toastMessage : error}
             </p>
           </div>
         )}

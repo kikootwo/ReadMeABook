@@ -70,6 +70,17 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      // Series bundle was split into per-book requests
+      if ('decomposed' in result) {
+        return NextResponse.json({
+          success: true,
+          decomposed: true,
+          count: result.count,
+          books: result.books,
+          message: result.message,
+        }, { status: 201 });
+      }
+
       return NextResponse.json({
         success: true,
         request: result.request,

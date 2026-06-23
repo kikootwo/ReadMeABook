@@ -87,6 +87,10 @@ export function useEbookSettings({ ebook, onChange, onSuccess, onError, markAsSa
           flaresolverrUrl: ebook.flaresolverrUrl || '',
           autoGrabEnabled: ebook.autoGrabEnabled ?? true,
           kindleFixEnabled: ebook.kindleFixEnabled ?? false,
+          ereaderAutoSendEnabled: ebook.ereaderAutoSendEnabled ?? false,
+          ebookDestinationMode: ebook.ebookDestinationMode || 'same',
+          ebookDestinationLibraryId: ebook.ebookDestinationLibraryId || '',
+          ebookDestinationPath: ebook.ebookDestinationPath || '',
         }),
       });
 

@@ -26,10 +26,10 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - Request ID, title, progress %, speed, ETA, user
 
 **GET /api/admin/requests** (Paginated)
-- Query params: `page`, `pageSize` (10|25|50|100), `search`, `status`, `userId`, `sortBy`, `sortOrder`
+- Query params: `page`, `pageSize` (10|25|50|100), `search`, `status`, `type` (all|audiobook|ebook), `userId`, `sortBy`, `sortOrder`
 - Returns: `requests[]`, `total`, `page`, `pageSize`, `totalPages`
 - Sorting: createdAt (default), completedAt, title, user, status
-- Filtering: by status, by user, text search (title/author)
+- Filtering: by status, by type, by user, text search (title/author)
 
 **GET /api/admin/requests/recent** (Legacy)
 - Request ID, title, user, status, created/completed dates
@@ -75,8 +75,10 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - **Filter Bar:**
   - Text search (title/author, 300ms debounce)
   - Status dropdown (all statuses)
+  - Type dropdown (All Types / Audiobooks / Ebooks)
   - User dropdown (all users)
   - Clear filters button
+  - All filters stored in URL query params (`type` param omitted when `all`)
 - **Sortable Columns:** Click headers to sort by title, user, status, requested, completed
 - **Pagination:** Page navigation, page size selector (10/25/50/100), results count
 - **URL State:** Filters/sort/page stored in URL query params (shareable, bookmarkable)

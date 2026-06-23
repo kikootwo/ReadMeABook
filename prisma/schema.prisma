@@ -63,6 +63,10 @@ model User {
   // Session invalidation (set when login token is revoked to force-logout active sessions)
   sessionsInvalidatedAt DateTime? @map("sessions_invalidated_at")
 
+  // E-reader delivery: enrolled Audiobookshelf e-reader device names (JSON array of strings).
+  // Ebooks this user requested are auto-emailed to each device. See documentation/integrations/ebook-sidecar.md
+  ereaderDeviceNames Json? @map("ereader_device_names")
+
   // Soft delete support
   deletedAt DateTime? @map("deleted_at")
   deletedBy String?   @map("deleted_by") // Admin user ID who deleted this user
@@ -247,6 +251,11 @@ model Request {
   // Ebook requests are created automatically when an audiobook is organized (if ebook downloads enabled)
   type             String    @default("audiobook") // 'audiobook' | 'ebook'
   parentRequestId  String?   @map("parent_request_id") // Links ebook request to originating audiobook request
+
+  // E-reader delivery: device names already successfully emailed for this (ebook) request (JSON array).
+  // Provides idempotency (no duplicate sends on re-organize/retry) and enables late delivery to new
+  // requesters. See documentation/integrations/ebook-sidecar.md
+  ereaderSentDevices Json? @map("ereader_sent_devices")
 
   // Soft delete support
   deletedAt DateTime? @map("deleted_at")

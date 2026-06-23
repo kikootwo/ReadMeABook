@@ -29,6 +29,12 @@ export interface ABSBookMetadata {
   explicit: boolean;
 }
 
+export interface ABSEreaderDevice {
+  name: string;
+  email: string;
+  availabilityOption?: string;
+}
+
 export interface ABSAudioFile {
   index: number;
   ino: string;

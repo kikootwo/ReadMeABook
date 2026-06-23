@@ -63,8 +63,13 @@ async function fetchViaFlareSolverr(
     maxTimeout: timeout,
   };
 
+  // Strip any trailing slash(es) so a configured URL like "http://byparr:8191/"
+  // doesn't build "http://byparr:8191//v1" — byparr returns 404 on the double
+  // slash (real FlareSolverr tolerates it), which silently breaks extraction.
+  const endpoint = `${flaresolverrUrl.replace(/\/+$/, '')}/v1`;
+
   const response = await axios.post<FlareSolverrResponse>(
-    `${flaresolverrUrl}/v1`,
+    endpoint,
     requestBody,
     {
       headers: { 'Content-Type': 'application/json' },

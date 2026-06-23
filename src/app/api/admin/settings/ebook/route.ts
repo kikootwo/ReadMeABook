@@ -14,7 +14,8 @@ export async function PUT(request: NextRequest) {
     return requireAdmin(req, async () => {
       try {
         // Parse request body - new structure with separate source toggles
-        const { annasArchiveEnabled, indexerSearchEnabled, format, baseUrl, flaresolverrUrl, autoGrabEnabled, kindleFixEnabled } = await request.json();
+        const { annasArchiveEnabled, indexerSearchEnabled, format, baseUrl, flaresolverrUrl, autoGrabEnabled, kindleFixEnabled,
+          ereaderAutoSendEnabled, ebookDestinationMode, ebookDestinationLibraryId, ebookDestinationPath } = await request.json();
 
         // Enforce: auto-grab must be false if no sources are enabled
         const effectiveAutoGrabEnabled = (annasArchiveEnabled || indexerSearchEnabled) ? (autoGrabEnabled ?? true) : false;
@@ -24,6 +25,27 @@ export async function PUT(request: NextRequest) {
         if (format && !validFormats.includes(format)) {
           return NextResponse.json(
             { error: `Invalid format. Must be one of: ${validFormats.join(', ')}` },
+            { status: 400 }
+          );
+        }
+
+        // Validate ebook destination mode + required companion fields
+        const destinationMode = ebookDestinationMode || 'same';
+        if (!['same', 'library', 'custom'].includes(destinationMode)) {
+          return NextResponse.json(
+            { error: 'Invalid ebook destination mode. Must be one of: same, library, custom' },
+            { status: 400 }
+          );
+        }
+        if (destinationMode === 'library' && !ebookDestinationLibraryId) {
+          return NextResponse.json(
+            { error: 'An Audiobookshelf library must be selected when destination mode is "library"' },
+            { status: 400 }
+          );
+        }
+        if (destinationMode === 'custom' && !(ebookDestinationPath && String(ebookDestinationPath).trim())) {
+          return NextResponse.json(
+            { error: 'A path is required when destination mode is "custom"' },
             { status: 400 }
           );
         }
@@ -94,6 +116,32 @@ export async function PUT(request: NextRequest) {
             value: kindleFixEnabled ? 'true' : 'false',
             category: 'ebook',
             description: 'Apply compatibility fixes to EPUB files for Kindle import',
+          },
+          // E-reader delivery (ABS only)
+          {
+            key: 'ebook_ereader_auto_send_enabled',
+            value: ereaderAutoSendEnabled ? 'true' : 'false',
+            category: 'ebook',
+            description: 'Automatically send organized ebooks to requesters\' e-reader devices via Audiobookshelf',
+          },
+          // Ebook destination
+          {
+            key: 'ebook_destination_mode',
+            value: destinationMode,
+            category: 'ebook',
+            description: 'Where the ebook sidecar saves files: same (audiobook folder), library (ABS library), custom (path)',
+          },
+          {
+            key: 'ebook_destination_library_id',
+            value: ebookDestinationLibraryId || '',
+            category: 'ebook',
+            description: 'Audiobookshelf library ID for ebook destination (when mode is "library")',
+          },
+          {
+            key: 'ebook_destination_path',
+            value: (ebookDestinationPath && String(ebookDestinationPath).trim()) || '',
+            category: 'ebook',
+            description: 'Custom filesystem path for ebook destination (when mode is "custom")',
           },
         ];
 

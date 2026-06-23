@@ -77,7 +77,7 @@ src/app/admin/settings/
 
 **Purpose:** Configure ebook download sources and preferences to accompany audiobook downloads.
 
-**Tab Structure (3 sections):**
+**Tab Structure (5 sections):**
 
 1. **Anna's Archive Section**
    - Enable toggle for Anna's Archive downloads
@@ -93,6 +93,12 @@ src/app/admin/settings/
    - Auto-grab toggle: Automatically create ebook requests after audiobook downloads
    - Kindle fix toggle: Apply compatibility fixes to EPUB files (only visible when EPUB format selected)
 
+4. **Ebook Destination Section** (visible when any source enabled)
+   - Mode dropdown: Same folder as audiobook / Existing ABS library (ABS-only, reveals a library dropdown) / Custom path (reveals a path field)
+
+5. **E-Reader Delivery Section** (ABS mode only, visible when any source enabled)
+   - Toggle: auto-email organized ebooks to requesters' enrolled e-reader devices. Per-user devices are assigned in Admin → Users. See [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#e-reader-delivery)
+
 **Configuration Keys:**
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -103,6 +109,10 @@ src/app/admin/settings/
 | `ebook_kindle_fix_enabled` | `false` | Apply Kindle compatibility fixes to EPUB files |
 | `ebook_sidecar_base_url` | `https://annas-archive.gl` | Anna's Archive mirror |
 | `ebook_sidecar_flaresolverr_url` | `` | FlareSolverr URL |
+| `ebook_destination_mode` | `same` | Ebook destination: `same` / `library` / `custom` |
+| `ebook_destination_library_id` | `` | Target ABS library (mode=`library`) |
+| `ebook_destination_path` | `` | Custom base path (mode=`custom`) |
+| `ebook_ereader_auto_send_enabled` | `false` | Auto-send ebooks to requesters' e-reader devices (ABS) |
 
 **Behavior:**
 - If Anna's Archive enabled → Searches Anna's Archive first

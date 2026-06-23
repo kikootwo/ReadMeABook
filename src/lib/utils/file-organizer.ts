@@ -986,14 +986,17 @@ export class FileOrganizer {
 /**
  * Get FileOrganizer instance configured from database settings
  * Reads media_dir, file_chmod, dir_chmod from database configuration
+ *
+ * @param mediaDirOverride - Optional base directory to use instead of the configured media_dir
+ *   (used by the ebook sidecar when a separate ebook destination is configured).
  */
-export async function getFileOrganizer(): Promise<FileOrganizer> {
+export async function getFileOrganizer(mediaDirOverride?: string): Promise<FileOrganizer> {
   // Read media_dir from database config
   const config = await prisma.configuration.findUnique({
     where: { key: 'media_dir' },
   });
 
-  const mediaDir = config?.value || process.env.MEDIA_DIR || '/media/audiobooks';
+  const mediaDir = mediaDirOverride || config?.value || process.env.MEDIA_DIR || '/media/audiobooks';
   const tempDir = process.env.TEMP_DIR || '/tmp/readmeabook';
 
   // Read file/directory permission settings

@@ -71,6 +71,12 @@ const STATUS_OPTIONS = [
   { value: 'denied', label: 'Denied' },
 ];
 
+const TYPE_OPTIONS = [
+  { value: 'all', label: 'All Types' },
+  { value: 'audiobook', label: 'Audiobooks' },
+  { value: 'ebook', label: 'Ebooks' },
+];
+
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 type SortField = 'createdAt' | 'completedAt' | 'title' | 'user' | 'status';
@@ -141,6 +147,7 @@ function getInitialParams(): {
   pageSize: number;
   search: string;
   status: string;
+  type: string;
   userId: string;
   sortBy: SortField;
   sortOrder: SortOrder;
@@ -151,6 +158,7 @@ function getInitialParams(): {
       pageSize: 25,
       search: '',
       status: 'all',
+      type: 'all',
       userId: '',
       sortBy: 'createdAt',
       sortOrder: 'desc',
@@ -162,6 +170,7 @@ function getInitialParams(): {
     pageSize: parseInt(params.get('pageSize') || '25', 10),
     search: params.get('search') || '',
     status: params.get('status') || 'all',
+    type: params.get('type') || 'all',
     userId: params.get('userId') || '',
     sortBy: (params.get('sortBy') || 'createdAt') as SortField,
     sortOrder: (params.get('sortOrder') || 'desc') as SortOrder,
@@ -178,6 +187,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
   const [searchInput, setSearchInput] = useState(initialParams.search);
   const [debouncedSearch, setDebouncedSearch] = useState(initialParams.search);
   const [status, setStatus] = useState(initialParams.status);
+  const [type, setType] = useState(initialParams.type);
   const [userId, setUserId] = useState(initialParams.userId);
   const [sortBy, setSortBy] = useState<SortField>(initialParams.sortBy);
   const [sortOrder, setSortOrder] = useState<SortOrder>(initialParams.sortOrder);
@@ -200,7 +210,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
   const [viewDetailsStatus, setViewDetailsStatus] = useState<string | null>(null);
 
   // Build API URL with current local filters
-  const apiUrl = `/api/admin/requests?page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(debouncedSearch)}&status=${status}&userId=${userId}&sortBy=${sortBy}&sortOrder=${sortOrder}`;
+  const apiUrl = `/api/admin/requests?page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(debouncedSearch)}&status=${status}&type=${type}&userId=${userId}&sortBy=${sortBy}&sortOrder=${sortOrder}`;
 
   // Fetch requests with SWR
   const { data, error, isLoading } = useSWR<RequestsResponse>(apiUrl, authenticatedFetcher, {
@@ -217,6 +227,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     pageSize: number;
     search: string;
     status: string;
+    type: string;
     userId: string;
     sortBy: string;
     sortOrder: string;
@@ -227,6 +238,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     if (params.pageSize !== 25) urlParams.set('pageSize', String(params.pageSize));
     if (params.search) urlParams.set('search', params.search);
     if (params.status !== 'all') urlParams.set('status', params.status);
+    if (params.type !== 'all') urlParams.set('type', params.type);
     if (params.userId) urlParams.set('userId', params.userId);
     if (params.sortBy !== 'createdAt') urlParams.set('sortBy', params.sortBy);
     if (params.sortOrder !== 'desc') urlParams.set('sortOrder', params.sortOrder);
@@ -245,6 +257,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       pageSize,
       search: debouncedSearch,
       status,
+      type,
       userId,
       sortBy,
       sortOrder,
@@ -254,7 +267,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       lastSyncedUrl.current = newUrl;
       window.history.replaceState(null, '', newUrl);
     }
-  }, [page, pageSize, debouncedSearch, status, userId, sortBy, sortOrder, buildUrlString]);
+  }, [page, pageSize, debouncedSearch, status, type, userId, sortBy, sortOrder, buildUrlString]);
 
   // Handle browser back/forward navigation
   useEffect(() => {
@@ -266,6 +279,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       setSearchInput(newSearch);
       setDebouncedSearch(newSearch);
       setStatus(params.get('status') || 'all');
+      setType(params.get('type') || 'all');
       setUserId(params.get('userId') || '');
       setSortBy((params.get('sortBy') || 'createdAt') as SortField);
       setSortOrder((params.get('sortOrder') || 'desc') as SortOrder);
@@ -292,6 +306,10 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     switch (key) {
       case 'status':
         setStatus(value as string);
+        setPage(1);
+        break;
+      case 'type':
+        setType(value as string);
         setPage(1);
         break;
       case 'userId':
@@ -321,11 +339,12 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     setSearchInput('');
     setDebouncedSearch('');
     setStatus('all');
+    setType('all');
     setUserId('');
     setPage(1);
   };
 
-  const hasActiveFilters = debouncedSearch || status !== 'all' || userId;
+  const hasActiveFilters = debouncedSearch || status !== 'all' || type !== 'all' || userId;
 
   // Action handlers
   const handleViewDetails = (asin: string, requestStatus?: string) => {
@@ -532,6 +551,19 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
             className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm min-w-[160px]"
           >
             {STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+
+          {/* Type Filter */}
+          <select
+            value={type}
+            onChange={(e) => updateFilter('type', e.target.value)}
+            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm min-w-[150px]"
+          >
+            {TYPE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>

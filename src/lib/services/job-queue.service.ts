@@ -33,7 +33,8 @@ export type JobType =
   // Ebook-specific job types
   | 'search_ebook'
   | 'start_direct_download'
-  | 'monitor_direct_download';
+  | 'monitor_direct_download'
+  | 'send_to_ereader';
 
 export interface JobPayload {
   jobId?: string; // Database job ID (added automatically by addJob)
@@ -181,6 +182,14 @@ export interface SendNotificationPayload extends JobPayload {
   message?: string;
   requestType?: string; // 'audiobook' | 'ebook' — drives type-specific notification titles
   timestamp: Date;
+}
+
+export interface SendToEreaderPayload extends JobPayload {
+  ebookRequestId: string; // The ebook Request (sent-device tracking lives here)
+  audiobookId: string;
+  title: string;
+  author: string;
+  targetUserIds?: string[]; // Restrict to these users (late requester); omitted = all requesters
 }
 
 export interface QueueStats {
@@ -435,6 +444,11 @@ export class JobQueueService {
     this.queue.process('monitor_direct_download', 2, async (job: BullJob<MonitorDirectDownloadPayload>) => {
       const { processMonitorDirectDownload } = await import('../processors/direct-download.processor');
       return await processMonitorDirectDownload(job.data);
+    });
+
+    this.queue.process('send_to_ereader', 1, async (job: BullJob<SendToEreaderPayload>) => {
+      const { processSendToEreader } = await import('../processors/send-to-ereader.processor');
+      return await processSendToEreader(job.data);
     });
   }
 
@@ -928,6 +942,43 @@ export class JobQueueService {
       {
         priority: 5, // Medium priority
         delay: delaySeconds * 1000,
+      }
+    );
+  }
+
+  /**
+   * Add send-to-ereader job (emails an organized ebook to requesters' e-reader devices).
+   * Delayed + retried to allow ABS to scan the newly organized file before lookup.
+   *
+   * @param targetUserIds - Restrict delivery to these users (late requester). Omit for all requesters.
+   */
+  async addSendToEreaderJob(
+    ebookRequestId: string,
+    audiobookId: string,
+    title: string,
+    author: string,
+    targetUserIds?: string[],
+    delaySeconds: number = 30
+  ): Promise<string> {
+    return await this.addJob(
+      'send_to_ereader',
+      {
+        // Tracked DB Job FK points at the ebook request
+        requestId: ebookRequestId,
+        ebookRequestId,
+        audiobookId,
+        title,
+        author,
+        targetUserIds,
+      } as SendToEreaderPayload,
+      {
+        priority: 4, // Low priority — post-completion task
+        delay: delaySeconds * 1000,
+        attempts: 5,
+        backoff: {
+          type: 'exponential',
+          delay: 30000, // 30s base → ~30s, 60s, 2m, 4m, 8m: lets ABS scan finish
+        },
       }
     );
   }

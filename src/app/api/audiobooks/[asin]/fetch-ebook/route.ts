@@ -174,6 +174,22 @@ export async function POST(
       if (existingEbookRequest) {
         // If in active status, block
         if (ACTIVE_EBOOK_STATUSES.includes(existingEbookRequest.status)) {
+          // Trigger 2 (#6): if the ebook is already downloaded, deliver the existing copy to this
+          // requesting user's e-reader devices. The send job dedupes by device, so users who
+          // already received it are not re-emailed. ABS-only + feature-gated inside the processor.
+          if (existingEbookRequest.status === 'downloaded') {
+            const jobQueue = getJobQueueService();
+            await jobQueue.addSendToEreaderJob(
+              existingEbookRequest.id,
+              audiobook.id,
+              audiobook.title,
+              audiobook.author,
+              [req.user.id],
+              0 // already organized & scanned — no need to wait
+            ).catch((error) => {
+              logger.error('Failed to queue send-to-ereader job for late requester', { error: error instanceof Error ? error.message : String(error) });
+            });
+          }
           return NextResponse.json({
             success: false,
             message: `E-book request already exists (status: ${existingEbookRequest.status})`,
