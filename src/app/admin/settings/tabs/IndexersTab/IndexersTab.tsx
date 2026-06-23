@@ -11,6 +11,7 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { Input } from '@/components/ui/Input';
 import { IndexerManagement } from '@/components/admin/indexers/IndexerManagement';
 import { FlagConfigRow } from '@/components/admin/FlagConfigRow';
+import { MinScoreSlider } from '@/components/admin/MinScoreSlider';
 import { IndexerFlagConfig } from '@/lib/utils/ranking-algorithm';
 import { useIndexersSettings } from './useIndexersSettings';
 import type { Settings, SavedIndexerConfig } from '../../lib/types';
@@ -234,6 +235,51 @@ export function IndexersTab({
             No flag rules configured. Flag bonuses/penalties are optional.
           </p>
         )}
+      </div>
+
+      {/* Minimum Score Threshold Section */}
+      <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
+        <div className="mb-4">
+          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
+            Minimum Score Threshold (Optional)
+          </h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Adjust how strict automatic searches are when accepting a release. The
+            ranking algorithm scores every result 0&ndash;100; only results at or
+            above the threshold are downloaded (default 50). Setting a threshold{' '}
+            <span className="font-medium">too high</span> can reject every result,
+            leaving requests stuck awaiting a re-search; setting it{' '}
+            <span className="font-medium">too low</span> grabs weaker matches (fewer
+            seeders, off-target size). The title/author match check always applies,
+            so wrong books are excluded regardless of these values, and
+            manual/interactive searches are never filtered.
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <MinScoreSlider
+            label="Audiobooks"
+            mediaLabel="audiobook"
+            value={settings.indexerOptions.minQualityScore}
+            onChange={(minQualityScore) =>
+              onChange({
+                ...settings,
+                indexerOptions: { ...settings.indexerOptions, minQualityScore },
+              })
+            }
+          />
+          <MinScoreSlider
+            label="E-books"
+            mediaLabel="e-book"
+            value={settings.indexerOptions.minQualityScoreEbook}
+            onChange={(minQualityScoreEbook) =>
+              onChange({
+                ...settings,
+                indexerOptions: { ...settings.indexerOptions, minQualityScoreEbook },
+              })
+            }
+          />
+        </div>
       </div>
 
       {/* Confirmation modal for Prowlarr connection change */}
