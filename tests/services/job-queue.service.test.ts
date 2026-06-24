@@ -27,6 +27,7 @@ const processorsMock = vi.hoisted(() => ({
   processSearchEbook: vi.fn().mockResolvedValue('ok'),
   processStartDirectDownload: vi.fn().mockResolvedValue('ok'),
   processMonitorDirectDownload: vi.fn().mockResolvedValue('ok'),
+  processDecomposeBundle: vi.fn().mockResolvedValue('ok'),
 }));
 
 const queueMock = vi.hoisted(() => ({
@@ -133,6 +134,9 @@ vi.mock('@/lib/processors/search-ebook.processor', () => ({
 vi.mock('@/lib/processors/direct-download.processor', () => ({
   processStartDirectDownload: processorsMock.processStartDirectDownload,
   processMonitorDirectDownload: processorsMock.processMonitorDirectDownload,
+}));
+vi.mock('@/lib/processors/decompose-bundle.processor', () => ({
+  processDecomposeBundle: processorsMock.processDecomposeBundle,
 }));
 
 vi.mock('@/lib/db', () => ({

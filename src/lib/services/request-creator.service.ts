@@ -41,8 +41,17 @@ export interface CreateRequestOptions {
 
 export type CreateRequestResult =
   | { success: true; request: any }
-  | { success: true; decomposed: true; count: number; books: { asin: string; title: string }[]; message: string }
+  | DecomposedResult
   | { success: false; reason: 'already_available' | 'being_processed' | 'duplicate' | 'user_not_found' | 'ignored'; message: string };
+
+/** Result variant returned when a request is recognized as a series bundle and split. */
+export type DecomposedResult = {
+  success: true;
+  decomposed: true;
+  count: number;
+  books: { asin: string; title: string }[];
+  message: string;
+};
 
 /**
  * Create a request for a user, with full duplicate detection, library checks,
@@ -150,16 +159,33 @@ export async function createRequestForUser(
     });
 
     if (detection.isBundle && seriesAsin) {
-      const decomposed = await decomposeBundle(
-        userId,
-        audiobook,
-        seriesAsin,
-        detection.range,
-        options
-      );
-      if (decomposed) return decomposed;
-      // Enumeration produced no usable books — fall through to normal handling.
-      logger.warn(`Bundle detected for "${audiobook.title}" but no books enumerated; treating as a normal request`);
+      // Offload the fan-out to a background job. Enumerating the series and
+      // creating up to MAX_BUNDLE_BOOKS per-book requests (each an Audnexus
+      // lookup + notification + search enqueue) inline would block this request
+      // and risk a client timeout for large box sets. The job preserves the
+      // single-request fallback when enumeration yields nothing.
+      try {
+        await getJobQueueService().addDecomposeBundleJob(
+          userId,
+          audiobook,
+          seriesAsin,
+          detection.range,
+          options
+        );
+        return {
+          success: true,
+          decomposed: true,
+          count: 0,
+          books: [],
+          message: `"${audiobook.title}" looks like a series bundle — splitting it into individual book requests in the background.`,
+        };
+      } catch (error) {
+        // Couldn't enqueue (e.g. Redis down) — fall through and create the bundle
+        // as a single normal request so the user still gets something.
+        logger.error(`Failed to enqueue bundle decomposition for "${audiobook.title}"; handling as a single request`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -367,17 +393,20 @@ export async function createRequestForUser(
  *
  * Enumerates the series' books, then calls createRequestForUser for each with
  * `bundleDecomposed: true` (preventing re-detection). Returns a `decomposed`
- * result when at least one book request was created, or null when the series
- * could not be enumerated / yielded no usable books (caller falls back to
- * normal single-request handling).
+ * result when the bundle was handled, or null when the series could not be
+ * enumerated / yielded no usable books (caller falls back to normal
+ * single-request handling).
+ *
+ * Invoked from the `decompose_bundle` background job (not inline) so the fan-out
+ * never blocks the originating HTTP request.
  */
-async function decomposeBundle(
+export async function decomposeBundle(
   userId: string,
   bundle: CreateRequestInput,
   seriesAsin: string,
   range: [number, number] | undefined,
   options: CreateRequestOptions
-): Promise<CreateRequestResult | null> {
+): Promise<DecomposedResult | null> {
   let books: CreateRequestInput[];
   try {
     books = await enumerateSeriesBooks(seriesAsin, range, bundle.asin);

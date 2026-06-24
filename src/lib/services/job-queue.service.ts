@@ -10,6 +10,9 @@ import { TorrentResult } from '../utils/ranking-algorithm';
 import { DownloadClientType } from '../interfaces/download-client.interface';
 import { RMABLogger } from '../utils/logger';
 import type { NotificationEvent } from '@/lib/constants/notification-events';
+// Type-only import (erased at compile time) — avoids a runtime circular dependency
+// with request-creator.service.ts, which imports getJobQueueService from here.
+import type { CreateRequestInput, CreateRequestOptions } from './request-creator.service';
 
 const logger = RMABLogger.create('JobQueue');
 
@@ -34,7 +37,8 @@ export type JobType =
   | 'search_ebook'
   | 'start_direct_download'
   | 'monitor_direct_download'
-  | 'send_to_ereader';
+  | 'send_to_ereader'
+  | 'decompose_bundle';
 
 export interface JobPayload {
   jobId?: string; // Database job ID (added automatically by addJob)
@@ -190,6 +194,14 @@ export interface SendToEreaderPayload extends JobPayload {
   title: string;
   author: string;
   targetUserIds?: string[]; // Restrict to these users (late requester); omitted = all requesters
+}
+
+export interface DecomposeBundlePayload extends JobPayload {
+  userId: string;
+  bundle: CreateRequestInput; // The detected bundle (its own ASIN is excluded from fan-out)
+  seriesAsin: string;
+  range?: [number, number]; // Position range to narrow the fan-out, when known
+  requestOptions: CreateRequestOptions; // skipAutoSearch / bypassIgnore from the originating request
 }
 
 export interface QueueStats {
@@ -449,6 +461,11 @@ export class JobQueueService {
     this.queue.process('send_to_ereader', 1, async (job: BullJob<SendToEreaderPayload>) => {
       const { processSendToEreader } = await import('../processors/send-to-ereader.processor');
       return await processSendToEreader(job.data);
+    });
+
+    this.queue.process('decompose_bundle', 1, async (job: BullJob<DecomposeBundlePayload>) => {
+      const { processDecomposeBundle } = await import('../processors/decompose-bundle.processor');
+      return await processDecomposeBundle(job.data);
     });
   }
 
@@ -979,6 +996,38 @@ export class JobQueueService {
           type: 'exponential',
           delay: 30000, // 30s base → ~30s, 60s, 2m, 4m, 8m: lets ABS scan finish
         },
+      }
+    );
+  }
+
+  /**
+   * Add a series-bundle decomposition job.
+   *
+   * Runs the per-book fan-out off the request thread: enumerating the series and
+   * creating up to MAX_BUNDLE_BOOKS individual requests (each an Audnexus lookup +
+   * notification + search enqueue) would otherwise block POST /api/requests and
+   * risk a client timeout. Low priority — it's a post-request expansion.
+   */
+  async addDecomposeBundleJob(
+    userId: string,
+    bundle: CreateRequestInput,
+    seriesAsin: string,
+    range: [number, number] | undefined,
+    requestOptions: CreateRequestOptions
+  ): Promise<string> {
+    return await this.addJob(
+      'decompose_bundle',
+      {
+        userId,
+        bundle,
+        seriesAsin,
+        range,
+        requestOptions,
+      } as DecomposeBundlePayload,
+      {
+        priority: 5, // Lowest — background fan-out, never blocks user-facing work
+        attempts: 2,
+        backoff: { type: 'exponential', delay: 10000 },
       }
     );
   }
