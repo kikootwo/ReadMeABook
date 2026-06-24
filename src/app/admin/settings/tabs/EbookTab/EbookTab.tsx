@@ -31,6 +31,9 @@ export function EbookTab({ ebook, backendMode, onChange, onSuccess, onError, mar
     saving,
     testingFlaresolverr,
     flaresolverrTestResult,
+    checkingPath,
+    pathCheckResult,
+    checkDestinationPath,
     updateEbook,
     testFlaresolverrConnection,
     saveSettings,
@@ -375,12 +378,31 @@ export function EbookTab({ ebook, backendMode, onChange, onSuccess, onError, mar
                   type="text"
                   value={ebook.ebookDestinationPath || ''}
                   onChange={(e) => updateEbook('ebookDestinationPath', e.target.value)}
+                  onBlur={checkDestinationPath}
                   placeholder="/media/ebooks"
                   className="font-mono"
                 />
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                   Absolute path inside the container. Ensure it is also scanned by Audiobookshelf if you use e-reader delivery.
                 </p>
+                {checkingPath && (
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                    Checking path…
+                  </p>
+                )}
+                {!checkingPath && pathCheckResult && !pathCheckResult.reachable && (
+                  <div className="mt-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+                    <p className="text-sm text-amber-800 dark:text-amber-200">
+                      <strong>⚠ Path not reachable:</strong> {pathCheckResult.message} Ebooks will
+                      fall back to the default media directory until this is fixed.
+                    </p>
+                  </div>
+                )}
+                {!checkingPath && pathCheckResult?.reachable && (
+                  <p className="mt-2 text-sm text-green-700 dark:text-green-300">
+                    ✓ {pathCheckResult.message}
+                  </p>
+                )}
               </div>
             )}
           </div>
