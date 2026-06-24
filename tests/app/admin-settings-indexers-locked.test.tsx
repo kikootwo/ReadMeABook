@@ -83,6 +83,8 @@ describe('Indexers tab while the saved list is not loaded', () => {
     configStore.clear();
     configStore.set('prowlarr_indexers', JSON.stringify(savedIndexers));
     configStore.set('indexer_flag_config', FLAG_RULES);
+    // The page remembers the last tab; start every test on the default one
+    window.localStorage.clear();
     prowlarrMock.getIndexers.mockResolvedValue(prowlarrIndexers);
     bridge.savedListFails = true;
     installBridge();

@@ -36,6 +36,17 @@ const INDEXERS_NOT_LOADED_MESSAGE =
   'Click "Test Connection" on this tab once Prowlarr is reachable to edit them.';
 const INDEXERS_STILL_LOADING_MESSAGE = 'Settings saved. The indexer list was still loading, so the saved indexers were left as they are.';
 
+// Last tab the admin opened, so a reload returns to it
+const ACTIVE_TAB_STORAGE_KEY = 'adminSettingsActiveTab';
+
+function readStoredTab(): string | null {
+  try {
+    return window.localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
+  } catch {
+    return null; // localStorage unavailable (private mode, blocked storage)
+  }
+}
+
 export default function AdminSettings() {
   // Core state
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -101,11 +112,25 @@ export default function AdminSettings() {
 
         setSettings(data);
         setOriginalSettings(JSON.parse(JSON.stringify(data)));
+
+        // Restore the last tab only if this backend mode shows it ('auth' is Audiobookshelf-only)
+        const storedTab = readStoredTab();
+        const restored = storedTab && getTabs(data.backendMode).find((tab) => tab.id === storedTab);
+        if (restored) setActiveTab(restored.id);
       }
     } catch (error) {
       console.error('Failed to fetch settings:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const selectTab = (tab: SettingsTab) => {
+    setActiveTab(tab);
+    try {
+      window.localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, tab);
+    } catch {
+      // Not remembered across reloads; the tab still switches
     }
   };
 
@@ -211,7 +236,7 @@ export default function AdminSettings() {
             {tabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => selectTab(tab.id)}
                 className={`
                   whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2
                   ${

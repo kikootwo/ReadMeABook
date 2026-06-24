@@ -140,6 +140,8 @@ describe('Admin settings indexer round trip', () => {
     configStore.clear();
     configStore.set('prowlarr_indexers', JSON.stringify(savedIndexers));
     configStore.set('indexer_flag_config', JSON.stringify([{ name: 'freeleech', modifier: 10 }]));
+    // The page remembers the last tab; start every test on the default one
+    window.localStorage.clear();
     bridge.indexersGetFails = false;
     prowlarrMock.getIndexers.mockResolvedValue(
       savedIndexers.map(({ id, name, protocol }) => ({ id, name, protocol, privacy: 'private' }))

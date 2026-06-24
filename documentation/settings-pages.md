@@ -73,6 +73,8 @@ src/app/admin/settings/
 7. **BookDate** - AI provider, API key (encrypted), model selection, library scope, custom prompt, swipe history
 8. **Notifications** - Multiple backends (Discord, Pushover), event subscriptions, test functionality
 
+**Active tab:** remembered across reloads in `localStorage` (`adminSettingsActiveTab`), written on tab click (`selectTab`). Restored once settings load, only if `getTabs(backendMode)` offers it (e.g. `auth` is Audiobookshelf-only), else `library`.
+
 ## E-book Sidecar
 
 **Purpose:** Configure ebook download sources and preferences to accompany audiobook downloads.

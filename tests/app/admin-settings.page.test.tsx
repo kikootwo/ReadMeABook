@@ -125,6 +125,7 @@ describe('AdminSettings', () => {
     parseArrayToCommaSeparatedMock.mockReset();
     vi.resetModules();
     mockAdminSettingsModules();
+    window.localStorage.clear();
   });
 
   it('fetches settings and renders the settings shell', async () => {
@@ -216,5 +217,51 @@ describe('AdminSettings', () => {
 
     expect(screen.getByText('Connected to Plex. You can now save.')).toBeInTheDocument();
     vi.useRealTimers();
+  });
+
+  describe('remembering the active tab', () => {
+    const libraryAndPaths = [
+      { id: 'library', label: 'Library', icon: 'L' },
+      { id: 'paths', label: 'Paths', icon: 'P' },
+    ];
+
+    beforeEach(() => {
+      fetchWithAuthMock.mockResolvedValue({ ok: true, json: async () => settingsFixture });
+      getTabValidationMock.mockReturnValue(true);
+    });
+
+    it('reopens the last tab after a reload', async () => {
+      window.localStorage.setItem('adminSettingsActiveTab', 'paths');
+      getTabsMock.mockReturnValue(libraryAndPaths);
+
+      const { default: AdminSettings } = await import('@/app/admin/settings/page');
+      render(<AdminSettings />);
+
+      expect(await screen.findByText('Paths Tab')).toBeInTheDocument();
+      expect(screen.queryByText('Library Tab')).not.toBeInTheDocument();
+    });
+
+    it('falls back to the first tab when the stored one is not offered in this backend mode', async () => {
+      // 'auth' only exists in Audiobookshelf mode; the fixture is in Plex mode
+      window.localStorage.setItem('adminSettingsActiveTab', 'auth');
+      getTabsMock.mockReturnValue(libraryAndPaths);
+
+      const { default: AdminSettings } = await import('@/app/admin/settings/page');
+      render(<AdminSettings />);
+
+      expect(await screen.findByText('Library Tab')).toBeInTheDocument();
+      expect(getTabsMock).toHaveBeenCalledWith('plex');
+    });
+
+    it('stores the tab the admin clicks', async () => {
+      getTabsMock.mockReturnValue(libraryAndPaths);
+
+      const { default: AdminSettings } = await import('@/app/admin/settings/page');
+      render(<AdminSettings />);
+      fireEvent.click(await screen.findByRole('button', { name: /Paths/ }));
+
+      expect(await screen.findByText('Paths Tab')).toBeInTheDocument();
+      expect(window.localStorage.getItem('adminSettingsActiveTab')).toBe('paths');
+    });
   });
 });
