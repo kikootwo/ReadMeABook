@@ -80,8 +80,8 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
 | `ebook_destination_path` | `` | path | Custom base path (mode=`custom`) |
 
 - *`same`* → audiobook folder (`media_dir`, current behavior). *`library`* → an existing ABS book library's folder (second dropdown, ABS mode only). *`custom`* → an explicit path.
-- Resolved in `processEbookOrganization` via `resolveEbookDestinationDir()`; falls back to `same` on any misconfiguration. Organizer base dir set via `getFileOrganizer(mediaDirOverride?)`.
-- **Custom path reachability check:** `POST /api/admin/settings/ebook/check-path {path}` → `{reachable, message}`. Server-side `fs.stat` + `fs.access(W_OK)` confirms the path exists, is a directory, and is writable **inside the RMAB container**. UI runs it on blur of the custom-path field and on save (non-blocking — save still proceeds); an amber warning renders under the field when `reachable=false`, noting fallback to the default media dir.
+- Resolved in `processEbookOrganization` via `resolveEbookDestinationDir()`; falls back to `same` on any misconfiguration. Organizer base dir set via `getFileOrganizer(mediaDirOverride?)`. For `custom`, the resolver **re-verifies reachability at organize time** (`checkPathReachable`) and falls back to the default media dir if the path is unreachable/unwritable — the save-time UI check is advisory only and config can drift.
+- **Reachability check (shared):** `checkPathReachable(path)` in `src/lib/utils/path-reachability.ts` — server-side `fs.stat` + `fs.access(W_OK)` confirms the path exists, is a directory, and is writable **inside the RMAB container**. Used by both the organize-time resolver and `POST /api/admin/settings/ebook/check-path {path}` → `{reachable, message}`. The Ebook UI runs the API on blur of the custom-path field and on save (non-blocking — save still proceeds); an amber warning renders under the field when `reachable=false`, noting fallback to the default media dir.
 
 #### Section 5: E-Reader Delivery (ABS only)
 | Key | Default | Options | Description |

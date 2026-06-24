@@ -8,8 +8,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { promises as fs, constants as fsConstants } from 'fs';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
+import { checkPathReachable } from '@/lib/utils/path-reachability';
 import { RMABLogger } from '@/lib/utils/logger';
 
 export const runtime = 'nodejs';
@@ -29,45 +29,10 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const target = path.trim();
-
-        if (!target.startsWith('/')) {
-          return NextResponse.json({
-            reachable: false,
-            message: 'Path must be an absolute path inside the container (start with "/").',
-          });
-        }
-
-        let stats;
-        try {
-          stats = await fs.stat(target);
-        } catch {
-          return NextResponse.json({
-            reachable: false,
-            message: 'Path does not exist inside the container. Make sure it is mounted into the RMAB container as a volume.',
-          });
-        }
-
-        if (!stats.isDirectory()) {
-          return NextResponse.json({
-            reachable: false,
-            message: 'Path exists but is not a directory.',
-          });
-        }
-
-        try {
-          await fs.access(target, fsConstants.W_OK);
-        } catch {
-          return NextResponse.json({
-            reachable: false,
-            message: 'Directory is reachable but not writable by the container. Check the volume/folder permissions.',
-          });
-        }
-
-        return NextResponse.json({
-          reachable: true,
-          message: 'Path is reachable and writable by the container.',
-        });
+        // Shared with the organizer's destination resolver so admin feedback and
+        // the organize-time fallback agree on what "reachable" means.
+        const result = await checkPathReachable(path);
+        return NextResponse.json(result);
       } catch (error) {
         logger.error('Ebook path check failed', { error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json(

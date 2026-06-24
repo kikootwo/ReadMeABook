@@ -18,6 +18,7 @@ import { removeEmptyParentDirectories } from '../utils/cleanup-helpers';
 import { getAudibleService } from '../integrations/audible.service';
 import { addAutoBlock } from '../services/blocklist.service';
 import { getABSLibraries } from '../services/audiobookshelf/api';
+import { checkPathReachable } from '../utils/path-reachability';
 
 /**
  * Process organize files job
@@ -932,10 +933,19 @@ async function resolveEbookDestinationDir(logger: RMABLogger): Promise<string | 
   const mode = (await configService.get('ebook_destination_mode')) || 'same';
 
   if (mode === 'custom') {
-    const customPath = await configService.get('ebook_destination_path');
-    if (customPath && customPath.trim()) return customPath.trim();
-    logger.warn('Ebook destination mode is "custom" but no path is set; using default media directory');
-    return undefined;
+    const customPath = (await configService.get('ebook_destination_path'))?.trim();
+    if (!customPath) {
+      logger.warn('Ebook destination mode is "custom" but no path is set; using default media directory');
+      return undefined;
+    }
+    // Verify reachability here (not just at save time) so an unreachable/unwritable
+    // path falls back to the default media dir instead of failing organization.
+    const check = await checkPathReachable(customPath);
+    if (!check.reachable) {
+      logger.warn(`Ebook destination path "${customPath}" is not usable (${check.message}); using default media directory`);
+      return undefined;
+    }
+    return customPath;
   }
 
   if (mode === 'library') {
