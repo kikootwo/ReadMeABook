@@ -25,6 +25,11 @@ import {
   getSlowDownloadLinks,
 } from '../services/ebook-scraper';
 
+// After this many consecutive no-result searches, settle the request as
+// `unavailable` instead of cycling in `awaiting_search`. A weekly scheduled
+// job and the manual-search dropdown still allow retries.
+const UNAVAILABLE_SEARCH_THRESHOLD = 3;
+
 /**
  * Process search ebook job
  * Searches Anna's Archive first (if enabled), then falls back to indexer search (if enabled)
@@ -45,7 +50,7 @@ export async function processSearchEbook(payload: SearchEbookPayload): Promise<a
         searchAttempts: { increment: 1 },
         updatedAt: new Date(),
       },
-      select: { customSearchTerms: true },
+      select: { customSearchTerms: true, searchAttempts: true },
     });
 
     // Use custom search terms if set, otherwise use audiobook title
@@ -100,16 +105,22 @@ export async function processSearchEbook(payload: SearchEbookPayload): Promise<a
       if (annasArchiveEnabled) enabledSources.push("Anna's Archive");
       if (indexerSearchEnabled) enabledSources.push("Indexer Search");
 
+      const attempts = requestRecord?.searchAttempts ?? 0;
+      const settleAsUnavailable = attempts >= UNAVAILABLE_SEARCH_THRESHOLD;
+
+      const status = settleAsUnavailable ? 'unavailable' : 'awaiting_search';
       const message = enabledSources.length > 0
-        ? `No ebook found on ${enabledSources.join(' or ')}. Will retry automatically.`
+        ? settleAsUnavailable
+          ? `Not found on ${enabledSources.join(' or ')} after ${attempts} searches. Will retry weekly or on manual search.`
+          : `No ebook found on ${enabledSources.join(' or ')}. Will retry automatically.`
         : 'No ebook sources enabled. Enable Anna\'s Archive or Indexer Search in settings.';
 
-      logger.warn(`No ebook found for request ${requestId}, marking as awaiting_search`);
+      logger.warn(`No ebook found for request ${requestId}, marking as ${status} (attempt ${attempts})`);
 
       await prisma.request.update({
         where: { id: requestId },
         data: {
-          status: 'awaiting_search',
+          status,
           errorMessage: message,
           lastSearchAt: new Date(),
           updatedAt: new Date(),
@@ -118,7 +129,9 @@ export async function processSearchEbook(payload: SearchEbookPayload): Promise<a
 
       return {
         success: false,
-        message: 'No ebook found, queued for re-search',
+        message: settleAsUnavailable
+          ? 'No ebook found after multiple searches, marked unavailable'
+          : 'No ebook found, queued for re-search',
         requestId,
       };
     }

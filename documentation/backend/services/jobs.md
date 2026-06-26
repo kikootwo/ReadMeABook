@@ -46,7 +46,7 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - Auto-reschedules until complete/failed
 
 **search_indexers / search_ebook:**
-- No torrents found → 'awaiting_search' status (not failed)
+- No torrents found → 'awaiting_search' status (not failed); **ebooks only:** after `UNAVAILABLE_SEARCH_THRESHOLD` (3) consecutive no-result searches, settles as `unavailable` instead — stops daily churn. `unavailable` requests are retryable via manual search (dropdown) and the weekly `retry_unavailable_ebooks` scheduled job (resets `searchAttempts` to 0 and re-queues).
 - Allows automatic retry via scheduled job
 - Sets request to `searching` as its first action. **Stall/crash safety net** (`job-queue.service` `failed` handler): when a `search_indexers` or `search_ebook` job permanently fails (e.g. Bull "job stalled more than allowable limit", which bypasses the processor's own catch), the request is reset `searching` → `awaiting_search` (guarded `updateMany`, only if still `searching`). Without this the request is orphaned in `searching` forever — no scheduler scans that status. Backstopped by the `retry_missing_torrents` reaper (see scheduler.md) for cases the `failed` event never fires (hard restart mid-job).
 - Upstream release-date gate: 4 enqueue sites (`request-creator.service`, `retry-missing-torrents.processor`, `monitor-rss-feeds.processor`, `bookdate/swipe/route`) check `shouldSkipAutoSearch` against `indexer.skip_unreleased`; gated requests are created/kept in `awaiting_release` and `addSearchJob` is not called. Manual search bypasses the gate.

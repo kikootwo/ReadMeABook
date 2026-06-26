@@ -81,7 +81,7 @@ describe('SchedulerService', () => {
     const service = new SchedulerService();
     await service.start();
 
-    expect(prismaMock.scheduledJob.create).toHaveBeenCalledTimes(10);
+    expect(prismaMock.scheduledJob.create).toHaveBeenCalledTimes(11);
     expect(jobQueueMock.addRepeatableJob).toHaveBeenCalledWith(
       'audible_refresh',
       { scheduledJobId: 'job-1' },

@@ -554,6 +554,10 @@ describe('JobQueueService', () => {
   });
 
   it('invokes processor handlers for registered jobs', async () => {
+    // Some scheduled-job processors call prisma.request.findMany (e.g.
+    // retry_unavailable_ebooks, retry_missing_torrents) — default to empty.
+    prismaMock.request.findMany.mockResolvedValue([]);
+
     const { JobQueueService } = await import('@/lib/services/job-queue.service');
     new JobQueueService();
 

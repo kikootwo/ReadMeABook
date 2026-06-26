@@ -68,6 +68,10 @@ export function StatusBadge({ status, progress, className }: StatusBadgeProps) {
       label: 'Pending Approval',
       color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
     },
+    unavailable: {
+      label: 'Unavailable',
+      color: 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-200',
+    },
     awaiting_release: {
       label: 'Awaiting Release',
       color: 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200',

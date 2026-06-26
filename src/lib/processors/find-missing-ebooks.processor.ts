@@ -46,6 +46,7 @@ const IN_FLIGHT_STATUSES = new Set([
   'processing',
   'awaiting_search',
   'awaiting_release',
+  'unavailable',
 ]);
 
 const AUTO_RETRY_CAP = 5;

@@ -14,4 +14,5 @@ export const CANCELLABLE_STATUSES = [
   'awaiting_search',
   'awaiting_approval',
   'awaiting_release',
+  'unavailable',
 ] as const;

@@ -69,8 +69,8 @@ export function RequestActionsDropdown({
   const canViewDetails = !isEbook && !!request.asin && !!onViewDetails;
 
   // Determine available actions based on status
-  const canSearch = ['pending', 'failed', 'awaiting_search', 'awaiting_release'].includes(request.status);
-  const canAdjustSearchTerms = ['pending', 'failed', 'awaiting_search', 'awaiting_release', 'searching'].includes(request.status);
+  const canSearch = ['pending', 'failed', 'awaiting_search', 'awaiting_release', 'unavailable'].includes(request.status);
+  const canAdjustSearchTerms = ['pending', 'failed', 'awaiting_search', 'awaiting_release', 'searching', 'unavailable'].includes(request.status);
   const canRetryDownload = request.status === 'failed' && (request.downloadAttempts ?? 0) > 0 && !!onRetryDownload;
   const canCancel = (CANCELLABLE_STATUSES as readonly string[]).includes(request.status);
   const canDelete = true; // Admins can always delete

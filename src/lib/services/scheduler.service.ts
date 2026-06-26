@@ -38,7 +38,7 @@ const LEGACY_MIDNIGHT_RESCHEDULES: ReadonlyArray<{
   { type: 'find_missing_ebooks', from: '0 0 * * *', to: '0 3 * * *' },
 ];
 
-export type ScheduledJobType = 'plex_library_scan' | 'plex_recently_added_check' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'find_missing_ebooks' | 'cleanup_seeded_torrents' | 'monitor_rss_feeds' | 'sync_reading_shelves' | 'check_watched_lists';
+export type ScheduledJobType = 'plex_library_scan' | 'plex_recently_added_check' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'find_missing_ebooks' | 'retry_unavailable_ebooks' | 'cleanup_seeded_torrents' | 'monitor_rss_feeds' | 'sync_reading_shelves' | 'check_watched_lists';
 
 export interface ScheduledJob {
   id: string;
@@ -155,6 +155,13 @@ export class SchedulerService {
         type: 'find_missing_ebooks' as ScheduledJobType,
         schedule: '0 3 * * *', // Daily at 03:00 — staggered off midnight so the ebook-search burst doesn't pile onto audible_refresh/retry
         enabled: true, // Enable by default; gated by ebook_auto_grab_enabled + source-enablement at run time
+        payload: {},
+      },
+      {
+        name: 'Retry Unavailable Ebooks',
+        type: 'retry_unavailable_ebooks' as ScheduledJobType,
+        schedule: '0 4 * * 0', // Weekly Sunday at 04:00
+        enabled: true, // Enable by default; only processes type='ebook' requests
         payload: {},
       },
       {
@@ -482,6 +489,9 @@ export class SchedulerService {
       case 'check_watched_lists':
         bullJobId = await this.triggerCheckWatchedLists(job);
         break;
+      case 'retry_unavailable_ebooks':
+        bullJobId = await this.triggerRetryUnavailableEbooks(job);
+        break;
       default:
         throw new Error(`Unknown job type: ${job.type}`);
     }
@@ -741,6 +751,10 @@ export class SchedulerService {
    */
   private async triggerFindMissingEbooks(job: any): Promise<string> {
     return await this.jobQueue.addFindMissingEbooksJob(job.id);
+  }
+
+  private async triggerRetryUnavailableEbooks(job: any): Promise<string> {
+    return await this.jobQueue.addRetryUnavailableEbooksJob(job.id);
   }
 
   /**
