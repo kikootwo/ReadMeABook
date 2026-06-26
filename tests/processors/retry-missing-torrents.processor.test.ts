@@ -156,4 +156,37 @@ describe('processRetryMissingTorrents', () => {
     expect(jobQueueMock.addSearchJob).toHaveBeenCalled();
     expect(result.triggered).toBe(1);
   });
+
+  it('reclaims requests orphaned in `searching` past the stale threshold', async () => {
+    prismaMock.request.updateMany.mockResolvedValue({ count: 3 });
+    prismaMock.request.findMany.mockResolvedValue([]);
+
+    const { processRetryMissingTorrents } = await import('@/lib/processors/retry-missing-torrents.processor');
+    const result = await processRetryMissingTorrents({ jobId: 'job-reap' });
+
+    expect(result.success).toBe(true);
+    expect(result.reclaimed).toBe(3);
+    // Reaper resets stale `searching` rows to `awaiting_search` with a time guard.
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: 'searching',
+          deletedAt: null,
+          updatedAt: { lt: expect.any(Date) },
+        }),
+        data: expect.objectContaining({ status: 'awaiting_search' }),
+      })
+    );
+  });
+
+  it('reports zero reclaimed when nothing is stuck in `searching`', async () => {
+    prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.request.findMany.mockResolvedValue([]);
+
+    const { processRetryMissingTorrents } = await import('@/lib/processors/retry-missing-torrents.processor');
+    const result = await processRetryMissingTorrents({ jobId: 'job-noreap' });
+
+    expect(result.success).toBe(true);
+    expect(result.reclaimed).toBe(0);
+  });
 });

@@ -243,6 +243,20 @@ export class JobQueueService {
         removeOnComplete: 100,
         removeOnFail: 200,
       },
+      // External searches (ebook via byparr/Cloudflare) legitimately run
+      // 60-130s+. Bull's defaults (lockDuration 30s, maxStalledCount 1) falsely
+      // fail such jobs as "job stalled more than allowable limit" on any
+      // event-loop hiccup, orphaning the request in `searching`. Widen the lock
+      // window and tolerate one transient stall before giving up. This is
+      // tolerance for *normal* long jobs — preventing the underlying event-loop
+      // freeze is handled by staggered cron schedules + reduced search
+      // concurrency; the retry_missing_torrents reaper backstops the rest.
+      settings: {
+        lockDuration: 120000,   // 2 min (default 30s)
+        lockRenewTime: 60000,   // renew at half lockDuration (default 15s)
+        stalledInterval: 60000, // sweep for stalled jobs every 60s (default 30s)
+        maxStalledCount: 2,     // allow one transient stall before failing (default 1)
+      },
     });
 
     // Increase max listeners to accommodate all job processors (12 total)
@@ -322,6 +336,36 @@ export class JobQueueService {
           logger.error('Failed to update request status after download_torrent failure', {
             error: updateError instanceof Error ? updateError.message : String(updateError),
           });
+        }
+      }
+
+      // Safety net for search jobs (audiobook `search_indexers` + `search_ebook`):
+      // a Bull stall ("job stalled more than allowable limit") or other permanent
+      // failure bypasses the processor's own catch block, which would otherwise
+      // reset the request. Without this the request is orphaned in `searching`
+      // forever — no scheduler scans that status. Reset to `awaiting_search` so
+      // retry_missing_torrents re-queues it. The `status: 'searching'` guard on
+      // updateMany avoids clobbering a request that already moved on (e.g. found a
+      // result, was cancelled, or already reclaimed by the reaper).
+      if ((job.name === 'search_ebook' || job.name === 'search_indexers') && job.data) {
+        const payload = job.data as { requestId?: string };
+        if (payload.requestId) {
+          logger.error(`${job.name} job permanently failed for request ${payload.requestId} after ${job.attemptsMade} attempts; resetting searching → awaiting_search`);
+
+          try {
+            await prisma.request.updateMany({
+              where: { id: payload.requestId, status: 'searching' },
+              data: {
+                status: 'awaiting_search',
+                errorMessage: error.message || 'Search failed after multiple retries; re-queued automatically',
+                updatedAt: new Date(),
+              },
+            });
+          } catch (updateError) {
+            logger.error('Failed to reset request status after search failure', {
+              error: updateError instanceof Error ? updateError.message : String(updateError),
+            });
+          }
         }
       }
     });
@@ -443,7 +487,12 @@ export class JobQueueService {
     });
 
     // Ebook-specific processors
-    this.queue.process('search_ebook', 2, async (job: BullJob<SearchEbookPayload>) => {
+    // Concurrency 1: ebook searches funnel through a single byparr/Cloudflare
+    // solver instance. Running them in parallel saturates it (slow solves →
+    // 30-65s timeouts/403s) and, combined with synchronous cheerio parsing,
+    // starves the event loop — the trigger for the mass "stalled" failures.
+    // Serializing keeps byparr responsive; the nightly backlog still drains.
+    this.queue.process('search_ebook', 1, async (job: BullJob<SearchEbookPayload>) => {
       const { processSearchEbook } = await import('../processors/search-ebook.processor');
       return await processSearchEbook(job.data);
     });

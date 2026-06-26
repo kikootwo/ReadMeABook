@@ -517,18 +517,47 @@ describe('SchedulerService', () => {
     const service = new SchedulerService();
     await service.start();
 
-    const updateManyCalls = prismaMock.scheduledJob.updateMany.mock.calls;
-    expect(updateManyCalls).toHaveLength(2);
+    // Filter to the rename calls (WHERE keyed on `name`); the schedule-migration
+    // pass also uses updateMany but is keyed on `schedule`.
+    const renameCalls = prismaMock.scheduledJob.updateMany.mock.calls.filter(
+      (c: any[]) => 'name' in c[0].where
+    );
+    expect(renameCalls).toHaveLength(2);
 
     // Type-gating safety: each WHERE must match BOTH name AND type exact-equals.
-    expect(updateManyCalls[0][0]).toEqual({
+    expect(renameCalls[0][0]).toEqual({
       where: { name: 'Plex Library Scan', type: 'plex_library_scan' },
       data: { name: 'Library Scan' },
     });
-    expect(updateManyCalls[1][0]).toEqual({
+    expect(renameCalls[1][0]).toEqual({
       where: { name: 'Plex Recently Added Check', type: 'plex_recently_added_check' },
       data: { name: 'Recently Added Check' },
     });
+  });
+
+  it('re-staggers legacy `0 0 * * *` jobs off midnight on startup (type + schedule gated)', async () => {
+    prismaMock.scheduledJob.findFirst.mockResolvedValue({ id: 'existing' });
+    prismaMock.scheduledJob.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.scheduledJob.findMany
+      .mockResolvedValueOnce([]) // cleanupDeprecatedJobs
+      .mockResolvedValueOnce([]) // scheduleAllJobs
+      .mockResolvedValue([]); // triggerOverdueJobs
+
+    const { SchedulerService } = await import('@/lib/services/scheduler.service');
+    const service = new SchedulerService();
+    await service.start();
+
+    // The reschedule pass is keyed on BOTH type and the exact old schedule, so a
+    // customized cron is never overridden. audible_refresh is intentionally absent
+    // (stays at midnight).
+    const scheduleCalls = prismaMock.scheduledJob.updateMany.mock.calls
+      .map((c: any[]) => c[0])
+      .filter((arg: any) => 'schedule' in arg.where);
+    expect(scheduleCalls).toEqual([
+      { where: { type: 'check_watched_lists', schedule: '0 0 * * *' }, data: { schedule: '0 1 * * *' } },
+      { where: { type: 'retry_missing_torrents', schedule: '0 0 * * *' }, data: { schedule: '0 2 * * *' } },
+      { where: { type: 'find_missing_ebooks', schedule: '0 0 * * *' }, data: { schedule: '0 3 * * *' } },
+    ]);
   });
 
   it('swallows rename errors and continues startup (idempotent)', async () => {

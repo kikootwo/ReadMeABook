@@ -22,6 +22,22 @@ const STALE_NAME_REWRITES: ReadonlyArray<{
   { type: 'plex_recently_added_check', staleName: 'Plex Recently Added Check', neutralName: 'Recently Added Check' },
 ];
 
+// Existing installs created these jobs on the old colliding `0 0 * * *` default,
+// so they all fire at midnight and can freeze the single event loop (→ mass Bull
+// "stalled" failures). Re-stagger them off midnight. Type-gated AND exact-schedule-
+// gated: only rewrites a row still on the exact old default, so an admin who
+// deliberately customized the time is never overridden. `audible_refresh` stays at
+// midnight (heaviest, runs alone).
+const LEGACY_MIDNIGHT_RESCHEDULES: ReadonlyArray<{
+  type: string;
+  from: string;
+  to: string;
+}> = [
+  { type: 'check_watched_lists', from: '0 0 * * *', to: '0 1 * * *' },
+  { type: 'retry_missing_torrents', from: '0 0 * * *', to: '0 2 * * *' },
+  { type: 'find_missing_ebooks', from: '0 0 * * *', to: '0 3 * * *' },
+];
+
 export type ScheduledJobType = 'plex_library_scan' | 'plex_recently_added_check' | 'audible_refresh' | 'retry_missing_torrents' | 'retry_failed_imports' | 'find_missing_ebooks' | 'cleanup_seeded_torrents' | 'monitor_rss_feeds' | 'sync_reading_shelves' | 'check_watched_lists';
 
 export interface ScheduledJob {
@@ -80,6 +96,10 @@ export class SchedulerService {
     // Create default jobs if they don't exist
     await this.ensureDefaultJobs();
 
+    // Re-stagger existing installs still on the legacy `0 0 * * *` default
+    // (must run before scheduleAllJobs so the new times take effect this startup)
+    await this.migrateLegacyMidnightSchedules();
+
     // Load and schedule all enabled jobs (works with whatever jobs exist in DB)
     await this.scheduleAllJobs();
 
@@ -119,7 +139,7 @@ export class SchedulerService {
       {
         name: 'Retry Missing Torrents Search',
         type: 'retry_missing_torrents' as ScheduledJobType,
-        schedule: '0 0 * * *', // Daily at midnight
+        schedule: '0 2 * * *', // Daily at 02:00 — staggered off midnight to avoid event-loop freeze from concurrent heavy jobs
         enabled: true, // Enable by default
         payload: {},
       },
@@ -133,7 +153,7 @@ export class SchedulerService {
       {
         name: 'Find Missing Ebooks',
         type: 'find_missing_ebooks' as ScheduledJobType,
-        schedule: '0 0 * * *', // Daily at midnight
+        schedule: '0 3 * * *', // Daily at 03:00 — staggered off midnight so the ebook-search burst doesn't pile onto audible_refresh/retry
         enabled: true, // Enable by default; gated by ebook_auto_grab_enabled + source-enablement at run time
         payload: {},
       },
@@ -161,7 +181,7 @@ export class SchedulerService {
       {
         name: 'Check Watched Lists',
         type: 'check_watched_lists' as ScheduledJobType,
-        schedule: '0 0 * * *', // Daily at midnight (every 24 hours)
+        schedule: '0 1 * * *', // Daily at 01:00 — staggered off midnight to avoid event-loop freeze from concurrent heavy jobs
         enabled: true, // Enable by default
         payload: {},
       },
@@ -217,6 +237,29 @@ export class SchedulerService {
       }
     } catch (error) {
       logger.error('Failed to rename stale scheduled job names', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Re-stagger jobs still on the legacy `0 0 * * *` default so they don't all
+   * fire at midnight and freeze the event loop. Type-gated AND exact-schedule-
+   * gated via the updateMany `where` — a customized schedule is never touched.
+   */
+  private async migrateLegacyMidnightSchedules(): Promise<void> {
+    try {
+      for (const entry of LEGACY_MIDNIGHT_RESCHEDULES) {
+        const result = await prisma.scheduledJob.updateMany({
+          where: { type: entry.type, schedule: entry.from },
+          data: { schedule: entry.to },
+        });
+        if (result.count > 0) {
+          logger.info(`Re-staggered ${entry.type}: ${entry.from} → ${entry.to} (${result.count} row${result.count === 1 ? '' : 's'})`);
+        }
+      }
+    } catch (error) {
+      logger.error('Failed to migrate legacy midnight schedules', {
         error: error instanceof Error ? error.message : String(error),
       });
     }
