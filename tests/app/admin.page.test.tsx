@@ -59,6 +59,10 @@ vi.mock('@/components/requests/InteractiveTorrentSearchModal', () => ({
   InteractiveTorrentSearchModal: () => null,
 }));
 
+vi.mock('@/components/requests/AnnasArchiveSearchModal', () => ({
+  AnnasArchiveSearchModal: () => null,
+}));
+
 describe('AdminDashboard', () => {
   beforeEach(() => {
     swrState.clear();

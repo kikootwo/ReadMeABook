@@ -98,7 +98,7 @@ export async function POST(
           );
         }
 
-        if (isDirectEbookSearch && !['pending', 'failed', 'awaiting_search'].includes(requestRecord.status)) {
+        if (isDirectEbookSearch && !['pending', 'failed', 'awaiting_search', 'unavailable'].includes(requestRecord.status)) {
           return NextResponse.json(
             { error: `Cannot search for ebook request in ${requestRecord.status} status` },
             { status: 400 }
@@ -115,7 +115,7 @@ export async function POST(
             },
           });
 
-          if (existingEbookRequest && !['failed', 'awaiting_search'].includes(existingEbookRequest.status)) {
+          if (existingEbookRequest && !['failed', 'awaiting_search', 'unavailable'].includes(existingEbookRequest.status)) {
             return NextResponse.json({
               error: `E-book request already exists (status: ${existingEbookRequest.status})`,
               existingRequestId: existingEbookRequest.id,

@@ -162,7 +162,7 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
 
           {/* Status Badge and Type Badge */}
           <div className="flex items-center gap-2 flex-wrap">
-            <StatusBadge status={request.status} progress={request.progress} />
+            <StatusBadge status={request.status} progress={request.progress} type={requestType} />
             {releaseDateLabel && (
               <span className="text-xs text-gray-500 dark:text-gray-400">
                 Releases {releaseDateLabel}

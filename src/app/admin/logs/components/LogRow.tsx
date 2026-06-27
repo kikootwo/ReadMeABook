@@ -34,7 +34,7 @@ function formatJobType(type: string): string {
 function formatDuration(startedAt: string | null, completedAt: string | null): string {
   if (!startedAt) return 'N/A';
   if (!completedAt) return 'Running…';
-  const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime();
+  const ms = Math.max(0, new Date(completedAt).getTime() - new Date(startedAt).getTime());
   const s = Math.floor(ms / 1000);
   const m = Math.floor(s / 60);
   const h = Math.floor(m / 60);

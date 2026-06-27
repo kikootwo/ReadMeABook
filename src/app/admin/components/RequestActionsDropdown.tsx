@@ -10,6 +10,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { InteractiveTorrentSearchModal } from '@/components/requests/InteractiveTorrentSearchModal';
+import { AnnasArchiveSearchModal } from '@/components/requests/AnnasArchiveSearchModal';
 import { AdjustSearchTermsModal } from './AdjustSearchTermsModal';
 import { useSmartDropdownPosition } from '@/hooks/useSmartDropdownPosition';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
@@ -35,6 +36,7 @@ export interface RequestActionsDropdownProps {
   onFetchEbook?: (requestId: string) => Promise<void>;
   onSearchTermsUpdated?: () => void;
   ebookSidecarEnabled?: boolean;
+  indexerSearchEnabled?: boolean;
   annasArchiveBaseUrl?: string;
   isLoading?: boolean;
 }
@@ -49,6 +51,7 @@ export function RequestActionsDropdown({
   onFetchEbook,
   onSearchTermsUpdated,
   ebookSidecarEnabled = false,
+  indexerSearchEnabled = false,
   annasArchiveBaseUrl = 'https://annas-archive.gl',
   isLoading = false,
 }: RequestActionsDropdownProps) {
@@ -56,6 +59,7 @@ export function RequestActionsDropdown({
   const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
   const [showInteractiveSearchEbook, setShowInteractiveSearchEbook] = useState(false);
   const [showAdjustSearchTerms, setShowAdjustSearchTerms] = useState(false);
+  const [showAnnasArchiveSearch, setShowAnnasArchiveSearch] = useState(false);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const { containerRef, dropdownRef, positionAbove, style } = useSmartDropdownPosition(isOpen);
@@ -70,7 +74,7 @@ export function RequestActionsDropdown({
 
   // Determine available actions based on status
   const canSearch = ['pending', 'failed', 'awaiting_search', 'awaiting_release', 'unavailable'].includes(request.status);
-  const canAdjustSearchTerms = ['pending', 'failed', 'awaiting_search', 'awaiting_release', 'searching', 'unavailable'].includes(request.status);
+  const canAdjustSearchTerms = !isEbook && ['pending', 'failed', 'awaiting_search', 'awaiting_release', 'searching', 'unavailable'].includes(request.status);
   const canRetryDownload = request.status === 'failed' && (request.downloadAttempts ?? 0) > 0 && !!onRetryDownload;
   const canCancel = (CANCELLABLE_STATUSES as readonly string[]).includes(request.status);
   const canDelete = true; // Admins can always delete
@@ -247,8 +251,32 @@ export function RequestActionsDropdown({
               <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
             )}
 
-            {/* Manual Search */}
-            {canSearch && (
+            {/* Ebook: Search Anna's Archive (replaces Manual Search) */}
+            {canSearch && isEbook && (
+              <button
+                onClick={() => { setIsOpen(false); setShowAnnasArchiveSearch(true); }}
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 transition-colors"
+                role="menuitem"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+                Search Anna&apos;s Archive
+              </button>
+            )}
+
+            {/* Audiobook: Manual Search (unchanged) */}
+            {canSearch && !isEbook && (
               <button
                 onClick={handleManualSearch}
                 className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 transition-colors"
@@ -271,8 +299,8 @@ export function RequestActionsDropdown({
               </button>
             )}
 
-            {/* Interactive Search */}
-            {canSearch && (
+            {/* Interactive Search: audiobooks always, ebooks only when indexer search enabled (renamed "Search Indexers") */}
+            {canSearch && (!isEbook || indexerSearchEnabled) && (
               <button
                 onClick={handleInteractiveSearch}
                 className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 transition-colors"
@@ -291,7 +319,7 @@ export function RequestActionsDropdown({
                     d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
                   />
                 </svg>
-                Interactive Search
+                {isEbook ? 'Search Indexers' : 'Interactive Search'}
               </button>
             )}
 
@@ -530,6 +558,19 @@ export function RequestActionsDropdown({
         }}
         searchMode="ebook"
         customSearchTerms={request.customSearchTerms}
+      />
+
+      {/* Anna's Archive Search Modal (ebooks) */}
+      <AnnasArchiveSearchModal
+        isOpen={showAnnasArchiveSearch}
+        onClose={() => setShowAnnasArchiveSearch(false)}
+        requestId={request.requestId}
+        audiobook={{
+          title: request.title,
+          author: request.author,
+          asin: request.asin,
+        }}
+        onSuccess={onSearchTermsUpdated}
       />
 
       {/* Adjust Search Terms Modal */}

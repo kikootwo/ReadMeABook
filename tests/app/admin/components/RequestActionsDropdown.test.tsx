@@ -29,6 +29,10 @@ vi.mock('@/components/requests/InteractiveTorrentSearchModal', () => ({
   }) => (isOpen ? <div>Interactive search for {audiobook.title}</div> : null),
 }));
 
+vi.mock('@/components/requests/AnnasArchiveSearchModal', () => ({
+  AnnasArchiveSearchModal: () => null,
+}));
+
 vi.mock('@/app/admin/components/AdjustSearchTermsModal', () => ({
   AdjustSearchTermsModal: () => null,
 }));

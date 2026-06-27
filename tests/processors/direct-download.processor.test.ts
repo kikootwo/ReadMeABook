@@ -205,15 +205,14 @@ describe('processStartDirectDownload', () => {
 
     const { processStartDirectDownload } = await import('@/lib/processors/direct-download.processor');
 
-    const result = await processStartDirectDownload({
+    await expect(processStartDirectDownload({
       requestId: 'req-3',
       downloadHistoryId: 'dh-3',
       downloadUrl: 'https://slow1.example.com/book',
       targetFilename: 'Failed Book.epub',
       jobId: 'job-3',
-    });
+    })).rejects.toThrow('No download URLs available');
 
-    expect(result.success).toBe(false);
     // Verify the second call (final failure status update)
     expect(prismaMock.request.update).toHaveBeenLastCalledWith({
       where: { id: 'req-3' },

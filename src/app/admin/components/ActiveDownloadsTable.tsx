@@ -131,14 +131,18 @@ export function ActiveDownloadsTable({ downloads }: ActiveDownloadsTableProps) {
                 </td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
-                    <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 max-w-[100px]">
-                      <div
-                        className="bg-blue-600 dark:bg-blue-500 h-2 rounded-full transition-all"
-                        style={{ width: `${download.progress}%` }}
-                      />
+                    <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 max-w-[150px] overflow-hidden">
+                      {download.progress === 0 ? (
+                        <div className="h-2 w-1/3 rounded-full bg-blue-500/60 animate-pulse" />
+                      ) : (
+                        <div
+                          className="bg-blue-600 dark:bg-blue-500 h-2 rounded-full transition-all duration-700 ease-out"
+                          style={{ width: `${download.progress}%` }}
+                        />
+                      )}
                     </div>
                     <span className="text-sm font-medium text-gray-900 dark:text-gray-100 min-w-[3rem] text-right">
-                      {download.progress}%
+                      {download.progress > 0 ? `${download.progress}%` : '...'}
                     </span>
                   </div>
                 </td>

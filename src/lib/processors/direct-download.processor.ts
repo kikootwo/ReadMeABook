@@ -203,12 +203,7 @@ export async function processStartDirectDownload(payload: StartDirectDownloadPay
         },
       });
 
-      return {
-        success: false,
-        message: 'Download failed',
-        requestId,
-        error: downloadResult.error,
-      };
+      throw new Error(downloadResult.error || 'All download attempts failed');
     }
 
     // Download succeeded - update records and trigger organize

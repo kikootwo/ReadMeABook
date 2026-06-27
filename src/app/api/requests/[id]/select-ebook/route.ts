@@ -12,6 +12,7 @@ import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { getConfigService } from '@/lib/services/config.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { getSlowDownloadLinks } from '@/lib/services/ebook-scraper';
 
 const logger = RMABLogger.create('API.SelectEbook');
 
@@ -100,7 +101,7 @@ export async function POST(
               },
             });
 
-        if (ebookRequest && !['failed', 'awaiting_search', 'pending'].includes(ebookRequest.status)) {
+        if (ebookRequest && !['failed', 'awaiting_search', 'pending', 'unavailable'].includes(ebookRequest.status)) {
           return NextResponse.json({
             error: `E-book request already exists (status: ${ebookRequest.status})`,
             existingRequestId: ebookRequest.id,
@@ -142,12 +143,23 @@ export async function POST(
         // Route to appropriate download based on source
         if (selectedEbook.source === 'annas_archive') {
           // Anna's Archive: Direct HTTP download
-          await handleAnnasArchiveDownload(
+          const aaResult = await handleAnnasArchiveDownload(
             ebookRequest.id,
             audiobook,
             selectedEbook,
             jobQueue
           );
+          if (!aaResult.success) {
+            // Revert request status so the user can retry from the modal
+            await prisma.request.update({
+              where: { id: ebookRequest.id },
+              data: { status: 'awaiting_search', errorMessage: aaResult.error, updatedAt: new Date() },
+            });
+            return NextResponse.json(
+              { error: aaResult.error, message: 'Download failed', success: false, requestId: ebookRequest.id },
+              { status: 400 }
+            );
+          }
         } else {
           // Indexer: Torrent/NZB download
           await handleIndexerDownload(
@@ -187,6 +199,18 @@ async function handleAnnasArchiveDownload(
   const configService = getConfigService();
   const preferredFormat = await configService.get('ebook_sidecar_preferred_format') || 'epub';
 
+  // Resolve download URLs on-demand when only md5 is provided (AA search modal flow)
+  if ((!selectedEbook.downloadUrls || selectedEbook.downloadUrls.length === 0) && selectedEbook.md5) {
+    const baseUrl = await configService.get('ebook_sidecar_base_url') || 'https://annas-archive.gl';
+    const flaresolverrUrl = await configService.get('ebook_sidecar_flaresolverr_url');
+    const slowLinks = await getSlowDownloadLinks(selectedEbook.md5, baseUrl, undefined, flaresolverrUrl || undefined);
+    if (slowLinks.length === 0) {
+      return { success: false as const, error: 'No download links available — FlareSolverr may be unavailable. Try again later.' };
+    }
+    selectedEbook.downloadUrls = slowLinks;
+    selectedEbook.downloadUrl = slowLinks[0];
+  }
+
   logger.info(`Starting Anna's Archive download for "${audiobook.title}"`);
   logger.info(`MD5: ${selectedEbook.md5}, Format: ${selectedEbook.format || preferredFormat}`);
 
@@ -224,6 +248,7 @@ async function handleAnnasArchiveDownload(
   );
 
   logger.info(`Queued direct download job for request ${requestId}`);
+  return { success: true as const };
 }
 
 /**

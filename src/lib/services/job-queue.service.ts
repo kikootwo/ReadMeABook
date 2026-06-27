@@ -605,6 +605,7 @@ export class JobQueueService {
 
       if (status === 'active') {
         updateData.startedAt = new Date();
+        updateData.completedAt = null;
       }
 
       if (status === 'completed' || status === 'failed') {

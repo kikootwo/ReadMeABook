@@ -49,6 +49,7 @@ interface RequestsResponse {
 
 interface RecentRequestsTableProps {
   ebookSidecarEnabled?: boolean;
+  indexerSearchEnabled?: boolean;
   annasArchiveBaseUrl?: string;
 }
 
@@ -82,11 +83,11 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 type SortField = 'createdAt' | 'completedAt' | 'title' | 'user' | 'status';
 type SortOrder = 'asc' | 'desc';
 
-function getStatusBadge(status: string) {
+function getStatusBadge(status: string, type?: string) {
   const styles: Record<string, string> = {
     pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
     awaiting_approval: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
-    awaiting_search: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+    awaiting_search: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
     awaiting_release: 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200',
     searching: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
     downloading: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
@@ -98,6 +99,7 @@ function getStatusBadge(status: string) {
     failed: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
     warn: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
     cancelled: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
+    unavailable: 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-200',
     denied: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
   };
 
@@ -108,13 +110,18 @@ function getStatusBadge(status: string) {
     awaiting_release: 'Awaiting Release',
     awaiting_import: 'Awaiting Import',
     awaiting_approval: 'Awaiting Approval',
+    unavailable: 'Unavailable',
   };
 
-  const label = labels[status] || status.charAt(0).toUpperCase() + status.slice(1);
+  let label = labels[status] || status.charAt(0).toUpperCase() + status.slice(1);
+
+  if (type === 'ebook' && status === 'downloaded') {
+    label = 'Available';
+  }
 
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${style}`}
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${style}`}
     >
       {label}
     </span>
@@ -177,7 +184,7 @@ function getInitialParams(): {
   };
 }
 
-export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveBaseUrl = 'https://annas-archive.gl' }: RecentRequestsTableProps) {
+export function RecentRequestsTable({ ebookSidecarEnabled = false, indexerSearchEnabled = false, annasArchiveBaseUrl = 'https://annas-archive.gl' }: RecentRequestsTableProps) {
   const toast = useToast();
 
   // Get initial filter state from URL (only evaluated once due to lazy init)
@@ -732,7 +739,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                     <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
                       {request.user}
                     </td>
-                    <td className="px-6 py-4">{getStatusBadge(request.status)}</td>
+                    <td className="px-6 py-4">{getStatusBadge(request.status, request.type)}</td>
                     <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
                       {formatDistanceToNow(new Date(request.createdAt), { addSuffix: true })}
                     </td>
@@ -764,6 +771,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                         onFetchEbook={handleFetchEbook}
                         onSearchTermsUpdated={() => mutate(apiUrl)}
                         ebookSidecarEnabled={ebookSidecarEnabled}
+                        indexerSearchEnabled={indexerSearchEnabled}
                         annasArchiveBaseUrl={annasArchiveBaseUrl}
                         isLoading={isDeleting || isFetchingEbook}
                       />
