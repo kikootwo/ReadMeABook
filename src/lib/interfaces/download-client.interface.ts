@@ -188,7 +188,7 @@ export interface IDownloadClient {
    * Get available categories/labels from the download client.
    * - qBittorrent: Returns configured category names
    * - Transmission: Returns empty array (uses free-form labels)
-   * - Usenet clients: Returns empty array (feature scoped to torrent clients)
+   * - SABnzbd/NZBGet: Returns configured category names
    */
   getCategories(): Promise<string[]>;
 

@@ -834,9 +834,15 @@ export class SABnzbdService implements IDownloadClient {
     await this.archiveCompletedNZB(id);
   }
 
-  /** Not applicable for usenet clients */
+  /** Get configured SABnzbd category names. */
   async getCategories(): Promise<string[]> {
-    return [];
+    try {
+      const config = await this.getConfig();
+      return config.categories.map((category) => category.name).filter(Boolean);
+    } catch (error) {
+      logger.error('Failed to get categories', { error: error instanceof Error ? error.message : String(error) });
+      return [];
+    }
   }
 
   /** Not applicable for usenet clients */
