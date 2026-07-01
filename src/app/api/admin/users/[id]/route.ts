@@ -67,14 +67,6 @@ export async function PUT(
           );
         }
 
-        // Prevent user from demoting themselves
-        if (req.user && id === req.user.sub) {
-          return NextResponse.json(
-            { error: 'You cannot change your own role' },
-            { status: 403 }
-          );
-        }
-
         // Check if user is the setup admin, OIDC user, or deleted
         const targetUser = await prisma.user.findUnique({
           where: { id },
@@ -104,6 +96,14 @@ export async function PUT(
 
         // Detect if role is being changed
         const isRoleChange = targetUser.role !== role;
+
+        // Prevent user from demoting themselves (only blocks actual role changes)
+        if (req.user && id === req.user.sub && isRoleChange) {
+          return NextResponse.json(
+            { error: 'You cannot change your own role' },
+            { status: 403 }
+          );
+        }
 
         // Prevent changing setup admin role (only if role is actually being changed)
         if (targetUser.isSetupAdmin && isRoleChange && role !== 'admin') {
