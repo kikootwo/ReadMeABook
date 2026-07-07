@@ -40,6 +40,12 @@ export interface AudiobookshelfSettings {
   apiToken: string;
   libraryId: string;
   triggerScanAfterImport: boolean;
+  /**
+   * When true, RMAB writes a `req:<username>` tag onto each ABS item it matches
+   * to a completed request. Lets admins scope per-user library access by tag.
+   * Backing config key: `audiobookshelf.tag_requester`.
+   */
+  tagRequester: boolean;
 }
 
 /**

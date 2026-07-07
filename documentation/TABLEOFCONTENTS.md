@@ -28,6 +28,7 @@
 - **Availability status, plexGuid linking** → [integrations/plex.md](integrations/plex.md)
 
 ## Audiobookshelf Integration
+- **Requester tagging (`req:<username>` per requester)** → [features/requester-tags.md](features/requester-tags.md)
 - **ABS API client, library scanning** → `src/lib/services/audiobookshelf/api.ts`
 - **ABS library service** → `src/lib/services/library/AudiobookshelfLibraryService.ts`
 - **Backend mode selection (Plex vs ABS)** → [backend/services/config.md](backend/services/config.md)
@@ -166,6 +167,8 @@
 **"How does logging work?"** → [backend/services/logging.md](backend/services/logging.md)
 **"How do BookDate card stack animations work?"** → [features/bookdate-animations.md](features/bookdate-animations.md)
 **"How does Audiobookshelf integration work?"** → `src/lib/services/audiobookshelf/api.ts`, `src/lib/services/library/AudiobookshelfLibraryService.ts`
+**"How do I tag books by requester?"** → [features/requester-tags.md](features/requester-tags.md)
+**"How do I scope ABS library access per user?"** → [features/requester-tags.md](features/requester-tags.md)
 **"How do I use OIDC/Authentik/Keycloak?"** → [backend/services/auth.md](backend/services/auth.md)
 **"How do I switch from Plex to Audiobookshelf?"** → Setup wizard (re-run setup with different backend mode)
 **"How does library thumbnail caching work?"** → [features/library-thumbnail-cache.md](features/library-thumbnail-cache.md)

@@ -29,6 +29,7 @@ export type JobType =
   | 'monitor_rss_feeds'
   | 'sync_reading_shelves'
   | 'check_watched_lists'
+  | 'backfill_requester_tags'
   | 'send_notification'
   // Ebook-specific job types
   | 'search_ebook'
@@ -120,6 +121,10 @@ export interface SyncShelvesPayload extends JobPayload {
   shelfType?: 'goodreads' | 'hardcover';
   userId?: string;
   maxLookupsPerShelf?: number;
+}
+
+export interface BackfillRequesterTagsPayload extends JobPayload {
+  scheduledJobId?: string;
 }
 
 export interface CheckWatchedListsPayload extends JobPayload {
@@ -413,6 +418,12 @@ export class JobQueueService {
       const { processCheckWatchedLists } = await import('../processors/check-watched-lists.processor');
       const payloadWithJobId = await this.ensureJobRecord(job, 'check_watched_lists');
       return await processCheckWatchedLists(payloadWithJobId);
+    });
+
+    this.queue.process('backfill_requester_tags', 1, async (job: BullJob<BackfillRequesterTagsPayload>) => {
+      const { processBackfillRequesterTags } = await import('../processors/backfill-requester-tags.processor');
+      const payloadWithJobId = await this.ensureJobRecord(job, 'backfill_requester_tags');
+      return await processBackfillRequesterTags(payloadWithJobId);
     });
 
     // Send notification processor
@@ -851,6 +862,23 @@ export class JobQueueService {
       } as CheckWatchedListsPayload,
       {
         priority: 8, // Higher than scheduled (7) since user-initiated
+      }
+    );
+  }
+
+  /**
+   * Add backfill requester tags job.
+   * Tags already-available ABS audiobook requests with their `req:<username>` tag.
+   * Triggered when the ABS "tag requester" setting is toggled on.
+   */
+  async addBackfillRequesterTagsJob(scheduledJobId?: string): Promise<string> {
+    return await this.addJob(
+      'backfill_requester_tags',
+      {
+        scheduledJobId,
+      } as BackfillRequesterTagsPayload,
+      {
+        priority: 6,
       }
     );
   }
