@@ -23,7 +23,9 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
   - `bookdate_library_scope` ('full'|'rated', default 'full') - Library scope for recommendations
   - `bookdate_custom_prompt` (text, optional, max 1000 chars) - Custom preferences for AI
   - `bookdate_onboarding_complete` (bool, default false) - Whether user has completed BookDate onboarding
-- Indexes: `plex_id`, `role`
+- **Discord integration:**
+  - `discord_user_id` (string, unique, nullable) - Linked Discord account for slash-command requesting (null = not linked). See [integrations/discord-bot.md](../integrations/discord-bot.md)
+- Indexes: `plex_id`, `role`, `discord_user_id`
 
 ### Audible_Cache
 - `id` (UUID PK), `asin` (unique, Audible ID), `title`, `author`, `narrator`, `description`
@@ -71,6 +73,7 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - `progress` (0-100), `priority`, `error_message`
 - `search_attempts`, `download_attempts`, `import_attempts`, `max_import_retries` (default 5)
 - `last_search_at`, `last_import_at`, `created_at`, `updated_at`, `completed_at`
+- `discord_cards` (JSONB, nullable) - Discord request-card message refs `[{kind:'public'|'dm', channelId, messageId}]` for the live, auto-updating embed. See [integrations/discord-bot.md](../integrations/discord-bot.md)
 - Unique: `(user_id, audiobook_id)`
 - Indexes: `user_id`, `audiobook_id`, `status`, `created_at DESC`
 

@@ -1,0 +1,1 @@
+export { DiscordTab } from './DiscordTab';

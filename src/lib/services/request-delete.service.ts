@@ -47,7 +47,9 @@ export interface DeleteRequestResult {
  */
 export async function deleteRequest(
   requestId: string,
-  adminUserId: string
+  // RMAB user ID of the actor, recorded as `deletedBy`. Pass null when the actor has no linked RMAB
+  // account (e.g. a Discord admin-role holder) so a non-user identifier is never stored as deletedBy.
+  adminUserId: string | null
 ): Promise<DeleteRequestResult> {
   try {
     // 1. Find request (only active, non-deleted)

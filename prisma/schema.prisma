@@ -57,6 +57,9 @@ model User {
   interactiveSearchAccess Boolean? @map("interactive_search_access") // null = use global setting, true = allow, false = deny
   downloadAccess          Boolean? @map("download_access")           // null = use global setting, true = allow, false = deny
 
+  // Discord integration (maps a Discord account to this RMAB user for slash-command requesting)
+  discordUserId String? @unique @map("discord_user_id") // Discord snowflake; null = not linked
+
   // Login token (admin-generated, for direct URL login)
   loginTokenHash String? @map("login_token_hash") // SHA-256 hash of the login token (never store plaintext)
 
@@ -85,6 +88,7 @@ model User {
   @@index([plexId])
   @@index([role])
   @@index([deletedAt])
+  @@index([discordUserId])
   @@map("users")
 }
 
@@ -251,6 +255,11 @@ model Request {
   // Soft delete support
   deletedAt DateTime? @map("deleted_at")
   deletedBy String?   @map("deleted_by") // Admin user ID
+
+  // Discord request card(s): persisted message refs for the live, auto-updating embed posted on
+  // /checkout. JSON array of { kind: 'public' | 'dm', channelId, messageId }. Null if not from Discord
+  // or card delivery disabled. The notification processor edits these in place as status changes.
+  discordCards Json? @map("discord_cards")
 
   // Relations
   user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)

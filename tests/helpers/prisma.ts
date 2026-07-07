@@ -9,6 +9,7 @@ type PrismaModelMock = {
   findMany: ReturnType<typeof vi.fn>;
   findFirst: ReturnType<typeof vi.fn>;
   findUnique: ReturnType<typeof vi.fn>;
+  findUniqueOrThrow: ReturnType<typeof vi.fn>;
   create: ReturnType<typeof vi.fn>;
   createMany: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
@@ -23,6 +24,7 @@ const createModelMock = (): PrismaModelMock => ({
   findMany: vi.fn(),
   findFirst: vi.fn(),
   findUnique: vi.fn(),
+  findUniqueOrThrow: vi.fn(() => Promise.resolve({})),
   create: vi.fn(() => Promise.resolve({})),
   createMany: vi.fn(() => Promise.resolve({ count: 0 })),
   update: vi.fn(() => Promise.resolve({})),

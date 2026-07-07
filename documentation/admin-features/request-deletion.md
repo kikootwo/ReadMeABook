@@ -137,11 +137,13 @@ where: {
 - **Soft-deleted requests:** Delete torrent + hard-delete request when seeding complete
 - **Unlimited seeding:** Hard-delete orphaned request immediately (no monitoring)
 
-### API Endpoint
+### API Endpoints
 
-**DELETE** `/api/admin/requests/:id`
+**DELETE** `/api/admin/requests/:id` — Admin-only (dashboard use)
 
-**Authorization:** Admin only
+**DELETE** `/api/requests/:id` — Ownership-based (user deletes own; admin deletes any). On the API token allowlist — usable by third-party integrations with `rmab_` tokens. Same cascading soft-delete as the admin endpoint.
+
+**Authorization:** Authenticated user (own requests) or admin (any request)
 
 **Request:** No body
 
@@ -161,7 +163,7 @@ where: {
 
 **Errors:**
 - 401: Unauthorized (not logged in)
-- 403: Forbidden (not admin)
+- 403: Forbidden (not owner or admin)
 - 404: Request not found or already deleted
 - 500: Internal server error
 

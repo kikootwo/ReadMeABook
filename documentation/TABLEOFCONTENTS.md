@@ -85,6 +85,14 @@
 - **Event types, triggers, message formatting** → [backend/services/notifications.md](backend/services/notifications.md)
 - **Notification settings UI** → [settings-pages.md](settings-pages.md)
 
+## Discord Bot (Slash-Command Requesting)
+- **In-Discord requesting (/request, /status, /delete)** → [integrations/discord-bot.md](integrations/discord-bot.md)
+- **Gateway bot architecture, startup, single-guild** → [integrations/discord-bot.md](integrations/discord-bot.md)
+- **Discord ↔ RMAB user mapping (discordUserId)** → [integrations/discord-bot.md](integrations/discord-bot.md)
+- **Discord approval flow (role ping, Approve/Deny buttons)** → [integrations/discord-bot.md](integrations/discord-bot.md)
+- **Shared approval service (web + Discord)** → [admin-features/request-approval.md](admin-features/request-approval.md)
+- **Discord settings tab (bot token, channel/role resolve)** → [settings-pages.md](settings-pages.md)
+
 ## Frontend Components
 - **Component catalog (cards, badges, forms)** → [frontend/components.md](frontend/components.md)
 - **RequestCard, StatusBadge, ProgressBar** → [frontend/components.md](frontend/components.md)
