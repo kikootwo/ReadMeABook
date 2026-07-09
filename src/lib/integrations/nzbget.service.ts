@@ -412,9 +412,29 @@ export class NZBGetService implements IDownloadClient {
     }
   }
 
-  /** Not applicable for usenet clients */
+  /** Get configured NZBGet category names. */
   async getCategories(): Promise<string[]> {
-    return [];
+    try {
+      const config = await this.rpc<NZBGetConfigItem[]>('config');
+      if (!config) {
+        return [];
+      }
+
+      return config
+        .filter((entry) => /^Category\d+\.Name$/.test(entry.Name))
+        .sort((a, b) => {
+          const aSlot = parseInt(a.Name.match(/^Category(\d+)\.Name$/)?.[1] || '0', 10);
+          const bSlot = parseInt(b.Name.match(/^Category(\d+)\.Name$/)?.[1] || '0', 10);
+          return aSlot - bSlot;
+        })
+        .map((entry) => entry.Value)
+        .filter(Boolean);
+    } catch (error) {
+      logger.error('Failed to get categories', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
   }
 
   /** Not applicable for usenet clients */

@@ -62,6 +62,7 @@ const createMockClient = (overrides: Partial<DownloadClient> = {}): DownloadClie
   password: 'secret',
   disableSSLVerify: false,
   remotePathMappingEnabled: false,
+  category: 'readmeabook',
   ...overrides,
 });
 
@@ -127,6 +128,7 @@ describe('DownloadClientStep', () => {
       expect(screen.getByText('URL')).toBeInTheDocument();
       expect(screen.getByText('Username')).toBeInTheDocument();
       expect(screen.getByText('Password')).toBeInTheDocument();
+      expect(screen.getByText('Category')).toBeInTheDocument();
     });
 
     it('validates required fields before testing connection', async () => {
@@ -267,6 +269,7 @@ describe('DownloadClientStep', () => {
       });
       fireEvent.change(screen.getByPlaceholderText('admin'), { target: { value: 'admin' } });
       fireEvent.change(screen.getByPlaceholderText('Password'), { target: { value: 'secret' } });
+      fireEvent.change(screen.getByPlaceholderText('readmeabook'), { target: { value: 'audiobooks' } });
       fireEvent.click(screen.getByRole('button', { name: /Test Connection/i }));
 
       await waitFor(() => {
@@ -289,6 +292,7 @@ describe('DownloadClientStep', () => {
       // There should be edit/delete buttons for the configured client
       expect(screen.getByTitle('Edit client')).toBeInTheDocument();
       expect(screen.getByTitle('Delete client')).toBeInTheDocument();
+      expect(screen.getByText('Category: audiobooks')).toBeInTheDocument();
     });
   });
 
@@ -314,6 +318,7 @@ describe('DownloadClientStep', () => {
 
       // SABnzbd should show API Key, not Username
       expect(screen.getByText('API Key')).toBeInTheDocument();
+      expect(screen.getByText('Category')).toBeInTheDocument();
       expect(screen.queryByText('Username')).not.toBeInTheDocument();
     });
 
