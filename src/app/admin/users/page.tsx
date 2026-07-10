@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import useSWR from 'swr';
 import Link from 'next/link';
 import { authenticatedFetcher, fetchJSON } from '@/lib/utils/api';
@@ -29,6 +29,7 @@ interface User {
   autoApproveRequests: boolean | null;
   interactiveSearchAccess: boolean | null;
   downloadAccess: boolean | null;
+  ereaderDeviceNames: string[] | null;
   hasLoginToken: boolean;
   _count: {
     requests: number;
@@ -41,6 +42,19 @@ interface PendingUser {
   plexEmail: string | null;
   authProvider: string;
   createdAt: string;
+}
+
+// Deterministic, stable pill colors derived from an e-reader device name.
+function ereaderPillStyle(name: string): React.CSSProperties {
+  let hue = 0;
+  for (let i = 0; i < name.length; i++) {
+    hue = (hue * 31 + name.charCodeAt(i)) % 360;
+  }
+  return {
+    backgroundColor: `hsl(${hue} 70% 92%)`,
+    color: `hsl(${hue} 65% 28%)`,
+    borderColor: `hsl(${hue} 60% 72%)`,
+  };
 }
 
 // Tinted-dot status badge following admin design system
@@ -204,6 +218,11 @@ function AdminUsersPageContent() {
     user: User | null;
   }>({ isOpen: false, user: null });
   const [editRole, setEditRole] = useState<'user' | 'admin'>('user');
+  // E-reader device enrollment (ABS only): selected devices + the list available from ABS
+  const [editEreaderDevices, setEditEreaderDevices] = useState<string[]>([]);
+  const [availableEreaderDevices, setAvailableEreaderDevices] = useState<{ name: string; email: string }[]>([]);
+  const [ereaderDropdownOpen, setEreaderDropdownOpen] = useState(false);
+  const ereaderDropdownRef = useRef<HTMLDivElement>(null);
   const [saving, setSaving] = useState(false);
   const [processingUserId, setProcessingUserId] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -244,6 +263,18 @@ function AdminUsersPageContent() {
       setGlobalInteractiveSearch(true);
     }
   }, [globalInteractiveSearchData]);
+
+  // Close the e-reader device dropdown when clicking outside it
+  useEffect(() => {
+    if (!ereaderDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (ereaderDropdownRef.current && !ereaderDropdownRef.current.contains(e.target as Node)) {
+        setEreaderDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [ereaderDropdownOpen]);
 
   // Sync global download access state (default to true if not set)
   useEffect(() => {
@@ -385,20 +416,37 @@ function AdminUsersPageContent() {
 
   const showEditDialog = (user: User) => {
     setEditRole(user.role);
+    setEditEreaderDevices(user.ereaderDeviceNames ?? []);
     setEditDialog({ isOpen: true, user });
+    // Load the e-reader devices configured in Audiobookshelf (empty list in non-ABS mode)
+    fetchJSON<{ devices: { name: string; email: string }[] }>('/api/admin/settings/ebook/ereader-devices')
+      .then((data) => setAvailableEreaderDevices(data.devices || []))
+      .catch(() => setAvailableEreaderDevices([]));
+  };
+
+  const toggleEreaderDevice = (name: string) => {
+    setEditEreaderDevices((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+    );
   };
 
   const hideEditDialog = () => {
     setEditDialog({ isOpen: false, user: null });
+    setEreaderDropdownOpen(false);
   };
 
   const saveUserRole = async () => {
     if (!editDialog.user) return;
     try {
       setSaving(true);
+      // Only manage e-reader enrollment when ABS exposes devices (section is shown)
+      const payload: { role: string; ereaderDeviceNames?: string[] } = { role: editRole };
+      if (availableEreaderDevices.length > 0) {
+        payload.ereaderDeviceNames = editEreaderDevices;
+      }
       await fetchJSON(`/api/admin/users/${editDialog.user.id}`, {
         method: 'PUT',
-        body: JSON.stringify({ role: editRole }),
+        body: JSON.stringify(payload),
       });
       toast.success(`User "${editDialog.user.plexUsername}" updated successfully`);
       hideEditDialog();
@@ -916,6 +964,85 @@ function AdminUsersPageContent() {
                     </label>
                   </div>
                 </div>
+
+                {/* E-Reader Devices (ABS only) — multi-select dropdown + colored pills; only shown when ABS has devices */}
+                {availableEreaderDevices.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      E-Reader Devices
+                    </label>
+
+                    {/* Selected device pills (deterministic colors) */}
+                    {editEreaderDevices.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {editEreaderDevices.map((name) => (
+                          <span
+                            key={name}
+                            className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium max-w-[12rem]"
+                            style={ereaderPillStyle(name)}
+                          >
+                            <span className="truncate">{name}</span>
+                            <button
+                              type="button"
+                              onClick={() => toggleEreaderDevice(name)}
+                              className="flex-shrink-0 hover:opacity-70"
+                              aria-label={`Remove ${name}`}
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Dropdown with checkboxes */}
+                    <div className="relative" ref={ereaderDropdownRef}>
+                      <button
+                        type="button"
+                        onClick={() => setEreaderDropdownOpen((o) => !o)}
+                        className="w-full flex items-center justify-between px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+                      >
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {editEreaderDevices.length > 0 ? `${editEreaderDevices.length} selected` : 'Select devices…'}
+                        </span>
+                        <svg
+                          className={`w-4 h-4 text-gray-400 transition-transform ${ereaderDropdownOpen ? 'rotate-180' : ''}`}
+                          fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+
+                      {ereaderDropdownOpen && (
+                        <div className="absolute z-10 mt-1 w-full max-h-56 overflow-auto rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg py-1">
+                          {availableEreaderDevices.map((device) => (
+                            <label
+                              key={device.name}
+                              className="flex items-start gap-3 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-600 cursor-pointer transition-colors"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={editEreaderDevices.includes(device.name)}
+                                onChange={() => toggleEreaderDevice(device.name)}
+                                className="mt-0.5 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 flex-shrink-0"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{device.name}</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{device.email}</div>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">
+                      Ebooks this user requests are emailed to the selected device(s) via Audiobookshelf. Devices are configured in Audiobookshelf → Settings → Users / Email.
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Dialog footer */}

@@ -106,6 +106,22 @@ export async function POST(
             });
           }
 
+          // Trigger 2 (#6): if already downloaded, deliver the existing copy to the request
+          // owner's e-reader devices. Send job dedupes by device; ABS-only + feature-gated inside.
+          if (existingEbookRequest.status === 'downloaded') {
+            const jobQueue = getJobQueueService();
+            await jobQueue.addSendToEreaderJob(
+              existingEbookRequest.id,
+              parentRequest.audiobook.id,
+              parentRequest.audiobook.title,
+              parentRequest.audiobook.author,
+              [parentRequest.userId],
+              0
+            ).catch((error) => {
+              logger.error('Failed to queue send-to-ereader job for late requester', { error: error instanceof Error ? error.message : String(error) });
+            });
+          }
+
           // Already exists and not in a retryable state
           return NextResponse.json({
             success: false,

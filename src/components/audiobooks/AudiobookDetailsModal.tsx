@@ -163,10 +163,15 @@ export function AudiobookDetailsModal({
     }
 
     try {
-      await createRequest(audiobook);
-      setLocalRequestStatus('pending');
-      onStatusChange?.('pending');
-      showNotification('Request created!');
+      const result = await createRequest(audiobook);
+      // A series bundle was split into individual per-book requests
+      if (result?.decomposed) {
+        showNotification(result.message || 'Series bundle split into individual book requests');
+      } else {
+        setLocalRequestStatus('pending');
+        onStatusChange?.('pending');
+        showNotification('Request created!');
+      }
       setTimeout(onClose, 1500);
       onRequestSuccess?.();
     } catch (err) {

@@ -10,6 +10,9 @@ import { TorrentResult } from '../utils/ranking-algorithm';
 import { DownloadClientType } from '../interfaces/download-client.interface';
 import { RMABLogger } from '../utils/logger';
 import type { NotificationEvent } from '@/lib/constants/notification-events';
+// Type-only import (erased at compile time) — avoids a runtime circular dependency
+// with request-creator.service.ts, which imports getJobQueueService from here.
+import type { CreateRequestInput, CreateRequestOptions } from './request-creator.service';
 
 const logger = RMABLogger.create('JobQueue');
 
@@ -25,6 +28,7 @@ export type JobType =
   | 'retry_missing_torrents'
   | 'retry_failed_imports'
   | 'find_missing_ebooks'
+  | 'retry_unavailable_ebooks'
   | 'cleanup_seeded_torrents'
   | 'monitor_rss_feeds'
   | 'sync_reading_shelves'
@@ -33,7 +37,9 @@ export type JobType =
   // Ebook-specific job types
   | 'search_ebook'
   | 'start_direct_download'
-  | 'monitor_direct_download';
+  | 'monitor_direct_download'
+  | 'send_to_ereader'
+  | 'decompose_bundle';
 
 export interface JobPayload {
   jobId?: string; // Database job ID (added automatically by addJob)
@@ -103,6 +109,10 @@ export interface RetryMissingTorrentsPayload extends JobPayload {
 }
 
 export interface RetryFailedImportsPayload extends JobPayload {
+  scheduledJobId?: string;
+}
+
+export interface RetryUnavailableEbooksPayload extends JobPayload {
   scheduledJobId?: string;
 }
 
@@ -183,6 +193,22 @@ export interface SendNotificationPayload extends JobPayload {
   timestamp: Date;
 }
 
+export interface SendToEreaderPayload extends JobPayload {
+  ebookRequestId: string; // The ebook Request (sent-device tracking lives here)
+  audiobookId: string;
+  title: string;
+  author: string;
+  targetUserIds?: string[]; // Restrict to these users (late requester); omitted = all requesters
+}
+
+export interface DecomposeBundlePayload extends JobPayload {
+  userId: string;
+  bundle: CreateRequestInput; // The detected bundle (its own ASIN is excluded from fan-out)
+  seriesAsin: string;
+  range?: [number, number]; // Position range to narrow the fan-out, when known
+  requestOptions: CreateRequestOptions; // skipAutoSearch / bypassIgnore from the originating request
+}
+
 export interface QueueStats {
   waiting: number;
   active: number;
@@ -221,6 +247,20 @@ export class JobQueueService {
         },
         removeOnComplete: 100,
         removeOnFail: 200,
+      },
+      // External searches (ebook via byparr/Cloudflare) legitimately run
+      // 60-130s+. Bull's defaults (lockDuration 30s, maxStalledCount 1) falsely
+      // fail such jobs as "job stalled more than allowable limit" on any
+      // event-loop hiccup, orphaning the request in `searching`. Widen the lock
+      // window and tolerate one transient stall before giving up. This is
+      // tolerance for *normal* long jobs — preventing the underlying event-loop
+      // freeze is handled by staggered cron schedules + reduced search
+      // concurrency; the retry_missing_torrents reaper backstops the rest.
+      settings: {
+        lockDuration: 120000,   // 2 min (default 30s)
+        lockRenewTime: 60000,   // renew at half lockDuration (default 15s)
+        stalledInterval: 60000, // sweep for stalled jobs every 60s (default 30s)
+        maxStalledCount: 2,     // allow one transient stall before failing (default 1)
       },
     });
 
@@ -301,6 +341,36 @@ export class JobQueueService {
           logger.error('Failed to update request status after download_torrent failure', {
             error: updateError instanceof Error ? updateError.message : String(updateError),
           });
+        }
+      }
+
+      // Safety net for search jobs (audiobook `search_indexers` + `search_ebook`):
+      // a Bull stall ("job stalled more than allowable limit") or other permanent
+      // failure bypasses the processor's own catch block, which would otherwise
+      // reset the request. Without this the request is orphaned in `searching`
+      // forever — no scheduler scans that status. Reset to `awaiting_search` so
+      // retry_missing_torrents re-queues it. The `status: 'searching'` guard on
+      // updateMany avoids clobbering a request that already moved on (e.g. found a
+      // result, was cancelled, or already reclaimed by the reaper).
+      if ((job.name === 'search_ebook' || job.name === 'search_indexers') && job.data) {
+        const payload = job.data as { requestId?: string };
+        if (payload.requestId) {
+          logger.error(`${job.name} job permanently failed for request ${payload.requestId} after ${job.attemptsMade} attempts; resetting searching → awaiting_search`);
+
+          try {
+            await prisma.request.updateMany({
+              where: { id: payload.requestId, status: 'searching' },
+              data: {
+                status: 'awaiting_search',
+                errorMessage: error.message || 'Search failed after multiple retries; re-queued automatically',
+                updatedAt: new Date(),
+              },
+            });
+          } catch (updateError) {
+            logger.error('Failed to reset request status after search failure', {
+              error: updateError instanceof Error ? updateError.message : String(updateError),
+            });
+          }
         }
       }
     });
@@ -391,6 +461,12 @@ export class JobQueueService {
       return await processRetryFailedImports(payloadWithJobId);
     });
 
+    this.queue.process('retry_unavailable_ebooks', 1, async (job: BullJob<RetryUnavailableEbooksPayload>) => {
+      const { processRetryUnavailableEbooks } = await import('../processors/retry-unavailable-ebooks.processor');
+      const payloadWithJobId = await this.ensureJobRecord(job, 'retry_unavailable_ebooks');
+      return await processRetryUnavailableEbooks(payloadWithJobId);
+    });
+
     this.queue.process('find_missing_ebooks', 1, async (job: BullJob<FindMissingEbooksPayload>) => {
       const { processFindMissingEbooks } = await import('../processors/find-missing-ebooks.processor');
       const payloadWithJobId = await this.ensureJobRecord(job, 'find_missing_ebooks');
@@ -422,7 +498,12 @@ export class JobQueueService {
     });
 
     // Ebook-specific processors
-    this.queue.process('search_ebook', 2, async (job: BullJob<SearchEbookPayload>) => {
+    // Concurrency 1: ebook searches funnel through a single byparr/Cloudflare
+    // solver instance. Running them in parallel saturates it (slow solves →
+    // 30-65s timeouts/403s) and, combined with synchronous cheerio parsing,
+    // starves the event loop — the trigger for the mass "stalled" failures.
+    // Serializing keeps byparr responsive; the nightly backlog still drains.
+    this.queue.process('search_ebook', 1, async (job: BullJob<SearchEbookPayload>) => {
       const { processSearchEbook } = await import('../processors/search-ebook.processor');
       return await processSearchEbook(job.data);
     });
@@ -435,6 +516,16 @@ export class JobQueueService {
     this.queue.process('monitor_direct_download', 2, async (job: BullJob<MonitorDirectDownloadPayload>) => {
       const { processMonitorDirectDownload } = await import('../processors/direct-download.processor');
       return await processMonitorDirectDownload(job.data);
+    });
+
+    this.queue.process('send_to_ereader', 1, async (job: BullJob<SendToEreaderPayload>) => {
+      const { processSendToEreader } = await import('../processors/send-to-ereader.processor');
+      return await processSendToEreader(job.data);
+    });
+
+    this.queue.process('decompose_bundle', 1, async (job: BullJob<DecomposeBundlePayload>) => {
+      const { processDecomposeBundle } = await import('../processors/decompose-bundle.processor');
+      return await processDecomposeBundle(job.data);
     });
   }
 
@@ -514,6 +605,7 @@ export class JobQueueService {
 
       if (status === 'active') {
         updateData.startedAt = new Date();
+        updateData.completedAt = null;
       }
 
       if (status === 'completed' || status === 'failed') {
@@ -782,6 +874,18 @@ export class JobQueueService {
     );
   }
 
+  async addRetryUnavailableEbooksJob(scheduledJobId?: string): Promise<string> {
+    return await this.addJob(
+      'retry_unavailable_ebooks',
+      {
+        scheduledJobId,
+      } as RetryUnavailableEbooksPayload,
+      {
+        priority: 3,
+      }
+    );
+  }
+
   /**
    * Add cleanup seeded torrents job
    */
@@ -928,6 +1032,75 @@ export class JobQueueService {
       {
         priority: 5, // Medium priority
         delay: delaySeconds * 1000,
+      }
+    );
+  }
+
+  /**
+   * Add send-to-ereader job (emails an organized ebook to requesters' e-reader devices).
+   * Delayed + retried to allow ABS to scan the newly organized file before lookup.
+   *
+   * @param targetUserIds - Restrict delivery to these users (late requester). Omit for all requesters.
+   */
+  async addSendToEreaderJob(
+    ebookRequestId: string,
+    audiobookId: string,
+    title: string,
+    author: string,
+    targetUserIds?: string[],
+    delaySeconds: number = 30
+  ): Promise<string> {
+    return await this.addJob(
+      'send_to_ereader',
+      {
+        // Tracked DB Job FK points at the ebook request
+        requestId: ebookRequestId,
+        ebookRequestId,
+        audiobookId,
+        title,
+        author,
+        targetUserIds,
+      } as SendToEreaderPayload,
+      {
+        priority: 4, // Low priority — post-completion task
+        delay: delaySeconds * 1000,
+        attempts: 5,
+        backoff: {
+          type: 'exponential',
+          delay: 30000, // 30s base → ~30s, 60s, 2m, 4m, 8m: lets ABS scan finish
+        },
+      }
+    );
+  }
+
+  /**
+   * Add a series-bundle decomposition job.
+   *
+   * Runs the per-book fan-out off the request thread: enumerating the series and
+   * creating up to MAX_BUNDLE_BOOKS individual requests (each an Audnexus lookup +
+   * notification + search enqueue) would otherwise block POST /api/requests and
+   * risk a client timeout. Low priority — it's a post-request expansion.
+   */
+  async addDecomposeBundleJob(
+    userId: string,
+    bundle: CreateRequestInput,
+    seriesAsin: string,
+    range: [number, number] | undefined,
+    requestOptions: CreateRequestOptions
+  ): Promise<string> {
+    return await this.addJob(
+      'decompose_bundle',
+      {
+        userId,
+        bundle,
+        seriesAsin,
+        range,
+        requestOptions,
+      } as DecomposeBundlePayload,
+      {
+        priority: 5, // Lowest — background fan-out, never blocks user-facing work
+        attempts: 2,
+        backoff: { type: 'exponential', delay: 10000 },
       }
     );
   }

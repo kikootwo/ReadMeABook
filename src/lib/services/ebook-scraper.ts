@@ -63,8 +63,13 @@ async function fetchViaFlareSolverr(
     maxTimeout: timeout,
   };
 
+  // Strip any trailing slash(es) so a configured URL like "http://byparr:8191/"
+  // doesn't build "http://byparr:8191//v1" — byparr returns 404 on the double
+  // slash (real FlareSolverr tolerates it), which silently breaks extraction.
+  const endpoint = `${flaresolverrUrl.replace(/\/+$/, '')}/v1`;
+
   const response = await axios.post<FlareSolverrResponse>(
-    `${flaresolverrUrl}/v1`,
+    endpoint,
     requestBody,
     {
       headers: { 'Content-Type': 'application/json' },
@@ -488,6 +493,145 @@ export async function searchByTitle(
     md5Cache.set(cacheKey, null);
     return null;
   }
+}
+
+/**
+ * Structured search params for the interactive Anna's Archive search modal.
+ */
+export interface AnnasArchiveSearchParams {
+  title?: string;
+  author?: string;
+  asinOrIsbn?: string;
+  format?: string;
+  year?: string;
+  freeTextQuery?: string;
+}
+
+export interface AnnasArchiveResult {
+  md5: string;
+  title: string;
+  author: string;
+  format: string;
+  fileSize: string;
+  year: string;
+  source: string;
+  language: string;
+  contentType: string;
+  infoUrl: string;
+  coverUrl: string;
+}
+
+const MAX_AA_RESULTS = 25;
+
+/**
+ * Search Anna's Archive with structured parameters, returning multiple results.
+ * Uses direct HTTP (no FlareSolverr) — AA search pages are not Cloudflare-gated.
+ */
+export async function searchAnnasArchiveMulti(
+  params: AnnasArchiveSearchParams,
+  baseUrl: string,
+  languageCode: string = 'en'
+): Promise<AnnasArchiveResult[]> {
+  const termPairs: string[] = [];
+  let termIndex = 1;
+
+  if (params.title) {
+    termPairs.push(`termtype_${termIndex}=title&termval_${termIndex}=${encodeURIComponent(params.title)}`);
+    termIndex++;
+  }
+  if (params.author) {
+    termPairs.push(`termtype_${termIndex}=author&termval_${termIndex}=${encodeURIComponent(params.author)}`);
+    termIndex++;
+  }
+
+  // Build the free-text q= param (ASIN/ISBN, year, and free text all go here)
+  const qParts: string[] = [];
+  if (params.asinOrIsbn) {
+    const cleaned = params.asinOrIsbn.trim();
+    if (/^\d{10,13}$/.test(cleaned)) {
+      qParts.push(`"isbn:${cleaned}"`);
+    } else {
+      qParts.push(`"asin:${cleaned}"`);
+    }
+  }
+  if (params.year) qParts.push(params.year.trim());
+  if (params.freeTextQuery) qParts.push(params.freeTextQuery.trim());
+
+  const q = encodeURIComponent(qParts.join(' '));
+  const formatFilter = params.format && params.format !== 'any' ? `&ext=${params.format}` : '';
+
+  const searchUrl = `${baseUrl}/search?${termPairs.join('&')}${formatFilter}&lang=${languageCode}&content=book_nonfiction&content=book_fiction&content=book_unknown&q=${q}`;
+
+  moduleLogger.debug(`AA multi-search URL: ${searchUrl}`);
+
+  const html = await fetchHtml(searchUrl, undefined);
+
+  const $ = cheerio.load(html);
+  const cards = $('div.js-aarecord-list-outer > div[class*="border-b"]');
+  const seen = new Set<string>();
+  const results: AnnasArchiveResult[] = [];
+
+  cards.each((i, card) => {
+    if (results.length >= MAX_AA_RESULTS) return false;
+
+    const titleEl = $(card).find('a[href*="/md5/"].font-semibold').first();
+    const href = titleEl.attr('href') || '';
+    const md5Match = href.match(/\/md5\/([a-f0-9]+)/);
+    if (!md5Match || seen.has(md5Match[1])) return;
+
+    const md5 = md5Match[1];
+    seen.add(md5);
+
+    const title = titleEl.text().trim() || 'Unknown Title';
+
+    const coverEl = $(card).find('a[href*="/md5/"] img').first();
+    const coverUrl = coverEl.attr('src') || '';
+
+    // The content div has children; the metadata line contains "· EPUB · 0.5MB · 2021 ·"
+    // Use clone + remove children to get only the div's own text (excludes inline scripts)
+    const contentDiv = $(card).find('div.max-w-full').first();
+    const metaDiv = contentDiv.find('div.text-gray-800').filter(function () {
+      const ownText = $(this).clone().children().remove().end().text();
+      return ownText.includes('·');
+    }).first();
+    const metaText = metaDiv.clone().children().remove().end().text().replace(/\s+/g, ' ').trim();
+    const metaParts = metaText.split('·').map(function (s: string) { return s.trim(); });
+
+    // Typical: ["English [en]", "EPUB", "0.5MB", "2021", "📕 Book (fiction)", "🚀/lgli/zlib", "Save"]
+    const language = metaParts[0] || '';
+    const format = metaParts[1] || '';
+    const fileSize = metaParts[2] || '';
+    const year = metaParts[3] || '';
+    const contentType = (metaParts[4] || '').replace(/^[^\w]*/, '');
+    const source = (metaParts[5] || '').replace(/^[^\w/]*/, '');
+
+    // Author is in child 0's text, after the title — "Title Author, Publisher, Year"
+    const child0 = contentDiv.children().first();
+    const child0Text = child0.clone().find('div[class*="text-gray"]').remove().end()
+      .text().replace(/\s+/g, ' ').trim();
+    // Remove the title to get the author/publisher text
+    const afterTitle = child0Text.replace(title, '').trim();
+    // Author is typically the first comma-separated segment
+    const authorSegments = afterTitle.split(',').map(function (s: string) { return s.trim(); });
+    const author = authorSegments[0] || '';
+
+    results.push({
+      md5,
+      title,
+      author,
+      format,
+      fileSize,
+      year,
+      source,
+      language,
+      contentType,
+      infoUrl: `${baseUrl}/md5/${md5}`,
+      coverUrl,
+    });
+  });
+
+  moduleLogger.debug(`AA multi-search found ${results.length} results`);
+  return results;
 }
 
 /**

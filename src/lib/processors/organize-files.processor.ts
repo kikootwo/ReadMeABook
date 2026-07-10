@@ -17,6 +17,8 @@ import { fixEpubForKindle, cleanupFixedEpub } from '../utils/epub-fixer';
 import { removeEmptyParentDirectories } from '../utils/cleanup-helpers';
 import { getAudibleService } from '../integrations/audible.service';
 import { addAutoBlock } from '../services/blocklist.service';
+import { getABSLibraries } from '../services/audiobookshelf/api';
+import { checkPathReachable } from '../utils/path-reachability';
 
 /**
  * Process organize files job
@@ -710,8 +712,12 @@ async function processEbookOrganization(
   const isIndexerDownload = downloadHistory?.downloadClient !== 'direct';
   logger.info(`Download source: ${downloadHistory?.downloadClient || 'unknown'} (indexer download: ${isIndexerDownload})`);
 
+  // Resolve the ebook destination base directory (#7): same folder as audiobook (default),
+  // a separate ABS library's folder, or a custom path. Falls back to 'same' on any problem.
+  const ebookMediaDirOverride = await resolveEbookDestinationDir(logger);
+
   // Get file organizer and ebook-specific template (falls back to audiobook template)
-  const organizer = await getFileOrganizer();
+  const organizer = await getFileOrganizer(ebookMediaDirOverride);
   const ebookTemplateConfig = await prisma.configuration.findUnique({
     where: { key: 'ebook_path_template' },
   });
@@ -883,6 +889,21 @@ async function processEbookOrganization(
     logger.debug(`Ebook library scan disabled (scanEnabled=${scanEnabled})`);
   }
 
+  // Trigger 1: auto-send the ebook to requesters' e-reader devices (ABS only, when enabled).
+  // The job is delayed + retried so ABS can scan the new file first. No targetUserIds → all
+  // requesters of this book. Non-blocking: organization succeeds regardless.
+  if (backendMode === 'audiobookshelf') {
+    const autoSendEnabled = await configService.get('ebook_ereader_auto_send_enabled');
+    if (autoSendEnabled === 'true') {
+      await jobQueue
+        .addSendToEreaderJob(requestId, audiobookId, book.title, book.author)
+        .then(() => logger.info('Queued send-to-ereader job for organized ebook'))
+        .catch((error) => {
+          logger.error('Failed to queue send-to-ereader job', { error: error instanceof Error ? error.message : String(error) });
+        });
+    }
+  }
+
   // Cleanup downloads if configured (uses IDownloadClient.postProcess for client-specific cleanup)
   await cleanupDownloadAfterOrganize(requestId, downloadPath, configService, jobId, logger);
 
@@ -899,6 +920,53 @@ async function processEbookOrganization(
     targetPath: result.targetPath,
     format: result.format,
   };
+}
+
+/**
+ * Resolve the base directory the ebook sidecar should organize into (#7).
+ * Modes: 'same' (default → use configured media_dir), 'library' (a separate ABS book
+ * library's folder), 'custom' (a user-entered path). Returns undefined to mean "use the
+ * default media_dir". Falls back to default on any misconfiguration.
+ */
+async function resolveEbookDestinationDir(logger: RMABLogger): Promise<string | undefined> {
+  const configService = getConfigService();
+  const mode = (await configService.get('ebook_destination_mode')) || 'same';
+
+  if (mode === 'custom') {
+    const customPath = (await configService.get('ebook_destination_path'))?.trim();
+    if (!customPath) {
+      logger.warn('Ebook destination mode is "custom" but no path is set; using default media directory');
+      return undefined;
+    }
+    // Verify reachability here (not just at save time) so an unreachable/unwritable
+    // path falls back to the default media dir instead of failing organization.
+    const check = await checkPathReachable(customPath);
+    if (!check.reachable) {
+      logger.warn(`Ebook destination path "${customPath}" is not usable (${check.message}); using default media directory`);
+      return undefined;
+    }
+    return customPath;
+  }
+
+  if (mode === 'library') {
+    const libraryId = await configService.get('ebook_destination_library_id');
+    if (!libraryId) {
+      logger.warn('Ebook destination mode is "library" but no library is selected; using default media directory');
+      return undefined;
+    }
+    try {
+      const libraries = await getABSLibraries();
+      const lib = libraries.find((l: any) => l.id === libraryId);
+      const folderPath = lib?.folders?.[0]?.fullPath;
+      if (folderPath) return folderPath;
+      logger.warn(`Ebook destination library ${libraryId} has no resolvable folder; using default media directory`);
+    } catch (error) {
+      logger.warn(`Failed to resolve ebook destination library: ${error instanceof Error ? error.message : String(error)}; using default media directory`);
+    }
+    return undefined;
+  }
+
+  return undefined; // 'same'
 }
 
 /**

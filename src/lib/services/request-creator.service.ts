@@ -15,6 +15,7 @@ import { getAudibleService } from '@/lib/integrations/audible.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { shouldSkipAutoSearch } from '@/lib/utils/release-date';
 import { seedAsin, getSiblingAsins } from '@/lib/services/works.service';
+import { detectBundle, enumerateSeriesBooks } from '@/lib/services/series-bundle.service';
 
 const logger = RMABLogger.create('RequestCreator');
 
@@ -31,11 +32,26 @@ export interface CreateRequestOptions {
   skipAutoSearch?: boolean;
   /** When true, skip the per-user ignore list check (used for manual requests) */
   bypassIgnore?: boolean;
+  /**
+   * Internal flag set when fanning out a series bundle into per-book requests.
+   * Disables bundle re-detection so a split-out book can't recursively re-split.
+   */
+  bundleDecomposed?: boolean;
 }
 
 export type CreateRequestResult =
   | { success: true; request: any }
+  | DecomposedResult
   | { success: false; reason: 'already_available' | 'being_processed' | 'duplicate' | 'user_not_found' | 'ignored'; message: string };
+
+/** Result variant returned when a request is recognized as a series bundle and split. */
+export type DecomposedResult = {
+  success: true;
+  decomposed: true;
+  count: number;
+  books: { asin: string; title: string }[];
+  message: string;
+};
 
 /**
  * Create a request for a user, with full duplicate detection, library checks,
@@ -46,7 +62,7 @@ export async function createRequestForUser(
   audiobook: CreateRequestInput,
   options: CreateRequestOptions = {}
 ): Promise<CreateRequestResult> {
-  const { skipAutoSearch = false, bypassIgnore = false } = options;
+  const { skipAutoSearch = false, bypassIgnore = false, bundleDecomposed = false } = options;
 
   // Check for existing active request (downloaded/available) for this ASIN
   const existingActiveRequest = await prisma.request.findFirst({
@@ -102,6 +118,7 @@ export async function createRequestForUser(
   let series: string | undefined;
   let seriesPart: string | undefined;
   let seriesAsin: string | undefined;
+  let durationMinutes: number | undefined;
   let releaseDate: Date | null = null;
   try {
     const audibleService = getAudibleService();
@@ -124,8 +141,52 @@ export async function createRequestForUser(
     if (audnexusData?.series) series = audnexusData.series;
     if (audnexusData?.seriesPart) seriesPart = audnexusData.seriesPart;
     if (audnexusData?.seriesAsin) seriesAsin = audnexusData.seriesAsin;
+    if (audnexusData?.durationMinutes) durationMinutes = audnexusData.durationMinutes;
   } catch (error) {
     logger.warn(`Failed to fetch Audnexus data for ASIN ${audiobook.asin}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+
+  // Series-bundle decomposition: if this request is actually a multi-book series
+  // bundle (e.g. "Mistborn Trilogy"), fan out into per-book requests instead of
+  // trying to download the bundle as one item. Skipped when we're already
+  // processing a split-out book (bundleDecomposed) to prevent recursion.
+  if (!bundleDecomposed) {
+    const detection = detectBundle({
+      title: audiobook.title,
+      seriesPart,
+      seriesAsin,
+      durationMinutes,
+    });
+
+    if (detection.isBundle && seriesAsin) {
+      // Offload the fan-out to a background job. Enumerating the series and
+      // creating up to MAX_BUNDLE_BOOKS per-book requests (each an Audnexus
+      // lookup + notification + search enqueue) inline would block this request
+      // and risk a client timeout for large box sets. The job preserves the
+      // single-request fallback when enumeration yields nothing.
+      try {
+        await getJobQueueService().addDecomposeBundleJob(
+          userId,
+          audiobook,
+          seriesAsin,
+          detection.range,
+          options
+        );
+        return {
+          success: true,
+          decomposed: true,
+          count: 0,
+          books: [],
+          message: `"${audiobook.title}" looks like a series bundle — splitting it into individual book requests in the background.`,
+        };
+      } catch (error) {
+        // Couldn't enqueue (e.g. Redis down) — fall through and create the bundle
+        // as a single normal request so the user still gets something.
+        logger.error(`Failed to enqueue bundle decomposition for "${audiobook.title}"; handling as a single request`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   // Find or create audiobook record
@@ -325,6 +386,81 @@ export async function createRequestForUser(
   }
 
   return { success: true, request: newRequest };
+}
+
+/**
+ * Fan out a detected series bundle into individual per-book requests.
+ *
+ * Enumerates the series' books, then calls createRequestForUser for each with
+ * `bundleDecomposed: true` (preventing re-detection). Returns a `decomposed`
+ * result when the bundle was handled, or null when the series could not be
+ * enumerated / yielded no usable books (caller falls back to normal
+ * single-request handling).
+ *
+ * Invoked from the `decompose_bundle` background job (not inline) so the fan-out
+ * never blocks the originating HTTP request.
+ */
+export async function decomposeBundle(
+  userId: string,
+  bundle: CreateRequestInput,
+  seriesAsin: string,
+  range: [number, number] | undefined,
+  options: CreateRequestOptions
+): Promise<DecomposedResult | null> {
+  let books: CreateRequestInput[];
+  try {
+    books = await enumerateSeriesBooks(seriesAsin, range, bundle.asin);
+  } catch (error) {
+    logger.warn(`Failed to enumerate series ${seriesAsin} for bundle "${bundle.title}"`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+
+  if (books.length === 0) return null;
+
+  logger.info(`Decomposing bundle "${bundle.title}" into ${books.length} book request(s)`, {
+    seriesAsin,
+    range: range ? `${range[0]}-${range[1]}` : 'all',
+  });
+
+  const created: { asin: string; title: string }[] = [];
+  for (const book of books) {
+    try {
+      const result = await createRequestForUser(userId, book, {
+        ...options,
+        bundleDecomposed: true,
+      });
+      if (result.success) {
+        created.push({ asin: book.asin, title: book.title });
+      }
+    } catch (error) {
+      logger.warn(`Failed to create request for "${book.title}" while decomposing "${bundle.title}"`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (created.length === 0) {
+    // Every book was a duplicate/already-owned/failed — nothing new requested.
+    // Still return a `decomposed` result (not null) so the caller reports the
+    // bundle was handled and does NOT also create the bundle as a single request.
+    return {
+      success: true,
+      decomposed: true,
+      count: 0,
+      books: [],
+      message: `"${bundle.title}" is a series bundle, but all of its books were already requested or available`,
+    };
+  }
+
+  return {
+    success: true,
+    decomposed: true,
+    count: created.length,
+    books: created,
+    message: `"${bundle.title}" is a ${books.length}-book series — created ${created.length} individual request${created.length === 1 ? '' : 's'}`,
+  };
 }
 
 /**

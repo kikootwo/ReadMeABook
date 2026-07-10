@@ -49,6 +49,7 @@ interface RequestsResponse {
 
 interface RecentRequestsTableProps {
   ebookSidecarEnabled?: boolean;
+  indexerSearchEnabled?: boolean;
   annasArchiveBaseUrl?: string;
 }
 
@@ -71,16 +72,22 @@ const STATUS_OPTIONS = [
   { value: 'denied', label: 'Denied' },
 ];
 
+const TYPE_OPTIONS = [
+  { value: 'all', label: 'All Types' },
+  { value: 'audiobook', label: 'Audiobooks' },
+  { value: 'ebook', label: 'Ebooks' },
+];
+
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 type SortField = 'createdAt' | 'completedAt' | 'title' | 'user' | 'status';
 type SortOrder = 'asc' | 'desc';
 
-function getStatusBadge(status: string) {
+function getStatusBadge(status: string, type?: string) {
   const styles: Record<string, string> = {
     pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
     awaiting_approval: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
-    awaiting_search: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+    awaiting_search: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
     awaiting_release: 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200',
     searching: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
     downloading: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
@@ -92,6 +99,7 @@ function getStatusBadge(status: string) {
     failed: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
     warn: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
     cancelled: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
+    unavailable: 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-200',
     denied: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
   };
 
@@ -102,13 +110,18 @@ function getStatusBadge(status: string) {
     awaiting_release: 'Awaiting Release',
     awaiting_import: 'Awaiting Import',
     awaiting_approval: 'Awaiting Approval',
+    unavailable: 'Unavailable',
   };
 
-  const label = labels[status] || status.charAt(0).toUpperCase() + status.slice(1);
+  let label = labels[status] || status.charAt(0).toUpperCase() + status.slice(1);
+
+  if (type === 'ebook' && status === 'downloaded') {
+    label = 'Available';
+  }
 
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${style}`}
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${style}`}
     >
       {label}
     </span>
@@ -141,6 +154,7 @@ function getInitialParams(): {
   pageSize: number;
   search: string;
   status: string;
+  type: string;
   userId: string;
   sortBy: SortField;
   sortOrder: SortOrder;
@@ -151,6 +165,7 @@ function getInitialParams(): {
       pageSize: 25,
       search: '',
       status: 'all',
+      type: 'all',
       userId: '',
       sortBy: 'createdAt',
       sortOrder: 'desc',
@@ -162,13 +177,14 @@ function getInitialParams(): {
     pageSize: parseInt(params.get('pageSize') || '25', 10),
     search: params.get('search') || '',
     status: params.get('status') || 'all',
+    type: params.get('type') || 'all',
     userId: params.get('userId') || '',
     sortBy: (params.get('sortBy') || 'createdAt') as SortField,
     sortOrder: (params.get('sortOrder') || 'desc') as SortOrder,
   };
 }
 
-export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveBaseUrl = 'https://annas-archive.gl' }: RecentRequestsTableProps) {
+export function RecentRequestsTable({ ebookSidecarEnabled = false, indexerSearchEnabled = false, annasArchiveBaseUrl = 'https://annas-archive.gl' }: RecentRequestsTableProps) {
   const toast = useToast();
 
   // Get initial filter state from URL (only evaluated once due to lazy init)
@@ -178,6 +194,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
   const [searchInput, setSearchInput] = useState(initialParams.search);
   const [debouncedSearch, setDebouncedSearch] = useState(initialParams.search);
   const [status, setStatus] = useState(initialParams.status);
+  const [type, setType] = useState(initialParams.type);
   const [userId, setUserId] = useState(initialParams.userId);
   const [sortBy, setSortBy] = useState<SortField>(initialParams.sortBy);
   const [sortOrder, setSortOrder] = useState<SortOrder>(initialParams.sortOrder);
@@ -202,7 +219,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
   const [viewDetailsUserId, setViewDetailsUserId] = useState<string | null>(null);
 
   // Build API URL with current local filters
-  const apiUrl = `/api/admin/requests?page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(debouncedSearch)}&status=${status}&userId=${userId}&sortBy=${sortBy}&sortOrder=${sortOrder}`;
+  const apiUrl = `/api/admin/requests?page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(debouncedSearch)}&status=${status}&type=${type}&userId=${userId}&sortBy=${sortBy}&sortOrder=${sortOrder}`;
 
   // Fetch requests with SWR
   const { data, error, isLoading } = useSWR<RequestsResponse>(apiUrl, authenticatedFetcher, {
@@ -219,6 +236,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     pageSize: number;
     search: string;
     status: string;
+    type: string;
     userId: string;
     sortBy: string;
     sortOrder: string;
@@ -229,6 +247,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     if (params.pageSize !== 25) urlParams.set('pageSize', String(params.pageSize));
     if (params.search) urlParams.set('search', params.search);
     if (params.status !== 'all') urlParams.set('status', params.status);
+    if (params.type !== 'all') urlParams.set('type', params.type);
     if (params.userId) urlParams.set('userId', params.userId);
     if (params.sortBy !== 'createdAt') urlParams.set('sortBy', params.sortBy);
     if (params.sortOrder !== 'desc') urlParams.set('sortOrder', params.sortOrder);
@@ -247,6 +266,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       pageSize,
       search: debouncedSearch,
       status,
+      type,
       userId,
       sortBy,
       sortOrder,
@@ -256,7 +276,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       lastSyncedUrl.current = newUrl;
       window.history.replaceState(null, '', newUrl);
     }
-  }, [page, pageSize, debouncedSearch, status, userId, sortBy, sortOrder, buildUrlString]);
+  }, [page, pageSize, debouncedSearch, status, type, userId, sortBy, sortOrder, buildUrlString]);
 
   // Handle browser back/forward navigation
   useEffect(() => {
@@ -268,6 +288,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       setSearchInput(newSearch);
       setDebouncedSearch(newSearch);
       setStatus(params.get('status') || 'all');
+      setType(params.get('type') || 'all');
       setUserId(params.get('userId') || '');
       setSortBy((params.get('sortBy') || 'createdAt') as SortField);
       setSortOrder((params.get('sortOrder') || 'desc') as SortOrder);
@@ -294,6 +315,10 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     switch (key) {
       case 'status':
         setStatus(value as string);
+        setPage(1);
+        break;
+      case 'type':
+        setType(value as string);
         setPage(1);
         break;
       case 'userId':
@@ -323,11 +348,12 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     setSearchInput('');
     setDebouncedSearch('');
     setStatus('all');
+    setType('all');
     setUserId('');
     setPage(1);
   };
 
-  const hasActiveFilters = debouncedSearch || status !== 'all' || userId;
+  const hasActiveFilters = debouncedSearch || status !== 'all' || type !== 'all' || userId;
 
   // Action handlers
   const handleViewDetails = (
@@ -547,6 +573,19 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
             ))}
           </select>
 
+          {/* Type Filter */}
+          <select
+            value={type}
+            onChange={(e) => updateFilter('type', e.target.value)}
+            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm min-w-[150px]"
+          >
+            {TYPE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+
           {/* User Filter */}
           <select
             value={userId}
@@ -709,7 +748,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                     <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
                       {request.user}
                     </td>
-                    <td className="px-6 py-4">{getStatusBadge(request.status)}</td>
+                    <td className="px-6 py-4">{getStatusBadge(request.status, request.type)}</td>
                     <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
                       {formatDistanceToNow(new Date(request.createdAt), { addSuffix: true })}
                     </td>
@@ -741,6 +780,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                         onFetchEbook={handleFetchEbook}
                         onSearchTermsUpdated={() => mutate(apiUrl)}
                         ebookSidecarEnabled={ebookSidecarEnabled}
+                        indexerSearchEnabled={indexerSearchEnabled}
                         annasArchiveBaseUrl={annasArchiveBaseUrl}
                         isLoading={isDeleting || isFetchingEbook}
                       />

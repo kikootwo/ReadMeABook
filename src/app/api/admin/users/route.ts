@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
             autoApproveRequests: true,
             interactiveSearchAccess: true,
             downloadAccess: true,
+            ereaderDeviceNames: true,
             loginTokenHash: true,
             _count: {
               select: {

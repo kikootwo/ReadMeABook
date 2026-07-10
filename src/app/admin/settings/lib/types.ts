@@ -137,6 +137,12 @@ export interface EbookSettings {
   autoGrabEnabled: boolean;
   // Kindle compatibility
   kindleFixEnabled: boolean;
+  // E-reader delivery (ABS only): auto-send organized ebooks to per-user devices
+  ereaderAutoSendEnabled: boolean;
+  // Ebook destination: 'same' (audiobook folder) | 'library' (ABS library) | 'custom' (path)
+  ebookDestinationMode: string;
+  ebookDestinationLibraryId: string;
+  ebookDestinationPath: string;
 }
 
 /**

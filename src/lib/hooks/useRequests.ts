@@ -211,7 +211,9 @@ export function useCreateRequest() {
       // Revalidate audiobook lists to update button states
       mutate((key) => typeof key === 'string' && key.includes('/api/audiobooks'));
 
-      return data.request;
+      // Return the full response so callers can detect a series-bundle split
+      // ({ decomposed, count, books, message }) vs a normal single request ({ request }).
+      return data;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       setError(message);
@@ -527,6 +529,55 @@ export function useInteractiveSearchEbook() {
   };
 
   return { searchEbooks, isLoading, error };
+}
+
+export function useSearchAnnasArchive() {
+  const { accessToken } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const searchAnnasArchive = async (
+    requestId: string,
+    params: {
+      title?: string;
+      author?: string;
+      asinOrIsbn?: string;
+      format?: string;
+      year?: string;
+      freeTextQuery?: string;
+    }
+  ) => {
+    if (!accessToken) {
+      throw new Error('Not authenticated');
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetchWithAuth(`/api/requests/${requestId}/search-annas-archive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || data.message || 'Failed to search Anna\'s Archive');
+      }
+
+      return data.results || [];
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return { searchAnnasArchive, isLoading, error };
 }
 
 export function useSelectEbook() {

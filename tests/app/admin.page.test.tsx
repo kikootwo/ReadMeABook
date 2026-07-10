@@ -59,6 +59,10 @@ vi.mock('@/components/requests/InteractiveTorrentSearchModal', () => ({
   InteractiveTorrentSearchModal: () => null,
 }));
 
+vi.mock('@/components/requests/AnnasArchiveSearchModal', () => ({
+  AnnasArchiveSearchModal: () => null,
+}));
+
 describe('AdminDashboard', () => {
   beforeEach(() => {
     swrState.clear();
@@ -98,7 +102,7 @@ describe('AdminDashboard', () => {
       },
     });
     // RecentRequestsTable fetches from /api/admin/requests with query params
-    swrState.set('/api/admin/requests?page=1&pageSize=25&search=&status=all&userId=&sortBy=createdAt&sortOrder=desc', {
+    swrState.set('/api/admin/requests?page=1&pageSize=25&search=&status=all&type=all&userId=&sortBy=createdAt&sortOrder=desc', {
       data: {
         requests: [
           {
@@ -144,7 +148,7 @@ describe('AdminDashboard', () => {
     });
     swrState.set('/api/admin/downloads/active', { data: { downloads: [] } });
     // RecentRequestsTable fetches from /api/admin/requests with query params
-    swrState.set('/api/admin/requests?page=1&pageSize=25&search=&status=all&userId=&sortBy=createdAt&sortOrder=desc', {
+    swrState.set('/api/admin/requests?page=1&pageSize=25&search=&status=all&type=all&userId=&sortBy=createdAt&sortOrder=desc', {
       data: { requests: [], total: 0, page: 1, pageSize: 25, totalPages: 0 },
     });
     swrState.set('/api/admin/users', { data: { users: [] } });

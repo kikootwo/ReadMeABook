@@ -114,8 +114,10 @@ describe('useRequests hooks', () => {
     const hook = renderHookValue(() => useCreateRequest());
 
     await act(async () => {
+      // createRequest returns the full response so callers can detect a series-bundle
+      // split ({ decomposed, ... }) vs a normal single request ({ request }).
       const result = await hook.createRequest({ asin: 'a1', title: 'Book', author: 'Author' } as any);
-      expect(result.id).toBe('req-1');
+      expect(result.request.id).toBe('req-1');
     });
 
     expect(fetchWithAuthMock).toHaveBeenCalledWith(
@@ -123,6 +125,22 @@ describe('useRequests hooks', () => {
       expect.objectContaining({ method: 'POST' })
     );
     expect(mutateMock).toHaveBeenCalled();
+  });
+
+  it('returns the decomposed result when a series bundle is split', async () => {
+    useAuthMock.mockReturnValue({ accessToken: 'token' });
+    fetchWithAuthMock.mockResolvedValueOnce(
+      makeResponse({ decomposed: true, count: 3, books: [{ asin: 'b1', title: 'One' }], message: '3-book series' })
+    );
+
+    const { useCreateRequest } = await import('@/lib/hooks/useRequests');
+    const hook = renderHookValue(() => useCreateRequest());
+
+    await act(async () => {
+      const result = await hook.createRequest({ asin: 'a1', title: 'Trilogy', author: 'Author' } as any);
+      expect(result.decomposed).toBe(true);
+      expect(result.count).toBe(3);
+    });
   });
 
   it('adds skipAutoSearch query params when creating requests', async () => {

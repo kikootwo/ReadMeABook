@@ -19,6 +19,10 @@ export interface RetryMissingTorrentsPayload {
   scheduledJobId?: string;
 }
 
+// A healthy ebook/audiobook search resolves in seconds-to-minutes; anything
+// still `searching` past this window is an orphan from a stalled job or restart.
+const SEARCHING_STALE_MINUTES = 30;
+
 export async function processRetryMissingTorrents(payload: RetryMissingTorrentsPayload): Promise<any> {
   const { jobId } = payload;
   const logger = RMABLogger.forJob(jobId, 'RetryMissingTorrents');
@@ -29,6 +33,30 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
     // Read skip-unreleased setting once at start (default ON when absent)
     const configService = getConfigService();
     const skipUnreleasedSetting = (await configService.get('indexer.skip_unreleased')) !== 'false';
+
+    // Reaper: reclaim requests orphaned in `searching` by a crashed/stalled
+    // search job. A Bull stall or a container restart bypasses the search
+    // processor's catch block AND the job-queue `failed` safety net, leaving the
+    // request stuck in `searching` with no scheduler watching that status. A
+    // healthy search completes in seconds-to-minutes, so anything still
+    // `searching` past the threshold is dead. Reset to `awaiting_search` BEFORE
+    // the query below so the same pass re-queues a fresh search.
+    const staleCutoff = new Date(Date.now() - SEARCHING_STALE_MINUTES * 60 * 1000);
+    const reaped = await prisma.request.updateMany({
+      where: {
+        status: 'searching',
+        deletedAt: null,
+        updatedAt: { lt: staleCutoff },
+      },
+      data: {
+        status: 'awaiting_search',
+        errorMessage: 'Search interrupted (stalled or restarted); re-queued automatically',
+        updatedAt: new Date(),
+      },
+    });
+    if (reaped.count > 0) {
+      logger.warn(`Reclaimed ${reaped.count} request(s) stuck in 'searching' for >${SEARCHING_STALE_MINUTES}m`);
+    }
 
     // Find all active requests in awaiting_search OR awaiting_release status
     const requests = await prisma.request.findMany({
@@ -51,6 +79,7 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
         triggered: 0,
         transitioned: 0,
         skipped: 0,
+        reclaimed: reaped.count,
       };
     }
 
@@ -160,6 +189,7 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
       triggered,
       transitioned,
       skipped,
+      reclaimed: reaped.count,
     };
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);

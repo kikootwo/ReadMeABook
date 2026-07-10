@@ -435,6 +435,13 @@ function parseSeriesBooks(
 
     if (!title) return;
 
+    // Series position: the h2 on series pages is the position label ("Book 1",
+    // "Book 1-3", "Buch 1", etc). Capture the leading number(s) as seriesPart so
+    // callers can map books to a position/range (used by bundle decomposition).
+    const positionLabel = $el.find('h2').first().text().trim();
+    const positionMatch = positionLabel.match(/(\d+(?:\s*[-–]\s*\d+)?)/);
+    const seriesPart = positionMatch ? positionMatch[1].replace(/\s+/g, '') : undefined;
+
     // Author
     const authorLink = $el.find('a[href*="/author/"]').first();
     const authorText = authorLink.text().trim() ||
@@ -469,6 +476,7 @@ function parseSeriesBooks(
       coverArtUrl,
       rating,
       durationMinutes,
+      seriesPart,
     });
   });
 

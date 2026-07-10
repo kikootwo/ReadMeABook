@@ -72,6 +72,44 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
 - *Auto-grab is automatically disabled if no ebook sources are enabled. Manual fetch via admin buttons still works.*
 - *Kindle fix toggle only visible when preferred format is EPUB.*
 
+#### Section 4: Ebook Destination
+| Key | Default | Options | Description |
+|-----|---------|---------|-------------|
+| `ebook_destination_mode` | `same` | `same, library, custom` | Where the sidecar saves ebooks |
+| `ebook_destination_library_id` | `` | ABS library id | Target ABS library (mode=`library`) |
+| `ebook_destination_path` | `` | path | Custom base path (mode=`custom`) |
+
+- *`same`* → audiobook folder (`media_dir`, current behavior). *`library`* → an existing ABS book library's folder (second dropdown, ABS mode only). *`custom`* → an explicit path.
+- Resolved in `processEbookOrganization` via `resolveEbookDestinationDir()`; falls back to `same` on any misconfiguration. Organizer base dir set via `getFileOrganizer(mediaDirOverride?)`. For `custom`, the resolver **re-verifies reachability at organize time** (`checkPathReachable`) and falls back to the default media dir if the path is unreachable/unwritable — the save-time UI check is advisory only and config can drift.
+- **Reachability check (shared):** `checkPathReachable(path)` in `src/lib/utils/path-reachability.ts` — server-side `fs.stat` + `fs.access(W_OK)` confirms the path exists, is a directory, and is writable **inside the RMAB container**. Used by both the organize-time resolver and `POST /api/admin/settings/ebook/check-path {path}` → `{reachable, message}`. The Ebook UI runs the API on blur of the custom-path field and on save (non-blocking — save still proceeds); an amber warning renders under the field when `reachable=false`, noting fallback to the default media dir.
+
+#### Section 5: E-Reader Delivery (ABS only)
+| Key | Default | Options | Description |
+|-----|---------|---------|-------------|
+| `ebook_ereader_auto_send_enabled` | `false` | `true, false` | Auto-email organized ebooks to requesters' e-reader devices |
+
+Auto-sends a downloaded ebook to the e-reader device(s) of **every user who requested that book** (audiobook and/or ebook), via Audiobookshelf's send-to-device API. Per-user devices are enrolled in **Admin → Users** (multi-select, stored on `User.ereaderDeviceNames`). Requires email + e-reader devices configured in Audiobookshelf. See "E-Reader Delivery" below.
+
+### E-Reader Delivery
+
+**Flow:**
+- **Trigger 1 (ebook organized):** `organize-files.processor.ts` queues a `send_to_ereader` job (30s delay, 5 attempts, exp. backoff base 30s) after the ebook is organized + scan triggered. No target users → all requesters.
+- **Trigger 2 (late requester):** When a *different* user requests a book whose ebook is already `downloaded`, the fetch-ebook routes queue a `send_to_ereader` job scoped to that user (`targetUserIds=[userId]`, no delay).
+
+**Processor** (`src/lib/processors/send-to-ereader.processor.ts`):
+1. Re-checks `ebook_ereader_auto_send_enabled` + ABS backend mode.
+2. Resolves recipients: explicit `targetUserIds`, else all non-deleted `Request`s for the `audiobookId` (status ∉ failed/cancelled/denied). Audiobooks dedup by ASIN, so this captures everyone who requested the book.
+3. Collects recipients' `User.ereaderDeviceNames`, minus device names already in `Request.ereaderSentDevices` (idempotency / late delivery).
+4. Resolves the ABS `libraryItemId`: lookup library by destination mode (`library` → `ebook_destination_library_id`, else `audiobookshelf.library_id`); `same` mode prefers the matched `Audiobook.absItemId`, else title (+author) search. **Not found → throws to retry** (ABS scan still running; happens before any send, so no duplicates).
+5. Sends to each remaining device (`POST /api/emails/send-ebook-to-device`). Per-device failures are logged, not thrown (avoids duplicate sends on retry).
+6. Appends successfully-sent device names to `Request.ereaderSentDevices`.
+
+**ABS API client** (`src/lib/services/audiobookshelf/api.ts`): `getEreaderDevices()` (reads `GET /api/emails/settings` → `ereaderDevices`), `sendEbookToDevice(libraryItemId, deviceName)`.
+
+**Endpoints:** `GET /api/admin/settings/ebook/ereader-devices` (admin; lists ABS devices for the per-user enrollment UI).
+
+**Known limits:** sent-tracking dedupes by device name (ABS device names are globally unique); item lookup falls back to title/author search (no file-hash equivalent for ebooks).
+
 ### Safety-Net: Find Missing Ebooks Job
 
 A scheduled `find_missing_ebooks` job (daily midnight, enabled by default) backstops the auto-grab path for cases where it silently misses books (race conditions, transient indexer failures, requests created before sources were configured, books from Goodreads/Hardcover sync). Per run it scans up to 50 audiobook requests in `downloaded`/`available` status and triggers the existing ebook fetch flow for any audiobook missing a successful ebook companion. **Lifetime auto-retry cap: 5 per audiobook** — after 5 failed auto-attempts the job stops retrying that audiobook (admin Manual "Fetch Ebook" remains available). Counter is tracked in `Request.ebookAutoRetryCount` and is **processor-private**: manual Fetch Ebook routes never read, write, or reset it. Gated by `ebook_auto_grab_enabled` AND at least one source enabled; logs no-op runs honestly. See `documentation/backend/services/scheduler.md` for full details.
@@ -103,9 +141,12 @@ type             String    @default("audiobook") // 'audiobook' | 'ebook'
 parentRequestId  String?   @map("parent_request_id")
 parentRequest    Request?  @relation("EbookParent", fields: [parentRequestId], references: [id])
 childRequests    Request[] @relation("EbookParent")
+ereaderSentDevices Json?   @map("ereader_sent_devices") // device names already sent (idempotency)
 ```
 
 **Indexes:** `type`, `parentRequestId`
+
+**User model addition:** `ereaderDeviceNames Json? @map("ereader_device_names")` — JSON array of enrolled ABS e-reader device names.
 
 ## Job Processors
 
@@ -220,20 +261,28 @@ Search: https://annas-archive.gl/search?q=Title+Author&ext=epub&lang=en
 - `src/lib/processors/search-ebook.processor.ts` - Multi-source search
 - `src/lib/processors/direct-download.processor.ts` - Anna's Archive downloads
 - `src/lib/processors/download-torrent.processor.ts` - Indexer downloads (shared)
-- `src/lib/processors/organize-files.processor.ts` (ebook branch)
+- `src/lib/processors/organize-files.processor.ts` (ebook branch; Trigger 1 + `resolveEbookDestinationDir()`)
+- `src/lib/processors/send-to-ereader.processor.ts` - E-reader delivery
 
 **Services:**
 - `src/lib/services/ebook-scraper.ts` - Anna's Archive scraping
-- `src/lib/services/job-queue.service.ts` (ebook job types)
+- `src/lib/services/job-queue.service.ts` (ebook job types; `send_to_ereader` + `addSendToEreaderJob()`)
+- `src/lib/services/audiobookshelf/api.ts` (`getEreaderDevices()`, `sendEbookToDevice()`)
 
 **Utils:**
-- `src/lib/utils/file-organizer.ts` (`organizeEbook` method)
+- `src/lib/utils/file-organizer.ts` (`organizeEbook` method; `getFileOrganizer(mediaDirOverride?)`)
 - `src/lib/utils/ranking-algorithm.ts` (`rankEbookTorrents` function)
 - `src/lib/utils/indexer-grouping.ts` (supports `'ebook'` type)
 - `src/lib/utils/epub-fixer.ts` (Kindle EPUB compatibility fixes)
 
+**API routes:**
+- `src/app/api/admin/settings/ebook/ereader-devices/route.ts` - List ABS e-reader devices
+- `src/app/api/audiobooks/[asin]/fetch-ebook/route.ts`, `src/app/api/requests/[id]/fetch-ebook/route.ts` (Trigger 2)
+
 **UI:**
 - `src/components/requests/RequestCard.tsx` (ebook badge)
+- `src/app/admin/settings/tabs/EbookTab/EbookTab.tsx` (Destination + E-Reader Delivery sections)
+- `src/app/admin/users/page.tsx` (per-user device enrollment)
 
 **Delete:**
 - `src/lib/services/request-delete.service.ts` (ebook-specific logic)

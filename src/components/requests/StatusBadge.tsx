@@ -11,10 +11,11 @@ import { cn } from '@/lib/utils/cn';
 interface StatusBadgeProps {
   status: string;
   progress?: number;
+  type?: 'audiobook' | 'ebook';
   className?: string;
 }
 
-export function StatusBadge({ status, progress, className }: StatusBadgeProps) {
+export function StatusBadge({ status, progress, type, className }: StatusBadgeProps) {
   const statusConfig: Record<string, { label: string; color: string }> = {
     pending: {
       label: 'Pending',
@@ -22,7 +23,7 @@ export function StatusBadge({ status, progress, className }: StatusBadgeProps) {
     },
     awaiting_search: {
       label: 'Awaiting Search',
-      color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+      color: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
     },
     searching: {
       label: 'Searching...',
@@ -68,6 +69,10 @@ export function StatusBadge({ status, progress, className }: StatusBadgeProps) {
       label: 'Pending Approval',
       color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
     },
+    unavailable: {
+      label: 'Unavailable',
+      color: 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-200',
+    },
     awaiting_release: {
       label: 'Awaiting Release',
       color: 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200',
@@ -78,15 +83,19 @@ export function StatusBadge({ status, progress, className }: StatusBadgeProps) {
     },
   };
 
-  const config = statusConfig[status] || {
+  let config = statusConfig[status] || {
     label: status,
     color: 'bg-gray-100 text-gray-800',
   };
 
+  if (type === 'ebook' && status === 'downloaded') {
+    config = { ...config, label: 'Available' };
+  }
+
   return (
     <span
       className={cn(
-        'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
+        'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap',
         config.color,
         className
       )}

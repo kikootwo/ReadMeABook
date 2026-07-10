@@ -20,6 +20,8 @@ export async function PUT(
         const { id } = await params;
         const body = await request.json();
         const { role, autoApproveRequests, interactiveSearchAccess, downloadAccess } = body;
+        // E-reader device enrollment (separate statement to minimize merge conflicts)
+        const ereaderDeviceNames = body.ereaderDeviceNames as string[] | null | undefined;
 
         // Validate role
         if (!role || (role !== 'user' && role !== 'admin')) {
@@ -53,11 +55,15 @@ export async function PUT(
           );
         }
 
-        // Prevent user from demoting themselves
-        if (req.user && id === req.user.sub) {
+        // Validate ereaderDeviceNames (optional): null clears, otherwise an array of strings
+        if (
+          ereaderDeviceNames !== undefined &&
+          ereaderDeviceNames !== null &&
+          (!Array.isArray(ereaderDeviceNames) || ereaderDeviceNames.some((n) => typeof n !== 'string'))
+        ) {
           return NextResponse.json(
-            { error: 'You cannot change your own role' },
-            { status: 403 }
+            { error: 'Invalid ereaderDeviceNames. Must be an array of strings or null' },
+            { status: 400 }
           );
         }
 
@@ -90,6 +96,14 @@ export async function PUT(
 
         // Detect if role is being changed
         const isRoleChange = targetUser.role !== role;
+
+        // Prevent user from demoting themselves (only blocks actual role changes)
+        if (req.user && id === req.user.sub && isRoleChange) {
+          return NextResponse.json(
+            { error: 'You cannot change your own role' },
+            { status: 403 }
+          );
+        }
 
         // Prevent changing setup admin role (only if role is actually being changed)
         if (targetUser.isSetupAdmin && isRoleChange && role !== 'admin') {
@@ -128,7 +142,7 @@ export async function PUT(
         }
 
         // Prepare update data
-        const updateData: { role: string; autoApproveRequests?: boolean | null; interactiveSearchAccess?: boolean | null; downloadAccess?: boolean | null } = { role };
+        const updateData: { role: string; autoApproveRequests?: boolean | null; interactiveSearchAccess?: boolean | null; downloadAccess?: boolean | null; ereaderDeviceNames?: string[] } = { role };
         if (autoApproveRequests !== undefined) {
           updateData.autoApproveRequests = autoApproveRequests;
         }
@@ -137,6 +151,10 @@ export async function PUT(
         }
         if (downloadAccess !== undefined) {
           updateData.downloadAccess = downloadAccess;
+        }
+        if (ereaderDeviceNames !== undefined) {
+          // Store [] (not null) when cleared — keeps Prisma's nullable-Json typing simple
+          updateData.ereaderDeviceNames = ereaderDeviceNames ?? [];
         }
 
         // Update user
@@ -150,6 +168,7 @@ export async function PUT(
             autoApproveRequests: true,
             interactiveSearchAccess: true,
             downloadAccess: true,
+            ereaderDeviceNames: true,
           },
         });
 

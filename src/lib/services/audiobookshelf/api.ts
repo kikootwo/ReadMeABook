@@ -10,6 +10,7 @@
 import { getConfigService } from '../config.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { AudibleRegion } from '@/lib/types/audible';
+import type { ABSEreaderDevice } from './types';
 
 const logger = RMABLogger.create('Audiobookshelf');
 
@@ -200,4 +201,33 @@ export async function deleteABSItem(itemId: string): Promise<void> {
   }
 
   logger.info(`Deleted library item ${itemId} from Audiobookshelf`);
+}
+
+/**
+ * Get the e-reader devices configured in Audiobookshelf (admin token sees all devices).
+ * Devices live inside the email settings (`GET /api/emails/settings`); the dedicated
+ * `/api/emails/ereader-devices` route is POST-only (update). Used to populate the per-user
+ * device enrollment UI.
+ */
+export async function getEreaderDevices(): Promise<ABSEreaderDevice[]> {
+  const result = await absRequest<{
+    ereaderDevices?: ABSEreaderDevice[];
+    settings?: { ereaderDevices?: ABSEreaderDevice[] };
+  }>('/emails/settings');
+  // ABS has returned this either at the top level or nested under `settings` across versions.
+  return result.ereaderDevices || result.settings?.ereaderDevices || [];
+}
+
+/**
+ * Send an ebook (the ebook file attached to a library item) to a configured e-reader device via email.
+ *
+ * @param libraryItemId - The Audiobookshelf library item ID that has an ebook file
+ * @param deviceName - The name of the e-reader device configured in Audiobookshelf
+ */
+export async function sendEbookToDevice(libraryItemId: string, deviceName: string): Promise<void> {
+  await absRequest('/emails/send-ebook-to-device', {
+    method: 'POST',
+    body: { libraryItemId, deviceName },
+  });
+  logger.info(`Sent ebook for item ${libraryItemId} to e-reader device "${deviceName}"`);
 }

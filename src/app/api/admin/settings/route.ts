@@ -155,6 +155,12 @@ export async function GET(request: NextRequest) {
         autoGrabEnabled: configMap.get('ebook_auto_grab_enabled') !== 'false',
         // Kindle compatibility fixes: default false
         kindleFixEnabled: configMap.get('ebook_kindle_fix_enabled') === 'true',
+        // E-reader delivery (ABS only): default false
+        ereaderAutoSendEnabled: configMap.get('ebook_ereader_auto_send_enabled') === 'true',
+        // Ebook destination: default 'same' (audiobook folder)
+        ebookDestinationMode: (configMap.get('ebook_destination_mode') as 'same' | 'library' | 'custom') || 'same',
+        ebookDestinationLibraryId: configMap.get('ebook_destination_library_id') || '',
+        ebookDestinationPath: configMap.get('ebook_destination_path') || '',
       },
       general: {
         appName: configMap.get('app_name') || 'ReadMeABook',

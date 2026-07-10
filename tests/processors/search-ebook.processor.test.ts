@@ -222,6 +222,65 @@ describe('processSearchEbook', () => {
     });
   });
 
+  it('marks ebook as unavailable after reaching search threshold', async () => {
+    // First update (status → searching) returns searchAttempts at threshold
+    prismaMock.request.update
+      .mockResolvedValueOnce({ customSearchTerms: null, searchAttempts: 3 })
+      .mockResolvedValue({});
+
+    ebookScraperMock.searchByAsin.mockResolvedValue(null);
+    ebookScraperMock.searchByTitle.mockResolvedValue(null);
+
+    const { processSearchEbook } = await import('@/lib/processors/search-ebook.processor');
+
+    const result = await processSearchEbook({
+      requestId: 'req-unavail',
+      audiobook: {
+        id: 'ab-unavail',
+        title: 'Permanently Missing',
+        author: 'No Author',
+        asin: 'B999ASIN',
+      },
+      jobId: 'job-unavail',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.message).toContain('unavailable');
+
+    // The second update call (no-result path) should set unavailable
+    const noResultUpdate = prismaMock.request.update.mock.calls[1][0];
+    expect(noResultUpdate.data.status).toBe('unavailable');
+    expect(noResultUpdate.data.errorMessage).toContain('after 3 searches');
+  });
+
+  it('keeps awaiting_search when below search threshold', async () => {
+    prismaMock.request.update
+      .mockResolvedValueOnce({ customSearchTerms: null, searchAttempts: 2 })
+      .mockResolvedValue({});
+
+    ebookScraperMock.searchByAsin.mockResolvedValue(null);
+    ebookScraperMock.searchByTitle.mockResolvedValue(null);
+
+    const { processSearchEbook } = await import('@/lib/processors/search-ebook.processor');
+
+    const result = await processSearchEbook({
+      requestId: 'req-below',
+      audiobook: {
+        id: 'ab-below',
+        title: 'Still Searching',
+        author: 'Hopeful Author',
+        asin: 'B998ASIN',
+      },
+      jobId: 'job-below',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.message).toContain('re-search');
+
+    const noResultUpdate = prismaMock.request.update.mock.calls[1][0];
+    expect(noResultUpdate.data.status).toBe('awaiting_search');
+  });
+
   it('uses FlareSolverr when configured', async () => {
     prismaMock.request.update.mockResolvedValue({});
     prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-6' });

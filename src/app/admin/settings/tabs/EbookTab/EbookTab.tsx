@@ -10,30 +10,49 @@
 
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { fetchWithAuth } from '@/lib/utils/api';
 import { useEbookSettings } from './useEbookSettings';
-import type { EbookSettings } from '../../lib/types';
+import type { EbookSettings, ABSLibrary } from '../../lib/types';
 
 interface EbookTabProps {
   ebook: EbookSettings;
+  backendMode: 'plex' | 'audiobookshelf';
   onChange: (ebook: EbookSettings) => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
   markAsSaved: () => void;
 }
 
-export function EbookTab({ ebook, onChange, onSuccess, onError, markAsSaved }: EbookTabProps) {
+export function EbookTab({ ebook, backendMode, onChange, onSuccess, onError, markAsSaved }: EbookTabProps) {
   const {
     saving,
     testingFlaresolverr,
     flaresolverrTestResult,
+    checkingPath,
+    pathCheckResult,
+    checkDestinationPath,
     updateEbook,
     testFlaresolverrConnection,
     saveSettings,
     isAnySourceEnabled,
   } = useEbookSettings({ ebook, onChange, onSuccess, onError, markAsSaved });
+
+  const isABS = backendMode === 'audiobookshelf';
+
+  // Load ABS libraries for the "library" ebook destination option (ABS mode only)
+  const [absLibraries, setAbsLibraries] = useState<ABSLibrary[]>([]);
+  useEffect(() => {
+    if (!isABS) return;
+    let cancelled = false;
+    fetchWithAuth('/api/admin/settings/audiobookshelf/libraries')
+      .then((res) => (res.ok ? res.json() : { libraries: [] }))
+      .then((data) => { if (!cancelled) setAbsLibraries(data.libraries || []); })
+      .catch(() => { if (!cancelled) setAbsLibraries([]); });
+    return () => { cancelled = true; };
+  }, [isABS]);
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -296,6 +315,134 @@ export function EbookTab({ ebook, onChange, onSuccess, onError, markAsSaved }: E
             <li>• Places e-book file in the same folder as the audiobook</li>
             <li>• If no match is found, audiobook download continues normally</li>
           </ul>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          SECTION 4: EBOOK DESTINATION
+          ═══════════════════════════════════════════════════════════════════════ */}
+      {isAnySourceEnabled && (
+        <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+          <div className="bg-gray-50 dark:bg-gray-800 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wider">
+              Ebook Destination
+            </h3>
+          </div>
+          <div className="p-4 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Where to save ebooks
+              </label>
+              <select
+                value={ebook.ebookDestinationMode || 'same'}
+                onChange={(e) => updateEbook('ebookDestinationMode', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                         bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100
+                         focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="same">Same folder as the audiobook</option>
+                {isABS && <option value="library">Existing Audiobookshelf library</option>}
+                <option value="custom">Custom path</option>
+              </select>
+            </div>
+
+            {ebook.ebookDestinationMode === 'library' && isABS && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Audiobookshelf library
+                </label>
+                <select
+                  value={ebook.ebookDestinationLibraryId || ''}
+                  onChange={(e) => updateEbook('ebookDestinationLibraryId', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                           bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100
+                           focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">Select a library…</option>
+                  {absLibraries.map((lib) => (
+                    <option key={lib.id} value={lib.id}>{lib.name}</option>
+                  ))}
+                </select>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Ebooks are organized into this library's folder instead of the audiobook folder.
+                </p>
+              </div>
+            )}
+
+            {ebook.ebookDestinationMode === 'custom' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Custom path
+                </label>
+                <Input
+                  type="text"
+                  value={ebook.ebookDestinationPath || ''}
+                  onChange={(e) => updateEbook('ebookDestinationPath', e.target.value)}
+                  onBlur={checkDestinationPath}
+                  placeholder="/media/ebooks"
+                  className="font-mono"
+                />
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Absolute path inside the container. Ensure it is also scanned by Audiobookshelf if you use e-reader delivery.
+                </p>
+                {checkingPath && (
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                    Checking path…
+                  </p>
+                )}
+                {!checkingPath && pathCheckResult && !pathCheckResult.reachable && (
+                  <div className="mt-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+                    <p className="text-sm text-amber-800 dark:text-amber-200">
+                      <strong>⚠ Path not reachable:</strong> {pathCheckResult.message} Ebooks will
+                      fall back to the default media directory until this is fixed.
+                    </p>
+                  </div>
+                )}
+                {!checkingPath && pathCheckResult?.reachable && (
+                  <p className="mt-2 text-sm text-green-700 dark:text-green-300">
+                    ✓ {pathCheckResult.message}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          SECTION 5: E-READER DELIVERY (ABS only)
+          ═══════════════════════════════════════════════════════════════════════ */}
+      {isAnySourceEnabled && isABS && (
+        <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+          <div className="bg-gray-50 dark:bg-gray-800 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wider">
+              E-Reader Delivery
+            </h3>
+          </div>
+          <div className="p-4 space-y-4">
+            <div className="flex items-start gap-4">
+              <input
+                type="checkbox"
+                id="ereader-auto-send-enabled"
+                checked={ebook.ereaderAutoSendEnabled || false}
+                onChange={(e) => updateEbook('ereaderAutoSendEnabled', e.target.checked)}
+                className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <div className="flex-1">
+                <label
+                  htmlFor="ereader-auto-send-enabled"
+                  className="block text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer"
+                >
+                  Automatically send ebooks to e-readers
+                </label>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                  When an ebook is downloaded, email it to the e-reader device(s) of every user who
+                  requested that book, via Audiobookshelf. Assign devices per user in
+                  Admin → Users. Requires email + e-reader devices configured in Audiobookshelf.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
