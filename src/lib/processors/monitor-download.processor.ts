@@ -218,7 +218,16 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
       const errorMessage = `Download failed in ${client.clientType}`;
       const clientErrorDetail = info.errorMessage ?? null;
 
-      // Update request to failed
+      // Fetch request details before updating to check type
+      const request = await prisma.request.findUnique({
+        where: { id: requestId },
+        include: {
+          audiobook: true,
+          user: { select: { plexUsername: true } },
+        },
+      });
+
+      // Update request to failed (default behavior)
       await prisma.request.update({
         where: { id: requestId },
         data: {
@@ -258,16 +267,48 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         });
       }
 
-      // Send notification for request failure
-      const request = await prisma.request.findUnique({
-        where: { id: requestId },
-        include: {
-          audiobook: true,
-          user: { select: { plexUsername: true } },
-        },
-      });
+      // Ebook fallback continuation: requeue search for next ranked candidate
+      if (request?.type === 'ebook' && request.audiobook) {
+        logger.info(`Ebook download failed, requeueing search for next candidate (request ${requestId})`);
 
-      if (request) {
+        // Transition from failed to searching to allow continuation
+        await prisma.request.update({
+          where: { id: requestId },
+          data: {
+            status: 'searching',
+            errorMessage: `Retrying next candidate after: ${errorMessage}`,
+            updatedAt: new Date(),
+          },
+        });
+
+        // Enqueue search_ebook job with isFallback=true to skip Anna and try next ranked candidate
+        const jobQueue = getJobQueueService();
+        await jobQueue.addSearchEbookJob(
+          requestId,
+          {
+            id: request.audiobook.id,
+            title: request.audiobook.title,
+            author: request.audiobook.author,
+            asin: request.audiobook.audibleAsin || undefined,
+          },
+          undefined,
+          { isFallback: true }
+        );
+
+        logger.info(`Requeued fallback ebook search for request ${requestId}`);
+
+        return {
+          success: false,
+          completed: true,
+          message: 'Ebook download failed, searching next candidate',
+          requestId,
+          progress: progressPercent,
+          continued: true,
+        };
+      }
+
+      // Audiobook (or ebook without audiobook data): stay failed and notify
+      if (request && request.audiobook) {
         const jobQueue = getJobQueueService();
         await jobQueue.addNotificationJob(
           'request_error',
@@ -415,7 +456,7 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
       },
     });
 
-    if (request) {
+    if (request && request.audiobook) {
       const jobQueue = getJobQueueService();
       await jobQueue.addNotificationJob(
         'request_error',

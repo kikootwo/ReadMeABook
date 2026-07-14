@@ -30,11 +30,11 @@ import {
  * Searches Anna's Archive first (if enabled), then falls back to indexer search (if enabled)
  */
 export async function processSearchEbook(payload: SearchEbookPayload): Promise<any> {
-  const { requestId, audiobook, preferredFormat: payloadFormat, jobId } = payload;
+  const { requestId, audiobook, preferredFormat: payloadFormat, jobId, isFallback } = payload;
 
   const logger = RMABLogger.forJob(jobId, 'SearchEbook');
 
-  logger.info(`Processing ebook request ${requestId} for "${audiobook.title}"`);
+  logger.info(`Processing ebook request ${requestId} for "${audiobook.title}"${isFallback ? ' (fallback, skipping Anna)' : ''}`);
 
   try {
     // Update request status to searching and fetch custom search terms
@@ -59,7 +59,7 @@ export async function processSearchEbook(payload: SearchEbookPayload): Promise<a
     // Get ebook configuration
     const configService = getConfigService();
     const preferredFormat = payloadFormat || await configService.get('ebook_sidecar_preferred_format') || 'epub';
-    const annasArchiveEnabled = await configService.get('ebook_annas_archive_enabled') === 'true';
+    const annasArchiveEnabled = !isFallback && (await configService.get('ebook_annas_archive_enabled') === 'true');
     const indexerSearchEnabled = await configService.get('ebook_indexer_search_enabled') === 'true';
 
     logger.info(`Sources: Anna's Archive=${annasArchiveEnabled}, Indexer Search=${indexerSearchEnabled}`);
@@ -69,7 +69,7 @@ export async function processSearchEbook(payload: SearchEbookPayload): Promise<a
     let annasArchiveResult: EbookSearchResult | null = null;
     let indexerResult: RankedEbookTorrent | null = null;
 
-    // ========== STEP 1: Try Anna's Archive (if enabled) ==========
+    // ========== STEP 1: Try Anna's Archive (if enabled and not a fallback) ==========
     if (annasArchiveEnabled) {
       logger.info(`Searching Anna's Archive...`);
       annasArchiveResult = await searchAnnasArchive(searchAudiobook, preferredFormat, logger);

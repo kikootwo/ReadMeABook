@@ -57,9 +57,12 @@ export async function processStartDirectDownload(payload: StartDirectDownloadPay
   logger.info(`Starting direct download for request ${requestId}`);
 
   try {
-    // Update request status to downloading
-    await prisma.request.update({
-      where: { id: requestId },
+    // Update request status to downloading (only if not already in terminal/fallback state)
+    const requestUpdateResult = await prisma.request.updateMany({
+      where: {
+        id: requestId,
+        status: { in: ['pending', 'searching', 'awaiting_approval'] }, // Only safe states to transition
+      },
       data: {
         status: 'downloading',
         progress: 0,
@@ -68,14 +71,41 @@ export async function processStartDirectDownload(payload: StartDirectDownloadPay
       },
     });
 
-    // Update download history
-    await prisma.downloadHistory.update({
-      where: { id: downloadHistoryId },
+    // If we couldn't update the request, it's likely in a terminal/fallback state
+    // Bail out silently - the fallback path will handle it
+    if (requestUpdateResult.count === 0) {
+      logger.warn(`Request ${requestId} is already in a terminal/fallback state, skipping download`);
+      return {
+        success: false,
+        message: 'Request already in terminal/fallback state',
+        requestId,
+        skipped: true,
+      };
+    }
+
+    // Update download history to downloading (only if currently queued)
+    const historyUpdateResult = await prisma.downloadHistory.updateMany({
+      where: {
+        id: downloadHistoryId,
+        requestId,
+        downloadStatus: 'queued',
+      },
       data: {
         downloadStatus: 'downloading',
         startedAt: new Date(),
       },
     });
+
+    // If history couldn't be updated, it's likely already processed
+    if (historyUpdateResult.count === 0) {
+      logger.warn(`DownloadHistory ${downloadHistoryId} is not in queued state, skipping download`);
+      return {
+        success: false,
+        message: 'Download history not in queued state',
+        requestId,
+        skipped: true,
+      };
+    }
 
     // Get download configuration
     const configService = getConfigService();
@@ -97,6 +127,19 @@ export async function processStartDirectDownload(payload: StartDirectDownloadPay
     }
 
     logger.info(`Have ${downloadUrls.length} download URL(s) to try`);
+
+    // TRIGGER FALLBACK: Zero URLs available
+    if (downloadUrls.length === 0) {
+      const { triggerFallbackToProwlarr } = await import('../utils/anna-prowlarr-fallback');
+      await triggerFallbackToProwlarr(requestId, downloadHistoryId, 'Zero slow URLs available');
+
+      return {
+        success: false,
+        message: 'Fallback triggered: Zero slow URLs available',
+        requestId,
+        fallback: true,
+      };
+    }
 
     // Try each slow download URL until one succeeds
     let downloadResult: { success: boolean; filePath?: string; format?: string; error?: string } = {
@@ -186,28 +229,15 @@ export async function processStartDirectDownload(payload: StartDirectDownloadPay
       // All attempts failed
       logger.error(`All ${attemptsLimit} download attempts failed`);
 
-      await prisma.request.update({
-        where: { id: requestId },
-        data: {
-          status: 'failed',
-          errorMessage: downloadResult.error || 'All download attempts failed',
-          updatedAt: new Date(),
-        },
-      });
-
-      await prisma.downloadHistory.update({
-        where: { id: downloadHistoryId },
-        data: {
-          downloadStatus: 'failed',
-          downloadError: downloadResult.error || 'All download attempts failed',
-        },
-      });
+      // TRIGGER FALLBACK: All links exhausted
+      const { triggerFallbackToProwlarr } = await import('../utils/anna-prowlarr-fallback');
+      await triggerFallbackToProwlarr(requestId, downloadHistoryId, 'All download links exhausted');
 
       return {
         success: false,
-        message: 'Download failed',
+        message: 'Fallback triggered: All download links exhausted',
         requestId,
-        error: downloadResult.error,
+        fallback: true,
       };
     }
 
