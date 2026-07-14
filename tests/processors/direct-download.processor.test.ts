@@ -61,9 +61,9 @@ vi.mock('axios', () => ({
 describe('processStartDirectDownload', () => {
   // Mock fallback helper at the top level
   const fallbackMock = vi.hoisted(() => ({
-    triggerFallbackToProwlarr: vi.fn().mockResolvedValue(undefined),
+    triggerDirectDownloadFallback: vi.fn().mockResolvedValue(undefined),
   }));
-  vi.mock('@/lib/utils/anna-prowlarr-fallback', () => fallbackMock);
+  vi.mock('@/lib/utils/direct-download-fallback', () => fallbackMock);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -157,7 +157,7 @@ describe('processStartDirectDownload', () => {
         progress: 100,
       }),
     });
-    expect(fallbackMock.triggerFallbackToProwlarr).not.toHaveBeenCalled();
+    expect(fallbackMock.triggerDirectDownloadFallback).not.toHaveBeenCalled();
   });
 
   it('triggers fallback immediately when no slow URLs are available', async () => {
@@ -182,10 +182,11 @@ describe('processStartDirectDownload', () => {
       fallback: true,
       requestId: 'req-zero',
     }));
-    expect(fallbackMock.triggerFallbackToProwlarr).toHaveBeenCalledWith(
+    expect(fallbackMock.triggerDirectDownloadFallback).toHaveBeenCalledWith(
       'req-zero',
       'dh-zero',
-      'Zero slow URLs available'
+      'Zero download URLs available',
+      'ebook'
     );
   });
 
@@ -271,10 +272,11 @@ describe('processStartDirectDownload', () => {
 
     expect(result.success).toBe(false);
     expect(result.fallback).toBe(true);
-    expect(fallbackMock.triggerFallbackToProwlarr).toHaveBeenCalledWith(
+    expect(fallbackMock.triggerDirectDownloadFallback).toHaveBeenCalledWith(
       'req-3',
       'dh-3',
-      'All download links exhausted'
+      'All download links exhausted',
+      'ebook'
     );
   });
 

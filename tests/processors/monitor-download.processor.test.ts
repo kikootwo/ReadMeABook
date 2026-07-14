@@ -626,7 +626,7 @@ describe('processMonitorDownload', () => {
       expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
 
       expect(result.continued).toBe(true);
-      expect(result.message).toBe('Ebook download failed, searching next candidate');
+      expect(result.message).toBe('ebook download failed, searching next candidate');
     });
 
     it('continues to next ebook candidate on qBittorrent monitor-stage failure with blocklist', async () => {
@@ -752,7 +752,7 @@ describe('processMonitorDownload', () => {
       expect(result.completed).toBe(false); // Still in progress
     });
 
-    it('marks audiobook failed on monitor-stage failure (no continuation)', async () => {
+    it('continues to next audiobook candidate on monitor-stage failure with blocklist', async () => {
       const sabClientMock = {
         clientType: 'sabnzbd',
         protocol: 'usenet',
@@ -800,21 +800,20 @@ describe('processMonitorDownload', () => {
       // Should blocklist
       expect(prismaMock.blockedRelease.upsert).toHaveBeenCalled();
 
-      // Should NOT requeue search (audiobooks don't continue)
-      expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
-
-      // SHOULD send failure notification
-      expect(jobQueueMock.addNotificationJob).toHaveBeenCalledWith(
-        'request_error',
+      // Should requeue search (audiobooks now DO continue)
+      expect(jobQueueMock.addSearchJob).toHaveBeenCalledWith(
         'req-audiobook',
-        'Book',
-        'Author',
-        'user',
-        'Download failed in sabnzbd'
+        {
+          id: 'ab-4',
+          title: 'Book',
+          author: 'Author',
+        }
       );
 
-      expect(result.continued).toBeUndefined(); // Not continued
-      expect(result.message).toBe('Download failed');
+      // Should NOT send failure notification
+      expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+
+      expect(result.continued).toBe(true);
     });
 
     it('handles ebook fallback when audiobook data is missing', async () => {

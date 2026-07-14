@@ -267,9 +267,13 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         });
       }
 
-      // Ebook fallback continuation: requeue search for next ranked candidate
-      if (request?.type === 'ebook' && request.audiobook) {
-        logger.info(`Ebook download failed, requeueing search for next candidate (request ${requestId})`);
+      // Ranked-hierarchy continuation: requeue search for next ranked candidate
+      // Applies to ALL request types (ebook and audiobook)
+      if (request?.type && request.audiobook) {
+        const jobQueue = getJobQueueService();
+        const requestType = request.type;
+
+        logger.info(`${requestType.toUpperCase()} download failed, requeueing search for next candidate (request ${requestId})`);
 
         // Transition from failed to searching to allow continuation
         await prisma.request.update({
@@ -281,33 +285,46 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
           },
         });
 
-        // Enqueue search_ebook job with isFallback=true to skip Anna and try next ranked candidate
-        const jobQueue = getJobQueueService();
-        await jobQueue.addSearchEbookJob(
-          requestId,
-          {
-            id: request.audiobook.id,
-            title: request.audiobook.title,
-            author: request.audiobook.author,
-            asin: request.audiobook.audibleAsin || undefined,
-          },
-          undefined,
-          { isFallback: true }
-        );
-
-        logger.info(`Requeued fallback ebook search for request ${requestId}`);
+        // Enqueue search job with fallback semantics for ranked-hierarchy continuation
+        if (requestType === 'ebook') {
+          // Ebook: use search_ebook with isFallback=true to skip direct download sources
+          await jobQueue.addSearchEbookJob(
+            requestId,
+            {
+              id: request.audiobook.id,
+              title: request.audiobook.title,
+              author: request.audiobook.author,
+              asin: request.audiobook.audibleAsin || undefined,
+            },
+            undefined,
+            { isFallback: true }
+          );
+          logger.info(`Requeued fallback search for ebook request ${requestId}`);
+        } else {
+          // Audiobook: use search_indexers for ranked-hierarchy continuation
+          await jobQueue.addSearchJob(
+            requestId,
+            {
+              id: request.audiobook.id,
+              title: request.audiobook.title,
+              author: request.audiobook.author,
+              asin: request.audiobook.audibleAsin ?? undefined,
+            }
+          );
+          logger.info(`Requeued fallback search for audiobook request ${requestId}`);
+        }
 
         return {
           success: false,
           completed: true,
-          message: 'Ebook download failed, searching next candidate',
+          message: `${requestType} download failed, searching next candidate`,
           requestId,
           progress: progressPercent,
           continued: true,
         };
       }
 
-      // Audiobook (or ebook without audiobook data): stay failed and notify
+      // Requests without audiobook data (shouldn't happen in normal flow): stay failed and notify
       if (request && request.audiobook) {
         const jobQueue = getJobQueueService();
         await jobQueue.addNotificationJob(

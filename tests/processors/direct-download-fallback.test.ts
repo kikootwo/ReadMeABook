@@ -1,8 +1,8 @@
 /**
- * Component: Anna→Prowlarr Fallback Tests
+ * Component: Direct Download Fallback Tests
  * Documentation: documentation/integrations/ebook-sidecar.md
  *
- * Tests for atomic fallback from Anna's Archive direct download to Prowlarr indexer search.
+ * Tests for atomic fallback from direct download to indexer search.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,6 +29,7 @@ vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 
 const jobQueueMock = vi.hoisted(() => ({
   addSearchEbookJob: vi.fn(),
+  addSearchJob: vi.fn(),
   addStartDirectDownloadJob: vi.fn(),
 }));
 
@@ -53,7 +54,7 @@ const ebookScraperMock = vi.hoisted(() => ({
 
 vi.mock('@/lib/services/ebook-scraper', () => ebookScraperMock);
 
-describe('Anna→Prowlarr Fallback', () => {
+describe('Direct Download Fallback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     configServiceMock.get.mockResolvedValue('true');
@@ -63,9 +64,9 @@ describe('Anna→Prowlarr Fallback', () => {
     configServiceMock.getAudibleRegion.mockResolvedValue('us');
   });
 
-  describe('triggerFallbackToProwlarr', () => {
-    it('atomically claims fallback_triggered status and enqueues search', async () => {
-      const { triggerFallbackToProwlarr } = await import('@/lib/utils/anna-prowlarr-fallback');
+  describe('triggerDirectDownloadFallback', () => {
+    it('atomically claims fallback_triggered status and enqueues ebook search', async () => {
+      const { triggerDirectDownloadFallback } = await import('@/lib/utils/direct-download-fallback');
 
       prismaMock.downloadHistory.updateMany.mockResolvedValue({ count: 1 });
       prismaMock.request.findUnique.mockResolvedValue({
@@ -78,7 +79,7 @@ describe('Anna→Prowlarr Fallback', () => {
       });
       prismaMock.request.update.mockResolvedValue({});
 
-      await triggerFallbackToProwlarr('req-1', 'dh-1', 'Zero slow URLs available');
+      await triggerDirectDownloadFallback('req-1', 'dh-1', 'Zero download URLs available', 'ebook');
 
       expect(prismaMock.downloadHistory.updateMany).toHaveBeenCalledWith({
         where: {
@@ -88,7 +89,7 @@ describe('Anna→Prowlarr Fallback', () => {
         },
         data: {
           downloadStatus: 'fallback_triggered',
-          downloadError: 'Zero slow URLs available',
+          downloadError: 'Zero download URLs available',
         },
       });
 
@@ -106,46 +107,95 @@ describe('Anna→Prowlarr Fallback', () => {
       expect(prismaMock.request.update).toHaveBeenCalledWith({
         where: { id: 'req-1' },
         data: {
-          errorMessage: 'Zero slow URLs available',
+          errorMessage: 'Zero download URLs available',
         },
       });
     });
 
-    it('does not enqueue Prowlarr search when claim fails (duplicate retry)', async () => {
-      const { triggerFallbackToProwlarr } = await import('@/lib/utils/anna-prowlarr-fallback');
+    it('atomically claims fallback_triggered status and enqueues audiobook search', async () => {
+      const { triggerDirectDownloadFallback } = await import('@/lib/utils/direct-download-fallback');
+
+      prismaMock.downloadHistory.updateMany.mockResolvedValue({ count: 1 });
+      prismaMock.request.findUnique.mockResolvedValue({
+        audiobook: {
+          id: 'ab-1',
+          title: 'Test Book',
+          author: 'Test Author',
+          audibleAsin: 'B001ASIN',
+        },
+      });
+      prismaMock.request.update.mockResolvedValue({});
+
+      await triggerDirectDownloadFallback('req-1', 'dh-1', 'Direct download failed', 'audiobook');
+
+      expect(prismaMock.downloadHistory.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'dh-1',
+          requestId: 'req-1',
+          downloadStatus: 'downloading',
+        },
+        data: {
+          downloadStatus: 'fallback_triggered',
+          downloadError: 'Direct download failed',
+        },
+      });
+
+      expect(jobQueueMock.addSearchJob.mock.calls[0]).toEqual([
+        'req-1',
+        expect.objectContaining({
+          id: 'ab-1',
+          title: 'Test Book',
+          author: 'Test Author',
+          asin: 'B001ASIN',
+        }),
+      ]);
+
+      expect(prismaMock.request.update).toHaveBeenCalledWith({
+        where: { id: 'req-1' },
+        data: {
+          errorMessage: 'Direct download failed',
+        },
+      });
+    });
+
+    it('does not enqueue search when claim fails (duplicate retry)', async () => {
+      const { triggerDirectDownloadFallback } = await import('@/lib/utils/direct-download-fallback');
 
       prismaMock.downloadHistory.updateMany.mockResolvedValue({ count: 0 });
 
-      await triggerFallbackToProwlarr('req-1', 'dh-1', 'All links exhausted');
+      await triggerDirectDownloadFallback('req-1', 'dh-1', 'All links exhausted', 'ebook');
 
       expect(prismaMock.downloadHistory.updateMany).toHaveBeenCalled();
       expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
+      expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
       expect(prismaMock.request.findUnique).not.toHaveBeenCalled();
       expect(prismaMock.request.update).not.toHaveBeenCalled();
     });
 
     it('does not overwrite terminal statuses (failed, completed)', async () => {
-      const { triggerFallbackToProwlarr } = await import('@/lib/utils/anna-prowlarr-fallback');
+      const { triggerDirectDownloadFallback } = await import('@/lib/utils/direct-download-fallback');
 
       prismaMock.downloadHistory.updateMany.mockResolvedValue({ count: 0 });
 
-      await triggerFallbackToProwlarr('req-1', 'dh-1', 'Late error');
+      await triggerDirectDownloadFallback('req-1', 'dh-1', 'Late error', 'audiobook');
 
       expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
+      expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
     });
 
     it('does not overwrite existing fallback_triggered status', async () => {
-      const { triggerFallbackToProwlarr } = await import('@/lib/utils/anna-prowlarr-fallback');
+      const { triggerDirectDownloadFallback } = await import('@/lib/utils/direct-download-fallback');
 
       prismaMock.downloadHistory.updateMany.mockResolvedValue({ count: 0 });
 
-      await triggerFallbackToProwlarr('req-1', 'dh-1', 'Second attempt');
+      await triggerDirectDownloadFallback('req-1', 'dh-1', 'Second attempt', 'ebook');
 
       expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
+      expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
     });
 
-    it('includes isFallback=true in search payload', async () => {
-      const { triggerFallbackToProwlarr } = await import('@/lib/utils/anna-prowlarr-fallback');
+    it('includes isFallback=true in ebook search payload', async () => {
+      const { triggerDirectDownloadFallback } = await import('@/lib/utils/direct-download-fallback');
 
       prismaMock.downloadHistory.updateMany.mockResolvedValue({ count: 1 });
       prismaMock.request.findUnique.mockResolvedValue({
@@ -154,7 +204,7 @@ describe('Anna→Prowlarr Fallback', () => {
       });
       prismaMock.request.update.mockResolvedValue({});
 
-      await triggerFallbackToProwlarr('req-1', 'dh-1', 'Exhausted links');
+      await triggerDirectDownloadFallback('req-1', 'dh-1', 'Exhausted links', 'ebook');
 
       expect(jobQueueMock.addSearchEbookJob).toHaveBeenCalledWith(
         'req-1',
@@ -169,8 +219,8 @@ describe('Anna→Prowlarr Fallback', () => {
     });
   });
 
-  describe('Fallback search skips Anna', () => {
-    it('skips Anna when isFallback=true in payload', async () => {
+  describe('Fallback search skips direct download sources', () => {
+    it('skips direct download when isFallback=true in payload', async () => {
       const { processSearchEbook } = await import('@/lib/processors/search-ebook.processor');
 
       prismaMock.request.update.mockResolvedValue({
@@ -197,12 +247,12 @@ describe('Anna→Prowlarr Fallback', () => {
         isFallback: true,
       });
 
-      // Anna's Archive should be skipped when isFallback=true
+      // Direct download sources should be skipped when isFallback=true
       expect(ebookScraperMock.searchByAsin).not.toHaveBeenCalled();
       expect(ebookScraperMock.searchByTitle).not.toHaveBeenCalled();
     });
 
-    it('searches Anna when isFallback is not set', async () => {
+    it('searches direct download sources when isFallback is not set', async () => {
       const { processSearchEbook } = await import('@/lib/processors/search-ebook.processor');
 
       prismaMock.request.update.mockResolvedValue({
@@ -232,7 +282,7 @@ describe('Anna→Prowlarr Fallback', () => {
         // No isFallback field
       });
 
-      // Anna's Archive should be searched when isFallback is not set
+      // Direct download sources should be searched when isFallback is not set
       expect(ebookScraperMock.searchByAsin).toHaveBeenCalled();
     });
   });

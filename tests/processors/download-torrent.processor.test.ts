@@ -169,16 +169,20 @@ describe('processDownloadTorrent', () => {
     );
   });
 
-  it('throws error when no client configured for protocol', async () => {
+  it('handles error when no client configured for protocol', async () => {
     downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(null);
-    prismaMock.request.update.mockResolvedValue({});
+    prismaMock.request.update.mockResolvedValue({ type: 'other' });
+    prismaMock.request.findUnique.mockResolvedValue({ type: 'other' });
+    const blocklistModule = await import('@/lib/services/blocklist.service');
+    blocklistModule.addAutoBlock.mockResolvedValue({ blocked: { id: 'block-1' }, wasNew: true });
 
     const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+    const result = await processDownloadTorrent(torrentPayload);
 
-    await expect(processDownloadTorrent(torrentPayload)).rejects.toThrow(
-      'No torrent download client configured'
-    );
-
+    // Should handle gracefully with continuation
+    expect(result.success).toBe(false);
+    expect(result.continuationTriggered).toBe(true);
+    expect(blocklistModule.addAutoBlock).toHaveBeenCalled();
     expect(downloadClientManagerMock.getClientServiceForProtocol).toHaveBeenCalledWith('torrent');
   });
 
@@ -309,7 +313,7 @@ describe('processDownloadTorrent', () => {
 
       // Should not throw - handled gracefully
       expect(result.success).toBe(false);
-      expect(result.fallbackTriggered).toBe(true);
+      expect(result.continuationTriggered).toBe(true);
       expect(result.blockedRelease).toBe('Ebook Book - Ebook Author [EPUB]');
 
       // Should blocklist the failed release
@@ -375,7 +379,7 @@ describe('processDownloadTorrent', () => {
       const result = await processDownloadTorrent(ebookNzbPayload);
 
       expect(result.success).toBe(false);
-      expect(result.fallbackTriggered).toBe(true);
+      expect(result.continuationTriggered).toBe(true);
       expect(result.blockedRelease).toBe('Ebook Book2 - Ebook Author2 [EPUB]');
 
       // Should blocklist the failed release (NZB has no infoHash)
@@ -440,7 +444,7 @@ describe('processDownloadTorrent', () => {
       expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
     });
 
-    it('audiobook requests keep existing failure behavior on permanent error', async () => {
+    it('audiobook requests also use ranked-hierarchy continuation on permanent error', async () => {
       const audiobookPayload = {
         requestId: 'ab-req-1',
         audiobook: { id: 'a3', title: 'Audiobook Book', author: 'Audiobook Author' },
@@ -476,33 +480,49 @@ describe('processDownloadTorrent', () => {
         if (args.where.id === 'ab-req-1' && args.data.status === 'downloading') {
           return { type: 'audiobook', user: { plexUsername: 'testuser' } };
         }
-        if (args.where.id === 'ab-req-1' && args.data.status === 'failed') {
-          return { id: 'ab-req-1', status: 'failed' };
+        if (args.where.id === 'ab-req-1' && args.data.status === 'awaiting_search') {
+          return { id: 'ab-req-1', status: 'awaiting_search' };
         }
         return {};
       });
       prismaMock.request.findUnique.mockResolvedValue({ type: 'audiobook' });
 
       const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+      const result = await processDownloadTorrent(audiobookPayload);
 
-      // Should throw
-      await expect(processDownloadTorrent(audiobookPayload)).rejects.toThrow('500 Internal Server Error');
+      // Should not throw - handled gracefully
+      expect(result.success).toBe(false);
+      expect(result.continuationTriggered).toBe(true);
+      expect(result.blockedRelease).toBe('Audiobook Book - Audiobook Author [M4B]');
 
-      // Should NOT blocklist
-      expect(addAutoBlockMock).not.toHaveBeenCalled();
+      // Should blocklist the failed release
+      expect(addAutoBlockMock).toHaveBeenCalledWith({
+        requestId: 'ab-req-1',
+        releaseName: 'Audiobook Book - Audiobook Author [M4B]',
+        releaseHash: 'def456',
+        indexerName: 'Indexer',
+        indexerId: 30,
+        source: 'download_fail',
+        reason: 'Download client add failed: 500 Internal Server Error',
+        reasonDetail: '500 Internal Server Error',
+        jobId: 'job-ab-1',
+      });
 
-      // Should mark as failed (existing behavior)
+      // Should update request status to awaiting_search (NOT failed)
       expect(prismaMock.request.update).toHaveBeenCalledWith({
         where: { id: 'ab-req-1' },
         data: {
-          status: 'failed',
-          errorMessage: '500 Internal Server Error',
+          status: 'awaiting_search',
+          errorMessage: 'Failed to add Audiobook Book - Audiobook Author [M4B] to download client, trying next candidate',
           updatedAt: expect.any(Date),
         },
       });
 
-      // Should NOT requeue search
-      expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
+      // Should requeue audiobook search
+      expect(jobQueueMock.addSearchJob).toHaveBeenCalledWith(
+        'ab-req-1',
+        { id: 'a3', title: 'Audiobook Book', author: 'Audiobook Author' }
+      );
     });
 
     it('does NOT increment searchAttempts - search_ebook.processor already does this', async () => {

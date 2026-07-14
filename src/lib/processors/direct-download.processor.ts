@@ -130,12 +130,12 @@ export async function processStartDirectDownload(payload: StartDirectDownloadPay
 
     // TRIGGER FALLBACK: Zero URLs available
     if (downloadUrls.length === 0) {
-      const { triggerFallbackToProwlarr } = await import('../utils/anna-prowlarr-fallback');
-      await triggerFallbackToProwlarr(requestId, downloadHistoryId, 'Zero slow URLs available');
+      const { triggerDirectDownloadFallback } = await import('../utils/direct-download-fallback');
+      await triggerDirectDownloadFallback(requestId, downloadHistoryId, 'Zero download URLs available', 'ebook');
 
       return {
         success: false,
-        message: 'Fallback triggered: Zero slow URLs available',
+        message: 'Fallback triggered: Zero download URLs available',
         requestId,
         fallback: true,
       };
@@ -230,8 +230,8 @@ export async function processStartDirectDownload(payload: StartDirectDownloadPay
       logger.error(`All ${attemptsLimit} download attempts failed`);
 
       // TRIGGER FALLBACK: All links exhausted
-      const { triggerFallbackToProwlarr } = await import('../utils/anna-prowlarr-fallback');
-      await triggerFallbackToProwlarr(requestId, downloadHistoryId, 'All download links exhausted');
+      const { triggerDirectDownloadFallback } = await import('../utils/direct-download-fallback');
+      await triggerDirectDownloadFallback(requestId, downloadHistoryId, 'All download links exhausted', 'ebook');
 
       return {
         success: false,
