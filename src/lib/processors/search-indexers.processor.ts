@@ -11,7 +11,16 @@ import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer
 import { RMABLogger } from '../utils/logger';
 import { getLanguageForRegion } from '../constants/language-config';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
+import { parseMinQualityScore } from '../utils/min-quality-score';
 import type { AudibleRegion } from '../types/audible';
+
+/**
+ * A correctly-identified book must clear the title/author match gate.
+ * matchScore is 0 when the author is absent or <80% of required title words
+ * are present, so requiring >0 keeps wrong-book torrents out even though the
+ * overall quality bar is relaxed.
+ */
+const MIN_MATCH_SCORE = 1;
 
 /**
  * Process search indexers job
@@ -65,6 +74,9 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     // Get flag configurations
     const flagConfigStr = await configService.get('indexer_flag_config');
     const flagConfigs = flagConfigStr ? JSON.parse(flagConfigStr) : [];
+
+    // Admin-configurable minimum ranking score for automatic searches (default 50)
+    const minQualityScore = parseMinQualityScore(await configService.get('indexer.min_quality_score'));
 
     // Group indexers by their category configuration
     // This minimizes API calls while ensuring each indexer only searches its configured categories
@@ -199,24 +211,28 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     }
 
     // Dual threshold filtering:
-    // 1. Base score must be >= 50 (quality minimum)
-    // 2. Final score must be >= 50 (not disqualified by negative bonuses)
+    // 1. Base score must be >= minQualityScore (quality minimum)
+    // 2. Final score must be >= minQualityScore (not disqualified by negative bonuses)
+    // 3. Title/author match gate must have passed (matchScore > 0) so the
+    //    quality bar can't admit a wrong book — applies even when minQualityScore is 0.
     const filteredResults = rankedResults.filter(result =>
-      result.score >= 50 && result.finalScore >= 50
+      result.score >= minQualityScore &&
+      result.finalScore >= minQualityScore &&
+      result.breakdown.matchScore >= MIN_MATCH_SCORE
     );
 
     const disqualifiedByNegativeBonus = rankedResults.filter(result =>
-      result.score >= 50 && result.finalScore < 50
+      result.score >= minQualityScore && result.finalScore < minQualityScore
     ).length;
 
-    logger.info(`Ranked ${rankedResults.length} results, ${filteredResults.length} above threshold (50/100 base + final)`);
+    logger.info(`Ranked ${rankedResults.length} results, ${filteredResults.length} above threshold (${minQualityScore}/100 base + final, match>0)`);
     if (disqualifiedByNegativeBonus > 0) {
       logger.info(`${disqualifiedByNegativeBonus} torrents disqualified by negative flag bonuses`);
     }
 
     if (filteredResults.length === 0) {
       // No quality results found - queue for re-search instead of failing
-      logger.warn(`No quality matches found for request ${requestId} (all below 50/100), marking as awaiting_search`);
+      logger.warn(`No quality matches found for request ${requestId} (all below ${minQualityScore}/100 or failed title/author match), marking as awaiting_search`);
 
       await prisma.request.update({
         where: { id: requestId },

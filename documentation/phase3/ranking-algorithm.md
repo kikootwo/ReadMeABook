@@ -167,8 +167,11 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - Negative modifiers penalize undesired flags (e.g., "Unwanted" at -60%)
   - -60% modifier → 85 base score → -51 penalty = 34 final
 - Dual threshold filtering:
-  - Base score must be ≥ 50 (quality minimum)
-  - Final score must be ≥ 50 (not disqualified by negative bonuses)
+  - Base score must be ≥ minQualityScore (quality minimum; **admin-configurable**, default 50)
+  - Final score must be ≥ minQualityScore (not disqualified by negative bonuses)
+  - Title/author match gate (matchScore > 0) applies independently — even at threshold 0, wrong books are rejected
+  - Configured via Indexers settings tab → keys `indexer.min_quality_score` (audiobook) / `indexer.min_quality_score_ebook` (ebook). See [settings-pages.md](../settings-pages.md#minimum-score-threshold-indexers-tab)
+  - Automatic searches only; manual/interactive searches are never filtered
   - Negative bonuses can disqualify otherwise good torrents
 - Flag extraction from Prowlarr API:
   - `downloadVolumeFactor: 0` → "Freeleech"

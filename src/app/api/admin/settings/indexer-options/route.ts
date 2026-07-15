@@ -15,16 +15,26 @@
  *                 opted out. Workers MUST match this contract:
  *
  *                   const skip = (await config.get('indexer.skip_unreleased')) !== 'false';
+ *
+ * Also manages the automatic-search minimum ranking thresholds:
+ *   - `indexer.min_quality_score`        (audiobook auto-search, default 50)
+ *   - `indexer.min_quality_score_ebook`  (e-book auto-search, default 50)
+ *   Values are integers 0-100. Missing/invalid resolves to 50. Consumed by the
+ *   search-indexers / search-ebook processors. The title/author match gate
+ *   applies independently, so a value of 0 still rejects wrong books.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { getConfigService } from '@/lib/services/config.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { parseMinQualityScore } from '@/lib/utils/min-quality-score';
 
 const logger = RMABLogger.create('API.Admin.Settings.IndexerOptions');
 
 const CONFIG_KEY = 'indexer.skip_unreleased';
+const MIN_SCORE_KEY = 'indexer.min_quality_score';
+const MIN_SCORE_EBOOK_KEY = 'indexer.min_quality_score_ebook';
 
 /**
  * GET /api/admin/settings/indexer-options
@@ -40,7 +50,10 @@ export async function GET(request: NextRequest) {
         // Default ON: missing or any value other than 'false' is treated as enabled.
         const skipUnreleased = value !== 'false';
 
-        return NextResponse.json({ skipUnreleased });
+        const minQualityScore = parseMinQualityScore(await configService.get(MIN_SCORE_KEY));
+        const minQualityScoreEbook = parseMinQualityScore(await configService.get(MIN_SCORE_EBOOK_KEY));
+
+        return NextResponse.json({ skipUnreleased, minQualityScore, minQualityScoreEbook });
       } catch (error) {
         logger.error('Failed to fetch indexer options', {
           error: error instanceof Error ? error.message : String(error),
@@ -55,15 +68,28 @@ export async function GET(request: NextRequest) {
 }
 
 /**
+ * Validate an optional minimum-score field: when present it must be an integer 0-100.
+ * Returns an error message string if invalid, otherwise null.
+ */
+function validateScore(value: unknown, field: string): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 100) {
+    return `${field} must be an integer between 0 and 100`;
+  }
+  return null;
+}
+
+/**
  * PUT /api/admin/settings/indexer-options
- * Persists indexer-wide options. Body: { skipUnreleased: boolean }
+ * Persists indexer-wide options.
+ * Body: { skipUnreleased: boolean, minQualityScore?: number, minQualityScoreEbook?: number }
  */
 export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
         const body = await request.json();
-        const { skipUnreleased } = body ?? {};
+        const { skipUnreleased, minQualityScore, minQualityScoreEbook } = body ?? {};
 
         if (typeof skipUnreleased !== 'boolean') {
           return NextResponse.json(
@@ -72,8 +98,15 @@ export async function PUT(request: NextRequest) {
           );
         }
 
+        const scoreError =
+          validateScore(minQualityScore, 'minQualityScore') ??
+          validateScore(minQualityScoreEbook, 'minQualityScoreEbook');
+        if (scoreError) {
+          return NextResponse.json({ error: scoreError }, { status: 400 });
+        }
+
         const configService = getConfigService();
-        await configService.setMany([
+        const updates = [
           {
             key: CONFIG_KEY,
             value: String(skipUnreleased),
@@ -81,14 +114,41 @@ export async function PUT(request: NextRequest) {
             description:
               'Skip auto-searches for books with future release dates',
           },
-        ]);
+        ];
 
-        // Explicitly clear cache for the key after write. `setMany` already
+        if (minQualityScore !== undefined) {
+          updates.push({
+            key: MIN_SCORE_KEY,
+            value: String(minQualityScore),
+            category: 'indexer',
+            description:
+              'Minimum ranking score (0-100) for automatic audiobook searches',
+          });
+        }
+        if (minQualityScoreEbook !== undefined) {
+          updates.push({
+            key: MIN_SCORE_EBOOK_KEY,
+            value: String(minQualityScoreEbook),
+            category: 'indexer',
+            description:
+              'Minimum ranking score (0-100) for automatic e-book searches',
+          });
+        }
+
+        await configService.setMany(updates);
+
+        // Explicitly clear cache for the keys after write. `setMany` already
         // does this, but we make it visible here to guarantee fresh reads
-        // by any sibling service that has cached the value.
+        // by any sibling service that has cached the values.
         configService.clearCache(CONFIG_KEY);
+        configService.clearCache(MIN_SCORE_KEY);
+        configService.clearCache(MIN_SCORE_EBOOK_KEY);
 
-        logger.info('Indexer options updated', { skipUnreleased });
+        logger.info('Indexer options updated', {
+          skipUnreleased,
+          minQualityScore,
+          minQualityScoreEbook,
+        });
 
         return NextResponse.json({
           success: true,

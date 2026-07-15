@@ -610,9 +610,12 @@ export class RankingAlgorithm {
     }
 
     // ========== STAGE 3: AUTHOR MATCHING (0-15 points) ==========
-    // Check how many authors appear in torrent title (exact substring match)
+    // Check how many authors appear in torrent title (exact substring match).
+    // Also try the initials-collapsed form so "TJ Klune" matches "T J Klune".
+    const collapsedTorrentTitle = this.collapseInitials(torrentTitle);
     const authorMatches = normalizedAuthors.filter(author =>
-      torrentTitle.includes(author)
+      torrentTitle.includes(author) ||
+      collapsedTorrentTitle.includes(this.collapseInitials(author))
     );
 
     let authorScore = 0;
@@ -628,6 +631,28 @@ export class RankingAlgorithm {
   }
 
   /**
+   * Collapse runs of single-letter tokens into one token so spaced and
+   * compacted initials compare equal.
+   *   "t j klune"        → "tj klune"
+   *   "george r r martin"→ "george rr martin"
+   * Input must already be normalized (lowercased, punctuation→spaces).
+   */
+  private collapseInitials(text: string): string {
+    const out: string[] = [];
+    let buf = '';
+    for (const word of text.split(/\s+/)) {
+      if (word.length === 1) {
+        buf += word; // accumulate consecutive single letters
+      } else {
+        if (buf) { out.push(buf); buf = ''; }
+        if (word) out.push(word);
+      }
+    }
+    if (buf) out.push(buf);
+    return out.join(' ');
+  }
+
+  /**
    * Check if author is present in torrent title with high confidence
    * Uses pre-parsed and normalized authors array
    *
@@ -636,17 +661,26 @@ export class RankingAlgorithm {
    * @returns true if at least ONE author is present with high confidence
    */
   private checkAuthorPresenceWithParsed(torrentTitle: string, normalizedAuthors: string[]): boolean {
+    // Collapsed-initials variant of the title so "T J Klune" matches "TJ Klune"
+    const collapsedTitle = this.collapseInitials(torrentTitle);
+
     // At least ONE author must match with high confidence
     return normalizedAuthors.some(author => {
-      // Check 1: Exact substring match (works well now that both are normalized)
-      if (torrentTitle.includes(author)) {
+      const collapsedAuthor = this.collapseInitials(author);
+
+      // Check 1: Exact substring match (raw OR initials-collapsed form)
+      // Handles: "TJ Klune" vs "T J Klune", "JD Robb" vs "J D Robb"
+      if (torrentTitle.includes(author) || collapsedTitle.includes(collapsedAuthor)) {
         return true;
       }
 
       // Check 2: High fuzzy similarity (≥ 0.85)
       // Handles: "J.K. Rowling" vs "J. K. Rowling" vs "JK Rowling"
       // Also handles: "Dennis E. Taylor" vs "Dennis Taylor"
-      const similarity = compareTwoStrings(author, torrentTitle);
+      const similarity = Math.max(
+        compareTwoStrings(author, torrentTitle),
+        compareTwoStrings(collapsedAuthor, collapsedTitle)
+      );
       if (similarity >= 0.85) {
         return true;
       }
@@ -655,13 +689,14 @@ export class RankingAlgorithm {
       // Handles: "Sanderson, Brandon" vs "Brandon Sanderson"
       // Handles: "Brandon R. Sanderson" vs "Brandon Sanderson"
       // Now also handles: "VirginaEvans" → "virgina evans" (after normalization)
-      const words = author.split(/\s+/).filter(w => w.length > 1);
+      // Use the collapsed forms so initials-based names resolve correctly.
+      const words = collapsedAuthor.split(/\s+/).filter(w => w.length > 1);
       if (words.length >= 2) {
         const firstName = words[0];
         const lastName = words[words.length - 1];
 
-        const firstIdx = torrentTitle.indexOf(firstName);
-        const lastIdx = torrentTitle.indexOf(lastName);
+        const firstIdx = collapsedTitle.indexOf(firstName);
+        const lastIdx = collapsedTitle.indexOf(lastName);
 
         // Both components present and reasonably close?
         if (firstIdx !== -1 && lastIdx !== -1) {
