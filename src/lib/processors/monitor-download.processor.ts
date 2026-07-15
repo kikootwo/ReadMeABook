@@ -224,7 +224,16 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
       const errorMessage = `Download failed in ${client.clientType}`;
       const clientErrorDetail = info.errorMessage ?? null;
 
-      // Update request to failed
+      // Fetch request details before updating to check type
+      const request = await prisma.request.findUnique({
+        where: { id: requestId },
+        include: {
+          audiobook: true,
+          user: { select: { plexUsername: true } },
+        },
+      });
+
+      // Update request to failed (default behavior)
       await prisma.request.update({
         where: { id: requestId },
         data: {
@@ -264,16 +273,65 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         });
       }
 
-      // Send notification for request failure
-      const request = await prisma.request.findUnique({
-        where: { id: requestId },
-        include: {
-          audiobook: true,
-          user: { select: { plexUsername: true } },
-        },
-      });
+      // Ranked-hierarchy continuation: requeue search for next ranked candidate
+      // Applies to ALL request types (ebook and audiobook)
+      if (request?.type && request.audiobook) {
+        const jobQueue = getJobQueueService();
+        const requestType = request.type;
 
-      if (request) {
+        logger.info(`${requestType.toUpperCase()} download failed, requeueing search for next candidate (request ${requestId})`);
+
+        // Transition from failed to searching to allow continuation
+        await prisma.request.update({
+          where: { id: requestId },
+          data: {
+            status: 'searching',
+            errorMessage: `Retrying next candidate after: ${errorMessage}`,
+            updatedAt: new Date(),
+          },
+        });
+
+        // Enqueue search job with fallback semantics for ranked-hierarchy continuation
+        if (requestType === 'ebook') {
+          // Ebook: use search_ebook with isFallback=true to skip direct download sources
+          await jobQueue.addSearchEbookJob(
+            requestId,
+            {
+              id: request.audiobook.id,
+              title: request.audiobook.title,
+              author: request.audiobook.author,
+              asin: request.audiobook.audibleAsin || undefined,
+            },
+            undefined,
+            { isFallback: true }
+          );
+          logger.info(`Requeued fallback search for ebook request ${requestId}`);
+        } else {
+          // Audiobook: use search_indexers for ranked-hierarchy continuation
+          await jobQueue.addSearchJob(
+            requestId,
+            {
+              id: request.audiobook.id,
+              title: request.audiobook.title,
+              author: request.audiobook.author,
+              asin: request.audiobook.audibleAsin ?? undefined,
+            }
+          );
+          logger.info(`Requeued fallback search for audiobook request ${requestId}`);
+        }
+
+        return {
+          success: false,
+          completed: true,
+          message: `${requestType} download failed, searching next candidate`,
+          requestId,
+          progress: progressPercent,
+          continued: true,
+        };
+      }
+
+      // Requests without audiobook data (shouldn't happen in normal flow): stay failed and notify
+      if (request && request.audiobook) {
         const jobQueue = getJobQueueService();
         await jobQueue.addNotificationJob(
           'request_error',
@@ -421,7 +479,7 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
       },
     });
 
-    if (request) {
+    if (request && request.audiobook) {
       const jobQueue = getJobQueueService();
       await jobQueue.addNotificationJob(
         'request_error',

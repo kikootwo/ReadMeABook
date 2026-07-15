@@ -10,6 +10,7 @@ import { getDownloadClientManager } from '../services/download-client-manager.se
 import { ProwlarrService } from '../integrations/prowlarr.service';
 import { RMABLogger } from '../utils/logger';
 import { isTransientConnectionError } from '../utils/connection-errors';
+import { addAutoBlock, type BlockSource } from '../services/blocklist.service';
 
 /**
  * Process download job
@@ -154,15 +155,67 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
       // If all retries are exhausted, the global failed handler marks it failed.
       logger.warn(`Download client unreachable for request ${requestId}, allowing Bull to retry`);
     } else {
-      // Permanent error — mark request as failed immediately
+      // Permanent error — blocklist this release and trigger ranked-hierarchy continuation
+      // for ALL request types (ebook and audiobook)
+      const requestDetails = await prisma.request.findUnique({
+        where: { id: requestId },
+        select: { type: true },
+      });
+
+      const requestType = requestDetails?.type || 'audiobook';
+      const jobQueue = getJobQueueService();
+
+      // Blocklist the failed release
+      await addAutoBlock({
+        requestId,
+        releaseName: torrent.title,
+        releaseHash: torrent.infoHash || undefined,
+        indexerName: torrent.indexer,
+        indexerId: torrent.indexerId,
+        source: 'download_fail',
+        reason: `Download client add failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        reasonDetail: error instanceof Error ? error.message : undefined,
+        jobId,
+      });
+
+      // Update request status to allow continuation search
+      // NOTE: Do NOT increment searchAttempts - search processors already do this
       await prisma.request.update({
         where: { id: requestId },
         data: {
-          status: 'failed',
-          errorMessage: error instanceof Error ? error.message : 'Failed to add download to client',
+          status: 'awaiting_search',
+          errorMessage: `Failed to add ${torrent.title} to download client, trying next candidate`,
           updatedAt: new Date(),
         },
       });
+
+      // Re-queue search job with fallback semantics for ranked-hierarchy continuation
+      if (requestType === 'ebook') {
+        // Ebook: use search_ebook with isFallback=true to skip direct download sources
+        await jobQueue.addSearchEbookJob(
+          requestId,
+          audiobook,
+          torrent.format,
+          { isFallback: true } // Skip direct download sources, continue through ranked candidates
+        );
+        logger.info(`Blocklisted ${torrent.title} and re-queued ebook search for next candidate (isFallback: true)`);
+      } else {
+        // Audiobook: use search_indexers for ranked-hierarchy continuation
+        await jobQueue.addSearchJob(
+          requestId,
+          audiobook
+        );
+        logger.info(`Blocklisted ${torrent.title} and re-queued audiobook search for next candidate`);
+      }
+
+      // Don't throw - we've handled the error by triggering continuation
+      return {
+        success: false,
+        message: `Download failed, trying next candidate`,
+        requestId,
+        blockedRelease: torrent.title,
+        continuationTriggered: true,
+      };
     }
 
     throw error;
