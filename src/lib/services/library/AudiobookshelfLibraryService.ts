@@ -59,31 +59,28 @@ export class AudiobookshelfLibraryService implements ILibraryService {
       .map((lib: any) => ({
         id: lib.id,
         name: lib.name,
-        type: lib.mediaType,
-        itemCount: lib.stats?.totalItems,
+        type: 'audiobook',
       }));
   }
 
   async getLibraryItems(libraryId: string): Promise<LibraryItem[]> {
     const items = await getABSLibraryItems(libraryId);
-    const audioItems = items.filter(this.hasAudioContent);
-    const skipped = items.length - audioItems.length;
-    if (skipped > 0) {
-      logger.info(`Filtered ${skipped} ebook-only item(s) from library (no audio files)`);
-    }
-    return audioItems.map(this.mapABSItemToLibraryItem);
+    return items
+      .filter((item: any) => this.hasAudioContent(item))
+      .map((item: any) => this.mapABSItemToLibraryItem(item));
   }
 
-  async getRecentlyAdded(libraryId: string, limit: number): Promise<LibraryItem[]> {
+  async getRecentlyAdded(libraryId: string, limit = 20): Promise<LibraryItem[]> {
     const items = await getABSRecentItems(libraryId, limit);
-    return items.filter(this.hasAudioContent).map(this.mapABSItemToLibraryItem);
+    return items
+      .filter((item: any) => this.hasAudioContent(item))
+      .map((item: any) => this.mapABSItemToLibraryItem(item));
   }
 
-  async getItem(itemId: string): Promise<LibraryItem | null> {
+  async getItem(id: string): Promise<LibraryItem | null> {
     try {
-      const item = await getABSItem(itemId);
+      const item = await getABSItem(id);
       if (!this.hasAudioContent(item)) {
-        logger.debug(`Item ${itemId} is ebook-only (no audio files), skipping`);
         return null;
       }
       return this.mapABSItemToLibraryItem(item);
@@ -104,48 +101,19 @@ export class AudiobookshelfLibraryService implements ILibraryService {
   }
 
   /**
-   * Get parameters needed for caching library covers
-   * @returns Parameters for ThumbnailCacheService.cacheLibraryThumbnail()
-   */
-  async getCoverCachingParams(): Promise<{
-    backendBaseUrl: string;
-    authToken: string;
-    backendMode: 'plex' | 'audiobookshelf';
-  }> {
-    const config = await this.configService.getMany([
-      'audiobookshelf.server_url',
-      'audiobookshelf.api_token',
-    ]);
-
-    const serverUrl = config['audiobookshelf.server_url'];
-    const authToken = config['audiobookshelf.api_token'];
-
-    if (!serverUrl || !authToken) {
-      throw new Error('Audiobookshelf server configuration is incomplete');
-    }
-
-    return {
-      backendBaseUrl: serverUrl,
-      authToken: authToken,
-      backendMode: 'audiobookshelf',
-    };
-  }
-
-  /**
-   * Check if an ABS library item contains audio content.
-   * ABS stores both audiobooks and ebooks under mediaType 'book'.
-   * Ebook-only items have no audio files and should be excluded from RMAB's audiobook pipeline.
-   *
-   * The list endpoint returns minified media (numAudioFiles, duration) without the full audioFiles array.
-   * The single-item endpoint returns the full audioFiles array.
-   * We check all available signals to handle both response shapes.
+   * Filter out non-audio items (ebooks without audio files)
    */
   private hasAudioContent(item: any): boolean {
-    if (!item?.media) return false;
+    if (!item || !item.media) return false;
 
-    // numAudioFiles: present in list/search endpoint responses (minified media)
+    // numAudioFiles: present in library item list/search summary objects
     if (typeof item.media.numAudioFiles === 'number') {
       return item.media.numAudioFiles > 0;
+    }
+
+    // numTracks: legacy / fallback field in some ABS versions
+    if (typeof item.media.numTracks === 'number') {
+      return item.media.numTracks > 0;
     }
 
     // audioFiles array: present in full single-item responses
@@ -162,12 +130,13 @@ export class AudiobookshelfLibraryService implements ILibraryService {
     return true;
   }
 
-  async verifyItemExists(title: string): Promise<boolean> {
+  async verifyItemExists(libraryId: string, title: string): Promise<boolean> {
     try {
-      const items = await searchABSItems(title);
+      const items = await searchABSItems(libraryId, title);
       if (!Array.isArray(items) || items.length === 0) return false;
       const cleanedQuery = title.toLowerCase().replace(/[^a-z0-9]/g, '');
-      return items.some((item: any) => {
+      return items.some((result: any) => {
+        const item = result.libraryItem || result;
         const itemTitle = (item.media?.metadata?.title || item.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
         return itemTitle.includes(cleanedQuery) || cleanedQuery.includes(itemTitle);
       });

@@ -30,6 +30,7 @@ export async function processRecoverStuckRequests(payload: RecoverStuckRequestsP
     },
     include: {
       audiobook: true,
+      downloadHistory: { orderBy: { createdAt: 'desc' }, take: 1 },
     },
   });
 
@@ -43,25 +44,26 @@ export async function processRecoverStuckRequests(payload: RecoverStuckRequestsP
   let resetToSearchCount = 0;
   let markedDownloadingCount = 0;
 
-  const sab = getSABnzbdService();
-  const qbit = getQBittorrentService();
+  let sab: any = null;
+  try {
+    sab = await getSABnzbdService();
+  } catch {}
 
   for (const req of stuckRequests) {
     const rawTitle = req.audiobook.title;
+    const historyItem = Array.isArray(req.downloadHistory) ? req.downloadHistory[0] : null;
+    const downloadId = historyItem?.nzbId || historyItem?.downloadClientId;
 
-    if (req.status === 'processing') {
+    if (req.status === 'processing' && downloadId && sab) {
       let isDownloading = false;
 
-      // Check SABnzbd if downloadId is present
-      if (req.downloadId) {
-        try {
-          const nzb = await sab.getNZB(req.downloadId);
-          if (nzb) {
-            isDownloading = true;
-          }
-        } catch {
-          // Client check error
+      try {
+        const nzb = await sab.getNZB(downloadId);
+        if (nzb) {
+          isDownloading = true;
         }
+      } catch {
+        // Client check error
       }
 
       if (isDownloading) {
