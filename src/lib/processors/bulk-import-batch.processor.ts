@@ -43,16 +43,16 @@ export async function processBulkImportBatch(payload: BulkImportBatchPayload): P
     for (const item of chunk) {
       totalProcessed++;
       try {
-        let audiobookId: string | null = null;
+        let audiobookRecord: { id: string; title: string; author: string; audibleAsin?: string | null } | null = null;
 
         if (item.asin) {
           const existing = await prisma.audiobook.findFirst({ where: { audibleAsin: item.asin } });
           if (existing) {
-            audiobookId = existing.id;
+            audiobookRecord = existing;
           } else {
             const cached = await prisma.audibleCache.findUnique({ where: { asin: item.asin } });
             if (cached) {
-              const created = await prisma.audiobook.create({
+              audiobookRecord = await prisma.audiobook.create({
                 data: {
                   audibleAsin: item.asin,
                   title: cached.title,
@@ -62,32 +62,35 @@ export async function processBulkImportBatch(payload: BulkImportBatchPayload): P
                   status: 'pending',
                 },
               });
-              audiobookId = created.id;
             }
           }
         }
 
-        if (!audiobookId && item.title && item.author) {
-          const created = await prisma.audiobook.create({
+        if (!audiobookRecord && item.title && item.author) {
+          audiobookRecord = await prisma.audiobook.create({
             data: {
               title: item.title,
               author: item.author,
               status: 'pending',
             },
           });
-          audiobookId = created.id;
         }
 
-        if (audiobookId) {
+        if (audiobookRecord) {
           const newReq = await prisma.request.create({
             data: {
               userId,
-              audiobookId,
+              audiobookId: audiobookRecord.id,
               type: 'audiobook',
               status: 'awaiting_search',
             },
           });
-          await jobQueue.addSearchJob(newReq.id, audiobookId);
+          await jobQueue.addSearchJob(newReq.id, {
+            id: audiobookRecord.id,
+            title: audiobookRecord.title,
+            author: audiobookRecord.author,
+            asin: audiobookRecord.audibleAsin || undefined,
+          });
           totalQueued++;
         }
       } catch (err) {
