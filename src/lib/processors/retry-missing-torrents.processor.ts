@@ -30,7 +30,7 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
     const configService = getConfigService();
     const skipUnreleasedSetting = (await configService.get('indexer.skip_unreleased')) !== 'false';
 
-    // Find all active requests in awaiting_search OR awaiting_release status
+    // Find active requests in awaiting_search OR awaiting_release status ordered by least recently searched
     const requests = await prisma.request.findMany({
       where: {
         status: { in: ['awaiting_search', 'awaiting_release'] },
@@ -38,6 +38,9 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
       },
       include: {
         audiobook: true,
+      },
+      orderBy: {
+        lastSearchAt: 'asc',
       },
       take: 50,
     });

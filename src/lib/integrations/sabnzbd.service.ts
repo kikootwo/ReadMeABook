@@ -611,8 +611,38 @@ export class SABnzbdService implements IDownloadClient {
       return this.mapQueueItemToNZBInfo(queueItem);
     }
 
-    // Not in queue, check history
-    const history = await this.getHistory(100);
+    // Direct NZO ID history query (bypasses 100-item history limit)
+    try {
+      const response = await this.client.get('/api', {
+        params: {
+          mode: 'history',
+          nzo_ids: nzbId,
+          output: 'json',
+          apikey: this.apiKey,
+        },
+      });
+
+      const slots = response?.data?.history?.slots || [];
+      if (slots.length > 0) {
+        const historyItem: HistoryItem = {
+          nzbId: slots[0].nzo_id,
+          name: slots[0].name,
+          category: slots[0].category || '',
+          status: slots[0].status,
+          bytes: slots[0].bytes || '0',
+          failMessage: slots[0].fail_message || '',
+          storage: slots[0].storage || '',
+          completedTimestamp: slots[0].completed || '0',
+          downloadTime: slots[0].download_time || '0',
+        };
+        return this.mapHistoryItemToNZBInfo(historyItem);
+      }
+    } catch {
+      // Fall through to deep history query
+    }
+
+    // Deep history fallback search (500 limit)
+    const history = await this.getHistory(500);
     const historyItem = history.find(item => item.nzbId === nzbId);
 
     if (historyItem) {
@@ -662,7 +692,7 @@ export class SABnzbdService implements IDownloadClient {
       },
     });
 
-    const slots = response.data?.history?.slots || [];
+    const slots = response?.data?.history?.slots || [];
     return slots.map((slot: any) => ({
       nzbId: slot.nzo_id,
       name: slot.name,

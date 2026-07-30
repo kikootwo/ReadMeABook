@@ -86,7 +86,78 @@ export class SchedulerService {
     // Check and trigger overdue jobs
     await this.triggerOverdueJobs();
 
+    // Start internal 5-minute watchdog timer to automatically recover stalled jobs
+    this.startWatchdog();
+
     logger.info('Scheduler service started');
+  }
+
+  private watchdogInterval: NodeJS.Timeout | null = null;
+
+  /**
+   * Start 5-minute background watchdog interval to detect and recover stalled jobs
+   */
+  startWatchdog(): void {
+    if (this.watchdogInterval) {
+      clearInterval(this.watchdogInterval);
+    }
+
+    // Check every 5 minutes (300000 ms)
+    this.watchdogInterval = setInterval(async () => {
+      try {
+        await this.recoverStalledJobs();
+      } catch (error) {
+        logger.error('Error in scheduler watchdog interval', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }, 300000);
+
+    if (this.watchdogInterval.unref) {
+      this.watchdogInterval.unref();
+    }
+
+    logger.info('Scheduler watchdog interval started (5m frequency)');
+  }
+
+  /**
+   * Stop watchdog interval
+   */
+  stopWatchdog(): void {
+    if (this.watchdogInterval) {
+      clearInterval(this.watchdogInterval);
+      this.watchdogInterval = null;
+      logger.info('Scheduler watchdog interval stopped');
+    }
+  }
+
+  /**
+   * Inspect all enabled scheduled jobs and recover any that are stalled
+   */
+  async recoverStalledJobs(): Promise<number> {
+    logger.info('Running scheduler watchdog stalled job recovery check...');
+    const jobs = await prisma.scheduledJob.findMany({
+      where: { enabled: true },
+    });
+
+    let recovered = 0;
+    for (const job of jobs) {
+      if (this.isJobOverdue(job)) {
+        logger.warn(`Watchdog detected stalled scheduled job "${job.name}" (lastRun: ${job.lastRun ? job.lastRun.toISOString() : 'NEVER'}). Re-scheduling and triggering recovery...`);
+        try {
+          await this.scheduleJob(job);
+          await this.triggerJobNow(job.id);
+          recovered++;
+        } catch (error) {
+          logger.error(`Watchdog failed to recover stalled job "${job.name}"`, {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+
+    logger.info(`Scheduler watchdog check complete: ${recovered} stalled jobs recovered`);
+    return recovered;
   }
 
   /**

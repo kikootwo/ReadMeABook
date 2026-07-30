@@ -211,8 +211,12 @@ export class JobQueueService {
     // Increase max listeners to accommodate all job processors (12 total)
     this.redis.setMaxListeners(20);
 
-    // Create Bull queue
+    // Create Bull queue with rate limiter
     this.queue = new Queue('audiobook-jobs', redisUrl, {
+      limiter: {
+        max: 10,
+        duration: 1000,
+      },
       defaultJobOptions: {
         attempts: 3,
         backoff: {

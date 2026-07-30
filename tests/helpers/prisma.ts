@@ -17,6 +17,7 @@ type PrismaModelMock = {
   delete: ReturnType<typeof vi.fn>;
   deleteMany: ReturnType<typeof vi.fn>;
   count: ReturnType<typeof vi.fn>;
+  groupBy: ReturnType<typeof vi.fn>;
 };
 
 const createModelMock = (): PrismaModelMock => ({
@@ -31,6 +32,7 @@ const createModelMock = (): PrismaModelMock => ({
   delete: vi.fn(() => Promise.resolve({})),
   deleteMany: vi.fn(() => Promise.resolve({})),
   count: vi.fn(),
+  groupBy: vi.fn(),
 });
 
 export const createPrismaMock = () => ({
