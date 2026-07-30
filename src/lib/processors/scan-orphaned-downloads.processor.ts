@@ -66,7 +66,7 @@ export async function processScanOrphanedDownloads(payload: ScanOrphanedDownload
       const fullPath = path.join(downloadDir, matchingFolder);
       logger.info(`Matched orphaned download folder "${matchingFolder}" to request "${rawTitle}" (${request.id})`);
 
-      await jobQueue.addOrganizeFilesJob(
+      await jobQueue.addOrganizeJob(
         request.id,
         request.audiobook.id,
         fullPath

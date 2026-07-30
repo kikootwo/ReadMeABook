@@ -83,6 +83,14 @@ export function OperationsCenter() {
         </button>
 
         <button
+          onClick={() => triggerJob('recover_stuck_requests', 'Reset Stuck Requests')}
+          disabled={loading !== null}
+          className="px-4 py-3 bg-primary text-primary-foreground rounded hover:opacity-90 font-medium disabled:opacity-50 text-left"
+        >
+          {loading === 'recover_stuck_requests' ? '⏳ Triggering...' : '🚨 Reset Stuck Requests (>2h)'}
+        </button>
+
+        <button
           onClick={restartScheduler}
           disabled={loading !== null}
           className="px-4 py-3 bg-destructive text-destructive-foreground rounded hover:opacity-90 font-medium disabled:opacity-50 text-left"

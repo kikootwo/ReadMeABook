@@ -236,6 +236,13 @@ export class SchedulerService {
         enabled: true, // Enable by default
         payload: {},
       },
+      {
+        name: 'Recover Stuck Requests',
+        type: 'recover_stuck_requests' as ScheduledJobType,
+        schedule: '0 * * * *', // Every 1 hour
+        enabled: true, // Enable by default
+        payload: {},
+      },
     ];
 
     let created = 0;
@@ -510,6 +517,9 @@ export class SchedulerService {
       case 'check_watched_lists':
         bullJobId = await this.triggerCheckWatchedLists(job);
         break;
+      case 'recover_stuck_requests':
+        bullJobId = await this.triggerRecoverStuckRequests(job);
+        break;
       default:
         throw new Error(`Unknown job type: ${job.type}`);
     }
@@ -616,6 +626,15 @@ export class SchedulerService {
    */
   private async triggerAudibleRefresh(job: any): Promise<string> {
     return await this.jobQueue.addAudibleRefreshJob(job.id);
+  }
+
+  /**
+   * Trigger stuck request state recovery
+   */
+  private async triggerRecoverStuckRequests(job: any): Promise<string> {
+    const { processRecoverStuckRequests } = await import('../processors/recover-stuck-requests.processor');
+    const result = await processRecoverStuckRequests({ jobId: job.id });
+    return `stuck-recovery-${Date.now()}`;
   }
 
 

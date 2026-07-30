@@ -162,6 +162,20 @@ export class AudiobookshelfLibraryService implements ILibraryService {
     return true;
   }
 
+  async verifyItemExists(title: string): Promise<boolean> {
+    try {
+      const items = await searchABSItems(title);
+      if (!Array.isArray(items) || items.length === 0) return false;
+      const cleanedQuery = title.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return items.some((item: any) => {
+        const itemTitle = (item.media?.metadata?.title || item.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        return itemTitle.includes(cleanedQuery) || cleanedQuery.includes(itemTitle);
+      });
+    } catch {
+      return false;
+    }
+  }
+
   private mapABSItemToLibraryItem(item: ABSLibraryItem): LibraryItem {
     const metadata = item.media.metadata;
     return {
