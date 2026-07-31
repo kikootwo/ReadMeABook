@@ -238,6 +238,39 @@ export class ConfigurationService {
   }
 
   /**
+   * Get preferred audiobook search language ('en' | 'de' | 'es' | 'fr' | 'all')
+   */
+  async getPreferredLanguage(): Promise<'en' | 'de' | 'es' | 'fr' | 'all'> {
+    const dbValue = await this.get('search.preferred_language');
+    const envValue = process.env.PREFERRED_AUDIOBOOK_LANGUAGE;
+    const value = (dbValue || envValue || 'en').toLowerCase().trim();
+    if (['en', 'de', 'es', 'fr', 'all'].includes(value)) {
+      return value as 'en' | 'de' | 'es' | 'fr' | 'all';
+    }
+    return 'en';
+  }
+
+  /**
+   * Get language penalty score for non-matching search results
+   */
+  async getLanguagePenaltyScore(): Promise<number> {
+    const dbValue = await this.get('search.language_penalty_score');
+    const envValue = process.env.LANGUAGE_PENALTY_SCORE;
+    const val = parseInt(dbValue || envValue || '100', 10);
+    return isNaN(val) ? 100 : val;
+  }
+
+  /**
+   * Get stuck request timeout in hours (default: 6, 0 to disable)
+   */
+  async getStuckRequestTimeoutHours(): Promise<number> {
+    const dbValue = await this.get('system.stuck_request_timeout_hours');
+    const envValue = process.env.STUCK_REQUEST_TIMEOUT_HOURS;
+    const val = parseInt(dbValue || envValue || '6', 10);
+    return isNaN(val) ? 6 : Math.max(0, val);
+  }
+
+  /**
    * Clear the cache for a specific key or all keys
    */
   clearCache(key?: string): void {
