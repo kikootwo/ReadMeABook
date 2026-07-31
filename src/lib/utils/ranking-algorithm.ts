@@ -42,6 +42,8 @@ export interface RankTorrentsOptions {
   requireAuthor?: boolean;                   // Enforce author presence check (default: true)
   stopWords?: string[];                      // Language-specific stop words for matching
   characterReplacements?: Record<string, string>;  // Language-specific char replacements (e.g. ß→ss)
+  preferredLanguage?: 'en' | 'de' | 'es' | 'fr' | 'all'; // Target language or 'all' to disable filter
+  languagePenaltyScore?: number;             // Score penalty for non-matching language (default: 100)
 }
 
 export interface EbookTorrentRequest {
@@ -175,25 +177,30 @@ export class RankingAlgorithm {
         });
       }
 
-      // Non-English language & Language Learning Course Penalty (-100 penalty)
-      const isRequestCourse = /learn|language|course|pimsleur|berlitz/i.test(audiobook.title);
-      const NON_ENGLISH_PATTERN = /\[?(german|deutsch|hörbuch|french|français|livre audio|spanish|español|audiolibro|italian|italiano|dutch|polish|russian)\]?/i;
-      const COURSE_PATTERN = /pimsleur|learn\s+(spanish|german|french|italian|japanese|chinese|russian)|berlitz|language\s+course/i;
+      // Configurable Preferred Language & Penalty Scoring
+      const preferredLang = options?.preferredLanguage ?? 'en';
+      const penaltyScore = options?.languagePenaltyScore ?? 100;
 
-      if (NON_ENGLISH_PATTERN.test(torrent.title)) {
-        bonusModifiers.push({
-          type: 'custom',
-          value: -1.0,
-          points: -100,
-          reason: 'Non-English language tag detected in release title (-100 penalty)',
-        });
-      } else if (!isRequestCourse && COURSE_PATTERN.test(torrent.title)) {
-        bonusModifiers.push({
-          type: 'custom',
-          value: -1.0,
-          points: -100,
-          reason: 'Language learning course tag detected in release title (-100 penalty)',
-        });
+      if (preferredLang !== 'all') {
+        const isRequestCourse = /learn|language|course|pimsleur|berlitz/i.test(audiobook.title);
+        const NON_ENGLISH_PATTERN = /\[?(german|deutsch|hörbuch|french|français|livre audio|spanish|español|audiolibro|italian|italiano|dutch|polish|russian)\]?/i;
+        const COURSE_PATTERN = /pimsleur|learn\s+(spanish|german|french|italian|japanese|chinese|russian)|berlitz|language\s+course/i;
+
+        if (NON_ENGLISH_PATTERN.test(torrent.title)) {
+          bonusModifiers.push({
+            type: 'custom',
+            value: -1.0,
+            points: -Math.abs(penaltyScore),
+            reason: `Non-English language tag detected in release title (-${penaltyScore} penalty)`,
+          });
+        } else if (!isRequestCourse && COURSE_PATTERN.test(torrent.title)) {
+          bonusModifiers.push({
+            type: 'custom',
+            value: -1.0,
+            points: -Math.abs(penaltyScore),
+            reason: `Language learning course tag detected in release title (-${penaltyScore} penalty)`,
+          });
+        }
       }
 
       // Sum all bonus points

@@ -175,6 +175,8 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     const ranker = getRankingAlgorithm();
     const region = await configService.getAudibleRegion() as AudibleRegion;
     const langConfig = getLanguageForRegion(region);
+    const preferredLanguage = await configService.getPreferredLanguage();
+    const languagePenaltyScore = await configService.getLanguagePenaltyScore();
 
     // Rank results with indexer priorities and flag configs
     // Note: rankTorrents now filters out results < 20 MB internally
@@ -190,6 +192,8 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       requireAuthor: true,  // Automatic mode - prevent wrong authors
       stopWords: langConfig.stopWords,
       characterReplacements: langConfig.characterReplacements,
+      preferredLanguage,
+      languagePenaltyScore,
     });
 
     // Log filter results
