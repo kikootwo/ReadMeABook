@@ -29,10 +29,10 @@ export async function processScanOrphanedDownloads(payload: ScanOrphanedDownload
     return { success: true, matched: 0, reason: 'Directory not found' };
   }
 
-  // Find all active requests in downloading or awaiting_import status
+  // Find requests in downloading, awaiting_import, failed, or awaiting_search status
   const requests = await prisma.request.findMany({
     where: {
-      status: { in: ['downloading', 'awaiting_import'] },
+      status: { in: ['downloading', 'awaiting_import', 'failed', 'awaiting_search'] },
       deletedAt: null,
     },
     include: {
@@ -45,33 +45,40 @@ export async function processScanOrphanedDownloads(payload: ScanOrphanedDownload
     return { success: true, matched: 0 };
   }
 
-  const entries = fs.readdirSync(downloadDir, { withFileTypes: true });
-  const folders = entries.filter(e => e.isDirectory()).map(e => e.name);
+  const dirsToScan = [
+    downloadDir,
+    '/storage/downloads/nzb/download',
+  ].filter(d => fs.existsSync(d));
 
-  logger.info(`Found ${folders.length} folders in storage and ${requests.length} candidate request(s).`);
-
-  const jobQueue = getJobQueueService();
   let matchedCount = 0;
+  const jobQueue = getJobQueueService();
 
-  for (const request of requests) {
-    const rawTitle = request.audiobook.title;
-    const cleaned = cleanTitle(rawTitle).toLowerCase().replace(/[^a-z0-9]/g, '');
+  for (const dir of dirsToScan) {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    const folders = entries.filter(e => e.isDirectory()).map(e => e.name);
 
-    const matchingFolder = folders.find(folder => {
-      const fLower = folder.toLowerCase().replace(/[^a-z0-9]/g, '');
-      return fLower.includes(cleaned);
-    });
+    logger.info(`Found ${folders.length} folders in storage dir "${dir}" and ${requests.length} candidate request(s).`);
 
-    if (matchingFolder) {
-      const fullPath = path.join(downloadDir, matchingFolder);
-      logger.info(`Matched orphaned download folder "${matchingFolder}" to request "${rawTitle}" (${request.id})`);
+    for (const request of requests) {
+      const rawTitle = request.audiobook.title;
+      const cleaned = cleanTitle(rawTitle).toLowerCase().replace(/[^a-z0-9]/g, '');
 
-      await jobQueue.addOrganizeJob(
-        request.id,
-        request.audiobook.id,
-        fullPath
-      );
-      matchedCount++;
+      const matchingFolder = folders.find(folder => {
+        const fLower = folder.toLowerCase().replace(/[^a-z0-9]/g, '');
+        return fLower.includes(cleaned);
+      });
+
+      if (matchingFolder) {
+        const fullPath = path.join(dir, matchingFolder);
+        logger.info(`Matched orphaned download folder "${matchingFolder}" to request "${rawTitle}" (${request.id})`);
+
+        await jobQueue.addOrganizeJob(
+          request.id,
+          request.audiobook.id,
+          fullPath
+        );
+        matchedCount++;
+      }
     }
   }
 

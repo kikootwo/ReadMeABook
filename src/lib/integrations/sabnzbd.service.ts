@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
+import fs from 'fs';
 import { RMAB_USER_AGENT } from '@/lib/utils/user-agent';
 import https from 'https';
 import FormData from 'form-data';
@@ -985,8 +986,30 @@ export class SABnzbdService implements IDownloadClient {
    * Map history item to NZBInfo
    */
   private mapHistoryItemToNZBInfo(historyItem: HistoryItem): NZBInfo {
-    const isCompleted = historyItem.status.toLowerCase().includes('completed');
-    const isFailed = historyItem.status.toLowerCase().includes('failed');
+    const rawStatus = (historyItem.status || '').toLowerCase();
+    const failMsg = (historyItem.failMessage || '').toLowerCase();
+    const isDuplicate = failMsg.includes('duplicate') || rawStatus.includes('duplicate');
+
+    let isCompleted = rawStatus.includes('completed');
+    let isFailed = rawStatus.includes('failed');
+
+    // If SABnzbd marked it as Duplicate NZB, check if storage path actually exists on disk and contains files
+    if (isDuplicate && historyItem.storage) {
+      try {
+        if (fs.existsSync(historyItem.storage)) {
+          const files = fs.readdirSync(historyItem.storage);
+          if (files.length > 0) {
+            isCompleted = true;
+            isFailed = false;
+            logger.info(`SABnzbd slot "${historyItem.name}" marked as Duplicate NZB, but target storage exists with ${files.length} file(s). Mapping to completed.`, {
+              storage: historyItem.storage,
+            });
+          }
+        }
+      } catch {
+        // Fall back to original status if disk check throws
+      }
+    }
 
     return {
       nzbId: historyItem.nzbId,
