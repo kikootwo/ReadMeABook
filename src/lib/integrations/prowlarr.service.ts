@@ -225,6 +225,14 @@ export class ProwlarrService {
       title,
     ];
 
+    // Pass 3: Subtitle-cleaned query (extract core title before colon or em-dash)
+    if (title.includes(':') || title.includes(' - ')) {
+      const cleanCoreTitle = title.split(/:|\s+-\s+/)[0].trim();
+      if (cleanCoreTitle && cleanCoreTitle.length > 3 && !queries.includes(cleanCoreTitle)) {
+        queries.push(cleanCoreTitle);
+      }
+    }
+
     logger.info(`Searching with ${queries.length} query variations`, { queries });
 
     const allResults: TorrentResult[] = [];

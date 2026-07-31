@@ -175,6 +175,27 @@ export class RankingAlgorithm {
         });
       }
 
+      // Non-English language & Language Learning Course Penalty (-100 penalty)
+      const isRequestCourse = /learn|language|course|pimsleur|berlitz/i.test(audiobook.title);
+      const NON_ENGLISH_PATTERN = /\[?(german|deutsch|hörbuch|french|français|livre audio|spanish|español|audiolibro|italian|italiano|dutch|polish|russian)\]?/i;
+      const COURSE_PATTERN = /pimsleur|learn\s+(spanish|german|french|italian|japanese|chinese|russian)|berlitz|language\s+course/i;
+
+      if (NON_ENGLISH_PATTERN.test(torrent.title)) {
+        bonusModifiers.push({
+          type: 'custom',
+          value: -1.0,
+          points: -100,
+          reason: 'Non-English language tag detected in release title (-100 penalty)',
+        });
+      } else if (!isRequestCourse && COURSE_PATTERN.test(torrent.title)) {
+        bonusModifiers.push({
+          type: 'custom',
+          value: -1.0,
+          points: -100,
+          reason: 'Language learning course tag detected in release title (-100 penalty)',
+        });
+      }
+
       // Sum all bonus points
       const bonusPoints = bonusModifiers.reduce((sum, mod) => sum + mod.points, 0);
 
