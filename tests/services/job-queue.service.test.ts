@@ -46,6 +46,8 @@ const queueMock = vi.hoisted(() => ({
 
 const redisMock = vi.hoisted(() => ({
   setMaxListeners: vi.fn(),
+  set: vi.fn(),
+  eval: vi.fn(),
   disconnect: vi.fn(),
 }));
 
@@ -158,6 +160,10 @@ describe('JobQueueService', () => {
     prismaMock.scheduledJob.update.mockReset();
     prismaMock.request.update.mockReset();
     prismaMock.downloadHistory.update.mockReset();
+    redisMock.set.mockReset();
+    redisMock.eval.mockReset();
+    redisMock.set.mockResolvedValue('OK');
+    redisMock.eval.mockResolvedValue(1);
   });
 
   it('adds search jobs with priority and stores Bull job ID', async () => {
@@ -193,6 +199,74 @@ describe('JobQueueService', () => {
       where: { id: 'job-1' },
       data: { bullJobId: 'bull-1' },
     });
+    expect(redisMock.set).toHaveBeenCalledWith(
+      'rmab:search-lock:req-1',
+      expect.any(String),
+      'EX',
+      43200,
+      'NX'
+    );
+  });
+
+  it('does not queue a duplicate search job for the same request', async () => {
+    redisMock.set.mockResolvedValue(null);
+
+    const { JobQueueService } = await import('@/lib/services/job-queue.service');
+    const service = new JobQueueService();
+    const jobId = await service.addSearchJob('req-1', {
+      id: 'ab-1',
+      title: 'Title',
+      author: 'Author',
+    });
+
+    expect(jobId).toBeNull();
+    expect(prismaMock.job.create).not.toHaveBeenCalled();
+    expect(queueMock.add).not.toHaveBeenCalled();
+  });
+
+  it('releases only the search lock owned by the job', async () => {
+    const { JobQueueService } = await import('@/lib/services/job-queue.service');
+    const service = new JobQueueService();
+    const updateSpy = vi.spyOn(service as any, 'updateJobInDatabase').mockResolvedValue(undefined);
+    const handlers = Object.fromEntries(queueMock.on.mock.calls.map(([event, handler]) => [event, handler]));
+
+    await handlers.completed(
+      {
+        id: 'bull-1',
+        name: 'search_indexers',
+        data: { requestId: 'req-1', searchLockToken: 'owner-token' },
+      },
+      { ok: true }
+    );
+
+    expect(updateSpy).toHaveBeenCalledWith('bull-1', 'completed', { ok: true });
+    expect(redisMock.eval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('get', KEYS[1]) == ARGV[1]"),
+      1,
+      'rmab:search-lock:req-1',
+      'owner-token'
+    );
+  });
+
+  it('releases the search lock when enqueueing fails', async () => {
+    prismaMock.job.create.mockResolvedValue({ id: 'job-1' });
+    queueMock.add.mockRejectedValue(new Error('queue unavailable'));
+
+    const { JobQueueService } = await import('@/lib/services/job-queue.service');
+    const service = new JobQueueService();
+
+    await expect(service.addSearchJob('req-1', {
+      id: 'ab-1',
+      title: 'Title',
+      author: 'Author',
+    })).rejects.toThrow('queue unavailable');
+
+    expect(redisMock.eval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('get', KEYS[1]) == ARGV[1]"),
+      1,
+      'rmab:search-lock:req-1',
+      expect.any(String)
+    );
   });
 
   it('adds download jobs with expected priority', async () => {
