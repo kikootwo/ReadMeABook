@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { parseMinQualityScore } from '@/lib/utils/min-quality-score';
 
 const logger = RMABLogger.create('API.Admin.Settings');
 
@@ -86,6 +87,11 @@ export async function GET(request: NextRequest) {
         // Must stay in lock-step with /api/admin/settings/indexer-options read contract
         // and any background worker that reads `indexer.skip_unreleased` directly.
         skipUnreleased: configMap.get('indexer.skip_unreleased') !== 'false',
+        // Minimum ranking score thresholds for automatic searches. Default 50,
+        // clamped 0-100. Must stay in lock-step with the indexer-options route
+        // and the search processors that read these keys directly.
+        minQualityScore: parseMinQualityScore(configMap.get('indexer.min_quality_score')),
+        minQualityScoreEbook: parseMinQualityScore(configMap.get('indexer.min_quality_score_ebook')),
       },
       // downloadClient is populated from multi-client format for backward compatibility
       // The DownloadTab component now uses DownloadClientManagement which reads from /api/admin/settings/download-clients

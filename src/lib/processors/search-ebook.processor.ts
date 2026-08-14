@@ -16,6 +16,7 @@ import { rankEbookTorrents, RankedEbookTorrent } from '../utils/ranking-algorith
 import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer-grouping';
 import { getLanguageForRegion } from '../constants/language-config';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
+import { parseMinQualityScore } from '../utils/min-quality-score';
 import type { AudibleRegion } from '../types/audible';
 
 // Import ebook scraper functions for Anna's Archive
@@ -24,6 +25,12 @@ import {
   searchByTitle,
   getSlowDownloadLinks,
 } from '../services/ebook-scraper';
+
+/**
+ * Title/author match gate: a correctly-identified book has matchScore > 0.
+ * Applied independently of minQualityScore so a value of 0 still rejects wrong books.
+ */
+const EBOOK_MIN_MATCH_SCORE = 1;
 
 /**
  * Process search ebook job
@@ -259,6 +266,9 @@ async function searchIndexers(
   const flagConfigStr = await configService.get('indexer_flag_config');
   const flagConfigs = flagConfigStr ? JSON.parse(flagConfigStr) : [];
 
+  // Admin-configurable minimum ranking score for automatic ebook searches (default 50)
+  const minQualityScore = parseMinQualityScore(await configService.get('indexer.min_quality_score_ebook'));
+
   // Group indexers by their EBOOK category configuration
   const { groups, skippedIndexers } = groupIndexersByCategories(indexersConfig, 'ebook');
 
@@ -353,16 +363,20 @@ async function searchIndexers(
     logger.info(`Filtered out ${preFilterCount - postFilterCount} results > 20 MB`);
   }
 
-  // Dual threshold filtering (same as audiobooks)
+  // Dual threshold filtering (same as audiobooks):
+  // base + final must clear minQualityScore, and the title/author match gate
+  // (matchScore > 0) must pass so a value of 0 still rejects wrong books.
   const filteredResults = rankedResults.filter(result =>
-    result.score >= 50 && result.finalScore >= 50
+    result.score >= minQualityScore &&
+    result.finalScore >= minQualityScore &&
+    result.breakdown.matchScore >= EBOOK_MIN_MATCH_SCORE
   );
 
   const disqualifiedByNegativeBonus = rankedResults.filter(result =>
-    result.score >= 50 && result.finalScore < 50
+    result.score >= minQualityScore && result.finalScore < minQualityScore
   ).length;
 
-  logger.info(`Ranked ${rankedResults.length} results, ${filteredResults.length} above threshold (50/100 base + final)`);
+  logger.info(`Ranked ${rankedResults.length} results, ${filteredResults.length} above threshold (${minQualityScore}/100 base + final, match>0)`);
   if (disqualifiedByNegativeBonus > 0) {
     logger.info(`${disqualifiedByNegativeBonus} ebooks disqualified by negative flag bonuses`);
   }

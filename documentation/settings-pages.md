@@ -149,6 +149,31 @@ src/app/admin/settings/
 
 **API:** Persisted via `PUT /api/admin/settings/indexer-options`. Saved alongside Prowlarr connection + indexer config when the Indexers tab Save button is clicked.
 
+## Minimum Score Threshold (Indexers tab)
+
+**Purpose:** Optional per-media sliders to tune how strict automatic searches are. The ranking algorithm scores each result 0-100; only results at/above the threshold are downloaded. Section is styled like Indexer Flag Configuration, marked "(Optional)", and lives below the IndexerManagement list.
+
+**Sliders:** range 0-100, default 50, step 1.
+- **Audiobooks** → `indexer.min_quality_score`
+- **E-books** → `indexer.min_quality_score_ebook`
+
+**Semantics:**
+- Higher = stricter (may reject everything → request stuck `awaiting_search`).
+- Lower = more lenient (grabs weaker matches: low seeders, off size).
+- **0** shows a warning: threshold disabled, accepts highest-ranked title/author match regardless of quality.
+- Title/author match gate (matchScore > 0) **always** applies — wrong books rejected even at 0.
+- Manual/interactive searches are **never** filtered.
+
+**Configuration Keys:**
+| Key | Default | Category | Description |
+|-----|---------|----------|-------------|
+| `indexer.min_quality_score` | `50` | `indexer` | Min ranking score for automatic audiobook searches |
+| `indexer.min_quality_score_ebook` | `50` | `indexer` | Min ranking score for automatic ebook searches |
+
+**Read contract (consumed by `search-indexers` / `search-ebook` processors):**
+- `parseInt(value)`, clamped 0-100. Missing/invalid → `50`.
+- Filter: `score >= min && finalScore >= min && breakdown.matchScore >= 1`.
+
 ## Audible Region
 
 **Purpose:** Configure which Audible region to use for metadata and search to ensure accurate ASIN matching with your metadata engine.
@@ -326,9 +351,12 @@ src/app/admin/settings/
 
 **PUT /api/admin/settings/indexer-options**
 - Updates indexer-wide auto-search options
-- Body: `{ skipUnreleased: boolean }` (strict boolean validation)
-- Persists `indexer.skip_unreleased` (category: `indexer`)
+- Body: `{ skipUnreleased: boolean, minQualityScore?: number, minQualityScoreEbook?: number }`
+- `skipUnreleased` strict boolean; score fields optional, validated as integers 0-100
+- Persists `indexer.skip_unreleased`, `indexer.min_quality_score`, `indexer.min_quality_score_ebook` (category: `indexer`)
 - No connection test required
+
+**GET /api/admin/settings/indexer-options** also returns `minQualityScore` and `minQualityScoreEbook` (default 50).
 
 **PUT /api/admin/settings/download-client**
 - Updates download client config

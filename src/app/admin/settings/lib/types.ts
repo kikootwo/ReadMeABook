@@ -88,6 +88,19 @@ export interface IndexerOptionsSettings {
    * Backing config key: `indexer.skip_unreleased`.
    */
   skipUnreleased: boolean;
+  /**
+   * Minimum ranking score (0-100) an audiobook release must reach in automatic
+   * searches to be eligible for download. Default 50. Lower = more lenient
+   * (grabs weaker matches); higher = stricter (may find nothing). The
+   * title/author match gate still applies independently. Manual searches are
+   * unaffected. Backing config key: `indexer.min_quality_score`.
+   */
+  minQualityScore: number;
+  /**
+   * Same as `minQualityScore` but for automatic e-book searches. Default 50.
+   * Backing config key: `indexer.min_quality_score_ebook`.
+   */
+  minQualityScoreEbook: number;
 }
 
 /**
