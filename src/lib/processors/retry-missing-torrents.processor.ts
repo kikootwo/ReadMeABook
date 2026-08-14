@@ -39,6 +39,10 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
       include: {
         audiobook: true,
       },
+      orderBy: [
+        { lastSearchAt: { sort: 'asc', nulls: 'first' } },
+        { createdAt: 'asc' },
+      ],
       take: 50,
     });
 

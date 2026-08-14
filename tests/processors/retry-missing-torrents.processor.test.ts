@@ -58,6 +58,15 @@ describe('processRetryMissingTorrents', () => {
       expect.objectContaining({ id: 'a1', title: 'Book', author: 'Author' })
     );
     expect(prismaMock.request.update).not.toHaveBeenCalled();
+    expect(prismaMock.request.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [
+          { lastSearchAt: { sort: 'asc', nulls: 'first' } },
+          { createdAt: 'asc' },
+        ],
+        take: 50,
+      })
+    );
   });
 
   it('transitions awaiting_search → awaiting_release when book is unreleased and setting ON', async () => {

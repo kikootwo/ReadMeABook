@@ -48,6 +48,7 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 **search_indexers:**
 - No torrents found → 'awaiting_search' status (not failed)
 - Allows automatic retry via scheduled job
+- Duplicate queued/active searches for the same request are ignored
 - Upstream release-date gate: 4 enqueue sites (`request-creator.service`, `retry-missing-torrents.processor`, `monitor-rss-feeds.processor`, `bookdate/swipe/route`) check `shouldSkipAutoSearch` against `indexer.skip_unreleased`; gated requests are created/kept in `awaiting_release` and `addSearchJob` is not called. Manual search bypasses the gate.
 
 **organize_files:**

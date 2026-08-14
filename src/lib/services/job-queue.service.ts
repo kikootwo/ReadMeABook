@@ -5,6 +5,7 @@
 
 import Queue, { Job as BullJob, JobOptions } from 'bull';
 import Redis from 'ioredis';
+import { randomUUID } from 'node:crypto';
 import { prisma } from '../db';
 import { TorrentResult } from '../utils/ranking-algorithm';
 import { DownloadClientType } from '../interfaces/download-client.interface';
@@ -42,6 +43,7 @@ export interface JobPayload {
 
 export interface SearchIndexersPayload extends JobPayload {
   requestId: string;
+  searchLockToken?: string;
   audiobook: {
     id: string;
     title: string;
@@ -191,6 +193,14 @@ export interface QueueStats {
   delayed: number;
 }
 
+const SEARCH_LOCK_TTL_SECONDS = 12 * 60 * 60;
+const RELEASE_SEARCH_LOCK_SCRIPT = `
+if redis.call('get', KEYS[1]) == ARGV[1] then
+  return redis.call('del', KEYS[1])
+end
+return 0
+`;
+
 export class JobQueueService {
   private queue: Queue.Queue;
   private redis: Redis;
@@ -238,6 +248,9 @@ export class JobQueueService {
     this.queue.on('completed', async (job: BullJob, result: any) => {
       logger.info(`Job ${job.id} completed`, { result });
       await this.updateJobInDatabase(job.id as string, 'completed', result);
+      if (job.name === 'search_indexers' && job.data?.requestId && job.data?.searchLockToken) {
+        await this.releaseSearchLock(job.data.requestId, job.data.searchLockToken);
+      }
     });
 
     this.queue.on('failed', async (job: BullJob, error: Error) => {
@@ -249,6 +262,10 @@ export class JobQueueService {
         error.message,
         error.stack
       );
+
+      if (job.name === 'search_indexers' && job.data?.requestId && job.data?.searchLockToken) {
+        await this.releaseSearchLock(job.data.requestId, job.data.searchLockToken);
+      }
 
       // Handle permanent failures for specific job types after all retries exhausted
       if (job.name === 'monitor_download' && job.data) {
@@ -580,16 +597,40 @@ export class JobQueueService {
   /**
    * Add search indexers job
    */
-  async addSearchJob(requestId: string, audiobook: { id: string; title: string; author: string; asin?: string }): Promise<string> {
-    return await this.addJob(
-      'search_indexers',
-      {
-        requestId,
-        audiobook,
-      } as SearchIndexersPayload,
-      {
-        priority: 10, // High priority for user-initiated requests
-      }
+  async addSearchJob(requestId: string, audiobook: { id: string; title: string; author: string; asin?: string }): Promise<string | null> {
+    const lockKey = `rmab:search-lock:${requestId}`;
+    const searchLockToken = randomUUID();
+    const acquired = await this.redis.set(lockKey, searchLockToken, 'EX', SEARCH_LOCK_TTL_SECONDS, 'NX');
+
+    if (!acquired) {
+      logger.info(`Search already queued for request ${requestId}`);
+      return null;
+    }
+
+    try {
+      return await this.addJob(
+        'search_indexers',
+        {
+          requestId,
+          audiobook,
+          searchLockToken,
+        } as SearchIndexersPayload,
+        {
+          priority: 10,
+        }
+      );
+    } catch (error) {
+      await this.releaseSearchLock(requestId, searchLockToken);
+      throw error;
+    }
+  }
+
+  private async releaseSearchLock(requestId: string, searchLockToken: string): Promise<void> {
+    await this.redis.eval(
+      RELEASE_SEARCH_LOCK_SCRIPT,
+      1,
+      `rmab:search-lock:${requestId}`,
+      searchLockToken
     );
   }
 
