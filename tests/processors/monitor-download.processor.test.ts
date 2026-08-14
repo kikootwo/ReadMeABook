@@ -725,6 +725,424 @@ describe('processMonitorDownload', () => {
       })
     );
   });
+
+  describe('Ebook Fallback Continuation', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      jobQueueMock.addNotificationJob.mockResolvedValue(undefined);
+      jobQueueMock.addSearchEbookJob.mockResolvedValue('job-fallback');
+    });
+
+    it('continues to next ebook candidate on SABnzbd monitor-stage failure with blocklist', async () => {
+      const sabClientMock = {
+        clientType: 'sabnzbd',
+        protocol: 'usenet',
+        getDownload: vi.fn().mockResolvedValue({
+          id: 'nzb-ebook',
+          name: 'Book - Author.epub',
+          size: 1000000,
+          bytesDownloaded: 0,
+          progress: 0,
+          status: 'failed',
+          downloadSpeed: 0,
+          eta: 0,
+          category: 'readmeabook',
+          errorMessage: 'Download failed (par2)',
+        }),
+      };
+      downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(sabClientMock);
+
+      prismaMock.request.findUnique.mockResolvedValue({
+        id: 'req-ebook',
+        type: 'ebook',
+        audiobook: { id: 'ab-1', title: 'Test Book', author: 'Test Author', audibleAsin: 'B001ASIN' },
+        user: { plexUsername: 'user' },
+      });
+      prismaMock.request.update.mockResolvedValue({});
+      prismaMock.downloadHistory.update.mockResolvedValue({});
+      prismaMock.downloadHistory.findUnique.mockResolvedValue({
+        id: 'dh-ebook',
+        torrentName: 'Book - Author.epub',
+        nzbId: 'nzb-ebook',
+        indexerName: 'TestIndexer',
+        indexerId: 1,
+      });
+      prismaMock.blockedRelease.upsert.mockResolvedValue({ id: 'block-1' });
+
+      const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+      const result = await processMonitorDownload({
+        requestId: 'req-ebook',
+        downloadHistoryId: 'dh-ebook',
+        downloadClientId: 'nzb-ebook',
+        downloadClient: 'sabnzbd',
+        jobId: 'job-ebook',
+      });
+
+      // Should blocklist the failed release
+      expect(prismaMock.blockedRelease.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            requestId: 'req-ebook',
+            releaseName: 'Book - Author.epub',
+            releaseHash: 'nzb-ebook',
+            source: 'download_fail',
+            reason: 'Download failed (par2)',
+            downloadHistoryId: 'dh-ebook',
+          }),
+        })
+      );
+
+      // Should update progress first (always happens on every poll)
+      expect(prismaMock.request.update).toHaveBeenNthCalledWith(1, {
+        where: { id: 'req-ebook' },
+        data: {
+          progress: 0,
+          updatedAt: expect.any(Date),
+        },
+      });
+
+      // Then update status to failed (default behavior)
+      expect(prismaMock.request.update).toHaveBeenNthCalledWith(2, {
+        where: { id: 'req-ebook' },
+        data: {
+          status: 'failed',
+          errorMessage: 'Download failed in sabnzbd',
+          updatedAt: expect.any(Date),
+        },
+      });
+
+      // Then transition from failed to searching for fallback
+      expect(prismaMock.request.update).toHaveBeenNthCalledWith(3, {
+        where: { id: 'req-ebook' },
+        data: {
+          status: 'searching',
+          errorMessage: 'Retrying next candidate after: Download failed in sabnzbd',
+          updatedAt: expect.any(Date),
+        },
+      });
+
+      // Should requeue search_ebook with isFallback=true
+      expect(jobQueueMock.addSearchEbookJob).toHaveBeenCalledWith(
+        'req-ebook',
+        {
+          id: 'ab-1',
+          title: 'Test Book',
+          author: 'Test Author',
+          asin: 'B001ASIN',
+        },
+        undefined,
+        { isFallback: true }
+      );
+
+      // Should NOT send failure notification
+      expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+
+      expect(result.continued).toBe(true);
+      expect(result.message).toBe('ebook download failed, searching next candidate');
+    });
+
+    it('continues to next ebook candidate on qBittorrent monitor-stage failure with blocklist', async () => {
+      const qbtClientMock = {
+        clientType: 'qbittorrent',
+        protocol: 'torrent',
+        getDownload: vi.fn().mockResolvedValue({
+          id: 'hash-ebook',
+          name: 'Book - Author.epub',
+          size: 1000000,
+          bytesDownloaded: 0,
+          progress: 0.2,
+          status: 'failed',
+          downloadSpeed: 0,
+          eta: 0,
+          category: 'readmeabook',
+          errorMessage: 'Download failed (missing files)',
+        }),
+      };
+      downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(qbtClientMock);
+
+      prismaMock.request.findUnique.mockResolvedValue({
+        id: 'req-ebook-torrent',
+        type: 'ebook',
+        audiobook: { id: 'ab-2', title: 'Another Book', author: 'Another Author', audibleAsin: 'B002ASIN' },
+        user: { plexUsername: 'user' },
+      });
+      prismaMock.request.update.mockResolvedValue({});
+      prismaMock.downloadHistory.update.mockResolvedValue({});
+      prismaMock.downloadHistory.findUnique.mockResolvedValue({
+        id: 'dh-ebook-torrent',
+        torrentName: 'Book - Author.epub',
+        torrentHash: 'hash-ebook',
+        indexerName: 'TorrentIndexer',
+        indexerId: 2,
+      });
+      prismaMock.blockedRelease.upsert.mockResolvedValue({ id: 'block-2' });
+
+      const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+      const result = await processMonitorDownload({
+        requestId: 'req-ebook-torrent',
+        downloadHistoryId: 'dh-ebook-torrent',
+        downloadClientId: 'hash-ebook',
+        downloadClient: 'qbittorrent',
+        jobId: 'job-ebook-torrent',
+      });
+
+      // Should blocklist the failed release
+      expect(prismaMock.blockedRelease.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            requestId: 'req-ebook-torrent',
+            releaseName: 'Book - Author.epub',
+            releaseHash: 'hash-ebook',
+            source: 'download_fail',
+            reason: 'Download failed (missing files)',
+            downloadHistoryId: 'dh-ebook-torrent',
+          }),
+        })
+      );
+
+      // Should requeue search_ebook with isFallback=true
+      expect(jobQueueMock.addSearchEbookJob).toHaveBeenCalledWith(
+        'req-ebook-torrent',
+        {
+          id: 'ab-2',
+          title: 'Another Book',
+          author: 'Another Author',
+          asin: 'B002ASIN',
+        },
+        undefined,
+        { isFallback: true }
+      );
+
+      expect(result.continued).toBe(true);
+    });
+
+    it('does NOT continue on transient monitor states (downloading, paused, queued, checking)', async () => {
+      const qbtClientMock = {
+        clientType: 'qbittorrent',
+        protocol: 'torrent',
+        getDownload: vi.fn().mockResolvedValue({
+          id: 'hash-transient',
+          name: 'Book',
+          size: 1000000,
+          bytesDownloaded: 500000,
+          progress: 0.5,
+          status: 'paused', // Transient state
+          downloadSpeed: 0,
+          eta: 60,
+          category: 'readmeabook',
+        }),
+      };
+      downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(qbtClientMock);
+
+      prismaMock.request.findUnique.mockResolvedValue({
+        id: 'req-ebook-transient',
+        type: 'ebook',
+        audiobook: { id: 'ab-3', title: 'Book', author: 'Author' },
+        user: { plexUsername: 'user' },
+      });
+      prismaMock.request.update.mockResolvedValue({});
+      prismaMock.downloadHistory.update.mockResolvedValue({});
+
+      const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+      const result = await processMonitorDownload({
+        requestId: 'req-ebook-transient',
+        downloadHistoryId: 'dh-transient',
+        downloadClientId: 'hash-transient',
+        downloadClient: 'qbittorrent',
+        jobId: 'job-transient',
+      });
+
+      // Should NOT blocklist
+      expect(prismaMock.blockedRelease.upsert).not.toHaveBeenCalled();
+
+      // Should NOT requeue search
+      expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
+
+      // Should NOT send failure notification
+      expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+
+      expect(result.completed).toBe(false); // Still in progress
+    });
+
+    it('continues to next audiobook candidate on monitor-stage failure with blocklist', async () => {
+      const sabClientMock = {
+        clientType: 'sabnzbd',
+        protocol: 'usenet',
+        getDownload: vi.fn().mockResolvedValue({
+          id: 'nzb-audiobook',
+          name: 'Book - Author.m4b',
+          size: 100000000,
+          bytesDownloaded: 0,
+          progress: 0,
+          status: 'failed',
+          downloadSpeed: 0,
+          eta: 0,
+          category: 'readmeabook',
+          errorMessage: 'Download failed',
+        }),
+      };
+      downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(sabClientMock);
+
+      prismaMock.request.findUnique.mockResolvedValue({
+        id: 'req-audiobook',
+        type: 'audiobook', // NOT ebook
+        audiobook: { id: 'ab-4', title: 'Book', author: 'Author' },
+        user: { plexUsername: 'user' },
+      });
+      prismaMock.request.update.mockResolvedValue({});
+      prismaMock.downloadHistory.update.mockResolvedValue({});
+      prismaMock.downloadHistory.findUnique.mockResolvedValue({
+        id: 'dh-audiobook',
+        torrentName: 'Book - Author.m4b',
+        nzbId: 'nzb-audiobook',
+        indexerName: 'TestIndexer',
+        indexerId: 1,
+      });
+      prismaMock.blockedRelease.upsert.mockResolvedValue({ id: 'block-4' });
+
+      const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+      const result = await processMonitorDownload({
+        requestId: 'req-audiobook',
+        downloadHistoryId: 'dh-audiobook',
+        downloadClientId: 'nzb-audiobook',
+        downloadClient: 'sabnzbd',
+        jobId: 'job-audiobook',
+      });
+
+      // Should blocklist
+      expect(prismaMock.blockedRelease.upsert).toHaveBeenCalled();
+
+      // Should requeue search (audiobooks now DO continue)
+      expect(jobQueueMock.addSearchJob).toHaveBeenCalledWith(
+        'req-audiobook',
+        {
+          id: 'ab-4',
+          title: 'Book',
+          author: 'Author',
+        }
+      );
+
+      // Should NOT send failure notification
+      expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+
+      expect(result.continued).toBe(true);
+    });
+
+    it('handles ebook fallback when audiobook data is missing', async () => {
+      const sabClientMock = {
+        clientType: 'sabnzbd',
+        protocol: 'usenet',
+        getDownload: vi.fn().mockResolvedValue({
+          id: 'nzb-missing',
+          name: 'Book.epub',
+          size: 1000000,
+          bytesDownloaded: 0,
+          progress: 0,
+          status: 'failed',
+          downloadSpeed: 0,
+          eta: 0,
+          category: 'readmeabook',
+        }),
+      };
+      downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(sabClientMock);
+
+      prismaMock.request.findUnique.mockResolvedValue({
+        id: 'req-missing-audiobook',
+        type: 'ebook',
+        audiobook: null, // Missing audiobook data
+        user: { plexUsername: 'user' },
+      });
+      prismaMock.request.update.mockResolvedValue({});
+      prismaMock.downloadHistory.update.mockResolvedValue({});
+      prismaMock.downloadHistory.findUnique.mockResolvedValue({
+        id: 'dh-missing',
+        torrentName: 'Book.epub',
+        nzbId: 'nzb-missing',
+      });
+
+      const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+      const result = await processMonitorDownload({
+        requestId: 'req-missing-audiobook',
+        downloadHistoryId: 'dh-missing',
+        downloadClientId: 'nzb-missing',
+        downloadClient: 'sabnzbd',
+        jobId: 'job-missing',
+      });
+
+      // Should NOT requeue search (no audiobook data)
+      expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
+
+      // Should NOT send notification (no audiobook data)
+      expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+
+      // Should stay failed
+      expect(result.continued).toBeUndefined();
+      expect(result.message).toBe('Download failed');
+    });
+
+    it('exhausts and stays failed when all candidates are blocklisted (handled by search-ebook)', async () => {
+      // This test verifies the exhaustion scenario is handled by search-ebook.processor
+      // When filterBlockedResults returns zero results, search-ebook sets status to awaiting_search
+      // So this monitor test only needs to verify the requeue happens correctly
+      const sabClientMock = {
+        clientType: 'sabnzbd',
+        protocol: 'usenet',
+        getDownload: vi.fn().mockResolvedValue({
+          id: 'nzb-exhaust',
+          name: 'Book - Author.epub',
+          size: 1000000,
+          bytesDownloaded: 0,
+          progress: 0,
+          status: 'failed',
+          downloadSpeed: 0,
+          eta: 0,
+          category: 'readmeabook',
+        }),
+      };
+      downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(sabClientMock);
+
+      prismaMock.request.findUnique.mockResolvedValue({
+        id: 'req-exhaust',
+        type: 'ebook',
+        audiobook: { id: 'ab-5', title: 'Book', author: 'Author', audibleAsin: 'B005ASIN' },
+        user: { plexUsername: 'user' },
+      });
+      prismaMock.request.update.mockResolvedValue({});
+      prismaMock.downloadHistory.update.mockResolvedValue({});
+      prismaMock.downloadHistory.findUnique.mockResolvedValue({
+        id: 'dh-exhaust',
+        torrentName: 'Book - Author.epub',
+        nzbId: 'nzb-exhaust',
+        indexerName: 'Indexer',
+        indexerId: 1,
+      });
+      prismaMock.blockedRelease.upsert.mockResolvedValue({ id: 'block-5' });
+
+      const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+      const result = await processMonitorDownload({
+        requestId: 'req-exhaust',
+        downloadHistoryId: 'dh-exhaust',
+        downloadClientId: 'nzb-exhaust',
+        downloadClient: 'sabnzbd',
+        jobId: 'job-exhaust',
+      });
+
+      // Should requeue search (exhaustion handled downstream)
+      expect(jobQueueMock.addSearchEbookJob).toHaveBeenCalledWith(
+        'req-exhaust',
+        expect.objectContaining({
+          id: 'ab-5',
+          title: 'Book',
+          author: 'Author',
+          asin: 'B005ASIN',
+        }),
+        undefined,
+        { isFallback: true }
+      );
+
+      expect(result.continued).toBe(true);
+    });
+  });
 });
 
 

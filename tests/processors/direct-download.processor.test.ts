@@ -59,6 +59,12 @@ vi.mock('axios', () => ({
 }));
 
 describe('processStartDirectDownload', () => {
+  // Mock fallback helper at the top level
+  const fallbackMock = vi.hoisted(() => ({
+    triggerDirectDownloadFallback: vi.fn().mockResolvedValue(undefined),
+  }));
+  vi.mock('@/lib/utils/direct-download-fallback', () => fallbackMock);
+
   beforeEach(() => {
     vi.clearAllMocks();
     configServiceMock.get.mockImplementation(async (key: string) => {
@@ -70,7 +76,9 @@ describe('processStartDirectDownload', () => {
   });
 
   it('updates request status to downloading', async () => {
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.request.update.mockResolvedValue({});
+    prismaMock.downloadHistory.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.downloadHistory.update.mockResolvedValue({});
     prismaMock.downloadHistory.findUnique.mockResolvedValue({
       torrentUrl: JSON.stringify(['https://slow.example.com/book']),
@@ -118,25 +126,74 @@ describe('processStartDirectDownload', () => {
       jobId: 'job-1',
     });
 
-    // Check status updates
-    expect(prismaMock.request.update).toHaveBeenCalledWith({
-      where: { id: 'req-1' },
+    // Check initial status updates use updateMany
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'req-1',
+        status: { in: ['pending', 'searching', 'awaiting_approval'] },
+      },
       data: expect.objectContaining({
         status: 'downloading',
         progress: 0,
       }),
     });
 
-    expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith({
-      where: { id: 'dh-1' },
+    expect(prismaMock.downloadHistory.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'dh-1',
+        requestId: 'req-1',
+        downloadStatus: 'queued',
+      },
       data: expect.objectContaining({
         downloadStatus: 'downloading',
       }),
     });
+
+    // Final update uses regular update
+    expect(prismaMock.request.update).toHaveBeenCalledWith({
+      where: { id: 'req-1' },
+      data: expect.objectContaining({
+        status: 'processing',
+        progress: 100,
+      }),
+    });
+    expect(fallbackMock.triggerDirectDownloadFallback).not.toHaveBeenCalled();
+  });
+
+  it('triggers fallback immediately when no slow URLs are available', async () => {
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.downloadHistory.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.downloadHistory.findUnique.mockResolvedValue({
+      torrentUrl: JSON.stringify([]),
+    });
+
+    const { processStartDirectDownload } = await import('@/lib/processors/direct-download.processor');
+
+    const result = await processStartDirectDownload({
+      requestId: 'req-zero',
+      downloadHistoryId: 'dh-zero',
+      downloadUrl: 'https://slow.example.com/book',
+      targetFilename: 'Zero Book.epub',
+      jobId: 'job-zero',
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      success: false,
+      fallback: true,
+      requestId: 'req-zero',
+    }));
+    expect(fallbackMock.triggerDirectDownloadFallback).toHaveBeenCalledWith(
+      'req-zero',
+      'dh-zero',
+      'Zero download URLs available',
+      'ebook'
+    );
   });
 
   it('triggers organize job after successful download', async () => {
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.request.update.mockResolvedValue({});
+    prismaMock.downloadHistory.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.downloadHistory.update.mockResolvedValue({});
     prismaMock.downloadHistory.findUnique.mockResolvedValue({
       torrentUrl: JSON.stringify(['https://slow.example.com/book']),
@@ -190,9 +247,9 @@ describe('processStartDirectDownload', () => {
     );
   });
 
-  it('marks request as failed when all download attempts fail', async () => {
-    prismaMock.request.update.mockResolvedValue({});
-    prismaMock.downloadHistory.update.mockResolvedValue({});
+  it('triggers fallback after exhausting all slow links', async () => {
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.downloadHistory.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.downloadHistory.findUnique.mockResolvedValue({
       torrentUrl: JSON.stringify([
         'https://slow1.example.com/book',
@@ -214,19 +271,13 @@ describe('processStartDirectDownload', () => {
     });
 
     expect(result.success).toBe(false);
-    // Verify the second call (final failure status update)
-    expect(prismaMock.request.update).toHaveBeenLastCalledWith({
-      where: { id: 'req-3' },
-      data: expect.objectContaining({
-        status: 'failed',
-      }),
-    });
-    expect(prismaMock.downloadHistory.update).toHaveBeenLastCalledWith({
-      where: { id: 'dh-3' },
-      data: expect.objectContaining({
-        downloadStatus: 'failed',
-      }),
-    });
+    expect(result.fallback).toBe(true);
+    expect(fallbackMock.triggerDirectDownloadFallback).toHaveBeenCalledWith(
+      'req-3',
+      'dh-3',
+      'All download links exhausted',
+      'ebook'
+    );
   });
 
   it('uses FlareSolverr when configured', async () => {

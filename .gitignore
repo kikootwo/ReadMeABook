@@ -60,3 +60,6 @@ dockerfile.patch
 
 # zach-flow scratch artifacts (locked briefs, orchestrator state)
 .zach-flow/
+
+# Local git worktree metadata
+.worktrees/

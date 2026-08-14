@@ -142,6 +142,7 @@ export interface SearchEbookPayload extends JobPayload {
     asin?: string; // ASIN for Anna's Archive search (best match)
   };
   preferredFormat?: string; // epub, pdf, mobi, azw3 (default: from config)
+  isFallback?: boolean; // If true, skip Anna's Archive and search only indexers
 }
 
 export interface EbookSearchResult {
@@ -865,7 +866,8 @@ export class JobQueueService {
   async addSearchEbookJob(
     requestId: string,
     audiobook: { id: string; title: string; author: string; asin?: string },
-    preferredFormat?: string
+    preferredFormat?: string,
+    options?: { isFallback?: boolean }
   ): Promise<string> {
     return await this.addJob(
       'search_ebook',
@@ -873,6 +875,7 @@ export class JobQueueService {
         requestId,
         audiobook,
         preferredFormat,
+        isFallback: options?.isFallback || false,
       } as SearchEbookPayload,
       {
         priority: 10, // High priority for user-initiated requests
