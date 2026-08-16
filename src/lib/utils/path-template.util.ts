@@ -11,6 +11,7 @@
  */
 export interface TemplateVariables {
   author: string;
+  primaryAuthor?: string;
   title: string;
   narrator?: string;
   asin?: string;
@@ -30,7 +31,7 @@ export interface ValidationResult {
 /**
  * Supported template variable names
  */
-const VALID_VARIABLES = ['author', 'title', 'narrator', 'asin', 'year', 'series', 'seriesPart'];
+const VALID_VARIABLES = ['author', 'primaryAuthor', 'title', 'narrator', 'asin', 'year', 'series', 'seriesPart'];
 
 /**
  * Invalid file path characters (outside of template variables)
@@ -66,6 +67,33 @@ function sanitizePath(name: string): string {
       // Limit length (255 chars max for most filesystems)
       .slice(0, 200)
   );
+}
+
+/**
+ * Extract the primary author from a comma-separated author list.
+ *
+ * Example:
+ * "Victoria Aveyard, Birgit Schmitz - Übersetzer"
+ * -> "Victoria Aveyard"
+ */
+function getPrimaryAuthor(author: string): string {
+  const primaryAuthor = author.split(',')[0]?.trim();
+
+  return primaryAuthor || author.trim();
+}
+
+/**
+ * Resolve a template variable, including derived variables.
+ */
+function getTemplateVariableValue(
+  variable: string,
+  variables: TemplateVariables
+): string | number | undefined {
+  if (variable === 'primaryAuthor') {
+    return variables.primaryAuthor ?? getPrimaryAuthor(variables.author);
+  }
+
+  return variables[variable as keyof TemplateVariables];
 }
 
 /**
@@ -120,7 +148,7 @@ function resolveConditionalBlocks(
 
     // Check if all found variables have non-empty values
     const allPresent = foundVars.every(varName => {
-      const value = variables[varName as keyof TemplateVariables];
+      const value = getTemplateVariableValue(varName, variables);
       return value !== undefined && value !== null && String(value).trim() !== '';
     });
 
@@ -133,7 +161,7 @@ function resolveConditionalBlocks(
     let result = content;
     const sortedVars = [...foundVars].sort((a, b) => b.length - a.length);
     for (const varName of sortedVars) {
-      const value = variables[varName as keyof TemplateVariables];
+      const value = getTemplateVariableValue(varName, variables);
       const sanitizedValue = sanitizePath(String(value).trim());
       const regex = new RegExp(`(?<![a-zA-Z0-9])${varName}(?![a-zA-Z0-9])`, 'g');
       result = result.replace(regex, sanitizedValue);
@@ -179,7 +207,7 @@ export function substituteTemplate(
 
   // Substitute each variable
   for (const key of VALID_VARIABLES) {
-    const value = variables[key as keyof TemplateVariables];
+    const value = getTemplateVariableValue(key, variables);
     const regex = new RegExp(`\\{${key}\\}`, 'g');
 
     if (value !== undefined && value !== null) {
