@@ -58,6 +58,8 @@ export interface DownloadTorrentPayload extends JobPayload {
     author: string;
   };
   torrent: TorrentResult;
+  /** Ranked candidates after `torrent`, used when an upstream grab is rate-limited/unavailable. */
+  alternateTorrents?: TorrentResult[];
 }
 
 export interface MonitorDownloadPayload extends JobPayload {
@@ -599,7 +601,8 @@ export class JobQueueService {
   async addDownloadJob(
     requestId: string,
     audiobook: { id: string; title: string; author: string },
-    torrent: TorrentResult
+    torrent: TorrentResult,
+    alternateTorrents: TorrentResult[] = []
   ): Promise<string> {
     return await this.addJob(
       'download_torrent',
@@ -607,6 +610,7 @@ export class JobQueueService {
         requestId,
         audiobook,
         torrent,
+        alternateTorrents,
       } as DownloadTorrentPayload,
       {
         priority: 9, // High priority - download selected torrent

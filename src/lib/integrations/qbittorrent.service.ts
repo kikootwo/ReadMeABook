@@ -20,6 +20,7 @@ import {
   DownloadStatus,
   AddDownloadOptions,
   ConnectionTestResult,
+  DownloadSourceError,
 } from '../interfaces/download-client.interface';
 
 // Handle both ESM and CommonJS imports
@@ -33,6 +34,7 @@ export interface AddTorrentOptions {
   tags?: string[];
   paused?: boolean;
   skipChecking?: boolean;
+  sourceHeaders?: Record<string, string>;
 }
 
 export interface TorrentInfo {
@@ -282,6 +284,11 @@ export class QBittorrentService implements IDownloadClient {
         return await this.addTorrentFile(url, category, options);
       }
     } catch (error) {
+      // Preserve source/indexer failures so the processor can try another release.
+      if (error instanceof DownloadSourceError) {
+        throw error;
+      }
+
       // Try re-authenticating once if we get a 403 — only meaningful when credentials are configured.
       // In auth-optional mode a 403 means the server actually wants auth (e.g. IP no longer whitelisted),
       // so retrying login is pointless and would mask the real error.
@@ -378,6 +385,10 @@ export class QBittorrentService implements IDownloadClient {
         maxRedirects: 0,
         validateStatus: (status) => status >= 200 && status < 300, // Only 2xx is success
         timeout: DOWNLOAD_CLIENT_TIMEOUT,
+        headers: {
+          'User-Agent': RMAB_USER_AGENT,
+          ...options?.sourceHeaders,
+        },
       });
 
       logger.info(` Got 2xx response, size=${torrentResponse.data.length} bytes`);
@@ -421,10 +432,22 @@ export class QBittorrentService implements IDownloadClient {
               responseType: 'arraybuffer',
               timeout: DOWNLOAD_CLIENT_TIMEOUT,
               maxRedirects: 5,
+              headers: {
+                'User-Agent': RMAB_USER_AGENT,
+                ...options?.sourceHeaders,
+              },
             });
             logger.info(` After following redirect: size=${torrentResponse.data.length} bytes`);
           } catch (redirectError) {
             logger.error('Failed to follow redirect', { error: redirectError instanceof Error ? redirectError.message : String(redirectError) });
+            if (axios.isAxiosError(redirectError) && redirectError.response?.status) {
+              throw new DownloadSourceError(
+                `Grab failed: source returned HTTP ${redirectError.response.status}`,
+                redirectError.response.status,
+                location,
+                redirectError
+              );
+            }
             throw new Error('Failed to download torrent file after redirect');
           }
         } else {
@@ -433,7 +456,12 @@ export class QBittorrentService implements IDownloadClient {
       } else {
         // Non-redirect error (4xx, 5xx)
         logger.error(`HTTP error ${status}`, { error: error.message });
-        throw new Error(`Failed to download torrent: HTTP ${status}`);
+        throw new DownloadSourceError(
+          `Grab failed: source returned HTTP ${status}`,
+          status,
+          torrentUrl,
+          error
+        );
       }
     }
 
@@ -1077,6 +1105,7 @@ export class QBittorrentService implements IDownloadClient {
       category: options?.category,
       paused: options?.paused,
       tags: ['audiobook'],
+      sourceHeaders: options?.sourceHeaders,
     });
   }
 

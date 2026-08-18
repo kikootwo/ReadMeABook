@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
 import { createJobQueueMock } from '../helpers/job-queue';
+import { DownloadSourceError } from '@/lib/interfaces/download-client.interface';
 
 const prismaMock = createPrismaMock();
 const configMock = vi.hoisted(() => ({
@@ -213,5 +214,108 @@ describe('processDownloadTorrent', () => {
     await processDownloadTorrent(nzbPayload);
 
     expect(downloadClientManagerMock.getClientServiceForProtocol).toHaveBeenCalledWith('usenet');
+  });
+
+  it('tries the next ranked release when an indexer grab returns 500', async () => {
+    const fallbackTorrent = {
+      ...torrentPayload.torrent,
+      indexer: 'Healthy Indexer',
+      indexerId: 2,
+      title: 'Book - Author - Fallback',
+      downloadUrl: 'https://prowlarr/2/download/fallback',
+      guid: 'guid-fallback',
+    };
+    const qbtClientMock = {
+      clientType: 'qbittorrent',
+      protocol: 'torrent',
+      addDownload: vi.fn()
+        .mockRejectedValueOnce(new DownloadSourceError(
+          'Grab failed: source returned HTTP 500',
+          500,
+          'https://prowlarr/1/download/limited'
+        ))
+        .mockResolvedValueOnce('fallback-hash'),
+    };
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(qbtClientMock);
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-1',
+      type: 'qbittorrent',
+      enabled: true,
+      category: 'readmeabook',
+    });
+    prismaMock.request.update.mockResolvedValue({
+      type: 'audiobook',
+      user: { plexUsername: 'testuser' },
+    });
+    prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-fallback' });
+
+    const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+    const result = await processDownloadTorrent({
+      ...torrentPayload,
+      torrent: {
+        ...torrentPayload.torrent,
+        downloadUrl: 'https://prowlarr/1/download/limited',
+      },
+      alternateTorrents: [fallbackTorrent],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.torrent.title).toBe(fallbackTorrent.title);
+    expect(qbtClientMock.addDownload).toHaveBeenNthCalledWith(
+      1,
+      'https://prowlarr/1/download/limited',
+      expect.anything()
+    );
+    expect(qbtClientMock.addDownload).toHaveBeenNthCalledWith(
+      2,
+      fallbackTorrent.downloadUrl,
+      expect.anything()
+    );
+    expect(prismaMock.downloadHistory.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          indexerName: 'Healthy Indexer',
+          torrentName: fallbackTorrent.title,
+          downloadClientId: 'fallback-hash',
+        }),
+      })
+    );
+  });
+
+  it('leaves the request retryable when every ranked grab is temporarily unavailable', async () => {
+    const qbtClientMock = {
+      clientType: 'qbittorrent',
+      protocol: 'torrent',
+      addDownload: vi.fn().mockRejectedValue(new DownloadSourceError(
+        'Grab failed: source returned HTTP 429',
+        429,
+        'https://prowlarr/1/download/limited'
+      )),
+    };
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(qbtClientMock);
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-1',
+      type: 'qbittorrent',
+      enabled: true,
+      category: 'readmeabook',
+    });
+    prismaMock.request.update.mockResolvedValue({
+      type: 'audiobook',
+      user: { plexUsername: 'testuser' },
+    });
+
+    const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+    await expect(processDownloadTorrent({
+      ...torrentPayload,
+      torrent: {
+        ...torrentPayload.torrent,
+        downloadUrl: 'https://prowlarr/1/download/limited',
+      },
+    })).rejects.toThrow('Indexer returned HTTP 429');
+
+    expect(prismaMock.request.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'failed' }) })
+    );
+    expect(prismaMock.downloadHistory.create).not.toHaveBeenCalled();
   });
 });

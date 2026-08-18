@@ -17,6 +17,7 @@ import {
   DownloadStatus,
   AddDownloadOptions,
   ConnectionTestResult,
+  DownloadSourceError,
 } from '../interfaces/download-client.interface';
 
 const logger = RMABLogger.create('NZBGet');
@@ -255,7 +256,12 @@ export class NZBGetService implements IDownloadClient {
       if (axios.isAxiosError(error)) {
         const status = error.response?.status;
         if (status) {
-          throw new Error(`Failed to download NZB file: HTTP ${status} from source URL`);
+          throw new DownloadSourceError(
+            `Grab failed: source returned HTTP ${status}`,
+            status,
+            url,
+            error
+          );
         }
         if (error.code === 'ECONNREFUSED') {
           throw new Error('Failed to download NZB file: Connection refused. Is Prowlarr running?');
