@@ -202,11 +202,20 @@ describe('JobQueueService', () => {
 
     const { JobQueueService } = await import('@/lib/services/job-queue.service');
     const service = new JobQueueService();
-    await service.addDownloadJob('req-1', { id: 'ab-1', title: 'Title', author: 'Author' }, { hash: 'hash' } as any);
+    await service.addDownloadJob(
+      'req-1',
+      { id: 'ab-1', title: 'Title', author: 'Author' },
+      { hash: 'hash' } as any,
+      [{ hash: 'fallback-hash' } as any]
+    );
 
     expect(queueMock.add).toHaveBeenCalledWith(
       'download_torrent',
-      expect.objectContaining({ requestId: 'req-1', jobId: 'job-2' }),
+      expect.objectContaining({
+        requestId: 'req-1',
+        jobId: 'job-2',
+        alternateTorrents: [{ hash: 'fallback-hash' }],
+      }),
       expect.objectContaining({ priority: 9 })
     );
   });

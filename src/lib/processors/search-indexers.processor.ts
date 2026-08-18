@@ -283,7 +283,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       id: audiobook.id,
       title: audiobook.title,
       author: audiobook.author,
-    }, bestResult);
+    }, bestResult, filteredResults.slice(1));
 
     return {
       success: true,

@@ -88,6 +88,17 @@ describe('processSearchIndexers', () => {
         guid: 'guid-1',
         format: 'M4B',
       },
+      {
+        indexer: 'Fallback Indexer',
+        indexerId: 2,
+        title: 'Book - Author - Alternate',
+        size: 50 * 1024 * 1024,
+        seeders: 1,
+        publishDate: new Date(),
+        downloadUrl: 'https://prowlarr/2/download/alternate',
+        guid: 'guid-2',
+        format: 'M4B',
+      },
     ]);
 
     prismaMock.request.update.mockResolvedValue({});
@@ -103,7 +114,8 @@ describe('processSearchIndexers', () => {
     expect(jobQueueMock.addDownloadJob).toHaveBeenCalledWith(
       'req-2',
       { id: 'a2', title: 'Book', author: 'Author' },
-      expect.objectContaining({ title: 'Book - Author' })
+      expect.objectContaining({ title: 'Book - Author' }),
+      [expect.objectContaining({ title: 'Book - Author - Alternate' })]
     );
   });
 
@@ -179,7 +191,8 @@ describe('processSearchIndexers', () => {
     expect(jobQueueMock.addDownloadJob).toHaveBeenCalledWith(
       'req-filter-name',
       expect.objectContaining({ id: 'a-filter' }),
-      expect.objectContaining({ title: 'Good Release - Author' })
+      expect.objectContaining({ title: 'Good Release - Author' }),
+      []
     );
   });
 
@@ -235,7 +248,8 @@ describe('processSearchIndexers', () => {
     expect(jobQueueMock.addDownloadJob).toHaveBeenCalledWith(
       'req-filter-hash',
       expect.anything(),
-      expect.objectContaining({ title: 'Good Release - Author' })
+      expect.objectContaining({ title: 'Good Release - Author' }),
+      []
     );
   });
 

@@ -106,6 +106,33 @@ export interface AddDownloadOptions {
   sourceHeaders?: Record<string, string>;
 }
 
+/**
+ * Failure while fetching a .torrent or .nzb from its source URL.
+ * Keeping this distinct from download-client API failures lets the pipeline
+ * try another release without blaming a healthy download client.
+ */
+export class DownloadSourceError extends Error {
+  readonly name = 'DownloadSourceError';
+
+  constructor(
+    message: string,
+    public readonly status: number | undefined,
+    public readonly sourceUrl: string,
+    public readonly originalError?: unknown
+  ) {
+    super(message);
+  }
+}
+
+/** HTTP source failures that may clear on their own or succeed via another indexer. */
+export function isRetryableDownloadSourceError(
+  error: unknown
+): error is DownloadSourceError {
+  return error instanceof DownloadSourceError
+    && typeof error.status === 'number'
+    && (error.status === 429 || (error.status >= 500 && error.status < 600));
+}
+
 /** Result of a connection test */
 export interface ConnectionTestResult {
   success: boolean;
