@@ -53,6 +53,23 @@ describe('processRetryMissingTorrents', () => {
     const result = await processRetryMissingTorrents({ jobId: 'job-1' });
 
     expect(result.success).toBe(true);
+    expect(prismaMock.request.findMany).toHaveBeenCalledWith({
+      where: {
+        deletedAt: null,
+        OR: [
+          { status: 'awaiting_search' },
+          { status: 'awaiting_release', releaseDate: null },
+          { status: 'awaiting_release', releaseDate: { lte: expect.any(Date) } },
+        ],
+      },
+      include: { audiobook: true },
+      orderBy: [
+        { lastSearchAt: { sort: 'asc', nulls: 'first' } },
+        { createdAt: 'asc' },
+        { id: 'asc' },
+      ],
+      take: 50,
+    });
     expect(jobQueueMock.addSearchJob).toHaveBeenCalledWith(
       'req-1',
       expect.objectContaining({ id: 'a1', title: 'Book', author: 'Author' })
@@ -155,5 +172,11 @@ describe('processRetryMissingTorrents', () => {
     expect(prismaMock.request.update).not.toHaveBeenCalled();
     expect(jobQueueMock.addSearchJob).toHaveBeenCalled();
     expect(result.triggered).toBe(1);
+    expect(prismaMock.request.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        deletedAt: null,
+        status: { in: ['awaiting_search', 'awaiting_release'] },
+      },
+    }));
   });
 });
