@@ -13,6 +13,8 @@ import { getLanguageForRegion } from '../constants/language-config';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
 import type { AudibleRegion } from '../types/audible';
 
+const MAX_RANKED_RESULTS = 100;
+
 /**
  * Process search indexers job
  * Searches configured indexers for audiobook torrents
@@ -103,7 +105,6 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
           categories: group.categories,
           indexerIds: group.indexerIds,
           minSeeders: 1, // Only torrents with at least 1 seeder
-          maxResults: 100, // Limit per group
         });
 
         logger.info(`Group ${i + 1} returned ${groupResults.length} results`);
@@ -201,15 +202,20 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     // Dual threshold filtering:
     // 1. Base score must be >= 50 (quality minimum)
     // 2. Final score must be >= 50 (not disqualified by negative bonuses)
-    const filteredResults = rankedResults.filter(result =>
+    const qualifyingResults = rankedResults.filter(result =>
       result.score >= 50 && result.finalScore >= 50
     );
+    const resultsTruncated = qualifyingResults.length > MAX_RANKED_RESULTS;
+    const filteredResults = qualifyingResults.slice(0, MAX_RANKED_RESULTS);
 
     const disqualifiedByNegativeBonus = rankedResults.filter(result =>
       result.score >= 50 && result.finalScore < 50
     ).length;
 
-    logger.info(`Ranked ${rankedResults.length} results, ${filteredResults.length} above threshold (50/100 base + final)`);
+    logger.info(`Ranked ${rankedResults.length} results, ${qualifyingResults.length} above threshold (50/100 base + final)`);
+    if (resultsTruncated) {
+      logger.info(`Limited automatic search to the top ${MAX_RANKED_RESULTS} of ${qualifyingResults.length} qualifying results after ranking`);
+    }
     if (disqualifiedByNegativeBonus > 0) {
       logger.info(`${disqualifiedByNegativeBonus} torrents disqualified by negative flag bonuses`);
     }
