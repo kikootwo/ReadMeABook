@@ -118,6 +118,9 @@ describe('InteractiveTorrentSearchModal', () => {
     await waitFor(() => {
       expect(selectTorrentMock).toHaveBeenCalledWith('req-123', baseResult);
     });
+    // When requestId is set, the modal must NOT fall into the create-new-request
+    // branch — that's the routing fix for own-request advanceable states.
+    expect(requestWithTorrentMock).not.toHaveBeenCalled();
     expect(onSuccess).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
   });

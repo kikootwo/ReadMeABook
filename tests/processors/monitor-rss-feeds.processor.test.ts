@@ -34,6 +34,7 @@ function futureDate(days = 30): Date {
 
 describe('processMonitorRssFeeds', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     // Default to empty blocklist so the filter is a no-op unless a test overrides.
     prismaMock.blockedRelease.findMany.mockResolvedValue([]);
@@ -73,6 +74,70 @@ describe('processMonitorRssFeeds', () => {
       'req-1',
       expect.objectContaining({ title: 'Great Book', author: 'Author Name' })
     );
+    expect(prismaMock.request.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: { id: 'asc' },
+      take: 100,
+    }));
+  });
+
+  it('pages beyond the first 100 awaiting requests', async () => {
+    vi.useFakeTimers();
+    configMock.get.mockImplementation(async (key: string) => {
+      if (key === 'prowlarr_indexers') {
+        return JSON.stringify([{ id: 1, name: 'Indexer', rssEnabled: true }]);
+      }
+      return null;
+    });
+    prowlarrMock.getAllRssFeeds.mockResolvedValue([
+      { title: 'Target Story - Target Author' },
+    ]);
+
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: `req-${String(index).padStart(3, '0')}`,
+      type: 'audiobook',
+      status: 'awaiting_search',
+      releaseDate: null,
+      audiobook: {
+        id: `a-${index}`,
+        title: `Unrelated Volume ${index}`,
+        author: 'Someone Else',
+        audibleAsin: `ASIN-${index}`,
+      },
+    }));
+    const secondPage = [{
+      id: 'req-target',
+      type: 'audiobook',
+      status: 'awaiting_search',
+      releaseDate: null,
+      audiobook: {
+        id: 'a-target',
+        title: 'Target Story',
+        author: 'Target Author',
+        audibleAsin: 'ASIN-TARGET',
+      },
+    }];
+    prismaMock.request.findMany
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce(secondPage);
+
+    const { processMonitorRssFeeds } = await import('@/lib/processors/monitor-rss-feeds.processor');
+    const processing = processMonitorRssFeeds({ jobId: 'job-paged' });
+    await vi.runAllTimersAsync();
+    const result = await processing;
+
+    expect(result.totalMissing).toBe(101);
+    expect(result.matched).toBe(1);
+    expect(prismaMock.request.findMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      orderBy: { id: 'asc' },
+      cursor: { id: 'req-099' },
+      skip: 1,
+      take: 100,
+    }));
+    expect(jobQueueMock.addSearchJob).toHaveBeenCalledWith(
+      'req-target',
+      expect.objectContaining({ title: 'Target Story', author: 'Target Author' })
+    );
+    vi.useRealTimers();
   });
 
   it('skips RSS auto-search when matched book is unreleased and setting ON', async () => {

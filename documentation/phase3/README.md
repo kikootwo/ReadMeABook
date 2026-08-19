@@ -20,6 +20,8 @@ Request → search_indexers → rank_results → download_torrent
 5. **process_audiobook** - Organize files to media directory
 6. **update_plex** - Trigger scan, fuzzy match
 
+Automatic searches keep the ranked candidate list. If Prowlarr returns HTTP `429` or `5xx` while grabbing the selected release, `download_torrent` attributes the error to the indexer/source and falls through to the next release. When all candidates have temporary grab failures, Bull retries the job with backoff.
+
 ## Integration Points
 
 **Indexers:** Prowlarr (primary), Jackett (fallback)

@@ -389,11 +389,12 @@ export class RankingAlgorithm {
 
     // Parse authors from RAW string first (preserving commas for splitting)
     // Then normalize individual authors for matching
-    const requestAuthorRaw = audiobook.author.toLowerCase().replace(/\s+/g, ' ').trim();
-    const parsedAuthors = requestAuthorRaw
-      .split(/,|&| and | - /)
+    const parsedAuthors = audiobook.author
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(/,|&| and | - /i)
       .map(a => a.trim())
-      .filter(a => a.length > 2 && !['translator', 'narrator'].includes(a));
+      .filter(a => a.length > 2 && !['translator', 'narrator'].includes(a.toLowerCase()));
 
     // Normalize parsed authors for matching (handles CamelCase in author names)
     const normalizedAuthors = parsedAuthors.map(a => this.normalizeForMatching(a, characterReplacements));

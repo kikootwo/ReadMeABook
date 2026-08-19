@@ -88,8 +88,10 @@ model Request {
    ```
 
 3. **Delete Media Files**
-   - Path: `[media_dir]/[author]/[title]/`
+   - Path: persisted `Audiobook.filePath` recorded during file organization
+   - Never rebuilds the path from the current `media_dir` or path template
    - **ONLY deletes title folder** (not author folder)
+   - Missing stored path: skips file deletion and returns `filesDeleted: false`
    - Handles missing folders gracefully
 
 4. **Delete from Library Backend**
@@ -216,7 +218,9 @@ where: {
 13. ✅ **Plex deletion not enabled in settings** - Log error, continue with soft delete
 14. ✅ **Title mismatch in plex_library** - ASIN-based deletion handles title variations (e.g., "(Unabridged)" suffix)
 15. ✅ **No ASIN available** - Falls back to exact title/author matching
-16. ✅ **Discord bot disabled or unreachable** - Discord sync is gated on a live client and never
+16. ✅ **Path template changed after organization** - Deletes only the persisted organized path
+17. ✅ **Legacy row has no stored path** - Skips file deletion without guessing a path
+18. ✅ **Discord bot disabled or unreachable** - Discord sync is gated on a live client and never
     throws, so deletion succeeds regardless
 
 ## Discord Convergence
@@ -245,7 +249,13 @@ holders with no linked RMAB account); other callers fall back to the deleting us
 - **Fix:** Changed plex_library deletion to use ASIN-based matching (same as availability check)
 - **Result:** Books immediately show as NOT available after deletion, can be re-requested right away
 
-**2. Web/API Deletions Left Live Discord Buttons**
+**2. Changed Path Template Deletes an Unrelated Directory**
+- **Issue:** Deletion rebuilt a directory from the current media path and template
+- **Cause:** `Audiobook.filePath` was persisted during organization but omitted from the deletion query
+- **Fix:** Delete only the persisted path; legacy rows without one skip file cleanup
+- **Result:** Configuration changes cannot redirect deletion to a newly rendered directory
+
+**3. Web/API Deletions Left Live Discord Buttons**
 - **Issue:** Deleting from the Web UI or via an API token never touched Discord: the request card
   kept a working Cancel Request button and the approval embed kept working Approve/Deny buttons
 - **Impact:** The stale approval embed made approving an already-deleted request reachable
@@ -282,7 +292,6 @@ Queries Updated (deletedAt: null filters):
 
 **No new config required** - uses existing:
 - `prowlarr_indexers` (seeding time per indexer)
-- `media_dir` (file deletion path)
 
 ## Security
 
@@ -290,6 +299,7 @@ Queries Updated (deletedAt: null filters):
 - **Audit Trail:** `deletedBy` tracks admin user ID
 - **Soft Delete:** Preserves history, prevents permanent data loss
 - **Confirmation Required:** Prevents accidental deletion
+- **Stored Path Only:** File cleanup targets the path recorded by the organizer; no template-based fallback
 
 ## Monitoring & Logging
 

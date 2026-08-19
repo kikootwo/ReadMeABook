@@ -51,14 +51,6 @@ vi.mock('@/lib/services/discord/discord-bot.service', () => ({
 }));
 
 vi.mock('@/lib/services/discord/discord-cards', () => discordCardsMock);
-
-vi.mock('@/lib/utils/file-organizer', () => ({
-  buildAudiobookPath: vi.fn((mediaDir: string, template: string, data: any) => {
-    // Simple mock implementation that mimics the real behavior for tests
-    return path.join(mediaDir, data.author, `${data.title} ${data.asin}`);
-  }),
-}));
-
 describe('deleteRequest', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -89,6 +81,7 @@ describe('deleteRequest', () => {
         audibleAsin: 'ASIN1',
         plexGuid: 'plex-1',
         absItemId: null,
+        filePath: path.join('/media', 'Author', 'Book ASIN1'),
       },
       downloadHistory: [
         {
@@ -169,6 +162,7 @@ describe('deleteRequest', () => {
         audibleAsin: null,
         plexGuid: 'plex-2',
         absItemId: null,
+        filePath: path.join('/media', 'Author', 'Book Two'),
       },
       downloadHistory: [
         {
@@ -234,6 +228,7 @@ describe('deleteRequest', () => {
         audibleAsin: 'ASIN3',
         plexGuid: 'plex-3',
         absItemId: null,
+        filePath: path.join('/media', 'Author Name', 'Book Three ASIN3'),
       },
       downloadHistory: [
         {
@@ -306,6 +301,7 @@ describe('deleteRequest', () => {
         audibleAsin: null,
         plexGuid: 'plex-4',
         absItemId: null,
+        filePath: path.join('/media', 'Author', 'Book Four'),
       },
       downloadHistory: [
         {
@@ -364,6 +360,7 @@ describe('deleteRequest', () => {
         audibleAsin: null,
         plexGuid: null,
         absItemId: 'abs-5',
+        filePath: path.join('/media', 'Author', 'Book Five'),
       },
       downloadHistory: [
         {
@@ -416,6 +413,7 @@ describe('deleteRequest', () => {
         audibleAsin: 'ASIN6',
         plexGuid: null,
         absItemId: 'abs-item-123',
+        filePath: path.join('/media', 'Author Six', 'Book Six ASIN6'),
       },
       downloadHistory: [],
     });
@@ -462,6 +460,7 @@ describe('deleteRequest', () => {
         audibleAsin: null,
         plexGuid: null,
         absItemId: 'abs-item-456',
+        filePath: path.join('/media', 'Author Seven', 'Book Seven'),
       },
       downloadHistory: [],
     });

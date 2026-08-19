@@ -31,6 +31,7 @@ export interface Audiobook {
   isRequested?: boolean;  // Set if ANY user has requested this audiobook
   requestStatus?: string | null;  // Status of request (if any)
   requestId?: string | null;  // ID of request (if any)
+  requestedByUserId?: string | null;  // User id who requested (populated by audiobook-matcher; used to gate own-request interactive-search routing)
   requestedByUsername?: string | null;  // Username who requested (only if not current user)
   hasReportedIssue?: boolean;  // True if an open issue exists for this audiobook
   isIgnored?: boolean;  // True if this user has ignored this audiobook from auto-requests

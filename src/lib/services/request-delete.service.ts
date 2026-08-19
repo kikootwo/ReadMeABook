@@ -9,7 +9,6 @@ import { prisma } from '../db';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { RMABLogger } from '../utils/logger';
-import { buildAudiobookPath } from '../utils/file-organizer';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 
 const logger = RMABLogger.create('RequestDelete');
@@ -119,6 +118,7 @@ export async function deleteRequest(
             audibleAsin: true,
             plexGuid: true,
             absItemId: true,
+            filePath: true,
             fileFormat: true,
           },
         },
@@ -255,72 +255,46 @@ export async function deleteRequest(
     // For ebooks: delete only ebook files (leave audiobook files intact)
     let filesDeleted = false;
     try {
-      const { getConfigService } = await import('./config.service');
-      const configService = getConfigService();
-      const mediaDir = (await configService.get('media_dir')) || '/media/audiobooks';
-      // Use ebook-specific template for ebook requests, with fallback to audiobook template
-      const audiobookTemplate = (await configService.get('audiobook_path_template')) || '{author}/{title} {asin}';
-      const template = isEbook
-        ? (await configService.get('ebook_path_template')) || audiobookTemplate
-        : audiobookTemplate;
+      const titleFolderPath = request.audiobook.filePath;
 
-      // Fetch year from audible cache if ASIN is available
-      let year: number | undefined;
-      if (request.audiobook.audibleAsin) {
-        const audibleCache = await prisma.audibleCache.findUnique({
-          where: { asin: request.audiobook.audibleAsin },
-          select: { releaseDate: true },
-        });
-        if (audibleCache?.releaseDate) {
-          year = new Date(audibleCache.releaseDate).getFullYear();
-        }
-      }
+      if (!titleFolderPath) {
+        logger.warn(
+          `Skipping media file deletion for request ${requestId}: no stored file path`
+        );
+      } else {
+        // Check if the directory recorded during organization still exists.
+        try {
+          await fs.access(titleFolderPath);
 
-      // Build path using centralized function
-      const titleFolderPath = buildAudiobookPath(
-        mediaDir,
-        template,
-        {
-          author: request.audiobook.author,
-          title: request.audiobook.title,
-          narrator: request.audiobook.narrator || undefined,
-          asin: request.audiobook.audibleAsin || undefined,
-          year,
-        }
-      );
+          if (isEbook) {
+            // For ebooks: only delete ebook files, leave audiobook files intact
+            const ebookExtensions = ['.epub', '.pdf', '.mobi', '.azw', '.azw3', '.fb2', '.cbz', '.cbr'];
+            const files = await fs.readdir(titleFolderPath);
 
-      // Check if folder exists
-      try {
-        await fs.access(titleFolderPath);
-
-        if (isEbook) {
-          // For ebooks: only delete ebook files, leave audiobook files intact
-          const ebookExtensions = ['.epub', '.pdf', '.mobi', '.azw', '.azw3', '.fb2', '.cbz', '.cbr'];
-          const files = await fs.readdir(titleFolderPath);
-
-          let deletedCount = 0;
-          for (const file of files) {
-            const ext = path.extname(file).toLowerCase();
-            if (ebookExtensions.includes(ext)) {
-              const filePath = path.join(titleFolderPath, file);
-              await fs.unlink(filePath);
-              logger.info(`Deleted ebook file: ${file}`);
-              deletedCount++;
+            let deletedCount = 0;
+            for (const file of files) {
+              const ext = path.extname(file).toLowerCase();
+              if (ebookExtensions.includes(ext)) {
+                const filePath = path.join(titleFolderPath, file);
+                await fs.unlink(filePath);
+                logger.info(`Deleted ebook file: ${file}`);
+                deletedCount++;
+              }
             }
-          }
 
-          filesDeleted = deletedCount > 0;
-          logger.info(`Deleted ${deletedCount} ebook file(s) from: ${titleFolderPath}`);
-        } else {
-          // For audiobooks: delete the entire title folder
-          await fs.rm(titleFolderPath, { recursive: true, force: true });
-          logger.info(`Deleted media directory: ${titleFolderPath}`);
-          filesDeleted = true;
+            filesDeleted = deletedCount > 0;
+            logger.info(`Deleted ${deletedCount} ebook file(s) from: ${titleFolderPath}`);
+          } else {
+            // For audiobooks: delete the entire title folder
+            await fs.rm(titleFolderPath, { recursive: true, force: true });
+            logger.info(`Deleted media directory: ${titleFolderPath}`);
+            filesDeleted = true;
+          }
+        } catch (accessError) {
+          // Folder doesn't exist - that's okay
+          logger.info(`Media directory not found: ${titleFolderPath}`);
+          filesDeleted = false;
         }
-      } catch (accessError) {
-        // Folder doesn't exist - that's okay
-        logger.info(`Media directory not found: ${titleFolderPath}`);
-        filesDeleted = false;
       }
     } catch (error) {
       logger.error(

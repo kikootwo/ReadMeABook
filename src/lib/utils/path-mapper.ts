@@ -163,15 +163,17 @@ export class PathMapper {
   }
 
   /**
-   * Normalizes a file path for consistent comparison
-   * - Converts backslashes to forward slashes
-   * - Removes trailing slashes
-   * - Normalizes redundant separators
+   * Normalizes a file path for consistent, OS-agnostic comparison.
+   * Shared house normalizer — reuse this for any path-boundary/prefix check
+   * rather than hand-building a separator-specific prefix (see #209).
+   * - Converts backslashes to forward slashes (handles Windows clients)
+   * - Normalizes redundant separators and `..` segments
+   * - Removes trailing slashes (except root '/')
    *
    * @param filePath - Path to normalize
    * @returns Normalized path
    */
-  private static normalizePath(filePath: string): string {
+  static normalizePath(filePath: string): string {
     // Convert backslashes to forward slashes
     let normalized = filePath.replace(/\\/g, '/');
 

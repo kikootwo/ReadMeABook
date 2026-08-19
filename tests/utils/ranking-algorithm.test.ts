@@ -1348,6 +1348,36 @@ describe('ranking-algorithm', () => {
       // Gets partial score from fuzzy matching (title words + author words present)
       expect(breakdown.matchScore).toBeGreaterThan(30);
     });
+
+    it('matches CamelCase author prefix "McGowan" in request author field', () => {
+      const torrent = {
+        ...baseTorrent,
+        title: 'The Housekeeper by Suellen McGowan [M4B]',
+      };
+
+      const breakdown = algorithm.getScoreBreakdown(torrent, {
+        title: 'The Housekeeper',
+        author: 'Suellen McGowan',
+      }, true);
+
+      // "McGowan" must survive into normalizeForMatching as "Mc Gowan"
+      // With requireAuthor: true, author presence check must pass
+      expect(breakdown.matchScore).toBeGreaterThanOrEqual(50);
+    });
+
+    it('matches CamelCase author prefix "McFadden" in request author field', () => {
+      const torrent = {
+        ...baseTorrent,
+        title: 'The Housemaid - Freida McFadden [M4B]',
+      };
+
+      const breakdown = algorithm.getScoreBreakdown(torrent, {
+        title: 'The Housemaid',
+        author: 'Freida McFadden',
+      }, true);
+
+      expect(breakdown.matchScore).toBeGreaterThanOrEqual(50);
+    });
   });
 
   describe('Legacy API Compatibility', () => {

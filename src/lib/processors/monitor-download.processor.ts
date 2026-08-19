@@ -122,10 +122,16 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         throw new Error('Download path not available from download client');
       }
 
-      // Detect TempPathEnabled race: content_path hasn't been relocated to save_path yet
+      // Detect TempPathEnabled race: content_path hasn't been relocated to save_path yet.
+      // Normalize BOTH operands so the boundary test is separator-agnostic — Windows
+      // clients report backslash paths, which a forward-slash prefix never matches (#209).
+      // "Relocated" means downloadPath is equal to, or a child of, savePath.
       if (info.savePath && downloadPath) {
-        const normalizedSave = info.savePath.endsWith('/') ? info.savePath : info.savePath + '/';
-        if (!downloadPath.startsWith(normalizedSave)) {
+        const normalizedSave = PathMapper.normalizePath(info.savePath);
+        const normalizedDownload = PathMapper.normalizePath(downloadPath);
+        const isRelocated = normalizedDownload === normalizedSave
+          || normalizedDownload.startsWith(normalizedSave + '/');
+        if (!isRelocated) {
           const waitCount = (prevPathWaitCount ?? 0) + 1;
           const MAX_PATH_WAIT = 30; // Give up after ~5 minutes
 

@@ -6,6 +6,7 @@
 import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QBittorrentService, getQBittorrentService, invalidateQBittorrentService } from '@/lib/integrations/qbittorrent.service';
+import { DownloadSourceError } from '@/lib/interfaces/download-client.interface';
 
 const clientMock = vi.hoisted(() => ({
   get: vi.fn(),
@@ -690,6 +691,32 @@ describe('QBittorrentService', () => {
       '/torrents/add',
       expect.any(Object),
       expect.objectContaining({ maxBodyLength: Infinity })
+    );
+  });
+
+  it('preserves upstream HTTP status and forwards source headers', async () => {
+    const service = new QBittorrentService('http://qb', 'user', 'pass');
+    (service as any).cookie = 'SID=source-error';
+    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(undefined);
+
+    axiosMock.get.mockRejectedValueOnce({
+      isAxiosError: true,
+      response: { status: 500, headers: {} },
+      message: 'Request failed',
+    });
+
+    const error = await service.addDownload(
+      'https://prowlarr/1/download/limited',
+      { sourceHeaders: { 'X-Api-Key': 'secret' } }
+    ).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(DownloadSourceError);
+    expect(error).toMatchObject({ status: 500 });
+    expect(axiosMock.get).toHaveBeenCalledWith(
+      'https://prowlarr/1/download/limited',
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'X-Api-Key': 'secret' }),
+      })
     );
   });
 
