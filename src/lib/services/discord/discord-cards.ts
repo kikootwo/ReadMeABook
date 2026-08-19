@@ -214,7 +214,7 @@ export async function editRequestCards(requestId: string, statusOverride?: strin
  */
 export async function cancelApprovalMessage(
   requestId: string,
-  cancelledByDiscordId: string
+  cancelledByDiscordId: string | null
 ): Promise<void> {
   const client = getDiscordBotService().getClient();
   if (!client) return;

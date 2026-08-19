@@ -21,7 +21,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { getDiscordConfig, getApprovalChannelId } from '../discord-config';
 import { resolveRmabUser } from '../discord-user.resolver';
 import { applyApprovalDecision, buildApprovalMessage, errorEmbed, infoEmbed } from '../embeds';
-import { cancelApprovalMessage, editRequestCards, recordApprovalMessage } from '../discord-cards';
+import { editRequestCards, recordApprovalMessage } from '../discord-cards';
 import { actorMeta } from '../discord-helpers';
 
 const logger = RMABLogger.create('Discord.Approval');
@@ -207,6 +207,8 @@ export async function handleCancelRequestButton(
       embeds: [errorEmbed('That request no longer exists.')],
       ephemeral: true,
     });
+    // The card is stale -- rewrite it to cancelled so the dead button does not linger.
+    await editRequestCards(requestId, 'cancelled').catch(() => undefined);
     return;
   }
 
@@ -232,10 +234,10 @@ export async function handleCancelRequestButton(
     return;
   }
 
-  const wasAwaitingApproval = request.status === 'awaiting_approval';
   // Record the RMAB user id as the actor; null when an admin-role holder has no linked account so we
-  // never persist a non-RMAB identifier as deletedBy.
-  const result = await deleteRequest(requestId, rmabUserId ?? null);
+  // never persist a non-RMAB identifier as deletedBy. The Discord id is passed separately purely to
+  // attribute the "Cancelled by" mention.
+  const result = await deleteRequest(requestId, rmabUserId ?? null, interaction.user.id);
   logger.info('Request cancelled via Discord', {
     ...actorMeta(interaction.user, rmabUserId),
     requestId,
@@ -250,14 +252,8 @@ export async function handleCancelRequestButton(
     return;
   }
 
-  // deleteRequest soft-deletes without changing status, so force the cancelled render on the card(s).
-  await editRequestCards(requestId, 'cancelled').catch(() => undefined);
-
-  // If it was still awaiting a decision, mark the admin approval message cancelled and drop its
-  // Approve/Deny buttons (leaving the embed for reference).
-  if (wasAwaitingApproval) {
-    await cancelApprovalMessage(requestId, interaction.user.id).catch(() => undefined);
-  }
+  // The card and approval-embed rewrites now live inside deleteRequest, so every deletion path
+  // (Web UI, API token, /status, /delete) converges on the same cleanup.
 }
 
 /** DM the original requester that their request was approved (best-effort). */

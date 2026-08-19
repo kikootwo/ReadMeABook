@@ -99,9 +99,15 @@ export function applyApprovalDecision(
  * before any decision was made. Notes who cancelled it (as an @mention); the caller removes the
  * Approve/Deny buttons but leaves the embed in place for reference.
  */
-export function applyApprovalCancellation(existing: Embed, cancelledByDiscordId: string): EmbedBuilder {
-  return EmbedBuilder.from(existing)
-    .setColor(COLOR.error)
-    .setTitle('🚫 Request Cancelled')
-    .addFields({ name: 'Cancelled by', value: `<@${cancelledByDiscordId}>`, inline: true });
+export function applyApprovalCancellation(
+  existing: Embed,
+  cancelledByDiscordId: string | null
+): EmbedBuilder {
+  const builder = EmbedBuilder.from(existing).setColor(COLOR.error).setTitle('🚫 Request Cancelled');
+
+  // Deletions from the Web UI or an API token have no Discord actor, and the RMAB user may have no
+  // linked account, so omit the field rather than rendering a broken `<@null>` mention.
+  return cancelledByDiscordId
+    ? builder.addFields({ name: 'Cancelled by', value: `<@${cancelledByDiscordId}>`, inline: true })
+    : builder;
 }

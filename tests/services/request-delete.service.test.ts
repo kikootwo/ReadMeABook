@@ -38,6 +38,20 @@ vi.mock('@/lib/services/audiobookshelf/api', () => ({
   deleteABSItem: vi.fn(),
 }));
 
+// deleteRequest now converges the Discord surfaces itself, so these are stubbed for every test.
+// getClient defaults to null (bot disabled), which is the no-op path the other cases rely on.
+const discordBotMock = vi.hoisted(() => ({ getClient: vi.fn<() => unknown>(() => null) }));
+const discordCardsMock = vi.hoisted(() => ({
+  editRequestCards: vi.fn(() => Promise.resolve()),
+  cancelApprovalMessage: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock('@/lib/services/discord/discord-bot.service', () => ({
+  getDiscordBotService: () => discordBotMock,
+}));
+
+vi.mock('@/lib/services/discord/discord-cards', () => discordCardsMock);
+
 vi.mock('@/lib/utils/file-organizer', () => ({
   buildAudiobookPath: vi.fn((mediaDir: string, template: string, data: any) => {
     // Simple mock implementation that mimics the real behavior for tests
@@ -48,6 +62,7 @@ vi.mock('@/lib/utils/file-organizer', () => ({
 describe('deleteRequest', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    discordBotMock.getClient.mockReturnValue(null);
     // Default mock for child request queries (audiobook requests check for child ebook requests)
     prismaMock.request.findMany.mockResolvedValue([]);
     prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
@@ -475,5 +490,98 @@ describe('deleteRequest', () => {
         data: expect.objectContaining({ deletedBy: 'admin-7' }),
       })
     );
+  });
+  // --- Discord convergence (PR #231 review) ------------------------------------------------------
+  // Every deletion path (Web UI, API token, admin route, /status, /delete) must rewrite the request
+  // card and strip the approval embed's buttons, so a cancelled request never leaves live Approve /
+  // Deny or Cancel buttons behind.
+
+  const ebookRequest = (overrides: Record<string, unknown> = {}) => ({
+    id: 'req-1',
+    type: 'ebook',
+    status: 'awaiting_approval',
+    audiobook: {
+      id: 'ab-1',
+      title: 'Book',
+      author: 'Author',
+      audibleAsin: 'ASIN1',
+      plexGuid: null,
+      absItemId: null,
+      fileFormat: null,
+    },
+    downloadHistory: [],
+    ...overrides,
+  });
+
+  it('rewrites the request card and cancels the approval embed when the bot is running', async () => {
+    discordBotMock.getClient.mockReturnValue({});
+    prismaMock.request.findFirst.mockResolvedValue(ebookRequest());
+    prismaMock.user.findUnique.mockResolvedValue({ discordUserId: 'discord-actor' });
+    const { deleteRequest } = await import('@/lib/services/request-delete.service');
+
+    const result = await deleteRequest('req-1', 'admin-1');
+
+    expect(result.success).toBe(true);
+    expect(discordCardsMock.editRequestCards).toHaveBeenCalledWith('req-1', 'cancelled');
+    expect(discordCardsMock.cancelApprovalMessage).toHaveBeenCalledWith('req-1', 'discord-actor');
+  });
+
+  it('does no Discord work when the bot is not running', async () => {
+    discordBotMock.getClient.mockReturnValue(null);
+    prismaMock.request.findFirst.mockResolvedValue(ebookRequest());
+    const { deleteRequest } = await import('@/lib/services/request-delete.service');
+
+    await deleteRequest('req-1', 'admin-1');
+
+    expect(discordCardsMock.editRequestCards).not.toHaveBeenCalled();
+    expect(discordCardsMock.cancelApprovalMessage).not.toHaveBeenCalled();
+  });
+
+  it('leaves the approval embed alone when the request was not awaiting approval', async () => {
+    discordBotMock.getClient.mockReturnValue({});
+    prismaMock.request.findFirst.mockResolvedValue(ebookRequest({ status: 'downloading' }));
+    const { deleteRequest } = await import('@/lib/services/request-delete.service');
+
+    await deleteRequest('req-1', 'admin-1');
+
+    expect(discordCardsMock.editRequestCards).toHaveBeenCalledWith('req-1', 'cancelled');
+    expect(discordCardsMock.cancelApprovalMessage).not.toHaveBeenCalled();
+  });
+
+  it('prefers the Discord actor supplied by the caller over the stored link', async () => {
+    discordBotMock.getClient.mockReturnValue({});
+    prismaMock.request.findFirst.mockResolvedValue(ebookRequest());
+    const { deleteRequest } = await import('@/lib/services/request-delete.service');
+
+    await deleteRequest('req-1', 'admin-1', 'interaction-actor');
+
+    expect(discordCardsMock.cancelApprovalMessage).toHaveBeenCalledWith('req-1', 'interaction-actor');
+    // No lookup needed when the caller already knows the Discord actor.
+    expect(prismaMock.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('attributes no one when the deleting user has no linked Discord account', async () => {
+    discordBotMock.getClient.mockReturnValue({});
+    prismaMock.request.findFirst.mockResolvedValue(ebookRequest());
+    prismaMock.user.findUnique.mockResolvedValue({ discordUserId: null });
+    const { deleteRequest } = await import('@/lib/services/request-delete.service');
+
+    await deleteRequest('req-1', 'admin-1');
+
+    // null rather than a broken `<@null>` mention.
+    expect(discordCardsMock.cancelApprovalMessage).toHaveBeenCalledWith('req-1', null);
+  });
+
+  it('still reports success when the Discord sync throws', async () => {
+    discordBotMock.getClient.mockReturnValue({});
+    prismaMock.request.findFirst.mockResolvedValue(ebookRequest());
+    prismaMock.user.findUnique.mockResolvedValue({ discordUserId: 'discord-actor' });
+    discordCardsMock.editRequestCards.mockRejectedValueOnce(new Error('Discord unreachable'));
+    const { deleteRequest } = await import('@/lib/services/request-delete.service');
+
+    const result = await deleteRequest('req-1', 'admin-1');
+
+    // A Discord failure must never fail the deletion itself.
+    expect(result.success).toBe(true);
   });
 });

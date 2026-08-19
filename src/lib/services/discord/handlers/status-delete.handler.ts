@@ -14,7 +14,6 @@ import type {
 import { prisma } from '@/lib/db';
 import { deleteRequest } from '@/lib/services/request-delete.service';
 import { RMABLogger } from '@/lib/utils/logger';
-import { cancelApprovalMessage, editRequestCards } from '../discord-cards';
 import { getDiscordConfig } from '../discord-config';
 import { resolveRmabUser, type ResolvedDiscordUser } from '../discord-user.resolver';
 import {
@@ -110,8 +109,7 @@ export async function handleStatusCancel(
     return;
   }
 
-  const wasAwaitingApproval = request.status === 'awaiting_approval';
-  const result = await deleteRequest(requestId, resolved.user.id);
+  const result = await deleteRequest(requestId, resolved.user.id, interaction.user.id);
   logger.info('Request cancelled via /status', { ...meta, requestId, success: result.success });
 
   if (!result.success) {
@@ -119,10 +117,7 @@ export async function handleStatusCancel(
     return;
   }
 
-  await editRequestCards(requestId, 'cancelled').catch(() => undefined);
-  if (wasAwaitingApproval) {
-    await cancelApprovalMessage(requestId, interaction.user.id).catch(() => undefined);
-  }
+  // Card + approval-embed rewrites are handled inside deleteRequest for every surface.
 
   const effectiveScope = resolved.isAdmin && scopeAll;
   const items = await fetchOutstandingRequests(resolved.user.id, effectiveScope);
@@ -321,7 +316,7 @@ export async function handleDeleteConfirm(
       return;
     }
 
-    const result = await deleteRequest(requestId, auth.resolved.user.id);
+    const result = await deleteRequest(requestId, auth.resolved.user.id, interaction.user.id);
     logger.info('Request deleted via Discord', { ...meta, requestId, success: result.success });
 
     if (!result.success) {
@@ -330,10 +325,6 @@ export async function handleDeleteConfirm(
         components: [],
       });
       return;
-    }
-
-    if (item.status === 'awaiting_approval') {
-      await cancelApprovalMessage(requestId, interaction.user.id).catch(() => undefined);
     }
 
     await interaction.editReply({ embeds: [buildDeleteConfirmEmbed(item)], components: [] });
