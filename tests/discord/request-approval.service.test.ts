@@ -47,14 +47,14 @@ describe('processRequestApproval', () => {
   });
 
   it('returns not_found when the request does not exist', async () => {
-    prismaMock.request.findUnique.mockResolvedValue(null);
+    prismaMock.request.findFirst.mockResolvedValue(null);
     const { processRequestApproval } = await loadService();
     const result = await processRequestApproval({ requestId: 'missing', action: 'approve', adminUserId: 'admin-1' });
     expect(result).toEqual({ success: false, reason: 'not_found', message: 'Request not found' });
   });
 
   it('returns invalid_status when the request is not awaiting approval', async () => {
-    prismaMock.request.findUnique.mockResolvedValue({ ...baseRequest, status: 'downloading' });
+    prismaMock.request.findFirst.mockResolvedValue({ ...baseRequest, status: 'downloading' });
     const { processRequestApproval } = await loadService();
     const result = await processRequestApproval({ requestId: 'req-1', action: 'approve', adminUserId: 'admin-1' });
     expect(result.success).toBe(false);
@@ -65,7 +65,7 @@ describe('processRequestApproval', () => {
   });
 
   it('approves with automatic search for an audiobook (no pre-selected torrent)', async () => {
-    prismaMock.request.findUnique.mockResolvedValue(baseRequest);
+    prismaMock.request.findFirst.mockResolvedValue(baseRequest);
     prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.request.findUniqueOrThrow.mockResolvedValue({ ...baseRequest, status: 'pending' });
 
@@ -75,7 +75,7 @@ describe('processRequestApproval', () => {
     expect(result.success).toBe(true);
     // The transition is claimed atomically, gated on the current status.
     expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'req-1', status: 'awaiting_approval' }, data: { status: 'pending' } })
+      expect.objectContaining({ where: { id: 'req-1', status: 'awaiting_approval', deletedAt: null }, data: { status: 'pending' } })
     );
     expect(jobQueueMock.addSearchJob).toHaveBeenCalledTimes(1);
     expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
@@ -91,7 +91,7 @@ describe('processRequestApproval', () => {
   });
 
   it('approves an ebook with the ebook search job and ebook notification typing', async () => {
-    prismaMock.request.findUnique.mockResolvedValue({ ...baseRequest, type: 'ebook' });
+    prismaMock.request.findFirst.mockResolvedValue({ ...baseRequest, type: 'ebook' });
     prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.request.findUniqueOrThrow.mockResolvedValue({ ...baseRequest, type: 'ebook', status: 'pending' });
 
@@ -114,7 +114,7 @@ describe('processRequestApproval', () => {
   });
 
   it('downloads directly when a torrent is pre-selected', async () => {
-    prismaMock.request.findUnique.mockResolvedValue({
+    prismaMock.request.findFirst.mockResolvedValue({
       ...baseRequest,
       selectedTorrent: { source: 'prowlarr', title: 'pick' },
     });
@@ -128,14 +128,14 @@ describe('processRequestApproval', () => {
     expect(jobQueueMock.addDownloadJob).toHaveBeenCalledTimes(1);
     expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'req-1', status: 'awaiting_approval' },
+        where: { id: 'req-1', status: 'awaiting_approval', deletedAt: null },
         data: expect.objectContaining({ status: 'downloading' }),
       })
     );
   });
 
   it('denies a request without triggering jobs or notifications', async () => {
-    prismaMock.request.findUnique.mockResolvedValue(baseRequest);
+    prismaMock.request.findFirst.mockResolvedValue(baseRequest);
     prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.request.findUniqueOrThrow.mockResolvedValue({ ...baseRequest, status: 'denied' });
 
@@ -145,7 +145,7 @@ describe('processRequestApproval', () => {
     expect(result.success).toBe(true);
     expect(result).toMatchObject({ message: 'Request denied' });
     expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'req-1', status: 'awaiting_approval' }, data: { status: 'denied' } })
+      expect.objectContaining({ where: { id: 'req-1', status: 'awaiting_approval', deletedAt: null }, data: { status: 'denied' } })
     );
     expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
     expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
@@ -153,9 +153,8 @@ describe('processRequestApproval', () => {
 
   it('bails as invalid_status when a concurrent actor already claimed the request', async () => {
     // Initial read still sees 'awaiting_approval', but the atomic claim loses the race (count 0).
-    prismaMock.request.findUnique
-      .mockResolvedValueOnce(baseRequest)
-      .mockResolvedValueOnce({ status: 'downloading' });
+    prismaMock.request.findFirst.mockResolvedValue(baseRequest);
+    prismaMock.request.findFirst.mockResolvedValue({ status: 'downloading', deletedAt: null });
     prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
 
     const { processRequestApproval } = await loadService();
@@ -170,5 +169,71 @@ describe('processRequestApproval', () => {
     expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
     expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
     expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+  });
+  // --- Soft-delete guard (PR #231 review) -------------------------------------------------------
+  // Soft delete sets deletedAt but intentionally leaves `status` untouched, so a cancelled request
+  // still reads as 'awaiting_approval'. Without a deletedAt filter an admin clicking Approve on a
+  // stale embed would claim the row and enqueue a real download for a request the user deleted.
+
+  it('scopes the initial fetch to non-deleted requests', async () => {
+    prismaMock.request.findFirst.mockResolvedValue(baseRequest);
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+
+    const { processRequestApproval } = await loadService();
+    await processRequestApproval({ requestId: 'req-1', action: 'approve', adminUserId: 'admin-1' });
+
+    expect(prismaMock.request.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'req-1', deletedAt: null } })
+    );
+  });
+
+  it('returns not_found for a soft-deleted request instead of approving it', async () => {
+    // The deletedAt filter excludes the cancelled row, so the fetch comes back empty.
+    prismaMock.request.findFirst.mockResolvedValue(null);
+
+    const { processRequestApproval } = await loadService();
+    const result = await processRequestApproval({ requestId: 'req-1', action: 'approve', adminUserId: 'admin-1' });
+
+    expect(result).toEqual({ success: false, reason: 'not_found', message: 'Request not found' });
+    // Critically: nothing was claimed and no download was enqueued.
+    expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
+    expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
+    expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
+    expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+  });
+
+  it('reports not_found (not invalid_status) when the row is soft-deleted mid-flight', async () => {
+    // Fetch wins the race, but the request is cancelled before the atomic claim lands.
+    prismaMock.request.findFirst.mockResolvedValue(baseRequest);
+    prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.request.findUnique.mockResolvedValue({
+      status: 'awaiting_approval',
+      deletedAt: new Date(),
+    });
+
+    const { processRequestApproval } = await loadService();
+    const result = await processRequestApproval({ requestId: 'req-1', action: 'approve', adminUserId: 'admin-1' });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.reason).toBe('not_found');
+    }
+    expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
+    expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+  });
+
+  it('denies only non-deleted requests', async () => {
+    prismaMock.request.findFirst.mockResolvedValue(baseRequest);
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+
+    const { processRequestApproval } = await loadService();
+    await processRequestApproval({ requestId: 'req-1', action: 'deny', adminUserId: 'admin-1' });
+
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'req-1', status: 'awaiting_approval', deletedAt: null },
+        data: { status: 'denied' },
+      })
+    );
   });
 });

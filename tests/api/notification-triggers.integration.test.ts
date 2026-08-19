@@ -266,7 +266,7 @@ describe('Notification Triggers - Integration Tests', () => {
       };
       requireAuthMock.mockImplementation((_req: any, handler: any) => handler(adminRequest));
 
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-1',
         userId: 'user-1',
         audiobookId: 'audiobook-1',

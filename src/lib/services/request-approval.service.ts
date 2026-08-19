@@ -40,12 +40,22 @@ export type ApprovalResult =
  * actor already approved/denied it). Reports the current status so the caller can surface it.
  */
 async function staleStatusResult(id: string): Promise<ApprovalResult> {
-  const current = await prisma.request.findUnique({ where: { id }, select: { status: true } });
+  const current = await prisma.request.findUnique({
+    where: { id },
+    select: { status: true, deletedAt: true },
+  });
+
+  // A soft-deleted row is gone as far as approval is concerned: the claim failed because the
+  // request was cancelled, not because a concurrent actor decided it first.
+  if (!current || current.deletedAt) {
+    return { success: false, reason: 'not_found', message: 'Request not found' };
+  }
+
   return {
     success: false,
     reason: 'invalid_status',
-    message: `Request is not awaiting approval (current status: ${current?.status ?? 'unknown'})`,
-    currentStatus: current?.status,
+    message: `Request is not awaiting approval (current status: ${current.status})`,
+    currentStatus: current.status,
   };
 }
 
@@ -65,8 +75,11 @@ export async function processRequestApproval(
 
   try {
     // Fetch the request
-    const existingRequest = await prisma.request.findUnique({
-      where: { id },
+    // findFirst (not findUnique) so the query can filter on deletedAt. Soft delete intentionally
+    // leaves `status` untouched, so a cancelled request would otherwise still match
+    // 'awaiting_approval' and get approved, enqueuing a real download for a deleted request.
+    const existingRequest = await prisma.request.findFirst({
+      where: { id, deletedAt: null },
       include: {
         audiobook: true,
         user: {
@@ -106,7 +119,7 @@ export async function processRequestApproval(
       // both pass the status check and double-enqueue download/search jobs + notifications. Only the
       // actor whose conditional update actually flips the row proceeds; the loser bails as stale.
       const claim = await prisma.request.updateMany({
-        where: { id, status: 'awaiting_approval' },
+        where: { id, status: 'awaiting_approval', deletedAt: null },
         data: effectiveTorrent
           ? { status: 'downloading', selectedTorrent: null as any }
           : { status: 'pending' },
@@ -270,7 +283,7 @@ export async function processRequestApproval(
       // Deny: atomically claim the transition to 'denied' so a concurrent approve/deny can't both
       // act on the same request.
       const claim = await prisma.request.updateMany({
-        where: { id, status: 'awaiting_approval' },
+        where: { id, status: 'awaiting_approval', deletedAt: null },
         data: { status: 'denied' },
       });
       if (claim.count === 0) {
