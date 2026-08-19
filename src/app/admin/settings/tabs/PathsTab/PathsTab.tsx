@@ -341,6 +341,10 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
             <span className="text-gray-600 dark:text-gray-400 ml-2">- Book author</span>
           </div>
           <div>
+            <code className="text-blue-700 dark:text-blue-300 font-mono">{'{primaryAuthor}'}</code>
+            <span className="text-gray-600 dark:text-gray-400 ml-2">- First author in author list</span>
+          </div>
+          <div>
             <code className="text-blue-700 dark:text-blue-300 font-mono">{'{title}'}</code>
             <span className="text-gray-600 dark:text-gray-400 ml-2">- Book title</span>
           </div>
