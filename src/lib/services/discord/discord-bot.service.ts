@@ -185,12 +185,19 @@ class DiscordBotService {
   }
 }
 
-// Process-wide singleton
-let instance: DiscordBotService | null = null;
+// Process-wide singleton, stashed on globalThis rather than a module-level `let` for the same
+// reason as the Prisma client in src/lib/db.ts: Next re-evaluates modules on dev-mode HMR, and a
+// second module instance would construct a second bot service and a second gateway connection --
+// after which every interaction is handled twice (duplicate requests and approvals while
+// developing). Unlike db.ts this is not gated on NODE_ENV, since a duplicated gateway connection is
+// worth preventing in every environment.
+const globalForDiscordBot = globalThis as unknown as {
+  discordBotService: DiscordBotService | undefined;
+};
 
 export function getDiscordBotService(): DiscordBotService {
-  if (!instance) {
-    instance = new DiscordBotService();
+  if (!globalForDiscordBot.discordBotService) {
+    globalForDiscordBot.discordBotService = new DiscordBotService();
   }
-  return instance;
+  return globalForDiscordBot.discordBotService;
 }

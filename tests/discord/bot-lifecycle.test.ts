@@ -74,6 +74,9 @@ vi.mock('@/lib/utils/logger', () => ({
 
 const loadService = async () => {
   vi.resetModules();
+  // The singleton lives on globalThis (so dev-mode HMR cannot spawn a second gateway connection),
+  // which means resetModules alone no longer yields a fresh service. Clear it explicitly.
+  delete (globalThis as unknown as { discordBotService?: unknown }).discordBotService;
   const mod = await import('@/lib/services/discord/discord-bot.service');
   return mod.getDiscordBotService();
 };
@@ -158,5 +161,18 @@ describe('DiscordBotService lifecycle', () => {
     await Promise.all([first, second]);
 
     expect(created).toHaveLength(1);
+  });
+  it('survives a module re-evaluation instead of constructing a second bot', async () => {
+    configMock.getDiscordConfig.mockResolvedValue({ botToken: 'tok', guildId: 'g1' });
+
+    const service = await loadService();
+
+    // Simulate Next dev-mode HMR: the module is re-evaluated without clearing globalThis.
+    vi.resetModules();
+    const { getDiscordBotService } = await import('@/lib/services/discord/discord-bot.service');
+
+    // Same instance, so a reload cannot open a second gateway connection that double-handles
+    // every interaction.
+    expect(getDiscordBotService()).toBe(service);
   });
 });
