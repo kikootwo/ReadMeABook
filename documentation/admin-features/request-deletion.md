@@ -216,6 +216,25 @@ where: {
 13. ✅ **Plex deletion not enabled in settings** - Log error, continue with soft delete
 14. ✅ **Title mismatch in plex_library** - ASIN-based deletion handles title variations (e.g., "(Unabridged)" suffix)
 15. ✅ **No ASIN available** - Falls back to exact title/author matching
+16. ✅ **Discord bot disabled or unreachable** - Discord sync is gated on a live client and never
+    throws, so deletion succeeds regardless
+
+## Discord Convergence
+
+`deleteRequest()` rewrites the Discord surfaces itself, so every deletion path converges — Web UI,
+API token, admin route, `/status`, `/delete`, and the reported-issue cleanup.
+
+- `editRequestCards(requestId, 'cancelled')` — soft delete leaves `status` untouched, so the
+  cancelled render is forced.
+- `cancelApprovalMessage(...)` — only when the request was `awaiting_approval`; strips the
+  Approve/Deny buttons so a stale embed cannot approve a deleted request.
+- Gated on `getDiscordBotService().getClient()` and dynamically imported, so discord.js stays
+  unloaded when the bot is disabled. Best-effort: failures are logged, never surfaced.
+
+**Signature:** `deleteRequest(requestId, adminUserId, actorDiscordUserId?)`. The optional third
+argument attributes the "Cancelled by" mention for Discord-initiated deletes (including admin-role
+holders with no linked RMAB account); other callers fall back to the deleting user's linked
+`discordUserId`, and the field is omitted entirely when neither exists.
 
 ## Fixed Issues ✅
 
@@ -225,6 +244,17 @@ where: {
 - **Impact:** Title variations (e.g., "Book Title" vs "Book Title (Unabridged)") caused plex_library records to persist
 - **Fix:** Changed plex_library deletion to use ASIN-based matching (same as availability check)
 - **Result:** Books immediately show as NOT available after deletion, can be re-requested right away
+
+**2. Web/API Deletions Left Live Discord Buttons**
+- **Issue:** Deleting from the Web UI or via an API token never touched Discord: the request card
+  kept a working Cancel Request button and the approval embed kept working Approve/Deny buttons
+- **Impact:** The stale approval embed made approving an already-deleted request reachable
+- **Fix:** Hoisted the card and approval-embed rewrites into `deleteRequest()` so all paths converge;
+  button handlers that find a request already gone now rewrite the card instead of leaving a dead
+  button
+- **Files updated:** `src/lib/services/request-delete.service.ts`,
+  `src/lib/services/discord/handlers/{approval,status-delete}.handler.ts`,
+  `src/lib/services/discord/{discord-cards,embeds/approval}.ts`
 
 ## File Structure
 

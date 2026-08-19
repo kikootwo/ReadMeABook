@@ -53,6 +53,17 @@ Allows admins to review and approve/deny user requests before they are processed
   - Send approved notification
 - **Deny:** → Change status to 'denied', no further processing
 
+**Approval guards (`processRequestApproval`, `src/lib/services/request-approval.service.ts`):**
+- **Soft-delete:** fetch is `findFirst` on `{ id, deletedAt: null }`, and both atomic claims carry
+  `deletedAt: null`. Soft delete leaves `status` untouched, so without this a cancelled request
+  still matched `awaiting_approval` and could be approved into a real download. A deleted row
+  returns `not_found` (never `invalid_status`).
+- **Concurrency:** the transition out of `awaiting_approval` is claimed via conditional `updateMany`;
+  the losing actor bails as `invalid_status` with the current status.
+- **Enqueue failure:** the claim runs before the job is enqueued, so a failed enqueue calls
+  `releaseClaim()` to restore `awaiting_approval` (and the cleared `selectedTorrent`), gated on the
+  status the claim set. The admin can simply retry; no `request_approved` notification is sent.
+
 ## API Endpoints
 
 ### POST /api/audiobooks/request-with-torrent
@@ -356,6 +367,24 @@ value: 'true' | 'false' (string)
   - Sends appropriate notifications (request_pending_approval or request_approved)
   - Only triggers search job if auto-approved
 - Files updated: `src/app/api/bookdate/swipe/route.ts:124-217`, `tests/api/bookdate.routes.test.ts:470-648`
+
+**2. Approving a Soft-Deleted (Cancelled) Request**
+- Issue: A cancelled request awaiting approval could still be approved, enqueuing a real download
+- Cause: Soft delete sets `deletedAt` but leaves `status`, and neither the fetch nor the atomic
+  claims filtered `deletedAt`; the Discord approval embed kept live Approve/Deny buttons after a
+  web-side cancel
+- Impact: Orphaned download for a deleted request, invisible to the pending-approval list (which
+  does filter `deletedAt`)
+- Fix: `deletedAt: null` on the fetch and both claims; deleted rows report `not_found`
+- Files updated: `src/lib/services/request-approval.service.ts`, `tests/discord/request-approval.service.test.ts`
+
+**3. Request Stranded in 'downloading' After a Failed Enqueue**
+- Issue: If job enqueue threw after the atomic claim, the request sat in 'downloading' with no job
+  and its `selectedTorrent` cleared, unrecoverable from any surface
+- Cause: Claiming before enqueuing (needed for the concurrency fix) reversed the old ordering, which
+  had left the request in `awaiting_approval` on failure
+- Fix: `releaseClaim()` compensates on enqueue failure, restoring status and torrent
+- Files updated: `src/lib/services/request-approval.service.ts`, `tests/discord/request-approval.service.test.ts`
 
 ## Related
 - [Admin Dashboard](../admin-dashboard.md) - Dashboard UI features

@@ -95,6 +95,27 @@ A scheduled `find_missing_ebooks` job (daily midnight, enabled by default) backs
 
 **Source:** Based on [kindle-epub-fix](https://github.com/innocenat/kindle-epub-fix)
 
+## API
+
+### POST /api/audiobooks/[asin]/fetch-ebook
+Thin wrapper around `createEbookRequestForUser()`
+([ebook-request-creator.service.ts](../../src/lib/services/ebook-request-creator.service.ts)), shared
+with the Discord `/request ebook` flow so both surfaces run an identical path (approval gate +
+sidecar rule).
+
+**Response:** `{ success, message, requestId, needsApproval }`
+
+| Status | When |
+|--------|------|
+| 201 | New request created (`created: true`) — including created-awaiting-approval |
+| 200 | Existing retryable request re-driven (`created: false`) |
+| 400 | Invalid ASIN, feature disabled, or audiobook not available |
+| 404 | Not found on Audible, or user not found |
+| 409 | An active e-book request already exists |
+
+The `created` flag on the success result exists solely so the route can distinguish 201 from 200;
+the Discord flow ignores it.
+
 ## Database Schema
 
 **Request model additions:**
