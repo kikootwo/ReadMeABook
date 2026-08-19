@@ -60,6 +60,37 @@ async function staleStatusResult(id: string): Promise<ApprovalResult> {
 }
 
 /**
+ * Undo an atomic claim after the follow-up enqueue failed, returning the request to
+ * 'awaiting_approval' (and restoring the torrent the claim cleared) so an admin can simply click
+ * Approve again. The old route enqueued first and flipped status second, so an enqueue failure was
+ * naturally harmless; claiming first closed the double-approve race but made a failed enqueue strand
+ * the row in 'downloading' with no job attached.
+ *
+ * Gated on the status the claim actually set, so a concurrent transition is never clobbered.
+ * Best-effort: a failure here is logged, not thrown, since the caller is already returning an error.
+ */
+async function releaseClaim(
+  id: string,
+  claimedStatus: string,
+  torrentToRestore: unknown
+): Promise<void> {
+  try {
+    await prisma.request.updateMany({
+      where: { id, status: claimedStatus },
+      data: {
+        status: 'awaiting_approval',
+        selectedTorrent: (torrentToRestore ?? null) as any,
+      },
+    });
+  } catch (error) {
+    logger.error('Failed to roll back approval claim after enqueue failure', {
+      requestId: id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * Process an approve/deny action for a request awaiting approval.
  *
  * Behavior mirrors the original inline route logic exactly:
@@ -141,51 +172,67 @@ export async function processRequestApproval(
           source: selectedTorrent.source,
         });
 
-        // Handle ebook requests with Anna's Archive source differently
-        if (isEbookRequest && selectedTorrent.source === 'annas_archive') {
-          // Create download history record for Anna's Archive
-          const downloadHistory = await prisma.downloadHistory.create({
-            data: {
-              requestId: existingRequest.id,
-              indexerName: "Anna's Archive",
-              torrentName: `${existingRequest.audiobook.title} - ${existingRequest.audiobook.author}.${selectedTorrent.format || 'epub'}`,
-              torrentSizeBytes: null,
-              qualityScore: selectedTorrent.score || 100,
-              selected: true,
-              downloadClient: 'direct',
-              downloadStatus: 'queued',
-            },
-          });
-
-          // Store all download URLs for retry purposes
-          if (selectedTorrent.downloadUrls && selectedTorrent.downloadUrls.length > 0) {
-            await prisma.downloadHistory.update({
-              where: { id: downloadHistory.id },
+        // The claim above already flipped the row, so an enqueue failure past this point would
+        // strand the request with no job to advance it. Roll the claim back and let the admin retry.
+        try {
+          // Handle ebook requests with Anna's Archive source differently
+          if (isEbookRequest && selectedTorrent.source === 'annas_archive') {
+            // Create download history record for Anna's Archive
+            const downloadHistory = await prisma.downloadHistory.create({
               data: {
-                torrentUrl: JSON.stringify(selectedTorrent.downloadUrls),
+                requestId: existingRequest.id,
+                indexerName: "Anna's Archive",
+                torrentName: `${existingRequest.audiobook.title} - ${existingRequest.audiobook.author}.${selectedTorrent.format || 'epub'}`,
+                torrentSizeBytes: null,
+                qualityScore: selectedTorrent.score || 100,
+                selected: true,
+                downloadClient: 'direct',
+                downloadStatus: 'queued',
               },
             });
-          }
 
-          // Trigger direct download job for Anna's Archive
-          await jobQueue.addStartDirectDownloadJob(
-            existingRequest.id,
-            downloadHistory.id,
-            selectedTorrent.downloadUrl,
-            `${existingRequest.audiobook.title} - ${existingRequest.audiobook.author}.${selectedTorrent.format || 'epub'}`,
-            undefined
-          );
-        } else {
-          // Trigger download job with pre-selected torrent (audiobook or indexer ebook)
-          await jobQueue.addDownloadJob(
-            existingRequest.id,
-            {
-              id: existingRequest.audiobook.id,
-              title: existingRequest.audiobook.title,
-              author: existingRequest.audiobook.author,
-            },
-            selectedTorrent
-          );
+            // Store all download URLs for retry purposes
+            if (selectedTorrent.downloadUrls && selectedTorrent.downloadUrls.length > 0) {
+              await prisma.downloadHistory.update({
+                where: { id: downloadHistory.id },
+                data: {
+                  torrentUrl: JSON.stringify(selectedTorrent.downloadUrls),
+                },
+              });
+            }
+
+            // Trigger direct download job for Anna's Archive
+            await jobQueue.addStartDirectDownloadJob(
+              existingRequest.id,
+              downloadHistory.id,
+              selectedTorrent.downloadUrl,
+              `${existingRequest.audiobook.title} - ${existingRequest.audiobook.author}.${selectedTorrent.format || 'epub'}`,
+              undefined
+            );
+          } else {
+            // Trigger download job with pre-selected torrent (audiobook or indexer ebook)
+            await jobQueue.addDownloadJob(
+              existingRequest.id,
+              {
+                id: existingRequest.audiobook.id,
+                title: existingRequest.audiobook.title,
+                author: existingRequest.audiobook.author,
+              },
+              selectedTorrent
+            );
+          }
+        } catch (enqueueError) {
+          await releaseClaim(id, 'downloading', existingRequest.selectedTorrent);
+          logger.error(`Failed to enqueue download for request ${id}; rolled back to awaiting_approval`, {
+            requestId: id,
+            adminId: adminUserId,
+            error: enqueueError instanceof Error ? enqueueError.message : String(enqueueError),
+          });
+          return {
+            success: false,
+            reason: 'error',
+            message: 'Failed to start the download. The request is still awaiting approval; please try again.',
+          };
         }
 
         // The atomic claim already flipped the row to 'downloading' and cleared selectedTorrent;
@@ -233,21 +280,37 @@ export async function processRequestApproval(
         // The atomic claim already flipped the row to 'pending'; derive the updated view.
         const updatedRequest = { ...existingRequest, status: 'pending' };
 
-        // Trigger appropriate search job based on request type
-        if (isEbookRequest) {
-          await jobQueue.addSearchEbookJob(updatedRequest.id, {
-            id: updatedRequest.audiobook.id,
-            title: updatedRequest.audiobook.title,
-            author: updatedRequest.audiobook.author,
-            asin: updatedRequest.audiobook.audibleAsin || undefined,
+        // The claim above already flipped the row, so an enqueue failure past this point would
+        // strand the request with no job to advance it. Roll the claim back and let the admin retry.
+        try {
+          // Trigger appropriate search job based on request type
+          if (isEbookRequest) {
+            await jobQueue.addSearchEbookJob(updatedRequest.id, {
+              id: updatedRequest.audiobook.id,
+              title: updatedRequest.audiobook.title,
+              author: updatedRequest.audiobook.author,
+              asin: updatedRequest.audiobook.audibleAsin || undefined,
+            });
+          } else {
+            await jobQueue.addSearchJob(updatedRequest.id, {
+              id: updatedRequest.audiobook.id,
+              title: updatedRequest.audiobook.title,
+              author: updatedRequest.audiobook.author,
+              asin: updatedRequest.audiobook.audibleAsin || undefined,
+            });
+          }
+        } catch (enqueueError) {
+          await releaseClaim(id, 'pending', existingRequest.selectedTorrent);
+          logger.error(`Failed to enqueue search for request ${id}; rolled back to awaiting_approval`, {
+            requestId: id,
+            adminId: adminUserId,
+            error: enqueueError instanceof Error ? enqueueError.message : String(enqueueError),
           });
-        } else {
-          await jobQueue.addSearchJob(updatedRequest.id, {
-            id: updatedRequest.audiobook.id,
-            title: updatedRequest.audiobook.title,
-            author: updatedRequest.audiobook.author,
-            asin: updatedRequest.audiobook.audibleAsin || undefined,
-          });
+          return {
+            success: false,
+            reason: 'error',
+            message: 'Failed to start the search. The request is still awaiting approval; please try again.',
+          };
         }
 
         // Send notification for manual approval

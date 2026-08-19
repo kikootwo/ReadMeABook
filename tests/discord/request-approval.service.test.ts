@@ -236,4 +236,83 @@ describe('processRequestApproval', () => {
       })
     );
   });
+  // --- Enqueue-failure compensation (PR #231 review) --------------------------------------------
+  // The atomic claim flips status (and clears selectedTorrent) before the job is enqueued. If the
+  // enqueue then throws, the row must be returned to 'awaiting_approval' so the admin can retry,
+  // rather than being stranded in 'downloading'/'pending' with no job attached.
+
+  it('rolls the claim back to awaiting_approval when the download enqueue fails', async () => {
+    const torrent = { source: 'prowlarr', title: 'pick' };
+    prismaMock.request.findFirst.mockResolvedValue({ ...baseRequest, selectedTorrent: torrent });
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    jobQueueMock.addDownloadJob.mockRejectedValueOnce(new Error('Redis down'));
+
+    const { processRequestApproval } = await loadService();
+    const result = await processRequestApproval({ requestId: 'req-1', action: 'approve', adminUserId: 'admin-1' });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.reason).toBe('error');
+    }
+    // Second updateMany is the compensating rollback: status restored, torrent choice preserved.
+    expect(prismaMock.request.updateMany).toHaveBeenCalledTimes(2);
+    expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'req-1', status: 'downloading' },
+      data: { status: 'awaiting_approval', selectedTorrent: torrent },
+    });
+    // A failed approval must not tell the requester it was approved.
+    expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+  });
+
+  it('rolls the claim back when the direct-download enqueue fails for an Anna\'s Archive ebook', async () => {
+    const torrent = { source: 'annas_archive', format: 'epub', downloadUrl: 'https://x/y' };
+    prismaMock.request.findFirst.mockResolvedValue({
+      ...baseRequest,
+      type: 'ebook',
+      selectedTorrent: torrent,
+    });
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-1' });
+    jobQueueMock.addStartDirectDownloadJob.mockRejectedValueOnce(new Error('Bull hiccup'));
+
+    const { processRequestApproval } = await loadService();
+    const result = await processRequestApproval({ requestId: 'req-1', action: 'approve', adminUserId: 'admin-1' });
+
+    expect(result.success).toBe(false);
+    expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'req-1', status: 'downloading' },
+      data: { status: 'awaiting_approval', selectedTorrent: torrent },
+    });
+  });
+
+  it('rolls the claim back to awaiting_approval when the search enqueue fails', async () => {
+    prismaMock.request.findFirst.mockResolvedValue(baseRequest);
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    jobQueueMock.addSearchJob.mockRejectedValueOnce(new Error('Redis down'));
+
+    const { processRequestApproval } = await loadService();
+    const result = await processRequestApproval({ requestId: 'req-1', action: 'approve', adminUserId: 'admin-1' });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.reason).toBe('error');
+    }
+    expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'req-1', status: 'pending' },
+      data: { status: 'awaiting_approval', selectedTorrent: null },
+    });
+    expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+  });
+
+  it('does not roll back when the enqueue succeeds', async () => {
+    prismaMock.request.findFirst.mockResolvedValue(baseRequest);
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+
+    const { processRequestApproval } = await loadService();
+    const result = await processRequestApproval({ requestId: 'req-1', action: 'approve', adminUserId: 'admin-1' });
+
+    expect(result.success).toBe(true);
+    // Exactly one updateMany: the claim. No compensating write.
+    expect(prismaMock.request.updateMany).toHaveBeenCalledTimes(1);
+  });
 });
