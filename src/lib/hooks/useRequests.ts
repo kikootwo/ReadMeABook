@@ -62,8 +62,14 @@ export function useRequests(status?: string, limit: number = 50, myOnly: boolean
 
 // ── Active statuses that warrant live polling ────────────────────────────────
 const ACTIVE_STATUSES = new Set([
-  'pending', 'awaiting_search', 'awaiting_approval',
-  'searching', 'downloading', 'processing', 'awaiting_import',
+  'pending',
+  'awaiting_search',
+  'awaiting_approval',
+  'searching',
+  'downloading',
+  'downloaded',
+  'processing',
+  'awaiting_import',
 ]);
 
 export type RequestFilterGroup = 'all' | 'active' | 'waiting' | 'completed' | 'failed' | 'cancelled';
@@ -110,7 +116,7 @@ export function useMyRequests(filter: RequestFilterGroup) {
   const { data, error, isLoading, isValidating, size, setSize, mutate: revalidate } =
     useSWRInfinite<RequestPage>(getKey, fetcher, {
       revalidateFirstPage: true,
-      revalidateOnFocus: false,
+      revalidateOnFocus: true,
       // Smart polling: refresh every 5s only when active requests exist
       refreshInterval: (data) => {
         if (!data) return 5000;

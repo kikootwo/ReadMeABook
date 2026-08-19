@@ -112,6 +112,14 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
   const ebookTemplate = paths.ebookPathTemplate || '{author}/{title} {asin}';
   const ebookMatchesAudiobook = ebookTemplate === audiobookTemplate;
 
+  const hardlinkCompatibleMetadataMode =
+    !paths.metadataTaggingEnabled || paths.metadataWriteMode === 'opf';
+
+  const hardlinkDisabledReason =
+    paths.metadataTaggingEnabled && paths.metadataWriteMode !== 'opf'
+      ? 'Hardlinking requires Metadata Write Mode to be OPF sidecar file. Embedded metadata creates a modified temporary file, so RMAB must copy instead.'
+      : null;
+
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
@@ -388,31 +396,133 @@ export function PathsTab({ paths, onChange, onValidationChange }: PathsTabProps)
         </div>
       </div>
 
-      {/* Metadata Tagging Toggle */}
-      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
-        <div className="flex items-start gap-4">
-          <input
-            type="checkbox"
-            id="metadata-tagging-settings"
-            checked={paths.metadataTaggingEnabled}
-            onChange={(e) => updatePath('metadataTaggingEnabled', e.target.checked)}
-            className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-          />
-          <div className="flex-1">
-            <label
-              htmlFor="metadata-tagging-settings"
-              className="block text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer"
-            >
-              Auto-tag audio files with metadata
-            </label>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              Automatically write correct title, author, and narrator metadata to m4b and mp3 files
-              during file organization. This significantly improves Plex matching accuracy for audiobooks
-              with missing or incorrect metadata.
-            </p>
+        {/* Metadata Tagging Toggle */}
+        <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+          <div className="flex items-start gap-4">
+            <input
+              type="checkbox"
+              id="metadata-tagging-settings"
+              checked={paths.metadataTaggingEnabled}
+              onChange={(e) => updatePath('metadataTaggingEnabled', e.target.checked)}
+              className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <div className="flex-1">
+              <label
+                htmlFor="metadata-tagging-settings"
+                className="block text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer"
+              >
+                Auto-tag audio files with metadata
+              </label>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Automatically write correct title, author, and narrator metadata to m4b and mp3 files
+                during file organization. This significantly improves Plex matching accuracy for audiobooks
+                with missing or incorrect metadata.
+              </p>
+            </div>
           </div>
         </div>
+
+      {/* Metadata Write Mode */}
+      {paths.metadataTaggingEnabled && (
+        <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800">
+          <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
+            Metadata Write Mode
+          </label>
+
+          <select
+            value={paths.metadataWriteMode || 'embedded'}
+            onChange={(e) => {
+              const nextMode = e.target.value;
+
+              updatePath('metadataWriteMode', nextMode);
+
+              if (paths.filePlacementMode === 'hardlink' && nextMode !== 'opf') {
+                updatePath('filePlacementMode', 'copy');
+              }
+            }}
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+          >
+            <option value="embedded">Embedded audio tags</option>
+            <option value="opf">OPF sidecar file</option>
+            <option value="both">Embedded tags + OPF sidecar</option>
+          </select>
+
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Controls how RMAB writes metadata when metadata tagging is enabled. OPF sidecars create a metadata.opf file alongside the organized audiobook.
+          </p>
+        </div>
+      )}
+
+      {/* File Placement Mode */}
+      <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800">
+        <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
+          File Placement Mode
+        </label>
+
+        <select
+          value={
+            paths.filePlacementMode === 'hardlink' && !hardlinkCompatibleMetadataMode
+              ? 'copy'
+              : paths.filePlacementMode || 'copy'
+          }
+          onChange={(e) => {
+            const nextMode = e.target.value;
+
+            if (nextMode === 'hardlink' && !hardlinkCompatibleMetadataMode) {
+              return;
+            }
+
+            updatePath('filePlacementMode', nextMode);
+          }}
+          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+        >
+          <option value="copy">Copy files</option>
+          <option value="hardlink" disabled={!hardlinkCompatibleMetadataMode}>
+            Hardlink files
+          </option>
+        </select>
+
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          Hardlinking avoids duplicate storage, but only works when the download and library paths are on the same filesystem.
+        </p>
+
+        {hardlinkDisabledReason && (
+          <p className="text-sm text-amber-700 dark:text-amber-300">
+            {hardlinkDisabledReason}
+          </p>
+        )}
       </div>
+
+      {paths.filePlacementMode === 'hardlink' && (
+        <>
+          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
+            Hardlinks require downloads and audiobooks to live under the same mounted filesystem.
+            For Docker, use a shared parent mount such as /media, then configure paths like
+            /media/downloads and /media/audiobooks.
+          </div>
+
+          <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800">
+            <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
+              If Hardlink Fails
+            </label>
+
+            <select
+              value={paths.hardlinkFallbackMode || 'copy'}
+              onChange={(e) => updatePath('hardlinkFallbackMode', e.target.value)}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+            >
+              <option value="copy">Fall back to copy</option>
+              <option value="fail">Fail the import</option>
+            </select>
+
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Use “Fail the import” when testing hardlinks so RMAB does not silently copy files if hardlinking fails.
+            </p>
+          </div>
+        </>
+      )}
+
+      {/* Plex Format Coercion Toggle */}
 
       {/* Plex Format Coercion Toggle */}
       <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
