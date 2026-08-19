@@ -15,7 +15,7 @@ import {
   type Client,
 } from 'discord.js';
 import { prisma } from '@/lib/db';
-import { processRequestApproval } from '@/lib/services/request-approval.service';
+import { processRequestApproval, type ApprovalAction } from '@/lib/services/request-approval.service';
 import { deleteRequest } from '@/lib/services/request-delete.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { getDiscordConfig, getApprovalChannelId } from '../discord-config';
@@ -180,10 +180,9 @@ export async function handleApprovalButton(
   // Reflect the decision on the requester's live request card (best-effort).
   await editRequestCards(requestId).catch(() => undefined);
 
-  // Notify the requester via DM (best-effort)
-  if (action === 'approve') {
-    await notifyRequester(interaction.client, requestId).catch(() => undefined);
-  }
+  // Notify the requester via DM on either outcome (best-effort). A plain deny with request cards
+  // disabled would otherwise be completely silent for them.
+  await notifyRequester(interaction.client, requestId, action).catch(() => undefined);
 }
 
 /**
@@ -256,8 +255,12 @@ export async function handleCancelRequestButton(
   // (Web UI, API token, /status, /delete) converges on the same cleanup.
 }
 
-/** DM the original requester that their request was approved (best-effort). */
-async function notifyRequester(client: Client, requestId: string): Promise<void> {
+/** DM the original requester with the decision on their request (best-effort). */
+async function notifyRequester(
+  client: Client,
+  requestId: string,
+  action: ApprovalAction
+): Promise<void> {
   const request = await prisma.request.findUnique({
     where: { id: requestId },
     include: {
@@ -269,18 +272,23 @@ async function notifyRequester(client: Client, requestId: string): Promise<void>
   const discordUserId = request?.user.discordUserId;
   if (!discordUserId) return;
 
+  const title = request?.audiobook.title;
+  const embed =
+    action === 'approve'
+      ? infoEmbed(
+          '✅ Request approved',
+          `Your request for **${title}** has been approved and is now being processed.`
+        )
+      : infoEmbed(
+          '❌ Request denied',
+          `Your request for **${title}** was not approved.`
+        );
+
   try {
     const user = await client.users.fetch(discordUserId);
-    await user.send({
-      embeds: [
-        infoEmbed(
-          '✅ Request approved',
-          `Your request for **${request?.audiobook.title}** has been approved and is now being processed.`
-        ),
-      ],
-    });
+    await user.send({ embeds: [embed] });
   } catch (error) {
-    logger.warn('Could not DM requester about approval', {
+    logger.warn('Could not DM requester about the decision', {
       requestId,
       error: error instanceof Error ? error.message : String(error),
     });
