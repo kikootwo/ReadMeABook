@@ -46,23 +46,30 @@ export async function PUT(request: NextRequest) {
           { key: DISCORD_CONFIG_KEYS.deletePermission, value: asDeletePermission(deletePermission) },
         ];
 
-        for (const { key, value } of plainUpdates) {
-          await prisma.configuration.upsert({
+        const writes = plainUpdates.map(({ key, value }) =>
+          prisma.configuration.upsert({
             where: { key },
             update: { value },
             create: { key, value, category: 'discord' },
-          });
-        }
+          })
+        );
 
         // Only update the bot token if a new (non-masked) value was supplied
         if (botToken && !botToken.startsWith('••••')) {
           const encrypted = getEncryptionService().encrypt(botToken.trim());
-          await prisma.configuration.upsert({
-            where: { key: DISCORD_CONFIG_KEYS.botToken },
-            update: { value: encrypted, encrypted: true },
-            create: { key: DISCORD_CONFIG_KEYS.botToken, value: encrypted, encrypted: true, category: 'discord' },
-          });
+          writes.push(
+            prisma.configuration.upsert({
+              where: { key: DISCORD_CONFIG_KEYS.botToken },
+              update: { value: encrypted, encrypted: true },
+              create: { key: DISCORD_CONFIG_KEYS.botToken, value: encrypted, encrypted: true, category: 'discord' },
+            })
+          );
         }
+
+        // All-or-nothing: run as one transaction so a mid-write failure cannot leave the config
+        // half old and half new (and then skip the bot restart below, stranding the bot on a
+        // configuration that was never fully persisted).
+        await prisma.$transaction(writes);
 
         // These upserts wrote straight to the DB, bypassing the config service's cache invalidation.
         // Clear the cached discord.* values so the restart below reads the freshly persisted config
