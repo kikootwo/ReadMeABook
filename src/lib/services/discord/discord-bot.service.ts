@@ -22,8 +22,14 @@ const logger = RMABLogger.create('Discord.Bot');
 
 class DiscordBotService {
   private client: Client | null = null;
-  private starting = false;
+  /** The in-flight start, so concurrent callers join it rather than racing past it. */
+  private starting: Promise<void> | null = null;
   private ready = false;
+  /**
+   * Bumped on every stop(). A start that is mid-login when the epoch moves has been superseded, and
+   * tears its own connection down instead of publishing a client built from stale config.
+   */
+  private generation = 0;
 
   /** True once the gateway client has logged in and emitted `ready`. */
   isReady(): boolean {
@@ -39,13 +45,25 @@ class DiscordBotService {
   }
 
   /**
-   * Start the bot if configured + enabled. Idempotent: repeated calls while running/starting are
-   * no-ops. Safe to call from /api/init on every container start.
+   * Start the bot if configured + enabled. Idempotent: a call while one is already running is a
+   * no-op, and a call while one is starting joins that start rather than returning early. Safe to
+   * call from /api/init on every container start.
    */
   async start(): Promise<void> {
-    if (this.client || this.starting) {
-      return;
+    if (this.client) return;
+    if (this.starting) return this.starting;
+
+    this.starting = this.doStart();
+    try {
+      await this.starting;
+    } finally {
+      this.starting = null;
     }
+  }
+
+  private async doStart(): Promise<void> {
+    // Snapshot the epoch: if stop() bumps it while we are logging in, this attempt is stale.
+    const epoch = this.generation;
 
     const config = await getDiscordConfig();
     if (!isDiscordBotConfigured(config)) {
@@ -53,7 +71,6 @@ class DiscordBotService {
       return;
     }
 
-    this.starting = true;
     try {
       // Lazy-load discord.js + the bot's router only once we know the bot is enabled.
       const { Client, Events, GatewayIntentBits, Partials } = await import('discord.js');
@@ -66,6 +83,8 @@ class DiscordBotService {
       });
 
       client.once(Events.ClientReady, async (readyClient) => {
+        // A superseded connection must not flip the service to ready.
+        if (this.generation !== epoch) return;
         this.ready = true;
         logger.info(`Discord bot logged in as ${readyClient.user.tag}`);
         await this.registerCommands(config, readyClient.user.id).catch((error) => {
@@ -95,6 +114,16 @@ class DiscordBotService {
       });
 
       await client.login(config.botToken!);
+
+      // stop()/restart() landed while login() was in flight, so this client was built from config
+      // that is already stale. Tear it down rather than publishing it; the caller that bumped the
+      // epoch is responsible for starting the replacement.
+      if (this.generation !== epoch) {
+        logger.info('Discarding superseded Discord gateway connection');
+        await client.destroy().catch(() => undefined);
+        return;
+      }
+
       this.client = client;
     } catch (error) {
       logger.error('Failed to start Discord bot', {
@@ -102,28 +131,41 @@ class DiscordBotService {
       });
       this.client = null;
       this.ready = false;
-    } finally {
-      this.starting = false;
     }
   }
 
   /** Stop the bot and release the gateway connection. */
   async stop(): Promise<void> {
+    // Bump first so any start mid-login sees the epoch move and discards itself.
+    this.generation++;
     this.ready = false;
-    if (this.client) {
+
+    // Detach before awaiting destroy() so a concurrent start never observes a half-torn-down client.
+    const client = this.client;
+    this.client = null;
+    if (client) {
       try {
-        await this.client.destroy();
+        await client.destroy();
       } catch (error) {
         logger.warn('Error while stopping Discord bot', {
           error: error instanceof Error ? error.message : String(error),
         });
       }
-      this.client = null;
     }
   }
 
-  /** Restart with the latest config (e.g. after a settings change). */
+  /**
+   * Restart with the latest config (e.g. after a settings change).
+   *
+   * Drains any in-flight start first. Without that, a start that is mid-login has not yet assigned
+   * this.client, so stop() would find nothing to destroy and the follow-up start() would join the
+   * doomed in-flight attempt -- leaving the admin's saved settings silently unapplied while the old
+   * connection stayed live.
+   */
   async restart(): Promise<void> {
+    if (this.starting) {
+      await this.starting.catch(() => undefined);
+    }
     await this.stop();
     await this.start();
   }
