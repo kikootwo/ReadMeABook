@@ -30,7 +30,17 @@ const ACTIVE_EBOOK_STATUSES = [
 const RETRYABLE_STATUSES = ['failed', 'awaiting_search'];
 
 export type CreateEbookRequestResult =
-  | { success: true; requestId: string; needsApproval: boolean; message: string }
+  | {
+      success: true;
+      requestId: string;
+      needsApproval: boolean;
+      message: string;
+      /**
+       * True when a new request row was created, false when an existing retryable request was
+       * re-driven. The fetch-ebook route maps this to 201 vs 200 to match its original behavior.
+       */
+      created: boolean;
+    }
   | {
       success: false;
       reason:
@@ -203,6 +213,7 @@ export async function createEbookRequestForUser(
           requestId: existingEbookRequest.id,
           needsApproval: false,
           message: 'E-book search retried',
+          created: false,
         };
       }
     }
@@ -268,6 +279,7 @@ export async function createEbookRequestForUser(
         requestId: ebookRequest.id,
         needsApproval: true,
         message: 'Ebook request submitted for admin approval',
+        created: true,
       };
     }
 
@@ -312,6 +324,7 @@ export async function createEbookRequestForUser(
       requestId: ebookRequest.id,
       needsApproval: false,
       message: 'E-book request created and search started',
+      created: true,
     };
   } catch (error) {
     logger.error('Failed to create ebook request', {

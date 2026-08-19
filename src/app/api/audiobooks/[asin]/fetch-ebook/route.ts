@@ -70,7 +70,9 @@ export async function POST(
           requestId: result.requestId,
           needsApproval: result.needsApproval,
         },
-        { status: 201 }
+        // 201 for a fresh request, 200 when an existing retryable request was re-driven, matching
+        // the original route's behavior before this logic moved into the shared service.
+        { status: result.created ? 201 : 200 }
       );
     } catch (error) {
       logger.error('Unexpected error', { error: error instanceof Error ? error.message : String(error) });
