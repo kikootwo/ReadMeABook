@@ -63,6 +63,12 @@ Allows admins to review and approve/deny user requests before they are processed
 - **Enqueue failure:** the claim runs before the job is enqueued, so a failed enqueue calls
   `releaseClaim()` to restore `awaiting_approval` (and the cleared `selectedTorrent`), gated on the
   status the claim set. The admin can simply retry; no `request_approved` notification is sent.
+- **Discord sync:** every successful decision calls `syncDiscordOnDecision()`, which rewrites the
+  Discord approval message to decided (removing its buttons), refreshes the requester's request
+  card, and DMs them the outcome. It lives in this service rather than the Discord button handler so
+  **all** surfaces converge — the Web UI Deny button and API-token decisions included. Gated on a
+  running bot, dynamically imported, and never throws. See
+  [discord-bot.md](../integrations/discord-bot.md).
 
 ## API Endpoints
 
@@ -385,6 +391,19 @@ value: 'true' | 'false' (string)
   had left the request in `awaiting_approval` on failure
 - Fix: `releaseClaim()` compensates on enqueue failure, restoring status and torrent
 - Files updated: `src/lib/services/request-approval.service.ts`, `tests/discord/request-approval.service.test.ts`
+
+**4. Web UI Decisions Left the Discord Approval Message Live**
+- Issue: Denying from the admin dashboard left the Discord embed's Approve/Deny buttons working, never refreshed the request card, and never notified the requester
+- Cause: the dashboard's Deny posts `action:'deny'` to the approve route, which runs
+  `processRequestApproval` and never calls `deleteRequest` — so hooking Discord into deletion alone
+  missed it entirely. The stale embed is what made approving an already-decided request reachable
+- Fix: `syncDiscordOnDecision()` in this service, fired on every success path from any surface; the
+  requester DM moved here from the Discord handler; stale clicks now reconcile the message from
+  current DB state instead of only greying the buttons
+- Files updated: `src/lib/services/request-approval.service.ts`,
+  `src/lib/services/discord/discord-cards.ts`,
+  `src/lib/services/discord/handlers/approval.handler.ts`,
+  `tests/discord/approval-decision-sync.test.ts`
 
 ## Related
 - [Admin Dashboard](../admin-dashboard.md) - Dashboard UI features

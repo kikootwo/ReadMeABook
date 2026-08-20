@@ -95,6 +95,23 @@ A scheduled `find_missing_ebooks` job (daily midnight, enabled by default) backs
 
 **Source:** Based on [kindle-epub-fix](https://github.com/innocenat/kindle-epub-fix)
 
+## Enablement Rule
+
+`isEbookRequestingEnabled()` ([ebook-request-creator.service.ts](../../src/lib/services/ebook-request-creator.service.ts))
+is the single source of truth for "can an e-book be requested at all": true when
+`ebook_annas_archive_enabled` **or** `ebook_indexer_search_enabled` is on, honouring the legacy
+`ebook_sidecar_enabled` key only when the newer Anna's Archive key has never been written.
+
+Shared by the request path (which rejects with `feature_disabled`) and the Discord `/request`
+command definitions, which omit the **E-book** type entirely when it returns false — so users are
+never offered a request type that cannot succeed. Saving the E-book Sidecar settings calls
+`refreshCommands()` so the choice appears/disappears without a bot restart.
+
+**Sidecar rule visibility:** an e-book request also requires the audiobook to already be in the
+library. The Web UI hides this by only showing "Fetch Ebook" on owned titles; Discord searches the
+whole Audible catalogue, so the e-book search modal and result dropdowns state the constraint up
+front. See [discord-bot.md](discord-bot.md).
+
 ## API
 
 ### POST /api/audiobooks/[asin]/fetch-ebook

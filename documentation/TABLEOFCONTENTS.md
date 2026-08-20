@@ -93,6 +93,9 @@
 - **Discord approval flow (role ping, Approve/Deny buttons)** → [integrations/discord-bot.md](integrations/discord-bot.md)
 - **Shared approval service (web + Discord)** → [admin-features/request-approval.md](admin-features/request-approval.md)
 - **Discord settings tab (bot token, channel/role resolve)** → [settings-pages.md](settings-pages.md)
+- **Discord decisions sync to embeds/cards/DMs (any surface)** → [admin-features/request-approval.md](admin-features/request-approval.md)
+- **Discord avatar cache (discordAvatarUrl)** → [integrations/discord-bot.md](integrations/discord-bot.md#user-mapping)
+- **Hiding the E-book request type / enablement rule** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#enablement-rule)
 
 ## Frontend Components
 - **Component catalog (cards, badges, forms)** → [frontend/components.md](frontend/components.md)

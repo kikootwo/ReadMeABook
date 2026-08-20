@@ -25,6 +25,7 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
   - `bookdate_onboarding_complete` (bool, default false) - Whether user has completed BookDate onboarding
 - **Discord integration:**
   - `discord_user_id` (string, unique, nullable) - Linked Discord account for slash-command requesting (null = not linked). See [integrations/discord-bot.md](../integrations/discord-bot.md)
+  - `discord_avatar_url` (string, nullable) - Cached Discord CDN avatar, refreshed from each interaction so admin surfaces can show a real avatar. Separate from `avatar_url` so a Plex/OIDC avatar is never overwritten; null = not linked or no custom Discord avatar
 - Indexes: `plex_id`, `role`, `discord_user_id`
 
 ### Audible_Cache
