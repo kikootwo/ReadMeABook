@@ -15,6 +15,7 @@ export interface WatchedAuthorItem {
   authorAsin: string;
   authorName: string;
   coverArtUrl: string | null;
+  includeBackCatalog: boolean;
   lastCheckedAt: string | null;
   createdAt: string;
 }
@@ -45,7 +46,7 @@ export function useAddWatchedAuthor() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const addAuthor = async (authorAsin: string, authorName: string, coverArtUrl?: string) => {
+  const addAuthor = async (authorAsin: string, authorName: string, coverArtUrl?: string, includeBackCatalog = false) => {
     if (!accessToken) throw new Error('Not authenticated');
 
     setIsLoading(true);
@@ -55,7 +56,7 @@ export function useAddWatchedAuthor() {
       const response = await fetchWithAuth('/api/user/watched-authors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ authorAsin, authorName, coverArtUrl }),
+        body: JSON.stringify({ authorAsin, authorName, coverArtUrl, includeBackCatalog }),
       });
 
       const data = await response.json();
@@ -78,6 +79,40 @@ export function useAddWatchedAuthor() {
   };
 
   return { addAuthor, isLoading, error };
+}
+
+export function useUpdateWatchedAuthor() {
+  const { accessToken } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const updateAuthor = async (id: string, includeBackCatalog: boolean) => {
+    if (!accessToken) throw new Error('Not authenticated');
+
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await fetchWithAuth(`/api/user/watched-authors/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ includeBackCatalog }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || data.error || 'Failed to update watched author');
+      }
+      mutate((key) => typeof key === 'string' && key.includes('/api/user/watched-authors'));
+      return data.author as WatchedAuthorItem;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return { updateAuthor, isLoading, error };
 }
 
 export function useDeleteWatchedAuthor() {

@@ -244,7 +244,7 @@ async function processAllWatchedAuthors(
 
 async function processAuthorForUsers(
   authorAsin: string,
-  subscriptions: Array<{ id: string; authorName: string; user: { id: string; plexUsername: string } }>,
+  subscriptions: Array<{ id: string; authorName: string; createdAt: Date; includeBackCatalog: boolean; user: { id: string; plexUsername: string } }>,
   log: ReturnType<typeof RMABLogger.forJob> | ReturnType<typeof RMABLogger.create>,
   stats: WatchedListsSyncStats
 ): Promise<void> {
@@ -290,12 +290,19 @@ async function processAuthorForUsers(
     persistDedupGroups(groups).catch(() => {});
   }
 
-  // For each user watching this author, create requests for new books
   for (const subscription of subscriptions) {
+    const followDate = toLocalDateKey(subscription.createdAt);
+    const books = subscription.includeBackCatalog
+      ? dedupedBooks
+      : dedupedBooks.filter((book) => {
+          const releaseDate = book.releaseDate?.slice(0, 10);
+          return !!releaseDate && /^\d{4}-\d{2}-\d{2}$/.test(releaseDate) && releaseDate >= followDate;
+        });
+
     await createRequestsForUser(
       subscription.user.id,
       subscription.user.plexUsername,
-      dedupedBooks,
+      books,
       log,
       stats
     );
@@ -308,6 +315,13 @@ async function processAuthorForUsers(
   }
 
   stats.authorsChecked++;
+}
+
+function toLocalDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 // ---------------------------------------------------------------------------

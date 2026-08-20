@@ -111,6 +111,7 @@ export function WatchAuthorButton({ authorAsin, authorName, coverArtUrl }: Watch
   const { deleteAuthor, isLoading: isDeleting } = useDeleteWatchedAuthor();
   const [error, setError] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [includeBackCatalog, setIncludeBackCatalog] = useState(false);
 
   const watchedEntry = authors.find((a) => a.authorAsin === authorAsin);
   const isWatching = !!watchedEntry;
@@ -126,7 +127,7 @@ export function WatchAuthorButton({ authorAsin, authorName, coverArtUrl }: Watch
         setError(err instanceof Error ? err.message : 'Failed');
       }
     } else {
-      // Show confirmation before watching
+      setIncludeBackCatalog(false);
       setShowConfirm(true);
     }
   };
@@ -135,7 +136,7 @@ export function WatchAuthorButton({ authorAsin, authorName, coverArtUrl }: Watch
     setShowConfirm(false);
     setError(null);
     try {
-      await addAuthor(authorAsin, authorName, coverArtUrl);
+      await addAuthor(authorAsin, authorName, coverArtUrl, includeBackCatalog);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed');
     }
@@ -177,7 +178,35 @@ export function WatchAuthorButton({ authorAsin, authorName, coverArtUrl }: Watch
         onClose={() => setShowConfirm(false)}
         onConfirm={handleConfirmWatch}
         title={`Watch "${authorName}"?`}
-        message={`This will request all books by "${authorName}" that aren't already in your library, and automatically request new releases. Continue?`}
+        message={(
+          <div className="space-y-3">
+            <p>Choose which books to request automatically.</p>
+            <label className="flex gap-3 cursor-pointer">
+              <input
+                type="radio"
+                name="author-watch-mode"
+                checked={!includeBackCatalog}
+                onChange={() => setIncludeBackCatalog(false)}
+              />
+              <span>
+                <span className="block font-medium text-gray-900 dark:text-white">New releases only</span>
+                <span className="text-sm">Books released from today forward.</span>
+              </span>
+            </label>
+            <label className="flex gap-3 cursor-pointer">
+              <input
+                type="radio"
+                name="author-watch-mode"
+                checked={includeBackCatalog}
+                onChange={() => setIncludeBackCatalog(true)}
+              />
+              <span>
+                <span className="block font-medium text-gray-900 dark:text-white">Entire catalog</span>
+                <span className="text-sm">Existing books plus future releases.</span>
+              </span>
+            </label>
+          </div>
+        )}
         confirmText="Watch"
         isLoading={isAdding}
       />

@@ -708,6 +708,7 @@ model WatchedAuthor {
   authorAsin    String    @map("author_asin")
   authorName    String    @map("author_name")
   coverArtUrl   String?   @map("cover_art_url") @db.Text
+  includeBackCatalog Boolean @default(false) @map("include_back_catalog")
   lastCheckedAt DateTime? @map("last_checked_at")
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")

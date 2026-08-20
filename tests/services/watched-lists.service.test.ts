@@ -195,6 +195,8 @@ describe('processWatchedLists', () => {
         authorAsin: 'B001AUTH001',
         authorName: 'Author A',
         coverArtUrl: null,
+        includeBackCatalog: true,
+        createdAt: new Date(2026, 0, 15, 12),
         lastCheckedAt: null,
         user: { id: 'user-1', plexUsername: 'testuser' },
       },
@@ -227,6 +229,43 @@ describe('processWatchedLists', () => {
     expect(stats.authorsChecked).toBe(1);
     expect(stats.requestsCreated).toBe(1);
     expect(mockSearchByAuthorAsin).toHaveBeenCalledWith('Author A', 'B001AUTH001', 1);
+  });
+
+  it('only requests releases on or after the follow date by default', async () => {
+    const followedAt = new Date(2026, 0, 15, 12);
+    prismaMock.watchedSeries.findMany.mockResolvedValue([]);
+    prismaMock.watchedAuthor.findMany.mockResolvedValue([
+      {
+        id: 'wa-1',
+        userId: 'user-1',
+        authorAsin: 'B001AUTH001',
+        authorName: 'Author A',
+        coverArtUrl: null,
+        includeBackCatalog: false,
+        createdAt: followedAt,
+        lastCheckedAt: null,
+        user: { id: 'user-1', plexUsername: 'testuser' },
+      },
+    ]);
+    prismaMock.watchedAuthor.update.mockResolvedValue({});
+
+    const books = [
+      { asin: 'OLD0000001', title: 'Old Book', author: 'Author A', releaseDate: '2026-01-14' },
+      { asin: 'NEW0000001', title: 'New Book', author: 'Author A', releaseDate: '2026-01-15' },
+      { asin: 'UND0000001', title: 'Undated Book', author: 'Author A' },
+    ];
+    mockSearchByAuthorAsin.mockResolvedValueOnce({ books, hasMore: false, page: 1, totalResults: 3 });
+    mockDeduplicateAndCollectGroups.mockReturnValue({ books, groups: [] });
+    mockCreateRequestForUser.mockResolvedValue({ success: true, request: {} });
+
+    const { processWatchedLists } = await import('@/lib/services/watched-lists.service');
+    await processWatchedLists();
+
+    expect(mockCreateRequestForUser).toHaveBeenCalledTimes(1);
+    expect(mockCreateRequestForUser).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({ asin: 'NEW0000001' })
+    );
   });
 
   it('counts duplicate/already-available books as skippedExisting', async () => {
@@ -485,6 +524,8 @@ describe('processWatchedLists', () => {
         authorAsin: 'B001AUTH001',
         authorName: 'Target Author',
         coverArtUrl: null,
+        includeBackCatalog: true,
+        createdAt: new Date(2026, 0, 15, 12),
         lastCheckedAt: null,
         user: { id: 'user-1', plexUsername: 'testuser' },
       },
