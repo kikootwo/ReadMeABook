@@ -80,18 +80,23 @@ export function buildApprovalMessage(params: {
 export function applyApprovalDecision(
   existing: Embed,
   action: 'approve' | 'deny',
-  decidedByDiscordId: string
+  decidedByDiscordId: string | null
 ): EmbedBuilder {
   const approved = action === 'approve';
-  // Mentions don't render in embed titles, so the acting user goes in a field value as <@id>.
-  return EmbedBuilder.from(existing)
+  const builder = EmbedBuilder.from(existing)
     .setColor(approved ? COLOR.success : COLOR.error)
-    .setTitle(approved ? '✅ Request Approved' : '🚫 Request Denied')
-    .addFields({
-      name: approved ? 'Approved by' : 'Denied by',
-      value: `<@${decidedByDiscordId}>`,
-      inline: true,
-    });
+    .setTitle(approved ? '✅ Request Approved' : '🚫 Request Denied');
+
+  // A decision made from the Web UI or an API token has no Discord actor, and the RMAB user may
+  // have no linked account, so omit the field rather than rendering a broken `<@null>` mention.
+  // Mentions don't render in embed titles, so the acting user goes in a field value as <@id>.
+  return decidedByDiscordId
+    ? builder.addFields({
+        name: approved ? 'Approved by' : 'Denied by',
+        value: `<@${decidedByDiscordId}>`,
+        inline: true,
+      })
+    : builder;
 }
 
 /**

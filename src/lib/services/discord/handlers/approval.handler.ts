@@ -20,8 +20,12 @@ import { deleteRequest } from '@/lib/services/request-delete.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { getDiscordConfig, getApprovalChannelId } from '../discord-config';
 import { resolveRmabUser } from '../discord-user.resolver';
-import { applyApprovalDecision, buildApprovalMessage, errorEmbed, infoEmbed } from '../embeds';
-import { editRequestCards, recordApprovalMessage } from '../discord-cards';
+import { buildApprovalMessage, errorEmbed } from '../embeds';
+import {
+  editRequestCards,
+  recordApprovalMessage,
+  reconcileApprovalMessage,
+} from '../discord-cards';
 import { actorMeta } from '../discord-helpers';
 
 const logger = RMABLogger.create('Discord.Approval');
@@ -143,7 +147,10 @@ export async function handleApprovalButton(
   });
 
   if (!result.success) {
-    // Stale/invalid: lock the buttons and note why
+    // Stale/invalid: re-render the message from the request's current persisted state. Merely
+    // disabling the buttons left the embed reading "Pending" for a request that was already
+    // decided or cancelled elsewhere, which looked like nothing had happened at all.
+    await reconcileApprovalMessage(requestId).catch(() => undefined);
     await interaction.message
       .edit({ components: [disabledDecisionRow()] })
       .catch(() => undefined);
@@ -160,29 +167,15 @@ export async function handleApprovalButton(
     return;
   }
 
-  // Lock the original approval message: rewrite the embed title to reflect the decision (preserving
-  // the book detail fields) and disable the buttons.
-  const existing = interaction.message.embeds[0];
-  await interaction.message
-    .edit({
-      embeds: existing ? [applyApprovalDecision(existing, action, interaction.user.id)] : undefined,
-      components: [disabledDecisionRow()],
-    })
-    .catch(() => undefined);
-
+  // The approval message rewrite, card refresh, and requester DM all happen inside
+  // processRequestApproval now, so every surface (Web UI, API token, buttons) converges on the same
+  // result. Nothing message-specific is done here.
   const pastTense = action === 'approve' ? 'approved' : 'denied';
   logger.info(`Request ${pastTense} via Discord`, {
     ...actorMeta(interaction.user, rmabUserId),
     requestId,
     action,
   });
-
-  // Reflect the decision on the requester's live request card (best-effort).
-  await editRequestCards(requestId).catch(() => undefined);
-
-  // Notify the requester via DM on either outcome (best-effort). A plain deny with request cards
-  // disabled would otherwise be completely silent for them.
-  await notifyRequester(interaction.client, requestId, action).catch(() => undefined);
 }
 
 /**
@@ -255,42 +248,3 @@ export async function handleCancelRequestButton(
   // (Web UI, API token, /status, /delete) converges on the same cleanup.
 }
 
-/** DM the original requester with the decision on their request (best-effort). */
-async function notifyRequester(
-  client: Client,
-  requestId: string,
-  action: ApprovalAction
-): Promise<void> {
-  const request = await prisma.request.findUnique({
-    where: { id: requestId },
-    include: {
-      audiobook: { select: { title: true } },
-      user: { select: { discordUserId: true } },
-    },
-  });
-
-  const discordUserId = request?.user.discordUserId;
-  if (!discordUserId) return;
-
-  const title = request?.audiobook.title;
-  const embed =
-    action === 'approve'
-      ? infoEmbed(
-          '✅ Request approved',
-          `Your request for **${title}** has been approved and is now being processed.`
-        )
-      : infoEmbed(
-          '❌ Request denied',
-          `Your request for **${title}** was not approved.`
-        );
-
-  try {
-    const user = await client.users.fetch(discordUserId);
-    await user.send({ embeds: [embed] });
-  } catch (error) {
-    logger.warn('Could not DM requester about the decision', {
-      requestId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}

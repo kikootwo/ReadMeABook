@@ -43,7 +43,10 @@ async function syncDiscordOnDelete(
 ): Promise<void> {
   try {
     const { getDiscordBotService } = await import('./discord/discord-bot.service');
-    if (!getDiscordBotService().getClient()) return;
+    if (!getDiscordBotService().getClient()) {
+      logger.info(`Skipping Discord sync for deleted request ${requestId}: bot not running`);
+      return;
+    }
 
     const { editRequestCards, cancelApprovalMessage } = await import('./discord/discord-cards');
 

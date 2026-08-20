@@ -91,6 +91,58 @@ async function releaseClaim(
 }
 
 /**
+ * Rewrite the Discord surfaces after an approve/deny: mark the approval message decided (dropping
+ * its Approve/Deny buttons), refresh the requester's live request card, and DM them the outcome.
+ *
+ * Lives here rather than in the Discord button handler so every surface converges -- the Web UI
+ * Deny button and API-token decisions previously left the approval embed live and notified nobody,
+ * which is what made a stale embed clickable long after the decision was made.
+ *
+ * Gated on a running bot and dynamically imported so discord.js stays unloaded when the bot is
+ * disabled. Never throws: a Discord failure must not fail the decision.
+ */
+async function syncDiscordOnDecision(
+  requestId: string,
+  action: ApprovalAction,
+  adminUserId: string
+): Promise<void> {
+  try {
+    const { getDiscordBotService } = await import('./discord/discord-bot.service');
+    if (!getDiscordBotService().getClient()) {
+      logger.info('Skipping Discord decision sync: bot not running', { requestId });
+      return;
+    }
+
+    // The Discord handler passes `discord:<id>` when an admin-role holder has no linked RMAB
+    // account; otherwise resolve the deciding user's linked Discord account. Either may be absent,
+    // in which case the decision renders without a "by" mention.
+    let mentionId: string | null = null;
+    if (adminUserId.startsWith('discord:')) {
+      mentionId = adminUserId.slice('discord:'.length);
+    } else {
+      const actor = await prisma.user.findUnique({
+        where: { id: adminUserId },
+        select: { discordUserId: true },
+      });
+      mentionId = actor?.discordUserId ?? null;
+    }
+
+    const { applyDecisionToApprovalMessage, editRequestCards, notifyRequesterOfDecision } =
+      await import('./discord/discord-cards');
+
+    await applyDecisionToApprovalMessage(requestId, action, mentionId);
+    await editRequestCards(requestId);
+    await notifyRequesterOfDecision(requestId, action);
+  } catch (error) {
+    logger.warn('Could not sync Discord surfaces for decision', {
+      requestId,
+      action,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * Process an approve/deny action for a request awaiting approval.
  *
  * Behavior mirrors the original inline route logic exactly:
@@ -261,6 +313,8 @@ export async function processRequestApproval(
           torrentSource,
         });
 
+        await syncDiscordOnDecision(id, 'approve', adminUserId);
+
         return {
           success: true,
           message: adminSelectedTorrent
@@ -334,6 +388,8 @@ export async function processRequestApproval(
           type: existingRequest.type,
         });
 
+        await syncDiscordOnDecision(id, 'approve', adminUserId);
+
         return {
           success: true,
           message: isEbookRequest
@@ -361,6 +417,8 @@ export async function processRequestApproval(
         audiobookTitle: updatedRequest.audiobook.title,
         adminId: adminUserId,
       });
+
+      await syncDiscordOnDecision(id, 'deny', adminUserId);
 
       return {
         success: true,

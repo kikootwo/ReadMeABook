@@ -19,7 +19,13 @@ import { RMABLogger } from '@/lib/utils/logger';
 import type { MediaType } from './custom-id';
 import { getDiscordConfig } from './discord-config';
 import { getDiscordBotService } from './discord-bot.service';
-import { applyApprovalCancellation, buildRequestCard, rebuildCardForStatus } from './embeds';
+import {
+  applyApprovalCancellation,
+  applyApprovalDecision,
+  buildRequestCard,
+  infoEmbed,
+  rebuildCardForStatus,
+} from './embeds';
 
 const logger = RMABLogger.create('Discord.Cards');
 
@@ -174,16 +180,25 @@ export async function postRequestCards(
  */
 export async function editRequestCards(requestId: string, statusOverride?: string): Promise<void> {
   const client = getDiscordBotService().getClient();
-  if (!client) return;
+  if (!client) {
+    logger.info('Skipping request card update: bot not running', { requestId });
+    return;
+  }
 
   const request = await prisma.request.findUnique({
     where: { id: requestId },
     select: { status: true, discordCards: true },
   });
-  if (!request) return;
+  if (!request) {
+    logger.info('Skipping request card update: request not found', { requestId });
+    return;
+  }
 
   const refs = parseCardRefs(request.discordCards);
-  if (refs.length === 0) return;
+  if (refs.length === 0) {
+    logger.info('Skipping request card update: no cards recorded', { requestId });
+    return;
+  }
 
   const status = statusOverride ?? request.status;
 
@@ -197,6 +212,7 @@ export async function editRequestCards(requestId: string, statusOverride?: strin
       if (!existing) continue;
       const { embed, components } = rebuildCardForStatus(existing, status, requestId);
       await message.edit({ embeds: [embed], components });
+      logger.info('Request card updated', { requestId, kind: ref.kind, status });
     } catch (error) {
       logger.warn('Could not update request card', {
         requestId,
@@ -217,14 +233,20 @@ export async function cancelApprovalMessage(
   cancelledByDiscordId: string | null
 ): Promise<void> {
   const client = getDiscordBotService().getClient();
-  if (!client) return;
+  if (!client) {
+    logger.info('Skipping approval message cancel: bot not running', { requestId });
+    return;
+  }
 
   const request = await prisma.request.findUnique({
     where: { id: requestId },
     select: { discordCards: true },
   });
   const ref = parseCardRefs(request?.discordCards).find((r) => r.kind === 'approval');
-  if (!ref) return;
+  if (!ref) {
+    logger.info('Skipping approval message cancel: no approval message recorded', { requestId });
+    return;
+  }
 
   try {
     const channel = await client.channels.fetch(ref.channelId);
@@ -236,10 +258,134 @@ export async function cancelApprovalMessage(
       embeds: [applyApprovalCancellation(existing, cancelledByDiscordId)],
       components: [],
     });
+    logger.info('Approval message marked cancelled', { requestId });
   } catch (error) {
     logger.warn('Could not update approval message on cancel', {
       requestId,
       error: error instanceof Error ? error.message : String(error),
     });
+  }
+}
+
+/**
+ * Rewrite the admin approval message to reflect a decision (approve/deny) and drop the Approve/Deny
+ * buttons. Works from the stored message ref rather than an interaction, so a decision made in the
+ * Web UI or via an API token updates Discord exactly like a button click does.
+ *
+ * Best-effort; logs why it skipped rather than failing silently.
+ */
+export async function applyDecisionToApprovalMessage(
+  requestId: string,
+  action: 'approve' | 'deny',
+  decidedByDiscordId: string | null
+): Promise<void> {
+  const client = getDiscordBotService().getClient();
+  if (!client) {
+    logger.info('Skipping approval message decision: bot not running', { requestId });
+    return;
+  }
+
+  const request = await prisma.request.findUnique({
+    where: { id: requestId },
+    select: { discordCards: true },
+  });
+  const ref = parseCardRefs(request?.discordCards).find((r) => r.kind === 'approval');
+  if (!ref) {
+    logger.info('Skipping approval message decision: no approval message recorded', { requestId });
+    return;
+  }
+
+  try {
+    const channel = await client.channels.fetch(ref.channelId);
+    if (!channel || !channel.isTextBased()) return;
+    const message = await channel.messages.fetch(ref.messageId);
+    const existing = message.embeds[0];
+    if (!existing) return;
+    await message.edit({
+      embeds: [applyApprovalDecision(existing, action, decidedByDiscordId)],
+      components: [],
+    });
+    logger.info('Approval message marked decided', { requestId, action });
+  } catch (error) {
+    logger.warn('Could not update approval message on decision', {
+      requestId,
+      action,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * DM the original requester the outcome of their request. Previously this lived in the Discord
+ * button handler, so a decision made in the Web UI notified nobody.
+ */
+export async function notifyRequesterOfDecision(
+  requestId: string,
+  action: 'approve' | 'deny'
+): Promise<void> {
+  const client = getDiscordBotService().getClient();
+  if (!client) {
+    logger.info('Skipping requester DM: bot not running', { requestId });
+    return;
+  }
+
+  const request = await prisma.request.findUnique({
+    where: { id: requestId },
+    include: {
+      audiobook: { select: { title: true } },
+      user: { select: { discordUserId: true } },
+    },
+  });
+
+  const discordUserId = request?.user.discordUserId;
+  if (!discordUserId) {
+    logger.info('Skipping requester DM: requester has no linked Discord account', { requestId });
+    return;
+  }
+
+  const title = request?.audiobook.title;
+  const embed =
+    action === 'approve'
+      ? infoEmbed(
+          '✅ Request approved',
+          `Your request for **${title}** has been approved and is now being processed.`
+        )
+      : infoEmbed('❌ Request denied', `Your request for **${title}** was not approved.`);
+
+  try {
+    const user = await client.users.fetch(discordUserId);
+    await user.send({ embeds: [embed] });
+    logger.info('Requester notified of decision', { requestId, action });
+  } catch (error) {
+    logger.warn('Could not DM requester about the decision', {
+      requestId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Re-render the approval message from the request's *current* persisted state. Used when a button
+ * click loses a race (already decided, or cancelled): rather than leaving the embed reading
+ * "Pending" with merely greyed-out buttons, bring it in line with reality.
+ */
+export async function reconcileApprovalMessage(requestId: string): Promise<void> {
+  const request = await prisma.request.findUnique({
+    where: { id: requestId },
+    select: { status: true, deletedAt: true },
+  });
+  if (!request) return;
+
+  if (request.deletedAt) {
+    await cancelApprovalMessage(requestId, null);
+    return;
+  }
+  if (request.status === 'denied') {
+    await applyDecisionToApprovalMessage(requestId, 'deny', null);
+    return;
+  }
+  if (request.status !== 'awaiting_approval') {
+    // pending / downloading / onwards all mean it was approved.
+    await applyDecisionToApprovalMessage(requestId, 'approve', null);
   }
 }
