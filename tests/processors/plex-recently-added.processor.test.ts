@@ -46,6 +46,8 @@ vi.mock('@/lib/utils/audiobook-matcher', () => ({
 vi.mock('@/lib/services/audiobookshelf/api', () => ({
   triggerABSItemMatch: vi.fn(),
   getABSItem: vi.fn(),
+  addABSItemTags: vi.fn(() => Promise.resolve()),
+  formatRequesterTag: (username: string) => `req:${username.toLowerCase()}`,
 }));
 
 vi.mock('@/lib/services/thumbnail-cache.service', () => ({
@@ -266,6 +268,71 @@ describe('processPlexRecentlyAddedCheck', () => {
     );
     // Should NOT trigger metadata match - items already have metadata from ABS
     expect(absApi.triggerABSItemMatch).not.toHaveBeenCalled();
+  });
+
+  it('tags the matched ABS item with the requester when tag_requester is enabled', async () => {
+    const matcher = await import('@/lib/utils/audiobook-matcher');
+    const absApi = await import('@/lib/services/audiobookshelf/api');
+
+    configMock.getBackendMode.mockResolvedValue('audiobookshelf');
+    configMock.getMany.mockResolvedValue({
+      'audiobookshelf.server_url': 'http://abs',
+      'audiobookshelf.api_token': 'token',
+      'audiobookshelf.library_id': 'abs-lib',
+    });
+    // Library ID lookup + tag_requester flag
+    configMock.get.mockImplementation(async (key: string) =>
+      key === 'audiobookshelf.tag_requester' ? 'true' : 'abs-lib'
+    );
+
+    libraryServiceMock.getCoverCachingParams.mockResolvedValue({
+      backendBaseUrl: 'http://abs',
+      authToken: 'token',
+      backendMode: 'audiobookshelf',
+    });
+    thumbnailCacheServiceMock.cacheLibraryThumbnail.mockResolvedValue('/app/cache/library/test.jpg');
+
+    libraryServiceMock.getRecentlyAdded.mockResolvedValue([
+      {
+        id: 'abs-1',
+        externalId: 'abs-item-1',
+        title: 'New ABS Item',
+        author: 'Author A',
+        asin: 'ASIN-ABS',
+        addedAt: new Date(),
+      },
+    ]);
+    prismaMock.plexLibrary.findUnique.mockResolvedValue(null);
+    prismaMock.plexLibrary.create.mockResolvedValue({});
+
+    prismaMock.request.findMany.mockResolvedValue([
+      {
+        id: 'req-1',
+        status: 'downloaded',
+        audiobook: {
+          id: 'ab-1',
+          title: 'Match Me',
+          author: 'Author A',
+          narrator: 'Narrator A',
+          audibleAsin: 'ASIN-ABS',
+        },
+        user: { plexUsername: 'guggs' },
+      },
+    ] as any);
+
+    (matcher.findPlexMatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      plexGuid: 'abs-item-1',
+      plexRatingKey: 'rating-abs',
+      title: 'Match Me',
+      author: 'Author A',
+    });
+    prismaMock.audiobook.update.mockResolvedValue({});
+    prismaMock.request.update.mockResolvedValue({});
+
+    const { processPlexRecentlyAddedCheck } = await import('@/lib/processors/plex-recently-added.processor');
+    await processPlexRecentlyAddedCheck({ jobId: 'job-tag' });
+
+    expect(absApi.addABSItemTags).toHaveBeenCalledWith('abs-item-1', ['req:guggs']);
   });
 });
 

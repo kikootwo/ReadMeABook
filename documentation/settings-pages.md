@@ -222,6 +222,20 @@ src/app/admin/settings/
 - When disabled: User relies on media server's filesystem watcher or manual scans
 - Error handling: Scan failures logged but don't fail organize job (graceful degradation)
 
+## Requester Tagging (Audiobookshelf only)
+
+**Purpose:** Tag each matched ABS item with `req:<username>` so admins can scope per-user library access by tag. See: [features/requester-tags.md](features/requester-tags.md).
+
+**Configuration:**
+- Key: `audiobookshelf.tag_requester` (boolean, default: false)
+- UI: Checkbox in Audiobookshelf settings section (Library tab), below the scan-trigger toggle
+
+**Behavior:**
+- At match time (`scan-plex.processor.ts`), when a request flips to `available` and ABS item ID + username are present, RMAB merges `req:<username>` into the item's `media.tags` (best-effort, never fails the scan).
+- Tag format: `req:` + username lowercased, trimmed, spaces→`_`, chars outside `[a-z0-9_-]` stripped.
+- Merge (not overwrite): GET current tags, union, PATCH back — preserves manual tags and other requesters' tags.
+- Toggling false→true enqueues a one-time `backfill_requester_tags` job that tags existing available requests.
+
 ## Plex Format Coercion
 
 **Purpose:** Rename audiobook files to Plex-recognized extensions (`.mp4` → `.m4b`, single-file `.m4a` → `.m4b`) before the library scan. Prevents Plex silently ignoring `.mp4` audiobooks. Rename-only — no transcoding. See: [phase3/file-organization.md](phase3/file-organization.md#plex-format-coercion).

@@ -31,6 +31,10 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
     const backendMode = await configService.getBackendMode();
     const thumbnailCacheService = getThumbnailCacheService();
 
+    // Whether to tag matched ABS items with the requester's `req:<username>` tag.
+    // Read once per scan; only meaningful for the Audiobookshelf backend.
+    const tagRequester = (await configService.get('audiobookshelf.tag_requester')) === 'true';
+
     logger.info(`Backend mode: ${backendMode}`);
 
     // 2. Get configured library ID
@@ -522,6 +526,18 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
           });
 
           matchedCount++;
+
+          // Tag the matched ABS item with the requester's username (best-effort).
+          // Only for the ABS backend, when enabled, and when we have both an item
+          // ID and a username. Tags are merged so other tags are preserved.
+          const username = request.user.plexUsername;
+          if (tagRequester && backendMode === 'audiobookshelf' && match.plexGuid && username) {
+            const { addABSItemTags, formatRequesterTag } = await import('../services/audiobookshelf/api');
+            const tag = formatRequesterTag(username);
+            if (tag) {
+              await addABSItemTags(match.plexGuid, [tag]);
+            }
+          }
 
           // Note: Audiobookshelf metadata matching is handled in the file hash phase above
           // Items without ASIN get file-hash-matched ASIN, items with ASIN already have correct metadata
