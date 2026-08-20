@@ -4,6 +4,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
+import fs from 'fs';
 import { RMAB_USER_AGENT } from '@/lib/utils/user-agent';
 import https from 'https';
 import FormData from 'form-data';
@@ -617,8 +618,38 @@ export class SABnzbdService implements IDownloadClient {
       return this.mapQueueItemToNZBInfo(queueItem);
     }
 
-    // Not in queue, check history
-    const history = await this.getHistory(100);
+    // Direct NZO ID history query (bypasses 100-item history limit)
+    try {
+      const response = await this.client.get('/api', {
+        params: {
+          mode: 'history',
+          nzo_ids: nzbId,
+          output: 'json',
+          apikey: this.apiKey,
+        },
+      });
+
+      const slots = response?.data?.history?.slots || [];
+      if (slots.length > 0) {
+        const historyItem: HistoryItem = {
+          nzbId: slots[0].nzo_id,
+          name: slots[0].name,
+          category: slots[0].category || '',
+          status: slots[0].status,
+          bytes: slots[0].bytes || '0',
+          failMessage: slots[0].fail_message || '',
+          storage: slots[0].storage || '',
+          completedTimestamp: slots[0].completed || '0',
+          downloadTime: slots[0].download_time || '0',
+        };
+        return this.mapHistoryItemToNZBInfo(historyItem);
+      }
+    } catch {
+      // Fall through to deep history query
+    }
+
+    // Deep history fallback search (500 limit)
+    const history = await this.getHistory(500);
     const historyItem = history.find(item => item.nzbId === nzbId);
 
     if (historyItem) {
@@ -668,7 +699,7 @@ export class SABnzbdService implements IDownloadClient {
       },
     });
 
-    const slots = response.data?.history?.slots || [];
+    const slots = response?.data?.history?.slots || [];
     return slots.map((slot: any) => ({
       nzbId: slot.nzo_id,
       name: slot.name,
@@ -961,8 +992,30 @@ export class SABnzbdService implements IDownloadClient {
    * Map history item to NZBInfo
    */
   private mapHistoryItemToNZBInfo(historyItem: HistoryItem): NZBInfo {
-    const isCompleted = historyItem.status.toLowerCase().includes('completed');
-    const isFailed = historyItem.status.toLowerCase().includes('failed');
+    const rawStatus = (historyItem.status || '').toLowerCase();
+    const failMsg = (historyItem.failMessage || '').toLowerCase();
+    const isDuplicate = failMsg.includes('duplicate') || rawStatus.includes('duplicate');
+
+    let isCompleted = rawStatus.includes('completed');
+    let isFailed = rawStatus.includes('failed');
+
+    // If SABnzbd marked it as Duplicate NZB, check if storage path actually exists on disk and contains files
+    if (isDuplicate && historyItem.storage) {
+      try {
+        if (fs.existsSync(historyItem.storage)) {
+          const files = fs.readdirSync(historyItem.storage);
+          if (files.length > 0) {
+            isCompleted = true;
+            isFailed = false;
+            logger.info(`SABnzbd slot "${historyItem.name}" marked as Duplicate NZB, but target storage exists with ${files.length} file(s). Mapping to completed.`, {
+              storage: historyItem.storage,
+            });
+          }
+        }
+      } catch {
+        // Fall back to original status if disk check throws
+      }
+    }
 
     return {
       nzbId: historyItem.nzbId,
