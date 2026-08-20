@@ -170,13 +170,36 @@ class DiscordBotService {
     await this.start();
   }
 
+  /**
+   * Re-register the slash commands against the live client, without restarting the gateway. Used
+   * when a setting that shapes the command list changes (e.g. enabling/disabling e-book sources
+   * adds or removes the E-book request type). No-op when the bot isn't running.
+   */
+  async refreshCommands(): Promise<void> {
+    const client = this.getClient();
+    if (!client?.user) return;
+
+    const config = await getDiscordConfig();
+    if (!isDiscordBotConfigured(config)) return;
+
+    await this.registerCommands(config, client.user.id).catch((error) => {
+      logger.error('Failed to refresh slash commands', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
   /** Register the slash commands for the configured guild (instant propagation; idempotent upsert). */
   private async registerCommands(config: DiscordConfig, applicationId: string): Promise<void> {
     if (!config.botToken || !config.guildId) return;
 
     const { REST, Routes } = await import('discord.js');
     const { buildCommandDefinitions } = await import('./command-definitions');
-    const commands = buildCommandDefinitions(config.deletePermission);
+    const { isEbookRequestingEnabled } = await import('../ebook-request-creator.service');
+    const commands = buildCommandDefinitions(
+      config.deletePermission,
+      await isEbookRequestingEnabled()
+    );
     const rest = new REST({ version: '10' }).setToken(config.botToken);
     await rest.put(Routes.applicationGuildCommands(applicationId, config.guildId), {
       body: commands,

@@ -55,6 +55,29 @@ export type CreateEbookRequestResult =
     };
 
 /**
+ * Whether e-book requesting is possible at all: true when at least one source (Anna's Archive or
+ * indexer search) is enabled. Honours the legacy `ebook_sidecar_enabled` key when the newer
+ * Anna's Archive key has never been written.
+ *
+ * Shared with the Discord command definitions so the `/request` type choices and the request path
+ * agree on one rule rather than drifting apart.
+ */
+export async function isEbookRequestingEnabled(): Promise<boolean> {
+  const [annasArchiveConfig, indexerSearchConfig, legacyConfig] = await Promise.all([
+    prisma.configuration.findUnique({ where: { key: 'ebook_annas_archive_enabled' } }),
+    prisma.configuration.findUnique({ where: { key: 'ebook_indexer_search_enabled' } }),
+    prisma.configuration.findUnique({ where: { key: 'ebook_sidecar_enabled' } }),
+  ]);
+
+  const isAnnasArchiveEnabled =
+    annasArchiveConfig?.value === 'true' ||
+    (annasArchiveConfig === null && legacyConfig?.value === 'true');
+  const isIndexerSearchEnabled = indexerSearchConfig?.value === 'true';
+
+  return isAnnasArchiveEnabled || isIndexerSearchEnabled;
+}
+
+/**
  * Create (or retry) an e-book request for the given ASIN on behalf of a user.
  * Mirrors POST /api/audiobooks/[asin]/fetch-ebook exactly.
  */
@@ -63,19 +86,8 @@ export async function createEbookRequestForUser(
   asin: string
 ): Promise<CreateEbookRequestResult> {
   try {
-    // Check which ebook sources are enabled
-    const [annasArchiveConfig, indexerSearchConfig, legacyConfig] = await Promise.all([
-      prisma.configuration.findUnique({ where: { key: 'ebook_annas_archive_enabled' } }),
-      prisma.configuration.findUnique({ where: { key: 'ebook_indexer_search_enabled' } }),
-      prisma.configuration.findUnique({ where: { key: 'ebook_sidecar_enabled' } }),
-    ]);
-
-    const isAnnasArchiveEnabled =
-      annasArchiveConfig?.value === 'true' ||
-      (annasArchiveConfig === null && legacyConfig?.value === 'true');
-    const isIndexerSearchEnabled = indexerSearchConfig?.value === 'true';
-
-    if (!isAnnasArchiveEnabled && !isIndexerSearchEnabled) {
+    // Check which ebook sources are enabled (shared with the Discord command definitions)
+    if (!(await isEbookRequestingEnabled())) {
       return {
         success: false,
         reason: 'feature_disabled',

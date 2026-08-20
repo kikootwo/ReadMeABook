@@ -41,6 +41,19 @@ const logger = RMABLogger.create('Discord.Request');
 
 const SEARCH_INPUT_ID = 'search_term';
 
+/**
+ * E-books are sidecars to an audiobook you already have, so a request is rejected unless the
+ * audiobook is already in the library. Discord's /request searches the whole Audible catalogue, so
+ * without this warning the constraint only surfaces after the user has picked a title.
+ */
+const EBOOK_SIDECAR_NOTE =
+  '\n\n📚 *E-books can only be requested for audiobooks already in the library.*';
+
+/** Body for the result dropdown, carrying the sidecar caveat for e-book searches. */
+function searchResultsBody(query: string, mediaType: MediaType): string {
+  return `Showing results for **${query}**.${mediaType === 'ebook' ? EBOOK_SIDECAR_NOTE : ''}`;
+}
+
 /** /request <type>: gate on account linkage, then open the search-term modal. */
 export async function handleRequestCommand(
   interaction: ChatInputCommandInteraction,
@@ -90,7 +103,7 @@ export async function handleRequestCommand(
 
       const row = buildSearchSelect(result.results, mediaType);
       await interaction.editReply({
-        embeds: [infoEmbed('Select a title', `Showing results for **${query}**.`)],
+        embeds: [infoEmbed('Select a title', searchResultsBody(query, mediaType))],
         components: [row],
       });
     } catch (error) {
@@ -112,7 +125,13 @@ export async function handleRequestCommand(
     .setLabel('Title, author, or keywords')
     .setStyle(TextInputStyle.Short)
     .setRequired(true)
-    .setMaxLength(200);
+    .setMaxLength(200)
+    // Modals have no description field, so the caveat rides on the placeholder.
+    .setPlaceholder(
+      mediaType === 'ebook'
+        ? 'Must already be in your library as an audiobook'
+        : 'e.g. Dungeon Crawler Carl'
+    );
 
   modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
   await interaction.showModal(modal);
@@ -147,7 +166,7 @@ export async function handleRequestModal(
 
     const row = buildSearchSelect(result.results, mediaType);
     await interaction.editReply({
-      embeds: [infoEmbed('Select a title', `Showing results for **${query}**.`)],
+      embeds: [infoEmbed('Select a title', searchResultsBody(query, mediaType))],
       components: [row],
     });
   } catch (error) {
