@@ -28,11 +28,16 @@ import {
 } from './handlers/status-delete.handler';
 import { handleApprovalButton, handleCancelRequestButton } from './handlers/approval.handler';
 import { infoEmbed } from './embeds';
+import { captureDiscordAvatar } from './discord-avatar';
 
 const logger = RMABLogger.create('Discord.Router');
 
 export async function routeInteraction(interaction: Interaction): Promise<void> {
   try {
+    // Refresh the cached Discord avatar off the interaction we're already handling. Fire-and-forget
+    // so it never delays acknowledging within Discord's 3-second window.
+    void captureDiscordAvatar(interaction.user);
+
     // Slash commands
     if (interaction.isChatInputCommand()) {
       switch (interaction.commandName) {

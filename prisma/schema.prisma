@@ -59,6 +59,9 @@ model User {
 
   // Discord integration (maps a Discord account to this RMAB user for slash-command requesting)
   discordUserId String? @unique @map("discord_user_id") // Discord snowflake; null = not linked
+  // Cached Discord CDN avatar URL, refreshed opportunistically on each interaction. Kept separate
+  // from avatarUrl so a Plex/OIDC avatar is never overwritten; null = no custom Discord avatar.
+  discordAvatarUrl String? @map("discord_avatar_url")
 
   // Login token (admin-generated, for direct URL login)
   loginTokenHash String? @map("login_token_hash") // SHA-256 hash of the login token (never store plaintext)

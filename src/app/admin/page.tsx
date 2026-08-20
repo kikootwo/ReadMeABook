@@ -49,6 +49,7 @@ interface PendingApprovalRequest {
     id: string;
     plexUsername: string;
     avatarUrl: string | null;
+    discordAvatarUrl: string | null;
   };
 }
 
@@ -284,9 +285,11 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
 
                     {/* User Info */}
                     <div className="flex items-center gap-2 mt-2">
-                      {request.user.avatarUrl ? (
+                      {/* Prefer the Discord avatar: requests made from Discord are the common case
+                          here, and a local account has no Plex/OIDC avatar to fall back on. */}
+                      {request.user.discordAvatarUrl || request.user.avatarUrl ? (
                         <img
-                          src={request.user.avatarUrl}
+                          src={request.user.discordAvatarUrl || request.user.avatarUrl || undefined}
                           alt={request.user.plexUsername}
                           className="w-5 h-5 rounded-full"
                         />
