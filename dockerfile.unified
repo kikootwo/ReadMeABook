@@ -9,6 +9,7 @@ FROM node:20-bookworm AS base
 ARG APP_VERSION=unknown
 ARG GIT_COMMIT=unknown
 ARG BUILD_DATE=unknown
+ARG TARGETPLATFORM
 
 # Install PostgreSQL 16 repository key
 RUN apt-get update && apt-get install -y curl gnupg && \
@@ -33,10 +34,21 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install static ffmpeg (no transitive dependencies like imagemagick)
-ADD https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz /tmp/ffmpeg.tar.xz
-RUN cd /tmp && tar xf ffmpeg.tar.xz && \
-    cp ffmpeg-*-static/ffmpeg ffmpeg-*-static/ffprobe /usr/local/bin/ && \
-    rm -rf /tmp/ffmpeg*
+# Skips gracefully on unsupported architectures — app runs without ffmpeg-dependent features
+RUN case ${TARGETPLATFORM} in \
+         "linux/amd64")  FFMPEG_ARCH=amd64  ;; \
+         "linux/arm64")  FFMPEG_ARCH=arm64  ;; \
+         "linux/arm/v7") FFMPEG_ARCH=armhf  ;; \
+         "linux/arm/v6") FFMPEG_ARCH=armel  ;; \
+         "linux/386")    FFMPEG_ARCH=i686   ;; \
+        *) echo "WARNING: no static ffmpeg build for ${TARGETPLATFORM} — skipping" >&2 && FFMPEG_ARCH="" ;; \
+    esac && \
+    [ -z "${FFMPEG_ARCH}" ] || ( \
+        curl -fL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${FFMPEG_ARCH}-static.tar.xz" -o /tmp/ffmpeg.tar.xz && \
+        cd /tmp && tar xf ffmpeg.tar.xz && \
+        cp ffmpeg-*-static/ffmpeg ffmpeg-*-static/ffprobe /usr/local/bin/ && \
+        rm -rf /tmp/ffmpeg* \
+    )
 
 # Remove imagemagick (pre-installed in node:20-bookworm base image, not needed)
 RUN apt-get purge -y imagemagick imagemagick-6-common 'imagemagick-6*' \
