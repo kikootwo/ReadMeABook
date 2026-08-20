@@ -962,6 +962,25 @@ describe('NZBGetService', () => {
       ]));
     });
 
+    it('returns configured category names in slot order', async () => {
+      clientMock.post.mockResolvedValueOnce({
+        data: {
+          result: [
+            { Name: 'DestDir', Value: '/downloads' },
+            { Name: 'Category2.Name', Value: 'audiobooks' },
+            { Name: 'Category2.DestDir', Value: '/downloads/audiobooks' },
+            { Name: 'Category1.Name', Value: 'readmeabook' },
+            { Name: 'Category1.DestDir', Value: '/downloads' },
+          ],
+        },
+      });
+
+      const service = new NZBGetService('http://nzbget:6789', 'nzbget', 'pass', 'readmeabook', '/downloads');
+      const categories = await service.getCategories();
+
+      expect(categories).toEqual(['readmeabook', 'audiobooks']);
+    });
+
     it('does not update when category exists with correct path', async () => {
       clientMock.post.mockResolvedValueOnce({
         data: {

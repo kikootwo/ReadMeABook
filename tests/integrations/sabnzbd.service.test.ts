@@ -734,6 +734,26 @@ describe('SABnzbdService', () => {
       expect(config.categories).toEqual([{ name: 'test', dir: 'test-dir' }]);
     });
 
+    it('returns configured category names', async () => {
+      clientMock.get.mockResolvedValueOnce({
+        data: {
+          config: {
+            version: '4.0.0',
+            misc: { complete_dir: '/mnt/usenet/complete' },
+            categories: {
+              readmeabook: { dir: '' },
+              audiobooks: { dir: 'audiobooks' },
+            },
+          },
+        },
+      });
+
+      const service = new SABnzbdService('http://sab', 'key', 'readmeabook', '/downloads');
+      const categories = await service.getCategories();
+
+      expect(categories).toEqual(['readmeabook', 'audiobooks']);
+    });
+
     it('returns complete_dir via getCompleteDir helper', async () => {
       clientMock.get.mockResolvedValueOnce({
         data: {

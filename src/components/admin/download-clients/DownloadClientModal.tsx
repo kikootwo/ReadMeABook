@@ -71,6 +71,7 @@ export function DownloadClientModal({
   const [saving, setSaving] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const categoryOptionsId = type ? `download-category-options-${type}` : undefined;
 
   // Reset form when modal opens
   useEffect(() => {
@@ -121,6 +122,10 @@ export function DownloadClientModal({
 
     if (!url.trim()) {
       newErrors.url = 'URL is required';
+    }
+
+    if (!category.trim()) {
+      newErrors.category = 'Category is required';
     }
 
     // SABnzbd always requires API key; qBittorrent credentials are optional (supports IP whitelist auth)
@@ -240,10 +245,7 @@ export function DownloadClientModal({
         const message = data.message || (data.version ? `Connected successfully (v${data.version})` : 'Connection successful');
         setTestResult({ success: true, message });
 
-        // Fetch categories for torrent clients after successful connection
-        if (type && CLIENT_PROTOCOL_MAP[type] === 'torrent') {
-          fetchCategories();
-        }
+        fetchCategories();
       } else {
         setTestResult({ success: false, message: data.error || 'Connection test failed' });
       }
@@ -274,6 +276,7 @@ export function DownloadClientModal({
       // Strip leading/trailing slashes from customPath
       const sanitizedCustomPath = customPath.replace(/^\/+|\/+$/g, '').trim();
 
+      const sanitizedCategory = category.trim();
       const clientData: any = {
         type,
         name,
@@ -285,7 +288,7 @@ export function DownloadClientModal({
         remotePathMappingEnabled,
         remotePath: remotePathMappingEnabled ? remotePath : undefined,
         localPath: remotePathMappingEnabled ? localPath : undefined,
-        category,
+        category: sanitizedCategory,
         customPath: sanitizedCustomPath,
         postImportCategory,
       };
@@ -424,6 +427,31 @@ export function DownloadClientModal({
               Use this client for downloads
             </p>
           </label>
+        </div>
+
+        {/* Download Category */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Category
+          </label>
+          <Input
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            placeholder="readmeabook"
+            error={errors.category}
+            list={categoryOptionsId}
+            disabled={fetchingCategories}
+          />
+          {categoryOptionsId && availableCategories.length > 0 && (
+            <datalist id={categoryOptionsId}>
+              {availableCategories.map((cat) => (
+                <option key={cat} value={cat} />
+              ))}
+            </datalist>
+          )}
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Category or label assigned when adding downloads to this client
+          </p>
         </div>
 
         {/* Custom Download Path */}
