@@ -72,6 +72,7 @@ src/app/admin/settings/
 6. **E-book Sidecar** - Multi-source ebook downloads (Anna's Archive + Indexer Search), preferred format
 7. **BookDate** - AI provider, API key (encrypted), model selection, library scope, custom prompt, swipe history
 8. **Notifications** - Multiple backends (Discord, Pushover), event subscriptions, test functionality
+9. **Discord** - Slash-command bot: enable toggle, bot token (encrypted, Test Token), guild/channel/role IDs, Resolve Names. See [integrations/discord-bot.md](integrations/discord-bot.md)
 
 ## E-book Sidecar
 

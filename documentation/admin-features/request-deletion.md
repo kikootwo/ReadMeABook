@@ -139,11 +139,13 @@ where: {
 - **Soft-deleted requests:** Delete torrent + hard-delete request when seeding complete
 - **Unlimited seeding:** Hard-delete orphaned request immediately (no monitoring)
 
-### API Endpoint
+### API Endpoints
 
-**DELETE** `/api/admin/requests/:id`
+**DELETE** `/api/admin/requests/:id` — Admin-only (dashboard use)
 
-**Authorization:** Admin only
+**DELETE** `/api/requests/:id` — Ownership-based (user deletes own; admin deletes any). On the API token allowlist — usable by third-party integrations with `rmab_` tokens. Same cascading soft-delete as the admin endpoint.
+
+**Authorization:** Authenticated user (own requests) or admin (any request)
 
 **Request:** No body
 
@@ -163,7 +165,7 @@ where: {
 
 **Errors:**
 - 401: Unauthorized (not logged in)
-- 403: Forbidden (not admin)
+- 403: Forbidden (not owner or admin)
 - 404: Request not found or already deleted
 - 500: Internal server error
 
@@ -218,6 +220,25 @@ where: {
 15. ✅ **No ASIN available** - Falls back to exact title/author matching
 16. ✅ **Path template changed after organization** - Deletes only the persisted organized path
 17. ✅ **Legacy row has no stored path** - Skips file deletion without guessing a path
+18. ✅ **Discord bot disabled or unreachable** - Discord sync is gated on a live client and never
+    throws, so deletion succeeds regardless
+
+## Discord Convergence
+
+`deleteRequest()` rewrites the Discord surfaces itself, so every deletion path converges — Web UI,
+API token, admin route, `/status`, `/delete`, and the reported-issue cleanup.
+
+- `editRequestCards(requestId, 'cancelled')` — soft delete leaves `status` untouched, so the
+  cancelled render is forced.
+- `cancelApprovalMessage(...)` — only when the request was `awaiting_approval`; strips the
+  Approve/Deny buttons so a stale embed cannot approve a deleted request.
+- Gated on `getDiscordBotService().getClient()` and dynamically imported, so discord.js stays
+  unloaded when the bot is disabled. Best-effort: failures are logged, never surfaced.
+
+**Signature:** `deleteRequest(requestId, adminUserId, actorDiscordUserId?)`. The optional third
+argument attributes the "Cancelled by" mention for Discord-initiated deletes (including admin-role
+holders with no linked RMAB account); other callers fall back to the deleting user's linked
+`discordUserId`, and the field is omitted entirely when neither exists.
 
 ## Fixed Issues ✅
 
@@ -233,6 +254,17 @@ where: {
 - **Cause:** `Audiobook.filePath` was persisted during organization but omitted from the deletion query
 - **Fix:** Delete only the persisted path; legacy rows without one skip file cleanup
 - **Result:** Configuration changes cannot redirect deletion to a newly rendered directory
+
+**3. Web/API Deletions Left Live Discord Buttons**
+- **Issue:** Deleting from the Web UI or via an API token never touched Discord: the request card
+  kept a working Cancel Request button and the approval embed kept working Approve/Deny buttons
+- **Impact:** The stale approval embed made approving an already-deleted request reachable
+- **Fix:** Hoisted the card and approval-embed rewrites into `deleteRequest()` so all paths converge;
+  button handlers that find a request already gone now rewrite the card instead of leaving a dead
+  button
+- **Files updated:** `src/lib/services/request-delete.service.ts`,
+  `src/lib/services/discord/handlers/{approval,status-delete}.handler.ts`,
+  `src/lib/services/discord/{discord-cards,embeds/approval}.ts`
 
 ## File Structure
 

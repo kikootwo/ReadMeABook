@@ -7,6 +7,8 @@
  */
 
 import { getNotificationService } from '../services/notification';
+import { enrichBookMeta } from '../services/notification/notification-enrichment';
+import { getDiscordBotService } from '../services/discord/discord-bot.service';
 import { RMABLogger } from '../utils/logger';
 import type { SendNotificationPayload } from '../services/job-queue.service';
 
@@ -26,6 +28,11 @@ export async function processSendNotification(payload: SendNotificationPayload):
 
   try {
     const notificationService = getNotificationService();
+
+    // Best-effort rich metadata (cover, narrator, series, genres, duration) for embed-capable
+    // backends. DB-only — independent of the Discord bot. Never blocks the notification.
+    const book = await enrichBookMeta(requestId);
+
     await notificationService.sendNotification({
       event,
       requestId,
@@ -35,10 +42,25 @@ export async function processSendNotification(payload: SendNotificationPayload):
       userName,
       message,
       requestType,
+      book,
       timestamp: new Date(),
     });
 
     logger.info(`Notification processed: ${event}`, { requestId });
+
+    // Refresh any live Discord request card to the request's new status. Gated on the bot actually
+    // running so discord.js stays unloaded when the bot is disabled (dynamic import below).
+    if (requestId && getDiscordBotService().getClient()) {
+      try {
+        const { editRequestCards } = await import('../services/discord/discord-cards');
+        await editRequestCards(requestId);
+      } catch (error) {
+        logger.warn('Failed to update Discord request card', {
+          requestId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   } catch (error) {
     logger.error('Failed to process notification', {
       event,

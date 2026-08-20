@@ -20,6 +20,10 @@ const configMock = vi.hoisted(() => ({
 const formatCoercionMock = vi.hoisted(() => ({
   coerceToPlexCompatible: vi.fn(),
 }));
+const discordBotMock = vi.hoisted(() => ({ getClient: vi.fn(() => null as unknown) }));
+const discordCardsMock = vi.hoisted(() => ({
+  editRequestCards: vi.fn(() => Promise.resolve()),
+}));
 
 vi.mock('@/lib/db', () => ({
   prisma: prismaMock,
@@ -42,6 +46,12 @@ vi.mock('@/lib/services/job-queue.service', () => ({
 }));
 
 vi.mock('@/lib/utils/format-coercion', () => formatCoercionMock);
+
+vi.mock('@/lib/services/discord/discord-bot.service', () => ({
+  getDiscordBotService: () => discordBotMock,
+}));
+
+vi.mock('@/lib/services/discord/discord-cards', () => discordCardsMock);
 
 describe('processOrganizeFiles', () => {
   beforeEach(() => {
@@ -554,6 +564,70 @@ describe('processOrganizeFiles', () => {
         data: expect.objectContaining({ status: 'downloaded' }),
       })
     );
+  });
+
+  it('refreshes the Discord request card at downloaded when the bot is running', async () => {
+    discordBotMock.getClient.mockReturnValueOnce({} as unknown);
+    prismaMock.audiobook.findUnique.mockResolvedValue({
+      id: 'a-card',
+      title: 'Book',
+      author: 'Author',
+      narrator: null,
+      coverArtUrl: null,
+      audibleAsin: 'ASIN-CARD',
+    });
+    organizerMock.organize.mockResolvedValue({
+      success: true,
+      targetPath: '/media/Author/Book',
+      filesMovedCount: 1,
+      errors: [],
+      audioFiles: ['/media/Author/Book/Book.m4b'],
+    });
+    configMock.getBackendMode.mockResolvedValue('plex');
+    configMock.get.mockResolvedValue('false');
+
+    const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+    const result = await processOrganizeFiles({
+      requestId: 'req-card',
+      audiobookId: 'a-card',
+      downloadPath: '/downloads/book',
+      jobId: 'job-card',
+    });
+
+    expect(result.success).toBe(true);
+    expect(discordCardsMock.editRequestCards).toHaveBeenCalledWith('req-card');
+  });
+
+  it('does NOT touch Discord cards at downloaded when the bot is not running', async () => {
+    discordBotMock.getClient.mockReturnValue(null);
+    prismaMock.audiobook.findUnique.mockResolvedValue({
+      id: 'a-nocard',
+      title: 'Book',
+      author: 'Author',
+      narrator: null,
+      coverArtUrl: null,
+      audibleAsin: 'ASIN-NOCARD',
+    });
+    organizerMock.organize.mockResolvedValue({
+      success: true,
+      targetPath: '/media/Author/Book',
+      filesMovedCount: 1,
+      errors: [],
+      audioFiles: ['/media/Author/Book/Book.m4b'],
+    });
+    configMock.getBackendMode.mockResolvedValue('plex');
+    configMock.get.mockResolvedValue('false');
+
+    const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+    const result = await processOrganizeFiles({
+      requestId: 'req-nocard',
+      audiobookId: 'a-nocard',
+      downloadPath: '/downloads/book',
+      jobId: 'job-nocard',
+    });
+
+    expect(result.success).toBe(true);
+    expect(discordCardsMock.editRequestCards).not.toHaveBeenCalled();
   });
 
   it('filesHash reflects post-coercion filenames', async () => {

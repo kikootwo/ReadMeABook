@@ -115,7 +115,9 @@ describe('Notification Triggers - Integration Tests', () => {
         'req-1',
         'Test Book',
         'Test Author',
-        'testuser'
+        'testuser',
+        undefined,
+        'audiobook'
       );
       expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled(); // No search when awaiting approval
     });
@@ -181,7 +183,9 @@ describe('Notification Triggers - Integration Tests', () => {
         'req-1',
         'Test Book',
         'Test Author',
-        'testuser'
+        'testuser',
+        undefined,
+        'audiobook'
       );
       expect(jobQueueMock.addSearchJob).toHaveBeenCalled(); // Search triggered
     });
@@ -246,7 +250,9 @@ describe('Notification Triggers - Integration Tests', () => {
         'req-1',
         'Test Book',
         'Test Author',
-        'testuser'
+        'testuser',
+        undefined,
+        'audiobook'
       );
       expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled(); // No automatic search
     });
@@ -260,7 +266,7 @@ describe('Notification Triggers - Integration Tests', () => {
       };
       requireAuthMock.mockImplementation((_req: any, handler: any) => handler(adminRequest));
 
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-1',
         userId: 'user-1',
         audiobookId: 'audiobook-1',
@@ -299,6 +305,8 @@ describe('Notification Triggers - Integration Tests', () => {
         updatedAt: new Date(),
       });
 
+      prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+
       const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
       const approveRequest = {
         json: vi.fn().mockResolvedValue({ action: 'approve' }),
@@ -310,7 +318,9 @@ describe('Notification Triggers - Integration Tests', () => {
         'req-1',
         'Test Book',
         'Test Author',
-        'testuser'
+        'testuser',
+        undefined,
+        'audiobook'
       );
     });
   });

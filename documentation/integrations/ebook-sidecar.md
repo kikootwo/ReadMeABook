@@ -95,6 +95,44 @@ A scheduled `find_missing_ebooks` job (daily midnight, enabled by default) backs
 
 **Source:** Based on [kindle-epub-fix](https://github.com/innocenat/kindle-epub-fix)
 
+## Enablement Rule
+
+`isEbookRequestingEnabled()` ([ebook-request-creator.service.ts](../../src/lib/services/ebook-request-creator.service.ts))
+is the single source of truth for "can an e-book be requested at all": true when
+`ebook_annas_archive_enabled` **or** `ebook_indexer_search_enabled` is on, honouring the legacy
+`ebook_sidecar_enabled` key only when the newer Anna's Archive key has never been written.
+
+Shared by the request path (which rejects with `feature_disabled`) and the Discord `/request`
+command definitions, which omit the **E-book** type entirely when it returns false — so users are
+never offered a request type that cannot succeed. Saving the E-book Sidecar settings calls
+`refreshCommands()` so the choice appears/disappears without a bot restart.
+
+**Sidecar rule visibility:** an e-book request also requires the audiobook to already be in the
+library. The Web UI hides this by only showing "Fetch Ebook" on owned titles; Discord searches the
+whole Audible catalogue, so the e-book search modal and result dropdowns state the constraint up
+front. See [discord-bot.md](discord-bot.md).
+
+## API
+
+### POST /api/audiobooks/[asin]/fetch-ebook
+Thin wrapper around `createEbookRequestForUser()`
+([ebook-request-creator.service.ts](../../src/lib/services/ebook-request-creator.service.ts)), shared
+with the Discord `/request ebook` flow so both surfaces run an identical path (approval gate +
+sidecar rule).
+
+**Response:** `{ success, message, requestId, needsApproval }`
+
+| Status | When |
+|--------|------|
+| 201 | New request created (`created: true`) — including created-awaiting-approval |
+| 200 | Existing retryable request re-driven (`created: false`) |
+| 400 | Invalid ASIN, feature disabled, or audiobook not available |
+| 404 | Not found on Audible, or user not found |
+| 409 | An active e-book request already exists |
+
+The `created` flag on the success result exists solely so the route can distinguish 201 from 200;
+the Discord flow ignores it.
+
 ## Database Schema
 
 **Request model additions:**

@@ -36,6 +36,38 @@ export class DiscordProvider implements INotificationProvider {
     ],
   };
 
+  // ── Embed formatting helpers (kept local; the bot's equivalents in
+  //    services/discord/embeds.ts pull in discord.js, which must never load here) ──
+
+  /** Reduce a comma-separated person list to just the top-listed name. */
+  private firstPerson(value?: string | null): string {
+    if (!value) return '';
+    const first = value.split(',')[0]?.trim();
+    return first || value.trim();
+  }
+
+  /** Format a runtime in minutes as e.g. "12h 34m" / "45m". */
+  private formatDuration(minutes?: number | null): string | null {
+    if (!minutes || minutes <= 0) return null;
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    if (h && m) return `${h}h ${m}m`;
+    if (h) return `${h}h`;
+    return `${m}m`;
+  }
+
+  /** Strip HTML tags and truncate (Discord descriptions cap at 4096; we keep it short). */
+  private cleanDescription(value?: string | null, max = 300): string | null {
+    if (!value) return null;
+    const text = value.replace(/<[^>]*>/g, '').trim();
+    if (!text) return null;
+    return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+  }
+
+  private truncate(value: string, max: number): string {
+    return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+  }
+
   async send(config: Record<string, any>, payload: NotificationPayload): Promise<void> {
     const discordConfig = config as unknown as DiscordConfig;
     const embed = this.formatEmbed(payload);
@@ -59,22 +91,44 @@ export class DiscordProvider implements INotificationProvider {
   }
 
   private formatEmbed(payload: NotificationPayload): any {
-    const { event, title, author, userName, message, requestId, requestType, timestamp } = payload;
+    const { event, title, author, userName, message, requestId, requestType, book, timestamp } = payload;
     const meta = getEventMeta(event);
     const resolvedTitle = getEventTitle(event, requestType);
 
     const isIssue = event === 'issue_reported';
-    const fields = [
-      { name: 'Title', value: title, inline: false },
-      { name: 'Author', value: author, inline: true },
-      { name: isIssue ? 'Reported By' : 'Requested By', value: userName, inline: true },
+    const isEbook = requestType === 'ebook';
+
+    // Fold the release year into the book title in parentheses, mirroring the bot's request card.
+    const bookTitle = book?.year ? `${title} (${book.year})` : title;
+
+    const fields: { name: string; value: string; inline: boolean }[] = [
+      { name: 'Title', value: this.truncate(bookTitle, 256), inline: false },
+      { name: 'Author', value: this.truncate(this.firstPerson(author) || author, 256), inline: true },
     ];
 
-    if (message) {
-      fields.push({ name: meta.messageLabel ?? 'Error', value: message, inline: false });
+    // Narrator + duration are audiobook-only concepts (omitted for ebooks).
+    if (!isEbook && book?.narrator) {
+      fields.push({ name: 'Narrator', value: this.truncate(this.firstPerson(book.narrator), 256), inline: true });
+    }
+    if (!isEbook) {
+      const duration = this.formatDuration(book?.durationMinutes);
+      if (duration) fields.push({ name: 'Duration', value: duration, inline: true });
+    }
+    if (book?.series) {
+      const series = book.seriesPart ? `${book.series} #${book.seriesPart}` : book.series;
+      fields.push({ name: 'Series', value: this.truncate(series, 256), inline: true });
+    }
+    if (book?.genres && book.genres.length > 0) {
+      fields.push({ name: 'Genre', value: this.truncate(book.genres.slice(0, 2).join(', '), 256), inline: true });
     }
 
-    return {
+    fields.push({ name: isIssue ? 'Reported By' : 'Requested By', value: userName, inline: true });
+
+    if (message) {
+      fields.push({ name: meta.messageLabel ?? 'Error', value: this.truncate(message, 1024), inline: false });
+    }
+
+    const embed: any = {
       title: `${meta.emoji} ${resolvedTitle}`,
       color: SEVERITY_COLORS[meta.severity],
       fields,
@@ -83,5 +137,11 @@ export class DiscordProvider implements INotificationProvider {
       },
       timestamp: timestamp.toISOString(),
     };
+
+    const description = this.cleanDescription(book?.description);
+    if (description) embed.description = description;
+    if (book?.coverArtUrl) embed.thumbnail = { url: book.coverArtUrl };
+
+    return embed;
   }
 }
