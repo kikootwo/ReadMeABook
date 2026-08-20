@@ -41,7 +41,11 @@ export function buildSearchSelect(
     const year = formatYear(book.releaseDate);
     const descriptionParts = [book.author];
     if (year) descriptionParts.push(year);
-    if (book.narrator) descriptionParts.push(`Narrated by ${book.narrator}`);
+    // Narrator is an audiobook-only field; e-book results must not advertise one, matching how the
+    // confirmation card and request embeds omit narrator/duration/format for ebooks.
+    if (book.narrator && mediaType !== 'ebook') {
+      descriptionParts.push(`Narrated by ${book.narrator}`);
+    }
 
     return new StringSelectMenuOptionBuilder()
       // Labels/descriptions have a 100-char Discord limit

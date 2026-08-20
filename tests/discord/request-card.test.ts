@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  buildSearchSelect,
   isCancellableStatus,
   requestStatusFooter,
 } from '@/lib/services/discord/embeds';
@@ -40,6 +41,35 @@ describe('request cancellability', () => {
   it('disallows cancelling once terminal', () => {
     for (const status of ['available', 'downloaded', 'denied', 'cancelled', 'failed']) {
       expect(isCancellableStatus(status)).toBe(false);
+    }
+  });
+});
+
+describe('search result dropdown', () => {
+  const book = {
+    asin: 'B0TEST0001',
+    title: 'Dungeon Crawler Carl',
+    author: 'Matt Dinniman',
+    narrator: 'Jeff Hays',
+    releaseDate: '2021-08-06',
+  } as any;
+
+  const descriptionOf = (mediaType: 'audiobook' | 'ebook') =>
+    (buildSearchSelect([book], mediaType).components[0] as any).options[0].data.description as string;
+
+  it('lists the narrator for audiobook results', () => {
+    expect(descriptionOf('audiobook')).toContain('Narrated by Jeff Hays');
+  });
+
+  it('omits the narrator for e-book results', () => {
+    // Narrator is audiobook-only; an e-book has none, so advertising one is misleading.
+    expect(descriptionOf('ebook')).not.toContain('Narrated by');
+  });
+
+  it('keeps author and year on both media types', () => {
+    for (const mediaType of ['audiobook', 'ebook'] as const) {
+      expect(descriptionOf(mediaType)).toContain('Matt Dinniman');
+      expect(descriptionOf(mediaType)).toContain('2021');
     }
   });
 });
