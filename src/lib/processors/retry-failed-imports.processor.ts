@@ -61,6 +61,11 @@ export async function processRetryFailedImports(payload: RetryFailedImportsPaylo
           take: 1,
         },
       },
+      orderBy: [
+        { lastImportAt: { sort: 'asc', nulls: 'first' } },
+        { createdAt: 'asc' },
+        { id: 'asc' },
+      ],
       take: 50, // Limit to 50 requests per run
     });
 
@@ -81,6 +86,13 @@ export async function processRetryFailedImports(payload: RetryFailedImportsPaylo
 
     for (const request of requests) {
       try {
+        // Claim this retry slot immediately so every selected row rotates to
+        // the back of the next batch, including malformed rows we must skip.
+        await prisma.request.update({
+          where: { id: request.id },
+          data: { lastImportAt: new Date() },
+        });
+
         // Get the download path from the most recent download history
         const downloadHistory = request.downloadHistory[0];
 

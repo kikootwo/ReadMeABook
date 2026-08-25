@@ -27,7 +27,8 @@ Indexer aggregator for searching multiple torrent/usenet indexers simultaneously
 - Minimum score threshold: 50/100
 - Filters applied after ranking to remove poor matches
 - Ensures at least basic title/author match quality
-- maxResults: 100 (increased from 50 for broader search)
+- Audiobook searches rank the full deduplicated result set, then retain the best 100
+- Interactive responses expose `truncated` and the pre-ranking `rawCount`
 
 **Example:** "Season of Storms" → finds all "Season of Storms" torrents → ranks by author match → filters score < 50
 
@@ -66,16 +67,17 @@ interface TorrentResult {
 
 **Manual Search** (`POST /api/requests/{id}/manual-search`)
 - Triggers automatic search job for requests with status: pending, failed, awaiting_search
-- Searches only enabled indexers (title only, maxResults: 100)
+- Searches only enabled indexers (title only)
 - Ranks all results, filters scores < 50
+- Retains the best 100 qualifying results after ranking
 - Selects best torrent from filtered results
 - Updates request status to 'pending'
 
 **Interactive Search** (`POST /api/requests/{id}/interactive-search`)
 - Returns ranked torrent results for user selection
-- Searches only enabled indexers (title only or custom, maxResults: 100)
+- Searches only enabled indexers (title only or custom)
 - Accepts optional custom search title in request body
-- Ranks all results, filters scores < 50
+- Ranks all results, then returns the best 100 with truncation metadata
 - Shows table with: rank, title, size, quality score, seeders, indexer, publish date
 - Editable title field allows search refinement
 - Available for same statuses as manual search

@@ -88,6 +88,17 @@ describe('processSearchIndexers', () => {
         guid: 'guid-1',
         format: 'M4B',
       },
+      {
+        indexer: 'Fallback Indexer',
+        indexerId: 2,
+        title: 'Book - Author - Alternate',
+        size: 50 * 1024 * 1024,
+        seeders: 1,
+        publishDate: new Date(),
+        downloadUrl: 'https://prowlarr/2/download/alternate',
+        guid: 'guid-2',
+        format: 'M4B',
+      },
     ]);
 
     prismaMock.request.update.mockResolvedValue({});
@@ -103,8 +114,55 @@ describe('processSearchIndexers', () => {
     expect(jobQueueMock.addDownloadJob).toHaveBeenCalledWith(
       'req-2',
       { id: 'a2', title: 'Book', author: 'Author' },
-      expect.objectContaining({ title: 'Book - Author' })
+      expect.objectContaining({ title: 'Book - Author' }),
+      [expect.objectContaining({ title: 'Book - Author - Alternate' })]
     );
+    expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith('Book', 'Author', {
+      categories: [3030],
+      indexerIds: [1],
+      minSeeders: 1,
+    });
+  });
+
+  it('ranks all candidates before limiting automatic search to 100 results', async () => {
+    configMock.get.mockImplementation(async (key: string) => {
+      if (key === 'prowlarr_indexers') {
+        return JSON.stringify([{ id: 1, name: 'Indexer', protocol: 'torrent', priority: 10, categories: [3030] }]);
+      }
+      if (key === 'indexer_flag_config') return JSON.stringify([]);
+      return null;
+    });
+
+    const candidates = Array.from({ length: 101 }, (_, index) => ({
+      indexer: 'Indexer',
+      indexerId: 1,
+      title: 'Book - Author',
+      size: 50 * 1024 * 1024,
+      seeders: index === 100 ? 500 : 1,
+      publishDate: new Date(),
+      downloadUrl: `magnet:?xt=urn:btih:${index}`,
+      guid: `guid-${index}`,
+      format: 'M4B',
+    }));
+    prowlarrMock.searchWithVariations.mockResolvedValue(candidates);
+    prismaMock.request.update.mockResolvedValue({});
+
+    const { processSearchIndexers } = await import('@/lib/processors/search-indexers.processor');
+    const result = await processSearchIndexers({
+      requestId: 'req-rank-before-limit',
+      audiobook: { id: 'a-rank-before-limit', title: 'Book', author: 'Author' },
+      jobId: 'job-rank-before-limit',
+    });
+
+    expect(result.success).toBe(true);
+    expect(jobQueueMock.addDownloadJob).toHaveBeenCalledWith(
+      'req-rank-before-limit',
+      expect.anything(),
+      expect.objectContaining({ guid: 'guid-100' }),
+      expect.any(Array)
+    );
+    const fallbackResults = jobQueueMock.addDownloadJob.mock.calls[0][3];
+    expect(fallbackResults).toHaveLength(99);
   });
 
   it('fails when no indexers are configured', async () => {
@@ -179,7 +237,8 @@ describe('processSearchIndexers', () => {
     expect(jobQueueMock.addDownloadJob).toHaveBeenCalledWith(
       'req-filter-name',
       expect.objectContaining({ id: 'a-filter' }),
-      expect.objectContaining({ title: 'Good Release - Author' })
+      expect.objectContaining({ title: 'Good Release - Author' }),
+      []
     );
   });
 
@@ -235,7 +294,8 @@ describe('processSearchIndexers', () => {
     expect(jobQueueMock.addDownloadJob).toHaveBeenCalledWith(
       'req-filter-hash',
       expect.anything(),
-      expect.objectContaining({ title: 'Good Release - Author' })
+      expect.objectContaining({ title: 'Good Release - Author' }),
+      []
     );
   });
 

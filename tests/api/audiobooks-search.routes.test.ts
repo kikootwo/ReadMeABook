@@ -20,6 +20,10 @@ const rankTorrentsMock = vi.hoisted(() => vi.fn());
 const groupIndexersMock = vi.hoisted(() => vi.fn());
 const groupDescriptionMock = vi.hoisted(() => vi.fn(() => 'Group'));
 
+vi.mock('@/lib/db', () => ({
+  prisma: {},
+}));
+
 vi.mock('@/lib/middleware/auth', () => ({
   requireAuth: requireAuthMock,
 }));
@@ -93,6 +97,45 @@ describe('Audiobooks search torrents route', () => {
     expect(payload.success).toBe(true);
     expect(payload.results[0].rank).toBe(1);
     expect(rankTorrentsMock).toHaveBeenCalled();
+  });
+
+  it('ranks all candidates before returning the top 100 with truncation metadata', async () => {
+    authRequest.json.mockResolvedValue({ title: 'Title', author: 'Author' });
+    configServiceMock.get
+      .mockResolvedValueOnce(JSON.stringify([{ id: 1, name: 'Indexer', protocol: 'torrent', priority: 10 }]))
+      .mockResolvedValueOnce(null);
+    groupIndexersMock.mockReturnValue({ groups: [{ categories: [3030], indexerIds: [1] }], skippedIndexers: [] });
+
+    const candidates = Array.from({ length: 101 }, (_, index) => ({
+      title: index === 100 ? 'Best result' : `Result ${index}`,
+      size: 100,
+      indexer: 'Indexer',
+      indexerId: 1,
+    }));
+    const rankedCandidates = [candidates[100], ...candidates.slice(0, 100)].map((result, index) => ({
+      ...result,
+      score: 100 - index,
+      breakdown: { matchScore: 50, formatScore: 0, sizeScore: 0, seederScore: 0, notes: [] },
+      bonusPoints: 0,
+      bonusModifiers: [],
+      finalScore: 100 - index,
+    }));
+    prowlarrMock.searchWithVariations.mockResolvedValue(candidates);
+    rankTorrentsMock.mockReturnValue(rankedCandidates);
+
+    const { POST } = await import('@/app/api/audiobooks/search-torrents/route');
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(rankTorrentsMock.mock.calls[0][0]).toHaveLength(101);
+    expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith('Title', 'Author', {
+      categories: [3030],
+      indexerIds: [1],
+    });
+    expect(payload.results).toHaveLength(100);
+    expect(payload.results[0]).toEqual(expect.objectContaining({ title: 'Best result', rank: 1 }));
+    expect(payload.truncated).toBe(true);
+    expect(payload.rawCount).toBe(101);
   });
 });
 

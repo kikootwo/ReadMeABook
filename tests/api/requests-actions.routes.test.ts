@@ -153,6 +153,51 @@ describe('Request action routes', () => {
     );
   });
 
+  it('ranks the complete interactive result set before returning the top 100', async () => {
+    authRequest.json.mockResolvedValue({});
+    prismaMock.request.findUnique.mockResolvedValueOnce({
+      id: 'req-complete-ranking',
+      userId: 'user-1',
+      audiobook: { title: 'Title', author: 'Author', audibleAsin: null },
+    });
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      role: 'user',
+      interactiveSearchAccess: null,
+    });
+    configServiceMock.get.mockResolvedValueOnce(JSON.stringify([{ id: 1, priority: 10, categories: [3030] }]));
+    configServiceMock.get.mockResolvedValueOnce(null);
+    groupIndexersMock.mockReturnValue({ groups: [{ categories: [3030], indexerIds: [1] }], skippedIndexers: [] });
+
+    const candidates = Array.from({ length: 101 }, (_, index) => ({
+      title: index === 100 ? 'Best result' : `Result ${index}`,
+      size: 100,
+    }));
+    const rankedCandidates = [candidates[100], ...candidates.slice(0, 100)].map((result, index) => ({
+      ...result,
+      score: 100 - index,
+      breakdown: { matchScore: 50, formatScore: 0, sizeScore: 0, seederScore: 0, notes: [] },
+      bonusPoints: 0,
+      bonusModifiers: [],
+      finalScore: 100 - index,
+    }));
+    prowlarrMock.searchWithVariations.mockResolvedValueOnce(candidates);
+    rankTorrentsMock.mockReturnValueOnce(rankedCandidates);
+
+    const { POST } = await import('@/app/api/requests/[id]/interactive-search/route');
+    const response = await POST({} as any, { params: Promise.resolve({ id: 'req-complete-ranking' }) });
+    const payload = await response.json();
+
+    expect(rankTorrentsMock.mock.calls[0][0]).toHaveLength(101);
+    expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith('Title', 'Author', {
+      categories: [3030],
+      indexerIds: [1],
+    });
+    expect(payload.results).toHaveLength(100);
+    expect(payload.results[0]).toEqual(expect.objectContaining({ title: 'Best result', rank: 1 }));
+    expect(payload.truncated).toBe(true);
+    expect(payload.rawCount).toBe(101);
+  });
+
   it('performs interactive search gracefully when runtime fetch fails', async () => {
     authRequest.json.mockResolvedValue({});
     prismaMock.request.findUnique.mockResolvedValueOnce({

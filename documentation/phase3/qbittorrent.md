@@ -247,7 +247,13 @@ type TorrentState =
    - `pausedUP` → `seeding` (unified) / `completed` (legacy) — triggers completion in monitor
    - `stoppedUP` → `seeding` (unified) / `completed` (legacy) — same fix for qBittorrent v5.x
    - `pausedDL`/`stoppedDL` remain `paused` — download phase genuinely paused
-   - Key insight: any `*UP` state is post-download; any `*DL` state is pre-completion
+- Key insight: any `*UP` state is post-download; any `*DL` state is pre-completion
+
+**17. Prowlarr grab errors blamed on qBittorrent** - Source HTTP errors were collapsed into `Failed to add torrent to qBittorrent`, so a rate-limited indexer permanently failed the request. Fixed by:
+- Forwarding Prowlarr source headers when fetching `.torrent` files
+- Preserving the upstream HTTP status as a structured source-grab error
+- Trying the remaining ranked releases on HTTP `429`/`5xx`
+- Reporting the indexer, release, and upstream status instead of blaming a healthy qBittorrent instance
 
 ## Tech Stack
 

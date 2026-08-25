@@ -19,6 +19,7 @@ import {
   DownloadStatus,
   AddDownloadOptions,
   ConnectionTestResult,
+  DownloadSourceError,
 } from '../interfaces/download-client.interface';
 
 // Handle both ESM and CommonJS imports
@@ -278,7 +279,7 @@ export class TransmissionService implements IDownloadClient {
         maxRedirects: 0,
         validateStatus: (status) => status >= 200 && status < 300,
         timeout: DOWNLOAD_CLIENT_TIMEOUT,
-        headers: { 'User-Agent': RMAB_USER_AGENT },
+        headers: { 'User-Agent': RMAB_USER_AGENT, ...options?.sourceHeaders },
       });
 
       // Check if response body is a magnet link
@@ -308,16 +309,29 @@ export class TransmissionService implements IDownloadClient {
               responseType: 'arraybuffer',
               timeout: DOWNLOAD_CLIENT_TIMEOUT,
               maxRedirects: 5,
-              headers: { 'User-Agent': RMAB_USER_AGENT },
+              headers: { 'User-Agent': RMAB_USER_AGENT, ...options?.sourceHeaders },
             });
-          } catch {
+          } catch (redirectError) {
+            if (axios.isAxiosError(redirectError) && redirectError.response?.status) {
+              throw new DownloadSourceError(
+                `Grab failed: source returned HTTP ${redirectError.response.status}`,
+                redirectError.response.status,
+                location,
+                redirectError
+              );
+            }
             throw new Error('Failed to download torrent file after redirect');
           }
         } else {
           throw new Error(`Invalid redirect location: ${location}`);
         }
       } else {
-        throw new Error(`Failed to download torrent: HTTP ${status}`);
+        throw new DownloadSourceError(
+          `Grab failed: source returned HTTP ${status}`,
+          status,
+          torrentUrl,
+          error
+        );
       }
     }
 

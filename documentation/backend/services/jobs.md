@@ -33,6 +33,14 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 5. **plex_recently_added_check** - Lightweight polling of recently added items, match all non-terminal requests
 6. **match_plex** - Fuzzy match to Plex item (deprecated - now handled by scan_plex)
 
+## Download Grab Fallback
+
+- Automatic audiobook search passes every above-threshold release to `download_torrent` in ranked order.
+- HTTP `429` and `5xx` responses while fetching a `.torrent`/`.nzb` from Prowlarr are source-grab failures, not download-client failures.
+- `download_torrent` immediately tries the next ranked release; the successful candidate is the only one written to download history.
+- If every ranked grab is temporarily unavailable, the job remains retryable under Bull's exponential backoff. The global failed handler marks the request failed only after all job attempts are exhausted.
+- Manual selections carry no alternates and retain their explicit-release behavior.
+
 ## Special Behaviors
 
 **monitor_download:**

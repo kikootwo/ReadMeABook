@@ -5,61 +5,38 @@
  * Standalone series scraping module. Uses the AudibleService fetch wrapper
  * for HTTP requests and Cheerio for HTML parsing.
  * Kept separate from audible.service.ts to avoid bloating the main service.
+ *
+ * HTML parsing lives in audible-series-parsers.ts (Audible A/B-serves two
+ * different series-page layouts; the parsers handle both).
  */
 
 import * as cheerio from 'cheerio';
-import { getAudibleService, AudibleAudiobook } from './audible.service';
-import { AUDIBLE_REGIONS } from '../types/audible';
+import { getAudibleService } from './audible.service';
 import {
   getLanguageForRegion,
   buildContainsSelector,
-  stripPrefixes,
-  type LanguageConfig,
 } from '../constants/language-config';
 import { RMABLogger } from '../utils/logger';
-import { parseRuntime } from '../utils/parse-runtime';
 import { randomDelay } from '../utils/scrape-resilience';
-import { extractAllNarrators } from '../utils/extract-narrator';
+import {
+  parseSeriesBooks,
+  parseSeriesDescription,
+  parseSeriesPageSummary,
+  parseSimilarSeries,
+  type SeriesDetail,
+  type SeriesSummary,
+} from './audible-series-parsers';
+
+export type {
+  SeriesSummary,
+  SimilarSeries,
+  SeriesDetail,
+} from './audible-series-parsers';
 
 const logger = RMABLogger.create('Audible.Series');
 
 const AUDIBLE_PAGE_SIZE = 50;
 const MAX_SERIES_RESULTS = 15;
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface SeriesSummary {
-  asin: string;
-  title: string;
-  bookCount: number;
-  rating?: number;
-  ratingCount?: number;
-  tags: string[];
-  coverArtUrl?: string;
-  audibleUrl: string;
-}
-
-export interface SimilarSeries {
-  asin: string;
-  title: string;
-  bookCount?: number;
-  coverArtUrl?: string;
-}
-
-export interface SeriesDetail {
-  asin: string;
-  title: string;
-  bookCount: number;
-  rating?: number;
-  ratingCount?: number;
-  description?: string;
-  tags: string[];
-  books: AudibleAudiobook[];
-  similarSeries: SimilarSeries[];
-  audibleUrl: string;
-}
 
 // ---------------------------------------------------------------------------
 // Search: extract series links from Audible search results
@@ -187,7 +164,7 @@ export async function searchForSeries(query: string): Promise<SeriesSummary[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Series page scraping (summary - for search results)
+// Series page scraping
 // ---------------------------------------------------------------------------
 
 /**
@@ -213,81 +190,6 @@ async function scrapeSeriesPageSummary(asin: string): Promise<Omit<SeriesSummary
 }
 
 /**
- * Parse summary fields from a series page's Cheerio document.
- */
-function parseSeriesPageSummary(
-  $: cheerio.CheerioAPI,
-  asin: string
-): Omit<SeriesSummary, 'audibleUrl'> {
-  // Title - from h1
-  const title = $('h1').first().text().trim() || '';
-
-  // Book count - multiple strategies, most specific first
-  let bookCount = 0;
-
-  // Primary: adbl-metadata[slot="child-count"] in the page header (NOT inside carousels)
-  // Filter out carousel items by excluding those inside adbl-product-carousel
-  $('adbl-metadata[slot="child-count"]').each((_i, el) => {
-    if (bookCount > 0) return false;
-    const $el = $(el);
-    // Skip if inside a carousel (those are similar-series counts)
-    if ($el.closest('adbl-product-carousel').length > 0) return;
-    const text = $el.text().trim();
-    const match = text.match(/(\d+)/);
-    if (match) bookCount = parseInt(match[1]);
-  });
-
-  // Secondary: text matching in spans/headings for "X books/titles/Titel/libros/Bucher"
-  if (bookCount === 0) {
-    const countText = $('span:contains("book"), span:contains("title"), span:contains("Titel"), span:contains("libro"), span:contains("Buch"), span:contains("B\u00fccher")')
-      .text().trim();
-    const countMatch = countText.match(/(\d+)\s*(books?|titles?|Titel|libros?|B(?:uch|\u00fccher))/i);
-    if (countMatch) {
-      bookCount = parseInt(countMatch[1]);
-    }
-  }
-
-  // Fallback: count product items on the page
-  if (bookCount === 0) {
-    bookCount = $('.productListItem, .bc-list-item[data-asin]').length;
-  }
-
-  // Rating
-  const { rating, ratingCount } = parseSeriesRating($);
-
-  // Tags/genres: primary from adbl-chip web components, fallback to legacy links
-  const tags: string[] = [];
-  const addTag = (text: string) => {
-    const tag = text.trim();
-    if (tag && tag.length >= 2 && tag.length <= 50 && !tags.includes(tag)) {
-      tags.push(tag);
-    }
-  };
-
-  // Primary: adbl-chip.related-tag elements (modern Audible layout)
-  $('adbl-chip.related-tag').each((_i, el) => {
-    addTag($(el).text());
-  });
-
-  // Fallback: legacy category and tag links
-  if (tags.length === 0) {
-    $('a[href*="/cat/"], a[href*="/tag/"]').each((_i, el) => {
-      addTag($(el).text());
-    });
-  }
-
-  // Cover art from first book image
-  const coverArtUrl = $('.productListItem img, .bc-list-item img').first()
-    .attr('src')?.replace(/\._.*_\./, '._SL500_.') || undefined;
-
-  return { asin, title, bookCount, rating, ratingCount, tags: tags.slice(0, 5), coverArtUrl };
-}
-
-// ---------------------------------------------------------------------------
-// Series page scraping (full detail)
-// ---------------------------------------------------------------------------
-
-/**
  * Scrape a series page for full detail data including books and similar series.
  * Used by the detail API endpoint.
  */
@@ -308,13 +210,22 @@ export async function scrapeSeriesPage(asin: string, page: number = 1): Promise<
     // Parse summary fields
     const summary = parseSeriesPageSummary($, asin);
 
-    // Description
-    const description = $('.bc-expander-content').first().text().trim() ||
-      $('[class*="productPublisherSummary"]').first().text().trim() ||
-      undefined;
+    const description = parseSeriesDescription($);
 
     // Parse all books from the series page
     const books = parseSeriesBooks($, langConfig.scraping.authorPrefixes, langConfig.scraping.narratorPrefixes, langConfig);
+
+    // Layout-drift detector: the header says the series has books but no rows
+    // parsed, which means Audible changed its markup again.
+    if (books.length === 0 && summary.bookCount > 0) {
+      logger.warn(
+        `Series ${asin} reports ${summary.bookCount} books but no book rows parsed - Audible layout may have changed`,
+        {
+          modernRows: $('adbl-product-row').length,
+          legacyRows: $('.productListItem, .bc-list-item').length,
+        },
+      );
+    }
 
     // Use actual book count if we got more from scraping
     const bookCount = Math.max(summary.bookCount, books.length);
@@ -349,184 +260,4 @@ export async function scrapeSeriesPage(asin: string, page: number = 1): Promise<
     });
     return null;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Parsing helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Extract rating and rating count from a series page.
- *
- * Real HTML uses:
- *   <div aria-label="4.5 out of 5 stars" class="bc-review-stars ...">
- *   <span class="series-rating bc-color-secondary">8,704 ratings</span>
- */
-function parseSeriesRating($: cheerio.CheerioAPI): { rating?: number; ratingCount?: number } {
-  let rating: number | undefined;
-  let ratingCount: number | undefined;
-
-  // Primary: aria-label on div.bc-review-stars (e.g. "4.5 out of 5 stars")
-  const starsDiv = $('div.bc-review-stars');
-  let ariaLabel = starsDiv.attr('aria-label') || '';
-
-  // Fallback: any element with aria-label containing rating pattern
-  if (!ariaLabel) {
-    const fallbackEl = $('[aria-label*="out of"], [aria-label*="von 5"], [aria-label*="de 5"]').first();
-    ariaLabel = fallbackEl.attr('aria-label') || '';
-  }
-
-  // Extract numeric rating from aria-label (handles "4.5 out of 5", "4,5 von 5", "4,5 de 5")
-  const ratingMatch = ariaLabel.match(/(\d+[.,]?\d*)\s*(?:out of|von|de)\s*5/i);
-  if (ratingMatch) {
-    rating = parseFloat(ratingMatch[1].replace(',', '.'));
-  }
-
-  // Rating count from span.series-rating (e.g. "8,704 ratings")
-  const seriesRatingSpan = $('span.series-rating').first();
-  let countText = seriesRatingSpan.text().trim();
-
-  // Fallback: look in broader context for rating count text
-  if (!countText) {
-    const fallbackContainer = $('[class*="rating"], .ratingsLabel').first();
-    countText = fallbackContainer.text().trim();
-  }
-
-  const countMatch = countText.match(/([\d,.]+)\s*(?:ratings?|Bewertungen?|calificaciones?)/i);
-  if (countMatch) {
-    ratingCount = parseInt(countMatch[1].replace(/[.,]/g, ''));
-  }
-
-  return { rating, ratingCount };
-}
-
-/**
- * Parse all books from a series page's product list items.
- */
-function parseSeriesBooks(
-  $: cheerio.CheerioAPI,
-  authorPrefixes: string[],
-  narratorPrefixes: string[],
-  langConfig: LanguageConfig
-): AudibleAudiobook[] {
-  const books: AudibleAudiobook[] = [];
-  const seenAsins = new Set<string>();
-
-  $('.productListItem, .bc-list-item').each((_index, element) => {
-    const $el = $(element);
-
-    // Extract ASIN
-    const bookAsin = $el.attr('data-asin') ||
-      $el.find('li').attr('data-asin') ||
-      $el.find('a[href*="/pd/"]').attr('href')?.match(/\/pd\/[^/]+\/([A-Z0-9]{10})/)?.[1] ||
-      $el.find('a[href*="/ac/"]').attr('href')?.match(/\/ac\/[^/]+\/([A-Z0-9]{10})/)?.[1] ||
-      $el.find('a').attr('href')?.match(/\/(?:pd|ac)\/[^/]+\/([A-Z0-9]{10})/)?.[1] || '';
-
-    if (!bookAsin || seenAsins.has(bookAsin)) return;
-    seenAsins.add(bookAsin);
-
-    // Title: h3 a / .bc-heading a hold the real book title;
-    // h2 on series pages is the position label ("Book 1"), so try it last.
-    const title = $el.find('h3 a').first().text().trim() ||
-      $el.find('.bc-heading a').first().text().trim() ||
-      $el.find('h2 a').first().text().trim() ||
-      $el.find('h2').first().text().trim() ||
-      '';
-
-    if (!title) return;
-
-    // Author
-    const authorLink = $el.find('a[href*="/author/"]').first();
-    const authorText = authorLink.text().trim() ||
-      $el.find('.authorLabel').text().trim() ||
-      '';
-    const authorHref = authorLink.attr('href') || '';
-    const authorAsinMatch = authorHref.match(/\/author\/[^/]+\/([A-Z0-9]{10})/);
-
-    // Narrator — capture all narrator links (multi-narrator productions are common)
-    const narratorText = extractAllNarrators($, $el);
-
-    // Cover art
-    const coverArtUrl = $el.find('img').first().attr('src')?.replace(/\._.*_\./, '._SL500_.') || '';
-
-    // Rating
-    const ratingText = $el.find('.ratingsLabel').text().trim() ||
-      $el.find('.a-icon-star span').first().text().trim();
-    const ratingMatch = ratingText ? ratingText.match(/(\d+[.,]?\d*)/) : null;
-    const rating = ratingMatch ? parseFloat(ratingMatch[1].replace(',', '.')) : undefined;
-
-    // Duration
-    const runtimeText = $el.find('.runtimeLabel').text().trim() ||
-      $el.find(buildContainsSelector('span', langConfig.scraping.lengthLabels)).text().trim();
-    const durationMinutes = parseRuntime(runtimeText, langConfig);
-
-    books.push({
-      asin: bookAsin,
-      title,
-      author: stripPrefixes(authorText, authorPrefixes),
-      authorAsin: authorAsinMatch?.[1] || undefined,
-      narrator: stripPrefixes(narratorText, narratorPrefixes),
-      coverArtUrl,
-      rating,
-      durationMinutes,
-    });
-  });
-
-  return books;
-}
-
-/**
- * Parse similar series from the "Listeners also enjoyed" carousel.
- *
- * Real HTML uses web components:
- *   <adbl-product-carousel id="SeriestoSeries">
- *     <adbl-product-grid-item>
- *       <div class="adbl-impression-emitted" data-asin="B0CGS1LPWJ">
- *       <adbl-metadata slot="title"><a>Hockey Guys</a></adbl-metadata>
- *       <adbl-metadata slot="child-count">3 titles</adbl-metadata>
- *     </adbl-product-grid-item>
- */
-function parseSimilarSeries($: cheerio.CheerioAPI): SimilarSeries[] {
-  const similar: SimilarSeries[] = [];
-  const seenAsins = new Set<string>();
-
-  // Scope to the SeriestoSeries carousel to avoid picking up other series links
-  const carousel = $('adbl-product-carousel#SeriestoSeries');
-  if (carousel.length === 0) return similar;
-
-  carousel.find('adbl-product-grid-item').each((_i, el) => {
-    if (similar.length >= 15) return false;
-
-    const $el = $(el);
-
-    // Extract ASIN: prefer data-asin on impression div, fallback to series href
-    let asin = $el.find('.adbl-impression-emitted, .adbl-asin-impression').first().attr('data-asin') || '';
-    if (!asin) {
-      const seriesHref = $el.find('a[href*="/series/"]').first().attr('href') || '';
-      const hrefMatch = seriesHref.match(/\/series\/[^/]*\/([A-Z0-9]{10})/);
-      if (hrefMatch) asin = hrefMatch[1];
-    }
-    if (!asin || !/^[A-Z0-9]{10}$/.test(asin)) return;
-    if (seenAsins.has(asin)) return;
-    seenAsins.add(asin);
-
-    // Title from metadata slot
-    const title = $el.find('adbl-metadata[slot="title"] a').first().text().trim() ||
-      $el.find('adbl-metadata[slot="title"]').first().text().trim() || '';
-    if (!title || title.length > 200) return;
-
-    // Book count from child-count slot (e.g. "3 titles")
-    const countText = $el.find('adbl-metadata[slot="child-count"]').first().text().trim();
-    const countMatch = countText.match(/(\d+)/);
-    const bookCount = countMatch ? parseInt(countMatch[1]) : undefined;
-
-    // Cover image from adbl-collection-image
-    const coverArtUrl = $el.find('adbl-collection-image img').first().attr('src')?.replace(/\._.*_\./, '._SL500_.') ||
-      $el.find('img').first().attr('src')?.replace(/\._.*_\./, '._SL500_.') ||
-      undefined;
-
-    similar.push({ asin, title, bookCount, coverArtUrl });
-  });
-
-  return similar;
 }

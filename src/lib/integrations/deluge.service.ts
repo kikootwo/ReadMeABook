@@ -14,6 +14,7 @@ import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import {
   IDownloadClient, DownloadClientType, ProtocolType,
   DownloadInfo, DownloadStatus, AddDownloadOptions, ConnectionTestResult,
+  DownloadSourceError,
 } from '../interfaces/download-client.interface';
 
 const parseTorrent = (parseTorrentModule as any).default || parseTorrentModule;
@@ -193,7 +194,7 @@ export class DelugeService implements IDownloadClient {
       torrentResponse = await axios.get(torrentUrl, {
         responseType: 'arraybuffer', maxRedirects: 0,
         validateStatus: (s) => s >= 200 && s < 300, timeout: DOWNLOAD_CLIENT_TIMEOUT,
-        headers: { 'User-Agent': RMAB_USER_AGENT },
+        headers: { 'User-Agent': RMAB_USER_AGENT, ...options?.sourceHeaders },
       });
       if (torrentResponse.data.length > 0) {
         const magnetMatch = torrentResponse.data.toString().match(/^magnet:\?[^\s]+$/);
@@ -206,10 +207,27 @@ export class DelugeService implements IDownloadClient {
         const loc = error.response.headers['location'];
         if (loc?.startsWith('magnet:')) return this.addMagnetLink(loc, category, options);
         if (loc?.startsWith('http://') || loc?.startsWith('https://')) {
-          try { torrentResponse = await axios.get(loc, { responseType: 'arraybuffer', timeout: DOWNLOAD_CLIENT_TIMEOUT, maxRedirects: 5, headers: { 'User-Agent': RMAB_USER_AGENT } }); }
-          catch { throw new Error('Failed to download torrent file after redirect'); }
+          try { torrentResponse = await axios.get(loc, { responseType: 'arraybuffer', timeout: DOWNLOAD_CLIENT_TIMEOUT, maxRedirects: 5, headers: { 'User-Agent': RMAB_USER_AGENT, ...options?.sourceHeaders } }); }
+          catch (redirectError) {
+            if (axios.isAxiosError(redirectError) && redirectError.response?.status) {
+              throw new DownloadSourceError(
+                `Grab failed: source returned HTTP ${redirectError.response.status}`,
+                redirectError.response.status,
+                loc,
+                redirectError
+              );
+            }
+            throw new Error('Failed to download torrent file after redirect');
+          }
         } else { throw new Error(`Invalid redirect location: ${loc}`); }
-      } else { throw new Error(`Failed to download torrent: HTTP ${status}`); }
+      } else {
+        throw new DownloadSourceError(
+          `Grab failed: source returned HTTP ${status}`,
+          status,
+          torrentUrl,
+          error
+        );
+      }
     }
 
     const torrentBuffer = Buffer.from(torrentResponse.data);

@@ -15,6 +15,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { resolveInteractiveSearchAccess } from '@/lib/utils/permissions';
 
 const logger = RMABLogger.create('API.InteractiveSearch');
+const MAX_RANKED_RESULTS = 100;
 
 /**
  * POST /api/requests/[id]/interactive-search
@@ -151,7 +152,6 @@ export async function POST(
           const groupResults = await prowlarr.searchWithVariations(searchTitle, searchAuthor, {
             categories: group.categories,
             indexerIds: group.indexerIds,
-            maxResults: 100,
           });
 
           logger.debug(`Group ${i + 1} returned ${groupResults.length} results`);
@@ -169,6 +169,8 @@ export async function POST(
         return NextResponse.json({
           success: true,
           results: [],
+          truncated: false,
+          rawCount: 0,
           message: 'No torrents/nzbs found',
         });
       }
@@ -214,6 +216,14 @@ export async function POST(
       // User can see scores and make their own decision
       logger.debug(`Ranked ${rankedResults.length} results (no threshold filter - user decides)`);
 
+      const truncated = rankedResults.length > MAX_RANKED_RESULTS;
+      const limitedRankedResults = rankedResults.slice(0, MAX_RANKED_RESULTS);
+      if (truncated) {
+        logger.info(`Interactive search truncated after ranking: returning top ${MAX_RANKED_RESULTS} of ${rankedResults.length} ranked results`, {
+          rawCount: results.length,
+        });
+      }
+
       // Log top 3 results with detailed score breakdown for debugging
       const top3 = rankedResults.slice(0, 3);
       if (top3.length > 0) {
@@ -245,7 +255,7 @@ export async function POST(
       }
 
       // Add rank position to each result
-      const resultsWithRank = rankedResults.map((result, index) => ({
+      const resultsWithRank = limitedRankedResults.map((result, index) => ({
         ...result,
         rank: index + 1,
       }));
@@ -253,8 +263,10 @@ export async function POST(
       return NextResponse.json({
         success: true,
         results: resultsWithRank,
-        message: rankedResults.length > 0
-          ? `Found ${rankedResults.length} results`
+        truncated,
+        rawCount: results.length,
+        message: limitedRankedResults.length > 0
+          ? `Found ${limitedRankedResults.length} results`
           : 'No results found',
       });
     } catch (error) {

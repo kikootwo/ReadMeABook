@@ -48,6 +48,7 @@
 - **Book covers API for login page** → [frontend/pages/login.md](frontend/pages/login.md)
 - **Dedup & works table (cross-ASIN identity)** → [integrations/audible.md](integrations/audible.md#dedup--works-table)
 - **Multi-narrator capture in HTML scrapers** → [integrations/audible.md](integrations/audible.md#narrator-capture-in-html-scrapers)
+- **Series page dual layout (modern/legacy A/B)** → [integrations/audible.md](integrations/audible.md#series-page-dual-layout)
 
 ## E-book Support (First-Class)
 - **First-class ebook requests, separate tracking** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
@@ -182,3 +183,4 @@
 **"How does bulk import work?"** → [features/bulk-import.md](features/bulk-import.md)
 **"How do I import multiple audiobooks at once?"** → [features/bulk-import.md](features/bulk-import.md)
 **"How does the bulk import scanner detect audiobooks?"** → [features/bulk-import.md](features/bulk-import.md)
+**"Why is a series page blank / showing no books, then fine after a refresh?"** → [integrations/audible.md](integrations/audible.md#series-page-dual-layout) (Audible A/B-serves two layouts; parsers handle both)

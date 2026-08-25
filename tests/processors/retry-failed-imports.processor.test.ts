@@ -77,6 +77,18 @@ describe('processRetryFailedImports', () => {
     const result = await processRetryFailedImports({ jobId: 'job-1' });
 
     expect(result.success).toBe(true);
+    expect(prismaMock.request.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: [
+        { lastImportAt: { sort: 'asc', nulls: 'first' } },
+        { createdAt: 'asc' },
+        { id: 'asc' },
+      ],
+      take: 50,
+    }));
+    expect(prismaMock.request.update).toHaveBeenCalledWith({
+      where: { id: 'req-1' },
+      data: { lastImportAt: expect.any(Date) },
+    });
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-1',
       'a1',
@@ -109,6 +121,10 @@ describe('processRetryFailedImports', () => {
 
     expect(result.skipped).toBe(1);
     expect(result.triggered).toBe(0);
+    expect(prismaMock.request.update).toHaveBeenCalledWith({
+      where: { id: 'req-2' },
+      data: { lastImportAt: expect.any(Date) },
+    });
   });
 
   it('falls back to configured download dir when qBittorrent lookup fails', async () => {

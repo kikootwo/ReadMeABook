@@ -119,9 +119,31 @@ Configurable Audible region for accurate metadata matching across international 
 **Files:**
 - Types: `src/lib/types/audible.ts`
 - Service: `src/lib/integrations/audible.service.ts`
-- Series (HTML): `src/lib/integrations/audible-series.ts`
+- Series (HTML): `src/lib/integrations/audible-series.ts` (fetch/orchestration), `src/lib/integrations/audible-series-parsers.ts` (Cheerio parsing)
 - Config: `src/lib/services/config.service.ts`
 - API: `src/app/api/admin/settings/audible/route.ts`
+
+## Series Page Dual Layout
+
+**Status:** ✅ Handled | Audible A/B-serves two different `/series/{asin}` layouts per request
+
+Roughly 40% of requests return the **modern** layout, the rest **legacy**. The same URL flips between them request-to-request. All parsers in `audible-series-parsers.ts` try modern first, then fall back to legacy. The layouts are disjoint — a modern page contains zero legacy markers and vice versa.
+
+| Field | Modern | Legacy |
+|-------|--------|--------|
+| Books | `<adbl-product-row>` inside `#series-titles` | `<li class="productListItem">` / `.bc-list-item` |
+| Book metadata | `<script type="application/json">` per row: `{authors[{name,url}], narrators[{name}], duration, language, releaseDate, rating{value,count}}` | scraped from `.authorLabel` / `searchNarrator=` anchors / `.runtimeLabel` / `.ratingsLabel` |
+| Book count | `<span slot="child">4 books in series</span>` | `"4 books"` span text |
+| Series rating | `<adbl-star-rating slot="rating" value count>` | `div.bc-review-stars[aria-label]` + `span.series-rating` |
+| Description | `#series-about adbl-text-block` (read `<p>` only — `[slot="title"]` is a heading) | `.bc-expander-content` |
+| Cover | first row's `adbl-product-image img` | `.productListItem img` |
+| Tags, similar series | `adbl-chip.related-tag`, `adbl-product-carousel#SeriestoSeries` (identical in both) | same |
+
+**Critical:** carousel content describes *other* series. `outsideCarousel()` excludes `adbl-product-carousel` descendants from book-count, rating, cover and row selection — the "Listeners also enjoyed" carousel carries its own `slot="child-count"` values.
+
+Modern rows yield strictly richer data (`releaseDate`, `language`, real narrator arrays, author ASIN). `parseSeriesBooks()` returns legacy results only when zero modern rows parse.
+
+`scrapeSeriesPage()` logs a warning when the header reports books but zero rows parse — that signals Audible changed its markup again.
 
 ## Unified Matching (`audiobook-matcher.ts`)
 
@@ -286,6 +308,13 @@ interface AuthorBooksResult {
 - PostgreSQL (`audible_cache`, `audible_cache_categories`)
 
 ## Fixed Issues
+
+**Series pages intermittently empty — blank cover, correct count, no books (2026-08-11)**
+- **Problem:** Loading a series showed a blank cover and the right book count in the card, but an empty "Books in Series" table. Refreshing a few times fixed it. Logs showed `Series detail complete: "..." (0 books)` alternating with `(4 books)` for the same ASIN seconds apart.
+- **Root cause:** Audible A/B-serves two different `/series/{asin}` layouts. `parseSeriesBooks` only matched the legacy `.productListItem` / `.bc-list-item` markup; the modern layout renders books as `<adbl-product-row>` web components and contains **zero** legacy classes. Probing one URL 12× returned the modern layout 5 times. The header (`h1`, book-count span) parses identically in both, which is why the count stayed correct while the list emptied. Same cause silently dropped `coverArtUrl`, `rating`, `ratingCount` and `description`.
+- **Scope:** series pages only — `/search`, `/author/` and `/adblbestsellers` returned legacy markup on 6/6 probes each.
+- **Fix:** Extracted all Cheerio parsing into `audible-series-parsers.ts` and made every parser modern-first with legacy fallback. Modern rows read their embedded JSON blob (structured narrators, author ASIN, duration, rating, releaseDate), so they carry more data than the legacy path. Added `outsideCarousel()` so similar-series carousel values can't be mistaken for this series', and a layout-drift warning when the header reports books but no rows parse.
+- **Location:** `src/lib/integrations/audible-series-parsers.ts` (new); `src/lib/integrations/audible-series.ts` (now fetch/orchestration only); `tests/integrations/audible-series-parsers.test.ts` (new, dual-layout parity tests).
 
 **Series-page duplicates not collapsing across user views (2026-05-14)**
 - **Problem:** Two re-listings of the same audiobook (same title, same narrator set, same duration, different ASINs) showed as two cards on series detail pages, even after the works table had already linked them via search-page dedup.
