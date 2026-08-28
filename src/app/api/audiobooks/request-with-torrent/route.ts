@@ -64,15 +64,17 @@ export async function POST(request: NextRequest) {
       const body = await req.json();
       const { audiobook, torrent } = RequestWithTorrentSchema.parse(body);
 
-      // First check: Is there an existing audiobook request in 'downloaded' or 'available' status?
-      // This catches the gap where files are organized but Plex hasn't scanned yet
+      // First check: Is there an existing audiobook request that is already
+      // fulfilled or actively being processed? Catches the gap where files are
+      // organized but Plex hasn't scanned yet, plus in-flight downloads, so the
+      // user isn't told "already requested" when the book is actually on its way.
       const existingActiveRequest = await prisma.request.findFirst({
         where: {
           audiobook: {
             audibleAsin: audiobook.asin,
           },
           type: 'audiobook', // Only check audiobook requests (ebook requests are separate)
-          status: { in: ['downloaded', 'available'] },
+          status: { in: ['downloaded', 'available', 'downloading', 'processing', 'awaiting_approval'] },
           deletedAt: null,
         },
         include: {
@@ -84,12 +86,24 @@ export async function POST(request: NextRequest) {
         const status = existingActiveRequest.status;
         const isOwnRequest = existingActiveRequest.userId === req.user.id;
 
+        let error: string;
+        let message: string;
+
+        if (status === 'available') {
+          error = 'AlreadyAvailable';
+          message = 'This audiobook is already available in your Plex library';
+        } else if (status === 'awaiting_approval') {
+          error = 'AwaitingApproval';
+          message = 'This request is awaiting admin approval';
+        } else {
+          error = 'BeingProcessed';
+          message = 'This audiobook is being processed and will be available soon';
+        }
+
         return NextResponse.json(
           {
-            error: status === 'available' ? 'AlreadyAvailable' : 'BeingProcessed',
-            message: status === 'available'
-              ? 'This audiobook is already available in your Plex library'
-              : 'This audiobook is being processed and will be available soon',
+            error,
+            message,
             requestStatus: status,
             isOwnRequest,
             requestedBy: existingActiveRequest.user?.plexUsername,
