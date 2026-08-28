@@ -70,6 +70,66 @@ describe('Request with torrent route', () => {
     expect(payload.error).toBe('BeingProcessed');
   });
 
+  it('returns BeingProcessed when request is downloading', async () => {
+    authRequest.json.mockResolvedValue({
+      audiobook: { asin: 'ASIN', title: 'Title', author: 'Author' },
+      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'url', publishDate: '2024-01-01' },
+    });
+    prismaMock.request.findFirst.mockResolvedValueOnce({
+      id: 'req-1',
+      status: 'downloading',
+      userId: 'user-1',
+      user: { plexUsername: 'me' },
+    } as any);
+
+    const { POST } = await import('@/app/api/audiobooks/request-with-torrent/route');
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload.error).toBe('BeingProcessed');
+  });
+
+  it('returns BeingProcessed when request is processing', async () => {
+    authRequest.json.mockResolvedValue({
+      audiobook: { asin: 'ASIN', title: 'Title', author: 'Author' },
+      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'url', publishDate: '2024-01-01' },
+    });
+    prismaMock.request.findFirst.mockResolvedValueOnce({
+      id: 'req-1',
+      status: 'processing',
+      userId: 'user-1',
+      user: { plexUsername: 'me' },
+    } as any);
+
+    const { POST } = await import('@/app/api/audiobooks/request-with-torrent/route');
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload.error).toBe('BeingProcessed');
+  });
+
+  it('returns AwaitingApproval when request is awaiting approval', async () => {
+    authRequest.json.mockResolvedValue({
+      audiobook: { asin: 'ASIN', title: 'Title', author: 'Author' },
+      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'url', publishDate: '2024-01-01' },
+    });
+    prismaMock.request.findFirst.mockResolvedValueOnce({
+      id: 'req-1',
+      status: 'awaiting_approval',
+      userId: 'user-1',
+      user: { plexUsername: 'me' },
+    } as any);
+
+    const { POST } = await import('@/app/api/audiobooks/request-with-torrent/route');
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload.error).toBe('AwaitingApproval');
+  });
+
   it('returns 401 when user is missing', async () => {
     authRequest.user = null;
 
