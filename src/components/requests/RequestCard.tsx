@@ -28,6 +28,8 @@ interface RequestCardProps {
     completedAt?: string;
     downloadAvailable?: boolean;
     releaseDate?: string | Date | null;
+    /** Request owner, included by GET /api/requests. Gates the modal's advance actions. */
+    user?: { id: string; plexUsername?: string } | null;
     audiobook: {
       id: string;
       audibleAsin?: string;
@@ -273,6 +275,8 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
           onClose={() => setShowDetailsModal(false)}
           requestStatus={request.status}
           isAvailable={COMPLETED_STATUSES.includes(request.status as typeof COMPLETED_STATUSES[number])}
+          requestId={request.id}
+          requestedByUserId={request.user?.id ?? null}
         />
       )}
 

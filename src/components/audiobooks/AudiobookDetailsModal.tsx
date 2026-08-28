@@ -19,6 +19,7 @@ import { usePreferences } from '@/contexts/PreferencesContext';
 import { InteractiveTorrentSearchModal } from '@/components/requests/InteractiveTorrentSearchModal';
 import { ReportIssueModal } from '@/components/audiobooks/ReportIssueModal';
 import { ManualImportBrowser } from '@/components/audiobooks/ManualImportBrowser';
+import { ManualTorrentModal } from '@/components/audiobooks/ManualTorrentModal';
 import { FolderArrowDownIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
 import { EyeSlashIcon as EyeSlashSolidIcon } from '@heroicons/react/24/solid';
 import { fetchWithAuth } from '@/lib/utils/api';
@@ -110,29 +111,44 @@ export function AudiobookDetailsModal({
   const [showInteractiveSearchEbook, setShowInteractiveSearchEbook] = useState(false);
   const [showReportIssue, setShowReportIssue] = useState(false);
   const [showManualImport, setShowManualImport] = useState(false);
+  const [showManualTorrent, setShowManualTorrent] = useState(false);
   const [asinCopied, setAsinCopied] = useState(false);
   const [localRequestStatus, setLocalRequestStatus] = useState<string | null>(requestStatus ?? null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [coverError, setCoverError] = useState(false);
   const [isTogglingIgnore, setIsTogglingIgnore] = useState(false);
+  // Request created inside this modal session. Callers that open the modal from a search
+  // card have no requestId to pass until their list data refetches, so remember it here.
+  const [localRequestId, setLocalRequestId] = useState<string | null>(null);
+  const [localRequestedByUserId, setLocalRequestedByUserId] = useState<string | null>(null);
 
   // Sync local status when the prop changes (e.g. page data refreshes)
   useEffect(() => {
     setLocalRequestStatus(requestStatus ?? null);
   }, [requestStatus]);
 
+  // Drop the in-session request once the modal closes so it never leaks into the next open
+  useEffect(() => {
+    if (!isOpen) {
+      setLocalRequestId(null);
+      setLocalRequestedByUserId(null);
+    }
+  }, [isOpen]);
+
   const effectiveStatus = localRequestStatus;
+  const effectiveRequestId = requestId ?? localRequestId;
+  const effectiveRequestedByUserId = requestedByUserId ?? localRequestedByUserId;
   const status = getStatusInfo(isAvailable, effectiveStatus, requestedByUsername);
   const canShowEbookButtons = isAvailable && ebookStatus?.ebookSourcesEnabled && !ebookStatus?.hasActiveEbookRequest;
 
   // Advance the existing request via select-torrent (instead of creating a new one)
   // only when the viewer owns the request, or is admin, AND the status is one we route on.
   // Outside this predicate the search modal falls back to today's "create new request" path.
-  const shouldAdvance = !!requestId
+  const shouldAdvance = !!effectiveRequestId
     && !!user
-    && (requestedByUserId === user.id || user.role === 'admin')
+    && (effectiveRequestedByUserId === user.id || user.role === 'admin')
     && (ADVANCEABLE_FROM_INTERACTIVE_SEARCH as readonly string[]).includes(effectiveStatus ?? '');
-  const advanceRequestId = shouldAdvance ? requestId ?? undefined : undefined;
+  const advanceRequestId = shouldAdvance ? effectiveRequestId ?? undefined : undefined;
 
   useEffect(() => {
     setMounted(true);
@@ -163,11 +179,19 @@ export function AudiobookDetailsModal({
     }
 
     try {
-      await createRequest(audiobook);
+      const created = await createRequest(audiobook);
+      if (created?.id) {
+        setLocalRequestId(created.id);
+        setLocalRequestedByUserId(user?.id ?? null);
+      }
       setLocalRequestStatus('pending');
       onStatusChange?.('pending');
       showNotification('Request created!');
-      setTimeout(onClose, 1500);
+      // Keep the modal open when the request id was captured so the user can act on it
+      // (Manual Torrent / Interactive Search) instead of it closing under them.
+      if (!created?.id) {
+        setTimeout(onClose, 1500);
+      }
       onRequestSuccess?.();
     } catch (err) {
       showNotification(err instanceof Error ? err.message : 'Failed to create request', 'error');
@@ -716,6 +740,20 @@ export function AudiobookDetailsModal({
                 </button>
               )}
 
+              {/* Manual Torrent - same gate as Interactive Search, needs an actionable request */}
+              {status.type !== 'available' && advanceRequestId && (user?.role === 'admin' || user?.permissions?.interactiveSearch !== false) && (
+                <button
+                  onClick={() => setShowManualTorrent(true)}
+                  disabled={!user}
+                  className="p-3 rounded-xl bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors disabled:opacity-50"
+                  title="Manual Torrent"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m6.5-6.5l1.5-1.5a4 4 0 115.656 5.656l-3 3a4 4 0 01-5.656 0" />
+                  </svg>
+                </button>
+              )}
+
               {/* Manual Import - admin only, hidden during active processing and completed states */}
               {user?.role === 'admin' && !isAvailable && !['downloading', 'processing', 'searching', 'downloaded', 'completed', 'available'].includes(effectiveStatus || '') && (
                 <button
@@ -832,6 +870,23 @@ export function AudiobookDetailsModal({
           />
         </div>,
         document.body
+      )}
+
+      {/* Manual Torrent Modal */}
+      {showManualTorrent && audiobook && advanceRequestId && (
+        <ManualTorrentModal
+          isOpen={showManualTorrent}
+          onClose={() => setShowManualTorrent(false)}
+          onSuccess={() => {
+            setShowManualTorrent(false);
+            setLocalRequestStatus('downloading');
+            onStatusChange?.('downloading');
+            showNotification('Download started');
+            onRequestSuccess?.();
+          }}
+          requestId={advanceRequestId}
+          bookTitle={audiobook.title}
+        />
       )}
 
       {/* Interactive Search Modal (Ebook) */}

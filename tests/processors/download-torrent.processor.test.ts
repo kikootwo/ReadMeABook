@@ -130,6 +130,49 @@ describe('processDownloadTorrent', () => {
     );
   });
 
+  it('routes a manual magnet (no seeders, zero size) to the torrent client', async () => {
+    const magnet = 'magnet:?xt=urn:btih:abc123def4567890abc123def4567890abc12345&dn=Manual';
+    const qbtClientMock = {
+      clientType: 'qbittorrent',
+      protocol: 'torrent',
+      addDownload: vi.fn().mockResolvedValue('hash-manual'),
+    };
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(qbtClientMock);
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-1',
+      type: 'qbittorrent',
+      enabled: true,
+      category: 'readmeabook',
+    });
+    prismaMock.request.update.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
+    prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-manual' });
+
+    const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+    const result = await processDownloadTorrent({
+      requestId: 'req-manual',
+      audiobook: { id: 'a1', title: 'Book', author: 'Author' },
+      torrent: {
+        indexer: 'manual',
+        title: 'Manual torrent',
+        size: 0,
+        publishDate: new Date(),
+        downloadUrl: magnet,
+        guid: magnet,
+        format: 'OTHER',
+        protocol: 'torrent',
+      },
+      alternateTorrents: [],
+      jobId: 'job-manual',
+    });
+
+    expect(result.success).toBe(true);
+    expect(downloadClientManagerMock.getClientServiceForProtocol).toHaveBeenCalledWith('torrent');
+    expect(qbtClientMock.addDownload).toHaveBeenCalledWith(
+      magnet,
+      expect.objectContaining({ category: 'readmeabook', priority: 'normal' })
+    );
+  });
+
   it('routes NZB downloads to SABnzbd', async () => {
     const sabClientMock = {
       clientType: 'sabnzbd',
