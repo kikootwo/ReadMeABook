@@ -740,8 +740,8 @@ export function AudiobookDetailsModal({
                 </button>
               )}
 
-              {/* Manual Torrent - same gate as Interactive Search, needs an actionable request */}
-              {status.type !== 'available' && advanceRequestId && (user?.role === 'admin' || user?.permissions?.interactiveSearch !== false) && (
+              {/* Manual Torrent - admin only, needs an actionable request */}
+              {status.type !== 'available' && advanceRequestId && user?.role === 'admin' && (
                 <button
                   onClick={() => setShowManualTorrent(true)}
                   disabled={!user}

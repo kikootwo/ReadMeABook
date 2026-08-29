@@ -82,7 +82,7 @@ describe('POST /api/requests/[id]/manual-download', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authRequest = {
-      user: { id: 'user-1', role: 'user' },
+      user: { id: 'admin-1', role: 'admin' },
       formData: vi.fn(async () => makeFormData({ magnet: VALID_MAGNET })),
     };
     requireAuthMock.mockImplementation(
@@ -124,14 +124,15 @@ describe('POST /api/requests/[id]/manual-download', () => {
     expect(payload.error).toBe('NotFound');
   });
 
-  it('returns 403 when the request belongs to another user', async () => {
-    prismaMock.request.findUnique.mockResolvedValue(eligibleRequest({ userId: 'user-2' }));
+  it('returns 403 for non-admin users', async () => {
+    authRequest.user = { id: 'user-1', role: 'user' };
 
     const response = await callRoute();
     const payload = await response.json();
 
     expect(response.status).toBe(403);
     expect(payload.error).toBe('Forbidden');
+    expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
   });
 
   it('allows an admin to act on another user\'s request', async () => {

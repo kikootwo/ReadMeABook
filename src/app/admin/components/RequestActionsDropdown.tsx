@@ -10,6 +10,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { InteractiveTorrentSearchModal } from '@/components/requests/InteractiveTorrentSearchModal';
+import { ManualTorrentModal } from '@/components/audiobooks/ManualTorrentModal';
 import { AdjustSearchTermsModal } from './AdjustSearchTermsModal';
 import { useSmartDropdownPosition } from '@/hooks/useSmartDropdownPosition';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
@@ -34,6 +35,7 @@ export interface RequestActionsDropdownProps {
   onViewDetails?: (asin: string) => void;
   onFetchEbook?: (requestId: string) => Promise<void>;
   onSearchTermsUpdated?: () => void;
+  onManualTorrentSuccess?: () => void;
   ebookSidecarEnabled?: boolean;
   annasArchiveBaseUrl?: string;
   isLoading?: boolean;
@@ -48,6 +50,7 @@ export function RequestActionsDropdown({
   onViewDetails,
   onFetchEbook,
   onSearchTermsUpdated,
+  onManualTorrentSuccess,
   ebookSidecarEnabled = false,
   annasArchiveBaseUrl = 'https://annas-archive.gl',
   isLoading = false,
@@ -56,6 +59,7 @@ export function RequestActionsDropdown({
   const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
   const [showInteractiveSearchEbook, setShowInteractiveSearchEbook] = useState(false);
   const [showAdjustSearchTerms, setShowAdjustSearchTerms] = useState(false);
+  const [showManualTorrent, setShowManualTorrent] = useState(false);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const { containerRef, dropdownRef, positionAbove, style } = useSmartDropdownPosition(isOpen);
@@ -140,6 +144,11 @@ export function RequestActionsDropdown({
     } else {
       setShowInteractiveSearch(true);
     }
+  };
+
+  const handleManualTorrent = () => {
+    setIsOpen(false);
+    setShowManualTorrent(true);
   };
 
   const handleAdjustSearchTerms = () => {
@@ -292,6 +301,30 @@ export function RequestActionsDropdown({
                   />
                 </svg>
                 Interactive Search
+              </button>
+            )}
+
+            {/* Manual Torrent */}
+            {canSearch && (
+              <button
+                onClick={handleManualTorrent}
+                className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 transition-colors"
+                role="menuitem"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m6.5-6.5l1.5-1.5a4 4 0 115.656 5.656l-3 3a4 4 0 01-5.656 0"
+                  />
+                </svg>
+                Manual Torrent
               </button>
             )}
 
@@ -541,6 +574,18 @@ export function RequestActionsDropdown({
         author={request.author}
         currentSearchTerms={request.customSearchTerms}
         onSuccess={onSearchTermsUpdated}
+      />
+
+      {/* Manual Torrent Modal */}
+      <ManualTorrentModal
+        isOpen={showManualTorrent}
+        onClose={() => setShowManualTorrent(false)}
+        onSuccess={() => {
+          setShowManualTorrent(false);
+          onManualTorrentSuccess?.();
+        }}
+        requestId={request.requestId}
+        bookTitle={request.title}
       />
 
       <ConfirmModal

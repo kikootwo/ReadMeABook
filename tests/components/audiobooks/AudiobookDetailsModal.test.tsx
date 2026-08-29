@@ -150,6 +150,7 @@ describe('AudiobookDetailsModal', () => {
 
   it('stays open after a successful request that returns an id', async () => {
     vi.useFakeTimers();
+    useAuthMock.mockReturnValue({ user: { id: 'admin-1', username: 'admin', role: 'admin' } });
     createRequestMock.mockResolvedValueOnce({ id: 'req-1' });
     const onClose = vi.fn();
     const onRequestSuccess = vi.fn();
@@ -472,7 +473,7 @@ describe('AudiobookDetailsModal', () => {
       requestedByUserId?: string | null;
       isAvailable?: boolean;
     }) => {
-      useAuthMock.mockReturnValue({ user: props.user ?? { id: 'user-1', username: 'u' } });
+      useAuthMock.mockReturnValue({ user: props.user ?? { id: 'admin-1', username: 'admin', role: 'admin' } });
       const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
 
       render(
@@ -491,7 +492,7 @@ describe('AudiobookDetailsModal', () => {
     };
 
     it.each(['pending', 'failed', 'awaiting_search', 'awaiting_release'])(
-      'renders the Manual Torrent button for an own %s request',
+      'renders the Manual Torrent button for an admin on a %s request',
       async (status) => {
         await renderModal({
           requestStatus: status,
@@ -551,7 +552,7 @@ describe('AudiobookDetailsModal', () => {
     it('forgets the in-session request once the modal closes', async () => {
       createRequestMock.mockResolvedValueOnce({ id: 'req-1' });
       const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
-      useAuthMock.mockReturnValue({ user: { id: 'user-1', username: 'u' } });
+      useAuthMock.mockReturnValue({ user: { id: 'admin-1', username: 'admin', role: 'admin' } });
 
       const { rerender } = render(
         <AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} />
@@ -595,9 +596,9 @@ describe('AudiobookDetailsModal', () => {
       expect(screen.queryByTitle('Manual Torrent')).not.toBeInTheDocument();
     });
 
-    it('hides the Manual Torrent button when interactive search permission is denied', async () => {
+    it('hides the Manual Torrent button for a non-admin user', async () => {
       await renderModal({
-        user: { id: 'user-1', username: 'u', permissions: { interactiveSearch: false } },
+        user: { id: 'user-1', username: 'u' },
         requestStatus: 'pending',
         requestId: 'req-1',
         requestedByUserId: 'user-1',

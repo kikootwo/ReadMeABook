@@ -90,10 +90,10 @@ export async function POST(
         );
       }
 
-      // Check authorization
-      if (requestRecord.userId !== req.user.id && req.user.role !== 'admin') {
+      // Check authorization - manual torrent download is admin-only
+      if (req.user.role !== 'admin') {
         return NextResponse.json(
-          { error: 'Forbidden', message: 'You do not have access to this request' },
+          { error: 'Forbidden', message: 'Manual torrent download is restricted to admins' },
           { status: 403 }
         );
       }
