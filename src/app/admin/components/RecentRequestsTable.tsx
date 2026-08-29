@@ -740,6 +740,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                         onViewDetails={(asin) => handleViewDetails(asin, request.status, request.requestId, request.userId)}
                         onFetchEbook={handleFetchEbook}
                         onSearchTermsUpdated={() => mutate(apiUrl)}
+                        onManualTorrentSuccess={() => mutate(apiUrl)}
                         ebookSidecarEnabled={ebookSidecarEnabled}
                         annasArchiveBaseUrl={annasArchiveBaseUrl}
                         isLoading={isDeleting || isFetchingEbook}
