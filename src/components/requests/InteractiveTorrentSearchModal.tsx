@@ -89,6 +89,17 @@ const getScoreStyle = (score: number) => {
   return { bg: 'bg-gray-500/10 dark:bg-gray-400/10', text: 'text-gray-500 dark:text-gray-400' };
 };
 
+const getIndexerFlagStyle = (flag: string): string => {
+  switch (flag.trim().toLowerCase()) {
+    case 'freeleech':
+      return 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300';
+    case 'vip':
+      return 'bg-amber-100 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300';
+    default:
+      return 'bg-blue-100 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300';
+  }
+};
+
 // Skeleton widths for loading state (deterministic to avoid hydration mismatch)
 const skeletonRows = [
   { title: '72%', meta: '48%' },
@@ -621,6 +632,14 @@ function ResultRow({
   const { tags } = extractTitleTags(result.title);
   const displayFormatLower = (displayFormat ?? '').toLowerCase();
   const chipTags = tags.filter((t) => t.toLowerCase() !== displayFormatLower);
+  const indexerFlags = Array.from(
+    new Map(
+      (result.flags ?? [])
+        .map((flag) => flag.trim())
+        .filter(Boolean)
+        .map((flag) => [flag.toLowerCase(), flag]),
+    ).values(),
+  );
 
   const titleRef = useRef<HTMLAnchorElement | null>(null);
   const isTruncated = useIsTruncated(titleRef);
@@ -728,6 +747,17 @@ function ResultRow({
               className="px-1 py-px text-[10px] font-semibold uppercase tracking-wide rounded bg-slate-100 dark:bg-slate-500/15 text-slate-700 dark:text-slate-300"
             >
               {tag}
+            </span>
+          ))}
+
+          {/* Indexer-provided release flags (Freeleech, VIP, Internal, etc.) */}
+          {indexerFlags.map((flag) => (
+            <span
+              key={flag.toLowerCase()}
+              className={`px-1 py-px text-[10px] font-semibold uppercase tracking-wide rounded ${getIndexerFlagStyle(flag)}`}
+              title={`Indexer flag: ${flag}`}
+            >
+              {flag}
             </span>
           ))}
 
