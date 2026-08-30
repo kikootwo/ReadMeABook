@@ -240,6 +240,31 @@ describe('InteractiveTorrentSearchModal', () => {
       expect(document.querySelectorAll('span.bg-slate-100').length).toBe(0);
     });
 
+    it('renders a distinct chip for each indexer flag', async () => {
+      await renderWithResults([
+        { ...baseResult, guid: 'flags', flags: ['freeleech', 'Internal'] },
+      ]);
+      await screen.findByRole('link', { name: 'Test Torrent' });
+      expect(screen.getByText('freeleech')).toHaveClass('bg-emerald-100');
+      expect(screen.getByText('Internal')).toHaveClass('bg-blue-100');
+    });
+
+    it('deduplicates indexer flags case-insensitively and ignores blanks', async () => {
+      await renderWithResults([
+        { ...baseResult, guid: 'dedupe-flags', flags: ['Freeleech', ' freeleech ', ''] },
+      ]);
+      await screen.findByRole('link', { name: 'Test Torrent' });
+      expect(screen.getAllByText(/freeleech/i)).toHaveLength(1);
+    });
+
+    it('renders no indexer flag chips when flags are absent', async () => {
+      await renderWithResults([
+        { ...baseResult, guid: 'no-flags', flags: undefined },
+      ]);
+      await screen.findByRole('link', { name: 'Test Torrent' });
+      expect(document.querySelector('[title^="Indexer flag:"]')).not.toBeInTheDocument();
+    });
+
     it('does not render the chevron when the title fits', async () => {
       useIsTruncatedMock.mockReturnValue(false);
       await renderWithResults([
