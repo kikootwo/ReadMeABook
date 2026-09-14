@@ -54,46 +54,63 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
     // Before deleting torrent, we check if other active requests are using it
     // NOTE: Ebooks downloaded via indexer search use torrent clients and need seeding cleanup too.
     //       Direct HTTP ebook downloads are naturally skipped (no torrent hash / unknown client type).
-    const completedRequests = await prisma.request.findMany({
-      where: {
-        OR: [
-          // Audiobook requests that are fully available (matched in Plex/ABS)
-          {
-            type: 'audiobook',
-            status: 'available',
-            deletedAt: null,
-          },
-          // Ebook requests that are fully downloaded (terminal state for ebooks)
-          {
-            type: 'ebook',
-            status: 'downloaded',
-            deletedAt: null,
-          },
-          // Soft-deleted requests of any type (orphaned downloads)
-          {
-            deletedAt: { not: null },
-          },
-        ],
-      },
-      include: {
-        downloadHistory: {
-          where: {
-            selected: true,
-            downloadStatus: 'completed',
-          },
-          orderBy: { completedAt: 'desc' },
-          take: 1,
-        },
-      },
-      take: 100, // Limit to 100 requests per run
-    });
-
-    logger.info(`Found ${completedRequests.length} requests to check (audiobook: available, ebook: downloaded, or soft-deleted)`);
+    const BATCH_SIZE = 100;
 
     let cleaned = 0;
     let skipped = 0;
     let noConfig = 0;
+    let totalChecked = 0;
+    let lastRequestId: string | undefined;
+
     const deletedHashes = new Set<string>(); // Track torrents already deleted this run
+
+    while (true) {
+      const completedRequests = await prisma.request.findMany({
+        where: {
+          OR: [
+            // Audiobook requests that are fully available (matched in Plex/ABS)
+            {
+              type: 'audiobook',
+              status: 'available',
+              deletedAt: null,
+            },
+            // Ebook requests that are fully downloaded (terminal state for ebooks)
+            {
+              type: 'ebook',
+              status: 'downloaded',
+              deletedAt: null,
+            },
+            // Soft-deleted requests of any type (orphaned downloads)
+            {
+              deletedAt: { not: null },
+            },
+          ],
+          ...(lastRequestId ? { id: { gt: lastRequestId } } : {}),
+        },
+        include: {
+          downloadHistory: {
+            where: {
+              selected: true,
+              downloadStatus: 'completed',
+            },
+            orderBy: { completedAt: 'desc' },
+            take: 1,
+          },
+        },
+        orderBy: { id: 'asc' },
+        take: BATCH_SIZE,
+      });
+
+      if (completedRequests.length === 0) {
+        break;
+      }
+
+      logger.info(
+        `Found batch of ${completedRequests.length} requests to check ` +
+        `(audiobook: available, ebook: downloaded, or soft-deleted)`
+      );
+
+      totalChecked += completedRequests.length;
 
     for (const request of completedRequests) {
       try {
@@ -255,13 +272,17 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
         logger.error(`Failed to cleanup request ${request.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     }
-
+    lastRequestId = completedRequests[completedRequests.length - 1].id;
+          if (completedRequests.length < BATCH_SIZE) {
+        break;
+      }
+    }
     logger.info(`Cleanup complete: ${cleaned} downloads cleaned, ${skipped} still seeding, ${noConfig} unlimited`);
 
     return {
       success: true,
       message: 'Cleanup seeded torrents completed',
-      totalChecked: completedRequests.length,
+      totalChecked,
       cleaned,
       skipped,
       unlimited: noConfig,

@@ -511,6 +511,57 @@ describe('processCleanupSeededTorrents', () => {
     expect(result.skipped).toBe(1);
     expect(qbtClientMock.deleteDownload).not.toHaveBeenCalled();
   });
+  it('checks all eligible requests when more than 100 exist', async () => {
+    configMock.get.mockResolvedValue(
+      JSON.stringify([{ name: 'IndexerA', seedingTimeMinutes: 30 }])
+    );
+
+    const firstBatch = Array.from({ length: 100 }, (_, index) => ({
+      id: `req-${String(index + 1).padStart(3, '0')}`,
+      deletedAt: null,
+      downloadHistory: [],
+    }));
+
+    const secondBatch = Array.from({ length: 12 }, (_, index) => ({
+      id: `req-${String(index + 101).padStart(3, '0')}`,
+      deletedAt: null,
+      downloadHistory: [],
+    }));
+
+    prismaMock.request.findMany
+      .mockResolvedValueOnce(firstBatch)
+      .mockResolvedValueOnce(secondBatch);
+
+    const { processCleanupSeededTorrents } = await import(
+      '@/lib/processors/cleanup-seeded-torrents.processor'
+    );
+
+    const result = await processCleanupSeededTorrents({
+      jobId: 'job-over-100',
+    });
+
+    expect(result.totalChecked).toBe(112);
+    expect(prismaMock.request.findMany).toHaveBeenCalledTimes(2);
+
+    expect(prismaMock.request.findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        orderBy: { id: 'asc' },
+        take: 100,
+      })
+    );
+
+    expect(prismaMock.request.findMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { gt: 'req-100' },
+        }),
+        orderBy: { id: 'asc' },
+        take: 100,
+      })
+    );
+  });
 });
 
 
