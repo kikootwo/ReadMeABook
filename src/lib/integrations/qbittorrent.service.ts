@@ -303,6 +303,19 @@ export class QBittorrentService implements IDownloadClient {
     }
   }
 
+  /** Accept legacy success or a qBittorrent 5.2 receipt for our single submitted hash. */
+  private isAddAccepted(data: unknown, infoHash: string): boolean {
+    if (data === 'Ok.') return true;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+
+    const receipt = data as Record<string, unknown>;
+    return receipt.success_count === 1 && receipt.failure_count === 0 &&
+      receipt.pending_count === 0 && Array.isArray(receipt.added_torrent_ids) &&
+      receipt.added_torrent_ids.length === 1 &&
+      typeof receipt.added_torrent_ids[0] === 'string' &&
+      receipt.added_torrent_ids[0].toLowerCase() === infoHash.toLowerCase();
+  }
+
   /**
    * Add magnet link - hash is extractable from URI (deterministic)
    */
@@ -358,7 +371,7 @@ export class QBittorrentService implements IDownloadClient {
       },
     });
 
-    if (response.data !== 'Ok.') {
+    if (!this.isAddAccepted(response.data, infoHash)) {
       throw new Error(`qBittorrent rejected magnet link: ${response.data}`);
     }
 
@@ -529,7 +542,7 @@ export class QBittorrentService implements IDownloadClient {
       maxContentLength: Infinity,
     });
 
-    if (response.data !== 'Ok.') {
+    if (!this.isAddAccepted(response.data, infoHash)) {
       throw new Error(`qBittorrent rejected .torrent file: ${response.data}`);
     }
 

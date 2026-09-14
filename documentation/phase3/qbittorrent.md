@@ -6,7 +6,12 @@ Free, open-source BitTorrent client with comprehensive Web API.
 
 ## Enterprise Torrent Addition
 
-**Challenge:** `/api/v2/torrents/add` returns only "Ok." without torrent hash.
+**Responses:** `/api/v2/torrents/add` returns legacy `Ok.` or a JSON receipt in qBittorrent 5.2.
+
+- Both magnet and file uploads accept `Ok.` for compatibility with older clients.
+- JSON must confirm exactly the submitted hash (case-insensitive): `success_count: 1`, `failure_count: 0`, `pending_count: 0`, and one matching `added_torrent_ids` entry.
+- Pending, malformed, mismatched and rejected responses remain errors; HTTP 200 alone does not confirm the add.
+- Hash extraction and the existing duplicate check are unchanged.
 
 **Solution (Professional):**
 
