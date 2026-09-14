@@ -31,7 +31,10 @@ const execState = vi.hoisted(() => {
       }
       resolve({ stdout: result.stdout ?? '', stderr: '' });
     });
-  return { exec, state };
+  const execFile = vi.fn();
+  (execFile as any)[custom] = (bin: string, args: string[]) =>
+    (exec as any)[custom](`${bin} ${args.map(arg => JSON.stringify(arg)).join(' ')}`);
+  return { exec, execFile, state };
 });
 const spawnMock = vi.hoisted(() => vi.fn());
 const fsMock = vi.hoisted(() => ({
@@ -45,6 +48,7 @@ const fsMock = vi.hoisted(() => ({
 
 vi.mock('child_process', () => ({
   exec: execState.exec,
+  execFile: execState.execFile,
   spawn: spawnMock,
 }));
 

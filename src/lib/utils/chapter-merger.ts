@@ -6,14 +6,16 @@
  * with proper chapter markers.
  */
 
-import { exec, spawn } from 'child_process';
+import { exec, execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
 import { RMABLogger } from './logger';
+import { resolveSourceTrackOrder, SourcePosition } from './source-track-order';
 import { CHAPTER_MERGE_FORMATS } from '../constants/audio-formats';
 
 const execPromise = promisify(exec);
+const execFilePromise = promisify(execFile);
 
 // Supported audio formats for chapter merging (from shared constants)
 const SUPPORTED_FORMATS: readonly string[] = CHAPTER_MERGE_FORMATS;
@@ -42,6 +44,8 @@ export interface ChapterFile {
   duration: number;           // milliseconds
   bitrate?: number;           // kbps
   trackNumber?: number;       // from metadata
+  discNumber?: number;
+  sourcePosition?: SourcePosition;
   titleMetadata?: string;     // from metadata
   titleIsBookTitle?: boolean; // true if titleMetadata is the book title (not chapter-specific)
   chapterTitle: string;       // final computed title
@@ -51,6 +55,7 @@ export interface AudioProbeResult {
   duration: number;           // milliseconds
   bitrate?: number;           // kbps
   trackNumber?: number;
+  discNumber?: number;
   title?: string;
   format: string;
 }
@@ -112,14 +117,14 @@ export async function detectChapterFiles(files: string[], logger?: RMABLogger): 
  * Probe an audio file to extract duration and metadata
  */
 export async function probeAudioFile(filePath: string): Promise<AudioProbeResult> {
-  const command = `ffprobe -v quiet -print_format json -show_format -show_streams "${filePath}"`;
+  const args = ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath];
 
   try {
-    const { stdout } = await execPromise(command, { timeout: 30000 });
+    const { stdout } = await execFilePromise('ffprobe', args, { timeout: 30000 });
     const data = JSON.parse(stdout);
 
     const format = data.format || {};
-    const tags = format.tags || {};
+    const tags = Object.fromEntries(Object.entries(format.tags || {}).map(([key, value]) => [key.toLowerCase(), value]));
 
     // Duration in milliseconds
     const duration = Math.round((parseFloat(format.duration) || 0) * 1000);
@@ -129,7 +134,7 @@ export async function probeAudioFile(filePath: string): Promise<AudioProbeResult
 
     // Track number (various possible tag names)
     let trackNumber: number | undefined;
-    const trackStr = tags.track || tags.TRACK || tags['track-number'];
+    const trackStr = tags.track || tags.tracknumber || tags['track-number'];
     if (trackStr) {
       // Handle "1/10" format
       const match = String(trackStr).match(/^(\d+)/);
@@ -137,6 +142,10 @@ export async function probeAudioFile(filePath: string): Promise<AudioProbeResult
         trackNumber = parseInt(match[1]);
       }
     }
+
+    const discStr = tags.disc || tags.discnumber || tags['disc-number'] || tags.disk || tags.tpos;
+    const discMatch = String(discStr || '').match(/^(\d+)(?:\/\d+)?$/);
+    const discNumber = discMatch ? Number(discMatch[1]) : undefined;
 
     // Title
     const title = tags.title || tags.TITLE || undefined;
@@ -148,7 +157,8 @@ export async function probeAudioFile(filePath: string): Promise<AudioProbeResult
       duration,
       bitrate,
       trackNumber,
-      title,
+      discNumber,
+      title: typeof title === 'string' ? title : undefined,
       format: fileFormat,
     };
   } catch (error) {
@@ -291,8 +301,8 @@ export async function analyzeChapterFiles(
 ): Promise<ChapterFile[]> {
   await logger?.info(`Analyzing ${filePaths.length} chapter files...`);
 
-  // Probe all files in parallel
-  const probePromises = filePaths.map(async (filePath) => {
+  // Bound ffprobe processes now that copy-only multi-folder imports also probe.
+  const probeFile = async (filePath: string) => {
     const probe = await probeAudioFile(filePath);
     return {
       path: filePath,
@@ -300,13 +310,17 @@ export async function analyzeChapterFiles(
       duration: probe.duration,
       bitrate: probe.bitrate,
       trackNumber: probe.trackNumber,
+      discNumber: probe.discNumber,
       titleMetadata: probe.title,
       titleIsBookTitle: false, // Will be updated if book title detected
       chapterTitle: '', // Will be computed after ordering
     };
-  });
+  };
 
-  const files = await Promise.all(probePromises);
+  const files: ChapterFile[] = [];
+  for (let i = 0; i < filePaths.length; i += 4) {
+    files.push(...await Promise.all(filePaths.slice(i, i + 4).map(probeFile)));
+  }
 
   // Log sample filenames for debugging
   const sampleCount = Math.min(3, files.length);
@@ -327,6 +341,14 @@ export async function analyzeChapterFiles(
     }
 
     await logger?.info(`Title metadata flagged as book title - will prioritize filename extraction for chapter names`);
+  }
+
+  // Resolve source sections while directory information is still available.
+  const sourceOrder = resolveSourceTrackOrder(files);
+  if (sourceOrder) {
+    sourceOrder.forEach((file, index) => { file.chapterTitle = getChapterTitle(file, index); });
+    await logger?.info(`Using source disc/track ordering for ${sourceOrder.length} chapters`);
+    return sourceOrder;
   }
 
   // Create filename-based order (natural sort)

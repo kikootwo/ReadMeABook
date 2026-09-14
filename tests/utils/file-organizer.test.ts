@@ -4,6 +4,7 @@
  */
 
 import path from 'path';
+import { resolveSourceTrackOrder } from '@/lib/utils/source-track-order';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FileOrganizer, getFileOrganizer } from '@/lib/utils/file-organizer';
 
@@ -469,6 +470,8 @@ describe('file organizer', () => {
   });
 
   it('keeps nested duplicate track names unique when renaming is disabled', async () => {
+    fsMock.readdir.mockResolvedValue([]);
+    chapterMock.analyzeChapterFiles.mockImplementation(async (paths: string[]) => resolveSourceTrackOrder(paths.map(p => ({ path: p }))));
     configState.values.set('metadata_tagging_enabled', 'false');
 
     const organizer = new FileOrganizer('/media', '/tmp');
@@ -502,18 +505,18 @@ describe('file organizer', () => {
     expect(result.success).toBe(true);
     expect(result.filesMovedCount).toBe(4);
     expect(result.audioFiles).toEqual([
-      path.join(expectedDir, 'CD1-Track01.mp3'),
-      path.join(expectedDir, 'CD1-Track02.mp3'),
-      path.join(expectedDir, 'CD2-Track01.mp3'),
-      path.join(expectedDir, 'CD2-Track02.mp3'),
+      path.join(expectedDir, 'Disc 01 - 0001 - CD1-Track01.mp3'),
+      path.join(expectedDir, 'Disc 01 - 0002 - CD1-Track02.mp3'),
+      path.join(expectedDir, 'Disc 02 - 0001 - CD2-Track01.mp3'),
+      path.join(expectedDir, 'Disc 02 - 0002 - CD2-Track02.mp3'),
     ]);
     expect(copyFileMock.copyFile).toHaveBeenCalledWith(
       path.join('/downloads', 'book', 'CD1', 'Track01.mp3'),
-      path.join(expectedDir, 'CD1-Track01.mp3')
+      path.join(expectedDir, 'Disc 01 - 0001 - CD1-Track01.mp3')
     );
     expect(copyFileMock.copyFile).toHaveBeenCalledWith(
       path.join('/downloads', 'book', 'CD2', 'Track01.mp3'),
-      path.join(expectedDir, 'CD2-Track01.mp3')
+      path.join(expectedDir, 'Disc 02 - 0001 - CD2-Track01.mp3')
     );
   });
 

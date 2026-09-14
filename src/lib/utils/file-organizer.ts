@@ -7,6 +7,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import axios from 'axios';
 import { RMAB_USER_AGENT } from './user-agent';
+import { hasMultipleSourceFolders, sourceOrderedFilename, SourcePosition } from './source-track-order';
+import type { ChapterFile } from './chapter-merger';
 import { tagMultipleFiles, checkFfmpegAvailable } from './metadata-tagger';
 import { RMABLogger } from './logger';
 import { copyFile } from './copy-file';
@@ -119,6 +121,19 @@ export class FileOrganizer {
       // Determine base path for source files
       const baseSourcePath = isFile ? path.dirname(downloadPath) : downloadPath;
 
+      // Preflight outside the merge fallback: uncertain order must not become a
+      // successful flattened import. Resolve once for copying, tagging and merging.
+      const sourcePaths = audioFiles.map(file => path.join(baseSourcePath, file));
+      let sourceChapters: ChapterFile[] | undefined;
+      const sourcePositions = new Map<string, SourcePosition>();
+      if (hasMultipleSourceFolders(sourcePaths)) {
+        sourceChapters = await analyzeChapterFiles(sourcePaths, logger ?? undefined);
+        audioFiles = sourceChapters.map(file => path.relative(baseSourcePath, file.path));
+        for (const file of sourceChapters) {
+          if (file.sourcePosition) sourcePositions.set(file.path, file.sourcePosition);
+        }
+      }
+
       // Track if we created a merged file that needs cleanup
       let tempMergedFile: string | null = null;
 
@@ -159,7 +174,7 @@ export class FileOrganizer {
                 }
 
                 // Analyze and order chapter files
-                const chapters = await analyzeChapterFiles(sourceFilePaths, logger ?? undefined);
+                const chapters = sourceChapters ?? await analyzeChapterFiles(sourceFilePaths, logger ?? undefined);
 
                 // Validate that we have valid ordering
                 if (chapters.length === 0) {
@@ -218,6 +233,89 @@ export class FileOrganizer {
         await logger?.info(`Single audio file detected - no chapter merging needed`);
       }
 
+      // Build target directory
+      const targetPath = this.buildTargetPath(
+        this.mediaDir,
+        template,
+        audiobook.author,
+        audiobook.title,
+        audiobook.narrator,
+        audiobook.asin,
+        audiobook.year,
+        audiobook.series,
+        audiobook.seriesPart
+      );
+
+      await logger?.info(`Target path: ${targetPath}`);
+
+      // Determine if file renaming should be applied
+      const shouldRename = renameConfig?.enabled && renameConfig.template;
+      const isMultiFile = audioFiles.length > 1;
+      const duplicateBasenames = this.findDuplicateBasenames(audioFiles);
+      const usedTargetFilenames = new Set<string>();
+
+      if (shouldRename) {
+        await logger?.info(`File renaming enabled with template: ${renameConfig.template}${isMultiFile ? ` (${audioFiles.length} files, indices will be appended)` : ''}`);
+      } else if (duplicateBasenames.size > 0) {
+        await logger?.info(`Detected ${duplicateBasenames.size} duplicate source filename(s); applying folder-aware naming to avoid collisions`);
+      }
+
+      // Plan all names before tagging or copying, including retry destinations.
+      const copyPlan = audioFiles.map((audioFile, i) => {
+        // Handle merged files (absolute paths) vs original files (relative paths)
+        const isAbsolutePath = path.isAbsolute(audioFile);
+        const originalSourcePath = isAbsolutePath
+          ? audioFile // Merged file - use path directly
+          : isFile
+            ? downloadPath
+            : path.join(downloadPath, audioFile);
+
+        // Determine target filename (apply rename template if enabled)
+        let filename: string;
+        if (shouldRename) {
+          const ext = path.extname(audioFile);
+          const variables: TemplateVariables = {
+            author: audiobook.author,
+            title: audiobook.title,
+            narrator: audiobook.narrator,
+            asin: audiobook.asin,
+            year: audiobook.year,
+            series: audiobook.series,
+            seriesPart: audiobook.seriesPart,
+          };
+          filename = buildRenamedFilename(
+            renameConfig.template,
+            variables,
+            ext,
+            isMultiFile ? i + 1 : undefined,
+          );
+          filename = this.makeUniqueFilename(filename, usedTargetFilenames);
+        } else {
+          filename = this.buildSourceAwareFilename(
+            audioFile,
+            duplicateBasenames,
+            usedTargetFilenames
+          );
+        }
+
+        const sourcePosition = sourcePositions.get(originalSourcePath);
+        if (sourcePosition) filename = sourceOrderedFilename(filename, sourcePosition);
+
+        return { audioFile, originalSourcePath, filename, targetFilePath: path.join(targetPath, filename) };
+      });
+
+      if (sourcePositions.size > 0) {
+        const existingFiles = await fs.readdir(targetPath).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return [];
+          throw error;
+        });
+        const plannedNames = new Set(copyPlan.map(file => file.filename));
+        if (existingFiles.some(file => (AUDIO_EXTENSIONS as readonly string[]).includes(path.extname(file).toLowerCase()) && !plannedNames.has(file))) {
+          if (tempMergedFile) await fs.unlink(tempMergedFile);
+          throw new Error('Audio ordering needs review: destination contains audio outside this import plan. Resolve the existing files before retrying; no files were replaced.');
+        }
+      }
+
       // Tag metadata BEFORE moving files (prevents Plex race condition)
       // Map from original file path to tagged file path (for successful tags)
       const taggedFileMap = new Map<string, string>();
@@ -255,7 +353,7 @@ export class FileOrganizer {
               asin: audiobook.asin,
               series: audiobook.series,
               seriesPart: audiobook.seriesPart,
-            });
+            }, sourcePositions);
 
             const successCount = taggingResults.filter((r) => r.success).length;
             const failCount = taggingResults.filter((r) => !r.success).length;
@@ -293,76 +391,10 @@ export class FileOrganizer {
         // Don't fail the whole operation if metadata tagging fails - continue with copying files
       }
 
-      // Build target directory
-      const targetPath = this.buildTargetPath(
-        this.mediaDir,
-        template,
-        audiobook.author,
-        audiobook.title,
-        audiobook.narrator,
-        audiobook.asin,
-        audiobook.year,
-        audiobook.series,
-        audiobook.seriesPart
-      );
-
-      await logger?.info(`Target path: ${targetPath}`);
-
-      // Create target directory
       await fs.mkdir(targetPath, { recursive: true, mode: this.dirMode });
 
-      // Determine if file renaming should be applied
-      const shouldRename = renameConfig?.enabled && renameConfig.template;
-      const isMultiFile = audioFiles.length > 1;
-      const duplicateBasenames = this.findDuplicateBasenames(audioFiles);
-      const usedTargetFilenames = new Set<string>();
-
-      if (shouldRename) {
-        await logger?.info(`File renaming enabled with template: ${renameConfig.template}${isMultiFile ? ` (${audioFiles.length} files, indices will be appended)` : ''}`);
-      } else if (duplicateBasenames.size > 0) {
-        await logger?.info(`Detected ${duplicateBasenames.size} duplicate source filename(s); applying folder-aware naming to avoid collisions`);
-      }
-
-      // Copy audio files (do NOT delete originals - needed for seeding)
-      for (let i = 0; i < audioFiles.length; i++) {
-        const audioFile = audioFiles[i];
-        // Handle merged files (absolute paths) vs original files (relative paths)
-        const isAbsolutePath = path.isAbsolute(audioFile);
-        const originalSourcePath = isAbsolutePath
-          ? audioFile // Merged file - use path directly
-          : isFile
-            ? downloadPath
-            : path.join(downloadPath, audioFile);
-
-        // Determine target filename (apply rename template if enabled)
-        let filename: string;
-        if (shouldRename) {
-          const ext = path.extname(audioFile);
-          const variables: TemplateVariables = {
-            author: audiobook.author,
-            title: audiobook.title,
-            narrator: audiobook.narrator,
-            asin: audiobook.asin,
-            year: audiobook.year,
-            series: audiobook.series,
-            seriesPart: audiobook.seriesPart,
-          };
-          filename = buildRenamedFilename(
-            renameConfig.template,
-            variables,
-            ext,
-            isMultiFile ? i + 1 : undefined,
-          );
-          filename = this.makeUniqueFilename(filename, usedTargetFilenames);
-        } else {
-          filename = this.buildSourceAwareFilename(
-            audioFile,
-            duplicateBasenames,
-            usedTargetFilenames
-          );
-        }
-
-        const targetFilePath = path.join(targetPath, filename);
+      // Copy audio files (do NOT delete originals - needed for seeding).
+      for (const { audioFile, originalSourcePath, filename, targetFilePath } of copyPlan) {
 
         // Check if we have a tagged version of this file
         const taggedFilePath = taggedFileMap.get(originalSourcePath);
