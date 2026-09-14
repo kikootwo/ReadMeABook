@@ -295,6 +295,47 @@ describe('TransmissionService', () => {
       expect(hash).toBe('abcdef0123456789abcdef0123456789abcdef01');
     });
 
+    it('follows a second-hop redirect to a magnet link (e.g. Prowlarr -> Jackett -> magnet)', async () => {
+      const service = new TransmissionService('http://transmission', 'user', 'pass');
+
+      // First hop: e.g. Prowlarr's redirect -> the indexer's own URL (not yet a magnet)
+      axiosMock.get.mockRejectedValueOnce({
+        isAxiosError: true,
+        response: {
+          status: 301,
+          headers: { location: 'https://jackett.example/dl/audiobookbay/?path=abc' },
+        },
+      });
+
+      // Second hop: the indexer's own redirect -> the actual magnet
+      axiosMock.get.mockRejectedValueOnce({
+        isAxiosError: true,
+        response: {
+          status: 302,
+          headers: { location: 'magnet:?xt=urn:btih:abcdef0123456789abcdef0123456789abcdef01' },
+        },
+      });
+
+      // getTorrentByHash - not found
+      clientMock.post
+        .mockResolvedValueOnce({
+          data: { result: 'success', arguments: { torrents: [] } },
+        })
+        // torrent-add
+        .mockResolvedValueOnce({
+          data: {
+            result: 'success',
+            arguments: {
+              'torrent-added': { hashString: 'abcdef0123456789abcdef0123456789abcdef01', name: 'Test' },
+            },
+          },
+        });
+
+      const hash = await service.addDownload('http://prowlarr.example/5/download?link=abc');
+      expect(hash).toBe('abcdef0123456789abcdef0123456789abcdef01');
+      expect(axiosMock.get).toHaveBeenCalledTimes(2);
+    });
+
     it('throws on invalid .torrent file', async () => {
       const service = new TransmissionService('http://transmission', 'user', 'pass');
 
