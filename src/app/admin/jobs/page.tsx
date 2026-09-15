@@ -413,7 +413,7 @@ function AdminJobsPageContent() {
 
         {/* Confirmation Dialog */}
         {confirmDialog.isOpen && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-4">
             <div className="bg-white dark:bg-gray-800 rounded-2xl sm:rounded-lg shadow-xl w-full max-w-md p-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">
                 Confirm Job Trigger
@@ -441,7 +441,7 @@ function AdminJobsPageContent() {
 
         {/* Edit Job Dialog */}
         {editDialog.isOpen && editDialog.job && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black bg-opacity-50 p-0 sm:p-4">
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4">
             <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-xl w-full sm:max-w-2xl max-h-[92vh] sm:max-h-[90vh] overflow-y-auto">
               {/* Dialog header */}
               <div className="sticky top-0 bg-white dark:bg-gray-800 px-5 py-4 border-b border-gray-200 dark:border-gray-700 rounded-t-2xl">

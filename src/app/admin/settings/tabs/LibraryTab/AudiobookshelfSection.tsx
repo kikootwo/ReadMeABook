@@ -127,7 +127,7 @@ export function AudiobookshelfSection({
         )}
       </div>
 
-      <div className="space-y-2">
+      <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
         <label className="flex items-start gap-3 cursor-pointer">
           <input
             type="checkbox"

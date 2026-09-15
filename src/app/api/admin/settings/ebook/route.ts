@@ -99,6 +99,18 @@ export async function PUT(request: NextRequest) {
 
         await configService.setMany(configs);
 
+        // Enabling/disabling e-book sources changes whether /request offers the E-book type, so
+        // re-register the slash commands. Best-effort and gated on a running bot: dynamically
+        // imported so discord.js stays unloaded when the Discord bot is disabled.
+        try {
+          const { getDiscordBotService } = await import('@/lib/services/discord/discord-bot.service');
+          await getDiscordBotService().refreshCommands();
+        } catch (error) {
+          logger.warn('Could not refresh Discord slash commands after e-book settings change', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+
         return NextResponse.json({ success: true });
       } catch (error) {
         logger.error('Failed to save e-book settings', { error: error instanceof Error ? error.message : String(error) });

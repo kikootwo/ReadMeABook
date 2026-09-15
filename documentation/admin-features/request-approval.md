@@ -5,6 +5,10 @@
 ## Overview
 Allows admins to review and approve/deny user requests before they are processed. Supports global auto-approve toggle and per-user auto-approve overrides. Interactive search requests store pre-selected torrents when approval is required.
 
+**Shared service:** Approve/deny logic lives in `src/lib/services/request-approval.service.ts` (`processRequestApproval`). The Web approve route (`POST /api/admin/requests/[id]/approve`) and the Discord bot's Approve/Deny buttons both call it, so the two surfaces stay in lock-step. See [integrations/discord-bot.md](../integrations/discord-bot.md).
+
+**Concurrency-safe:** The transition out of `awaiting_approval` is claimed atomically with a conditional `updateMany({ where: { id, status: 'awaiting_approval' } })`. Only the actor whose update flips the row enqueues jobs/notifications; concurrent approvals (e.g. Discord button + Web UI, or two admins) see `count === 0` and return `invalid_status` instead of double-processing. The notification carries `requestType` (`'audiobook'`/`'ebook'`) so ebook approvals render ebook-typed embeds.
+
 ## Key Details
 
 ### Request Statuses
@@ -48,6 +52,23 @@ Allows admins to review and approve/deny user requests before they are processed
   - If no `selectedTorrent` → Trigger automatic search job (status: 'pending')
   - Send approved notification
 - **Deny:** → Change status to 'denied', no further processing
+
+**Approval guards (`processRequestApproval`, `src/lib/services/request-approval.service.ts`):**
+- **Soft-delete:** fetch is `findFirst` on `{ id, deletedAt: null }`, and both atomic claims carry
+  `deletedAt: null`. Soft delete leaves `status` untouched, so without this a cancelled request
+  still matched `awaiting_approval` and could be approved into a real download. A deleted row
+  returns `not_found` (never `invalid_status`).
+- **Concurrency:** the transition out of `awaiting_approval` is claimed via conditional `updateMany`;
+  the losing actor bails as `invalid_status` with the current status.
+- **Enqueue failure:** the claim runs before the job is enqueued, so a failed enqueue calls
+  `releaseClaim()` to restore `awaiting_approval` (and the cleared `selectedTorrent`), gated on the
+  status the claim set. The admin can simply retry; no `request_approved` notification is sent.
+- **Discord sync:** every successful decision calls `syncDiscordOnDecision()`, which rewrites the
+  Discord approval message to decided (removing its buttons), refreshes the requester's request
+  card, and DMs them the outcome. It lives in this service rather than the Discord button handler so
+  **all** surfaces converge — the Web UI Deny button and API-token decisions included. Gated on a
+  running bot, dynamically imported, and never throws. See
+  [discord-bot.md](../integrations/discord-bot.md).
 
 ## API Endpoints
 
@@ -352,6 +373,37 @@ value: 'true' | 'false' (string)
   - Sends appropriate notifications (request_pending_approval or request_approved)
   - Only triggers search job if auto-approved
 - Files updated: `src/app/api/bookdate/swipe/route.ts:124-217`, `tests/api/bookdate.routes.test.ts:470-648`
+
+**2. Approving a Soft-Deleted (Cancelled) Request**
+- Issue: A cancelled request awaiting approval could still be approved, enqueuing a real download
+- Cause: Soft delete sets `deletedAt` but leaves `status`, and neither the fetch nor the atomic
+  claims filtered `deletedAt`; the Discord approval embed kept live Approve/Deny buttons after a
+  web-side cancel
+- Impact: Orphaned download for a deleted request, invisible to the pending-approval list (which
+  does filter `deletedAt`)
+- Fix: `deletedAt: null` on the fetch and both claims; deleted rows report `not_found`
+- Files updated: `src/lib/services/request-approval.service.ts`, `tests/discord/request-approval.service.test.ts`
+
+**3. Request Stranded in 'downloading' After a Failed Enqueue**
+- Issue: If job enqueue threw after the atomic claim, the request sat in 'downloading' with no job
+  and its `selectedTorrent` cleared, unrecoverable from any surface
+- Cause: Claiming before enqueuing (needed for the concurrency fix) reversed the old ordering, which
+  had left the request in `awaiting_approval` on failure
+- Fix: `releaseClaim()` compensates on enqueue failure, restoring status and torrent
+- Files updated: `src/lib/services/request-approval.service.ts`, `tests/discord/request-approval.service.test.ts`
+
+**4. Web UI Decisions Left the Discord Approval Message Live**
+- Issue: Denying from the admin dashboard left the Discord embed's Approve/Deny buttons working, never refreshed the request card, and never notified the requester
+- Cause: the dashboard's Deny posts `action:'deny'` to the approve route, which runs
+  `processRequestApproval` and never calls `deleteRequest` — so hooking Discord into deletion alone
+  missed it entirely. The stale embed is what made approving an already-decided request reachable
+- Fix: `syncDiscordOnDecision()` in this service, fired on every success path from any surface; the
+  requester DM moved here from the Discord handler; stale clicks now reconcile the message from
+  current DB state instead of only greying the buttons
+- Files updated: `src/lib/services/request-approval.service.ts`,
+  `src/lib/services/discord/discord-cards.ts`,
+  `src/lib/services/discord/handlers/approval.handler.ts`,
+  `tests/discord/approval-decision-sync.test.ts`
 
 ## Related
 - [Admin Dashboard](../admin-dashboard.md) - Dashboard UI features

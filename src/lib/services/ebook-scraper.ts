@@ -63,8 +63,9 @@ async function fetchViaFlareSolverr(
     maxTimeout: timeout,
   };
 
+  const normalizedUrl = flaresolverrUrl.replace(/\/+$/, '');
   const response = await axios.post<FlareSolverrResponse>(
-    `${flaresolverrUrl}/v1`,
+    `${normalizedUrl}/v1`,
     requestBody,
     {
       headers: { 'Content-Type': 'application/json' },

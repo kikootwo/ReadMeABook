@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils/cn';
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   error?: string;
-  helperText?: string;
+  helperText?: React.ReactNode;
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
