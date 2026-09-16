@@ -15,10 +15,31 @@ Provides template variable substitution, validation, and preview generation for 
 
 ## Supported Variables
 
-- `{author}` - Audiobook author name
+- `{author}` - Full audiobook author string
+- `{primaryAuthor}` - First author in the author list
 - `{title}` - Audiobook title
 - `{narrator}` - Audiobook narrator (optional)
 - `{asin}` - Amazon ASIN identifier (optional)
+- `{year}` - Release year (optional)
+- `{series}` - Series name (optional)
+- `{seriesPart}` - Series part or position (optional)
+
+### Primary Author
+
+`{primaryAuthor}` is derived from `{author}` by taking the first entry in a comma-separated author list.
+`{author}` remains unchanged and continues to contain the full author string.
+
+````markdown
+```typescript
+const result = substituteTemplate(
+  '{primaryAuthor}/{title}',
+  {
+    author: 'Victoria Aveyard, Birgit Schmitz - Übersetzer',
+    title: 'Wütender Sturm'
+  }
+);
+
+// Returns: "Victoria Aveyard/Wütender Sturm"
 
 ## API Reference
 
@@ -95,7 +116,7 @@ Get list of valid template variable names.
 **Example:**
 ```typescript
 const variables = getValidVariables();
-// Returns: ['author', 'title', 'narrator', 'asin']
+// Returns: ['author', 'primaryAuthor', 'title', 'narrator', 'asin', 'year', 'series', 'seriesPart']
 ```
 
 ## Usage Examples

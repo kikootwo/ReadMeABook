@@ -15,6 +15,60 @@ import {
 } from '@/lib/utils/path-template.util';
 
 describe('substituteTemplate', () => {
+  it('substitutes primaryAuthor with the first author', () => {
+    const template = '{primaryAuthor}/{title}';
+
+    const variables: TemplateVariables = {
+      author: 'Victoria Aveyard, Birgit Schmitz - Übersetzer',
+      title: 'Wütender Sturm'
+    };
+
+    const result = substituteTemplate(template, variables);
+
+    expect(result).toBe('Victoria Aveyard/Wütender Sturm');
+  });
+
+  it('keeps the full author list when using author', () => {
+    const template = '{author}/{title}';
+
+    const variables: TemplateVariables = {
+      author: 'Victoria Aveyard, Birgit Schmitz - Übersetzer',
+      title: 'Wütender Sturm'
+    };
+
+    const result = substituteTemplate(template, variables);
+
+    expect(result).toBe(
+      'Victoria Aveyard, Birgit Schmitz - Übersetzer/Wütender Sturm'
+    );
+  });
+
+  it('uses the author unchanged as primaryAuthor when there is only one author', () => {
+    const template = '{primaryAuthor}/{title}';
+
+    const variables: TemplateVariables = {
+      author: 'Andrzej Sapkowski',
+      title: 'Das Erbe der Elfen'
+    };
+
+    const result = substituteTemplate(template, variables);
+
+    expect(result).toBe('Andrzej Sapkowski/Das Erbe der Elfen');
+  });
+
+  it('uses the first author for multiple actual authors', () => {
+    const template = '{primaryAuthor}/{title}';
+
+    const variables: TemplateVariables = {
+      author: 'Douglas Preston, Lincoln Child',
+      title: 'Relic'
+    };
+
+    const result = substituteTemplate(template, variables);
+
+    expect(result).toBe('Douglas Preston/Relic');
+  });
+
   it('should substitute all valid variables', () => {
     const template = '{author}/{title}/{narrator}/{asin}';
     const variables: TemplateVariables = {
@@ -355,6 +409,18 @@ describe('substituteTemplate', () => {
 });
 
 describe('validateTemplate', () => {
+  it('should accept primaryAuthor as a valid variable', () => {
+    const result = validateTemplate('{primaryAuthor}/{title}');
+
+    expect(result.valid).toBe(true);
+  });
+
+  it('should accept primaryAuthor in conditional blocks', () => {
+    const result = validateTemplate('{primaryAuthor - }{title}');
+
+    expect(result.valid).toBe(true);
+  });
+
   it('should accept valid templates', () => {
     const templates = [
       '{author}/{title}',
@@ -595,13 +661,14 @@ describe('getValidVariables', () => {
     const variables = getValidVariables();
 
     expect(variables).toContain('author');
+    expect(variables).toContain('primaryAuthor');
     expect(variables).toContain('title');
     expect(variables).toContain('narrator');
     expect(variables).toContain('asin');
     expect(variables).toContain('year');
     expect(variables).toContain('series');
     expect(variables).toContain('seriesPart');
-    expect(variables).toHaveLength(7);
+    expect(variables).toHaveLength(8);
   });
 
   it('should return a new array each time (not mutate original)', () => {
