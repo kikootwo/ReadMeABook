@@ -220,9 +220,16 @@ export class ProwlarrService {
     author: string,
     filters?: SearchFilters
   ): Promise<TorrentResult[]> {
+    // Search the full Audible title first, then retry without a subtitle.
+    // Indexer releases frequently omit subtitles even when Audible includes them.
+    const baseTitle = title.split(':')[0].trim();
+
     const queries = [
       `${title} ${author}`,
       title,
+      ...(baseTitle !== title
+        ? [`${baseTitle} ${author}`, baseTitle]
+        : []),
     ];
 
     logger.info(`Searching with ${queries.length} query variations`, { queries });
