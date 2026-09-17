@@ -34,6 +34,8 @@ vi.mock('@/lib/services/job-queue.service', () => ({
 vi.mock('@/lib/services/audiobookshelf/api', () => ({
   triggerABSItemMatch: vi.fn(),
   getABSItem: vi.fn(),
+  addABSItemTags: vi.fn(() => Promise.resolve()),
+  formatRequesterTag: (username: string) => `req:${username.toLowerCase()}`,
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -370,6 +372,56 @@ describe('processScanPlex', () => {
     );
     // Should NOT trigger metadata match - items with ASIN already have correct metadata
     expect(absApi.triggerABSItemMatch).not.toHaveBeenCalled();
+  });
+
+  it('tags the matched ABS item with the requester when tag_requester is enabled', async () => {
+    configMock.getBackendMode.mockResolvedValue('audiobookshelf');
+    // Library ID lookup + tag_requester flag
+    configMock.get.mockImplementation(async (key: string) =>
+      key === 'audiobookshelf.tag_requester' ? 'true' : 'abs-lib'
+    );
+
+    libraryServiceMock.getCoverCachingParams.mockResolvedValue({
+      backendBaseUrl: 'http://abs',
+      authToken: 'token',
+      backendMode: 'audiobookshelf',
+    });
+    thumbnailCacheServiceMock.cacheLibraryThumbnail.mockResolvedValue('/app/cache/library/test.jpg');
+    libraryServiceMock.getLibraryItems.mockResolvedValue([]);
+
+    prismaMock.plexLibrary.findMany.mockResolvedValue([]);
+    prismaMock.audiobook.findMany.mockResolvedValue([]);
+    prismaMock.request.findMany.mockResolvedValue([
+      {
+        id: 'req-abs',
+        status: 'downloaded',
+        audiobook: {
+          id: 'abs-audio',
+          title: 'ABS Title',
+          author: 'ABS Author',
+          narrator: 'Narrator',
+          audibleAsin: 'ASIN123',
+        },
+        user: { plexUsername: 'guggs' },
+      },
+    ] as any);
+    prismaMock.audiobook.update.mockResolvedValue({});
+    prismaMock.request.update.mockResolvedValue({});
+
+    const matcher = await import('@/lib/utils/audiobook-matcher');
+    (matcher.findPlexMatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      plexGuid: 'abs-item-1',
+      plexRatingKey: 'rating-abs',
+      title: 'ABS Title',
+      author: 'ABS Author',
+    });
+
+    const absApi = await import('@/lib/services/audiobookshelf/api');
+
+    const { processScanPlex } = await import('@/lib/processors/scan-plex.processor');
+    await processScanPlex({ jobId: 'job-tag' });
+
+    expect(absApi.addABSItemTags).toHaveBeenCalledWith('abs-item-1', ['req:guggs']);
   });
 
   it('uses file hash matching for ABS items without ASIN', async () => {

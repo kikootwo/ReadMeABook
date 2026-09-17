@@ -12,6 +12,7 @@ const prismaMock = createPrismaMock();
 const requireAuthMock = vi.hoisted(() => vi.fn());
 const requireAdminMock = vi.hoisted(() => vi.fn());
 const configServiceMock = vi.hoisted(() => ({
+  get: vi.fn(),
   setMany: vi.fn(),
   clearCache: vi.fn(),
 }));
@@ -20,6 +21,7 @@ const audibleServiceMock = vi.hoisted(() => ({
 }));
 const jobQueueMock = vi.hoisted(() => ({
   addAudibleRefreshJob: vi.fn(),
+  addBackfillRequesterTagsJob: vi.fn(),
 }));
 const plexServiceMock = vi.hoisted(() => ({
   testConnection: vi.fn(),
@@ -393,6 +395,50 @@ describe('Admin settings core routes', () => {
 
     expect(payload.success).toBe(true);
     expect(configServiceMock.setMany).toHaveBeenCalled();
+  });
+
+  it('enqueues a backfill job when tagRequester toggles false→true', async () => {
+    // Previous stored value is 'false' (off)
+    configServiceMock.get.mockResolvedValue('false');
+
+    const request = {
+      json: vi.fn().mockResolvedValue({
+        serverUrl: 'http://abs',
+        apiToken: 'token',
+        libraryId: 'lib',
+        triggerScanAfterImport: false,
+        tagRequester: true,
+      }),
+    };
+
+    const { PUT } = await import('@/app/api/admin/settings/audiobookshelf/route');
+    const response = await PUT(request as any);
+    const payload = await response.json();
+
+    expect(payload.success).toBe(true);
+    expect(jobQueueMock.addBackfillRequesterTagsJob).toHaveBeenCalled();
+  });
+
+  it('does not enqueue a backfill job when tagRequester was already on', async () => {
+    // Previous stored value is 'true' (already on)
+    configServiceMock.get.mockResolvedValue('true');
+
+    const request = {
+      json: vi.fn().mockResolvedValue({
+        serverUrl: 'http://abs',
+        apiToken: 'token',
+        libraryId: 'lib',
+        triggerScanAfterImport: false,
+        tagRequester: true,
+      }),
+    };
+
+    const { PUT } = await import('@/app/api/admin/settings/audiobookshelf/route');
+    const response = await PUT(request as any);
+    const payload = await response.json();
+
+    expect(payload.success).toBe(true);
+    expect(jobQueueMock.addBackfillRequesterTagsJob).not.toHaveBeenCalled();
   });
 });
 

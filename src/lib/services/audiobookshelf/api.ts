@@ -22,7 +22,7 @@ function mapRegionToABSProvider(region: AudibleRegion): string {
 }
 
 interface ABSRequestOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: any;
 }
 
@@ -168,6 +168,69 @@ export async function triggerABSItemMatch(itemId: string, asin?: string) {
   } catch (error) {
     // Don't throw - matching is best-effort, scan should continue even if match fails
     logger.error(`Failed to trigger match for item ${itemId}`, { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+/**
+ * Format a requester tag from a username.
+ * Lowercases, trims, converts spaces to underscores, and strips any character
+ * outside [a-z0-9_-]. Example: "John Smith" -> "req:john_smith".
+ *
+ * Returns '' when the username sanitizes to nothing (e.g. all-symbol or
+ * non-Latin usernames). Callers MUST skip empty results — otherwise every such
+ * user would collapse onto a single bare `req:` tag, exposing their libraries
+ * to each other. The whole point of the tag is per-user scoping.
+ *
+ * @param username - The requester's username
+ * @returns The sanitized `req:<username>` tag, or '' if nothing usable remains
+ */
+export function formatRequesterTag(username: string): string {
+  const sanitized = username
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_-]/g, '');
+  return sanitized ? `req:${sanitized}` : '';
+}
+
+/**
+ * Add tags to an Audiobookshelf library item, merging with any existing tags.
+ * Best-effort: never throws (logs on failure), mirroring triggerABSItemMatch.
+ *
+ * ABS's PATCH /items/:id/media replaces the entire tags array, so we GET the
+ * current media.tags, union with the new tags (dedupe), and PATCH back. This
+ * preserves manual tags (e.g. `nsfw`) and other requesters' `req:` tags.
+ *
+ * @param itemId - The Audiobookshelf item ID
+ * @param tagsToAdd - Tags to add to the item
+ */
+export async function addABSItemTags(itemId: string, tagsToAdd: string[]): Promise<void> {
+  try {
+    // Drop empty/blank tags defensively — never write a bare/whitespace tag.
+    const cleanTags = tagsToAdd.filter((t) => t && t.trim().length > 0);
+    if (cleanTags.length === 0) {
+      return;
+    }
+
+    const item = await getABSItem(itemId);
+    const currentTags: string[] = Array.isArray(item?.media?.tags) ? item.media.tags : [];
+
+    const merged = Array.from(new Set([...currentTags, ...cleanTags]));
+
+    // Skip the write if nothing would change
+    if (merged.length === currentTags.length) {
+      return;
+    }
+
+    await absRequest(`/items/${itemId}/media`, {
+      method: 'PATCH',
+      body: { tags: merged },
+    });
+
+    logger.info(`Tagged ABS item ${itemId}`, { added: cleanTags });
+  } catch (error) {
+    // Don't throw - tagging is best-effort, scan/backfill should continue
+    logger.error(`Failed to tag ABS item ${itemId}`, { error: error instanceof Error ? error.message : String(error) });
   }
 }
 
