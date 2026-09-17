@@ -121,6 +121,7 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
               title: request.audiobook.title,
               author: request.audiobook.author,
               asin: request.audiobook.audibleAsin || undefined,
+              seriesPart: request.audiobook.seriesPart || undefined,
             });
           }
           triggered++;
@@ -159,6 +160,7 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
               title: request.audiobook.title,
               author: request.audiobook.author,
               asin: request.audiobook.audibleAsin || undefined,
+              seriesPart: request.audiobook.seriesPart || undefined,
             });
             triggered++;
             logger.info(`Triggered audiobook search for request ${request.id}: ${request.audiobook.title}`);

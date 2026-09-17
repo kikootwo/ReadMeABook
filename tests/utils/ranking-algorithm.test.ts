@@ -233,6 +233,62 @@ describe('ranking-algorithm', () => {
     });
   });
 
+  describe('Series Part Matching', () => {
+    const algorithm = new RankingAlgorithm();
+
+    const request = {
+      title: 'Azarinth Healer: Book One',
+      author: 'Rhaegar',
+      seriesPart: '1',
+    };
+
+    const score = (title: string, seriesPart = '1') =>
+      algorithm.getScoreBreakdown({
+        ...baseTorrent,
+        title,
+        size: 500 * MB,
+      }, {
+        ...request,
+        seriesPart,
+      }).matchScore;
+
+    it('rejects an explicitly conflicting numeric series part', () => {
+      expect(score('Rhaegar - Azarinth Healer 03')).toBe(0);
+      expect(score('Rhaegar - Azarinth Healer 04')).toBe(0);
+    });
+
+    it('accepts an exact numeric series part', () => {
+      expect(score('Rhaegar - Azarinth Healer 01')).toBeGreaterThan(0);
+      expect(score('Rhaegar - Azarinth Healer 1')).toBeGreaterThan(0);
+    });
+
+    it('accepts an explicit Book marker with the requested series part', () => {
+      expect(score('Rhaegar - Azarinth Healer Book 1')).toBeGreaterThan(0);
+    });
+
+    it('does not reject a release with no detectable series part', () => {
+      expect(score('Rhaegar - Azarinth Healer')).toBeGreaterThan(0);
+    });
+
+    it('accepts a range containing the requested series part', () => {
+      expect(score('Rhaegar - Azarinth Healer 1-3')).toBeGreaterThan(0);
+      expect(score('Rhaegar - Azarinth Healer 01-03')).toBeGreaterThan(0);
+    });
+
+    it('rejects a range that does not contain the requested series part', () => {
+      expect(score('Rhaegar - Azarinth Healer 2-4')).toBe(0);
+    });
+
+    it('supports decimal series parts', () => {
+      expect(score('Rhaegar - Azarinth Healer 1.5', '1.5')).toBeGreaterThan(0);
+      expect(score('Rhaegar - Azarinth Healer 2.5', '1.5')).toBe(0);
+    });
+
+    it('does not interpret unrelated metadata numbers as a series part', () => {
+      expect(score('Rhaegar - Azarinth Healer 2025 64kbps')).toBeGreaterThan(0);
+    });
+  });
+
   describe('Colon-Separated Subtitle/Series Handling', () => {
     const algorithm = new RankingAlgorithm();
 

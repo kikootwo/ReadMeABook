@@ -320,6 +320,7 @@ export async function PATCH(
             title: requestWithData.audiobook.title,
             author: requestWithData.audiobook.author,
             asin: requestWithData.audiobook.audibleAsin || undefined,
+            seriesPart: requestWithData.audiobook.seriesPart || undefined,
           });
 
           updated = await prisma.request.update({

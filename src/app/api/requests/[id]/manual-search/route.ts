@@ -76,7 +76,10 @@ export async function POST(
       if (requestRecord.type === 'ebook') {
         await jobQueue.addSearchEbookJob(id, audiobookData);
       } else {
-        await jobQueue.addSearchJob(id, audiobookData);
+        await jobQueue.addSearchJob(id, {
+          ...audiobookData,
+          seriesPart: requestRecord.audiobook.seriesPart || undefined,
+        });
       }
 
       // Update request status

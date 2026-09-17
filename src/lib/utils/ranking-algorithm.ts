@@ -29,6 +29,7 @@ export interface AudiobookRequest {
   author: string;
   narrator?: string;
   durationMinutes?: number;
+  seriesPart?: string;
 }
 
 export interface IndexerFlagConfig {
@@ -346,6 +347,81 @@ export class RankingAlgorithm {
    * "Twelve.Months-Jim.Butcher" → "twelve months jim butcher"
    * "Author_Name_Book" → "author name book"
    */
+ private hasConflictingSeriesPart(
+  torrentTitle: string,
+  requestedSeriesPart: string,
+  requiredTitle: string
+): boolean {
+  const requestedMatch = requestedSeriesPart.match(/\d+(?:\.\d+)?/);
+  if (!requestedMatch) {
+    return false;
+  }
+
+  const requested = Number(requestedMatch[0]);
+  if (!Number.isFinite(requested)) {
+    return false;
+  }
+
+  const rawTitle = torrentTitle.toLowerCase();
+
+  // Explicit ranges such as 1-3, 01-03, or 1.5-2.5.
+  const rangeMatches = rawTitle.matchAll(
+    /(?:^|[\s_-])(\d+(?:\.\d+)?)\s*[-–—]\s*(\d+(?:\.\d+)?)(?=$|[\s_-])/g
+  );
+
+  for (const match of rangeMatches) {
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+
+    if (Number.isFinite(start) && Number.isFinite(end)) {
+      return requested < Math.min(start, end) ||
+        requested > Math.max(start, end);
+    }
+  }
+
+  // Explicit sequence markers are strong evidence of a volume number.
+  const explicitMatch = rawTitle.match(
+    /\b(?:book|bk|volume|vol)\s*\.?\s*#?\s*(\d+(?:\.\d+)?)\b/i
+  );
+
+  if (explicitMatch) {
+    return Number(explicitMatch[1]) !== requested;
+  }
+
+  // Detect a bare sequence number immediately following the required title.
+  // This handles releases such as "Azarinth Healer 03" without treating
+  // unrelated numbers elsewhere in the release name as volume numbers.
+  const titleWords = this.normalizeForMatching(requiredTitle)
+  .split(/\s+/)
+  .filter(Boolean)
+  .map(word => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+
+if (titleWords.length > 0) {
+  const titlePattern = titleWords.join('[\\s._-]+');
+
+  const bareMatch = rawTitle.match(
+    new RegExp(
+      `${titlePattern}[\\s._-]+(\\d+(?:\\.\\d+)?)(?=$|[\\s_-])`,
+      'i'
+    )
+  );
+
+  if (bareMatch) {
+    const detected = Number(bareMatch[1]);
+
+    // Four-digit values are much more likely to be years than series parts.
+    if (detected >= 1000 && detected <= 2999) {
+      return false;
+    }
+
+    return detected !== requested;
+  }
+}
+
+  // No reliable series number was detected, so normal ranking may continue.
+  return false;
+}
+
   private normalizeForMatching(text: string, characterReplacements?: Record<string, string>): string {
     let result = text
       // Split CamelCase FIRST (before lowercasing): "TheCorrespondent" → "The Correspondent"
@@ -488,7 +564,17 @@ export class RankingAlgorithm {
         return 0;
       }
     }
-
+    // Reject releases that explicitly identify a different series volume.
+    if (
+      audiobook.seriesPart &&
+      this.hasConflictingSeriesPart(
+        torrent.title,
+        audiobook.seriesPart,
+        requiredTitle
+      )
+    ) {
+      return 0;
+    }
     // ========== STAGE 1.5: AUTHOR PRESENCE CHECK (OPTIONAL) ==========
     // Only enforced in automatic mode (requireAuthor: true)
     // Interactive search (requireAuthor: false) shows all results

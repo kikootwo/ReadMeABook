@@ -321,6 +321,7 @@ export async function createRequestForUser(
       title: audiobookRecord.title,
       author: audiobookRecord.author,
       asin: audiobookRecord.audibleAsin || undefined,
+      seriesPart: audiobookRecord.seriesPart || undefined,
     });
   }
 
