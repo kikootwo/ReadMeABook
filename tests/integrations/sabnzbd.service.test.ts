@@ -380,7 +380,7 @@ describe('SABnzbdService', () => {
     expect(extracting.state).toBe('extracting');
   });
 
-  it('maps completed status when percentage is 100', () => {
+  it('maps 100 percent queue status to extracting', () => {
     const service = new SABnzbdService('http://sab', 'key');
     const progress = service.getDownloadProgress({
       nzbId: 'nzb-7',
@@ -394,7 +394,7 @@ describe('SABnzbdService', () => {
       priority: 'Normal',
     });
 
-    expect(progress.state).toBe('completed');
+    expect(progress.state).toBe('extracting');
     expect(progress.percent).toBe(1);
   });
 
