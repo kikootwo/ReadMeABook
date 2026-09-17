@@ -550,8 +550,18 @@ export class SABnzbdService implements IDownloadClient {
     formData.append('output', 'json');
     formData.append('apikey', this.apiKey);
 
+    const contentLength = await new Promise<number>((resolve, reject) => {
+      formData.getLength((err, length) => {
+        if (err) reject(err);
+        else resolve(length);
+      });
+    });
+
     const response = await this.client.post('/api', formData, {
-      headers: formData.getHeaders(),
+      headers: {
+        ...formData.getHeaders(),
+        'Content-Length': contentLength,
+      },
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
     });
