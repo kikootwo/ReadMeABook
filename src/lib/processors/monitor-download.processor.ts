@@ -223,16 +223,29 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
 
       const errorMessage = `Download failed in ${client.clientType}`;
       const clientErrorDetail = info.errorMessage ?? null;
+      const isDuplicateFail = (clientErrorDetail || '').toLowerCase().includes('duplicate');
 
-      // Update request to failed
-      await prisma.request.update({
-        where: { id: requestId },
-        data: {
-          status: 'failed',
-          errorMessage,
-          updatedAt: new Date(),
-        },
-      });
+      if (isDuplicateFail) {
+        logger.info(`Download flagged as Duplicate in ${client.clientType} for request ${requestId}. Resetting status to 'awaiting_search' to allow alternate release search.`);
+        await prisma.request.update({
+          where: { id: requestId },
+          data: {
+            status: 'awaiting_search',
+            errorMessage: 'Duplicate download flagged by client - reset for search retry',
+            updatedAt: new Date(),
+          },
+        });
+      } else {
+        // Update request to failed
+        await prisma.request.update({
+          where: { id: requestId },
+          data: {
+            status: 'failed',
+            errorMessage,
+            updatedAt: new Date(),
+          },
+        });
+      }
 
       // Update download history
       await prisma.downloadHistory.update({
@@ -243,25 +256,25 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         },
       });
 
-      // Auto-block this release. The client itself reported `failed`, so this
-      // is a real release problem — distinct from the connection-exhausted
-      // path below at line ~317 which we deliberately do NOT block on.
-      const failedDownload = await prisma.downloadHistory.findUnique({
-        where: { id: downloadHistoryId },
-      });
-      if (failedDownload?.torrentName) {
-        await addAutoBlock({
-          requestId,
-          releaseName: failedDownload.torrentName,
-          releaseHash: failedDownload.torrentHash ?? failedDownload.nzbId ?? null,
-          indexerName: failedDownload.indexerName ?? null,
-          indexerId: failedDownload.indexerId ?? null,
-          source: 'download_fail',
-          reason: classifyDownloadFailure(clientErrorDetail),
-          reasonDetail: clientErrorDetail,
-          downloadHistoryId: failedDownload.id,
-          jobId,
+      // Auto-block this release ONLY if it was NOT a duplicate detection failure
+      if (!isDuplicateFail) {
+        const failedDownload = await prisma.downloadHistory.findUnique({
+          where: { id: downloadHistoryId },
         });
+        if (failedDownload?.torrentName) {
+          await addAutoBlock({
+            requestId,
+            releaseName: failedDownload.torrentName,
+            releaseHash: failedDownload.torrentHash ?? failedDownload.nzbId ?? null,
+            indexerName: failedDownload.indexerName ?? null,
+            indexerId: failedDownload.indexerId ?? null,
+            source: 'download_fail',
+            reason: classifyDownloadFailure(clientErrorDetail),
+            reasonDetail: clientErrorDetail,
+            downloadHistoryId: failedDownload.id,
+            jobId,
+          });
+        }
       }
 
       // Send notification for request failure
