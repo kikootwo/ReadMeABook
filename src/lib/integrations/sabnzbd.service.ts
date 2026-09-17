@@ -927,7 +927,10 @@ export class SABnzbdService implements IDownloadClient {
     } else if (statusLower.includes('repairing') || statusLower.includes('verifying')) {
       state = 'repairing';
     } else if (percent >= 1.0) {
-      state = 'completed';
+      // 100% in SAB's queue only means downloading is finished.
+      // Post-processing may still be running and the final storage path
+      // is not available until the item moves to SAB history.
+      state = 'extracting';
     }
 
     return {
