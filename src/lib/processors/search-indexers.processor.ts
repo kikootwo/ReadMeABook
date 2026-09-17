@@ -185,6 +185,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       title: effectiveSearchTitle,
       author: audiobook.author,
       durationMinutes,
+      seriesPart: audiobook.seriesPart,
     }, {
       indexerPriorities,
       flagConfigs,

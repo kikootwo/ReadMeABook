@@ -173,6 +173,7 @@ export async function processMonitorRssFeeds(payload: MonitorRssFeedsPayload): P
               title: audiobook.title,
               author: audiobook.author,
               asin: audiobook.audibleAsin || undefined,
+              seriesPart: audiobook.seriesPart || undefined,
             });
             matched++;
             logger.info(`Triggered audiobook search job for request ${request.id}`);

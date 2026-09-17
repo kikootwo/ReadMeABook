@@ -60,7 +60,13 @@ export async function PATCH(
           where: { id },
           include: {
             audiobook: {
-              select: { id: true, title: true, author: true, audibleAsin: true },
+              select: {
+                id: true,
+                title: true,
+                author: true,
+                audibleAsin: true,
+                seriesPart: true,
+              },
             },
           },
         });
@@ -113,7 +119,10 @@ export async function PATCH(
           if (existingRequest.type === 'ebook') {
             await jobQueue.addSearchEbookJob(id, audiobookData);
           } else {
-            await jobQueue.addSearchJob(id, audiobookData);
+            await jobQueue.addSearchJob(id, {
+              ...audiobookData,
+              seriesPart: existingRequest.audiobook.seriesPart || undefined,
+            });
           }
 
           searchTriggered = true;

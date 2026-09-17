@@ -224,6 +224,7 @@ export async function POST(
                 title: updatedRequest.audiobook.title,
                 author: updatedRequest.audiobook.author,
                 asin: updatedRequest.audiobook.audibleAsin || undefined,
+                seriesPart: updatedRequest.audiobook.seriesPart || undefined,
               });
             }
 
