@@ -12,7 +12,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { useWatchedSeries, useDeleteWatchedSeries, WatchedSeriesItem } from '@/lib/hooks/useWatchedSeries';
-import { useWatchedAuthors, useDeleteWatchedAuthor, WatchedAuthorItem } from '@/lib/hooks/useWatchedAuthors';
+import { useWatchedAuthors, useDeleteWatchedAuthor, useUpdateWatchedAuthor, WatchedAuthorItem } from '@/lib/hooks/useWatchedAuthors';
 import { usePreferences } from '@/contexts/PreferencesContext';
 
 function formatRelativeTime(dateStr: string | null): string {
@@ -166,12 +166,21 @@ export function WatchedAuthorsSection() {
   const router = useRouter();
   const { authors, isLoading } = useWatchedAuthors();
   const { deleteAuthor, isLoading: isDeleting } = useDeleteWatchedAuthor();
+  const { updateAuthor, isLoading: isUpdating } = useUpdateWatchedAuthor();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const handleDelete = async (id: string) => {
     try {
       await deleteAuthor(id);
       setConfirmDeleteId(null);
+    } catch {
+      // Error handled by hook
+    }
+  };
+
+  const handleModeChange = async (id: string, includeBackCatalog: boolean) => {
+    try {
+      await updateAuthor(id, includeBackCatalog);
     } catch {
       // Error handled by hook
     }
@@ -204,6 +213,8 @@ export function WatchedAuthorsSection() {
             onConfirmDelete={() => setConfirmDeleteId(item.id)}
             onCancelDelete={() => setConfirmDeleteId(null)}
             onDelete={() => handleDelete(item.id)}
+            onModeChange={(includeBackCatalog) => handleModeChange(item.id, includeBackCatalog)}
+            isUpdating={isUpdating}
           />
         ))}
       </div>
@@ -212,15 +223,17 @@ export function WatchedAuthorsSection() {
 }
 
 function WatchedAuthorCard({
-  item, isDeleting, confirmingDelete, onNavigate, onConfirmDelete, onCancelDelete, onDelete,
+  item, isDeleting, isUpdating, confirmingDelete, onNavigate, onConfirmDelete, onCancelDelete, onDelete, onModeChange,
 }: {
   item: WatchedAuthorItem;
   isDeleting: boolean;
+  isUpdating: boolean;
   confirmingDelete: boolean;
   onNavigate: () => void;
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
   onDelete: () => void;
+  onModeChange: (includeBackCatalog: boolean) => Promise<unknown>;
 }) {
   return (
     <div className="rounded-xl bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700/50 p-4 flex gap-4 hover:shadow-sm transition-shadow">
@@ -250,6 +263,16 @@ function WatchedAuthorCard({
           <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
             Last checked: {formatRelativeTime(item.lastCheckedAt)}
           </p>
+          <select
+            value={item.includeBackCatalog ? 'all' : 'new'}
+            disabled={isUpdating}
+            onChange={(event) => void onModeChange(event.target.value === 'all')}
+            className="mt-2 text-xs bg-transparent text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-600 rounded px-2 py-1"
+            aria-label={`Watch mode for ${item.authorName}`}
+          >
+            <option value="new">New releases only</option>
+            <option value="all">Entire catalog</option>
+          </select>
         </div>
       </div>
 

@@ -16,6 +16,7 @@ const AddWatchedAuthorSchema = z.object({
   authorAsin: z.string().regex(/^[A-Z0-9]{10}$/, 'Invalid author ASIN'),
   authorName: z.string().min(1).max(500),
   coverArtUrl: z.string().url().optional(),
+  includeBackCatalog: z.boolean().default(false),
 });
 
 /**
@@ -41,6 +42,7 @@ export async function GET(request: NextRequest) {
           authorAsin: a.authorAsin,
           authorName: a.authorName,
           coverArtUrl: a.coverArtUrl,
+          includeBackCatalog: a.includeBackCatalog,
           lastCheckedAt: a.lastCheckedAt,
           createdAt: a.createdAt,
         })),
@@ -64,7 +66,7 @@ export async function POST(request: NextRequest) {
       }
 
       const body = await req.json();
-      const { authorAsin, authorName, coverArtUrl } = AddWatchedAuthorSchema.parse(body);
+      const { authorAsin, authorName, coverArtUrl, includeBackCatalog } = AddWatchedAuthorSchema.parse(body);
 
       // Check for duplicate
       const existing = await prisma.watchedAuthor.findUnique({
@@ -84,6 +86,7 @@ export async function POST(request: NextRequest) {
           authorAsin,
           authorName,
           coverArtUrl: coverArtUrl || null,
+          includeBackCatalog,
         },
       });
 
@@ -105,6 +108,7 @@ export async function POST(request: NextRequest) {
           authorAsin: watched.authorAsin,
           authorName: watched.authorName,
           coverArtUrl: watched.coverArtUrl,
+          includeBackCatalog: watched.includeBackCatalog,
           lastCheckedAt: watched.lastCheckedAt,
           createdAt: watched.createdAt,
         },
