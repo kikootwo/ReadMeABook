@@ -11,6 +11,10 @@ import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer
 import { RMABLogger } from '../utils/logger';
 import { getLanguageForRegion } from '../constants/language-config';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
+
+// ~32 kbps. Whole-book releases are practically never below this; single chapters
+// pulled from multi-file Usenet posts (e.g. one 57 MB mp3 for a 20 h book) are far below it.
+const MIN_AUTO_MB_PER_MINUTE = 0.25;
 import type { AudibleRegion } from '../types/audible';
 
 const MAX_RANKED_RESULTS = 100;
@@ -189,6 +193,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       indexerPriorities,
       flagConfigs,
       requireAuthor: true,  // Automatic mode - prevent wrong authors
+      minMBPerMinute: MIN_AUTO_MB_PER_MINUTE,  // Automatic mode - reject single chapters/partial posts
       stopWords: langConfig.stopWords,
       characterReplacements: langConfig.characterReplacements,
     });
@@ -196,7 +201,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     // Log filter results
     const postFilterCount = rankedResults.length;
     if (postFilterCount < preFilterCount) {
-      logger.info(`Filtered out ${preFilterCount - postFilterCount} results < ${sizeMBThreshold} MB`);
+      logger.info(`Filtered out ${preFilterCount - postFilterCount} results < ${sizeMBThreshold} MB or < ${MIN_AUTO_MB_PER_MINUTE} MB/min of runtime`);
     }
 
     // Dual threshold filtering:

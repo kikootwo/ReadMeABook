@@ -20,6 +20,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - ✅ **Context-aware filtering (3 tests)**
 - ✅ **API compatibility (2 tests)**
 - ✅ **CamelCase and punctuation separator handling (7 tests)**
+- ✅ **Minimum size-per-runtime filter (2 tests)**
 
 **Tested edge cases prevent regressions from previous tweaks:**
 - "We Are Legion (We Are Bob)" matching with/without subtitle
@@ -31,6 +32,14 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - **"Project Hail Mary" (no author) NOT matching when Andy Weir required (automatic mode)**
 - **All results shown in interactive mode regardless of author**
 - **Middle initials, name order, and role filtering for author matching**
+
+## Pre-Filters (Audiobooks)
+
+- < 20 MB: always filtered (ebooks/samples)
+- `minMBPerMinute` (opt-in): filtered when `sizeMB / durationMinutes` < value; skipped if runtime unknown
+  - Automatic search (`search-indexers.processor.ts`): `0.25` (~32 kbps)
+  - Interactive search: unset (user decides)
+  - Catches single files from multi-file Usenet posts (e.g. 57 MB chapter for 1182 min book = 0.05 MB/min, scored 79.7 without filter)
 
 ## Scoring Criteria (100 points max)
 
@@ -229,6 +238,7 @@ interface RankTorrentsOptions {
   indexerPriorities?: Map<number, number>;  // indexerId -> priority (1-25)
   flagConfigs?: IndexerFlagConfig[];        // Flag bonus configurations
   requireAuthor?: boolean;                  // Enforce author check (default: true)
+  minMBPerMinute?: number;                  // Size/runtime floor (default: off)
 }
 
 interface BonusModifier {
@@ -282,7 +292,8 @@ function rankTorrents(
 const ranked = rankTorrents(torrents, audiobook, {
   indexerPriorities,
   flagConfigs,
-  requireAuthor: true  // Default - prevents wrong authors
+  requireAuthor: true,  // Default - prevents wrong authors
+  minMBPerMinute: 0.25  // Rejects single chapters/partial posts
 });
 
 const topResult = ranked[0];  // Safe to auto-download

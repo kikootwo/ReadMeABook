@@ -33,6 +33,34 @@ describe('ranking-algorithm', () => {
     expect(ranked[0].guid).toBe('big');
   });
 
+  it('drops results below minMBPerMinute when runtime is known', () => {
+    // 20 h book: a single 57 MB chapter vs. a 600 MB full release
+    const chapter = { ...baseTorrent, guid: 'chapter', size: 57 * MB, seeders: 0 };
+    const full = { ...baseTorrent, guid: 'full', size: 600 * MB, seeders: 0 };
+
+    const ranked = rankTorrents(
+      [chapter, full],
+      { title: 'Great Book', author: 'Author Name', durationMinutes: 1200 },
+      { minMBPerMinute: 0.25 }
+    );
+
+    expect(ranked.map(r => r.guid)).toEqual(['full']);
+  });
+
+  it('keeps small results when minMBPerMinute is unset or runtime is unknown', () => {
+    const chapter = { ...baseTorrent, guid: 'chapter', size: 57 * MB };
+
+    expect(rankTorrents(
+      [chapter],
+      { title: 'Great Book', author: 'Author Name', durationMinutes: 1200 }
+    )).toHaveLength(1);
+    expect(rankTorrents(
+      [chapter],
+      { title: 'Great Book', author: 'Author Name' },
+      { minMBPerMinute: 0.25 }
+    )).toHaveLength(1);
+  });
+
   it('prefers strong title/author matches over weaker ones', () => {
     const good = { ...baseTorrent, guid: 'good', title: 'Great Book - Author Name' };
     const bad = { ...baseTorrent, guid: 'bad', title: 'Different Title - Other Author' };
