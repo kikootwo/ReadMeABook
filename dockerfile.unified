@@ -2,13 +2,8 @@
 # Single container with PostgreSQL, Redis, and Next.js app
 # Designed for easy deployment with minimal configuration
 
-# Start from debian base with node preinstalled
+# Shared runtime base: Node.js plus the unified container services.
 FROM node:20-bookworm AS base
-
-# Re-declare build arguments after FROM (ARGs before FROM are not available after)
-ARG APP_VERSION=unknown
-ARG GIT_COMMIT=unknown
-ARG BUILD_DATE=unknown
 
 # Install PostgreSQL 16 repository key
 RUN apt-get update && apt-get install -y curl gnupg && \
@@ -47,6 +42,14 @@ RUN apt-get purge -y imagemagick imagemagick-6-common 'imagemagick-6*' \
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
+# Build the application with development dependencies kept out of the final image.
+FROM base AS builder
+
+# Re-declare build arguments after FROM (ARGs before FROM are not available after)
+ARG APP_VERSION=unknown
+ARG GIT_COMMIT=unknown
+ARG BUILD_DATE=unknown
+
 WORKDIR /app
 
 # Copy package files
@@ -77,15 +80,44 @@ ENV NODE_ENV=production
 ENV TURBOPACK=0
 RUN npm run build
 
-# Reorganize for standalone output
-# Next.js standalone mode creates .next/standalone/ with server.js
-# We need to move files to root for supervisord to find server.js
-RUN cp -r .next/standalone/* . && \
-    cp -r .next/static ./.next/static && \
-    cp -r public ./public 2>/dev/null || true
+# Install the CLI used by the unchanged runtime entrypoint at the lockfile's
+# Prisma version. It is otherwise a development dependency and not included
+# in Next.js standalone output.
+FROM base AS prisma-cli
+RUN npm install --prefix /prisma-cli --no-save prisma@6.19.0 && \
+    npm cache clean --force
 
-# Remove dev dependencies to reduce image size
-RUN npm prune --production
+# Fresh runtime image: only standalone application artifacts and the services
+# required by the existing unified-container startup architecture.
+FROM base AS runtime
+
+# Re-declare build arguments after FROM (ARGs before FROM are not available after)
+ARG APP_VERSION=unknown
+ARG GIT_COMMIT=unknown
+ARG BUILD_DATE=unknown
+
+WORKDIR /app
+
+# Set version environment variables for runtime
+ENV NEXT_PUBLIC_APP_VERSION=${APP_VERSION}
+ENV NEXT_PUBLIC_GIT_COMMIT=${GIT_COMMIT}
+ENV NEXT_PUBLIC_BUILD_DATE=${BUILD_DATE}
+ENV APP_VERSION=${APP_VERSION}
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV BUILD_DATE=${BUILD_DATE}
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+ENV TURBOPACK=0
+
+# Next.js standalone mode creates .next/standalone/ with server.js.
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+
+# The entrypoint runs Prisma schema and data migrations at startup.
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/prisma ./prisma
+COPY --from=prisma-cli /prisma-cli/node_modules ./node_modules
 
 # Create necessary directories
 RUN mkdir -p \
