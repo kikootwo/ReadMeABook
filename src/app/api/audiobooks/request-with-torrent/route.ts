@@ -13,6 +13,10 @@ import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { z } from 'zod';
 import { RMABLogger } from '@/lib/utils/logger';
+import {
+  AUTHOR_BLOCKED_MESSAGE,
+  isAuthorBlocked,
+} from '@/lib/services/author-blacklist.service';
 
 const logger = RMABLogger.create('API.RequestWithTorrent');
 
@@ -63,6 +67,13 @@ export async function POST(request: NextRequest) {
 
       const body = await req.json();
       const { audiobook, torrent } = RequestWithTorrentSchema.parse(body);
+
+      if (await isAuthorBlocked(audiobook.author)) {
+        return NextResponse.json(
+          { error: 'AuthorBlocked', message: AUTHOR_BLOCKED_MESSAGE },
+          { status: 409 }
+        );
+      }
 
       // First check: Is there an existing audiobook request in 'downloaded' or 'available' status?
       // This catches the gap where files are organized but Plex hasn't scanned yet

@@ -130,6 +130,17 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - **Match rules:** Case-insensitive exact match on `release_key` OR exact match on `release_hash`.
 - **Service:** Single writer is `src/lib/services/blocklist.service.ts` (`addAutoBlock` is idempotent via upsert; never throws).
 
+### Blocked_Authors
+- `id` (UUID PK)
+- `author_name` (string) — display as entered by admin
+- `author_key` (string, unique) — normalized lookup: `trim().toLowerCase()` of author_name
+- `created_by_id` (UUID?, FK → Users, SetNull on user delete)
+- `created_at` (timestamp)
+- Indexes: unique on `author_key`
+- **Purpose:** Global admin author blacklist. User/auto request paths reject books whose author field matches (comma-split segment equality).
+- **Match rules:** Case-insensitive exact match on each comma-separated author segment vs `author_key`. No substring / ASIN match.
+- **Service:** `src/lib/services/author-blacklist.service.ts`
+
 ## Relationships
 
 - User → Requests (1:many)
@@ -137,6 +148,7 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - Request → Download History (1:many)
 - Request → Jobs (1:many, nullable)
 - Request → Blocked Releases (1:many, CASCADE on hard delete)
+- User → Blocked Authors created (1:many, nullable creator, SetNull)
 - Job → Job Events (1:many, CASCADE delete)
 
 ## Setup Strategy

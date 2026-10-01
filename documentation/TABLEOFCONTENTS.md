@@ -109,6 +109,7 @@
 - **Request deletion (soft delete, seeding awareness)** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
 - **Request approval system, auto-approve settings** → [admin-features/request-approval.md](admin-features/request-approval.md)
 - **Release blocklist (auto-block failed releases, /admin/blocklist)** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md)
+- **Author blacklist (admin name block, /admin/author-blacklist)** → [admin-features/author-blacklist.md](admin-features/author-blacklist.md)
 
 ## Fixes & Improvements
 - **File hash-based library matching (ABS)** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md)
@@ -155,6 +156,9 @@
 **"How does the release blocklist work?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md)
 **"Why does the same bad release keep getting re-downloaded?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md) (it shouldn't anymore — auto-blocked on permanent failure)
 **"How do I unblock a release?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md) (admin → /admin/blocklist → Unblock, or chip on the request row)
+**"How does the author blacklist work?"** → [admin-features/author-blacklist.md](admin-features/author-blacklist.md)
+**"How do I block an author from being requested?"** → [admin-features/author-blacklist.md](admin-features/author-blacklist.md) (admin → /admin/author-blacklist)
+**"Why does requesting a book say the author is blocked?"** → [admin-features/author-blacklist.md](admin-features/author-blacklist.md)
 **"How does the admin book info modal work?"** → [admin-features/request-approval.md](admin-features/request-approval.md#ui-features), [frontend/components.md](frontend/components.md#component-apis)
 **"How do I customize audiobook folder organization?"** → [settings-pages.md](settings-pages.md#audiobook-organization-template), [phase3/file-organization.md](phase3/file-organization.md#target-structure)
 **"How do I deploy?"** → [deployment/docker.md](deployment/docker.md) (multi-container), [deployment/unified.md](deployment/unified.md) (all-in-one)

@@ -15,6 +15,10 @@ import { getAudibleService } from '@/lib/integrations/audible.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { shouldSkipAutoSearch } from '@/lib/utils/release-date';
 import { seedAsin, getSiblingAsins } from '@/lib/services/works.service';
+import {
+  AUTHOR_BLOCKED_MESSAGE,
+  isAuthorBlocked,
+} from '@/lib/services/author-blacklist.service';
 
 const logger = RMABLogger.create('RequestCreator');
 
@@ -35,7 +39,7 @@ export interface CreateRequestOptions {
 
 export type CreateRequestResult =
   | { success: true; request: any }
-  | { success: false; reason: 'already_available' | 'being_processed' | 'duplicate' | 'user_not_found' | 'ignored'; message: string };
+  | { success: false; reason: 'already_available' | 'being_processed' | 'duplicate' | 'user_not_found' | 'ignored' | 'author_blocked'; message: string };
 
 /**
  * Create a request for a user, with full duplicate detection, library checks,
@@ -47,6 +51,15 @@ export async function createRequestForUser(
   options: CreateRequestOptions = {}
 ): Promise<CreateRequestResult> {
   const { skipAutoSearch = false, bypassIgnore = false } = options;
+
+  // Global admin author blacklist — always enforced (no bypass)
+  if (await isAuthorBlocked(audiobook.author)) {
+    return {
+      success: false,
+      reason: 'author_blocked',
+      message: AUTHOR_BLOCKED_MESSAGE,
+    };
+  }
 
   // Check for existing active request (downloaded/available) for this ASIN
   const existingActiveRequest = await prisma.request.findFirst({

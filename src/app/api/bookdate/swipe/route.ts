@@ -10,6 +10,10 @@ import { getAudibleService } from '@/lib/integrations/audible.service';
 import { getConfigService } from '@/lib/services/config.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { shouldSkipAutoSearch } from '@/lib/utils/release-date';
+import {
+  AUTHOR_BLOCKED_MESSAGE,
+  isAuthorBlocked,
+} from '@/lib/services/author-blacklist.service';
 
 const logger = RMABLogger.create('API.BookDateSwipe');
 
@@ -43,6 +47,19 @@ async function handler(req: AuthenticatedRequest) {
       return NextResponse.json(
         { error: 'Recommendation not found or does not belong to user' },
         { status: 404 }
+      );
+    }
+
+    // Block request creation for blacklisted authors before recording the swipe
+    if (
+      action === 'right' &&
+      !markedAsKnown &&
+      recommendation.audnexusAsin &&
+      (await isAuthorBlocked(recommendation.author))
+    ) {
+      return NextResponse.json(
+        { error: 'AuthorBlocked', message: AUTHOR_BLOCKED_MESSAGE },
+        { status: 409 }
       );
     }
 

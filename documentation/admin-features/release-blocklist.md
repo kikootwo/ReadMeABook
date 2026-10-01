@@ -82,7 +82,7 @@ Mirrors `/admin/logs` patterns: URL ↔ state via `useBlocklistUrlState`, SWR wi
 - **Bulk Clear (`Clear filtered (N)` or `Clear all (N)`):** opens a typed-token confirmation modal. Button label adapts to active filter state.
 - **Empty states:** "fresh" / "filters-too-tight" / "search-no-match" — pure function of `{ total, hasFilters, hasSearch }`.
 
-**Nav entry:** Quick Actions tile on the admin dashboard (`src/app/admin/page.tsx`).
+**Nav entry:** Quick Actions tile labeled **Release Blocklist** on the admin dashboard (`src/app/admin/page.tsx`). Distinct from **Author Blacklist** (`/admin/author-blacklist`).
 
 ## Request Detail Chip
 **Component:** `BlockedReleasesChip` ([src/app/admin/components/BlockedReleasesChip.tsx](../../src/app/admin/components/BlockedReleasesChip.tsx))

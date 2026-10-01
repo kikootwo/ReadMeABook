@@ -167,10 +167,10 @@ function AdminBlocklistContent() {
         {error && (
           <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
             <h3 className="text-sm font-medium text-red-800 dark:text-red-200">
-              Error Loading Blocklist
+              Error Loading Release Blocklist
             </h3>
             <p className="text-sm text-red-700 dark:text-red-300 mt-1">
-              {error?.message || 'Failed to load blocklist'}
+              {error?.message || 'Failed to load release blocklist'}
             </p>
           </div>
         )}

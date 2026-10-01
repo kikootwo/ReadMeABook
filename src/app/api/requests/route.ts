@@ -62,6 +62,7 @@ export async function POST(request: NextRequest) {
           duplicate: { error: 'DuplicateRequest', status: 409 },
           user_not_found: { error: 'UserNotFound', status: 404 },
           ignored: { error: 'Ignored', status: 409 },
+          author_blocked: { error: 'AuthorBlocked', status: 409 },
         };
         const mapped = statusMap[result.reason] || { error: 'RequestError', status: 500 };
         return NextResponse.json(
