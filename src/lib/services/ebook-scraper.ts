@@ -445,7 +445,7 @@ export async function searchByTitle(
   }
 
   try {
-    const formatParams = format && format !== 'any' ? { ext: format } : {};
+    const formatParams: Record<string, string> = format && format !== 'any' ? { ext: format } : {};
     const strictParams = new URLSearchParams({
       termtype_1: 'author', termval_1: author,
       termtype_2: 'title', termval_2: title,
