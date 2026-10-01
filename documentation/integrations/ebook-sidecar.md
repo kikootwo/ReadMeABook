@@ -182,6 +182,10 @@ Configure URL in Admin Settings → E-book Sidecar: `http://localhost:8191`
 
 ## Scraping Strategy (Anna's Archive)
 
+- Search by ASIN first, then try title + author fields, quoted title + author, title-only, and broad title-only queries.
+- Rank results using title/author words from nearby result text; exclude recent-download and partial-match sections.
+- Positive MD5 lookups stay cached for the process lifetime. Negative lookups expire after 2 minutes so later retries can recover from temporary misses.
+
 ### Method 1: ASIN Search (exact match)
 ```
 Search: https://annas-archive.gl/search?ext=epub&lang=en&q="asin:B09TWSRMCB"

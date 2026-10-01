@@ -27,7 +27,61 @@ const MAX_RETRIES = 3;
 const FLARESOLVERR_TIMEOUT_MS = 60000; // 60 seconds for FlareSolverr requests
 
 // In-memory cache for MD5 lookups (prevents re-scraping same ASIN)
-const md5Cache = new Map<string, string | null>();
+const NEGATIVE_CACHE_TTL_MS = 2 * 60 * 1000;
+const md5Cache = new Map<string, { md5: string | null; expiresAt: number }>();
+
+function getCachedMd5(cacheKey: string): string | null | undefined {
+  const entry = md5Cache.get(cacheKey);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
+    md5Cache.delete(cacheKey);
+    return undefined;
+  }
+  return entry.md5;
+}
+
+function cacheMd5(cacheKey: string, md5: string | null): void {
+  md5Cache.set(cacheKey, {
+    md5,
+    expiresAt: md5 ? Number.POSITIVE_INFINITY : Date.now() + NEGATIVE_CACHE_TTL_MS,
+  });
+}
+
+function getSearchResultMd5s(html: string, title: string, author: string): string[] {
+  const $ = cheerio.load(html);
+  const titleWords = normalizeSearchText(title).split(/\s+/).filter(Boolean);
+  const authorWords = normalizeSearchText(author).split(/\s+/).filter(Boolean);
+  const candidates = new Map<string, number>();
+
+  $('a[href*="/md5/"]').each((_, elem) => {
+    const anchor = $(elem);
+    if (anchor.closest('.js-recent-downloads-container, .js-partial-matches-show').length) return;
+
+    const href = anchor.attr('href') || '';
+    const md5 = href.match(/\/md5\/([a-f0-9]{6,32})/i)?.[1]?.toLowerCase();
+    if (!md5) return;
+
+    // Search result cards vary across page versions; nearby text usually contains
+    // the title, author, and format metadata needed to prefer the right edition.
+    const context = normalizeSearchText(anchor.closest('li, article, [class*="item"], [class*="result"]').text()
+      || anchor.parent().parent().text()
+      || anchor.text());
+    const contextWords = new Set(context.split(/\s+/));
+    const titleHits = titleWords.filter(word => contextWords.has(word)).length;
+    const authorHits = authorWords.filter(word => contextWords.has(word)).length;
+    const score = titleHits * 3 + authorHits * 2;
+    candidates.set(md5, Math.max(score, candidates.get(md5) ?? -1));
+  });
+
+  return [...candidates.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([md5]) => md5);
+}
+
+function normalizeSearchText(value: string): string {
+  return value.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+}
 
 // FlareSolverr types
 interface FlareSolverrRequest {
@@ -318,12 +372,12 @@ export async function searchByAsin(
 ): Promise<string | null> {
   // Check cache first
   const cacheKey = `${asin}-${format}-${languageCode}`;
-  if (md5Cache.has(cacheKey)) {
-    const cached = md5Cache.get(cacheKey);
+  const cached = getCachedMd5(cacheKey);
+  if (cached !== undefined) {
     if (cached) {
       await logger?.info(`Using cached MD5 for ASIN ${asin}`);
     }
-    return cached ?? null; // Convert undefined to null
+    return cached;
   }
 
   try {
@@ -335,55 +389,26 @@ export async function searchByAsin(
 
     const html = await fetchHtml(searchUrl, flaresolverrUrl, logger);
     const $ = cheerio.load(html);
-
-    // Exclude MD5 links from "Recent downloads" banner and "Partial matches" section
-    // Only look for actual search result links
-    const searchResultLinks = $('a[href*="/md5/"]').filter((i, elem) => {
-      // Exclude links inside the recent downloads banner
-      if ($(elem).closest('.js-recent-downloads-container').length > 0) {
-        return false;
-      }
-      // Exclude links inside the partial matches section
-      if ($(elem).closest('.js-partial-matches-show').length > 0) {
-        return false;
-      }
-      return true;
-    });
+    const candidates = getSearchResultMd5s(html, '', '');
 
     // Debug logging for ASIN search
     const pageTitle = $('title').text();
-    const allMd5Links = $('a[href*="/md5/"]').length;
     moduleLogger.debug('ASIN search results', {
       htmlLength: html.length,
       pageTitle,
-      totalMd5Links: allMd5Links,
-      searchResultLinks: searchResultLinks.length
+      searchResultLinks: candidates.length
     });
-
-    // Extract MD5 from first search result link
-    const firstResult = searchResultLinks.first();
-    const href = firstResult.attr('href');
-
-    if (firstResult.length > 0) {
-      const resultText = firstResult.text().trim().substring(0, 100);
-      const parentText = firstResult.parent().text().trim().substring(0, 100);
-      moduleLogger.debug('First result details', { resultText, parentText });
-    }
-
-    if (!href) {
+    const md5 = candidates[0] || null;
+    if (!md5) {
       await logger?.warn(`No search results found for ASIN: ${asin}`);
-      md5Cache.set(cacheKey, null);
+      cacheMd5(cacheKey, null);
       return null;
     }
-
-    // Extract MD5 from href (e.g., "/md5/3b6f9c0f..." -> "3b6f9c0f...")
-    const md5Match = href.match(/\/md5\/([a-f0-9]+)/);
-    const md5 = md5Match ? md5Match[1] : null;
 
     moduleLogger.debug(`Extracted MD5 from ASIN search: ${md5}`);
 
     // Cache result
-    md5Cache.set(cacheKey, md5);
+    cacheMd5(cacheKey, md5);
 
     await delay(REQUEST_DELAY_MS);
     return md5;
@@ -391,7 +416,7 @@ export async function searchByAsin(
     await logger?.error(
       `Search failed: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
-    md5Cache.set(cacheKey, null);
+    cacheMd5(cacheKey, null);
     return null;
   }
 }
@@ -411,73 +436,61 @@ export async function searchByTitle(
 ): Promise<string | null> {
   // Check cache first
   const cacheKey = `title-${title}-${author}-${format}-${languageCode}`.toLowerCase();
-  if (md5Cache.has(cacheKey)) {
-    const cached = md5Cache.get(cacheKey);
+  const cached = getCachedMd5(cacheKey);
+  if (cached !== undefined) {
     if (cached) {
       await logger?.info(`Using cached MD5 for title search`);
     }
-    return cached ?? null;
+    return cached;
   }
 
   try {
-    // Build search URL using specific term types for author and title (more accurate than raw query)
-    const encodedAuthor = encodeURIComponent(author);
-    const encodedTitle = encodeURIComponent(title);
+    const formatParams = format && format !== 'any' ? { ext: format } : {};
+    const strictParams = new URLSearchParams({
+      termtype_1: 'author', termval_1: author,
+      termtype_2: 'title', termval_2: title,
+      ...formatParams,
+      lang: languageCode,
+      q: '',
+    });
+    strictParams.append('content', 'book_nonfiction');
+    strictParams.append('content', 'book_fiction');
+    strictParams.append('content', 'book_unknown');
 
-    // Use Anna's Archive advanced search with specific term types
-    let searchUrl = `${baseUrl}/search?termtype_1=author&termval_1=${encodedAuthor}&termtype_2=title&termval_2=${encodedTitle}`;
+    const queries = [
+      { label: 'author + title fields', params: strictParams },
+      { label: 'title + author', params: new URLSearchParams({
+        ...formatParams, lang: languageCode, q: `"${title}" "${author}"`,
+      }) },
+      { label: 'title only', params: new URLSearchParams({
+        ...formatParams, lang: languageCode, q: title,
+      }) },
+      { label: 'broad title only', params: new URLSearchParams({ q: title }) },
+    ];
 
-    // Add format filter if not 'any'
-    if (format && format !== 'any') {
-      searchUrl += `&ext=${format}`;
+    let md5: string | null = null;
+    for (const query of queries) {
+      const searchUrl = `${baseUrl}/search?${query.params.toString()}`;
+      moduleLogger.debug(`Title search URL (${query.label}): ${searchUrl}`);
+      const html = await fetchHtml(searchUrl, flaresolverrUrl, logger);
+      const candidates = getSearchResultMd5s(html, title, author);
+      moduleLogger.debug('Title search results', { query: query.label, candidateCount: candidates.length });
+      if (candidates.length) {
+        md5 = candidates[0];
+        await logger?.info(`Found ${candidates.length} candidate(s) using ${query.label} search`);
+        break;
+      }
+      await delay(REQUEST_DELAY_MS);
     }
 
-    // Add content type filters (books only, all fiction/nonfiction/unknown)
-    searchUrl += '&content=book_nonfiction&content=book_fiction&content=book_unknown';
-
-    // Add language filter
-    searchUrl += `&lang=${languageCode}`;
-
-    // Empty raw query (we're using specific terms instead)
-    searchUrl += '&q=';
-
-    moduleLogger.debug(`Title search URL: ${searchUrl}`);
-
-    const html = await fetchHtml(searchUrl, flaresolverrUrl, logger);
-    const $ = cheerio.load(html);
-
-    // Exclude MD5 links from "Recent downloads" banner and "Partial matches" section
-    const searchResultLinks = $('a[href*="/md5/"]').filter((i, elem) => {
-      // Exclude links inside the recent downloads banner
-      if ($(elem).closest('.js-recent-downloads-container').length > 0) {
-        return false;
-      }
-      // Exclude links inside the partial matches section
-      if ($(elem).closest('.js-partial-matches-show').length > 0) {
-        return false;
-      }
-      return true;
-    });
-
-    const allMd5Links = $('a[href*="/md5/"]').length;
-    moduleLogger.debug('Title search results', { totalMd5Links: allMd5Links, searchResultLinks: searchResultLinks.length });
-
-    // Extract MD5 from first search result link
-    const firstResult = searchResultLinks.first();
-    const href = firstResult.attr('href');
-
-    if (!href) {
+    if (!md5) {
       await logger?.warn(`No search results found for title: "${title}" by ${author}`);
-      md5Cache.set(cacheKey, null);
+      cacheMd5(cacheKey, null);
       return null;
     }
 
-    // Extract MD5 from href
-    const md5Match = href.match(/\/md5\/([a-f0-9]+)/);
-    const md5 = md5Match ? md5Match[1] : null;
-
     // Cache result
-    md5Cache.set(cacheKey, md5);
+    cacheMd5(cacheKey, md5);
 
     await delay(REQUEST_DELAY_MS);
     return md5;
@@ -485,7 +498,7 @@ export async function searchByTitle(
     await logger?.error(
       `Title search failed: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
-    md5Cache.set(cacheKey, null);
+    cacheMd5(cacheKey, null);
     return null;
   }
 }
