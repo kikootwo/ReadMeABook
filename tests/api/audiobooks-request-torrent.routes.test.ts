@@ -314,5 +314,33 @@ describe('Request with torrent route', () => {
       author: 'Author',
     }, expect.objectContaining({ guid: 'guid' }));
   });
+
+  it('returns 409 AuthorBlocked when author is blacklisted', async () => {
+    authRequest.json.mockResolvedValue({
+      audiobook: { asin: 'ASIN', title: 'Title', author: 'Blocked Author' },
+      torrent: {
+        guid: 'guid',
+        title: 'Torrent',
+        size: 100,
+        indexer: 'Indexer',
+        downloadUrl: 'url',
+        publishDate: '2024-01-01',
+      },
+    });
+    prismaMock.blockedAuthor.findFirst.mockResolvedValueOnce({ id: 'ba-1' });
+
+    const { POST } = await import(
+      '@/app/api/audiobooks/request-with-torrent/route'
+    );
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload.error).toBe('AuthorBlocked');
+    expect(payload.message).toBe(
+      'This author is blocked by the administrator'
+    );
+    expect(prismaMock.request.create).not.toHaveBeenCalled();
+  });
 });
 

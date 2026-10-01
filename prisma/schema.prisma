@@ -81,6 +81,7 @@ model User {
   watchedAuthors          WatchedAuthor[]
   homeSections            UserHomeSection[]
   ignoredAudiobooks       IgnoredAudiobook[]
+  blockedAuthorsCreated   BlockedAuthor[]          @relation("BlockedAuthorCreator")
 
   @@index([plexId])
   @@index([role])
@@ -305,6 +306,26 @@ model BlockedRelease {
   @@index([releaseHash])
   @@index([createdAt(sort: Desc)])
   @@map("blocked_releases")
+}
+
+// ============================================================================
+// BLOCKED AUTHORS TABLE
+// Global admin author blacklist (name-based). User/auto request paths reject
+// books whose author field matches a blacklisted name.
+// Documentation: documentation/admin-features/author-blacklist.md
+// ============================================================================
+
+model BlockedAuthor {
+  id          String   @id @default(uuid())
+  authorName  String   @map("author_name") // display as entered
+  authorKey   String   @unique @map("author_key") // normalized: trim + lowercase
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  createdBy User? @relation("BlockedAuthorCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([createdAt(sort: Desc)])
+  @@map("blocked_authors")
 }
 
 model DownloadHistory {

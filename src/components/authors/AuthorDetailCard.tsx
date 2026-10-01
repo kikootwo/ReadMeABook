@@ -12,6 +12,7 @@ import React, { useState } from 'react';
 import Image from 'next/image';
 import { AuthorDetail } from '@/lib/hooks/useAuthors';
 import { WatchAuthorButton } from '@/components/ui/WatchButton';
+import { BlacklistAuthorButton } from '@/components/ui/BlacklistAuthorButton';
 
 interface AuthorDetailCardProps {
   author: AuthorDetail;
@@ -65,7 +66,7 @@ export function AuthorDetailCard({ author }: AuthorDetailCardProps) {
           </div>
         )}
 
-        {/* Actions row: Audible link + Watch button */}
+        {/* Actions row: Audible link + Watch + admin Blacklist */}
         <div className="mt-3 flex flex-wrap items-center justify-center sm:justify-start gap-3">
           {author.audibleUrl && (
             <a
@@ -85,6 +86,7 @@ export function AuthorDetailCard({ author }: AuthorDetailCardProps) {
             authorName={author.name}
             coverArtUrl={author.image}
           />
+          <BlacklistAuthorButton authorName={author.name} />
         </div>
 
         {/* Description */}

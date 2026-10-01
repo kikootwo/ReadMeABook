@@ -326,3 +326,38 @@ describe('createRequestForUser — release-date gate', () => {
     expect(jobQueueAddSearchJob).toHaveBeenCalled();
   });
 });
+
+describe('createRequestForUser — author blacklist', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    jobQueueAddSearchJob.mockResolvedValue(undefined);
+    jobQueueAddNotificationJob.mockResolvedValue(undefined);
+    prismaMock.request.findFirst.mockResolvedValue(null);
+    prismaMock.audiobook.findFirst.mockResolvedValue(null);
+    prismaMock.ignoredAudiobook.findUnique.mockResolvedValue(null);
+    prismaMock.ignoredAudiobook.findFirst.mockResolvedValue(null);
+    prismaMock.blockedAuthor.findFirst.mockResolvedValue(null);
+    mockGetSiblingAsins.mockResolvedValue(new Map());
+    mockSeedAsin.mockResolvedValue(undefined);
+    audibleServiceMock.getAudiobookDetails.mockResolvedValue(null);
+    configServiceGet.mockResolvedValue(null);
+  });
+
+  it('blocks request when author is on the admin blacklist', async () => {
+    prismaMock.blockedAuthor.findFirst.mockResolvedValueOnce({ id: 'ba-1' });
+
+    const { createRequestForUser } = await import(
+      '@/lib/services/request-creator.service'
+    );
+    const result = await createRequestForUser(TEST_USER_ID, TEST_AUDIOBOOK);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.reason).toBe('author_blocked');
+      expect(result.message).toBe(
+        'This author is blocked by the administrator'
+      );
+    }
+    expect(prismaMock.request.create).not.toHaveBeenCalled();
+  });
+});

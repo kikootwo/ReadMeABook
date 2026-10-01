@@ -21,8 +21,8 @@ type PrismaModelMock = {
 
 const createModelMock = (): PrismaModelMock => ({
   findMany: vi.fn(),
-  findFirst: vi.fn(),
-  findUnique: vi.fn(),
+  findFirst: vi.fn(() => Promise.resolve(null)),
+  findUnique: vi.fn(() => Promise.resolve(null)),
   create: vi.fn(() => Promise.resolve({})),
   createMany: vi.fn(() => Promise.resolve({ count: 0 })),
   update: vi.fn(() => Promise.resolve({})),
@@ -59,6 +59,7 @@ export const createPrismaMock = () => ({
   audibleCacheCategory: createModelMock(),
   ignoredAudiobook: createModelMock(),
   blockedRelease: createModelMock(),
+  blockedAuthor: createModelMock(),
   $queryRaw: vi.fn(),
   $transaction: vi.fn(),
   $disconnect: vi.fn(),

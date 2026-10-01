@@ -208,4 +208,32 @@ describe('BookDate swipe — release-date gate', () => {
     );
     expect(jobQueueMock.addSearchJob).toHaveBeenCalled();
   });
+
+  it('returns 409 AuthorBlocked when author is blacklisted', async () => {
+    authRequest.json.mockResolvedValue({
+      recommendationId: 'rec-blocked',
+      action: 'right',
+      markedAsKnown: false,
+    });
+    prismaMock.bookDateRecommendation.findUnique.mockResolvedValueOnce({
+      id: 'rec-blocked',
+      userId: 'user-1',
+      title: 'Blocked Book',
+      author: 'Blocked Author',
+      audnexusAsin: 'ASIN-BLOCKED',
+    } as any);
+    prismaMock.blockedAuthor.findFirst.mockResolvedValueOnce({ id: 'ba-1' });
+
+    const { POST } = await import('@/app/api/bookdate/swipe/route');
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload.error).toBe('AuthorBlocked');
+    expect(payload.message).toBe(
+      'This author is blocked by the administrator'
+    );
+    expect(prismaMock.bookDateSwipe.create).not.toHaveBeenCalled();
+    expect(prismaMock.request.create).not.toHaveBeenCalled();
+  });
 });
