@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - add-ebook-providers
 
 env:
   REGISTRY: ghcr.io
