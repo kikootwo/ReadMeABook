@@ -33,6 +33,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ./dockerfile.unified
           push: true
           tags: |
             ghcr.io/deadpoolkb/readmeabook:latest
