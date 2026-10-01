@@ -88,6 +88,8 @@ export interface IndexerOptionsSettings {
    * Backing config key: `indexer.skip_unreleased`.
    */
   skipUnreleased: boolean;
+  preferredLanguage?: 'en' | 'de' | 'es' | 'fr' | 'all';
+  languagePenaltyScore?: number;
 }
 
 /**

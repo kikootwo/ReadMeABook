@@ -146,7 +146,7 @@ export function IndexersTab({
           </p>
         </div>
 
-        <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+        <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700 space-y-4">
           <div className="flex items-start gap-4">
             <input
               type="checkbox"
@@ -172,6 +172,69 @@ export function IndexersTab({
               </label>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                 When ON, ReadMeABook will not search indexers for books whose release date is in the future. These requests will automatically begin searching once the book is released. Manual searches are not affected.
+              </p>
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-gray-200 dark:border-gray-700 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label
+                htmlFor="indexer-preferred-language"
+                className="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-1"
+              >
+                Preferred Search Language
+              </label>
+              <select
+                id="indexer-preferred-language"
+                value={settings.indexerOptions.preferredLanguage || 'en'}
+                onChange={(e) =>
+                  onChange({
+                    ...settings,
+                    indexerOptions: {
+                      ...settings.indexerOptions,
+                      preferredLanguage: e.target.value as any,
+                    },
+                  })
+                }
+                className="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm p-2"
+              >
+                <option value="en">English (en)</option>
+                <option value="de">German (de)</option>
+                <option value="es">Spanish (es)</option>
+                <option value="fr">French (fr)</option>
+                <option value="all">All (Disable Language Filter)</option>
+              </select>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Target audiobook language. Selecting &quot;All&quot; disables language filtering and score penalties.
+              </p>
+            </div>
+
+            <div>
+              <label
+                htmlFor="indexer-language-penalty"
+                className="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-1"
+              >
+                Language Penalty Score
+              </label>
+              <input
+                type="number"
+                id="indexer-language-penalty"
+                min="0"
+                max="1000"
+                value={settings.indexerOptions.languagePenaltyScore ?? 100}
+                onChange={(e) =>
+                  onChange({
+                    ...settings,
+                    indexerOptions: {
+                      ...settings.indexerOptions,
+                      languagePenaltyScore: parseInt(e.target.value || '0', 10),
+                    },
+                  })
+                }
+                className="w-full rounded-md border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm p-2"
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Score penalty subtracted for non-matching language or language-learning course releases (default: 100).
               </p>
             </div>
           </div>

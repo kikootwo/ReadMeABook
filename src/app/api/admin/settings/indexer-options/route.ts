@@ -39,8 +39,14 @@ export async function GET(request: NextRequest) {
 
         // Default ON: missing or any value other than 'false' is treated as enabled.
         const skipUnreleased = value !== 'false';
+        const preferredLanguage = await configService.getPreferredLanguage();
+        const languagePenaltyScore = await configService.getLanguagePenaltyScore();
 
-        return NextResponse.json({ skipUnreleased });
+        return NextResponse.json({
+          skipUnreleased,
+          preferredLanguage,
+          languagePenaltyScore,
+        });
       } catch (error) {
         logger.error('Failed to fetch indexer options', {
           error: error instanceof Error ? error.message : String(error),
@@ -56,39 +62,54 @@ export async function GET(request: NextRequest) {
 
 /**
  * PUT /api/admin/settings/indexer-options
- * Persists indexer-wide options. Body: { skipUnreleased: boolean }
+ * Persists indexer-wide options. Body: { skipUnreleased?: boolean, preferredLanguage?: string, languagePenaltyScore?: number }
  */
 export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
         const body = await request.json();
-        const { skipUnreleased } = body ?? {};
-
-        if (typeof skipUnreleased !== 'boolean') {
-          return NextResponse.json(
-            { error: 'skipUnreleased must be a boolean' },
-            { status: 400 }
-          );
-        }
-
+        const { skipUnreleased, preferredLanguage, languagePenaltyScore } = body ?? {};
         const configService = getConfigService();
-        await configService.setMany([
-          {
+        const updates: any[] = [];
+
+        if (typeof skipUnreleased === 'boolean') {
+          updates.push({
             key: CONFIG_KEY,
             value: String(skipUnreleased),
             category: 'indexer',
             description:
               'Skip auto-searches for books with future release dates',
-          },
-        ]);
+          });
+        }
 
-        // Explicitly clear cache for the key after write. `setMany` already
-        // does this, but we make it visible here to guarantee fresh reads
-        // by any sibling service that has cached the value.
-        configService.clearCache(CONFIG_KEY);
+        if (preferredLanguage && ['en', 'de', 'es', 'fr', 'all'].includes(String(preferredLanguage).toLowerCase())) {
+          updates.push({
+            key: 'search.preferred_language',
+            value: String(preferredLanguage).toLowerCase(),
+            category: 'search',
+            description: 'Preferred search language (en, de, es, fr, all)',
+          });
+        }
 
-        logger.info('Indexer options updated', { skipUnreleased });
+        if (languagePenaltyScore !== undefined) {
+          const score = parseInt(String(languagePenaltyScore), 10);
+          if (!isNaN(score) && score >= 0) {
+            updates.push({
+              key: 'search.language_penalty_score',
+              value: String(score),
+              category: 'search',
+              description: 'Language penalty score for non-matching search results',
+            });
+          }
+        }
+
+        if (updates.length > 0) {
+          await configService.setMany(updates);
+          configService.clearCache();
+        }
+
+        logger.info('Indexer options updated', { skipUnreleased, preferredLanguage, languagePenaltyScore });
 
         return NextResponse.json({
           success: true,
