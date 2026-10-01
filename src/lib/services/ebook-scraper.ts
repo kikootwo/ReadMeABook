@@ -67,7 +67,9 @@ function getSearchResultMd5s(html: string, title: string, author: string): strin
       || anchor.parent().parent().text()
       || anchor.text());
     const contextWords = new Set(context.split(/\s+/));
-    const titleHits = titleWords.filter(word => contextWords.has(word)).length;
+    const titleHits = titleWords.filter(word =>
+      contextWords.has(word) || (word.length >= 5 && [...contextWords].some(candidate => isOneEditAway(word, candidate)))
+    ).length;
     const authorHits = authorWords.filter(word => contextWords.has(word)).length;
     const score = titleHits * 3 + authorHits * 2;
     candidates.set(md5, Math.max(score, candidates.get(md5) ?? -1));
@@ -76,6 +78,29 @@ function getSearchResultMd5s(html: string, title: string, author: string): strin
   return [...candidates.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([md5]) => md5);
+}
+
+function isOneEditAway(left: string, right: string): boolean {
+  if (Math.abs(left.length - right.length) > 1) return false;
+  let leftIndex = 0;
+  let rightIndex = 0;
+  let edits = 0;
+
+  while (leftIndex < left.length && rightIndex < right.length) {
+    if (left[leftIndex] === right[rightIndex]) {
+      leftIndex++;
+      rightIndex++;
+      continue;
+    }
+    if (++edits > 1) return false;
+    if (left.length > right.length) leftIndex++;
+    else if (right.length > left.length) rightIndex++;
+    else {
+      leftIndex++;
+      rightIndex++;
+    }
+  }
+  return edits + Number(leftIndex < left.length || rightIndex < right.length) <= 1;
 }
 
 function normalizeSearchText(value: string): string {
@@ -466,6 +491,9 @@ export async function searchByTitle(
         ...formatParams, lang: languageCode, q: title,
       }) },
       { label: 'broad title only', params: new URLSearchParams({ q: title }) },
+      { label: 'author only', params: new URLSearchParams({
+        termtype_1: 'author', termval_1: author, q: '',
+      }) },
     ];
 
     let md5: string | null = null;
