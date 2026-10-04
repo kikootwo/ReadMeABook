@@ -13,6 +13,10 @@ import { getLanguageForRegion } from '../constants/language-config';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
 import type { AudibleRegion } from '../types/audible';
 
+// Auto-search size floor (~21 kbps). Complete releases go as low as ~0.21 MB/min;
+// single chapters from multi-file Usenet posts are ~0.05.
+const MIN_AUTO_MB_PER_MINUTE = 0.15;
+
 const MAX_RANKED_RESULTS = 100;
 
 /**
@@ -189,6 +193,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       indexerPriorities,
       flagConfigs,
       requireAuthor: true,  // Automatic mode - prevent wrong authors
+      minMBPerMinute: MIN_AUTO_MB_PER_MINUTE,  // Automatic mode - reject single chapters/partial posts
       stopWords: langConfig.stopWords,
       characterReplacements: langConfig.characterReplacements,
     });
@@ -196,7 +201,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     // Log filter results
     const postFilterCount = rankedResults.length;
     if (postFilterCount < preFilterCount) {
-      logger.info(`Filtered out ${preFilterCount - postFilterCount} results < ${sizeMBThreshold} MB`);
+      logger.info(`Filtered out ${preFilterCount - postFilterCount} results < ${sizeMBThreshold} MB or < ${MIN_AUTO_MB_PER_MINUTE} MB/min of runtime`);
     }
 
     // Dual threshold filtering:
