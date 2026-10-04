@@ -11,11 +11,11 @@ import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer
 import { RMABLogger } from '../utils/logger';
 import { getLanguageForRegion } from '../constants/language-config';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
-
-// ~32 kbps. Whole-book releases are practically never below this; single chapters
-// pulled from multi-file Usenet posts (e.g. one 57 MB mp3 for a 20 h book) are far below it.
-const MIN_AUTO_MB_PER_MINUTE = 0.25;
 import type { AudibleRegion } from '../types/audible';
+
+// Auto-search size floor (~21 kbps). Complete releases go as low as ~0.21 MB/min;
+// single chapters from multi-file Usenet posts are ~0.05.
+const MIN_AUTO_MB_PER_MINUTE = 0.15;
 
 const MAX_RANKED_RESULTS = 100;
 

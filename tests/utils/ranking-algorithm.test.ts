@@ -47,6 +47,20 @@ describe('ranking-algorithm', () => {
     expect(ranked.map(r => r.guid)).toEqual(['full']);
   });
 
+  it('keeps a complete ~29 kbps release (0.21 MB/min)', () => {
+    // Real complete release: 443 MB, 2154 min
+    const lowBitrate = { ...baseTorrent, guid: 'low', size: 443 * MB, seeders: 0 };
+    const chapter = { ...baseTorrent, guid: 'chapter', size: 100 * MB, seeders: 0 };
+
+    const ranked = rankTorrents(
+      [lowBitrate, chapter],
+      { title: 'Great Book', author: 'Author Name', durationMinutes: 2154 },
+      { minMBPerMinute: 0.15 }
+    );
+
+    expect(ranked.map(r => r.guid)).toEqual(['low']);
+  });
+
   it('keeps small results when minMBPerMinute is unset or runtime is unknown', () => {
     const chapter = { ...baseTorrent, guid: 'chapter', size: 57 * MB };
 
