@@ -265,6 +265,80 @@ export class TransmissionService implements IDownloadClient {
     return infoHash;
   }
 
+  /**
+   * Fetch a torrent URL, manually following redirects one hop at a time.
+   *
+   * Some indexer proxies (e.g. Prowlarr with its "Redirect" setting enabled)
+   * don't hand back the final magnet link directly - they redirect to the
+   * indexer's own URL (e.g. Jackett), which only resolves to the magnet on
+   * the *next* hop. axios's automatic redirect-following (maxRedirects > 0)
+   * cannot follow a non-HTTP `magnet:` Location header; rather than throwing
+   * a catchable error it silently returns an empty/invalid body, which then
+   * fails torrent parsing downstream with a misleading "Invalid .torrent
+   * file" error. Following redirects manually - checking every hop's
+   * Location for a magnet link, not just the first - fixes this.
+   */
+  private async fetchTorrentOrMagnet(
+    url: string,
+    options?: AddDownloadOptions,
+    maxHops: number = 5
+  ): Promise<{ type: 'magnet'; magnetUrl: string } | { type: 'file'; buffer: Buffer }> {
+    let currentUrl = url;
+
+    for (let hop = 0; hop <= maxHops; hop++) {
+      let response;
+      try {
+        response = await axios.get(currentUrl, {
+          responseType: 'arraybuffer',
+          maxRedirects: 0,
+          validateStatus: (status) => status >= 200 && status < 300,
+          timeout: DOWNLOAD_CLIENT_TIMEOUT,
+          headers: { 'User-Agent': RMAB_USER_AGENT, ...options?.sourceHeaders },
+        });
+      } catch (error) {
+        if (!axios.isAxiosError(error) || !error.response) {
+          throw error;
+        }
+
+        const status = error.response.status;
+
+        if (status >= 300 && status < 400) {
+          const location = error.response.headers['location'];
+
+          if (location && location.startsWith('magnet:')) {
+            return { type: 'magnet', magnetUrl: location };
+          }
+          if (location && (location.startsWith('http://') || location.startsWith('https://'))) {
+            currentUrl = location;
+            continue;
+          }
+          throw new Error(`Invalid redirect location: ${location}`);
+        }
+
+        throw new DownloadSourceError(
+          `Grab failed: source returned HTTP ${status}`,
+          status,
+          currentUrl,
+          error
+        );
+      }
+
+      // Check if response body is a magnet link
+      if (response.data.length > 0) {
+        const responseText = response.data.toString();
+        const magnetMatch = responseText.match(/^magnet:\?[^\s]+$/);
+        if (magnetMatch) {
+          logger.info('Response body is a magnet link');
+          return { type: 'magnet', magnetUrl: magnetMatch[0] };
+        }
+      }
+
+      return { type: 'file', buffer: Buffer.from(response.data) };
+    }
+
+    throw new Error('Too many redirects while resolving torrent URL');
+  }
+
   private async addTorrentFile(
     torrentUrl: string,
     category: string,
@@ -272,70 +346,13 @@ export class TransmissionService implements IDownloadClient {
   ): Promise<string> {
     logger.info(`Downloading .torrent file from: ${torrentUrl}`);
 
-    let torrentResponse;
-    try {
-      torrentResponse = await axios.get(torrentUrl, {
-        responseType: 'arraybuffer',
-        maxRedirects: 0,
-        validateStatus: (status) => status >= 200 && status < 300,
-        timeout: DOWNLOAD_CLIENT_TIMEOUT,
-        headers: { 'User-Agent': RMAB_USER_AGENT, ...options?.sourceHeaders },
-      });
+    const result = await this.fetchTorrentOrMagnet(torrentUrl, options);
 
-      // Check if response body is a magnet link
-      if (torrentResponse.data.length > 0) {
-        const responseText = torrentResponse.data.toString();
-        const magnetMatch = responseText.match(/^magnet:\?[^\s]+$/);
-        if (magnetMatch) {
-          logger.info('Response body is a magnet link');
-          return this.addMagnetLink(magnetMatch[0], category, options);
-        }
-      }
-    } catch (error) {
-      if (!axios.isAxiosError(error) || !error.response) {
-        throw error;
-      }
-
-      const status = error.response.status;
-
-      if (status >= 300 && status < 400) {
-        const location = error.response.headers['location'];
-        if (location && location.startsWith('magnet:')) {
-          return this.addMagnetLink(location, category, options);
-        }
-        if (location && (location.startsWith('http://') || location.startsWith('https://'))) {
-          try {
-            torrentResponse = await axios.get(location, {
-              responseType: 'arraybuffer',
-              timeout: DOWNLOAD_CLIENT_TIMEOUT,
-              maxRedirects: 5,
-              headers: { 'User-Agent': RMAB_USER_AGENT, ...options?.sourceHeaders },
-            });
-          } catch (redirectError) {
-            if (axios.isAxiosError(redirectError) && redirectError.response?.status) {
-              throw new DownloadSourceError(
-                `Grab failed: source returned HTTP ${redirectError.response.status}`,
-                redirectError.response.status,
-                location,
-                redirectError
-              );
-            }
-            throw new Error('Failed to download torrent file after redirect');
-          }
-        } else {
-          throw new Error(`Invalid redirect location: ${location}`);
-        }
-      } else {
-        throw new DownloadSourceError(
-          `Grab failed: source returned HTTP ${status}`,
-          status,
-          torrentUrl,
-          error
-        );
-      }
+    if (result.type === 'magnet') {
+      return this.addMagnetLink(result.magnetUrl, category, options);
     }
 
-    const torrentBuffer = Buffer.from(torrentResponse.data);
+    const torrentBuffer = result.buffer;
 
     let parsedTorrentData: any;
     try {
