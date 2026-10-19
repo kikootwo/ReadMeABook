@@ -15,6 +15,7 @@ interface DownloadClientCardProps {
     name: string;
     url: string;
     enabled: boolean;
+    category?: string;
     customPath?: string;
     postImportCategory?: string;
   };
@@ -59,6 +60,11 @@ export function DownloadClientCard({ client, onEdit, onDelete }: DownloadClientC
             <p className="text-xs text-gray-500 dark:text-gray-400 truncate" title={client.url}>
               {displayUrl}
             </p>
+            {client.category && (
+              <p className="text-xs text-indigo-600 dark:text-indigo-400 truncate" title={`Category: ${client.category}`}>
+                Category: {client.category}
+              </p>
+            )}
             {client.customPath && (
               <p className="text-xs text-blue-600 dark:text-blue-400 truncate" title={`Custom path: ${client.customPath}`}>
                 Path: {client.customPath}
