@@ -20,8 +20,14 @@ const ENTRYPOINT = '/entrypoint.sh';
 const DUMMY_DB_URL = 'postgresql://dummy:dummy@localhost:5432/dummy?schema=public';
 // ELF e_machine per Node arch (same bytes as the ffmpeg guard: 0x3e x86_64, 0xb7 aarch64).
 const E_MACHINE = { x64: 0x3e, arm64: 0xb7 };
-// Bare specifiers in .next/server chunks that are allowed to be absent (each needs a reason).
-const OPTIONAL_MISSING = new Set([]);
+// Bare require("…") matches in .next/server that are allowed to be unresolvable, keyed by spec,
+// limited to the chunk file name they may appear in. Each needs a reason.
+const ALLOWED_UNRESOLVED = new Map([
+  // Not a require: an HMR comment in Next's Turbopack runtime ("contains e.g. a `require("something")` call").
+  ['something', /^\[turbopack\]_runtime\.js$/],
+]);
+// Server externals the app is known to load at runtime; their absence means the scan stopped seeing requires.
+const EXPECTED_EXTERNALS = ['bcrypt', 'bull'];
 
 const failures = [];
 const fail = (msg) => failures.push(msg);
@@ -106,6 +112,7 @@ function checkLayout() {
 function checkServerRequires() {
   const builtins = new Set(builtinModules);
   const missing = new Map();
+  const seen = new Set();
   let checked = 0;
   walk(path.join(APP, '.next/server'), (file) => {
     if (!file.endsWith('.js')) return;
@@ -114,15 +121,18 @@ function checkServerRequires() {
       const bare = spec.replace(/^node:/, '');
       if (builtins.has(bare) || builtins.has(bare.split('/')[0])) continue;
       checked++;
+      seen.add(spec);
       try {
         req.resolve(spec);
       } catch {
-        if (!OPTIONAL_MISSING.has(spec)) missing.set(spec, path.relative(APP, file));
+        const allowedIn = ALLOWED_UNRESOLVED.get(spec);
+        if (!(allowedIn && allowedIn.test(path.basename(file)))) missing.set(spec, path.relative(APP, file));
       }
     }
   });
   for (const [spec, file] of missing) fail(`unresolvable require("${spec}") in ${file}`);
-  ok(`${checked} bare require() calls in .next/server resolve`);
+  for (const spec of EXPECTED_EXTERNALS) if (!seen.has(spec)) fail(`no require("${spec}") found in .next/server (scan is blind)`);
+  ok(`${checked} bare require() calls (${seen.size} specifiers) in .next/server resolve`);
 }
 
 function checkElfArch() {

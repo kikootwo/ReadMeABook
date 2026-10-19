@@ -90,7 +90,8 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - CLI version == `Prisma.prismaVersion.client`; `@prisma/engines-version` == CLI engines hash == `Prisma.prismaVersion.engine` (catches a split prisma/@prisma/client bump)
 - `prisma migrate diff --from-empty --to-schema-datamodel /app/prisma/schema.prisma --script` renders the schema offline (dummy URL on that command only)
 - Recovery: generated client + bcrypt load from `/app/scripts`; `package.json` has `rmab:recover`
-- Every bare `require("…")` in `.next/server/**/*.js` resolves from its chunk
+- Every bare `require("…")` in `.next/server/**/*.js` resolves from its chunk (externals today: `bcrypt`, `bull`, `keyv`, `next/dist/...`); `bcrypt` + `bull` must be seen (else the scan is blind). Only allowlisted miss: `something` in `[turbopack]_runtime.js` (a code comment)
+- Note: Next 16 `next build` uses Turbopack even with `TURBOPACK=0` (chunk names `[turbopack]_runtime.js`)
 - Every ELF file in `/app` + ffmpeg/ffprobe has the build arch's `e_machine`; expects 1 schema engine, ≥2 `libquery_engine` copies, `bcrypt_lib.node`
 
 **Guard failures:**
