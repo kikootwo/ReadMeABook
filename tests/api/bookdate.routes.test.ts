@@ -854,7 +854,7 @@ describe('BookDate routes', () => {
   it('tests BookDate connection without auth during setup', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({ data: [{ id: 'model-1' }] }),
+      json: vi.fn().mockResolvedValue({ data: [{ id: 'gpt-4o' }] }),
       text: vi.fn().mockResolvedValue('ok'),
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -862,12 +862,12 @@ describe('BookDate routes', () => {
     const { POST } = await import('@/app/api/bookdate/test-connection/route');
     const response = await POST({
       headers: { get: () => null },
-      json: vi.fn().mockResolvedValue({ provider: 'custom', baseUrl: 'http://custom', apiKey: '' }),
+      json: vi.fn().mockResolvedValue({ provider: 'openai', apiKey: 'sk-test' }),
     } as any);
     const payload = await response.json();
 
     expect(payload.success).toBe(true);
-    expect(payload.models[0].id).toBe('model-1');
+    expect(payload.models[0].id).toBe('gpt-4o');
   });
 });
 

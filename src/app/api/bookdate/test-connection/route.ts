@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { requireSetupIncompleteOrAdmin } from '@/lib/middleware/auth';
+import { AuthenticatedRequest, requireSetupIncompleteOrAdmin } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('API.BookDate.TestConnection');
@@ -90,13 +90,40 @@ function normalizeBaseUrl(url: string): string {
   return url.replace(/\/$/, ''); // Remove trailing slash
 }
 
-async function testConnection(req: NextRequest, options: { allowSavedKey: boolean }) {
+// Longest slice of a custom provider's response body written to the (admin-only) server log
+const MAX_LOGGED_BODY_CHARS = 1000;
+
+// Keep only well-formed model entries: a string id (or a bare string) and a string name
+function toModelList(entries: unknown[]): { id: string; name: string }[] {
+  const models: { id: string; name: string }[] = [];
+  for (const entry of entries) {
+    if (typeof entry === 'string') {
+      if (entry) models.push({ id: entry, name: entry });
+      continue;
+    }
+    if (!entry || typeof entry !== 'object') continue;
+    const { id, name } = entry as { id?: unknown; name?: unknown };
+    if (typeof id !== 'string' || !id) continue;
+    models.push({ id, name: typeof name === 'string' && name ? name : id });
+  }
+  return models;
+}
+
+async function readBodyForLog(response: Response): Promise<string> {
+  try {
+    return (await response.text()).slice(0, MAX_LOGGED_BODY_CHARS);
+  } catch {
+    return '';
+  }
+}
+
+async function testConnection(req: NextRequest, options: { callerIsAdmin: boolean }) {
   try {
     const body = await req.json();
     const { provider, apiKey, baseUrl, useSavedKey } = body;
 
-    // During setup (no signed-in admin) the saved key must not be used
-    if (useSavedKey && !options.allowSavedKey) {
+    // Only a signed-in admin may use the saved key (never the setup wizard)
+    if (useSavedKey && !options.callerIsAdmin) {
       return NextResponse.json(
         { error: 'Authentication required to use saved API key' },
         { status: 401 }
@@ -120,6 +147,14 @@ async function testConnection(req: NextRequest, options: { allowSavedKey: boolea
 
     // Custom provider requires baseUrl
     if (provider === 'custom') {
+      // The setup wizard only offers the built-in providers; custom URLs are admin-only
+      if (!options.callerIsAdmin) {
+        return NextResponse.json(
+          { error: 'Custom providers can only be tested by an admin' },
+          { status: 403 }
+        );
+      }
+
       if (!baseUrl && !useSavedKey) {
         return NextResponse.json(
           { error: 'Base URL is required for custom provider' },
@@ -148,6 +183,14 @@ async function testConnection(req: NextRequest, options: { allowSavedKey: boolea
       if (!config || !config.apiKey) {
         return NextResponse.json(
           { error: 'No saved configuration found' },
+          { status: 400 }
+        );
+      }
+
+      // A saved key is only ever sent to the provider it was saved for
+      if (config.provider !== provider) {
+        return NextResponse.json(
+          { error: 'The saved API key is for a different provider. Enter an API key to test this provider.' },
           { status: 400 }
         );
       }
@@ -252,31 +295,41 @@ async function testConnection(req: NextRequest, options: { allowSavedKey: boolea
         });
 
         if (!response.ok) {
-          logger.error('Custom provider connection error', { status: response.status });
+          // The body goes to the server log only; the caller gets the status, never the body.
           // Return 400 (not the external service's status) to prevent triggering logout on 401.
-          // Only the status is reported back, never the remote response body.
+          logger.error('Custom provider connection error', {
+            status: response.status,
+            body: await readBodyForLog(response),
+          });
           return NextResponse.json(
             { error: `Failed to connect to custom provider (HTTP ${response.status})` },
             { status: 400 }
           );
         }
 
-        const data = await response.json();
+        const rawBody = await response.text();
+        let data: unknown;
+        try {
+          data = JSON.parse(rawBody);
+        } catch {
+          logger.error('Custom provider returned a non-JSON response', {
+            body: rawBody.slice(0, MAX_LOGGED_BODY_CHARS),
+          });
+          return NextResponse.json(
+            { error: 'Connected to the custom provider, but the response was not JSON' },
+            { status: 400 }
+          );
+        }
 
         // Handle multiple response formats
-        let modelsList = [];
-        if (Array.isArray(data?.data)) {
+        let modelsList: { id: string; name: string }[];
+        const wrapped = (data as { data?: unknown } | null)?.data;
+        if (Array.isArray(wrapped)) {
           // OpenAI format: { data: [...] }
-          modelsList = data.data.map((m: any) => ({
-            id: m.id,
-            name: m.name || m.id,
-          }));
+          modelsList = toModelList(wrapped);
         } else if (Array.isArray(data)) {
           // Direct array format
-          modelsList = data.map((m: any) => ({
-            id: m.id || m,
-            name: m.name || m.id || m,
-          }));
+          modelsList = toModelList(data);
         } else {
           // Unable to parse, but connection successful
           return NextResponse.json({
@@ -311,21 +364,15 @@ async function testConnection(req: NextRequest, options: { allowSavedKey: boolea
   }
 }
 
-async function isSetupComplete(): Promise<boolean> {
-  const { prisma } = await import('@/lib/db');
-  const config = await prisma.configuration.findUnique({ where: { key: 'setup_completed' } });
-  return config?.value === 'true';
-}
-
 /**
  * POST /api/bookdate/test-connection
  * Requires admin after setup; while setup is incomplete the setup wizard may test
- * without signing in (and cannot use the saved key).
+ * a built-in provider with a key it supplies, without signing in.
  */
 export async function POST(req: NextRequest) {
   return requireSetupIncompleteOrAdmin(req, async (request) => {
-    // After setup the middleware only lets an authenticated admin through
-    const allowSavedKey = await isSetupComplete();
-    return testConnection(request, { allowSavedKey });
+    // Set by the auth middleware after setup; absent for the unauthenticated setup wizard
+    const callerIsAdmin = (request as AuthenticatedRequest).user?.role === 'admin';
+    return testConnection(request, { callerIsAdmin });
   });
 }
