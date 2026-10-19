@@ -91,6 +91,7 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - `prisma migrate diff --from-empty --to-schema-datamodel /app/prisma/schema.prisma --script` renders the schema offline (dummy URL on that command only)
 - Recovery: generated client + bcrypt load from `/app/scripts`; `package.json` has `rmab:recover`
 - Every bare `require("…")` in `.next/server/**/*.js` resolves from its chunk (externals today: `bcrypt`, `bull`, `keyv`, `next/dist/...`); `bcrypt` + `bull` must be seen (else the scan is blind). Only allowlisted miss: `something` in `[turbopack]_runtime.js` (a code comment)
+- Next >= 16.4 requires externals through hashed aliases (`require("bcrypt-a3fecf8c027c10c9")`) backed by relative symlinks in `.next/node_modules/` (`-> ../../node_modules/bcrypt`); an alias counts as its package and must resolve inside `/app/node_modules/<pkg>/`
 - Note: Next 16 `next build` uses Turbopack even with `TURBOPACK=0` (chunk names `[turbopack]_runtime.js`)
 - Every ELF file in `/app` + ffmpeg/ffprobe has the build arch's `e_machine`; expects 1 schema engine, ≥2 `libquery_engine` copies, `bcrypt_lib.node`
 

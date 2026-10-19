@@ -27,7 +27,10 @@ const ALLOWED_UNRESOLVED = new Map([
   ['something', /^\[turbopack\]_runtime\.js$/],
 ]);
 // Server externals the app is known to load at runtime; their absence means the scan stopped seeing requires.
+// Next >= 16.4 (Turbopack) requires them through hashed aliases ("bcrypt-a3fecf8c027c10c9") that live as
+// relative symlinks in .next/node_modules; either form counts, and an alias must land on the real package.
 const EXPECTED_EXTERNALS = ['bcrypt', 'bull'];
+const HASHED_ALIAS = /^(.+)-[0-9a-f]{16}$/;
 
 const failures = [];
 const fail = (msg) => failures.push(msg);
@@ -121,17 +124,25 @@ function checkServerRequires() {
       const bare = spec.replace(/^node:/, '');
       if (builtins.has(bare) || builtins.has(bare.split('/')[0])) continue;
       checked++;
-      seen.add(spec);
+      let resolved = null;
       try {
-        req.resolve(spec);
+        resolved = fs.realpathSync(req.resolve(spec));
       } catch {
         const allowedIn = ALLOWED_UNRESOLVED.get(spec);
         if (!(allowedIn && allowedIn.test(path.basename(file)))) missing.set(spec, path.relative(APP, file));
       }
+      const alias = spec.match(HASHED_ALIAS);
+      if (alias && resolved) {
+        // A hashed alias must point at the real package under /app/node_modules.
+        const pkgRoot = path.join(APP, 'node_modules', alias[1]) + path.sep;
+        if (!resolved.startsWith(pkgRoot)) fail(`require("${spec}") resolves to ${resolved}, not ${pkgRoot}`);
+        seen.add(alias[1]);
+      }
+      seen.add(spec);
     }
   });
   for (const [spec, file] of missing) fail(`unresolvable require("${spec}") in ${file}`);
-  for (const spec of EXPECTED_EXTERNALS) if (!seen.has(spec)) fail(`no require("${spec}") found in .next/server (scan is blind)`);
+  for (const spec of EXPECTED_EXTERNALS) if (!seen.has(spec)) fail(`no require("${spec}") (or a hashed alias of it) found in .next/server (scan is blind)`);
   ok(`${checked} bare require() calls (${seen.size} specifiers) in .next/server resolve`);
 }
 
