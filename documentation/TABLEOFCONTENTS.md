@@ -76,6 +76,7 @@
 ## Background Jobs
 - **Bull queue, processors, retry logic** → [backend/services/jobs.md](backend/services/jobs.md)
 - **Scheduled/recurring jobs (cron)** → [backend/services/scheduler.md](backend/services/scheduler.md)
+- **Startup initialization (instrumentation hook, /api/init, single-process rule)** → [backend/services/scheduler.md](backend/services/scheduler.md#startup-initialization)
 - **Job types:** search, download monitor, organize, Plex scan, cleanup, retries
 
 ## Logging

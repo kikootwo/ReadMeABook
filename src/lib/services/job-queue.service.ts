@@ -9,6 +9,7 @@ import { prisma } from '../db';
 import { TorrentResult } from '../utils/ranking-algorithm';
 import { DownloadClientType } from '../interfaces/download-client.interface';
 import { RMABLogger } from '../utils/logger';
+import { oncePerProcess, peekProcessSingleton, processSingleton } from '../utils/process-singleton';
 import type { NotificationEvent } from '@/lib/constants/notification-events';
 
 const logger = RMABLogger.create('JobQueue');
@@ -1151,20 +1152,21 @@ export class JobQueueService {
   }
 }
 
-// Singleton instance
-let jobQueueService: JobQueueService | null = null;
+// Process-wide singleton: the constructor starts every processor, so it must
+// exist once per process even if this module is evaluated more than once.
+const JOB_QUEUE_SINGLETON = 'job-queue-service';
 
 export function getJobQueueService(): JobQueueService {
-  if (!jobQueueService) {
-    jobQueueService = new JobQueueService();
-  }
-  return jobQueueService;
+  return processSingleton(JOB_QUEUE_SINGLETON, () => new JobQueueService());
 }
 
 // Graceful shutdown
-process.on('SIGTERM', async () => {
-  if (jobQueueService) {
-    logger.info('Closing job queue...');
-    await jobQueueService.close();
-  }
+oncePerProcess('job-queue-sigterm', () => {
+  process.on('SIGTERM', async () => {
+    const jobQueueService = peekProcessSingleton<JobQueueService>(JOB_QUEUE_SINGLETON);
+    if (jobQueueService) {
+      logger.info('Closing job queue...');
+      await jobQueueService.close();
+    }
+  });
 });

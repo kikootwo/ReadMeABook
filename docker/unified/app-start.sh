@@ -63,12 +63,12 @@ SERVER_PID=$!
 # WAIT FOR SERVER READINESS
 # =============================================================================
 # The health endpoint (/api/health) checks both the Next.js server AND database
-# connectivity. We must wait for both before initializing scheduled jobs.
+# connectivity. This wait is for logging only: service initialization (scheduler,
+# credential migration) is started by the app itself (src/instrumentation.ts) and
+# retries until the database and Redis are ready.
 
 HEALTH_URL="http://localhost:3030/api/health"
-INIT_URL="http://localhost:3030/api/init"
 READY_TIMEOUT=${APP_READY_TIMEOUT:-60}
-INIT_RETRIES=${APP_INIT_RETRIES:-5}
 
 echo "[App] Waiting for server to be ready (timeout: ${READY_TIMEOUT}s)..."
 
@@ -95,59 +95,8 @@ for i in $(seq 1 "$READY_TIMEOUT"); do
 done
 
 if [ "$READY" = "false" ]; then
-    echo "[App] ERROR: Server did not become healthy within ${READY_TIMEOUT}s"
-    echo "[App] The scheduler will not be initialized - scheduled jobs may be missing"
-    echo "[App] Check server logs above for errors (database connection, port conflict, etc.)"
-else
-    # =========================================================================
-    # WAIT FOR REDIS TO FINISH LOADING (internal Redis only)
-    # =========================================================================
-    # Redis returns "LOADING Redis is loading the dataset in memory" while it
-    # replays its AOF/RDB on startup. /api/health only checks Postgres, so it
-    # passes before Redis is actually ready to accept commands. Without this
-    # wait, /api/init kicks off Bull queues that flood the log with LOADING
-    # errors until the retry loop catches up.
-    if [ "$USE_EXTERNAL_REDIS" != "true" ]; then
-        REDIS_READY_TIMEOUT=${REDIS_READY_TIMEOUT:-60}
-        echo "[App] Waiting for Redis to finish loading (timeout: ${REDIS_READY_TIMEOUT}s)..."
-        for i in $(seq 1 "$REDIS_READY_TIMEOUT"); do
-            if redis-cli -h 127.0.0.1 -p 6379 ping 2>/dev/null | grep -q '^PONG$'; then
-                echo "[App] Redis is ready (took ${i}s)"
-                break
-            fi
-            if [ "$i" -eq "$REDIS_READY_TIMEOUT" ]; then
-                echo "[App] WARNING: Redis did not become ready within ${REDIS_READY_TIMEOUT}s - proceeding anyway"
-            fi
-            sleep 1
-        done
-    fi
-
-    # =========================================================================
-    # INITIALIZE APPLICATION SERVICES
-    # =========================================================================
-    # Creates default scheduled jobs, runs credential migration, etc.
-    # Retry with backoff to handle transient failures during startup.
-
-    echo "[App] Initializing application services..."
-
-    INIT_SUCCESS=false
-    for attempt in $(seq 1 "$INIT_RETRIES"); do
-        HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" "$INIT_URL" 2>/dev/null) || HTTP_CODE="000"
-
-        if [ "$HTTP_CODE" = "200" ]; then
-            INIT_SUCCESS=true
-            echo "[App] Services initialized successfully"
-            break
-        fi
-
-        echo "[App] Init attempt $attempt/$INIT_RETRIES failed (HTTP $HTTP_CODE), retrying in ${attempt}s..."
-        sleep "$attempt"
-    done
-
-    if [ "$INIT_SUCCESS" = "false" ]; then
-        echo "[App] ERROR: Failed to initialize services after $INIT_RETRIES attempts"
-        echo "[App] Scheduled jobs may be missing - check application logs for details"
-    fi
+    echo "[App] WARNING: Server did not become healthy within ${READY_TIMEOUT}s"
+    echo "[App] Startup initialization keeps retrying inside the app - check logs for [Startup] lines"
 fi
 
 echo "[App] Server running with PID $SERVER_PID"

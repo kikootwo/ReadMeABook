@@ -11,6 +11,7 @@ import { SUPPORTED_CLIENT_TYPES, CLIENT_PROTOCOL_MAP, DownloadClientType, getCli
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { randomUUID } from 'crypto';
+import { MASKED_PASSWORD } from '@/lib/utils/saved-credential';
 
 const logger = RMABLogger.create('API.Admin.Settings.DownloadClients');
 
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest) {
         // Mask passwords in response
         const maskedClients = clients.map(c => ({
           ...c,
-          password: c.password ? '********' : '',
+          password: c.password ? MASKED_PASSWORD : '',
         }));
 
         return NextResponse.json({ clients: maskedClients });
@@ -173,7 +174,7 @@ export async function POST(request: NextRequest) {
           message: 'Download client added successfully',
           client: {
             ...newClient,
-            password: '********',
+            password: MASKED_PASSWORD,
           },
         });
       } catch (error) {

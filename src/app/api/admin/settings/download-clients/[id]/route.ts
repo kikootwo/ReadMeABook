@@ -10,6 +10,8 @@ import { getDownloadClientManager, invalidateDownloadClientManager } from '@/lib
 import { DownloadClientConfig } from '@/lib/services/download-client-manager.service';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { MASKED_PASSWORD, resolveSecretForUrl } from '@/lib/utils/saved-credential';
+import { savedClientCredential } from '@/lib/services/saved-credentials.service';
 
 const logger = RMABLogger.create('API.Admin.Settings.DownloadClients.ID');
 
@@ -63,14 +65,28 @@ export async function PUT(
           );
         }
 
+        // Keeping the saved password/API key is only allowed for the saved URL
+        const nextUrl = url !== undefined ? url : existingClient.url;
+        const resolvedPassword = await resolveSecretForUrl({
+          kind: 'downloadClient',
+          url: nextUrl,
+          supplied: password,
+          acceptPasswordMask: true,
+          emptyMeansSaved: Boolean(existingClient.password),
+          loadSaved: () => savedClientCredential(existingClient),
+        });
+        if (!resolvedPassword.ok) {
+          return NextResponse.json({ error: resolvedPassword.error }, { status: 400 });
+        }
+
         // Build updated client (preserve fields not in request)
         const updatedClient: DownloadClientConfig = {
           ...existingClient,
           name: name !== undefined ? name : existingClient.name,
           enabled: enabled !== undefined ? enabled : existingClient.enabled,
-          url: url !== undefined ? url : existingClient.url,
+          url: nextUrl,
           username: username !== undefined ? username : existingClient.username,
-          password: password === '********' ? existingClient.password : (password || existingClient.password),
+          password: resolvedPassword.secret || existingClient.password,
           disableSSLVerify: disableSSLVerify !== undefined ? disableSSLVerify : existingClient.disableSSLVerify,
           remotePathMappingEnabled: remotePathMappingEnabled !== undefined ? remotePathMappingEnabled : existingClient.remotePathMappingEnabled,
           remotePath: remotePath !== undefined ? remotePath : existingClient.remotePath,
@@ -97,7 +113,7 @@ export async function PUT(
           (
             url !== undefined ||
             username !== undefined ||
-            (password && password !== '********') ||
+            (password && password !== MASKED_PASSWORD) ||
             disableSSLVerify !== undefined
           )
         ) {
@@ -130,7 +146,7 @@ export async function PUT(
           message: 'Download client updated successfully',
           client: {
             ...updatedClient,
-            password: '********',
+            password: MASKED_PASSWORD,
           },
         });
       } catch (error) {

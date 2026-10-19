@@ -12,6 +12,8 @@ import { getConfigService } from '@/lib/services/config.service';
 import { getDownloadClientManager, DownloadClientConfig } from '@/lib/services/download-client-manager.service';
 import { SUPPORTED_CLIENT_TYPES } from '@/lib/interfaces/download-client.interface';
 import { RMABLogger } from '@/lib/utils/logger';
+import { isSameServiceUrl, resolveSecretForUrl } from '@/lib/utils/saved-credential';
+import { savedClientCredential } from '@/lib/services/saved-credentials.service';
 
 const logger = RMABLogger.create('API.TestDownloadClient');
 
@@ -47,25 +49,25 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // If password is masked, fetch the actual value from download client manager (decrypted)
-        let actualPassword = password;
-        if (password && (password.startsWith('••••') || password === '********')) {
-          const configService = getConfigService();
-          const manager = getDownloadClientManager(configService);
-          const clients = await manager.getAllClients();
-
-          // Find the first client of matching type to get its password
-          const matchingClient = clients.find(c => c.type === type);
-
-          if (!matchingClient?.password) {
-            return NextResponse.json(
-              { success: false, error: 'No stored password/API key found. Please re-enter it.' },
-              { status: 400 }
-            );
-          }
-
-          actualPassword = matchingClient.password;
+        // A masked password reuses a saved one — from the client of this type saved at this URL
+        const resolved = await resolveSecretForUrl({
+          kind: 'downloadClient',
+          url,
+          supplied: password,
+          acceptPasswordMask: true,
+          missingMessage: 'No stored password/API key found. Please re-enter it.',
+          loadSaved: async () => {
+            const manager = getDownloadClientManager(getConfigService());
+            const sameType = (await manager.getAllClients()).filter((c) => c.type === type && c.password);
+            const atThisUrl = sameType.find((c) => isSameServiceUrl(url, c.url));
+            // No client at this URL: report the first saved one so the URL mismatch is explained
+            return savedClientCredential(atThisUrl ?? sameType[0]);
+          },
+        });
+        if (!resolved.ok) {
+          return NextResponse.json({ success: false, error: resolved.error }, { status: 400 });
         }
+        const actualPassword = resolved.secret;
 
         // Build a temporary config for testing
         const testConfig: DownloadClientConfig = {
