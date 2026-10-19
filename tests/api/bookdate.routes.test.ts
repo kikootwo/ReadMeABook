@@ -45,6 +45,8 @@ vi.mock('@/lib/integrations/audible.service', () => ({
 vi.mock('@/lib/middleware/auth', () => ({
   requireAuth: requireAuthMock,
   requireAdmin: requireAdminMock,
+  // Setup wizard path (setup incomplete); access rules: bookdate-test-connection.access.test.ts
+  requireSetupIncompleteOrAdmin: (req: unknown, handler: (r: unknown) => unknown) => handler(req),
 }));
 
 vi.mock('@/lib/services/encryption.service', () => ({
@@ -849,7 +851,7 @@ describe('BookDate routes', () => {
     expect(payload.success).toBe(true);
   });
 
-  it('tests BookDate connection without auth', async () => {
+  it('tests BookDate connection without auth during setup', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: vi.fn().mockResolvedValue({ data: [{ id: 'model-1' }] }),

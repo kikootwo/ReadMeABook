@@ -12,8 +12,15 @@ const encryptionMock = vi.hoisted(() => ({
   decrypt: vi.fn(),
 }));
 
+// Access rules are covered with the real middleware in bookdate-test-connection.access.test.ts.
+// Here: a request with an Authorization header is the admin after setup; without one, the setup wizard.
 vi.mock('@/lib/middleware/auth', () => ({
   requireAuth: requireAuthMock,
+  requireSetupIncompleteOrAdmin: (req: any, handler: (r: any) => any) => {
+    const signedIn = Boolean(req.headers.get('authorization'));
+    prismaMock.configuration.findUnique.mockResolvedValue(signedIn ? { key: 'setup_completed', value: 'true' } : null);
+    return signedIn ? requireAuthMock(req, () => handler(req)) : handler(req);
+  },
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -509,7 +516,7 @@ describe('BookDate test connection route', () => {
 
     const payload = await response.json();
     expect(response.status).toBe(500);
-    expect(payload.error).toMatch(/Network error/i);
+    expect(payload.error).toMatch(/Could not connect to the custom provider/i);
   });
 
   it('returns 400 (not 401) when custom provider returns 401 to prevent logout', async () => {

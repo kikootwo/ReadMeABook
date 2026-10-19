@@ -68,7 +68,7 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 ## API Endpoints
 
 **Global Configuration (Admin):**
-- POST `/api/bookdate/test-connection` - Validate API key (saved or new), fetch models
+- POST `/api/bookdate/test-connection` - Validate API key (saved or new), fetch models. Requires admin after setup (`requireSetupIncompleteOrAdmin`); during setup the wizard may call it without signing in but cannot use the saved key. Errors carry the provider's HTTP status, not its response body
   - **Auth:** Optional (unauthenticated during setup wizard, authenticated for saved keys in settings)
   - Supports `useSavedKey: true` to test with encrypted saved API key (requires authentication)
 - GET `/api/bookdate/config` - Get global config (excluding API key) (All authenticated)
