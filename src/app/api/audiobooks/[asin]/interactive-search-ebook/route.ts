@@ -17,7 +17,8 @@ import { groupIndexersByCategories } from '@/lib/utils/indexer-grouping';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { RMABLogger } from '@/lib/utils/logger';
-import { resolveInteractiveSearchAccess } from '@/lib/utils/permissions';
+import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
+import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { getLanguageForRegion } from '@/lib/constants/language-config';
 import type { AudibleRegion } from '@/lib/types/audible';
 import {
@@ -88,18 +89,8 @@ export async function POST(
       const { asin } = await params;
 
       // Check interactive search access permission
-      if (req.user) {
-        const callingUser = await prisma.user.findUnique({
-          where: { id: req.user.id },
-          select: { role: true, interactiveSearchAccess: true },
-        });
-        if (!callingUser || !(await resolveInteractiveSearchAccess(callingUser.role, callingUser.interactiveSearchAccess))) {
-          return NextResponse.json(
-            { error: 'Forbidden', message: 'You do not have interactive search access. Contact your admin to enable this permission.' },
-            { status: 403 }
-          );
-        }
-      }
+      const accessDenied = await denyWithoutInteractiveSearchAccess(req.user?.id);
+      if (accessDenied) return accessDenied;
 
       const body = await request.json().catch(() => ({}));
       const customTitle = body.customTitle as string | undefined;
@@ -305,7 +296,7 @@ export async function POST(
       logger.info(`Found ${combinedResults.length} total ebook results`);
 
       return NextResponse.json({
-        results: combinedResults,
+        results: await stripProwlarrKeyFromResults(combinedResults),
         searchTitle,
         preferredFormat: format,
         audiobookId: audiobook.id,

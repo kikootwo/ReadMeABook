@@ -14,6 +14,7 @@ import { getProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { rankEbookTorrents, RankedEbookTorrent } from '@/lib/utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '@/lib/utils/indexer-grouping';
 import { RMABLogger } from '@/lib/utils/logger';
+import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { getLanguageForRegion } from '@/lib/constants/language-config';
 import type { AudibleRegion } from '@/lib/types/audible';
 import {
@@ -215,7 +216,7 @@ export async function POST(
         logger.info(`Found ${combinedResults.length} total ebook results`);
 
         return NextResponse.json({
-          results: combinedResults,
+          results: await stripProwlarrKeyFromResults(combinedResults),
           searchTitle,
           preferredFormat: format,
         });

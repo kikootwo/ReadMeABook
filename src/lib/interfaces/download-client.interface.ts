@@ -6,6 +6,8 @@
  * Enables protocol-agnostic download management across torrent and usenet clients.
  */
 
+import type { SourceAuth } from '@/lib/integrations/download-source';
+
 // =========================================================================
 // TYPE DEFINITIONS
 // =========================================================================
@@ -102,8 +104,8 @@ export interface AddDownloadOptions {
   priority?: string;
   /** Whether to add in paused state */
   paused?: boolean;
-  /** Headers to include when fetching the source file (e.g. Prowlarr API key for proxy URLs) */
-  sourceHeaders?: Record<string, string>;
+  /** Prowlarr credentials; the key is sent only to Prowlarr proxy-download hops (see download-source.ts) */
+  sourceAuth?: SourceAuth;
 }
 
 /**
@@ -125,6 +127,15 @@ export class DownloadSourceError extends Error {
 }
 
 /** HTTP source failures that may clear on their own or succeed via another indexer. */
+/**
+ * The release's source can't be used at all (redirect to an invalid or malformed
+ * location, magnet for a usenet client, redirect loop). The processor skips it
+ * and tries the next ranked release.
+ */
+export class UnusableDownloadSourceError extends Error {
+  readonly name = 'UnusableDownloadSourceError';
+}
+
 export function isRetryableDownloadSourceError(
   error: unknown
 ): error is DownloadSourceError {

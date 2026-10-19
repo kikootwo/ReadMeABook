@@ -9,6 +9,7 @@
 import { prisma } from '@/lib/db';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { RMABLogger } from '@/lib/utils/logger';
+import { sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 
 const logger = RMABLogger.create('ReportedIssue');
 
@@ -43,7 +44,7 @@ export async function reportIssue(
         audibleAsin: asin,
         title: metadata?.title || 'Unknown Title',
         author: metadata?.author || 'Unknown Author',
-        coverArtUrl: metadata?.coverArtUrl,
+        coverArtUrl: sanitizeCoverArtUrl(metadata?.coverArtUrl),
         status: 'requested',
       },
     });
