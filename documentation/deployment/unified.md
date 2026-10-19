@@ -39,17 +39,36 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 **Base:** `node:20-bookworm` (debian with node)
 
 **Installed packages:**
-- postgresql-15
+- postgresql-16
 - redis-server
 - supervisor
 - curl, openssl
+- ffmpeg + ffprobe 9.0.2 (static-pie, no runtime deps) → `/usr/local/bin`
+
+**ffmpeg source:**
+- `FROM mwader/static-ffmpeg:9.0.2-1@sha256:<index digest> AS ffmpeg` + `COPY --from=ffmpeg /ffmpeg /ffprobe`
+- Digest = multi-arch index (amd64 + arm64); BuildKit copies the TARGETPLATFORM variant. Other platforms fail the build (no match)
+- Build guard: ELF arch byte of each binary must match `uname -m`, and `-version` must equal `FFMPEG_VERSION`
+- License: GPLv3 build (no nonfree/libfdk-aac); bundled lib versions at `/usr/local/share/ffmpeg/versions.json`
+- Bump: change tag + digest on the `FROM` line AND `ARG FFMPEG_VERSION` together
+- **Fixed (#230):** previously an unpinned amd64-only tarball from johnvansickle.com (host outages broke builds; arm64 got amd64 binaries)
 
 **Build process:**
-1. Install dependencies (production only)
-2. Generate Prisma client
-3. Build Next.js app
-4. Create directories (postgres, redis, app)
-5. Copy supervisord.conf and entrypoint.sh
+1. `ffmpeg` stage: pinned `mwader/static-ffmpeg` index digest (platform variant auto-selected)
+2. apt install (postgres, redis, supervisor, ...)
+3. `COPY --from=ffmpeg` ffmpeg/ffprobe → `/usr/local/bin`, versions.json → `/usr/local/share/ffmpeg/`
+4. Guard RUN: arch + version check (failure meanings below)
+5. Install dependencies (production only)
+6. Generate Prisma client
+7. Build Next.js app
+8. Create directories (postgres, redis, app)
+9. Copy supervisord.conf and entrypoint.sh
+
+**ffmpeg guard failures:**
+- `ERROR: <bin> e_machine 0x.., expected 0x.. for <arch>` → wrong-arch binary copied (platform selection broken, e.g. a `--platform` added to the ffmpeg `FROM`); never ship it
+- `ERROR: expected <bin> <ver>, got: ...` → `FROM` tag/digest and `ARG FFMPEG_VERSION` disagree
+- `ERROR: no pinned static ffmpeg for <arch>` → unsupported platform (only amd64/arm64)
+- Bump: new tag + its multi-arch index digest on the `FROM` line (`docker buildx imagetools inspect mwader/static-ffmpeg:<tag>`) AND `ARG FFMPEG_VERSION`, in one commit
 
 **Files:**
 - `dockerfile.unified` - Main Dockerfile

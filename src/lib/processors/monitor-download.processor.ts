@@ -205,7 +205,11 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
       await jobQueue.addOrganizeJob(
         requestId,
         request.audiobook.id,
-        organizePath
+        organizePath,
+        undefined,
+        undefined,
+        undefined,
+        downloadHistoryId
       );
 
       logger.info(`Triggered organize_files job for request ${requestId}`);

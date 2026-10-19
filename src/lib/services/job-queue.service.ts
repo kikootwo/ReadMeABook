@@ -80,6 +80,7 @@ export interface OrganizeFilesPayload extends JobPayload {
   targetPath?: string; // Optional - not used by processor (reads from database config)
   cleanupSource?: boolean; // If true, delete source files after successful import
   selectedFiles?: string[]; // If set, only import these specific files from downloadPath
+  downloadHistoryId?: string; // Set only for downloads RMAB completed; gates download cleanup (absent for manual/bulk import)
 }
 
 export interface ScanPlexPayload extends JobPayload {
@@ -661,7 +662,8 @@ export class JobQueueService {
     downloadPath: string,
     targetPath?: string,
     cleanupSource?: boolean,
-    selectedFiles?: string[]
+    selectedFiles?: string[],
+    downloadHistoryId?: string
   ): Promise<string> {
     return await this.addJob(
       'organize_files',
@@ -672,6 +674,7 @@ export class JobQueueService {
         targetPath, // Not used by processor
         cleanupSource,
         selectedFiles,
+        downloadHistoryId,
       } as OrganizeFilesPayload,
       {
         priority: 8,

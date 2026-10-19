@@ -103,6 +103,8 @@ export async function processRetryFailedImports(payload: RetryFailedImportsPaylo
         }
 
         let downloadPath: string;
+        // True when the path came from the download client itself (not a stored or guessed path)
+        let resolvedFromClient = false;
 
         // Get path mapping for this specific download client
         const clientType = downloadHistory.downloadClient || 'qbittorrent';
@@ -133,6 +135,7 @@ export async function processRetryFailedImports(payload: RetryFailedImportsPaylo
                 const info = await client.getDownload(clientId);
                 if (info?.downloadPath) {
                   downloadPath = PathMapper.transform(info.downloadPath, mappingConfig);
+                  resolvedFromClient = true;
                   logger.info(
                     `Got download path from ${client.clientType} for request ${request.id}: ${info.downloadPath}` +
                     (downloadPath !== info.downloadPath ? ` → ${downloadPath} (mapped)` : '')
@@ -162,10 +165,28 @@ export async function processRetryFailedImports(payload: RetryFailedImportsPaylo
           continue;
         }
 
+        // Keep the stored path in step with what the client reports, so download
+        // cleanup (which requires job path == stored path) still runs after a move.
+        // A failed write only disables cleanup for this attempt; the import proceeds.
+        if (resolvedFromClient && downloadPath !== downloadHistory.downloadPath) {
+          try {
+            await prisma.downloadHistory.update({
+              where: { id: downloadHistory.id },
+              data: { downloadPath },
+            });
+          } catch (updateError) {
+            logger.warn(`Failed to store refreshed download path for request ${request.id}: ${updateError instanceof Error ? updateError.message : String(updateError)}`);
+          }
+        }
+
         await jobQueue.addOrganizeJob(
           request.id,
           request.audiobook.id,
-          downloadPath
+          downloadPath,
+          undefined,
+          undefined,
+          undefined,
+          downloadHistory.id
         );
         triggered++;
         logger.info(`Triggered organize job for ${request.type || 'audiobook'} request ${request.id}: ${request.audiobook.title}`);

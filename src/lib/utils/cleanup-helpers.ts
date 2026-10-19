@@ -20,6 +20,8 @@ export interface RemoveEmptyParentOptions {
   boundaryPath: string;
   /** Optional logger context for job-aware logging */
   logContext?: { jobId: string; context: string };
+  /** Directories that are never removed even when empty (e.g. configured roots); the sweep stops there */
+  protectedPaths?: string[];
 }
 
 /**
@@ -72,6 +74,7 @@ export async function removeEmptyParentDirectories(
   try {
     // Normalize paths for consistent comparison
     const normalizedBoundary = normalizePath(options.boundaryPath);
+    const protectedPaths = new Set((options.protectedPaths || []).map(normalizePath));
     let currentPath = normalizePath(path.dirname(deletedPath));
 
     log.debug('Starting empty parent directory cleanup', {
@@ -101,6 +104,17 @@ export async function removeEmptyParentDirectories(
           currentPath,
           boundaryPath: normalizedBoundary,
         });
+        return {
+          success: true,
+          removedDirectories,
+          stoppedAt: currentPath,
+          stoppedReason: 'boundary_reached',
+        };
+      }
+
+      // Safety check: never remove a protected directory
+      if (protectedPaths.has(currentPath)) {
+        log.debug('Reached protected directory, stopping cleanup', { currentPath });
         return {
           success: true,
           removedDirectories,
@@ -235,7 +249,7 @@ async function isDirectoryEmpty(dirPath: string): Promise<boolean | null> {
  * @param boundaryPath - The boundary path (must be normalized)
  * @returns true if testPath is strictly below boundaryPath
  */
-function isPathBelowBoundary(testPath: string, boundaryPath: string): boolean {
+export function isPathBelowBoundary(testPath: string, boundaryPath: string): boolean {
   // Ensure both paths don't have trailing slashes for comparison
   const normalizedTest = testPath.replace(/\/+$/, '');
   const normalizedBoundary = boundaryPath.replace(/\/+$/, '');
@@ -256,7 +270,7 @@ function isPathBelowBoundary(testPath: string, boundaryPath: string): boolean {
  * @param filePath - Path to normalize
  * @returns Normalized path with forward slashes and no trailing slash
  */
-function normalizePath(filePath: string): string {
+export function normalizePath(filePath: string): string {
   // Convert backslashes to forward slashes
   let normalized = filePath.replace(/\\/g, '/');
 

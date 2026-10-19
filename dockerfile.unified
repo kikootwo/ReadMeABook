@@ -1,6 +1,13 @@
 # ReadMeABook - Unified Dockerfile
 # Single container with PostgreSQL, Redis, and Next.js app
 # Designed for easy deployment with minimal configuration
+# Documentation: documentation/deployment/unified.md
+
+# Static ffmpeg/ffprobe source (static-pie, no runtime deps, GPLv3 build without nonfree/libfdk-aac).
+# Pinned to a multi-arch (amd64 + arm64) index digest; BuildKit copies the variant matching
+# TARGETPLATFORM. Other platforms fail here ("no match for platform"). Multi-arch approach
+# from PR #241 (TaylorMcGinnis). Bump: update tag + digest here AND FFMPEG_VERSION below.
+FROM mwader/static-ffmpeg:9.0.2-1@sha256:f5d100184884eb3e82b0eb14bb5ebf98da99826ac824989720297fb9ef21c822 AS ffmpeg
 
 # Start from debian base with node preinstalled
 FROM node:20-bookworm AS base
@@ -32,11 +39,28 @@ RUN apt-get update && apt-get install -y \
     && update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install static ffmpeg (no transitive dependencies like imagemagick)
-ADD https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz /tmp/ffmpeg.tar.xz
-RUN cd /tmp && tar xf ffmpeg.tar.xz && \
-    cp ffmpeg-*-static/ffmpeg ffmpeg-*-static/ffprobe /usr/local/bin/ && \
-    rm -rf /tmp/ffmpeg*
+# Install static ffmpeg + ffprobe from the pinned "ffmpeg" stage (no transitive deps like imagemagick).
+# versions.json lists the bundled library versions (GPL source traceability).
+ARG FFMPEG_VERSION=9.0.2
+COPY --from=ffmpeg /ffmpeg /ffprobe /usr/local/bin/
+COPY --from=ffmpeg /versions.json /usr/local/share/ffmpeg/versions.json
+# Guard: binaries must match the build arch (ELF e_machine byte; a wrong-arch binary can still
+# run under QEMU, see issue #230) and the pinned version (catches a tag/digest mismatch).
+RUN set -eu; \
+    case "$(uname -m)" in \
+        x86_64) want=3e ;; \
+        aarch64) want=b7 ;; \
+        *) echo "ERROR: no pinned static ffmpeg for $(uname -m) (supported: amd64, arm64)" >&2; exit 1 ;; \
+    esac; \
+    for bin in ffmpeg ffprobe; do \
+        got="$(od -An -t x1 -j 18 -N 1 "/usr/local/bin/$bin" | tr -d ' \n')"; \
+        [ "$got" = "$want" ] || { echo "ERROR: $bin e_machine 0x$got, expected 0x$want for $(uname -m)" >&2; exit 1; }; \
+        ver="$("/usr/local/bin/$bin" -version | head -n 1)"; \
+        case "$ver" in \
+            "$bin version $FFMPEG_VERSION "*) echo "OK: $ver ($(uname -m))" ;; \
+            *) echo "ERROR: expected $bin $FFMPEG_VERSION, got: $ver" >&2; exit 1 ;; \
+        esac; \
+    done
 
 # Remove imagemagick (pre-installed in node:20-bookworm base image, not needed)
 RUN apt-get purge -y imagemagick imagemagick-6-common 'imagemagick-6*' \
