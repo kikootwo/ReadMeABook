@@ -8,6 +8,8 @@ Indexer aggregator for searching multiple torrent/usenet indexers simultaneously
 
 **Base:** `http://prowlarr:9696/api/v1`
 **Auth:** `X-Api-Key` header
+**Connection settings:** `getProwlarrConnection()` (`src/lib/integrations/prowlarr-connection.ts`): `prowlarr_url` → `PROWLARR_URL` → `http://prowlarr:9696`; `prowlarr_api_key` → `PROWLARR_API_KEY`
+**Download links:** results carry proxy links `<prowlarr>/{indexerId}/download?apikey=…&link=…`. The key is stripped before results reach the browser and only re-sent to that path shape on the configured origin ([download-clients.md](./download-clients.md#source-fetch--prowlarr-key-scoping))
 
 **GET /search?query={q}&categories=3030&indexerIds={ids}** - Search indexers (3030 = audiobooks, ids = comma-separated indexer IDs)
 **GET /indexer** - List configured indexers

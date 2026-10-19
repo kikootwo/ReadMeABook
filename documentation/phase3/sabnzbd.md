@@ -303,6 +303,7 @@ organizePath = PathMapper.transform(sabPath, config)
 Prowlarr returns download URLs that point back to itself (proxy URLs like `http://prowlarr:9696/3/download?apikey=...&link=...`).
 RMAB downloads the NZB file content from that URL, then uploads it to SABnzbd via `mode=addfile` (multipart POST).
 This matches qBittorrent's pattern where RMAB downloads `.torrent` files and uploads the binary content.
+Fetch goes through the shared `fetchDownloadSource()` (redirects hop by hop, 30s hard deadline for the whole fetch, Prowlarr key only on Prowlarr download hops) — see [download-clients.md](./download-clients.md#source-fetch--prowlarr-key-scoping).
 
 **Result:** Download clients only need network access to RMAB. No direct Prowlarr connectivity required.
 

@@ -35,6 +35,16 @@ vi.mock('@/lib/services/job-queue.service', () => ({
   getJobQueueService: () => jobQueueMock,
 }));
 
+
+// Prowlarr connection used by the download-URL guard and key stripping
+vi.mock('@/lib/integrations/prowlarr-connection', () => ({
+  getProwlarrConnection: async () => ({
+    baseUrl: 'http://prowlarr:9696',
+    apiKey: 'test-prowlarr-key',
+    base: { origin: 'http://prowlarr:9696', protocol: 'http:', hostname: 'prowlarr', host: 'prowlarr:9696', port: '9696', defaultPort: false, userinfo: '', basePath: '' },
+  }),
+}));
+
 describe('Admin requests routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -369,7 +379,7 @@ describe('Admin requests routes', () => {
     prismaMock.request.findUnique.mockResolvedValueOnce({
       id: 'req-3',
       status: 'awaiting_approval',
-      selectedTorrent: { title: 'Torrent' },
+      selectedTorrent: { title: 'Torrent', downloadUrl: 'http://prowlarr:9696/1/download' },
       audiobook: { id: 'ab-3', title: 'Title', author: 'Author' },
       user: { id: 'u3', plexUsername: 'user3' },
       userId: 'u3',

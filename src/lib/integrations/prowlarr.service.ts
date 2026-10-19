@@ -9,9 +9,21 @@ import { XMLParser } from 'fast-xml-parser';
 import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
 import { TorrentResult } from '../utils/ranking-algorithm';
 import { RMABLogger } from '../utils/logger';
+import { urlForLog } from '../utils/prowlarr-url';
 
 // Module-level logger
 const logger = RMABLogger.create('Prowlarr');
+
+/** A raw Prowlarr result for debug logs: URL fields reduced to scheme + host (they carry the API key). */
+function loggableResult(result: unknown): Record<string, unknown> {
+  if (!result || typeof result !== 'object') return { value: result };
+  const copy: Record<string, unknown> = { ...(result as Record<string, unknown>) };
+  for (const field of ['downloadUrl', 'magnetUrl', 'guid', 'infoUrl']) {
+    const value = copy[field];
+    if (typeof value === 'string' && /^(https?:|magnet:)/i.test(value)) copy[field] = urlForLog(value);
+  }
+  return copy;
+}
 
 export interface SearchFilters {
   category?: number; // Deprecated: use categories instead
@@ -167,7 +179,7 @@ export class ProwlarrService {
 
       // Debug: Log first raw result full structure (automatically filtered by LOG_LEVEL)
       if (response.data.length > 0) {
-        logger.debug('Sample raw result from API', response.data[0]);
+        logger.debug('Sample raw result from API', loggableResult(response.data[0]));
       }
 
       // Transform Prowlarr results to our format
@@ -176,7 +188,7 @@ export class ProwlarrService {
           const transformed = this.transformResult(result);
           if (!transformed) {
             // Log the full raw result that was skipped (automatically filtered by LOG_LEVEL)
-            logger.debug(`Result #${index + 1} was skipped`, { rawData: result });
+            logger.debug(`Result #${index + 1} was skipped`, { rawData: loggableResult(result) });
           }
           return transformed;
         })
@@ -448,7 +460,7 @@ export class ProwlarrService {
       // Debug: Log first few results to see their protocols
       if (results.length > 0 && results.length <= 5) {
         results.forEach((r, i) => {
-          logger.info(` Result ${i + 1}: protocol="${r.protocol || 'undefined'}", url="${r.downloadUrl.substring(0, 80)}..."`);
+          logger.info(` Result ${i + 1}: protocol="${r.protocol || 'undefined'}", url="${urlForLog(r.downloadUrl)}"`);
         });
       } else if (results.length > 5) {
         logger.info(` First 3 results:`);
@@ -660,13 +672,8 @@ export function invalidateProwlarrService(): void {
 
 export async function getProwlarrService(): Promise<ProwlarrService> {
   if (!prowlarrService) {
-    // Get configuration from database
-    const { getConfigService } = await import('@/lib/services/config.service');
-    const configService = getConfigService();
-
-    const config = await configService.getMany(['prowlarr_url', 'prowlarr_api_key']);
-    const baseUrl = config.prowlarr_url || process.env.PROWLARR_URL || 'http://prowlarr:9696';
-    const apiKey = config.prowlarr_api_key || process.env.PROWLARR_API_KEY;
+    const { getProwlarrConnection } = await import('./prowlarr-connection');
+    const { baseUrl, apiKey } = await getProwlarrConnection();
 
     if (!apiKey) {
       throw new Error('Prowlarr API key not configured');

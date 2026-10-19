@@ -72,6 +72,22 @@ vi.mock('@/lib/integrations/audible.service', () => ({
 
 vi.mock('fs/promises', () => ({ default: fsMock, ...fsMock, constants: { R_OK: 4 } }));
 
+
+// Prowlarr connection used by the download-URL guard and key stripping
+vi.mock('@/lib/integrations/prowlarr-connection', () => ({
+  getProwlarrConnection: async () => ({
+    baseUrl: 'http://prowlarr:9696',
+    apiKey: 'test-prowlarr-key',
+    base: { origin: 'http://prowlarr:9696', protocol: 'http:', hostname: 'prowlarr', host: 'prowlarr:9696', port: '9696', defaultPort: false, userinfo: '', basePath: '' },
+  }),
+}));
+
+
+// Interactive search permission is covered by tests/api/interactive-search-access.test.ts
+vi.mock('@/lib/middleware/interactive-search-access', () => ({
+  denyWithoutInteractiveSearchAccess: async () => null,
+}));
+
 describe('Request action routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -303,7 +319,7 @@ describe('Request action routes', () => {
   });
 
   it('selects a torrent and queues download', async () => {
-    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100 } });
+    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
     prismaMock.request.findUnique.mockResolvedValueOnce({
       id: 'req-3',
       userId: 'user-1',
@@ -349,7 +365,7 @@ describe('Request action routes', () => {
   });
 
   it('returns 404 when request is not found', async () => {
-    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100 } });
+    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
     prismaMock.request.findUnique.mockResolvedValueOnce(null);
 
     const { POST } = await import('@/app/api/requests/[id]/select-torrent/route');
@@ -361,7 +377,7 @@ describe('Request action routes', () => {
   });
 
   it('returns 403 when user does not own the request', async () => {
-    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100 } });
+    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
     prismaMock.request.findUnique.mockResolvedValueOnce({
       id: 'req-4',
       userId: 'user-2',
@@ -378,7 +394,7 @@ describe('Request action routes', () => {
   });
 
   it('returns 403 when request is awaiting approval', async () => {
-    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100 } });
+    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
     prismaMock.request.findUnique.mockResolvedValueOnce({
       id: 'req-5',
       userId: 'user-1',
@@ -395,7 +411,7 @@ describe('Request action routes', () => {
   });
 
   it('stores selected torrent when approval is required by global setting', async () => {
-    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100 } });
+    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
     configState.values.set('auto_approve_requests', 'false');
     prismaMock.request.findUnique.mockResolvedValueOnce({
       id: 'req-6',
@@ -426,7 +442,7 @@ describe('Request action routes', () => {
   });
 
   it('auto-approves when global setting is missing and user has no preference', async () => {
-    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100 } });
+    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
     prismaMock.request.findUnique.mockResolvedValueOnce({
       id: 'req-7',
       userId: 'user-1',
@@ -458,7 +474,7 @@ describe('Request action routes', () => {
   // AudiobookDetailsModal now routes through select-torrent for own/admin
   // advanceable requests; the release-date gate is intentionally bypassed.
   it('selects a torrent and queues download from awaiting_release (admin)', async () => {
-    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100 } });
+    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
     prismaMock.request.findUnique.mockResolvedValueOnce({
       id: 'req-ar-admin',
       userId: 'user-1',
@@ -487,7 +503,7 @@ describe('Request action routes', () => {
   });
 
   it('stores selected torrent on awaiting_release when approval is required', async () => {
-    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100 } });
+    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
     configState.values.set('auto_approve_requests', 'false');
     prismaMock.request.findUnique.mockResolvedValueOnce({
       id: 'req-ar-user',

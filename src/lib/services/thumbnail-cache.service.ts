@@ -9,10 +9,11 @@ import crypto from 'crypto';
 import axios from 'axios';
 import { RMAB_USER_AGENT } from '../utils/user-agent';
 import { RMABLogger } from '../utils/logger';
+import { THUMBNAIL_CACHE_DIR } from '../utils/cover-art-url';
 
 const logger = RMABLogger.create('ThumbnailCache');
 
-const CACHE_DIR = '/app/cache/thumbnails';
+const CACHE_DIR = THUMBNAIL_CACHE_DIR;
 const LIBRARY_CACHE_DIR = '/app/cache/library';
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB max per image
 const TIMEOUT_MS = 10000; // 10 second timeout for downloads

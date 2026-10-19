@@ -11,6 +11,7 @@ import { tagMultipleFiles, checkFfmpegAvailable } from './metadata-tagger';
 import { RMABLogger } from './logger';
 import { copyFile, isSameFile } from './copy-file';
 import { getMediaDir } from './media-dir';
+import { MAX_COVER_ART_BYTES, MAX_COVER_ART_REDIRECTS, cachedThumbnailPath, isAllowedRemoteCoverUrl, isLibraryCoverSource } from './cover-art-url';
 
 const moduleLogger = RMABLogger.create('FileOrganizer');
 import {
@@ -496,6 +497,11 @@ export class FileOrganizer {
           await logger?.warn(`Failed to copy cover art: ${error instanceof Error ? error.message : 'Unknown error'}`);
           result.errors.push('Failed to copy cover art');
         }
+      } else if (audiobook.coverArtUrl && !isLibraryCoverSource(audiobook.coverArtUrl)) {
+        // Display-only cover (e.g. a shelf-sync fallback host): never fetched into the library
+        const message = 'Cover art is not from a cached thumbnail or known cover image host; skipping cover.jpg';
+        if (logger) await logger.warn(message);
+        else moduleLogger.warn(message);
       } else if (audiobook.coverArtUrl) {
         // Download cover art from Audible if not in torrent
         try {
@@ -741,26 +747,33 @@ export class FileOrganizer {
     const targetPath = path.join(targetDir, 'cover.jpg');
 
     try {
-      // Check if this is a cached thumbnail (local file)
-      if (url.startsWith('/api/cache/thumbnails/')) {
-        // Extract filename from the API path
-        const filename = url.replace('/api/cache/thumbnails/', '');
-        const cachedPath = path.join('/app/cache/thumbnails', filename);
-
-        // Copy from local cache instead of downloading
+      // Cached thumbnail (plain file name inside the cache dir only)
+      const cachedPath = cachedThumbnailPath(url);
+      if (cachedPath) {
         await copyFile(cachedPath, targetPath);
         await fs.chmod(targetPath, this.fileMode);
-        moduleLogger.debug(`Copied cover art from cache: ${filename}`);
-      } else {
-        // Download from external URL (e.g., Audible CDN)
+        moduleLogger.debug(`Copied cover art from cache: ${path.basename(cachedPath)}`);
+      } else if (isAllowedRemoteCoverUrl(url)) {
+        // Known Audible/Amazon image host over https; every redirect hop must be one too
         const response = await axios.get(url, {
           responseType: 'arraybuffer',
           timeout: 30000,
+          maxRedirects: MAX_COVER_ART_REDIRECTS,
+          beforeRedirect: (redirect: { href?: string; protocol?: string; hostname?: string }) => {
+            const next = redirect.href ?? `${redirect.protocol}//${redirect.hostname}/`;
+            if (!isAllowedRemoteCoverUrl(next)) {
+              throw new Error('Cover art redirected to a host that is not a known cover image host');
+            }
+          },
+          maxContentLength: MAX_COVER_ART_BYTES,
           headers: { 'User-Agent': RMAB_USER_AGENT },
         });
 
         await fs.writeFile(targetPath, response.data);
+        await fs.chmod(targetPath, this.fileMode);
         moduleLogger.debug(`Downloaded cover art from URL`);
+      } else {
+        throw new Error('Cover art URL is not a cached thumbnail or a known cover image host');
       }
     } catch (error) {
       moduleLogger.error('Failed to download cover art', { error: error instanceof Error ? error.message : String(error) });

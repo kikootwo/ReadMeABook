@@ -6,7 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
 import { createJobQueueMock } from '../helpers/job-queue';
-import { DownloadSourceError } from '@/lib/interfaces/download-client.interface';
+import { DownloadSourceError, UnusableDownloadSourceError } from '@/lib/interfaces/download-client.interface';
 
 const prismaMock = createPrismaMock();
 const configMock = vi.hoisted(() => ({
@@ -317,5 +317,68 @@ describe('processDownloadTorrent', () => {
       expect.objectContaining({ data: expect.objectContaining({ status: 'failed' }) })
     );
     expect(prismaMock.downloadHistory.create).not.toHaveBeenCalled();
+  });
+
+  const setupQbit = (addDownload: ReturnType<typeof vi.fn>) => {
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue({ clientType: 'qbittorrent', protocol: 'torrent', addDownload });
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({ id: 'client-1', type: 'qbittorrent', enabled: true, category: 'readmeabook' });
+    prismaMock.request.update.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
+    prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-1' });
+  };
+  const second = { ...torrentPayload.torrent, title: 'Second', guid: 'guid-2', downloadUrl: 'magnet:?xt=urn:btih:def' };
+
+  it('skips a release with a malformed magnet before trying any client', async () => {
+    const addDownload = vi.fn().mockResolvedValue('hash-2');
+    setupQbit(addDownload);
+
+    const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+    const result = await processDownloadTorrent({
+      ...torrentPayload,
+      torrent: { ...torrentPayload.torrent, downloadUrl: 'magnet:?xt=urn:btih:abc\nhttp://x.example/y' },
+      alternateTorrents: [second],
+    } as any);
+
+    expect(result.success).toBe(true);
+    expect(addDownload).toHaveBeenCalledTimes(1);
+    expect(addDownload.mock.calls[0][0]).toBe('magnet:?xt=urn:btih:def');
+  });
+
+  it('ignores null alternates instead of crashing', async () => {
+    const addDownload = vi.fn().mockResolvedValue('hash-1');
+    setupQbit(addDownload);
+
+    const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+    const result = await processDownloadTorrent({ ...torrentPayload, alternateTorrents: [null, second] } as any);
+
+    expect(result.success).toBe(true);
+    expect(addDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips a release whose source is unusable and grabs the next one', async () => {
+    const addDownload = vi.fn()
+      .mockRejectedValueOnce(new UnusableDownloadSourceError('Invalid redirect location: magnet:'))
+      .mockResolvedValueOnce('hash-2');
+    setupQbit(addDownload);
+
+    const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+    const result = await processDownloadTorrent({ ...torrentPayload, alternateTorrents: [second] } as any);
+
+    expect(result.success).toBe(true);
+    expect(addDownload).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps an earlier temporary failure retryable when the last release is unusable', async () => {
+    const addDownload = vi.fn()
+      .mockRejectedValueOnce(new DownloadSourceError('Grab failed: source returned HTTP 429', 429, 'https://prowlarr'))
+      .mockRejectedValueOnce(new UnusableDownloadSourceError('Invalid redirect location: magnet:'));
+    setupQbit(addDownload);
+
+    const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+    await expect(processDownloadTorrent({ ...torrentPayload, alternateTorrents: [second] } as any))
+      .rejects.toThrow('HTTP 429');
+
+    expect(prismaMock.request.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'failed' }) })
+    );
   });
 });
