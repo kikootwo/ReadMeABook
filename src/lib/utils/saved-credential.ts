@@ -13,6 +13,10 @@ export const CREDENTIAL_HELP = {
   plex: 'Plex token (X-Plex-Token: in Plex Web, open any item → ⋯ → Get Info → View XML; the token is at the end of the URL)',
   prowlarr: 'Prowlarr API key (in Prowlarr: Settings → General → Security → API Key)',
   downloadClient: 'download client password or API key (SABnzbd: Config → General → API Key; qBittorrent/Transmission/Deluge/NZBGet: the Web UI password)',
+  oidc: "OIDC client secret (in your identity provider's application/client settings)",
+  apprise: 'Apprise notification URLs and auth token (the target-service URLs you configured in Apprise, and the Apprise API token if it requires one)',
+  ntfy: 'ntfy access token (in ntfy: Account → Access tokens)',
+  bookdate: "AI provider API key (in your AI provider's account or API settings)",
 } as const;
 
 export type CredentialKind = keyof typeof CREDENTIAL_HELP;

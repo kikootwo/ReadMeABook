@@ -11,8 +11,16 @@ import { AppriseProvider } from './providers/apprise.provider';
 import { DiscordProvider } from './providers/discord.provider';
 import { NtfyProvider } from './providers/ntfy.provider';
 import { PushoverProvider } from './providers/pushover.provider';
+import { isSameServiceUrl, savedCredentialUrlMismatch } from '../../utils/saved-credential';
 
 const logger = RMABLogger.create('NotificationService');
+
+/** Placeholder sent to the UI instead of a saved sensitive value */
+export const MASKED_CONFIG_VALUE = '••••••••';
+
+export type MaskedSecretMerge =
+  | { ok: true; config: Record<string, any> }
+  | { ok: false; error: string };
 
 // Provider registry
 const providers = new Map<string, INotificationProvider>();
@@ -138,6 +146,38 @@ export class NotificationService {
   }
 
   /**
+   * Replace masked values in an updated config with the saved values. For providers whose
+   * secrets are tied to a server URL (secretBoundUrl), a saved secret is kept only while that
+   * URL is unchanged; an empty URL counts as the provider's default on both sides.
+   */
+  mergeMaskedSecrets(type: string, existingConfig: any, updatedConfig: Record<string, any>): MaskedSecretMerge {
+    const provider = getProvider(type);
+    const saved = (existingConfig ?? {}) as Record<string, any>;
+    const merged: Record<string, any> = { ...updatedConfig };
+    const keptSecrets: string[] = [];
+
+    for (const key of Object.keys(merged)) {
+      if (merged[key] !== MASKED_CONFIG_VALUE) continue;
+      merged[key] = saved[key];
+      if (saved[key] && provider?.sensitiveFields.includes(key)) keptSecrets.push(key);
+    }
+
+    const binding = provider?.secretBoundUrl;
+    if (binding && keptSecrets.length > 0) {
+      const effectiveUrl = (value: unknown) =>
+        typeof value === 'string' && value.trim() ? value.trim() : binding.defaultUrl ?? '';
+      if (!isSameServiceUrl(effectiveUrl(merged[binding.field]), effectiveUrl(saved[binding.field]))) {
+        const labels = keptSecrets.map(
+          (key) => provider!.metadata.configFields.find((f) => f.name === key)?.label ?? key
+        );
+        return { ok: false, error: `${savedCredentialUrlMismatch(binding.credentialKind)} Fields to re-enter: ${labels.join(', ')}.` };
+      }
+    }
+
+    return { ok: true, config: merged };
+  }
+
+  /**
    * Mask sensitive config values for API responses
    */
   maskConfig(type: string, config: any): any {
@@ -149,7 +189,7 @@ export class NotificationService {
     const masked = { ...config };
     for (const field of provider.sensitiveFields) {
       if (masked[field]) {
-        masked[field] = '••••••••';
+        masked[field] = MASKED_CONFIG_VALUE;
       }
     }
     return masked;

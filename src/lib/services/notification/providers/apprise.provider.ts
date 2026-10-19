@@ -25,6 +25,7 @@ const SEVERITY_TYPES: Record<NotificationSeverity, string> = {
 export class AppriseProvider implements INotificationProvider {
   type = 'apprise' as const;
   sensitiveFields = ['urls', 'authToken'];
+  secretBoundUrl = { field: 'serverUrl', credentialKind: 'apprise' as const };
   metadata: ProviderMetadata = {
     type: 'apprise',
     displayName: 'Apprise',
