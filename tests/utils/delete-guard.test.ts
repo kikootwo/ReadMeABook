@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { assertSafeToDelete, DeleteGuardContext, UnsafeDeleteError } from '@/lib/utils/delete-guard';
+import { assertSafeToDelete, DeleteGuardContext, normalizeGuardPath, UnsafeDeleteError } from '@/lib/utils/delete-guard';
 
 let root: string;
 
@@ -51,11 +51,11 @@ describe('assertSafeToDelete', () => {
     });
 
     it('allows a download folder inside the download dir', async () => {
-      await expect(assertSafeToDelete(dir('downloads', 'Book.Name'), ctx)).resolves.toBeUndefined();
+      await expect(assertSafeToDelete(dir('downloads', 'Book.Name'), ctx)).resolves.toEqual(expect.any(String));
     });
 
     it('allows a download path that no longer exists', async () => {
-      await expect(assertSafeToDelete(path.join(downloads, 'gone', 'Book.Name'), ctx)).resolves.toBeUndefined();
+      await expect(assertSafeToDelete(path.join(downloads, 'gone', 'Book.Name'), ctx)).resolves.toEqual(expect.any(String));
     });
 
     it.each([
@@ -74,14 +74,14 @@ describe('assertSafeToDelete', () => {
 
     it('allows another library folder when media sources are allowed, but still never the target', async () => {
       const other = dir('media', 'Other', 'Book');
-      await expect(assertSafeToDelete(other, { ...ctx, allowMediaSources: true })).resolves.toBeUndefined();
+      await expect(assertSafeToDelete(other, { ...ctx, allowMediaSources: true })).resolves.toEqual(expect.any(String));
       await expectRefused(path.join(target, 'Book.m4b'), { ...ctx, allowMediaSources: true }, /inside the organize target/);
       await expectRefused(media, { ...ctx, allowMediaSources: true }, /configured root|organize target/);
     });
 
     it('does not treat a sibling with a shared prefix as inside the media dir', async () => {
       const sibling = dir('media2', 'Book');
-      await expect(assertSafeToDelete(sibling, ctx)).resolves.toBeUndefined();
+      await expect(assertSafeToDelete(sibling, ctx)).resolves.toEqual(expect.any(String));
     });
   });
 
@@ -91,7 +91,7 @@ describe('assertSafeToDelete', () => {
       const downloads = dir('media', '_downloads');
       const ctx = { targetPath: dir('media', 'Author', 'Book'), mediaDir: media, downloadRoots: [downloads] };
 
-      await expect(assertSafeToDelete(dir('media', '_downloads', 'Book.Name'), ctx)).resolves.toBeUndefined();
+      await expect(assertSafeToDelete(dir('media', '_downloads', 'Book.Name'), ctx)).resolves.toEqual(expect.any(String));
       await expectRefused(dir('media', 'Other', 'Book'), ctx, /inside the media library/);
       await expectRefused(downloads, ctx, /is a configured root/);
     });
@@ -103,7 +103,7 @@ describe('assertSafeToDelete', () => {
 
       await expectRefused(dir('data', 'media', 'audiobooks', 'Other', 'Book'), ctx, /inside the media library/);
       await expectRefused(path.join(data, 'media'), ctx, /contains/);
-      await expect(assertSafeToDelete(dir('data', 'torrents', 'Book.Name'), ctx)).resolves.toBeUndefined();
+      await expect(assertSafeToDelete(dir('data', 'torrents', 'Book.Name'), ctx)).resolves.toEqual(expect.any(String));
     });
 
     it('checks every download root, including per-client custom paths and mapped local paths', async () => {
@@ -114,7 +114,7 @@ describe('assertSafeToDelete', () => {
       };
 
       await expectRefused(path.join(root, 'downloads', 'sab'), ctx, /is a configured root/);
-      await expect(assertSafeToDelete(dir('media', 'mapped', 'Book.Name'), ctx)).resolves.toBeUndefined();
+      await expect(assertSafeToDelete(dir('media', 'mapped', 'Book.Name'), ctx)).resolves.toEqual(expect.any(String));
     });
   });
 
@@ -150,6 +150,54 @@ describe('assertSafeToDelete', () => {
       }
       const ctx = { targetPath: caseVariant, mediaDir: media, downloadRoots: [dir('downloads')], allowMediaSources: true };
       await expectRefused(target, ctx, /is the organize target/);
+    });
+  });
+
+  describe('path the caller acts on', () => {
+    const toGuardForm = (p: string) => p.split(path.sep).join('/');
+
+    it('returns the canonical path that was checked', async () => {
+      const downloads = dir('downloads');
+      const real = dir('downloads', 'real', 'Book.Name');
+      const alias = path.join(downloads, 'alias');
+      linkDir(path.join(downloads, 'real'), alias);
+      const ctx = { mediaDir: dir('media'), downloadRoots: [downloads] };
+
+      const result = await assertSafeToDelete(path.join(alias, 'sub', '..', 'Book.Name'), ctx);
+
+      expect(result).toBe(toGuardForm(real));
+    });
+
+    it('returns the link itself when the candidate is a symlink', async () => {
+      const downloads = dir('downloads');
+      const realDir = dir('downloads', 'real');
+      const link = path.join(downloads, 'link');
+      linkDir(realDir, link);
+      const ctx = { mediaDir: dir('media'), downloadRoots: [downloads] };
+
+      const result = await assertSafeToDelete(link, ctx);
+
+      expect(result).toBe(toGuardForm(link));
+    });
+  });
+
+  describe('drive roots', () => {
+    it('normalizes a bare drive to its root', () => {
+      expect(normalizeGuardPath('C:')).toBe('C:/');
+      expect(normalizeGuardPath('C:/')).toBe('C:/');
+      expect(normalizeGuardPath('/')).toBe('/');
+    });
+
+    it.runIf(process.platform === 'win32')('does not treat the current directory as an ancestor of every path', async () => {
+      const target = dir('media', 'Author', 'Book');
+      const ctx = { targetPath: target, mediaDir: dir('media'), downloadRoots: [dir('downloads')] };
+      const previous = process.cwd();
+      process.chdir(target);
+      try {
+        await expect(assertSafeToDelete(dir('downloads', 'Book.Name'), ctx)).resolves.toEqual(expect.any(String));
+      } finally {
+        process.chdir(previous);
+      }
     });
   });
 });

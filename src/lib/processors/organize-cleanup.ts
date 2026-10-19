@@ -10,7 +10,7 @@ import type { ConfigurationService } from '../services/config.service';
 import { getDownloadClientManager } from '../services/download-client-manager.service';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 import { isPathBelowBoundary, normalizePath, removeEmptyParentDirectories } from '../utils/cleanup-helpers';
-import { assertSafeToDelete, DeleteGuardContext, UnsafeDeleteError } from '../utils/delete-guard';
+import { assertSafeToDelete, canonicalPath, DeleteGuardContext, UnsafeDeleteError } from '../utils/delete-guard';
 import { getMediaDir } from '../utils/media-dir';
 
 const BOOKDROP_PATH = '/bookdrop';
@@ -22,28 +22,32 @@ const BOOKDROP_PATH = '/bookdrop';
 /**
  * Collect the roots the delete guard protects: media dir, global download_dir,
  * each client's download_dir/customPath, each client's mapped localPath, and
- * the bookdrop mount.
+ * the bookdrop mount. Throws when the client list cannot be read.
  */
 export async function collectGuardRoots(
-  configService: ConfigurationService,
-  logger: RMABLogger
+  configService: ConfigurationService
 ): Promise<Omit<DeleteGuardContext, 'targetPath' | 'allowMediaSources'>> {
   const downloadDir = (await configService.get('download_dir')) || '/downloads';
   const mediaDir = await getMediaDir();
   const downloadRoots = new Set<string>([downloadDir]);
 
+  // Fail closed: without the client list the guard would protect fewer roots,
+  // so the caller's delete is aborted instead.
+  let clients;
   try {
-    const clients = await getDownloadClientManager(configService).getAllClients();
-    for (const client of clients) {
-      if (client.customPath) {
-        downloadRoots.add(path.join(downloadDir, client.customPath));
-      }
-      if (client.remotePathMappingEnabled && client.localPath) {
-        downloadRoots.add(client.localPath);
-      }
-    }
+    clients = await getDownloadClientManager(configService).getAllClients();
   } catch (error) {
-    logger.warn(`Could not read download client paths for the delete guard: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Could not read download client paths for the delete guard, nothing deleted: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  for (const client of clients) {
+    if (client.customPath) {
+      downloadRoots.add(path.join(downloadDir, client.customPath));
+    }
+    if (client.remotePathMappingEnabled && client.localPath) {
+      downloadRoots.add(client.localPath);
+    }
   }
 
   return { mediaDir, downloadRoots: [...downloadRoots], otherRoots: [BOOKDROP_PATH] };
@@ -114,17 +118,58 @@ async function findCompletedDownloadForJob(
   return downloadHistory;
 }
 
-/** Run the guard; log and return false on refusal, rethrow anything else. */
-async function guardAllows(candidate: string, ctx: DeleteGuardContext, logger: RMABLogger, label: string): Promise<boolean> {
+type GuardRoots = Awaited<ReturnType<typeof collectGuardRoots>>;
+
+/**
+ * Run the guard. Returns the path to act on (the canonical path it checked),
+ * or null after logging a refusal; other errors propagate.
+ */
+async function guardAllows(candidate: string, ctx: DeleteGuardContext, logger: RMABLogger, label: string): Promise<string | null> {
   try {
-    await assertSafeToDelete(candidate, ctx);
-    return true;
+    return await assertSafeToDelete(candidate, ctx);
   } catch (guardError) {
     if (guardError instanceof UnsafeDeleteError) {
       logger.warn(`${label} skipped: ${guardError.message}`);
-      return false;
+      return null;
     }
     throw guardError;
+  }
+}
+
+/**
+ * Remove empty parent directories above a deleted path, bounded by the nearest
+ * configured root that contains it. The sweep never removes a configured root
+ * (download_dir, a client customPath or mapped localPath, media_dir, bookdrop)
+ * and never climbs from a download root into a media dir above it.
+ */
+async function sweepEmptyParents(
+  deletedPath: string,
+  roots: GuardRoots,
+  jobId: string | undefined,
+  logger: RMABLogger,
+  context: string
+): Promise<void> {
+  const canonicalRoots = await Promise.all(
+    [roots.mediaDir, ...roots.downloadRoots, ...(roots.otherRoots || [])].filter(Boolean).map(canonicalPath)
+  );
+  const deleted = normalizePath(await canonicalPath(deletedPath));
+  const boundary = canonicalRoots
+    .filter((root) => isPathBelowBoundary(deleted, normalizePath(root)))
+    .sort((a, b) => b.length - a.length)[0];
+
+  if (!boundary) {
+    logger.info(`No configured root contains ${deletedPath}, leaving parent directories alone`);
+    return;
+  }
+
+  const cleanupResult = await removeEmptyParentDirectories(deleted, {
+    boundaryPath: boundary,
+    protectedPaths: canonicalRoots,
+    logContext: jobId ? { jobId, context } : undefined,
+  });
+
+  if (cleanupResult.removedDirectories.length > 0) {
+    logger.info(`Cleaned up ${cleanupResult.removedDirectories.length} empty parent directories`);
   }
 }
 
@@ -142,17 +187,18 @@ export async function cleanupDirectDownloadSource(params: DownloadCleanupParams)
     }
 
     const fs = await import('fs/promises');
-    const stats = await fs.stat(downloadPath);
+    const stats = await fs.lstat(downloadPath);
     if (!stats.isFile()) {
       return;
     }
 
-    const roots = await collectGuardRoots(configService, logger);
-    if (!(await guardAllows(downloadPath, { ...roots, targetPath }, logger, 'Direct download cleanup'))) {
+    const roots = await collectGuardRoots(configService);
+    const deletePath = await guardAllows(downloadPath, { ...roots, targetPath }, logger, 'Direct download cleanup');
+    if (!deletePath) {
       return;
     }
 
-    await fs.unlink(downloadPath);
+    await fs.unlink(deletePath);
     logger.info(`Cleaned up direct download file: ${path.basename(downloadPath)}`);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -212,40 +258,33 @@ export async function cleanupDownloadAfterOrganize(params: DownloadCleanupParams
       return;
     }
 
-    const roots = await collectGuardRoots(configService, logger);
-    if (!(await guardAllows(downloadPath, { ...roots, targetPath }, logger, 'Download cleanup'))) {
+    const roots = await collectGuardRoots(configService);
+    const deletePath = await guardAllows(downloadPath, { ...roots, targetPath }, logger, 'Download cleanup');
+    if (!deletePath) {
       return;
     }
 
     logger.info(`Cleaning up download ${downloadHistory.downloadClientId} (cleanup enabled for indexer ${indexer.id})`);
-    logger.info(`Removing download files from filesystem: ${downloadPath}`);
+    logger.info(`Removing download files from filesystem: ${deletePath}`);
 
     const fs = await import('fs/promises');
 
     try {
-      const stats = await fs.stat(downloadPath);
+      // Act on the canonical path the guard checked (lstat: a symlink is removed, not followed)
+      const stats = await fs.lstat(deletePath);
 
       if (stats.isDirectory()) {
-        await fs.rm(downloadPath, { recursive: true, force: true });
-        logger.info(`Removed directory: ${downloadPath}`);
+        await fs.rm(deletePath, { recursive: true, force: true });
+        logger.info(`Removed directory: ${deletePath}`);
       } else {
-        await fs.unlink(downloadPath);
-        logger.info(`Removed file: ${downloadPath}`);
+        await fs.unlink(deletePath);
+        logger.info(`Removed file: ${deletePath}`);
       }
 
-      // Clean up empty parent directories
-      const downloadDir = await configService.get('download_dir') || '/downloads';
-      const cleanupResult = await removeEmptyParentDirectories(downloadPath, {
-        boundaryPath: downloadDir,
-        logContext: jobId ? { jobId, context: 'CleanupParents' } : undefined,
-      });
-
-      if (cleanupResult.removedDirectories.length > 0) {
-        logger.info(`Cleaned up ${cleanupResult.removedDirectories.length} empty parent directories`);
-      }
+      await sweepEmptyParents(deletePath, roots, jobId, logger, 'CleanupParents');
     } catch (fsError) {
       if ((fsError as NodeJS.ErrnoException).code === 'ENOENT') {
-        logger.info(`Download path already deleted: ${downloadPath}`);
+        logger.info(`Download path already deleted: ${deletePath}`);
       } else {
         throw fsError;
       }
@@ -302,9 +341,8 @@ export async function cleanupSourceAfterOrganize(
 
     logger.info(`Cleaning up source files: ${downloadPath}`);
 
-    const roots = await collectGuardRoots(configService, logger);
+    const roots = await collectGuardRoots(configService);
     const guardContext: DeleteGuardContext = { ...roots, targetPath, allowMediaSources: true };
-    let removedAny = false;
 
     if (selectedFiles && selectedFiles.length > 0) {
       // Only delete the specific files that were imported, not the entire directory
@@ -312,8 +350,9 @@ export async function cleanupSourceAfterOrganize(
       let removed = 0;
       for (const fileName of selectedFiles) {
         const filePath = path.join(downloadPath, fileName);
+        let deletePath: string;
         try {
-          await assertSafeToDelete(filePath, guardContext);
+          deletePath = await assertSafeToDelete(filePath, guardContext);
         } catch (guardError) {
           if (guardError instanceof UnsafeDeleteError) {
             kept.push(fileName);
@@ -322,7 +361,7 @@ export async function cleanupSourceAfterOrganize(
           throw guardError;
         }
         try {
-          await fs.unlink(filePath);
+          await fs.unlink(deletePath);
           removed++;
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -335,52 +374,34 @@ export async function cleanupSourceAfterOrganize(
           `Kept ${kept.length} source file(s) that are part of the import target ${targetPath}: ${kept.join(', ')}`
         );
       }
-      removedAny = removed > 0;
       logger.info(`Removed ${removed} selected source files from ${downloadPath}`);
-    } else {
-      // No file filter — delete entire source path (original behavior)
-      try {
-        await assertSafeToDelete(downloadPath, guardContext);
-      } catch (guardError) {
-        if (guardError instanceof UnsafeDeleteError) {
-          logger.warn(`Source cleanup skipped: ${guardError.message}`);
-          return;
-        }
-        throw guardError;
+      if (removed > 0) {
+        await sweepEmptyParents(downloadPath, roots, jobId, logger, 'CleanupSourceParents');
       }
-      const stats = await fs.stat(downloadPath);
-      if (stats.isDirectory()) {
-        await fs.rm(downloadPath, { recursive: true, force: true });
-        logger.info(`Removed source directory: ${downloadPath}`);
-      } else {
-        await fs.unlink(downloadPath);
-        logger.info(`Removed source file: ${downloadPath}`);
-      }
-      removedAny = true;
-    }
-
-    if (!removedAny) {
       return;
     }
 
-    // Determine boundary path based on which root the source lives under
-    const normalizedSource = normalizePath(path.resolve(downloadPath));
-    const downloadDir = (await configService.get('download_dir')) || '/downloads';
-    let boundaryPath = downloadDir;
-    if (isPathBelowBoundary(normalizedSource, normalizePath(path.resolve(BOOKDROP_PATH)))) {
-      boundaryPath = BOOKDROP_PATH;
-    } else if (isPathBelowBoundary(normalizedSource, normalizePath(path.resolve(roots.mediaDir)))) {
-      boundaryPath = roots.mediaDir;
+    // No file filter: remove the source path itself. A whole folder inside the
+    // media library is never removed (it can hold other books); single files may be.
+    const stats = await fs.lstat(downloadPath);
+    const isDirectory = stats.isDirectory();
+    const deletePath = await guardAllows(
+      downloadPath,
+      { ...guardContext, allowMediaSources: !isDirectory },
+      logger,
+      'Source cleanup'
+    );
+    if (!deletePath) {
+      return;
     }
-
-    const cleanupResult = await removeEmptyParentDirectories(downloadPath, {
-      boundaryPath,
-      logContext: jobId ? { jobId, context: 'CleanupSourceParents' } : undefined,
-    });
-
-    if (cleanupResult.removedDirectories.length > 0) {
-      logger.info(`Cleaned up ${cleanupResult.removedDirectories.length} empty parent directories`);
+    if (isDirectory) {
+      await fs.rm(deletePath, { recursive: true, force: true });
+      logger.info(`Removed source directory: ${deletePath}`);
+    } else {
+      await fs.unlink(deletePath);
+      logger.info(`Removed source file: ${deletePath}`);
     }
+    await sweepEmptyParents(deletePath, roots, jobId, logger, 'CleanupSourceParents');
   } catch (error) {
     // Non-fatal - files are already safely in the media library
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {

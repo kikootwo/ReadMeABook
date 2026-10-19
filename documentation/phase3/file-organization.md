@@ -242,12 +242,17 @@ When user deletes and re-requests the same audiobook:
 |------|---------|
 | a | Equals, contains, or is inside the organize target |
 | b | Equals or contains any root: `media_dir`, `download_dir`, `download_dir/customPath` per client, mapped `localPath` per client, `/bookdrop` |
-| c | Inside `media_dir`, unless inside a download root that itself sits strictly inside `media_dir` (`allowMediaSources` bypasses c for `cleanupSource` only) |
+| c | Inside `media_dir`, unless inside a download root that itself sits strictly inside `media_dir` (`allowMediaSources` bypasses c for `cleanupSource` files only; a whole folder inside `media_dir` is never removed) |
 
 - Comparison: realpath of candidate, target and roots (symlinks, junctions), plus dev+inode identity of the entry and its ancestors (case-insensitive mounts). Inode 0 never matches.
+- Acts on the path the guard returns (the canonical path it checked; a symlink candidate is removed as a link, never followed).
+- Fail closed: if the download client list cannot be read, nothing is deleted (job still succeeds).
+- Empty-parent sweep: bounded by the nearest configured root containing the deleted path; never removes a root (download_dir, client customPath / mapped localPath, media_dir, bookdrop) and never climbs from a download root into `media_dir`.
 - `cleanupSource` + `selectedFiles`: each file is checked; files inside the target are kept and listed in a warning (in-place renamed re-imports keep the old-named file).
 - Ebook `cleanupSource` removes only the imported ebook file (`result.sourceFile`; the original EPUB when the Kindle fix ran), never its folder.
 - Direct HTTP download files (`downloadClient = direct`) are removed by `cleanupDirectDownloadSource` (same provenance gate + guard); the organizer itself never deletes its source.
+- Failed manual/bulk import (no `downloadHistoryId`): request → `failed` with `Import from <path> failed: <error>. Fix the folder and run the import again.`; never `awaiting_import` (that path re-queues the request's last client download).
+- Windows drive roots normalize to `C:/` (`normalizeGuardPath`), never `C:.` (the drive's current directory).
 - `media_dir` resolution shared via `src/lib/utils/media-dir.ts` (`media_dir` → `MEDIA_DIR` → `/media/audiobooks`).
 
 **Same-file copies:** `copyFile` is a no-op when source and destination are the same file (`isSameFile`: realpath equal, or same dev + non-zero inode); the organizer skips audio and cover art already in place.

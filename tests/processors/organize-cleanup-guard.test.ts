@@ -21,6 +21,7 @@ const configMock = vi.hoisted(() => ({ getBackendMode: vi.fn(), get: vi.fn() }))
 const formatCoercionMock = vi.hoisted(() => ({ coerceToPlexCompatible: vi.fn() }));
 const clientState = vi.hoisted(() => ({
   clients: [] as Array<Record<string, unknown>>,
+  failClients: false,
   postProcess: vi.fn(async () => undefined),
 }));
 
@@ -32,7 +33,10 @@ vi.mock('@/lib/services/job-queue.service', () => ({ getJobQueueService: () => j
 vi.mock('@/lib/utils/format-coercion', () => formatCoercionMock);
 vi.mock('@/lib/services/download-client-manager.service', () => ({
   getDownloadClientManager: () => ({
-    getAllClients: async () => clientState.clients,
+    getAllClients: async () => {
+      if (clientState.failClients) throw new Error('database unavailable');
+      return clientState.clients;
+    },
     getClientForProtocol: async () => null,
     getClientServiceForProtocol: async () => ({ clientType: 'sabnzbd', postProcess: clientState.postProcess }),
   }),
@@ -100,6 +104,7 @@ describe('post-organize cleanup safety', () => {
     downloadDirSetting = downloads;
     indexers = [{ id: 7, protocol: 'usenet', removeAfterProcessing: true }];
     clientState.clients = [];
+    clientState.failClients = false;
 
     prismaMock.request.findUnique.mockResolvedValue({
       id: 'req-1', userId: 'u1', type: 'audiobook', user: { plexUsername: 'tester' },
@@ -413,5 +418,144 @@ describe('post-organize cleanup safety', () => {
     await runOrganize({ downloadPath: libraryFile, downloadHistoryId: 'dh-1' });
 
     expect(fs.existsSync(libraryFile)).toBe(true);
+  });
+
+  describe('failed manual import', () => {
+    it('marks the request failed instead of queueing a retry of the last client download', async () => {
+      prismaMock.request.findUnique.mockResolvedValue({
+        id: 'req-1', userId: 'u1', type: 'audiobook', user: { plexUsername: 'tester' },
+        audiobook: { title: 'Book', author: 'Author' },
+      });
+      const source = path.join(media, 'Unsorted', 'Book');
+      mkfile(path.join(source, 'Book.m4b'));
+      useHistory(historyRow({ id: 'dh-old' }));
+      organizerMock.organize.mockResolvedValue({
+        success: false, targetPath: '', filesMovedCount: 0, audioFiles: [],
+        errors: ["ENOENT: no such file or directory, open 'Book.m4b'"],
+      });
+
+      await expect(
+        runOrganize({ downloadPath: source, cleanupSource: true, selectedFiles: ['Book.m4b'] })
+      ).rejects.toThrow(/ENOENT/);
+
+      const statuses = prismaMock.request.update.mock.calls.map((call: Array<{ data?: { status?: string } }>) => call[0]?.data?.status);
+      expect(statuses).not.toContain('awaiting_import');
+      expect(prismaMock.request.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'failed',
+            errorMessage: expect.stringContaining(`Import from ${source} failed`),
+          }),
+        })
+      );
+      expect(prismaMock.downloadHistory.update).not.toHaveBeenCalled();
+      expect(fs.existsSync(path.join(source, 'Book.m4b'))).toBe(true);
+    });
+  });
+
+  describe('whole-folder source cleanup', () => {
+    it('never removes a library folder that holds other books', async () => {
+      const source = path.join(media, 'Unsorted');
+      const imported = mkfile(path.join(source, 'Book', 'Book.m4b'));
+      const otherBook = mkfile(path.join(source, 'Other', 'Other.m4b'));
+      useHistory(null);
+      organizeInto(path.join(media, 'Author', 'Book'));
+
+      await runOrganize({ downloadPath: source, cleanupSource: true });
+
+      expect(fs.existsSync(imported)).toBe(true);
+      expect(fs.existsSync(otherBook)).toBe(true);
+    });
+
+    it('still removes a whole staging folder under the download dir', async () => {
+      const source = path.join(downloads, 'manual', 'Book');
+      mkfile(path.join(source, 'Book.m4b'));
+      useHistory(null);
+      organizeInto(path.join(media, 'Author', 'Book'));
+
+      await runOrganize({ downloadPath: source, cleanupSource: true });
+
+      expect(fs.existsSync(source)).toBe(false);
+      expect(fs.existsSync(downloads)).toBe(true);
+    });
+  });
+
+  describe('empty-parent sweep', () => {
+    it('never removes a client custom path root, even when empty', async () => {
+      clientState.clients = [{ id: 'c1', type: 'sabnzbd', customPath: 'sab' }];
+      const clientRoot = path.join(downloads, 'sab');
+      const download = path.join(clientRoot, 'Book.Name');
+      mkfile(path.join(download, 'Book.m4b'));
+      useHistory(historyRow({ downloadPath: download }));
+      organizeInto(path.join(media, 'Author', 'Book'));
+
+      await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
+
+      expect(fs.existsSync(download)).toBe(false);
+      expect(fs.existsSync(clientRoot)).toBe(true);
+    });
+
+    it('does not climb from a download root inside the library into the library', async () => {
+      // Mapped client root nested in the library; the imported ebook file sits directly in it
+      prismaMock.request.findUnique.mockResolvedValue({
+        id: 'req-1', userId: 'u1', type: 'ebook', user: { plexUsername: 'tester' },
+      });
+      const mappedRoot = path.join(media, 'mapped');
+      clientState.clients = [{ id: 'c1', type: 'sabnzbd', remotePathMappingEnabled: true, localPath: mappedRoot }];
+      const file = mkfile(path.join(mappedRoot, 'Book.epub'), 'epub');
+      const targetDir = path.join(media, 'Author', 'Book');
+      organizerMock.organizeEbook.mockResolvedValue({
+        success: true, targetPath: targetDir, format: 'epub', errors: [], sourceFile: file,
+      });
+      useHistory(null);
+
+      await runOrganize({ downloadPath: file, cleanupSource: true });
+
+      expect(fs.existsSync(file)).toBe(false);
+      expect(fs.existsSync(mappedRoot)).toBe(true);
+    });
+  });
+
+  describe('fail closed', () => {
+    it('keeps the download when the client list cannot be read', async () => {
+      clientState.failClients = true;
+      const download = path.join(downloads, 'Book.Name');
+      mkfile(path.join(download, 'Book.m4b'));
+      useHistory(historyRow());
+      organizeInto(path.join(media, 'Author', 'Book'));
+
+      await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
+
+      expect(fs.existsSync(download)).toBe(true);
+      expect(clientState.postProcess).not.toHaveBeenCalled();
+    });
+
+    it('keeps manual-import sources when the client list cannot be read', async () => {
+      clientState.failClients = true;
+      const source = path.join(downloads, 'manual', 'Book');
+      const file = mkfile(path.join(source, 'Book.m4b'));
+      useHistory(null);
+      organizeInto(path.join(media, 'Author', 'Book'));
+
+      await runOrganize({ downloadPath: source, cleanupSource: true, selectedFiles: ['Book.m4b'] });
+
+      expect(fs.existsSync(file)).toBe(true);
+    });
+  });
+
+  it('removes the real download folder when the job path runs through a symlinked parent', async () => {
+    const real = path.join(downloads, 'real');
+    const download = path.join(real, 'Book.Name');
+    mkfile(path.join(download, 'Book.m4b'));
+    const alias = path.join(downloads, 'alias');
+    fs.symlinkSync(real, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const jobPath = path.join(alias, 'Book.Name');
+    useHistory(historyRow({ downloadPath: jobPath }));
+    organizeInto(path.join(media, 'Author', 'Book'));
+
+    await runOrganize({ downloadPath: jobPath, downloadHistoryId: 'dh-1' });
+
+    expect(fs.existsSync(download)).toBe(false);
+    expect(fs.existsSync(downloads)).toBe(true);
   });
 });

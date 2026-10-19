@@ -46,16 +46,26 @@ interface CanonicalPath {
   ancestors: FileIdentity[];
 }
 
+/**
+ * normalizePath plus drive-root handling: on Windows path.normalize('C:') is
+ * 'C:.' (the drive's current directory), so drive roots become 'C:/'.
+ */
+export function normalizeGuardPath(p: string): string {
+  const normalized = normalizePath(p);
+  return /^[A-Za-z]:\.?$/.test(normalized) ? `${normalized.slice(0, 2)}/` : normalized;
+}
+
 async function statIdentity(p: string): Promise<FileIdentity | undefined> {
   try {
-    // normalizePath turns a Windows drive root into "C:", which would stat the
-    // drive's current directory; stat the root itself instead.
-    const target = /^[A-Za-z]:$/.test(p) ? `${p}/` : p;
-    const s = await fs.stat(target, { bigint: true });
+    const s = await fs.stat(p, { bigint: true });
     return { dev: s.dev, ino: s.ino };
   } catch {
     return undefined;
   }
+}
+
+function joinGuardPath(dir: string, base: string): string {
+  return dir.endsWith('/') ? dir + base : `${dir}/${base}`;
 }
 
 /**
@@ -65,16 +75,19 @@ async function statIdentity(p: string): Promise<FileIdentity | undefined> {
 async function realpathLenient(p: string): Promise<string> {
   const resolved = path.resolve(p);
   try {
-    return normalizePath(await fs.realpath(resolved));
+    return normalizeGuardPath(await fs.realpath(resolved));
   } catch {
     const parent = path.dirname(resolved);
     if (parent === resolved) {
-      return normalizePath(resolved);
+      return normalizeGuardPath(resolved);
     }
-    const base = path.basename(resolved);
-    const realParent = await realpathLenient(parent);
-    return realParent.endsWith('/') ? realParent + base : `${realParent}/${base}`;
+    return joinGuardPath(await realpathLenient(parent), path.basename(resolved));
   }
+}
+
+/** Canonical (realpath, normalized) form of a path; missing tails are kept as-is. */
+export async function canonicalPath(p: string): Promise<string> {
+  return realpathLenient(p);
 }
 
 async function canonicalize(p: string): Promise<CanonicalPath> {
@@ -83,7 +96,7 @@ async function canonicalize(p: string): Promise<CanonicalPath> {
   const ancestors: FileIdentity[] = [];
   let current = canonical;
   while (true) {
-    const parent = normalizePath(path.dirname(current));
+    const parent = normalizeGuardPath(path.dirname(current));
     if (parent === current) break;
     const parentId = await statIdentity(parent);
     if (parentId) ancestors.push(parentId);
@@ -112,8 +125,12 @@ function isStrictlyInside(child: CanonicalPath, parent: CanonicalPath): boolean 
  *  b. candidate equals or contains any configured root (media, download, other)
  *  c. candidate is inside the media dir, unless it is inside a download root
  *     that itself sits strictly inside the media dir (or allowMediaSources)
+ *
+ * Returns the path the caller must act on: the canonical path that was checked,
+ * or, when the candidate itself is a symlink, the link in its canonical parent
+ * (removing a link never removes what it points to).
  */
-export async function assertSafeToDelete(candidate: string, ctx: DeleteGuardContext): Promise<void> {
+export async function assertSafeToDelete(candidate: string, ctx: DeleteGuardContext): Promise<string> {
   if (!candidate || !candidate.trim()) {
     throw new UnsafeDeleteError(candidate, 'empty path');
   }
@@ -147,4 +164,15 @@ export async function assertSafeToDelete(candidate: string, ctx: DeleteGuardCont
       throw new UnsafeDeleteError(candidate, 'it is inside the media library');
     }
   }
+
+  try {
+    const linkStat = await fs.lstat(candidate);
+    if (linkStat.isSymbolicLink()) {
+      const resolved = path.resolve(candidate);
+      return joinGuardPath(await realpathLenient(path.dirname(resolved)), path.basename(resolved));
+    }
+  } catch {
+    // Missing candidate: nothing to resolve
+  }
+  return c.path;
 }

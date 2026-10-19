@@ -369,19 +369,28 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
-    const errorMessage = error instanceof Error ? error.message : 'File organization failed';
+    const rawErrorMessage = error instanceof Error ? error.message : 'File organization failed';
+
+    // A job without a download row is a manual or bulk import: its folder, file
+    // selection and cleanup choice exist only in this payload. The import-retry
+    // path re-queues the request's last client download instead, so these jobs
+    // never go there; they fail with a message telling the admin to re-run them.
+    const isClientDownload = !!downloadHistoryId;
+    const errorMessage = isClientDownload
+      ? rawErrorMessage
+      : `Import from ${downloadPath} failed: ${rawErrorMessage}. Fix the folder and run the import again.`;
 
     // Check if this is a retryable error (transient filesystem issues or no files found)
     // These errors may resolve on retry (e.g., files still being extracted, permissions being set)
     const isRetryableError =
-      errorMessage.includes('No audiobook files found') ||
-      errorMessage.includes('No ebook files found') ||  // Ebook equivalent of above
-      errorMessage.includes('ENOENT') || // File/directory not found
-      errorMessage.includes('no such file or directory') ||
-      errorMessage.includes('EACCES') || // Permission denied (might be temporary)
-      errorMessage.includes('EPERM');    // Operation not permitted (might be temporary)
+      rawErrorMessage.includes('No audiobook files found') ||
+      rawErrorMessage.includes('No ebook files found') ||  // Ebook equivalent of above
+      rawErrorMessage.includes('ENOENT') || // File/directory not found
+      rawErrorMessage.includes('no such file or directory') ||
+      rawErrorMessage.includes('EACCES') || // Permission denied (might be temporary)
+      rawErrorMessage.includes('EPERM');    // Operation not permitted (might be temporary)
 
-    if (isRetryableError) {
+    if (isRetryableError && isClientDownload) {
       // Get current request to check retry count
       const currentRequest = await prisma.request.findFirst({
         where: {
