@@ -1,0 +1,11 @@
+{
+  "name": "rmab-e2e-fake-arr",
+  "private": true,
+  "description": "Scenario-driven fakes for Prowlarr, qBittorrent, SABnzbd and Plex used by the ReadMeABook e2e harness. No dependencies.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/"
+  }
+}

@@ -1,0 +1,11 @@
+# Component: build-context allowlist for e2e/runner/Dockerfile (context: e2e/)
+# Documentation: documentation/testing/e2e-harness.md
+*
+!package.json
+!package-lock.json
+!tsconfig.json
+!playwright.config.ts
+!bootstrap.ts
+!lib/harness.ts
+!lib/exec-client.cjs
+!specs/**

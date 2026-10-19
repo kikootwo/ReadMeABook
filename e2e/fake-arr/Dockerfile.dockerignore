@@ -1,0 +1,9 @@
+# Component: build-context allowlist for e2e/fake-arr/Dockerfile (context: e2e/)
+# Documentation: documentation/testing/e2e-harness.md
+*
+!fake-arr/package.json
+!fake-arr/src/**
+!fixtures/generate.mjs
+!fixtures/manifest.json
+!fixtures/test/offline-metadata.json
+!scenarios/*.json

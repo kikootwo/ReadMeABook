@@ -313,7 +313,8 @@ async function downloadFileWithProgress(
     });
 
     // Get content length if available
-    const contentLength = parseInt(response.headers['content-length'] || '0', 10);
+    // axios 1.20 types header values as string | number | boolean | string[] | AxiosHeaders
+    const contentLength = parseInt(String(response.headers['content-length'] ?? '0'), 10);
     if (contentLength > 0) {
       tracking.bytesTotal = contentLength;
     }

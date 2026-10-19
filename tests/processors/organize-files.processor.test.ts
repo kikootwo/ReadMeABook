@@ -20,6 +20,10 @@ const configMock = vi.hoisted(() => ({
 const formatCoercionMock = vi.hoisted(() => ({
   coerceToPlexCompatible: vi.fn(),
 }));
+// The processor enriches missing series data from Audnexus; keep unit tests off the network.
+const audibleServiceMock = vi.hoisted(() => ({
+  getAudiobookDetails: vi.fn(),
+}));
 
 vi.mock('@/lib/db', () => ({
   prisma: prismaMock,
@@ -43,6 +47,10 @@ vi.mock('@/lib/services/job-queue.service', () => ({
 
 vi.mock('@/lib/utils/format-coercion', () => formatCoercionMock);
 
+vi.mock('@/lib/integrations/audible.service', () => ({
+  getAudibleService: () => audibleServiceMock,
+}));
+
 describe('processOrganizeFiles', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -59,6 +67,8 @@ describe('processOrganizeFiles', () => {
       errors: [],
       finalAudioFiles: paths,
     }));
+    // No Audnexus data by default (no series enrichment)
+    audibleServiceMock.getAudiobookDetails.mockResolvedValue(null);
   });
 
   it('organizes files and triggers filesystem scan when enabled', async () => {
@@ -98,6 +108,8 @@ describe('processOrganizeFiles', () => {
 
     expect(result.success).toBe(true);
     expect(libraryServiceMock.triggerLibraryScan).toHaveBeenCalledWith('lib-1');
+    // Missing series data goes to the (mocked) Audnexus lookup, never the real network.
+    expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledWith('ASIN1');
   });
 
   it('skips filesystem scan when disabled', async () => {

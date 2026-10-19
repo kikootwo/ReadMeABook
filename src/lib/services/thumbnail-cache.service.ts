@@ -117,7 +117,8 @@ export class ThumbnailCacheService {
       });
 
       // Verify content type is an image
-      const contentType = response.headers['content-type'];
+      // axios 1.20 types header values as string | number | boolean | string[] | AxiosHeaders
+      const contentType = String(response.headers['content-type'] ?? '');
       if (!contentType || !contentType.startsWith('image/')) {
         logger.warn(`Invalid content type for ${asin}: ${contentType}`);
         return null;
@@ -193,7 +194,8 @@ export class ThumbnailCacheService {
       });
 
       // Verify content type is an image
-      const contentType = response.headers['content-type'];
+      // axios 1.20 types header values as string | number | boolean | string[] | AxiosHeaders
+      const contentType = String(response.headers['content-type'] ?? '');
       if (!contentType || !contentType.startsWith('image/')) {
         logger.warn(`Invalid content type for library cover ${plexGuid}: ${contentType}`);
         return null;
