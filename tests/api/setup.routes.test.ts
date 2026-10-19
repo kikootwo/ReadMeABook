@@ -12,6 +12,7 @@ const bcryptMock = vi.hoisted(() => ({
 }));
 const encryptionMock = vi.hoisted(() => ({
   encrypt: vi.fn((value: string) => `enc-${value}`),
+  isEncryptedFormat: vi.fn((value: string) => typeof value === 'string' && value.startsWith('enc-')),
 }));
 const generateAccessTokenMock = vi.hoisted(() => vi.fn(() => 'access-token'));
 const generateRefreshTokenMock = vi.hoisted(() => vi.fn(() => 'refresh-token'));

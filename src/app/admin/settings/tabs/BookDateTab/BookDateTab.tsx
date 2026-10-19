@@ -19,6 +19,7 @@ export function BookDateTab({ onSuccess, onError }: BookDateTabProps) {
   const {
     provider,
     apiKey,
+    clearApiKey,
     model,
     baseUrl,
     enabled,
@@ -29,6 +30,7 @@ export function BookDateTab({ onSuccess, onError }: BookDateTabProps) {
     clearingSwipes,
     setProvider,
     setApiKey,
+    setClearApiKey,
     setModel,
     setBaseUrl,
     setEnabled,
@@ -128,6 +130,7 @@ export function BookDateTab({ onSuccess, onError }: BookDateTabProps) {
         <Input
           type="password"
           value={apiKey}
+          disabled={provider === 'custom' && clearApiKey}
           onChange={(e) => {
             setApiKey(e.target.value);
             setModels([]);
@@ -145,6 +148,20 @@ export function BookDateTab({ onSuccess, onError }: BookDateTabProps) {
             ? 'Optional: Leave blank if your endpoint does not require authentication (e.g., Ollama, LM Studio)'
             : 'The API key is stored securely and encrypted. Leave blank to keep existing key.'}
         </p>
+        {provider === 'custom' && configured && (
+          <label className="mt-2 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <input
+              type="checkbox"
+              checked={clearApiKey}
+              onChange={(e) => {
+                setClearApiKey(e.target.checked);
+                if (e.target.checked) setApiKey('');
+              }}
+              className="rounded border-gray-300 dark:border-gray-600"
+            />
+            This endpoint needs no API key (removes the saved key)
+          </label>
+        )}
       </div>
 
       {/* Test Connection Button */}

@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { getConfigService } from '@/lib/services/config.service';
 import { getDownloadClientManager, invalidateDownloadClientManager, DownloadClientConfig } from '@/lib/services/download-client-manager.service';
+import { serializeDownloadClients } from '@/lib/services/download-client-storage';
 import { SUPPORTED_CLIENT_TYPES, getClientDisplayName } from '@/lib/interfaces/download-client.interface';
 import { PathMapper } from '@/lib/utils/path-mapper';
 import { RMABLogger } from '@/lib/utils/logger';
@@ -133,9 +134,9 @@ export async function PUT(request: NextRequest) {
           updatedClients = [...existingClients, updatedClient];
         }
 
-        // Save to new format
+        // Save to new format (every client's password encrypted; getAllClients returns them decrypted)
         await config.setMany([
-          { key: 'download_clients', value: JSON.stringify(updatedClients) },
+          { key: 'download_clients', value: serializeDownloadClients(updatedClients) },
         ]);
 
         logger.info('Download client settings updated via legacy API', { type, id: updatedClient.id });

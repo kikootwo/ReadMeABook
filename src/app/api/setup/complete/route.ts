@@ -8,6 +8,7 @@ import { prisma } from '@/lib/db';
 import bcrypt from 'bcrypt';
 import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
 import { getEncryptionService } from '@/lib/services/encryption.service';
+import { serializeDownloadClients } from '@/lib/services/download-client-storage';
 import { getPlexService } from '@/lib/integrations/plex.service';
 import { getClientDisplayName } from '@/lib/interfaces/download-client.interface';
 import { requireSetupIncomplete } from '@/lib/middleware/auth';
@@ -420,16 +421,13 @@ export async function POST(request: NextRequest) {
       throw new Error('Invalid download client configuration');
     }
 
-    // Encrypt passwords in download clients
-    const encryptedClients = downloadClientsArray.map(client => ({
-      ...client,
-      password: client.password ? encryptionService.encrypt(client.password) : '',
-    }));
+    // Passwords are encrypted when serialised
+    const storedClients = serializeDownloadClients(downloadClientsArray);
 
     await prisma.configuration.upsert({
       where: { key: 'download_clients' },
-      update: { value: JSON.stringify(encryptedClients) },
-      create: { key: 'download_clients', value: JSON.stringify(encryptedClients) },
+      update: { value: storedClients },
+      create: { key: 'download_clients', value: storedClients },
     });
 
     // Path configuration

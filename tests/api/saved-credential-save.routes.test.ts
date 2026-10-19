@@ -24,7 +24,17 @@ vi.mock('@/lib/db', () => ({ prisma: { configuration: { upsert: upsertMock } } }
 vi.mock('@/lib/services/config.service', () => ({
   getConfigService: () => ({ get: async (key: string) => config.values[key] ?? null, setMany: setManyMock, clearCache: clearCacheMock }),
 }));
-vi.mock('@/lib/services/encryption.service', () => ({ getEncryptionService: () => ({ encrypt: (v: string) => `enc:${v}` }) }));
+vi.mock('@/lib/services/encryption.service', () => ({
+  getEncryptionService: () => ({
+    encrypt: (v: string) => `enc:${v}`,
+    isEncryptedFormat: (v: string) => typeof v === 'string' && v.startsWith('enc:'),
+    // "enc:undecryptable" stands for ciphertext from another key; other enc: values decrypt
+    decrypt: (v: string) => {
+      if (v === 'enc:undecryptable') throw new Error('bad auth tag');
+      return v.slice('enc:'.length);
+    },
+  }),
+}));
 vi.mock('@/lib/integrations/plex.service', () => ({ getPlexService: () => ({ testConnection: plexTestMock }) }));
 vi.mock('@/lib/integrations/prowlarr.service', () => ({ invalidateProwlarrService: () => undefined }));
 vi.mock('@/lib/integrations/qbittorrent.service', () => ({ invalidateQBittorrentService: () => undefined }));
@@ -191,6 +201,18 @@ describe('settings save routes keep a saved secret only for the saved URL', () =
       const stored = JSON.parse(setManyMock.mock.calls[0][0][0].value);
       expect(stored[0].password).toBe('enc:saved-pass');
     });
+
+    it('does not re-encrypt a password the manager could not decrypt', async () => {
+      managerMock.getAllClients.mockResolvedValue([
+        { ...savedClient },
+        { id: 'c2', type: 'sabnzbd', name: 'SABnzbd', enabled: true, url: 'http://sab:8080', password: 'enc:undecryptable' },
+      ]);
+      const response = await put({ name: 'Renamed', password: '********' });
+
+      expect(response.status).toBe(200);
+      const stored = JSON.parse(setManyMock.mock.calls[0][0][0].value);
+      expect(stored.map((c: { password: string }) => c.password)).toEqual(['enc:saved-pass', 'enc:undecryptable']);
+    });
   });
 
   describe('PUT /api/admin/settings/download-client (legacy)', () => {
@@ -200,7 +222,21 @@ describe('settings save routes keep a saved secret only for the saved URL', () =
 
       expect(response.status).toBe(200);
       expect(setManyMock).toHaveBeenCalled();
-      expect(JSON.stringify(setManyMock.mock.calls)).toContain('saved-pass');
+      const stored = JSON.parse(setManyMock.mock.calls[0][0][0].value);
+      expect(stored[0].password).toBe('enc:saved-pass');
+    });
+
+    it('stores every client password encrypted, not just the edited one', async () => {
+      managerMock.getAllClients.mockResolvedValue([
+        { ...savedClient },
+        { id: 'c2', type: 'sabnzbd', name: 'SABnzbd', enabled: true, url: 'http://sab:8080', password: 'canary-plain' },
+      ]);
+      const { PUT } = await import('@/app/api/admin/settings/download-client/route');
+      const response = await PUT(json({ type: 'qbittorrent', url: 'http://qbit.saved:8080', username: 'u', password: 'new-pass' }));
+
+      expect(response.status).toBe(200);
+      const stored = JSON.parse(setManyMock.mock.calls[0][0][0].value);
+      expect(stored.map((c: { password: string }) => c.password)).toEqual(['enc:new-pass', 'enc:canary-plain']);
     });
 
     it('rejects a masked password with a new URL and saves nothing', async () => {

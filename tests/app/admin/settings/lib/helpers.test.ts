@@ -274,6 +274,37 @@ describe('admin settings helpers', () => {
     expect(oidcBody.enabled).toBe(false);
   });
 
+  it('shows the OIDC route error and still saves registration settings', async () => {
+    const reenter = 'The saved credential only works with the saved address. Re-enter the OIDC client secret.';
+    fetchWithAuthMock
+      .mockResolvedValueOnce({ ok: false, json: async () => ({ error: reenter }) })
+      .mockResolvedValueOnce(makeOk());
+
+    const { saveTabSettings } = await import('@/app/admin/settings/lib/helpers');
+    await expect(saveTabSettings('auth', baseSettings, [], [])).rejects.toThrow(reenter);
+
+    expect(fetchWithAuthMock).toHaveBeenCalledWith(
+      '/api/admin/settings/registration',
+      expect.objectContaining({ method: 'PUT' })
+    );
+  });
+
+  it('falls back to a generic OIDC message when the error body is not JSON', async () => {
+    fetchWithAuthMock
+      .mockResolvedValueOnce({ ok: false, json: async () => { throw new Error('not json'); } })
+      .mockResolvedValueOnce(makeOk());
+
+    const { saveTabSettings } = await import('@/app/admin/settings/lib/helpers');
+    await expect(saveTabSettings('auth', baseSettings, [], [])).rejects.toThrow('Failed to save OIDC settings');
+  });
+
+  it('reports a registration failure even when OIDC saved', async () => {
+    fetchWithAuthMock.mockResolvedValueOnce(makeOk()).mockResolvedValueOnce(makeFail());
+
+    const { saveTabSettings } = await import('@/app/admin/settings/lib/helpers');
+    await expect(saveTabSettings('auth', baseSettings, [], [])).rejects.toThrow('Failed to save registration settings');
+  });
+
   it('saves prowlarr settings with enabled indexers and flag configs', async () => {
     fetchWithAuthMock
       .mockResolvedValueOnce(makeOk())

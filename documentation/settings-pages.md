@@ -270,6 +270,10 @@ src/app/admin/settings/
 - Reused only when the URL being tested or saved equals the saved URL (`isSameServiceUrl`: same origin + path, trailing slash ignored) → else 400 "re-enter … for the new address" naming where to find it (`CREDENTIAL_HELP`); nothing is saved or contacted
 - Test routes: `setup/test-abs` (`audiobookshelf.server_url`), `admin/settings/test-plex` (`plex_url`), `admin/settings/test-prowlarr` (`prowlarr_url` → `PROWLARR_URL`), `admin/settings/download-clients/{test,categories}` (client by `clientId`), legacy `test-download-client` (the same-type client saved at that URL)
 - Save routes: `PUT admin/settings/plex`, `prowlarr`, `audiobookshelf`, `download-clients/[id]`, legacy `download-client` (checked before anything is written)
+- OIDC (`PUT admin/settings/oidc`): masked or empty `clientSecret` keeps the saved secret only for the saved `oidc.issuer_url`; empty issuer = OIDC disabled (`oidc.enabled` saved false), no secret needed; all OIDC keys written in one transaction (`ConfigurationService.setManyAtomic`). Settings UI shows the route's `error` text and saves registration settings even if the OIDC save is refused
+- Notifications (`PUT admin/notifications/[id]`): Apprise/ntfy masked secrets kept only while `serverUrl` is unchanged (ntfy: empty = `https://ntfy.sh`) → else 400 listing the fields to re-enter; Discord/Pushover unchanged (see notifications.md)
+- BookDate (`POST bookdate/config`) without a new `apiKey`: saved key kept only for the same provider and, for custom, the same `baseUrl`. Other built-in provider → 400; switching to custom → stored empty; new custom `baseUrl` with a non-empty saved key → 400 re-enter. `clearApiKey: true` (custom only; UI checkbox "This endpoint needs no API key") stores an empty key. Built-in provider with no saved key → 400 "There is no saved API key for this provider. Enter one."
+- `CREDENTIAL_HELP` kinds: audiobookshelf, plex, prowlarr, downloadClient, oidc, apprise, ntfy, bookdate
 
 **BookDate (Admin Settings):**
 1. **On tab load:** Current BookDate global configuration loaded from database automatically

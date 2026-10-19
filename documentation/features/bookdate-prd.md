@@ -97,7 +97,7 @@ UI Elements:
 **Validation:**
 - API key required for initial setup
 - Model and library scope always required
-- API key optional when updating existing configuration (uses saved key)
+- API key optional when updating existing configuration: the saved key is kept only for the same provider (and, for custom, the same base URL); custom can be saved keyless with `clearApiKey: true`
 
 **Visibility:** BookDate tab visible to all admins in /admin/settings
 

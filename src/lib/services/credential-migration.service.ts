@@ -12,24 +12,10 @@ import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('CredentialMigration');
 
-/**
- * Check if a value looks like it's already encrypted.
- * Encrypted values have format: base64:base64:base64 (iv:authTag:ciphertext)
- */
-export function isEncryptedFormat(value: string): boolean {
-  if (!value || typeof value !== 'string') {
-    return false;
-  }
-
-  const parts = value.split(':');
-  if (parts.length !== 3) {
-    return false;
-  }
-
-  // Check if all parts look like base64
-  const base64Regex = /^[A-Za-z0-9+/]+=*$/;
-  return parts.every(part => part.length > 0 && base64Regex.test(part));
-}
+// Values are treated as already encrypted only when they match encrypt()'s exact shape
+// (EncryptionService.isEncryptedFormat: 16-byte IV and auth tag), so a plaintext secret
+// that merely contains colons is still encrypted.
+const isEncryptedFormat = (value: string) => getEncryptionService().isEncryptedFormat(value);
 
 /**
  * Migrate a single configuration key from plaintext to encrypted.
@@ -60,17 +46,21 @@ async function migrateConfigKey(key: string): Promise<boolean> {
     return false;
   }
 
-  // Encrypt the plaintext value
+  // Encrypt the plaintext value. Compare-and-swap: skip if the value changed since it was read
   const encryptionService = getEncryptionService();
   const encryptedValue = encryptionService.encrypt(config.value);
 
-  await prisma.configuration.update({
-    where: { key },
+  const { count } = await prisma.configuration.updateMany({
+    where: { key, value: config.value },
     data: {
       value: encryptedValue,
       encrypted: true,
     },
   });
+  if (count === 0) {
+    logger.info(`Credential "${key}" changed during migration; leaving the new value`);
+    return false;
+  }
 
   logger.info(`Migrated credential: ${key}`);
   return true;
@@ -113,10 +103,15 @@ async function migrateDownloadClients(): Promise<boolean> {
   }
 
   if (migratedCount > 0) {
-    await prisma.configuration.update({
-      where: { key: 'download_clients' },
+    // Compare-and-swap: an admin save between the read and this write wins
+    const { count } = await prisma.configuration.updateMany({
+      where: { key: 'download_clients', value: config.value },
       data: { value: JSON.stringify(clients) },
     });
+    if (count === 0) {
+      logger.info('Download clients changed during migration; leaving the new value');
+      return false;
+    }
 
     logger.info(`Migrated ${migratedCount} download client password(s)`);
     return true;
@@ -138,6 +133,7 @@ export async function runCredentialMigration(): Promise<void> {
   const keysToMigrate = [
     'plex_token',
     'prowlarr_api_key',
+    'download_client_password', // legacy single-client password (pre multi-client installs)
   ];
 
   for (const key of keysToMigrate) {
