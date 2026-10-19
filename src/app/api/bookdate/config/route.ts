@@ -50,7 +50,7 @@ async function getConfig(req: AuthenticatedRequest) {
 async function saveConfig(req: AuthenticatedRequest) {
   try {
     const body = await req.json();
-    const { provider, apiKey, model, baseUrl, isEnabled } = body;
+    const { provider, apiKey, model, baseUrl, isEnabled, clearApiKey } = body;
 
     // Check if config exists
     const existingConfig = await prisma.bookDateConfig.findFirst();
@@ -115,6 +115,15 @@ async function saveConfig(req: AuthenticatedRequest) {
     if (apiKey) {
       // New API key provided - encrypt it
       encryptedApiKeyToUse = encryptionService.encrypt(apiKey);
+    } else if (clearApiKey === true) {
+      // Explicitly saved with no key (keyless custom endpoint); never for built-in providers
+      if (provider !== 'custom') {
+        return NextResponse.json(
+          { error: 'Only a custom provider can be saved without an API key' },
+          { status: 400 }
+        );
+      }
+      encryptedApiKeyToUse = encryptionService.encrypt('');
     } else if (canKeepSavedKey) {
       // Same provider (and custom base URL): keep the saved key
       encryptedApiKeyToUse = existingConfig!.apiKey;
@@ -123,7 +132,7 @@ async function saveConfig(req: AuthenticatedRequest) {
       if (existingConfig?.provider === 'custom' && savedKeyIsSet(existingConfig.apiKey)) {
         // The saved key belongs to the saved base URL
         return NextResponse.json(
-          { error: savedCredentialUrlMismatch('bookdate') },
+          { error: `${savedCredentialUrlMismatch('bookdate')} If this endpoint needs no key, choose "This endpoint needs no API key".` },
           { status: 400 }
         );
       }
@@ -131,10 +140,12 @@ async function saveConfig(req: AuthenticatedRequest) {
       encryptedApiKeyToUse = encryptionService.encrypt('');
     } else {
       // API key required for OpenAI/Claude/Gemini; a saved key for another provider is never reused
-      return NextResponse.json(
-        { error: existingConfig ? 'The saved API key is for a different provider. Enter an API key for this provider.' : 'API key is required' },
-        { status: 400 }
-      );
+      const error = !existingConfig
+        ? 'API key is required'
+        : savedKeyIsSet(existingConfig.apiKey)
+          ? 'The saved API key is for a different provider. Enter an API key for this provider.'
+          : 'There is no saved API key for this provider. Enter one.';
+      return NextResponse.json({ error }, { status: 400 });
     }
 
     let config;

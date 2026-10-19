@@ -246,6 +246,32 @@ describe('BookDate routes', () => {
       expect(prismaMock.bookDateConfig.update.mock.calls[0][0].data.apiKey).toBe('enc-');
     });
 
+    it('lets a custom provider at a new base URL be saved with the key explicitly cleared', async () => {
+      prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce(savedCustom);
+      prismaMock.bookDateConfig.update.mockResolvedValueOnce({ ...savedCustom, apiKey: 'enc-' });
+      const { response } = await save({ provider: 'custom', model: 'm', baseUrl: 'http://llm.moved:8080/v1', clearApiKey: true });
+
+      expect(response.status).toBe(200);
+      expect(prismaMock.bookDateConfig.update.mock.calls[0][0].data.apiKey).toBe('enc-');
+    });
+
+    it('refuses clearing the key for a built-in provider', async () => {
+      prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce({ id: 'cfg-11', provider: 'openai', apiKey: 'enc-sk', baseUrl: null });
+      const { response, payload } = await save({ provider: 'openai', model: 'gpt-4o', clearApiKey: true });
+
+      expect(response.status).toBe(400);
+      expect(payload.error).toMatch(/Only a custom provider/);
+      expect(prismaMock.bookDateConfig.update).not.toHaveBeenCalled();
+    });
+
+    it('says there is no saved key when switching from a keyless custom provider', async () => {
+      prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce({ ...savedCustom, apiKey: 'enc-' });
+      const { response, payload } = await save({ provider: 'openai', model: 'gpt-4o' });
+
+      expect(response.status).toBe(400);
+      expect(payload.error).toBe('There is no saved API key for this provider. Enter one.');
+    });
+
     it('saves a new custom base URL with a newly entered key', async () => {
       prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce(savedCustom);
       prismaMock.bookDateConfig.update.mockResolvedValueOnce({ ...savedCustom });

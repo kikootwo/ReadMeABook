@@ -103,7 +103,8 @@ model NotificationBackend {
 **Masking:** Sensitive values returned as `••••••••` in API responses
 
 **Preservation:** `NotificationService.mergeMaskedSecrets(type, existing, updated)` on update: a masked value (`MASKED_CONFIG_VALUE` = `••••••••`) keeps the existing encrypted value
-- Providers with `secretBoundUrl` (Apprise: `serverUrl`; ntfy: `serverUrl`, default `https://ntfy.sh`): a kept secret requires the same server URL (`isSameServiceUrl`; empty = default on both sides) → else `PUT` returns 400 `{ error: 'ValidationError', message }` naming the fields to re-enter, nothing saved
+- Providers with `secretBoundUrl` (Apprise: `serverUrl`, no default; ntfy: `serverUrl`, default `https://ntfy.sh`): a kept secret requires the same server URL (`isSameServiceUrl`; ntfy: empty = `https://ntfy.sh` on both sides) → else `PUT` returns 400 `{ error: 'ValidationError', message }` naming the fields to re-enter, nothing saved
+- Apprise: an empty or scheme-less `serverUrl` with masked secrets → 400 asking for the full `http(s)://` URL
 - Discord, Pushover: no server URL binding
 
 ## Message Formatting

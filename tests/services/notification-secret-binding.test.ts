@@ -50,6 +50,17 @@ describe('NotificationService.mergeMaskedSecrets', () => {
       expect(result).toEqual({ ok: true, config: { serverUrl: 'https://apprise.new', urls: 'discord://id/token', authToken: 'new' } });
     });
 
+    it.each([
+      ['empty', ''],
+      ['missing its scheme', 'apprise.saved:8000'],
+    ])('asks for the full server URL when it is %s and secrets are kept', async (_label, serverUrl) => {
+      const result = await merge('apprise', existing, { serverUrl, urls: MASK });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error).toBe('Enter the full Server URL (starting with http:// or https://) to keep the saved Notification URLs.');
+    });
+
     it('allows a new server URL when no secret was saved for the masked field', async () => {
       const result = await merge('apprise', { serverUrl: 'http://apprise.saved:8000' }, { serverUrl: 'https://apprise.new', urls: MASK });
 

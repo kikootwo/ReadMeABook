@@ -3,8 +3,8 @@
  * Documentation: documentation/settings-pages.md
  *
  * A masked or empty client secret keeps the saved secret only for the saved issuer.
- * Clearing the issuer disables OIDC and needs no secret. A new secret is written
- * before the issuer.
+ * Clearing the issuer disables OIDC and needs no secret. All values are written in
+ * one transaction (setManyAtomic).
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,7 +18,7 @@ vi.mock('@/lib/middleware/auth', () => ({
   requireAdmin: (_req: unknown, handler: () => unknown) => handler(),
 }));
 vi.mock('@/lib/services/config.service', () => ({
-  getConfigService: () => ({ get: async (key: string) => saved.values[key] ?? null, setMany: setManyMock }),
+  getConfigService: () => ({ get: async (key: string) => saved.values[key] ?? null, setManyAtomic: setManyMock }),
 }));
 vi.mock('@/lib/utils/logger', () => ({
   RMABLogger: { create: () => ({ info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -60,7 +60,7 @@ describe('PUT /api/admin/settings/oidc', () => {
     expect(written('oidc.enabled')?.value).toBe('true');
   });
 
-  it('saves a new issuer with a newly entered secret, writing the secret first', async () => {
+  it('saves a new issuer with a newly entered secret in the same write', async () => {
     const response = await save({ issuerUrl: 'https://auth.new.example/', clientSecret: 'new-secret' });
 
     expect(response.status).toBe(200);
@@ -77,7 +77,7 @@ describe('PUT /api/admin/settings/oidc', () => {
     expect(written('oidc.client_secret')).toBeUndefined();
   });
 
-  it('accepts an empty secret when none is saved (public client)', async () => {
+  it('saves without a secret when none is saved and none is entered', async () => {
     saved.values = {};
     const response = await save({ issuerUrl: 'https://auth.new.example/', clientSecret: '' });
 

@@ -1,6 +1,6 @@
 /**
  * OIDC Settings API
- * Documentation: documentation/features/audiobookshelf-integration.md
+ * Documentation: documentation/backend/services/auth.md
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -62,8 +62,8 @@ export async function PUT(request: NextRequest) {
           newClientSecret = clientSecret;
         }
 
-        // Build config updates. setMany writes in order: the secret goes first, so a new
-        // issuer is never saved alongside the previous issuer's secret.
+        // Build config updates, written in one transaction so a new issuer is never saved
+        // without its secret (or the reverse).
         const updates: Array<{key: string; value: string; encrypted?: boolean}> = [];
         if (newClientSecret) {
           updates.push({ key: 'oidc.client_secret', value: newClientSecret, encrypted: true });
@@ -83,7 +83,7 @@ export async function PUT(request: NextRequest) {
           { key: 'oidc.admin_claim_value', value: adminClaimValue || '' },
         );
 
-        await configService.setMany(updates);
+        await configService.setManyAtomic(updates);
 
         return NextResponse.json({
           success: true,

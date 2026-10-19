@@ -28,6 +28,11 @@ vi.mock('@/lib/services/encryption.service', () => ({
   getEncryptionService: () => ({
     encrypt: (v: string) => `enc:${v}`,
     isEncryptedFormat: (v: string) => typeof v === 'string' && v.startsWith('enc:'),
+    // "enc:undecryptable" stands for ciphertext from another key; other enc: values decrypt
+    decrypt: (v: string) => {
+      if (v === 'enc:undecryptable') throw new Error('bad auth tag');
+      return v.slice('enc:'.length);
+    },
   }),
 }));
 vi.mock('@/lib/integrations/plex.service', () => ({ getPlexService: () => ({ testConnection: plexTestMock }) }));

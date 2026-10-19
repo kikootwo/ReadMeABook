@@ -11,7 +11,7 @@ import { AppriseProvider } from './providers/apprise.provider';
 import { DiscordProvider } from './providers/discord.provider';
 import { NtfyProvider } from './providers/ntfy.provider';
 import { PushoverProvider } from './providers/pushover.provider';
-import { isSameServiceUrl, savedCredentialUrlMismatch } from '../../utils/saved-credential';
+import { isSameServiceUrl, isServiceUrl, savedCredentialUrlMismatch } from '../../utils/saved-credential';
 
 const logger = RMABLogger.create('NotificationService');
 
@@ -164,12 +164,19 @@ export class NotificationService {
 
     const binding = provider?.secretBoundUrl;
     if (binding && keptSecrets.length > 0) {
+      const labelOf = (key: string) => provider!.metadata.configFields.find((f) => f.name === key)?.label ?? key;
+      const labels = keptSecrets.map(labelOf);
       const effectiveUrl = (value: unknown) =>
         typeof value === 'string' && value.trim() ? value.trim() : binding.defaultUrl ?? '';
-      if (!isSameServiceUrl(effectiveUrl(merged[binding.field]), effectiveUrl(saved[binding.field]))) {
-        const labels = keptSecrets.map(
-          (key) => provider!.metadata.configFields.find((f) => f.name === key)?.label ?? key
-        );
+      const newUrl = effectiveUrl(merged[binding.field]);
+      // Apprise has no default server: an empty or scheme-less URL can't be matched to the saved one
+      if (!isServiceUrl(newUrl)) {
+        return {
+          ok: false,
+          error: `Enter the full ${labelOf(binding.field)} (starting with http:// or https://) to keep the saved ${labels.join(', ')}.`,
+        };
+      }
+      if (!isSameServiceUrl(newUrl, effectiveUrl(saved[binding.field]))) {
         return { ok: false, error: `${savedCredentialUrlMismatch(binding.credentialKind)} Fields to re-enter: ${labels.join(', ')}.` };
       }
     }

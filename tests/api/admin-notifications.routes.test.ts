@@ -22,7 +22,7 @@ const requireAdminMock = vi.hoisted(() => vi.fn());
 const notificationServiceMock = vi.hoisted(() => ({
   encryptConfig: vi.fn((type: string, config: any) => ({ ...config, encrypted: true })),
   maskConfig: vi.fn((type: string, config: any) => ({ ...config, masked: true })),
-  // URL binding rules are covered in notification.service.test.ts; here masked values keep the saved ones
+  // URL binding rules are covered in notification-secret-binding.test.ts; here masked values keep the saved ones
   mergeMaskedSecrets: vi.fn((type: string, existing: any, updated: any) => ({
     ok: true,
     config: Object.fromEntries(Object.entries(updated).map(([k, v]) => [k, v === '••••••••' ? existing?.[k] : v])),

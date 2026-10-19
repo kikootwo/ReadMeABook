@@ -66,6 +66,15 @@ describe('download client storage', () => {
     expect(stored[0].password).toBe(foreign);
   });
 
+  it('encrypts a supplied value that is valid ciphertext for this key, instead of storing it as-is', () => {
+    const otherSecret = enc.encrypt('prowlarr-api-key');
+    const stored = encryptClientPasswords([{ id: 'a', password: otherSecret }]);
+
+    expect(stored[0].password).not.toBe(otherSecret);
+    // Reading it back yields the literal text that was supplied, not the other secret
+    expect(enc.decrypt(stored[0].password!)).toBe(otherSecret);
+  });
+
   it('stores an empty string when there is no password', () => {
     expect(encryptClientPasswords([{ id: 'a' }, { id: 'b', password: '' }]).map((c) => c.password)).toEqual(['', '']);
   });

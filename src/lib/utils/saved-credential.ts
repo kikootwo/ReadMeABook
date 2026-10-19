@@ -35,6 +35,11 @@ function normalize(url: string | null | undefined): string | null {
   }
 }
 
+/** True for a valid http(s) URL. */
+export function isServiceUrl(value: string | null | undefined): boolean {
+  return normalize(value) !== null;
+}
+
 /** True when both URLs are valid http(s) URLs with the same origin and path (trailing slash ignored). */
 export function isSameServiceUrl(supplied: string | null | undefined, saved: string | null | undefined): boolean {
   const a = normalize(supplied);

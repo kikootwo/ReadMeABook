@@ -13,6 +13,7 @@ const requireAuthMock = vi.hoisted(() => vi.fn());
 const requireAdminMock = vi.hoisted(() => vi.fn());
 const configServiceMock = vi.hoisted(() => ({
   setMany: vi.fn(),
+  setManyAtomic: vi.fn(),
   clearCache: vi.fn(),
 }));
 const audibleServiceMock = vi.hoisted(() => ({
@@ -351,7 +352,7 @@ describe('Admin settings core routes', () => {
     const payload = await response.json();
 
     expect(payload.success).toBe(true);
-    expect(configServiceMock.setMany).toHaveBeenCalled();
+    expect(configServiceMock.setManyAtomic).toHaveBeenCalled();
   });
 
   it('updates ebook settings', async () => {
