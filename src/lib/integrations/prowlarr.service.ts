@@ -14,6 +14,17 @@ import { urlForLog } from '../utils/prowlarr-url';
 // Module-level logger
 const logger = RMABLogger.create('Prowlarr');
 
+/** A raw Prowlarr result for debug logs: URL fields reduced to scheme + host (they carry the API key). */
+function loggableResult(result: unknown): Record<string, unknown> {
+  if (!result || typeof result !== 'object') return { value: result };
+  const copy: Record<string, unknown> = { ...(result as Record<string, unknown>) };
+  for (const field of ['downloadUrl', 'magnetUrl', 'guid', 'infoUrl']) {
+    const value = copy[field];
+    if (typeof value === 'string' && /^(https?:|magnet:)/i.test(value)) copy[field] = urlForLog(value);
+  }
+  return copy;
+}
+
 export interface SearchFilters {
   category?: number; // Deprecated: use categories instead
   categories?: number[]; // Array of category IDs to search
@@ -168,7 +179,7 @@ export class ProwlarrService {
 
       // Debug: Log first raw result full structure (automatically filtered by LOG_LEVEL)
       if (response.data.length > 0) {
-        logger.debug('Sample raw result from API', response.data[0]);
+        logger.debug('Sample raw result from API', loggableResult(response.data[0]));
       }
 
       // Transform Prowlarr results to our format
@@ -177,7 +188,7 @@ export class ProwlarrService {
           const transformed = this.transformResult(result);
           if (!transformed) {
             // Log the full raw result that was skipped (automatically filtered by LOG_LEVEL)
-            logger.debug(`Result #${index + 1} was skipped`, { rawData: result });
+            logger.debug(`Result #${index + 1} was skipped`, { rawData: loggableResult(result) });
           }
           return transformed;
         })
