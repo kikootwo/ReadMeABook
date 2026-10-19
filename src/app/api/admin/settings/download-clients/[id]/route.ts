@@ -8,7 +8,7 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { getConfigService } from '@/lib/services/config.service';
 import { getDownloadClientManager, invalidateDownloadClientManager } from '@/lib/services/download-client-manager.service';
 import { DownloadClientConfig } from '@/lib/services/download-client-manager.service';
-import { getEncryptionService } from '@/lib/services/encryption.service';
+import { serializeDownloadClients } from '@/lib/services/download-client-storage';
 import { RMABLogger } from '@/lib/utils/logger';
 import { MASKED_PASSWORD, resolveSecretForUrl } from '@/lib/utils/saved-credential';
 import { savedClientCredential } from '@/lib/services/saved-credentials.service';
@@ -126,15 +126,10 @@ export async function PUT(
           }
         }
 
-        // Update clients array and encrypt passwords before saving
+        // Update clients array; passwords are encrypted when serialised
         clients[clientIndex] = updatedClient;
-        const encryptionService = getEncryptionService();
-        const encryptedClients = clients.map(c => ({
-          ...c,
-          password: c.password ? encryptionService.encrypt(c.password) : '',
-        }));
         await config.setMany([
-          { key: 'download_clients', value: JSON.stringify(encryptedClients) },
+          { key: 'download_clients', value: serializeDownloadClients(clients) },
         ]);
 
         // Invalidate cache
@@ -187,15 +182,10 @@ export async function DELETE(
 
         const deletedClient = clients[clientIndex];
 
-        // Remove client from array and encrypt passwords before saving
+        // Remove client from array; passwords are encrypted when serialised
         const updatedClients = clients.filter(c => c.id !== id);
-        const encryptionService = getEncryptionService();
-        const encryptedClients = updatedClients.map(c => ({
-          ...c,
-          password: c.password ? encryptionService.encrypt(c.password) : '',
-        }));
         await config.setMany([
-          { key: 'download_clients', value: JSON.stringify(encryptedClients) },
+          { key: 'download_clients', value: serializeDownloadClients(updatedClients) },
         ]);
 
         // Invalidate cache

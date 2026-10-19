@@ -9,6 +9,9 @@ Syncs user-subscribed Goodreads shelves via RSS feeds, resolves books to Audible
 
 ### Files
 - `src/lib/services/goodreads-sync.service.ts` — RSS fetch/parse, delegates to shared core
+- `src/lib/utils/goodreads-rss-url.ts` — Feed URL rules (`toGoodreadsRssUrl`, `isGoodreadsHttpsUrl`); client-safe, also used by `AddShelfModal` / `ManageShelfModal`
+- `src/lib/utils/goodreads-rss-url.schema.ts` — `goodreadsRssUrlSchema` (zod) for POST/PATCH bodies
+- `src/lib/services/goodreads-shelf-match.ts` — `findShelfWithSameFeed()` duplicate lookup by normalised URL, `isUniqueConstraintError()`
 - `src/lib/services/shelf-sync-core.service.ts` — Shared sync logic (Audible lookup, cover enrichment, request creation)
 - `src/lib/utils/shelf-helpers.ts` — Shared `processBooks()` utility for cover URL parsing
 - `src/lib/hooks/createShelfHooks.ts` — Generic hook factory for shelf CRUD operations
@@ -24,6 +27,9 @@ Syncs user-subscribed Goodreads shelves via RSS feeds, resolves books to Audible
 ## Goodreads RSS Feed
 - **Format:** `https://www.goodreads.com/review/list_rss/{userId}?shelf={shelfName}`
 - **Auth:** None required (public RSS)
+- **Allowed URLs:** `https://` + host `goodreads.com` or `www.goodreads.com` (no port, no credentials) + path `/review/list_rss/`. Normalised to `https://www.goodreads.com/review/list_rss/...` (http:// and bare `goodreads.com` accepted and rewritten); POST/PATCH store the normalised form, older stored rows are normalised at fetch time (not rewritten). Anything else → 400 `{ error: 'ValidationError', message }` on POST/PATCH; sync refuses it too
+- **Duplicates:** POST/PATCH compare normalised feed URLs against the user's shelves (PATCH excludes itself) → 409 `DuplicateShelf`; a racing insert/update (Prisma P2002) → 409 too
+- **Redirects:** axios `maxRedirects: 0`; up to 3 redirects followed by hand, each target must be an https Goodreads host before it is requested
 - **Parsing:** `fast-xml-parser` extracts `item` entries with `book_id`, `title`, `author_name`, `book_image_url`
 
 ## Shared Sync Core

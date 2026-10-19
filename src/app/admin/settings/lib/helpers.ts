@@ -20,6 +20,22 @@ export const parseArrayToCommaSeparated = (jsonStr: string): string => {
 };
 
 /**
+ * Throw for a failed save, using the route's own `error` message when it sends one
+ * (e.g. which credential to re-enter), else the fallback.
+ */
+const throwUnlessOk = async (res: Response, fallback: string): Promise<void> => {
+  if (res.ok) return;
+  let message = fallback;
+  try {
+    const data = await res.json();
+    if (typeof data?.error === 'string' && data.error) message = data.error;
+  } catch {
+    // Non-JSON error body: keep the fallback
+  }
+  throw new Error(message);
+};
+
+/**
  * Converts comma-separated string to JSON array string for storage
  */
 export const parseCommaSeparatedToArray = (str: string): string => {
@@ -76,22 +92,30 @@ export const saveTabSettings = async (
         allowedUsernames: parseCommaSeparatedToArray(settings.oidc.allowedUsernames),
       };
 
-      await fetchWithAuth('/api/admin/settings/oidc', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(oidcPayload),
-      }).then(res => {
-        if (!res.ok) throw new Error('Failed to save OIDC settings');
-      });
+      // OIDC and registration save independently: a refused OIDC save (e.g. the client
+      // secret must be re-entered for a new issuer) does not skip the registration settings
+      const authFailures: string[] = [];
+      try {
+        await fetchWithAuth('/api/admin/settings/oidc', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(oidcPayload),
+        }).then(res => throwUnlessOk(res, 'Failed to save OIDC settings'));
+      } catch (error) {
+        authFailures.push(error instanceof Error ? error.message : 'Failed to save OIDC settings');
+      }
 
-      // Save registration settings
-      await fetchWithAuth('/api/admin/settings/registration', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings.registration),
-      }).then(res => {
-        if (!res.ok) throw new Error('Failed to save registration settings');
-      });
+      try {
+        await fetchWithAuth('/api/admin/settings/registration', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(settings.registration),
+        }).then(res => throwUnlessOk(res, 'Failed to save registration settings'));
+      } catch (error) {
+        authFailures.push(error instanceof Error ? error.message : 'Failed to save registration settings');
+      }
+
+      if (authFailures.length > 0) throw new Error(authFailures.join(' '));
       break;
 
     case 'prowlarr':

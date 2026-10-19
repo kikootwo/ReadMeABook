@@ -69,8 +69,11 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 
 **Global Configuration (Admin):**
 - POST `/api/bookdate/test-connection` - Validate API key (saved or new), fetch models
-  - **Auth:** Optional (unauthenticated during setup wizard, authenticated for saved keys in settings)
-  - Supports `useSavedKey: true` to test with encrypted saved API key (requires authentication)
+  - **Auth:** `requireSetupIncompleteOrAdmin`. After setup: admin only (API tokens refused). During setup: no sign-in, built-in providers (openai/claude/gemini) with a caller-supplied key only
+  - `provider: 'custom'`: admin only (403 otherwise)
+  - `useSavedKey: true`: admin only (401 otherwise); refused (400) when `provider` differs from the saved provider; custom uses the saved `baseUrl`, ignoring any in the request
+  - Custom model list: only entries with a string `id` (or bare strings) are returned, as `{id, name}` strings
+  - Errors: `Failed to connect to custom provider (HTTP n)` (400), `Connected to the custom provider, but the response was not JSON` (400), `Could not connect to the custom provider` (500), `Connection test failed` (500). The remote response body goes to the server log only
 - GET `/api/bookdate/config` - Get global config (excluding API key) (All authenticated)
 - POST `/api/bookdate/config` - Create/update global config (Admin only)
   - Accepts optional `apiKey` (only required for initial setup)
@@ -354,10 +357,9 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - Cause: `/api/bookdate/test-connection` required authentication, but setup wizard runs before user login
   - Wizard tried to send Authorization header from localStorage (doesn't exist during setup)
   - Settings page works because user is already authenticated
-- Fix: Modified endpoint to support optional authentication
-  - Unauthenticated: Allowed during setup wizard (tests provided API key only)
-  - Authenticated: Required when using `useSavedKey: true` in settings (accesses saved encrypted key)
-  - Route checks for Authorization header presence to determine flow
+- Fix: endpoint open to the setup wizard while setup is incomplete
+  - Unauthenticated: allowed only while setup is incomplete (built-in providers, provided API key only)
+  - After setup: admin only via `requireSetupIncompleteOrAdmin`; saved key requires the caller's admin role
   - Files updated: `src/app/api/bookdate/test-connection/route.ts`, `src/app/setup/steps/BookDateStep.tsx`
 
 **5. Library Books Appearing in Recommendations**

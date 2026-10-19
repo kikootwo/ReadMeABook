@@ -1,0 +1,66 @@
+# Component: E2E tainted-mode overlay (untrusted branch code: network + privilege isolation)
+# Documentation: documentation/testing/e2e-harness.md
+#
+# Layered on compose.yml by `run.mjs --tainted`:
+# - `stack` becomes internal (no gateway: no internet, no LAN, no host). RMAB's only way out is the
+#   allowlist egress proxy (Audible/Audnexus metadata), which alone joins the `egress` network.
+# - RMAB is not published to the host; host.docker.internal resolves to an unroutable TEST-NET address.
+# - Every service: no-new-privileges, dropped capabilities, memory and pids limits.
+
+networks:
+  stack:
+    internal: true
+  egress: {}
+
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 1024
+
+services:
+  rmab:
+    <<: *hardening
+    ports: !reset []
+    cap_drop: [ALL]
+    # Entrypoint chowns volumes and drops to PUID/PGID/postgres via gosu; supervisord signals children.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, FSETID, SETUID, SETGID, KILL]
+    mem_limit: 4g
+    extra_hosts:
+      - "host.docker.internal:192.0.2.1"
+      - "gateway.docker.internal:192.0.2.1"
+    environment:
+      HTTP_PROXY: http://egress-proxy:3128
+      HTTPS_PROXY: http://egress-proxy:3128
+      http_proxy: http://egress-proxy:3128
+      https_proxy: http://egress-proxy:3128
+      NO_PROXY: fake-arr,tracker.e2e,abs,localhost,127.0.0.1
+      no_proxy: fake-arr,tracker.e2e,abs,localhost,127.0.0.1
+    depends_on:
+      egress-proxy:
+        condition: service_started
+
+  abs:
+    <<: *hardening
+    mem_limit: 1g
+    extra_hosts:
+      - "host.docker.internal:192.0.2.1"
+
+  fake-arr:
+    <<: *hardening
+    cap_drop: [ALL]
+    # Root inside, only to chown the shared volumes to PUID:PGID and write fixture files.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    mem_limit: 512m
+
+  egress-proxy:
+    <<: *hardening
+    image: rmab-e2e/fake-arr:${FAKE_ARR_TAG:-local}
+    command: ["node", "src/egress-proxy.js"]
+    user: "node"
+    cap_drop: [ALL]
+    mem_limit: 256m
+    networks: [stack, egress]
+    environment:
+      EGRESS_ALLOW: ${EGRESS_ALLOW:-api.audible.com,www.audible.com,audible.com,api.audnex.us,m.media-amazon.com}
+    labels:
+      rmab-e2e: "true"

@@ -8,8 +8,19 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { prisma } from '@/lib/db';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { isSameServiceUrl, savedCredentialUrlMismatch } from '@/lib/utils/saved-credential';
 
 const logger = RMABLogger.create('API.BookDateConfig');
+
+/** True when the saved (encrypted) key is non-empty, or cannot be read (treated as set). */
+function savedKeyIsSet(encryptedApiKey: string | null | undefined): boolean {
+  if (!encryptedApiKey) return false;
+  try {
+    return getEncryptionService().decrypt(encryptedApiKey) !== '';
+  } catch {
+    return true;
+  }
+}
 
 // GET: Fetch global BookDate configuration (excluding API key)
 // Any authenticated user can check if BookDate is configured
@@ -39,7 +50,7 @@ async function getConfig(req: AuthenticatedRequest) {
 async function saveConfig(req: AuthenticatedRequest) {
   try {
     const body = await req.json();
-    const { provider, apiKey, model, baseUrl, isEnabled } = body;
+    const { provider, apiKey, model, baseUrl, isEnabled, clearApiKey } = body;
 
     // Check if config exists
     const existingConfig = await prisma.bookDateConfig.findFirst();
@@ -92,26 +103,49 @@ async function saveConfig(req: AuthenticatedRequest) {
       }
     }
 
-    // Determine which API key to use
+    // Determine which API key to store (encrypted). Without a new key, the saved key is kept
+    // only for the same provider and, for custom, the same base URL; it never moves elsewhere.
+    const encryptionService = getEncryptionService();
+    const canKeepSavedKey = Boolean(existingConfig) &&
+      existingConfig!.provider === provider &&
+      (provider !== 'custom' || isSameServiceUrl(baseUrl, existingConfig!.baseUrl));
     let encryptedApiKeyToUse: string;
+    let apiKeyChanged = true;
 
     if (apiKey) {
       // New API key provided - encrypt it
-      const encryptionService = getEncryptionService();
       encryptedApiKeyToUse = encryptionService.encrypt(apiKey);
-    } else if (provider === 'custom' && !apiKey && !existingConfig) {
-      // Custom provider with no API key (local model) - encrypt empty string
-      const encryptionService = getEncryptionService();
+    } else if (clearApiKey === true) {
+      // Explicitly saved with no key (keyless custom endpoint); never for built-in providers
+      if (provider !== 'custom') {
+        return NextResponse.json(
+          { error: 'Only a custom provider can be saved without an API key' },
+          { status: 400 }
+        );
+      }
       encryptedApiKeyToUse = encryptionService.encrypt('');
-    } else if (existingConfig) {
-      // No new API key, use existing one
-      encryptedApiKeyToUse = existingConfig.apiKey;
+    } else if (canKeepSavedKey) {
+      // Same provider (and custom base URL): keep the saved key
+      encryptedApiKeyToUse = existingConfig!.apiKey;
+      apiKeyChanged = false;
+    } else if (provider === 'custom') {
+      if (existingConfig?.provider === 'custom' && savedKeyIsSet(existingConfig.apiKey)) {
+        // The saved key belongs to the saved base URL
+        return NextResponse.json(
+          { error: `${savedCredentialUrlMismatch('bookdate')} If this endpoint needs no key, choose "This endpoint needs no API key".` },
+          { status: 400 }
+        );
+      }
+      // Custom provider with no API key (local model) - encrypt empty string
+      encryptedApiKeyToUse = encryptionService.encrypt('');
     } else {
-      // API key required for OpenAI/Claude/Gemini
-      return NextResponse.json(
-        { error: 'API key is required' },
-        { status: 400 }
-      );
+      // API key required for OpenAI/Claude/Gemini; a saved key for another provider is never reused
+      const error = !existingConfig
+        ? 'API key is required'
+        : savedKeyIsSet(existingConfig.apiKey)
+          ? 'The saved API key is for a different provider. Enter an API key for this provider.'
+          : 'There is no saved API key for this provider. Enter one.';
+      return NextResponse.json({ error }, { status: 400 });
     }
 
     let config;
@@ -125,8 +159,8 @@ async function saveConfig(req: AuthenticatedRequest) {
         updatedAt: new Date(),
       };
 
-      // Only update API key if a new one was provided
-      if (apiKey) {
+      // Only update the API key when it changed (new key, or cleared for a keyless custom provider)
+      if (apiKeyChanged) {
         updateData.apiKey = encryptedApiKeyToUse;
       }
 

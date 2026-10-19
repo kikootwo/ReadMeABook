@@ -19,6 +19,19 @@ Manages application configuration with secure storage, encryption for sensitive 
 - Built into Node.js crypto module
 - Encryption key: 32-byte random (env var `CONFIG_ENCRYPTION_KEY`)
 - Format: `iv:authTag:encryptedData` (base64)
+- "Already encrypted" check: `EncryptionService.isEncryptedFormat` (strict: 3 base64 parts, IV and auth tag decode to 16 bytes). Used by the download-client storage helper and the credential migration, so colon-containing plaintext is still encrypted and undecryptable ciphertext is never wrapped twice
+
+## Atomic Writes
+
+- `setManyAtomic(updates)`: all upserts in one `prisma.$transaction` (all or nothing); used by the OIDC settings save. `setMany` writes one by one
+
+## Credential Migration (`src/lib/services/credential-migration.service.ts`)
+
+- `runCredentialMigration()` runs once per process at startup (`src/lib/startup/app-init.ts`); safe to repeat
+- Config keys: `plex_token`, `prowlarr_api_key`, `download_client_password` (legacy single-client) → encrypted, `encrypted: true`
+- `download_clients` JSON: plaintext passwords encrypted in place
+- Writes are compare-and-swap (`updateMany where { key, value: <value read> }`): an admin save in between wins, migration skips
+- `download_clients` writers all use `serializeDownloadClients()` (`src/lib/services/download-client-storage.ts`) → passwords always stored encrypted; a value in encrypted format is kept as-is only if it does NOT decrypt with the current key (otherwise it is treated as supplied text and encrypted)
 
 ## Configuration Model
 

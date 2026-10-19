@@ -1,0 +1,3 @@
+# Component: line endings for the e2e harness (files are consumed inside Linux containers)
+# Documentation: documentation/testing/e2e-harness.md
+* text=auto eol=lf

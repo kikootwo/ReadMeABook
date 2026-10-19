@@ -3,6 +3,8 @@
  * Documentation: documentation/backend/services/notifications.md
  */
 
+import type { CredentialKind } from '@/lib/utils/saved-credential';
+
 // Re-export event types from central source of truth
 export type { NotificationEvent } from '@/lib/constants/notification-events';
 
@@ -49,6 +51,12 @@ export interface INotificationProvider {
 
   /** Config field names that need encryption/masking */
   sensitiveFields: string[];
+
+  /**
+   * Config field holding the server URL the sensitive fields are sent to. A saved
+   * (masked) secret is kept on update only while this URL is unchanged.
+   */
+  secretBoundUrl?: { field: string; defaultUrl?: string; credentialKind: CredentialKind };
 
   /** Self-describing metadata for UI and validation */
   metadata: ProviderMetadata;

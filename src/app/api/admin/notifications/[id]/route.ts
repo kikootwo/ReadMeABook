@@ -100,22 +100,15 @@ export async function PUT(
 
         const notificationService = getNotificationService();
 
-        // Handle config updates (preserve masked values, encrypt new values)
+        // Handle config updates: masked values keep the saved (encrypted) value, but only
+        // while the server URL those secrets belong to is unchanged; new values are encrypted
         let finalConfig = existing.config;
         if (updates.config) {
-          const existingConfig = existing.config as any;
-          const updatedConfig = updates.config as any;
-
-          // Check if masked values need to be preserved
-          Object.keys(updatedConfig).forEach((key) => {
-            if (updatedConfig[key] === '••••••••') {
-              // Preserve existing encrypted value
-              updatedConfig[key] = existingConfig[key];
-            }
-          });
-
-          // Encrypt new/changed values
-          finalConfig = notificationService.encryptConfig(existing.type, updatedConfig);
+          const merge = notificationService.mergeMaskedSecrets(existing.type, existing.config, updates.config);
+          if (!merge.ok) {
+            return NextResponse.json({ error: 'ValidationError', message: merge.error }, { status: 400 });
+          }
+          finalConfig = notificationService.encryptConfig(existing.type, merge.config);
         }
 
         // Update backend

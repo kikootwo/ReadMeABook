@@ -12,13 +12,12 @@ import { Button } from './Button';
 import { useAddGoodreadsShelf } from '@/lib/hooks/useGoodreadsShelves';
 import { useAddHardcoverShelf } from '@/lib/hooks/useHardcoverShelves';
 import { HardcoverForm } from './HardcoverForm';
+import { GOODREADS_RSS_URL_ERROR, toGoodreadsRssUrl } from '@/lib/utils/goodreads-rss-url';
 
 interface AddShelfModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
-
-const GOODREADS_RSS_PATTERN = /goodreads\.com\/review\/list_rss\//;
 
 export function AddShelfModal({ isOpen, onClose }: AddShelfModalProps) {
   const [provider, setProvider] = useState<'goodreads' | 'hardcover'>('goodreads');
@@ -50,8 +49,8 @@ export function AddShelfModal({ isOpen, onClose }: AddShelfModalProps) {
         setValidationError('RSS URL is required');
         return false;
       }
-      if (!GOODREADS_RSS_PATTERN.test(rssUrl)) {
-        setValidationError('Must be a Goodreads shelf RSS URL (goodreads.com/review/list_rss/...)');
+      if (!toGoodreadsRssUrl(rssUrl)) {
+        setValidationError(GOODREADS_RSS_URL_ERROR);
         return false;
       }
     } else {
