@@ -28,8 +28,8 @@ RUN npm ci --ignore-scripts --fetch-retries=5 --fetch-retry-mintimeout=20000 --f
 COPY --from=harness --chown=node:node fetch-prisma-engines.mjs /opt/harness/fetch-prisma-engines.mjs
 RUN cd / && node /opt/harness/fetch-prisma-engines.mjs /src/node_modules /opt/prisma-engines
 
-# 3. No network from here on: native bindings built from source (bcrypt), platform binary checks, source, client.
-RUN --network=none npm_config_build_from_source=true npm_config_nodedir=/usr/local npm rebuild bcrypt esbuild unrs-resolver
+# 3. No network from here on: native bindings built from source (esbuild, unrs-resolver; bcrypt 6 loads its sha512-pinned prebuild like the image does), platform binary checks, source, client.
+RUN --network=none npm_config_build_from_source=true npm_config_nodedir=/usr/local npm rebuild esbuild unrs-resolver
 COPY --chown=node:node . .
 RUN --network=none npx prisma generate
 
