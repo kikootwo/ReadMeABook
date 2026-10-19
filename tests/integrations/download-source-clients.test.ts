@@ -25,8 +25,12 @@ import { TransmissionService } from '@/lib/integrations/transmission.service';
 import { DelugeService } from '@/lib/integrations/deluge.service';
 import { SABnzbdService } from '@/lib/integrations/sabnzbd.service';
 import { NZBGetService } from '@/lib/integrations/nzbget.service';
+import { UnusableDownloadSourceError } from '@/lib/interfaces/download-client.interface';
+import { DownloadSourceTimeoutError } from '@/lib/integrations/download-source';
 
 const logged = vi.hoisted(() => [] as string[]);
+// Short fetch deadline so the slow-source case finishes quickly
+vi.mock('@/lib/constants/download-timeouts', () => ({ DOWNLOAD_CLIENT_TIMEOUT: 1500 }));
 vi.mock('@/lib/utils/logger', () => {
   const record = (...args: unknown[]) => { logged.push(JSON.stringify(args)); };
   return { RMABLogger: { create: () => ({ info: record, debug: record, warn: record, error: record }) } };
@@ -190,5 +194,24 @@ describe('Prowlarr key scoping in download clients', () => {
         expect(servers.keyed('other')).toHaveLength(0);
       });
     }
+  });
+
+  describe('qBittorrent passes source errors through to the processor', () => {
+    it('reports an unusable redirect as UnusableDownloadSourceError (so the next release is tried)', async () => {
+      servers.on('prowlarr', '/1/download', redirectTo('ftp://files.example/book.torrent'));
+      const error = await new QBittorrentService(qbitUrl, '', '').addDownload(`${servers.prowlarrUrl}/1/download`, options()).catch((e) => e);
+      expect(error).toBeInstanceOf(UnusableDownloadSourceError);
+    });
+
+    it('reports a source that outlasts the deadline as DownloadSourceTimeoutError (so the job is retried)', async () => {
+      servers.on('other', '/slow', (res) => {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        const timer = setInterval(() => res.write('d'), 50);
+        res.on('close', () => clearInterval(timer));
+      });
+      const error = await new QBittorrentService(qbitUrl, '', '').addDownload(`${servers.otherUrl}/slow`, options()).catch((e) => e);
+      expect(error).toBeInstanceOf(DownloadSourceTimeoutError);
+      expect(error.code).toBe('ETIMEDOUT');
+    });
   });
 });

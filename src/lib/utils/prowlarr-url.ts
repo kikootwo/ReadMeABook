@@ -100,20 +100,25 @@ export function isProwlarrDownloadUrl(url: string, base: ProwlarrBase | null): b
  * Map a link Prowlarr published onto the configured base, or null if it is not a
  * Prowlarr download link. Same host name required (case-insensitive); a scheme
  * difference (TLS proxy without X-Forwarded-Proto) or default-port difference and
- * base-path case are tolerated. The result always uses the configured scheme,
- * port, credentials and base path, so the key travels the way the admin set it up.
+ * base-path case are tolerated; any credentials in the candidate are discarded.
+ * The result uses the configured scheme, port and base path. Configured
+ * credentials (`user:pass@`) are added only with `withCredentials` — at fetch
+ * time — so they are never stored with a pick, a download record or a job.
  */
-export function toConfiguredProwlarrUrl(url: string, base: ProwlarrBase | null): string | null {
+export function toConfiguredProwlarrUrl(
+  url: string,
+  base: ProwlarrBase | null,
+  options: { withCredentials?: boolean } = {}
+): string | null {
   if (!base) return null;
   const parsed = parseHttpUrl(url);
   if (!parsed || parsed.hostname.toLowerCase() !== base.hostname) return null;
-  const candidateUserinfo = userinfoOf(parsed);
-  if (candidateUserinfo && candidateUserinfo !== base.userinfo) return null;
   const portsMatch = effectivePort(parsed) === base.port || (parsed.port === '' && base.defaultPort);
   if (!portsMatch) return null;
   const suffix = downloadSuffix(parsed, base);
   if (!suffix) return null;
-  return `${base.protocol}//${base.userinfo}${base.host}${base.basePath}${suffix}${parsed.search}${parsed.hash}`;
+  const userinfo = options.withCredentials ? base.userinfo : '';
+  return `${base.protocol}//${userinfo}${base.host}${base.basePath}${suffix}${parsed.search}${parsed.hash}`;
 }
 
 const MAGNET_PATTERN = /^magnet:\?[^\s]+$/i;

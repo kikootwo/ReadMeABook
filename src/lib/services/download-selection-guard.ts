@@ -19,7 +19,10 @@ export const UNTRUSTED_DOWNLOAD_URL_MESSAGE =
 
 const MD5_PATTERN = /^[a-f0-9]{32}$/i;
 
-export type GuardResult<T> = { ok: true; value: T } | { ok: false; error: string };
+/** `retryable`: the source could not be reached right now (the pick itself may be fine) */
+export type GuardResult<T> = { ok: true; value: T } | { ok: false; error: string; retryable?: boolean };
+
+export const SOURCE_UNAVAILABLE_MESSAGE = "Couldn't reach Anna's Archive to prepare this download. Try again in a moment.";
 
 /**
  * Accept a magnet as-is, or a Prowlarr download link rewritten onto the configured
@@ -53,7 +56,12 @@ export async function resolveAnnasArchiveLinks(md5: unknown): Promise<GuardResul
   const configService = getConfigService();
   const baseUrl = (await configService.get('ebook_sidecar_base_url')) || DEFAULT_ANNAS_ARCHIVE_BASE_URL;
   const flaresolverrUrl = (await configService.get('ebook_sidecar_flaresolverr_url')) || undefined;
-  const downloadUrls = await getSlowDownloadLinks(normalized, baseUrl, undefined, flaresolverrUrl);
+  let downloadUrls: string[];
+  try {
+    downloadUrls = await getSlowDownloadLinks(normalized, baseUrl, undefined, flaresolverrUrl, { throwOnError: true });
+  } catch {
+    return { ok: false, error: SOURCE_UNAVAILABLE_MESSAGE, retryable: true };
+  }
   if (downloadUrls.length === 0) {
     return { ok: false, error: "No Anna's Archive download links are available for this e-book right now" };
   }
@@ -83,6 +91,14 @@ export async function guardEbookSelection<
 /** 400 response for a rejected selection. */
 export function rejectedSelectionResponse(message: string): NextResponse {
   return NextResponse.json({ error: 'ValidationError', message }, { status: 400 });
+}
+
+/** 503 when the source could not be reached (try again), otherwise 400. */
+export function selectionFailureResponse(result: { error: string; retryable?: boolean }): NextResponse {
+  if (result.retryable) {
+    return NextResponse.json({ error: 'SourceUnavailable', message: result.error }, { status: 503 });
+  }
+  return rejectedSelectionResponse(result.error);
 }
 
 function stripDeep(value: unknown, apiKey: string): unknown {

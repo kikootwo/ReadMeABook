@@ -29,10 +29,16 @@ describe('checkClientDownloadUrl against the configured Prowlarr base', () => {
       'https://prowlarr.example/3/download?link=abc&file=Book',
     ],
     [
-      '(b) configured URL carries credentials',
+      '(b) configured URL carries credentials (never copied into the pick)',
       'http://admin:s3cret@prowlarr:9696',
       'http://prowlarr:9696/3/download?link=abc',
-      'http://admin:s3cret@prowlarr:9696/3/download?link=abc',
+      'http://prowlarr:9696/3/download?link=abc',
+    ],
+    [
+      'a pick that carries its own credentials (discarded)',
+      'http://admin:s3cret@prowlarr:9696',
+      'http://other:x@prowlarr:9696/3/download?link=abc',
+      'http://prowlarr:9696/3/download?link=abc',
     ],
     [
       '(c) URL base differs in case',
@@ -55,7 +61,6 @@ describe('checkClientDownloadUrl against the configured Prowlarr base', () => {
     ['a different host', 'https://prowlarr.example', 'http://evil.example/3/download'],
     ['a different non-default port on the same host', 'http://prowlarr:9696', 'http://prowlarr:9697/3/download'],
     ['same host but a non-default port while configured on the default one', 'https://prowlarr.example', 'http://prowlarr.example:8080/3/download'],
-    ['different credentials', 'http://admin:s3cret@prowlarr:9696', 'http://other:x@prowlarr:9696/3/download'],
     ['a non-download Prowlarr path', 'http://prowlarr:9696', 'http://prowlarr:9696/api/v1/indexer'],
     ['outside the configured base path', 'http://prowlarr:9696/prowlarr', 'http://prowlarr:9696/3/download'],
   ])('rejects %s', async (_label, configured, picked) => {

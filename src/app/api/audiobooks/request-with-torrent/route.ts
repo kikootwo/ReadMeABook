@@ -16,6 +16,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
 import { sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 import { guardTorrentSelection, rejectedSelectionResponse } from '@/lib/services/download-selection-guard';
+import { hideStoredPick } from '@/lib/services/request-detail-query';
 
 const logger = RMABLogger.create('API.RequestWithTorrent');
 
@@ -214,7 +215,7 @@ export async function POST(request: NextRequest) {
             {
               error: 'DuplicateRequest',
               message: 'You have already requested this audiobook',
-              request: existingRequest,
+              request: hideStoredPick(existingRequest, req.user.role),
             },
             { status: 409 }
           );
@@ -309,7 +310,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
           success: true,
-          request: newRequest,
+          request: hideStoredPick(newRequest, req.user.role),
           message: 'Request submitted for admin approval',
         }, { status: 201 });
       } else {
@@ -361,7 +362,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
           success: true,
-          request: newRequest,
+          request: hideStoredPick(newRequest, req.user.role),
         }, { status: 201 });
       }
     } catch (error) {

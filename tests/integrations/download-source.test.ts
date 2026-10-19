@@ -15,6 +15,7 @@ import {
   serve,
 } from '../helpers/source-servers';
 import { fetchDownloadSource } from '@/lib/integrations/download-source';
+import { parseProwlarrBase, toConfiguredProwlarrUrl } from '@/lib/utils/prowlarr-url';
 import { DownloadSourceError, UnusableDownloadSourceError } from '@/lib/interfaces/download-client.interface';
 import { isTransientConnectionError } from '@/lib/utils/connection-errors';
 
@@ -132,6 +133,24 @@ describe('fetchDownloadSource', () => {
     // A tab is a legal header byte; a client that split on whitespace would fetch the second URL
     servers.on('other', '/smuggle', redirectTo(`${TEST_MAGNET}\thttp://evil.example/x`));
     await expect(fetchTorrent(`${servers.otherUrl}/smuggle`)).rejects.toThrow('Invalid redirect location');
+  });
+
+  it('adds configured Prowlarr credentials only at grab time, and the grab authenticates', async () => {
+    servers.on('prowlarr', '/1/download', serve(TEST_TORRENT));
+    const configured = servers.prowlarrUrl.replace('http://', 'http://admin:S3cret@');
+    const base = parseProwlarrBase(configured);
+    const stored = toConfiguredProwlarrUrl(`${servers.prowlarrUrl}/1/download?link=a`, base);
+    expect(stored).not.toContain('S3cret');
+
+    const grabUrl = toConfiguredProwlarrUrl(stored!, base, { withCredentials: true })!;
+    await fetchDownloadSource(grabUrl, {
+      sourceAuth: { prowlarrBaseUrl: configured, apiKey: TEST_PROWLARR_KEY }, allowMagnet: true, timeoutMs: 5000,
+    });
+
+    const [request] = servers.requests;
+    expect(request.headers.authorization).toBe(`Basic ${Buffer.from('admin:S3cret').toString('base64')}`);
+    expect(request.headers['x-api-key']).toBe(TEST_PROWLARR_KEY);
+    expect(logged.join('\n')).not.toContain('S3cret');
   });
 
   it('rejects redirects to non-http schemes', async () => {

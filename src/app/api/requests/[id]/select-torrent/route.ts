@@ -11,6 +11,7 @@ import { TorrentResult } from '@/lib/utils/ranking-algorithm';
 import { RMABLogger } from '@/lib/utils/logger';
 import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
 import { guardTorrentSelection, rejectedSelectionResponse } from '@/lib/services/download-selection-guard';
+import { hideStoredPick } from '@/lib/services/request-detail-query';
 
 const logger = RMABLogger.create('API.SelectTorrent');
 
@@ -146,7 +147,7 @@ export async function POST(
 
         return NextResponse.json({
           success: true,
-          request: updated,
+          request: hideStoredPick(updated, req.user.role),
           message: 'Request submitted for admin approval',
         });
       }
@@ -192,7 +193,7 @@ export async function POST(
 
       return NextResponse.json({
         success: true,
-        request: updated,
+        request: hideStoredPick(updated, req.user.role),
         message: 'Torrent download initiated',
       });
     } catch (error) {

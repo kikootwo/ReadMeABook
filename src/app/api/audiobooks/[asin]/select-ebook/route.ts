@@ -16,7 +16,7 @@ import { getAudibleService } from '@/lib/integrations/audible.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { startAnnasArchiveDownload, startIndexerEbookDownload, type SelectedEbook } from '@/lib/services/ebook-selection.service';
 import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
-import { guardEbookSelection, rejectedSelectionResponse } from '@/lib/services/download-selection-guard';
+import { guardEbookSelection, selectionFailureResponse } from '@/lib/services/download-selection-guard';
 
 const logger = RMABLogger.create('API.Audiobooks.SelectEbook');
 
@@ -75,7 +75,7 @@ export async function POST(
 
       // Indexer picks must be Prowlarr/magnet links; Anna's Archive links are rebuilt from the md5
       const ebookCheck = await guardEbookSelection(selectedEbook);
-      if (!ebookCheck.ok) return rejectedSelectionResponse(ebookCheck.error);
+      if (!ebookCheck.ok) return selectionFailureResponse(ebookCheck);
       selectedEbook = ebookCheck.value;
 
       // First, fetch audiobook data from Audible (works for books imported outside RMAB)

@@ -161,7 +161,7 @@ describe('download selection guard on routes', () => {
     const response = await POST(request as any, { params: Promise.resolve({ asin: 'B000000001' }) });
 
     expect(response.status).toBe(200);
-    expect(slowLinksMock).toHaveBeenCalledWith(MD5, ANNAS, undefined, undefined);
+    expect(slowLinksMock).toHaveBeenCalledWith(MD5, ANNAS, undefined, undefined, { throwOnError: true });
     const [, , queuedUrl] = jobQueueMock.addStartDirectDownloadJob.mock.calls[0];
     expect(queuedUrl).toBe(`${ANNAS}/slow_download/${MD5}/0/0`);
     expect(JSON.stringify(prismaMock.downloadHistory.update.mock.calls)).not.toContain('evil.example');
@@ -208,9 +208,45 @@ describe('download selection guard on routes', () => {
 
     const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
     const response = await POST(request as any, params('req-3'));
+    const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(jobQueueMock.addStartDirectDownloadJob).not.toHaveBeenCalled();
     expect(jobQueueMock.addSearchEbookJob).toHaveBeenCalled();
+    // The admin is told the user's pick was dropped
+    expect(body.selectionDropped).toContain('No Anna');
+    expect(body.message).toContain('could not be used');
+  });
+
+  it('keeps the stored pick and returns 503 when Anna\'s Archive cannot be reached at approval', async () => {
+    slowLinksMock.mockRejectedValue(new Error('FlareSolverr timeout'));
+    prismaMock.request.findUnique.mockResolvedValue({
+      id: 'req-4', userId: 'user-2', type: 'ebook', status: 'awaiting_approval',
+      selectedTorrent: { source: 'annas_archive', md5: MD5 },
+      audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
+      user: { id: 'user-2', plexUsername: 'other' },
+    });
+    const request = { json: async () => ({ action: 'approve' }) };
+
+    const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
+    const response = await POST(request as any, params('req-4'));
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body.message).toContain('Try again');
+    expect(prismaMock.request.update).not.toHaveBeenCalled();
+    expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
+    expect(jobQueueMock.addStartDirectDownloadJob).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 (not 400) for an e-book pick when Anna\'s Archive cannot be reached', async () => {
+    slowLinksMock.mockRejectedValue(new Error('ECONNRESET'));
+    const request = { json: async () => ({ ebook: { source: 'annas_archive', md5: MD5, title: 'Book', score: 100 } }) };
+
+    const { POST } = await import('@/app/api/audiobooks/[asin]/select-ebook/route');
+    const response = await POST(request as any, { params: Promise.resolve({ asin: 'B000000001' }) });
+
+    expect(response.status).toBe(503);
+    expect(jobQueueMock.addStartDirectDownloadJob).not.toHaveBeenCalled();
   });
 });

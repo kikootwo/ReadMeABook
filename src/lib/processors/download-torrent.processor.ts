@@ -28,7 +28,8 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
   const logger = RMABLogger.forJob(jobId, 'DownloadTorrent');
 
   // A magnet must be one whitespace-free URI (clients split their URL lists on newlines)
-  const candidates = [torrent, ...alternateTorrents].filter((candidate) => {
+  const candidates = [torrent, ...(alternateTorrents ?? [])].filter((candidate) => {
+    if (!candidate) return false;
     const malformed = /^magnet:/i.test(candidate.downloadUrl ?? '') && !isMagnetUri(candidate.downloadUrl);
     if (malformed) {
       logger.warn(`Skipping release with a malformed magnet link: ${candidate.title}`, { indexer: candidate.indexer });
@@ -95,7 +96,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
       try {
         downloadClientId = await client.addDownload(
           // Prowlarr links go to the configured base (scheme, port, credentials); others as-is
-          toConfiguredProwlarrUrl(candidate.downloadUrl, prowlarr.base) ?? candidate.downloadUrl,
+          toConfiguredProwlarrUrl(candidate.downloadUrl, prowlarr.base, { withCredentials: true }) ?? candidate.downloadUrl,
           { category, priority: 'normal', sourceAuth }
         );
       } catch (error) {

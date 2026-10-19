@@ -12,7 +12,7 @@ import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { startAnnasArchiveDownload, startIndexerEbookDownload, type SelectedEbook } from '@/lib/services/ebook-selection.service';
-import { guardEbookSelection, rejectedSelectionResponse } from '@/lib/services/download-selection-guard';
+import { guardEbookSelection, selectionFailureResponse } from '@/lib/services/download-selection-guard';
 
 const logger = RMABLogger.create('API.SelectEbook');
 
@@ -37,7 +37,7 @@ export async function POST(
 
         // Indexer picks must be Prowlarr/magnet links; Anna's Archive links are rebuilt from the md5
         const ebookCheck = await guardEbookSelection(selectedEbook);
-        if (!ebookCheck.ok) return rejectedSelectionResponse(ebookCheck.error);
+        if (!ebookCheck.ok) return selectionFailureResponse(ebookCheck);
         selectedEbook = ebookCheck.value;
 
         // Get the request - could be an audiobook request or an existing ebook request

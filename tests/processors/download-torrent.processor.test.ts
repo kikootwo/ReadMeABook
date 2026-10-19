@@ -343,6 +343,17 @@ describe('processDownloadTorrent', () => {
     expect(addDownload.mock.calls[0][0]).toBe('magnet:?xt=urn:btih:def');
   });
 
+  it('ignores null alternates instead of crashing', async () => {
+    const addDownload = vi.fn().mockResolvedValue('hash-1');
+    setupQbit(addDownload);
+
+    const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+    const result = await processDownloadTorrent({ ...torrentPayload, alternateTorrents: [null, second] } as any);
+
+    expect(result.success).toBe(true);
+    expect(addDownload).toHaveBeenCalledTimes(1);
+  });
+
   it('skips a release whose source is unusable and grabs the next one', async () => {
     const addDownload = vi.fn()
       .mockRejectedValueOnce(new UnusableDownloadSourceError('Invalid redirect location: magnet:'))

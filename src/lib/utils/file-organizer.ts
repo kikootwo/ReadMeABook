@@ -10,7 +10,7 @@ import { RMAB_USER_AGENT } from './user-agent';
 import { tagMultipleFiles, checkFfmpegAvailable } from './metadata-tagger';
 import { RMABLogger } from './logger';
 import { copyFile } from './copy-file';
-import { MAX_COVER_ART_BYTES, MAX_COVER_ART_REDIRECTS, cachedThumbnailPath, isAllowedRemoteCoverUrl } from './cover-art-url';
+import { MAX_COVER_ART_BYTES, MAX_COVER_ART_REDIRECTS, cachedThumbnailPath, isAllowedRemoteCoverUrl, isLibraryCoverSource } from './cover-art-url';
 
 const moduleLogger = RMABLogger.create('FileOrganizer');
 import {
@@ -482,6 +482,11 @@ export class FileOrganizer {
           await logger?.warn(`Failed to copy cover art: ${error instanceof Error ? error.message : 'Unknown error'}`);
           result.errors.push('Failed to copy cover art');
         }
+      } else if (audiobook.coverArtUrl && !isLibraryCoverSource(audiobook.coverArtUrl)) {
+        // Display-only cover (e.g. a shelf-sync fallback host): never fetched into the library
+        const message = 'Cover art is not from a cached thumbnail or known cover image host; skipping cover.jpg';
+        if (logger) await logger.warn(message);
+        else moduleLogger.warn(message);
       } else if (audiobook.coverArtUrl) {
         // Download cover art from Audible if not in torrent
         try {

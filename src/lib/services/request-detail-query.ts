@@ -112,3 +112,12 @@ export const OWNER_REQUEST_DETAIL_SELECT = {
     },
   },
 } satisfies Prisma.RequestSelect;
+
+/**
+ * Drop the stored release pick from a request returned to a non-admin. It is
+ * internal (download link) and only admins act on it.
+ */
+export function hideStoredPick<T>(record: T, role: string | undefined): T {
+  if (role === 'admin' || !record || typeof record !== 'object') return record;
+  return { ...record, selectedTorrent: undefined };
+}

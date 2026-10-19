@@ -389,7 +389,8 @@ describe('file organizer', () => {
     expect(axiosMock.get).not.toHaveBeenCalled();
     expect(copyFileMock.copyFile).toHaveBeenCalledTimes(1); // the audio file only
     expect(result.coverArtFile).toBeUndefined();
-    expect(result.errors.join(' ')).toContain('Failed to download cover art');
+    // Display-only covers are skipped with a warning, not reported as an error
+    expect(result.errors.join(' ')).not.toContain('cover art');
   });
 
   it('records an error when cover art download fails', async () => {

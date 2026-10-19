@@ -11,7 +11,7 @@ import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
 import * as parseTorrentModule from 'parse-torrent';
 import FormData from 'form-data';
 import { RMABLogger } from '../utils/logger';
-import { fetchDownloadSource, type SourceAuth } from './download-source';
+import { DownloadSourceTimeoutError, fetchDownloadSource, type SourceAuth } from './download-source';
 import { urlForLog } from '../utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import {
@@ -23,6 +23,7 @@ import {
   AddDownloadOptions,
   ConnectionTestResult,
   DownloadSourceError,
+  UnusableDownloadSourceError,
 } from '../interfaces/download-client.interface';
 
 // Handle both ESM and CommonJS imports
@@ -286,8 +287,13 @@ export class QBittorrentService implements IDownloadClient {
         return await this.addTorrentFile(url, category, options);
       }
     } catch (error) {
-      // Preserve source/indexer failures so the processor can try another release.
-      if (error instanceof DownloadSourceError) {
+      // Preserve source/indexer failures so the processor can try another release
+      // (unusable source) or Bull can retry (fetch deadline).
+      if (
+        error instanceof DownloadSourceError ||
+        error instanceof UnusableDownloadSourceError ||
+        error instanceof DownloadSourceTimeoutError
+      ) {
         throw error;
       }
 
