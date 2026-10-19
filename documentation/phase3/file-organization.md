@@ -146,7 +146,7 @@ exiftool "audiobook.m4b" | grep -i asin
 **Requirements:**
 - ffmpeg + ffprobe must be on PATH (`/usr/local/bin`)
 - **Image install** (`dockerfile.unified`): see [deployment/unified.md](../deployment/unified.md) → ffmpeg (pinned static 9.0.2, amd64 + arm64)
-- Codecs/formats RMAB needs: demux concat/ffmetadata/mov/mp3/flac/aac; decode mp3/flac/aac; encode aac (libfdk_aac optional, not in image); mux mp4/mp3/flac/null; bsf aac_adtstoasc
+- Codecs/formats RMAB needs: demux concat/ffmetadata/mov/mp3/flac/aac/ogg; decode mp3/flac/aac/alac/ogg (vorbis, opus); encode aac (libfdk_aac optional, not in image); mux mp4/ipod/mp3/flac/null; bsf aac_adtstoasc
 - **Verify installation:** `docker exec readmeabook ffmpeg -version`
 - **Fixed (#230):** arm64 images shipped an amd64 ffprobe (`Exec format error`), silently disabling tagging + chapter merge
 
