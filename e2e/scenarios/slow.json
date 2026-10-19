@@ -1,0 +1,8 @@
+{
+  "name": "slow",
+  "description": "Healthy release that takes 90s to complete (progress reporting, monitor polling).",
+  "book": "phm",
+  "releases": [
+    { "id": "slow", "title": "{{author}} - {{title}} (Unabridged) [M4B]", "sizeMB": 400, "seeders": 40, "fixture": "phm-m4b", "download": { "completeMs": 90000 } }
+  ]
+}

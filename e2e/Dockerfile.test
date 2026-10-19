@@ -1,0 +1,36 @@
+# Component: E2E harness containerized unit suite (npm test for any branch, incl. untrusted ones)
+# Documentation: documentation/testing/e2e-harness.md
+#
+# Built by `npm run e2e:unit -- --slug <s> --worktree <dir>` from a TRUSTED checkout:
+#   docker build -f <trusted>/e2e/Dockerfile.test --build-context harness=<trusted>/e2e/unit <worktree>
+# Network is used only by npm itself (lockfile tarballs, integrity-checked, --ignore-scripts) and by the
+# trusted engine fetch below. Every step that can execute branch or package code runs --network=none.
+# The suite then runs with --network none, as the non-root node user, no mounts, memory/cpu/pids caps.
+
+# Same pinned static ffmpeg/ffprobe as dockerfile.unified, so ffmpeg-backed integration tests run (not skip).
+FROM mwader/static-ffmpeg:9.0.2-1@sha256:f5d100184884eb3e82b0eb14bb5ebf98da99826ac824989720297fb9ef21c822 AS ffmpeg
+
+FROM node:20-bookworm@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5
+COPY --from=ffmpeg /ffmpeg /ffprobe /usr/local/bin/
+ENV CI=true NEXT_TELEMETRY_DISABLED=1 NPM_CONFIG_UPDATE_NOTIFIER=false NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false \
+    PRISMA_SCHEMA_ENGINE_BINARY=/opt/prisma-engines/schema-engine \
+    PRISMA_QUERY_ENGINE_LIBRARY=/opt/prisma-engines/libquery_engine-debian-openssl-3.0.x.so.node \
+    PRISMA_SKIP_POSTINSTALL_GENERATE=1
+WORKDIR /src
+RUN mkdir /opt/prisma-engines && chown node:node /src /opt/prisma-engines
+USER node
+
+# 1. Network, npm only: exactly the lockfile's tarballs, no lifecycle scripts from the branch or its packages.
+COPY --chown=node:node package.json package-lock.json ./
+RUN npm ci --ignore-scripts --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-timeout=600000
+
+# 2. Network, trusted code only: Prisma engines for the locked engines hash, sha256-verified.
+COPY --from=harness --chown=node:node fetch-prisma-engines.mjs /opt/harness/fetch-prisma-engines.mjs
+RUN cd / && node /opt/harness/fetch-prisma-engines.mjs /src/node_modules /opt/prisma-engines
+
+# 3. No network from here on: native bindings built from source (bcrypt), platform binary checks, source, client.
+RUN --network=none npm_config_build_from_source=true npm_config_nodedir=/usr/local npm rebuild bcrypt esbuild unrs-resolver
+COPY --chown=node:node . .
+RUN --network=none npx prisma generate
+
+CMD ["npm", "test"]

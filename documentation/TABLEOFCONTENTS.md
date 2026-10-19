@@ -126,6 +126,7 @@
 
 ## Testing
 - **Backend unit test framework, scripts** [testing.md](testing.md)
+- **E2E harness (disposable Docker stack, fake-arr, Playwright, self-gate, preview)** → [testing/e2e-harness.md](testing/e2e-harness.md)
 
 ## Feature-Specific Lookups
 **"How do I add a new audiobook?"** → [integrations/audible.md](integrations/audible.md) (scraping), [phase3/README.md](phase3/README.md) (automation)
@@ -136,6 +137,7 @@
 **"How do I use NZBGet instead of SABnzbd?"** → [phase3/download-clients.md](phase3/download-clients.md)
 **"How do I use Transmission instead of qBittorrent?"** → [phase3/download-clients.md](phase3/download-clients.md)
 **"How do I set different download paths per client?"** → [phase3/download-clients.md](phase3/download-clients.md#per-client-custom-download-path)
+**"How do I test a branch end to end without touching my own Docker setup?"** → [testing/e2e-harness.md](testing/e2e-harness.md)
 **"How does Plex matching work?"** → [integrations/plex.md](integrations/plex.md)
 **"How does e-book support work?"** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
 **"How do I enable e-book downloads?"** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md), [settings-pages.md](settings-pages.md#e-book-sidecar)

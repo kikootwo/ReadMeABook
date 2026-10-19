@@ -1,0 +1,8 @@
+{
+  "name": "rmab-e2e-harness",
+  "private": true,
+  "description": "ReadMeABook e2e harness: Playwright specs run inside a pinned Playwright container. Kept out of the app's package.json so nothing here reaches the production image.",
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

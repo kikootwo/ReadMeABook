@@ -1,0 +1,59 @@
+# Component: build-context filter for e2e/Dockerfile.test (BuildKit reads <Dockerfile>.dockerignore)
+# Documentation: documentation/testing/e2e-harness.md
+#
+# Superset of the repo-root .dockerignore (kept in sync by hand) plus harness-specific exclusions.
+
+# --- root .dockerignore ---
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+src/generated
+coverage
+.nyc_output
+.next
+out
+build
+dist
+.DS_Store
+*.pem
+*.log
+logs
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.git
+.gitignore
+.gitattributes
+.github
+*.md
+!README.md
+Dockerfile
+docker-compose.yml
+.dockerignore
+config
+downloads
+media
+pgdata
+redisdata
+bookdrop
+redis
+.claude
+e2e/
+
+# --- harness additions ---
+**/node_modules
+**/*.log
+**/*.pem
+**/.env*
+docker-compose*.yml
+.claude
+cache
+redis
