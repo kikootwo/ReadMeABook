@@ -10,7 +10,7 @@
 
 import { NextResponse } from 'next/server';
 import { getProwlarrConnection } from '@/lib/integrations/prowlarr-connection';
-import { isMagnetUri, isProwlarrDownloadUrl, stripApiKey } from '@/lib/utils/prowlarr-url';
+import { isMagnetUri, stripApiKey, toConfiguredProwlarrUrl } from '@/lib/utils/prowlarr-url';
 
 export const DEFAULT_ANNAS_ARCHIVE_BASE_URL = 'https://annas-archive.gl';
 
@@ -21,21 +21,25 @@ const MD5_PATTERN = /^[a-f0-9]{32}$/i;
 
 export type GuardResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
-/** Returns null when `url` may be fetched on the user's behalf, otherwise the rejection message. */
-export async function checkClientDownloadUrl(url: unknown): Promise<string | null> {
-  if (typeof url !== 'string' || url.trim() === '') return 'Download URL is required';
-  if (isMagnetUri(url)) return null;
+/**
+ * Accept a magnet as-is, or a Prowlarr download link rewritten onto the configured
+ * Prowlarr base (scheme, port, credentials); anything else is rejected.
+ */
+export async function checkClientDownloadUrl(url: unknown): Promise<GuardResult<string>> {
+  if (typeof url !== 'string' || url.trim() === '') return { ok: false, error: 'Download URL is required' };
+  if (isMagnetUri(url)) return { ok: true, value: url };
   const { base } = await getProwlarrConnection();
-  return isProwlarrDownloadUrl(url.trim(), base) ? null : UNTRUSTED_DOWNLOAD_URL_MESSAGE;
+  const rewritten = toConfiguredProwlarrUrl(url, base);
+  return rewritten ? { ok: true, value: rewritten } : { ok: false, error: UNTRUSTED_DOWNLOAD_URL_MESSAGE };
 }
 
-/** Validate a client- or DB-supplied torrent/NZB selection. */
+/** Validate a client- or DB-supplied torrent/NZB selection (downloadUrl normalized onto the configured base). */
 export async function guardTorrentSelection<T extends { downloadUrl?: unknown }>(
   selection: T | null | undefined
 ): Promise<GuardResult<T>> {
   if (!selection || typeof selection !== 'object') return { ok: false, error: 'Torrent data is required' };
-  const error = await checkClientDownloadUrl(selection.downloadUrl);
-  return error ? { ok: false, error } : { ok: true, value: selection };
+  const url = await checkClientDownloadUrl(selection.downloadUrl);
+  return url.ok ? { ok: true, value: { ...selection, downloadUrl: url.value } } : url;
 }
 
 /** Rebuild Anna's Archive download links from the md5 using the configured base URL. */
@@ -72,10 +76,7 @@ export async function guardEbookSelection<
       value: { ...selection, md5: links.value.md5, downloadUrl: links.value.downloadUrls[0], downloadUrls: links.value.downloadUrls },
     };
   }
-  if (selection.source === 'prowlarr') {
-    const error = await checkClientDownloadUrl(selection.downloadUrl);
-    return error ? { ok: false, error } : { ok: true, value: selection };
-  }
+  if (selection.source === 'prowlarr') return guardTorrentSelection(selection);
   return { ok: false, error: 'Ebook source not specified' };
 }
 

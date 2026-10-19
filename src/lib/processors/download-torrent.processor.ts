@@ -9,11 +9,12 @@ import { getConfigService } from '../services/config.service';
 import { getDownloadClientManager } from '../services/download-client-manager.service';
 import { ProwlarrService } from '../integrations/prowlarr.service';
 import { getProwlarrConnection } from '../integrations/prowlarr-connection';
-import { isMagnetUri } from '../utils/prowlarr-url';
+import { isMagnetUri, toConfiguredProwlarrUrl } from '../utils/prowlarr-url';
 import { RMABLogger } from '../utils/logger';
 import { isTransientConnectionError } from '../utils/connection-errors';
 import {
   DownloadSourceError,
+  UnusableDownloadSourceError,
   isRetryableDownloadSourceError,
 } from '../interfaces/download-client.interface';
 
@@ -24,9 +25,16 @@ import {
  */
 export async function processDownloadTorrent(payload: DownloadTorrentPayload): Promise<any> {
   const { requestId, audiobook, torrent, alternateTorrents = [], jobId } = payload;
-  const candidates = [torrent, ...alternateTorrents];
-
   const logger = RMABLogger.forJob(jobId, 'DownloadTorrent');
+
+  // A magnet must be one whitespace-free URI (clients split their URL lists on newlines)
+  const candidates = [torrent, ...alternateTorrents].filter((candidate) => {
+    const malformed = /^magnet:/i.test(candidate.downloadUrl ?? '') && !isMagnetUri(candidate.downloadUrl);
+    if (malformed) {
+      logger.warn(`Skipping release with a malformed magnet link: ${candidate.title}`, { indexer: candidate.indexer });
+    }
+    return !malformed;
+  });
 
   logger.info(`Processing request ${requestId} for "${audiobook.title}"`);
   logger.info(`Selected result: ${torrent.title}`, {
@@ -61,15 +69,12 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
       ? { prowlarrBaseUrl: prowlarr.baseUrl, apiKey: prowlarr.apiKey }
       : undefined;
 
+    // Last temporary (429/5xx) failure, so a later unusable release cannot hide it from Bull's retry
+    let lastRetryableError: DownloadSourceError | null = null;
+
     for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
       const candidate = candidates[candidateIndex];
-
-      // A magnet must be one whitespace-free URI (clients split their URL lists on newlines)
-      if (/^magnet:/i.test(candidate.downloadUrl ?? '') && !isMagnetUri(candidate.downloadUrl)) {
-        logger.warn(`Skipping release with a malformed magnet link: ${candidate.title}`, { indexer: candidate.indexer });
-        if (candidateIndex < candidates.length - 1) continue;
-        throw new Error(`Release "${candidate.title}" has a malformed magnet link`);
-      }
+      const hasNextCandidate = candidateIndex < candidates.length - 1;
       const isUsenet = ProwlarrService.isNZBResult(candidate);
       const protocol = isUsenet ? 'usenet' : 'torrent';
       const client = await manager.getClientServiceForProtocol(protocol);
@@ -88,12 +93,23 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
 
       let downloadClientId: string;
       try {
-        downloadClientId = await client.addDownload(candidate.downloadUrl, {
-          category,
-          priority: 'normal',
-          sourceAuth,
-        });
+        downloadClientId = await client.addDownload(
+          // Prowlarr links go to the configured base (scheme, port, credentials); others as-is
+          toConfiguredProwlarrUrl(candidate.downloadUrl, prowlarr.base) ?? candidate.downloadUrl,
+          { category, priority: 'normal', sourceAuth }
+        );
       } catch (error) {
+        if (error instanceof UnusableDownloadSourceError) {
+          // This release can't be fetched (bad redirect, malformed magnet, ...): try the next one
+          logger.warn(`${error.message} for "${candidate.title}"${hasNextCandidate ? '; trying next ranked release' : ''}`, {
+            indexer: candidate.indexer,
+            candidate: candidateIndex + 1,
+            candidateCount: candidates.length,
+          });
+          if (hasNextCandidate) continue;
+          throw lastRetryableError ?? error;
+        }
+
         if (!(error instanceof DownloadSourceError)) {
           throw error;
         }
@@ -109,7 +125,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
           throw contextualError;
         }
 
-        const hasNextCandidate = candidateIndex < candidates.length - 1;
+        lastRetryableError = contextualError;
 
         logger.warn(
           `${contextualError.message}${hasNextCandidate ? '; trying next ranked release' : ''}`,

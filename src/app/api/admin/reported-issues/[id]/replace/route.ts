@@ -57,7 +57,7 @@ export async function POST(
         const torrentCheck = await guardTorrentSelection(torrent);
         if (!torrentCheck.ok) return rejectedSelectionResponse(torrentCheck.error);
 
-        const result = await replaceAudiobook(id, req.user.id, torrent);
+        const result = await replaceAudiobook(id, req.user.id, torrentCheck.value);
 
         return NextResponse.json({
           success: true,

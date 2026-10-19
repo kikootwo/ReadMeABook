@@ -15,7 +15,8 @@ import {
   serve,
 } from '../helpers/source-servers';
 import { fetchDownloadSource } from '@/lib/integrations/download-source';
-import { DownloadSourceError } from '@/lib/interfaces/download-client.interface';
+import { DownloadSourceError, UnusableDownloadSourceError } from '@/lib/interfaces/download-client.interface';
+import { isTransientConnectionError } from '@/lib/utils/connection-errors';
 
 const logged = vi.hoisted(() => [] as string[]);
 vi.mock('@/lib/utils/logger', () => {
@@ -117,10 +118,14 @@ describe('fetchDownloadSource', () => {
     });
     const started = Date.now();
 
-    await expect(
-      fetchDownloadSource(`${servers.otherUrl}/drip`, { allowMagnet: true, timeoutMs: 500 })
-    ).rejects.toThrow('Timed out resolving download source');
+    const error = await fetchDownloadSource(`${servers.otherUrl}/drip`, { allowMagnet: true, timeoutMs: 500 })
+      .catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain('Timed out resolving download source');
     expect(Date.now() - started).toBeLessThan(2500);
+    // Retryable like an axios timeout was before (Bull retries the job instead of failing the request)
+    expect(isTransientConnectionError(error)).toBe(true);
   });
 
   it('rejects a redirect to a magnet with embedded whitespace', async () => {
@@ -162,24 +167,43 @@ describe('fetchDownloadSource httpsAgent scope', () => {
   const agent = new HttpsAgent({ rejectUnauthorized: false });
   const redirect = (location: string) => ({ isAxiosError: true, response: { status: 302, headers: { location } } });
 
-  it('uses the agent only on https hops of the starting origin', async () => {
+  const withProwlarr = (prowlarrBaseUrl: string) => ({
+    sourceAuth: { prowlarrBaseUrl, apiKey: 'k' }, allowMagnet: true, timeoutMs: 5000, httpsAgent: agent,
+  });
+
+  it('uses the agent only on hops to the configured https Prowlarr origin', async () => {
     const get = vi.spyOn(axios, 'get')
       .mockRejectedValueOnce(redirect('https://other.example/file'))
       .mockResolvedValueOnce({ data: TEST_TORRENT, headers: {} });
 
-    await fetchDownloadSource('https://prowlarr.example/1/download', { allowMagnet: true, timeoutMs: 5000, httpsAgent: agent });
+    await fetchDownloadSource('https://PROWLARR.example/1/download', withProwlarr('https://prowlarr.example'));
 
     expect(get.mock.calls[0][1]?.httpsAgent).toBe(agent);
     expect(get.mock.calls[1][1]?.httpsAgent).toBeUndefined();
   });
 
-  it('never uses the agent when the starting URL is plain http', async () => {
+  it('never uses the agent when the first URL names another host', async () => {
+    const get = vi.spyOn(axios, 'get').mockResolvedValueOnce({ data: TEST_TORRENT, headers: {} });
+
+    await fetchDownloadSource('https://other.example/1/download', withProwlarr('https://prowlarr.example'));
+
+    expect(get.mock.calls[0][1]?.httpsAgent).toBeUndefined();
+  });
+
+  it('never uses the agent when the configured Prowlarr is plain http', async () => {
     const get = vi.spyOn(axios, 'get')
       .mockRejectedValueOnce(redirect('https://prowlarr.example/next'))
       .mockResolvedValueOnce({ data: TEST_TORRENT, headers: {} });
 
-    await fetchDownloadSource('http://prowlarr.example/1/download', { allowMagnet: true, timeoutMs: 5000, httpsAgent: agent });
+    await fetchDownloadSource('http://prowlarr.example/1/download', withProwlarr('http://prowlarr.example'));
 
     expect(get.mock.calls.every(([, config]) => config?.httpsAgent === undefined)).toBe(true);
+  });
+
+  it('throws an unusable-source error for a redirect to a malformed magnet', async () => {
+    vi.spyOn(axios, 'get').mockRejectedValueOnce(redirect('magnet:?xt=urn:btih:abc http://x.example'));
+
+    await expect(fetchDownloadSource('https://prowlarr.example/1/download', withProwlarr('https://prowlarr.example')))
+      .rejects.toBeInstanceOf(UnusableDownloadSourceError);
   });
 });

@@ -23,10 +23,22 @@ describe('cover art URL rules', () => {
     'https://evilmedia-amazon.com/x.jpg',
     'https://user:pw@m.media-amazon.com/x.jpg',
     'http://127.0.0.1:8080/',
+    'https://i.gr-assets.com/images/x.jpg',
     'file:///etc/passwd',
     '/etc/passwd',
-  ])('rejects %s', (url) => {
+  ])('never downloads a cover from %s', (url) => {
     expect(isAllowedRemoteCoverUrl(url)).toBe(false);
+  });
+
+  it.each([
+    'https://i.gr-assets.com/images/S/x.jpg',
+    'https://assets.hardcover.app/edition/1/cover.jpg',
+    'http://example.com/cover.jpg',
+  ])('keeps the display URL %s (shelf-sync fallbacks)', (url) => {
+    expect(sanitizeCoverArtUrl(url)).toBe(url);
+  });
+
+  it.each(['file:///etc/passwd', '/etc/passwd', 'javascript:alert(1)', 'not a url'])('drops %s at storage', (url) => {
     expect(sanitizeCoverArtUrl(url)).toBeUndefined();
   });
 

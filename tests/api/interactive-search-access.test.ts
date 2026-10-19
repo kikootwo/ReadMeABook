@@ -141,10 +141,10 @@ describe('Prowlarr key never reaches the browser', () => {
         id: 'req-1', userId: 'user-1', audiobookId: 'ab-1', status: 'failed', progress: 0, type: 'audiobook',
         errorMessage: `Grab failed: ${PROWLARR_LINK}`,
         selectedTorrent: { downloadUrl: `CANARY-selected ${PROWLARR_LINK}` },
-        audiobook: { id: 'ab-1', title: 'T', author: 'A' },
+        audiobook: { id: 'ab-1', title: 'T', author: 'A', filePath: '/media/CANARY-filePath' },
         user: { id: 'user-1', plexUsername: 'owner' },
         downloadHistory: [{
-          id: 'dh-1', downloadStatus: 'failed', torrentSizeBytes: null,
+          id: 'dh-1', downloadStatus: 'failed', torrentSizeBytes: null, downloadPath: '/downloads/CANARY-downloadPath',
           magnetLink: `CANARY-magnet ${PROWLARR_LINK}`, torrentUrl: 'CANARY-torrentUrl',
         }],
         jobs: [{

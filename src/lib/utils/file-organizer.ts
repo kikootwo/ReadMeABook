@@ -10,7 +10,7 @@ import { RMAB_USER_AGENT } from './user-agent';
 import { tagMultipleFiles, checkFfmpegAvailable } from './metadata-tagger';
 import { RMABLogger } from './logger';
 import { copyFile } from './copy-file';
-import { MAX_COVER_ART_BYTES, cachedThumbnailPath, isAllowedRemoteCoverUrl } from './cover-art-url';
+import { MAX_COVER_ART_BYTES, MAX_COVER_ART_REDIRECTS, cachedThumbnailPath, isAllowedRemoteCoverUrl } from './cover-art-url';
 
 const moduleLogger = RMABLogger.create('FileOrganizer');
 import {
@@ -734,16 +734,23 @@ export class FileOrganizer {
         await fs.chmod(targetPath, this.fileMode);
         moduleLogger.debug(`Copied cover art from cache: ${path.basename(cachedPath)}`);
       } else if (isAllowedRemoteCoverUrl(url)) {
-        // Known Audible/Amazon image host over https; no redirects to other hosts
+        // Known Audible/Amazon image host over https; every redirect hop must be one too
         const response = await axios.get(url, {
           responseType: 'arraybuffer',
           timeout: 30000,
-          maxRedirects: 0,
+          maxRedirects: MAX_COVER_ART_REDIRECTS,
+          beforeRedirect: (redirect: { href?: string; protocol?: string; hostname?: string }) => {
+            const next = redirect.href ?? `${redirect.protocol}//${redirect.hostname}/`;
+            if (!isAllowedRemoteCoverUrl(next)) {
+              throw new Error('Cover art redirected to a host that is not a known cover image host');
+            }
+          },
           maxContentLength: MAX_COVER_ART_BYTES,
           headers: { 'User-Agent': RMAB_USER_AGENT },
         });
 
         await fs.writeFile(targetPath, response.data);
+        await fs.chmod(targetPath, this.fileMode);
         moduleLogger.debug(`Downloaded cover art from URL`);
       } else {
         throw new Error('Cover art URL is not a cached thumbnail or a known cover image host');

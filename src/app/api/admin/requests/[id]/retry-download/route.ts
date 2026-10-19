@@ -103,14 +103,8 @@ export async function POST(
           );
         }
 
-        // Stored URLs (including rows saved before validation existed) get the same check as new picks
-        const urlCheck = await guardTorrentSelection({ downloadUrl: downloadHistory.magnetLink });
-        if (!urlCheck.ok) {
-          return rejectedSelectionResponse(`The stored download link cannot be retried: ${urlCheck.error}`);
-        }
-
         const jobQueue = getJobQueueService();
-        let retryPath: 'resumed_monitoring' | 're_added';
+        let retryPath: 'resumed_monitoring' | 're_added' = 're_added';
 
         // Determine if we can attempt to resume monitoring.
         // downloadClient is stored as a plain string in the DB (can be 'qbittorrent', 'sabnzbd',
@@ -137,7 +131,7 @@ export async function POST(
               const downloadInfo = await client.getDownload(clientId!);
 
               if (downloadInfo && ALIVE_STATUSES.has(downloadInfo.status)) {
-                // Download is still alive — restart monitoring
+                // Download is still alive — restart monitoring (the stored link is not used)
                 logger.info(`Retry download: resuming monitoring for request ${id}`, {
                   requestId: id,
                   downloadClientId: clientId,
@@ -160,9 +154,6 @@ export async function POST(
                   requestId: id,
                   adminId: req.user.sub,
                 });
-
-                await reAddDownload(jobQueue, id, existingRequest.audiobook, downloadHistory);
-                retryPath = 're_added';
               }
             } else {
               // No client configured for that protocol — fall through to re-add
@@ -170,9 +161,6 @@ export async function POST(
                 requestId: id,
                 adminId: req.user.sub,
               });
-
-              await reAddDownload(jobQueue, id, existingRequest.audiobook, downloadHistory);
-              retryPath = 're_added';
             }
           } catch (clientError) {
             // Client lookup failed (connection error etc.) — re-add to be safe
@@ -181,8 +169,6 @@ export async function POST(
               error: clientError instanceof Error ? clientError.message : String(clientError),
               adminId: req.user.sub,
             });
-
-            await reAddDownload(jobQueue, id, existingRequest.audiobook, downloadHistory);
             retryPath = 're_added';
           }
         } else {
@@ -191,9 +177,18 @@ export async function POST(
             requestId: id,
             adminId: req.user.sub,
           });
+        }
 
-          await reAddDownload(jobQueue, id, existingRequest.audiobook, downloadHistory);
-          retryPath = 're_added';
+        if (retryPath === 're_added') {
+          // Re-adding fetches the stored link again: same check as new picks (older rows were never validated)
+          const urlCheck = await guardTorrentSelection({ downloadUrl: downloadHistory.magnetLink });
+          if (!urlCheck.ok) {
+            return rejectedSelectionResponse(`The stored download link cannot be retried: ${urlCheck.error}`);
+          }
+          await reAddDownload(jobQueue, id, existingRequest.audiobook, {
+            ...downloadHistory,
+            magnetLink: urlCheck.value.downloadUrl as string,
+          });
         }
 
         // Increment downloadAttempts, clear errorMessage, set status to downloading

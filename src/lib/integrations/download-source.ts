@@ -12,7 +12,7 @@ import axios from 'axios';
 import type { Agent as HttpsAgent } from 'https';
 import { RMAB_USER_AGENT } from '@/lib/utils/user-agent';
 import { RMABLogger } from '@/lib/utils/logger';
-import { DownloadSourceError } from '@/lib/interfaces/download-client.interface';
+import { DownloadSourceError, UnusableDownloadSourceError } from '@/lib/interfaces/download-client.interface';
 import {
   MAX_MAGNET_BODY_BYTES,
   MAX_SOURCE_FILE_BYTES,
@@ -21,6 +21,7 @@ import {
 import {
   isMagnetUri,
   isProwlarrDownloadUrl,
+  parseHttpUrl,
   parseProwlarrBase,
   urlForLog,
   withApiKeyParam,
@@ -42,8 +43,8 @@ export interface FetchSourceOptions {
   /** Hard deadline for the whole fetch, all hops and body included (ms) */
   timeoutMs: number;
   /**
-   * Agent for https hops on the starting URL's origin only (a usenet client's
-   * "disable SSL verify" setting for e.g. a self-signed Prowlarr). Never used on other hosts.
+   * A usenet client's relaxed TLS agent ("disable SSL verify"), used only for hops on
+   * the configured Prowlarr origin when that origin is https. Never used on other hosts.
    */
   httpsAgent?: HttpsAgent;
 }
@@ -52,28 +53,29 @@ export type FetchedSource =
   | { kind: 'magnet'; magnetUrl: string }
   | { kind: 'file'; data: Buffer; headers: Record<string, unknown> };
 
+/**
+ * The whole fetch exceeded its deadline. Carries `code: 'ETIMEDOUT'` so
+ * isTransientConnectionError() treats it as transient and Bull retries the job
+ * (as it did for axios timeouts before the shared deadline).
+ */
+export class DownloadSourceTimeoutError extends Error {
+  readonly name = 'DownloadSourceTimeoutError';
+  readonly code = 'ETIMEDOUT';
+
+  constructor(timeoutMs: number) {
+    super(`Timed out resolving download source after ${Math.round(timeoutMs / 1000)}s (ETIMEDOUT)`);
+  }
+}
+
 function magnetResult(magnetUrl: string, allowMagnet: boolean): FetchedSource {
   if (!allowMagnet) {
-    throw new Error('Download source resolved to a magnet link, but this client needs an .nzb file');
+    throw new UnusableDownloadSourceError('Download source resolved to a magnet link, but this client needs an .nzb file');
   }
   return { kind: 'magnet', magnetUrl };
 }
 
 function originOf(url: string): string | null {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return null;
-  }
-}
-
-function isHttpUrl(url: string): boolean {
-  try {
-    const protocol = new URL(url).protocol;
-    return protocol === 'http:' || protocol === 'https:';
-  } catch {
-    return false;
-  }
+  return parseHttpUrl(url)?.origin ?? null;
 }
 
 /**
@@ -82,25 +84,26 @@ function isHttpUrl(url: string): boolean {
  */
 export async function fetchDownloadSource(url: string, options: FetchSourceOptions): Promise<FetchedSource> {
   const auth = options.sourceAuth?.apiKey ? options.sourceAuth : undefined;
-  const prowlarrBase = auth ? parseProwlarrBase(auth.prowlarrBaseUrl) : null;
+  const configuredBase = options.sourceAuth ? parseProwlarrBase(options.sourceAuth.prowlarrBaseUrl) : null;
+  const prowlarrBase = auth ? configuredBase : null;
+  // A usenet client's relaxed TLS agent is only for the configured Prowlarr when it is https
+  const agentOrigin = configuredBase?.protocol === 'https:' ? configuredBase.origin : null;
   const deadline = Date.now() + options.timeoutMs;
   // Hard cap: axios `timeout` is an inactivity timer, so a slow-drip server could outlast it
   const deadlineSignal = AbortSignal.timeout(options.timeoutMs);
   let currentUrl = url.trim();
-  const startOrigin = originOf(currentUrl);
-  const startIsHttps = currentUrl.startsWith('https:');
 
   for (let hop = 0; hop <= MAX_SOURCE_REDIRECT_HOPS; hop++) {
     if (isMagnetUri(currentUrl)) {
       return magnetResult(currentUrl, options.allowMagnet);
     }
-    if (!isHttpUrl(currentUrl)) {
-      throw new Error(`Invalid redirect location: ${urlForLog(currentUrl)}`);
+    if (!parseHttpUrl(currentUrl)) {
+      throw new UnusableDownloadSourceError(`Invalid redirect location: ${urlForLog(currentUrl)}`);
     }
 
     const remaining = deadline - Date.now();
     if (remaining <= 0) {
-      throw new Error(`Timed out resolving download source after ${hop} redirect(s)`);
+      throw new DownloadSourceTimeoutError(options.timeoutMs);
     }
 
     const sendKey = !!auth && isProwlarrDownloadUrl(currentUrl, prowlarrBase);
@@ -119,11 +122,11 @@ export async function fetchDownloadSource(url: string, options: FetchSourceOptio
         maxBodyLength: MAX_SOURCE_FILE_BYTES,
         headers,
         signal: deadlineSignal,
-        httpsAgent: startIsHttps && originOf(requestUrl) === startOrigin ? options.httpsAgent : undefined,
+        httpsAgent: agentOrigin !== null && originOf(requestUrl) === agentOrigin ? options.httpsAgent : undefined,
       });
     } catch (error) {
       if (deadlineSignal.aborted) {
-        throw new Error(`Timed out resolving download source after ${Math.round(options.timeoutMs / 1000)}s`);
+        throw new DownloadSourceTimeoutError(options.timeoutMs);
       }
       if (!axios.isAxiosError(error) || !error.response) {
         throw error;
@@ -132,7 +135,7 @@ export async function fetchDownloadSource(url: string, options: FetchSourceOptio
       if (status >= 300 && status < 400) {
         const location = error.response.headers?.['location'];
         if (typeof location !== 'string' || location.trim() === '') {
-          throw new Error(`Invalid redirect location: (missing) from ${urlForLog(currentUrl)}`);
+          throw new UnusableDownloadSourceError(`Invalid redirect location: (missing) from ${urlForLog(currentUrl)}`);
         }
         let nextUrl: string;
         try {
@@ -140,7 +143,7 @@ export async function fetchDownloadSource(url: string, options: FetchSourceOptio
           const trimmed = location.trim();
           nextUrl = /^magnet:/i.test(trimmed) ? trimmed : new URL(trimmed, currentUrl).toString();
         } catch {
-          throw new Error(`Invalid redirect location: ${urlForLog(location)}`);
+          throw new UnusableDownloadSourceError(`Invalid redirect location: ${urlForLog(location)}`);
         }
         logger.info(`Source redirect ${hop + 1} (HTTP ${status}) to ${urlForLog(nextUrl)}`);
         currentUrl = nextUrl;
@@ -157,7 +160,7 @@ export async function fetchDownloadSource(url: string, options: FetchSourceOptio
     const data = Buffer.from(response.data);
     if (data.length > 0 && data.length <= MAX_MAGNET_BODY_BYTES) {
       const text = data.toString().trim();
-      if (/^magnet:\?[^\s]+$/.test(text)) {
+      if (isMagnetUri(text)) {
         logger.info('Source response body is a magnet link');
         return magnetResult(text, options.allowMagnet);
       }
@@ -165,5 +168,5 @@ export async function fetchDownloadSource(url: string, options: FetchSourceOptio
     return { kind: 'file', data, headers: (response.headers ?? {}) as Record<string, unknown> };
   }
 
-  throw new Error(`Too many redirects (>${MAX_SOURCE_REDIRECT_HOPS}) while resolving download source`);
+  throw new UnusableDownloadSourceError(`Too many redirects (>${MAX_SOURCE_REDIRECT_HOPS}) while resolving download source`);
 }

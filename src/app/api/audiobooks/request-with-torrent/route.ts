@@ -68,11 +68,12 @@ export async function POST(request: NextRequest) {
       if (accessDenied) return accessDenied;
 
       const body = await req.json();
-      const { audiobook, torrent } = RequestWithTorrentSchema.parse(body);
+      const { audiobook, torrent: pickedTorrent } = RequestWithTorrentSchema.parse(body);
 
       // Only magnet links or Prowlarr download links may be fetched on the user's behalf
-      const torrentCheck = await guardTorrentSelection(torrent);
+      const torrentCheck = await guardTorrentSelection(pickedTorrent);
       if (!torrentCheck.ok) return rejectedSelectionResponse(torrentCheck.error);
+      const torrent = torrentCheck.value;
 
       // First check: Is there an existing audiobook request in 'downloaded' or 'available' status?
       // This catches the gap where files are organized but Plex hasn't scanned yet

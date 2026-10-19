@@ -20,6 +20,7 @@ const jobQueueMock = vi.hoisted(() => ({
   addDownloadJob: vi.fn(),
   addStartDirectDownloadJob: vi.fn(),
   addSearchJob: vi.fn(),
+  addSearchEbookJob: vi.fn(),
   addNotificationJob: vi.fn(),
 }));
 const slowLinksMock = vi.hoisted(() => vi.fn());
@@ -110,14 +111,32 @@ describe('download selection guard on routes', () => {
       expect(replaceAudiobookMock).not.toHaveBeenCalled();
     });
 
-    it('POST /api/admin/requests/[id]/approve with a stored pick → 400', async () => {
+    it('POST /api/admin/requests/[id]/approve with a stored user pick → approves with automatic search', async () => {
       prismaMock.request.findUnique.mockResolvedValue({
         id: 'req-1', userId: 'user-2', type: 'audiobook', status: 'awaiting_approval',
         selectedTorrent: torrent(url),
         audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
         user: { id: 'user-2', plexUsername: 'other' },
       });
+      prismaMock.request.update.mockResolvedValue({ id: 'req-1', userId: 'user-2', audiobook: { id: 'ab-1', title: 'Title', author: 'Author' }, user: {} });
       const request = { json: async () => ({ action: 'approve' }) };
+      const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
+      const response = await POST(request as any, params('req-1'));
+
+      expect(response.status).toBe(200);
+      expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
+      expect(jobQueueMock.addSearchJob).toHaveBeenCalled();
+      expect(prismaMock.request.update.mock.calls[0][0].data.status).toBe('pending');
+      expect(prismaMock.request.update.mock.calls[0][0].data.selectedTorrent).toBeDefined();
+    });
+
+    it('POST /api/admin/requests/[id]/approve with an admin-provided pick → 400', async () => {
+      prismaMock.request.findUnique.mockResolvedValue({
+        id: 'req-1', userId: 'user-2', type: 'audiobook', status: 'awaiting_approval', selectedTorrent: null,
+        audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
+        user: { id: 'user-2', plexUsername: 'other' },
+      });
+      const request = { json: async () => ({ action: 'approve', selectedTorrent: torrent(url) }) };
       const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
       const response = await POST(request as any, params('req-1'));
 
@@ -174,5 +193,24 @@ describe('download selection guard on routes', () => {
 
     const [, , queuedUrl] = jobQueueMock.addStartDirectDownloadJob.mock.calls[0];
     expect(queuedUrl).toBe(`${ANNAS}/slow_download/${MD5}/0/0`);
+  });
+
+  it('approves with an automatic search when a stored Anna\'s Archive pick has no links any more', async () => {
+    slowLinksMock.mockResolvedValue([]);
+    prismaMock.request.findUnique.mockResolvedValue({
+      id: 'req-3', userId: 'user-2', type: 'ebook', status: 'awaiting_approval',
+      selectedTorrent: { source: 'annas_archive', md5: MD5 },
+      audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
+      user: { id: 'user-2', plexUsername: 'other' },
+    });
+    prismaMock.request.update.mockResolvedValue({ id: 'req-3', userId: 'user-2', audiobook: { id: 'ab-1', title: 'Title', author: 'Author' }, user: {} });
+    const request = { json: async () => ({ action: 'approve' }) };
+
+    const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
+    const response = await POST(request as any, params('req-3'));
+
+    expect(response.status).toBe(200);
+    expect(jobQueueMock.addStartDirectDownloadJob).not.toHaveBeenCalled();
+    expect(jobQueueMock.addSearchEbookJob).toHaveBeenCalled();
   });
 });

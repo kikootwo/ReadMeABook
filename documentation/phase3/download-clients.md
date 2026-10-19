@@ -146,21 +146,24 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 **File:** `src/lib/integrations/download-source.ts` (`fetchDownloadSource`), rules in `src/lib/utils/prowlarr-url.ts`, constants in `src/lib/constants/download-source.ts`
 - RMAB fetches every .torrent/.nzb itself (all 5 clients), then hands the file or magnet to the client
 - Redirects followed one hop at a time, max `MAX_SOURCE_REDIRECT_HOPS` (5); `Location` resolved against the current hop (relative OK)
-- `magnet:` accepted at any hop or as the response body (torrent clients only; usenet → error). Strict form everywhere (`isMagnetUri`: `^magnet:\?[^\s]+$`, no whitespace) because clients split URL lists on newlines; the processor skips releases with a malformed magnet
-- Hard deadline for the whole fetch (caller timeout; `AbortSignal.timeout`, since axios `timeout` is only an inactivity timer); file size cap `MAX_SOURCE_FILE_BYTES` (50 MB); non-http(s) hops rejected
-- `httpsAgent` (usenet clients' "disable SSL verify") applies only when the starting URL is https, and only to hops on that same origin
-- **Prowlarr key:** `AddDownloadOptions.sourceAuth = { prowlarrBaseUrl, apiKey }` (built in `download-torrent.processor.ts` from `getProwlarrConnection()`). Key sent (`X-Api-Key` + `apikey` query restored if missing) **only** when the hop is `<configured Prowlarr origin><base path>/{indexerId}/download`. Any other origin or Prowlarr path gets no key. Configured URL that is not plain http(s) → key never sent
+- `magnet:` accepted at any hop or as the response body (torrent clients only). Strict form everywhere (`isMagnetUri`: `^magnet:\?[^\s]+$`, no whitespace) because clients split URL lists on newlines; the processor drops releases with a malformed magnet before trying any client
+- Hard deadline for the whole fetch (caller timeout; `AbortSignal.timeout`, since axios `timeout` is only an inactivity timer) → `DownloadSourceTimeoutError` (`code: 'ETIMEDOUT'`, transient: Bull retries the job); file size cap `MAX_SOURCE_FILE_BYTES` (50 MB)
+- Unusable source (invalid/non-http redirect, malformed magnet hop, magnet for usenet, redirect loop) → `UnusableDownloadSourceError`: the processor tries the next ranked release; if it was the last, an earlier 429/5xx (retryable) error wins
+- `httpsAgent` (usenet clients' "disable SSL verify") applies only to hops on the configured Prowlarr origin, and only when that origin is https
+- **Prowlarr key:** `AddDownloadOptions.sourceAuth = { prowlarrBaseUrl, apiKey }` (built in `download-torrent.processor.ts` from `getProwlarrConnection()`). Key sent (`X-Api-Key` + `apikey` query restored if missing) **only** when the hop is exactly the configured scheme/host/port/credentials + `<base path>/{indexerId}/download` (`isProwlarrDownloadUrl`). Any other origin or Prowlarr path gets no key. Automatic grabs are rewritten onto the configured base first (`toConfiguredProwlarrUrl`)
 - Logs/errors: `urlForLog()` keeps scheme + host only (`magnet:` for magnets); `DownloadSourceError.sourceUrl` uses the same form
-- HTTP error from source → `DownloadSourceError` (processor tries next ranked release)
+- HTTP error from source → `DownloadSourceError` (processor tries next ranked release on 429/5xx)
 
 ### User-Picked Releases
 **File:** `src/lib/services/download-selection-guard.ts`
-- Torrent/NZB picks (`request-with-torrent`, `select-torrent`, `select-ebook` indexer source, admin `replace`, admin `approve` incl. stored picks, admin `retry-download` of a stored link): `downloadUrl` must be a `magnet:?` URI or a Prowlarr download URL (rule above) → else 400 `ValidationError`
+- Torrent/NZB picks (`request-with-torrent`, `select-torrent`, `select-ebook` indexer source, admin `replace`, admin `approve` incl. stored picks, admin `retry-download` when it re-adds a stored link): `downloadUrl` must be a `magnet:?` URI or a Prowlarr download link → else 400 `ValidationError`
+- Prowlarr link match (`toConfiguredProwlarrUrl`): same host name as `prowlarr_url` (case-insensitive) + base path (case-insensitive) + `/{indexerId}/download`; tolerates http↔https (TLS proxy without `X-Forwarded-Proto`) and default-port differences, never a different host or non-default port. The pick is then **rewritten** onto the configured base (scheme, port, `user:pass@`, base path)
+- Approve: an unusable stored user pick (or Anna's Archive with no links left) → warning, pick cleared, approve falls back to automatic search; an unusable admin-provided pick → 400
 - Magnets are accepted as-is, so a user can choose a magnet's tracker list (accepted)
 - Anna's Archive picks: only `md5` (32 hex) is trusted; links rebuilt with `getSlowDownloadLinks(md5, ebook_sidecar_base_url, flaresolverr)`; client `downloadUrl(s)` ignored
 - Search responses (`search-torrents`, `requests/[id]/interactive-search`, both `interactive-search-ebook`): `stripProwlarrKeyFromResults()` removes any `apikey=<configured key>` on any origin from every string field (fetcher restores it for Prowlarr hops)
 - Interactive search permission (`denyWithoutInteractiveSearchAccess`, `src/lib/middleware/interactive-search-access.ts`) enforced on all search + pick routes above (user routes) → 403
-- Known limit: if a reverse proxy makes Prowlarr publish links on an origin other than the configured `prowlarr_url`, interactive picks get 400 (automatic grabs still work); set `prowlarr_url` to the origin Prowlarr links use
+- Known limit: if Prowlarr publishes links on a different host name (or non-default port) than `prowlarr_url`, interactive picks get 400 (automatic grabs still work); set `prowlarr_url` to the host Prowlarr links use
 
 ### Migration
 **Auto-migration** from legacy single-client config to new JSON array format on first access:

@@ -9,8 +9,20 @@
 import { REDACTED_VALUE } from '@/lib/constants/download-source';
 
 export interface ProwlarrBase {
+  /** Configured scheme + host + port */
   origin: string;
-  /** Configured URL base path without trailing slash ('' when none) */
+  protocol: 'http:' | 'https:';
+  /** Lower-case host name without port */
+  hostname: string;
+  /** Host as configured (with a non-default port) */
+  host: string;
+  /** Effective port ('80'/'443' when omitted) */
+  port: string;
+  /** True when the configured URL uses its scheme's default port */
+  defaultPort: boolean;
+  /** `user:pass@` from the configured URL, or '' */
+  userinfo: string;
+  /** Configured URL base path without trailing slash ('' when none), original case */
   basePath: string;
 }
 
@@ -20,10 +32,11 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function parseHttpUrl(value: string): URL | null {
+/** Parse an http(s) URL; null for anything else. */
+export function parseHttpUrl(value: string): URL | null {
   let parsed: URL;
   try {
-    parsed = new URL(value);
+    parsed = new URL(value.trim());
   } catch {
     return null;
   }
@@ -32,22 +45,75 @@ function parseHttpUrl(value: string): URL | null {
   return parsed;
 }
 
-/** Parse the configured Prowlarr URL. Returns null for anything but a plain http(s) URL. */
-export function parseProwlarrBase(baseUrl: string | undefined | null): ProwlarrBase | null {
-  if (!baseUrl) return null;
-  const parsed = parseHttpUrl(baseUrl.trim());
-  if (!parsed || parsed.username || parsed.password) return null;
-  return { origin: parsed.origin, basePath: parsed.pathname.replace(/\/+$/, '') };
+function effectivePort(url: URL): string {
+  return url.port || (url.protocol === 'https:' ? '443' : '80');
 }
 
-/** True when `url` is a Prowlarr proxy-download URL on the configured origin. */
+function userinfoOf(url: URL): string {
+  if (!url.username && !url.password) return '';
+  return `${url.username}${url.password ? `:${url.password}` : ''}@`;
+}
+
+/** `/{indexerId}/download` after the base path (base path compared case-insensitively), or null. */
+function downloadSuffix(url: URL, base: ProwlarrBase): string | null {
+  const prefix = base.basePath.toLowerCase();
+  if (!url.pathname.toLowerCase().startsWith(`${prefix}/`)) return null;
+  const rest = url.pathname.slice(prefix.length);
+  return DOWNLOAD_PATH_PATTERN.test(rest) ? rest : null;
+}
+
+/** Parse the configured Prowlarr URL. Returns null for anything but an http(s) URL. */
+export function parseProwlarrBase(baseUrl: string | undefined | null): ProwlarrBase | null {
+  if (!baseUrl) return null;
+  const parsed = parseHttpUrl(baseUrl);
+  if (!parsed) return null;
+  return {
+    origin: parsed.origin,
+    protocol: parsed.protocol as 'http:' | 'https:',
+    hostname: parsed.hostname.toLowerCase(),
+    host: parsed.host.toLowerCase(),
+    port: effectivePort(parsed),
+    defaultPort: parsed.port === '',
+    userinfo: userinfoOf(parsed),
+    basePath: parsed.pathname.replace(/\/+$/, ''),
+  };
+}
+
+/**
+ * Strict check used before attaching the key: exactly the configured scheme,
+ * host, port and credentials, on the proxy-download path.
+ */
 export function isProwlarrDownloadUrl(url: string, base: ProwlarrBase | null): boolean {
   if (!base) return false;
   const parsed = parseHttpUrl(url);
-  if (!parsed || parsed.username || parsed.password) return false;
-  if (parsed.origin !== base.origin) return false;
-  if (!parsed.pathname.startsWith(`${base.basePath}/`)) return false;
-  return DOWNLOAD_PATH_PATTERN.test(parsed.pathname.slice(base.basePath.length));
+  if (!parsed) return false;
+  return (
+    parsed.protocol === base.protocol &&
+    parsed.hostname.toLowerCase() === base.hostname &&
+    effectivePort(parsed) === base.port &&
+    userinfoOf(parsed) === base.userinfo &&
+    downloadSuffix(parsed, base) !== null
+  );
+}
+
+/**
+ * Map a link Prowlarr published onto the configured base, or null if it is not a
+ * Prowlarr download link. Same host name required (case-insensitive); a scheme
+ * difference (TLS proxy without X-Forwarded-Proto) or default-port difference and
+ * base-path case are tolerated. The result always uses the configured scheme,
+ * port, credentials and base path, so the key travels the way the admin set it up.
+ */
+export function toConfiguredProwlarrUrl(url: string, base: ProwlarrBase | null): string | null {
+  if (!base) return null;
+  const parsed = parseHttpUrl(url);
+  if (!parsed || parsed.hostname.toLowerCase() !== base.hostname) return null;
+  const candidateUserinfo = userinfoOf(parsed);
+  if (candidateUserinfo && candidateUserinfo !== base.userinfo) return null;
+  const portsMatch = effectivePort(parsed) === base.port || (parsed.port === '' && base.defaultPort);
+  if (!portsMatch) return null;
+  const suffix = downloadSuffix(parsed, base);
+  if (!suffix) return null;
+  return `${base.protocol}//${base.userinfo}${base.host}${base.basePath}${suffix}${parsed.search}${parsed.hash}`;
 }
 
 const MAGNET_PATTERN = /^magnet:\?[^\s]+$/i;

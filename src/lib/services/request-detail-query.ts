@@ -4,7 +4,8 @@
  *
  * Non-admin callers (owners, API tokens) get an explicit field list that leaves out
  * internal job/download data: Job.payload/result/stackTrace,
- * DownloadHistory.magnetLink/torrentUrl and Request.selectedTorrent.
+ * DownloadHistory.magnetLink/torrentUrl/downloadPath, Audiobook.filePath and
+ * Request.selectedTorrent.
  */
 
 import type { Prisma } from '@/generated/prisma/client';
@@ -42,7 +43,32 @@ export const OWNER_REQUEST_DETAIL_SELECT = {
   type: true,
   parentRequestId: true,
   deletedAt: true,
-  audiobook: true,
+  // Same fields as the admin view minus the library file path (GET /api/requests strips it too)
+  audiobook: {
+    select: {
+      id: true,
+      audibleAsin: true,
+      title: true,
+      author: true,
+      narrator: true,
+      description: true,
+      coverArtUrl: true,
+      year: true,
+      series: true,
+      seriesPart: true,
+      seriesAsin: true,
+      status: true,
+      fileFormat: true,
+      fileSizeBytes: true,
+      plexGuid: true,
+      plexLibraryId: true,
+      absItemId: true,
+      filesHash: true,
+      createdAt: true,
+      updatedAt: true,
+      completedAt: true,
+    },
+  },
   user: { select: { id: true, plexUsername: true } },
   downloadHistory: {
     ...LATEST_SELECTED_DOWNLOAD,
@@ -63,7 +89,6 @@ export const OWNER_REQUEST_DETAIL_SELECT = {
       downloadClientId: true,
       downloadStatus: true,
       downloadError: true,
-      downloadPath: true,
       startedAt: true,
       completedAt: true,
       createdAt: true,

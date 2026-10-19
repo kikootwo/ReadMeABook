@@ -16,11 +16,14 @@ import {
 const KEY = 'abc123key';
 
 describe('parseProwlarrBase', () => {
-  it('keeps origin and base path', () => {
-    expect(parseProwlarrBase('http://Prowlarr:9696/prowlarr/')).toEqual({ origin: 'http://prowlarr:9696', basePath: '/prowlarr' });
+  it('keeps origin, host, port and base path', () => {
+    expect(parseProwlarrBase('http://Prowlarr:9696/prowlarr/')).toMatchObject({
+      origin: 'http://prowlarr:9696', hostname: 'prowlarr', port: '9696', defaultPort: false, userinfo: '', basePath: '/prowlarr',
+    });
+    expect(parseProwlarrBase('https://p.example')).toMatchObject({ port: '443', defaultPort: true, host: 'p.example' });
   });
 
-  it.each(['', 'ftp://prowlarr', 'javascript:alert(1)', 'not a url', 'http://user:pass@prowlarr:9696'])(
+  it.each(['', 'ftp://prowlarr', 'javascript:alert(1)', 'not a url'])(
     'rejects %j',
     (value) => expect(parseProwlarrBase(value)).toBeNull()
   );
@@ -43,6 +46,9 @@ describe('isProwlarrDownloadUrl', () => {
     ['https://media.example/prowlarr/3/download', withPath, true],
     ['https://media.example/3/download', withPath, false],
     ['https://media.example/prowlarrx/3/download', withPath, false],
+    ['https://media.example/Prowlarr/3/download', withPath, true],
+    ['http://media.example/prowlarr/3/download', withPath, false],
+    ['http://a:b@prowlarr:9696/12/download', parseProwlarrBase('http://a:b@prowlarr:9696'), true],
   ])('%s → %s', (url, b, expected) => {
     expect(isProwlarrDownloadUrl(url, b as any)).toBe(expected);
   });

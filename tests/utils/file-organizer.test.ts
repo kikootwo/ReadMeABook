@@ -325,6 +325,36 @@ describe('file organizer', () => {
     expect(result.filesMovedCount).toBe(1);
   });
 
+  it('follows up to 3 cover redirects, checks every hop, and applies the file mode', async () => {
+    configState.values.set('metadata_tagging_enabled', 'false');
+    const organizer = new FileOrganizer('/media', '/tmp');
+    (organizer as any).findAudiobookFiles = vi.fn().mockResolvedValue({ audioFiles: ['book.m4b'], coverFile: undefined, isFile: false });
+    const sourcePath = path.join('/downloads', 'book', 'book.m4b');
+    fsMock.access.mockImplementation(async (filePath: string) => {
+      if (path.normalize(filePath) === path.normalize(sourcePath)) return undefined;
+      throw new Error('missing');
+    });
+    fsMock.mkdir.mockResolvedValue(undefined);
+    copyFileMock.copyFile.mockResolvedValue(undefined);
+    fsMock.chmod.mockResolvedValue(undefined);
+    fsMock.writeFile.mockResolvedValue(undefined);
+    axiosMock.get.mockResolvedValue({ data: Buffer.from('cover') });
+
+    const result = await organizer.organize('/downloads/book', {
+      title: 'Book', author: 'Author', asin: 'ASIN123',
+      coverArtUrl: 'https://images-na.ssl-images-amazon.com/images/I/legacy.jpg',
+    }, '{author}/{title} {asin}');
+
+    const config = axiosMock.get.mock.calls[0][1];
+    expect(config.maxRedirects).toBe(3);
+    expect(() => config.beforeRedirect({ href: 'https://m.media-amazon.com/images/I/legacy.jpg' })).not.toThrow();
+    expect(() => config.beforeRedirect({ href: 'http://127.0.0.1:6379/' })).toThrow();
+    expect(() => config.beforeRedirect({ protocol: 'https:', hostname: 'evil.example' })).toThrow();
+    const coverPath = path.join('/media', 'Author', 'Book ASIN123', 'cover.jpg');
+    expect(result.coverArtFile).toBe(coverPath);
+    expect(fsMock.chmod).toHaveBeenCalledWith(coverPath, expect.anything());
+  });
+
   it.each([
     ['a loopback URL', 'http://127.0.0.1:6379/'],
     ['a plain-http image host', 'http://m.media-amazon.com/images/I/cover.jpg'],
