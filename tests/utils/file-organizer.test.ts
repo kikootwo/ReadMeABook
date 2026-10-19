@@ -72,6 +72,7 @@ const ebookMock = vi.hoisted(() => ({
 
 const copyFileMock = vi.hoisted(() => ({
   copyFile: vi.fn(),
+  isSameFile: vi.fn(async () => false),
 }));
 
 vi.mock('fs/promises', () => ({

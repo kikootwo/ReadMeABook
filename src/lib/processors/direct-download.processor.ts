@@ -226,6 +226,7 @@ export async function processStartDirectDownload(payload: StartDirectDownloadPay
       data: {
         downloadStatus: 'completed',
         completedAt: new Date(),
+        downloadPath: downloadResult.filePath,
       },
     });
 
@@ -244,7 +245,11 @@ export async function processStartDirectDownload(payload: StartDirectDownloadPay
     await jobQueue.addOrganizeJob(
       requestId,
       request.audiobookId,
-      downloadResult.filePath!
+      downloadResult.filePath!,
+      undefined,
+      undefined,
+      undefined,
+      downloadHistoryId
     );
 
     logger.info(`Download complete, triggered organize job for ${downloadResult.filePath}`);

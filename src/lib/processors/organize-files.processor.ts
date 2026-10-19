@@ -4,6 +4,7 @@
  */
 
 import { OrganizeFilesPayload, getJobQueueService } from '../services/job-queue.service';
+import path from 'path';
 import { prisma } from '../db';
 import { getFileOrganizer } from '../utils/file-organizer';
 import { RMABLogger } from '../utils/logger';
@@ -14,7 +15,7 @@ import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import { generateFilesHash } from '../utils/files-hash';
 import { fixEpubForKindle, cleanupFixedEpub } from '../utils/epub-fixer';
-import { removeEmptyParentDirectories } from '../utils/cleanup-helpers';
+import { cleanupDirectDownloadSource, cleanupDownloadAfterOrganize, cleanupSourceAfterOrganize } from './organize-cleanup';
 import { getAudibleService } from '../integrations/audible.service';
 import { addAutoBlock } from '../services/blocklist.service';
 
@@ -24,7 +25,7 @@ import { addAutoBlock } from '../services/blocklist.service';
  * Handles both audiobook and ebook request types with appropriate branching
  */
 export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promise<any> {
-  const { requestId, audiobookId, downloadPath, jobId, cleanupSource, selectedFiles } = payload;
+  const { requestId, audiobookId, downloadPath, jobId, cleanupSource, selectedFiles, downloadHistoryId } = payload;
 
   const logger = RMABLogger.forJob(jobId, 'OrganizeFiles');
 
@@ -339,11 +340,19 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     }
 
     // Cleanup downloads if configured (uses IDownloadClient.postProcess for client-specific cleanup)
-    await cleanupDownloadAfterOrganize(requestId, downloadPath, configService, jobId, logger);
+    await cleanupDownloadAfterOrganize({
+      requestId,
+      downloadPath,
+      downloadHistoryId,
+      targetPath: result.targetPath,
+      configService,
+      jobId,
+      logger,
+    });
 
     // Cleanup source files if requested (manual import feature)
     if (cleanupSource) {
-      await cleanupSourceAfterOrganize(downloadPath, configService, jobId, logger, selectedFiles);
+      await cleanupSourceAfterOrganize(downloadPath, result.targetPath, configService, jobId, logger, selectedFiles);
     }
 
     return {
@@ -360,17 +369,60 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
-    const errorMessage = error instanceof Error ? error.message : 'File organization failed';
+    const rawErrorMessage = error instanceof Error ? error.message : 'File organization failed';
+
+    // Manual imports pass cleanupSource true, bulk imports false; download jobs
+    // leave it unset (dropped from the JSON payload), including jobs queued
+    // before downloadHistoryId existed. A manual or bulk import's folder, file
+    // selection and cleanup choice exist only in this payload, and the import
+    // retry path would re-queue the request's last client download instead, so
+    // these fail once with a message telling the admin to re-run them.
+    const isManualImport = !downloadHistoryId && typeof cleanupSource === 'boolean';
+    const isClientDownload = !isManualImport;
+    const detail = rawErrorMessage
+      .replace(/^(File|Ebook) organization failed:\s*/, '')
+      .replace(/[.\s]+$/, '');
+    const errorMessage = isClientDownload
+      ? rawErrorMessage
+      : `Import from ${downloadPath} did not complete: ${detail}. Fix the folder and run the import again.`;
+
+    if (isManualImport) {
+      await prisma.request.update({
+        where: { id: requestId },
+        data: { status: 'failed', errorMessage, updatedAt: new Date() },
+      });
+
+      const failedRequest = await prisma.request.findUnique({
+        where: { id: requestId },
+        include: { audiobook: true, user: { select: { plexUsername: true } } },
+      });
+      if (failedRequest?.audiobook) {
+        await getJobQueueService().addNotificationJob(
+          'request_error',
+          failedRequest.id,
+          failedRequest.audiobook.title,
+          failedRequest.audiobook.author,
+          failedRequest.user?.plexUsername || 'Unknown User',
+          'Import did not complete. Check the selected folder and run the import again.'
+        ).catch((notifyError) => {
+          logger.error('Failed to queue notification', { error: notifyError instanceof Error ? notifyError.message : String(notifyError) });
+        });
+      }
+
+      // Returned, not thrown: a queue retry would re-run the import and send
+      // another notification for the same failure.
+      return { success: false, message: errorMessage, requestId };
+    }
 
     // Check if this is a retryable error (transient filesystem issues or no files found)
     // These errors may resolve on retry (e.g., files still being extracted, permissions being set)
     const isRetryableError =
-      errorMessage.includes('No audiobook files found') ||
-      errorMessage.includes('No ebook files found') ||  // Ebook equivalent of above
-      errorMessage.includes('ENOENT') || // File/directory not found
-      errorMessage.includes('no such file or directory') ||
-      errorMessage.includes('EACCES') || // Permission denied (might be temporary)
-      errorMessage.includes('EPERM');    // Operation not permitted (might be temporary)
+      rawErrorMessage.includes('No audiobook files found') ||
+      rawErrorMessage.includes('No ebook files found') ||  // Ebook equivalent of above
+      rawErrorMessage.includes('ENOENT') || // File/directory not found
+      rawErrorMessage.includes('no such file or directory') ||
+      rawErrorMessage.includes('EACCES') || // Permission denied (might be temporary)
+      rawErrorMessage.includes('EPERM');    // Operation not permitted (might be temporary)
 
     if (isRetryableError) {
       // Get current request to check retry count
@@ -577,7 +629,7 @@ async function processEbookOrganization(
   request: { id: string; userId: string; type: string; user: { plexUsername: string | null } },
   logger: RMABLogger
 ): Promise<any> {
-  const { requestId, audiobookId, downloadPath, jobId, cleanupSource } = payload;
+  const { requestId, audiobookId, downloadPath, jobId, cleanupSource, downloadHistoryId } = payload;
 
   logger.info(`Processing ebook organization for request ${requestId}`);
 
@@ -702,11 +754,12 @@ async function processEbookOrganization(
 
   logger.info(`Final metadata for path organization: year=${year || 'null'}, narrator=${narrator || 'null'}, series=${series || 'null'}, seriesPart=${seriesPart || 'null'}`);
 
-  // Check if this is an indexer download (needs to keep source for seeding)
-  const downloadHistory = await prisma.downloadHistory.findFirst({
-    where: { requestId },
-    orderBy: { createdAt: 'desc' },
-  });
+  // Check if this is an indexer download (needs to keep source for seeding).
+  // Decided from the download that queued this job, never the request's newest
+  // row: a manual import has no download of its own.
+  const downloadHistory = downloadHistoryId
+    ? await prisma.downloadHistory.findUnique({ where: { id: downloadHistoryId } })
+    : null;
   const isIndexerDownload = downloadHistory?.downloadClient !== 'direct';
   logger.info(`Download source: ${downloadHistory?.downloadClient || 'unknown'} (indexer download: ${isIndexerDownload})`);
 
@@ -883,12 +936,50 @@ async function processEbookOrganization(
     logger.debug(`Ebook library scan disabled (scanEnabled=${scanEnabled})`);
   }
 
-  // Cleanup downloads if configured (uses IDownloadClient.postProcess for client-specific cleanup)
-  await cleanupDownloadAfterOrganize(requestId, downloadPath, configService, jobId, logger);
+  // Remove a direct HTTP download file now that it is in the library
+  if (!isIndexerDownload) {
+    await cleanupDirectDownloadSource({
+      requestId,
+      downloadPath,
+      downloadHistoryId,
+      targetPath: result.targetPath,
+      configService,
+      jobId,
+      logger,
+    });
+  }
 
-  // Cleanup source files if requested (manual import feature)
+  // Cleanup downloads if configured (uses IDownloadClient.postProcess for client-specific cleanup)
+  await cleanupDownloadAfterOrganize({
+    requestId,
+    downloadPath,
+    downloadHistoryId,
+    targetPath: result.targetPath,
+    configService,
+    jobId,
+    logger,
+  });
+
+  // Cleanup source files if requested (manual import feature). Only the ebook
+  // file that was imported is removed, never the folder around it: an import
+  // folder can also hold an audiobook or other library content.
   if (cleanupSource) {
-    await cleanupSourceAfterOrganize(downloadPath, configService, jobId, logger);
+    // The organizer reads a temp copy when the Kindle fix ran; the original is epubFilePath
+    const importedFile = fixedEpubPath ? epubFilePath : result.sourceFile;
+    if (!importedFile) {
+      logger.warn('Imported ebook file unknown, skipping source cleanup');
+    } else if (path.resolve(importedFile) === path.resolve(downloadPath)) {
+      await cleanupSourceAfterOrganize(downloadPath, result.targetPath, configService, jobId, logger);
+    } else {
+      await cleanupSourceAfterOrganize(
+        downloadPath,
+        result.targetPath,
+        configService,
+        jobId,
+        logger,
+        [path.relative(downloadPath, importedFile)]
+      );
+    }
   }
 
   return {
@@ -1040,211 +1131,6 @@ async function applyPostImportCategory(
     logger.info(`Post-import category applied successfully`);
   } catch (error) {
     logger.warn(`Failed to apply post-import category: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-// =========================================================================
-// DOWNLOAD CLEANUP
-// =========================================================================
-
-/**
- * Cleanup download files and archive from download client after successful organization.
- * Uses the IDownloadClient.postProcess() method for client-specific cleanup (e.g., SABnzbd archive).
- * Shared between audiobook and ebook organization flows.
- */
-async function cleanupDownloadAfterOrganize(
-  requestId: string,
-  downloadPath: string,
-  configService: any,
-  jobId: string | undefined,
-  logger: RMABLogger
-): Promise<void> {
-  try {
-    logger.info('Checking if cleanup is needed for this download');
-
-    // Get download history to find client ID and indexer
-    const downloadHistory = await prisma.downloadHistory.findFirst({
-      where: { requestId },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    logger.info(`Download history found: ${downloadHistory ? 'yes' : 'no'}`, {
-      hasDownloadClientId: !!downloadHistory?.downloadClientId,
-      hasIndexerId: !!downloadHistory?.indexerId,
-      downloadClient: downloadHistory?.downloadClient || 'none',
-    });
-
-    if (!downloadHistory?.indexerId || !downloadHistory?.downloadClientId) {
-      return;
-    }
-
-    // Get indexer configuration
-    const indexersConfig = await configService.get('prowlarr_indexers');
-    if (!indexersConfig) {
-      return;
-    }
-
-    const indexers: Array<{ id: number; protocol: string; removeAfterProcessing?: boolean }> = JSON.parse(indexersConfig);
-    const indexer = indexers.find(idx => idx.id === downloadHistory.indexerId);
-
-    logger.info(`Indexer found in config: ${indexer ? 'yes' : 'no'}`, {
-      indexerId: downloadHistory.indexerId,
-      protocol: indexer?.protocol || 'none',
-      removeAfterProcessing: indexer?.removeAfterProcessing ?? 'undefined',
-    });
-
-    // Check if this is a non-torrent indexer with cleanup enabled.
-    const isTorrentProtocol = indexer?.protocol?.toLowerCase() === 'torrent';
-
-    if (!indexer || isTorrentProtocol || !indexer.removeAfterProcessing) {
-      return;
-    }
-
-    logger.info(`Cleaning up download ${downloadHistory.downloadClientId} (cleanup enabled for indexer ${indexer.id})`);
-
-    // First, manually delete files from filesystem
-    if (downloadPath) {
-      logger.info(`Removing download files from filesystem: ${downloadPath}`);
-
-      const fs = await import('fs/promises');
-
-      try {
-        const stats = await fs.stat(downloadPath);
-
-        if (stats.isDirectory()) {
-          await fs.rm(downloadPath, { recursive: true, force: true });
-          logger.info(`Removed directory: ${downloadPath}`);
-        } else {
-          await fs.unlink(downloadPath);
-          logger.info(`Removed file: ${downloadPath}`);
-        }
-
-        // Clean up empty parent directories
-        const downloadDir = await configService.get('download_dir') || '/downloads';
-        const cleanupResult = await removeEmptyParentDirectories(downloadPath, {
-          boundaryPath: downloadDir,
-          logContext: jobId ? { jobId, context: 'CleanupParents' } : undefined,
-        });
-
-        if (cleanupResult.removedDirectories.length > 0) {
-          logger.info(`Cleaned up ${cleanupResult.removedDirectories.length} empty parent directories`);
-        }
-      } catch (fsError) {
-        if ((fsError as NodeJS.ErrnoException).code === 'ENOENT') {
-          logger.info(`Download path already deleted: ${downloadPath}`);
-        } else {
-          throw fsError;
-        }
-      }
-    } else {
-      logger.warn(`No download path available, skipping filesystem deletion`);
-    }
-
-    // Then use the download client interface for client-specific post-processing
-    // (e.g., usenet clients archive from history, torrent clients are a no-op)
-    const clientType = downloadHistory.downloadClient;
-    if (clientType && clientType !== 'direct') {
-      const manager = getDownloadClientManager(configService);
-      const protocol = CLIENT_PROTOCOL_MAP[clientType as DownloadClientType];
-      if (!protocol) {
-        logger.warn(`Unknown download client type: ${clientType}, skipping post-processing`);
-        return;
-      }
-      const client = await manager.getClientServiceForProtocol(protocol as 'torrent' | 'usenet');
-
-      if (client) {
-        await client.postProcess(downloadHistory.downloadClientId);
-        logger.info(`Successfully post-processed download ${downloadHistory.downloadClientId} via ${client.clientType}`);
-      }
-    }
-  } catch (error) {
-    // Log error but don't fail the job - cleanup is optional
-    logger.warn(
-      `Failed to cleanup download: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      {
-        error: error instanceof Error ? error.stack : undefined,
-      }
-    );
-  }
-}
-
-// =========================================================================
-// SOURCE FILE CLEANUP (MANUAL IMPORT)
-// =========================================================================
-
-/**
- * Delete source files after successful manual import.
- * Non-fatal: logs a warning on failure but does not fail the job.
- * Files are already safely copied to the media library at this point.
- */
-async function cleanupSourceAfterOrganize(
-  downloadPath: string,
-  configService: any,
-  jobId: string | undefined,
-  logger: RMABLogger,
-  selectedFiles?: string[]
-): Promise<void> {
-  try {
-    const fs = await import('fs/promises');
-    const pathModule = await import('path');
-
-    logger.info(`Cleaning up source files: ${downloadPath}`);
-
-    if (selectedFiles && selectedFiles.length > 0) {
-      // Only delete the specific files that were imported, not the entire directory
-      for (const fileName of selectedFiles) {
-        const filePath = pathModule.join(downloadPath, fileName);
-        try {
-          await fs.unlink(filePath);
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-            logger.warn(`Failed to delete source file: ${filePath}`);
-          }
-        }
-      }
-      logger.info(`Removed ${selectedFiles.length} selected source files from ${downloadPath}`);
-    } else {
-      // No file filter — delete entire source path (original behavior)
-      const stats = await fs.stat(downloadPath);
-      if (stats.isDirectory()) {
-        await fs.rm(downloadPath, { recursive: true, force: true });
-        logger.info(`Removed source directory: ${downloadPath}`);
-      } else {
-        await fs.unlink(downloadPath);
-        logger.info(`Removed source file: ${downloadPath}`);
-      }
-    }
-
-    // Determine boundary path based on download path prefix
-    const BOOKDROP_PATH = '/bookdrop';
-    const downloadDir = await configService.get('download_dir') || '/downloads';
-    const mediaDir = await configService.get('media_dir') || '/media';
-
-    let boundaryPath = downloadDir;
-    if (downloadPath.startsWith(BOOKDROP_PATH)) {
-      boundaryPath = BOOKDROP_PATH;
-    } else if (downloadPath.startsWith(mediaDir)) {
-      boundaryPath = mediaDir;
-    }
-
-    const cleanupResult = await removeEmptyParentDirectories(downloadPath, {
-      boundaryPath,
-      logContext: jobId ? { jobId, context: 'CleanupSourceParents' } : undefined,
-    });
-
-    if (cleanupResult.removedDirectories.length > 0) {
-      logger.info(`Cleaned up ${cleanupResult.removedDirectories.length} empty parent directories`);
-    }
-  } catch (error) {
-    // Non-fatal - files are already safely in the media library
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      logger.info(`Source path already deleted: ${downloadPath}`);
-    } else {
-      logger.warn(
-        `Failed to cleanup source files: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        { error: error instanceof Error ? error.stack : undefined }
-      );
-    }
   }
 }
 

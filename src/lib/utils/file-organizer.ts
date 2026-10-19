@@ -9,7 +9,8 @@ import axios from 'axios';
 import { RMAB_USER_AGENT } from './user-agent';
 import { tagMultipleFiles, checkFfmpegAvailable } from './metadata-tagger';
 import { RMABLogger } from './logger';
-import { copyFile } from './copy-file';
+import { copyFile, isSameFile } from './copy-file';
+import { getMediaDir } from './media-dir';
 
 const moduleLogger = RMABLogger.create('FileOrganizer');
 import {
@@ -49,6 +50,8 @@ export interface EbookOrganizationResult {
   targetPath: string;
   errors: string[];
   format?: string;
+  /** The ebook file that was read (may be a temp copy when a fixed EPUB was organized). */
+  sourceFile?: string;
 }
 
 export interface ValidationResult {
@@ -377,10 +380,15 @@ export class FileOrganizer {
           continue;
         }
 
-        // Check if target already exists (skip if already copied)
+        // Check if target already exists (skip if already copied, or if the
+        // source already is the target, e.g. an in-place re-import from the library)
         try {
           await fs.access(targetFilePath);
-          moduleLogger.debug(`File already exists, skipping: ${filename}`);
+          if (await isSameFile(originalSourcePath, targetFilePath)) {
+            await logger?.info(`Already in place, skipping copy: ${filename}`);
+          } else {
+            moduleLogger.debug(`File already exists, skipping: ${filename}`);
+          }
           result.audioFiles.push(targetFilePath);
 
           // Clean up tagged temp file if it exists
@@ -471,12 +479,19 @@ export class FileOrganizer {
         const targetCoverPath = path.join(targetPath, 'cover.jpg');
 
         try {
-          // Copy cover art (do NOT delete original)
-          await copyFile(sourcePath, targetCoverPath);
-          await fs.chmod(targetCoverPath, this.fileMode);
-          result.coverArtFile = targetCoverPath;
-          result.filesMovedCount++;
-          await logger?.info(`Copied cover art`);
+          if (await isSameFile(sourcePath, targetCoverPath)) {
+            // In-place re-import: the cover already is the target file. Copying
+            // it onto itself would truncate it.
+            result.coverArtFile = targetCoverPath;
+            await logger?.info(`Cover art already in place, skipping copy`);
+          } else {
+            // Copy cover art (do NOT delete original)
+            await copyFile(sourcePath, targetCoverPath);
+            await fs.chmod(targetCoverPath, this.fileMode);
+            result.coverArtFile = targetCoverPath;
+            result.filesMovedCount++;
+            await logger?.info(`Copied cover art`);
+          }
         } catch (error) {
           await logger?.warn(`Failed to copy cover art: ${error instanceof Error ? error.message : 'Unknown error'}`);
           result.errors.push('Failed to copy cover art');
@@ -840,6 +855,7 @@ export class FileOrganizer {
 
       // Build full path to source file
       const sourceFilePath = isFile ? downloadPath : path.join(baseSourcePath, ebookFile);
+      result.sourceFile = sourceFilePath;
       await logger?.info(`Found ebook file: ${ebookFile}`);
 
       // Detect format from extension
@@ -903,15 +919,9 @@ export class FileOrganizer {
 
       await logger?.info(`Copied ebook: ${targetFilename}`);
 
-      // Clean up source file ONLY for direct HTTP downloads (not indexer downloads which need to seed)
-      if (!isIndexerDownload && isFile) {
-        try {
-          await fs.unlink(sourceFilePath);
-          await logger?.info(`Cleaned up source file: ${sourceFilename}`);
-        } catch {
-          // Ignore cleanup errors
-        }
-      } else if (isIndexerDownload) {
+      // The source is never deleted here. Direct HTTP download files are removed
+      // afterwards by the post-organize cleanup, behind the delete guard.
+      if (isIndexerDownload) {
         await logger?.info(`Keeping source file for seeding: ${sourceFilename}`);
       }
 
@@ -988,12 +998,7 @@ export class FileOrganizer {
  * Reads media_dir, file_chmod, dir_chmod from database configuration
  */
 export async function getFileOrganizer(): Promise<FileOrganizer> {
-  // Read media_dir from database config
-  const config = await prisma.configuration.findUnique({
-    where: { key: 'media_dir' },
-  });
-
-  const mediaDir = config?.value || process.env.MEDIA_DIR || '/media/audiobooks';
+  const mediaDir = await getMediaDir();
   const tempDir = process.env.TEMP_DIR || '/tmp/readmeabook';
 
   // Read file/directory permission settings

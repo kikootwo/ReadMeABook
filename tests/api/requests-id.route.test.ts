@@ -275,7 +275,7 @@ describe('Request by ID API routes', () => {
         id: 'req-5',
         userId: 'user-1',
         audiobook: { id: 'ab-5' },
-        downloadHistory: [{ torrentHash: 'hash-1', selected: true, downloadClient: 'qbittorrent' }],
+        downloadHistory: [{ id: 'dh-q', torrentHash: 'hash-1', selected: true, downloadClient: 'qbittorrent' }],
       });
     downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue({
       clientType: 'qbittorrent',
@@ -295,7 +295,7 @@ describe('Request by ID API routes', () => {
 
     expect(response.status).toBe(200);
     expect(payload.success).toBe(true);
-    expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith('req-5', 'ab-5', '/downloads/Book');
+    expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith('req-5', 'ab-5', '/downloads/Book', undefined, undefined, undefined, 'dh-q');
   });
 
   it('retries an import via SABnzbd download history', async () => {
@@ -310,7 +310,7 @@ describe('Request by ID API routes', () => {
         id: 'req-6',
         userId: 'user-1',
         audiobook: { id: 'ab-6' },
-        downloadHistory: [{ nzbId: 'nzb-1', selected: true, downloadClient: 'sabnzbd' }],
+        downloadHistory: [{ id: 'dh-s', nzbId: 'nzb-1', selected: true, downloadClient: 'sabnzbd' }],
       });
     downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue({
       clientType: 'sabnzbd',
@@ -330,7 +330,7 @@ describe('Request by ID API routes', () => {
 
     expect(response.status).toBe(200);
     expect(payload.success).toBe(true);
-    expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith('req-6', 'ab-6', '/usenet/book');
+    expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith('req-6', 'ab-6', '/usenet/book', undefined, undefined, undefined, 'dh-s');
   });
 
   it('returns 400 when download history is missing for import retry', async () => {

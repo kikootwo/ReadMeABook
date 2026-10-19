@@ -279,7 +279,11 @@ export async function PATCH(
           await jobQueue.addOrganizeJob(
             id,
             requestWithData.audiobook.id,
-            downloadPath
+            downloadPath,
+            undefined,
+            undefined,
+            undefined,
+            downloadHistory.id
           );
 
           updated = await prisma.request.update({

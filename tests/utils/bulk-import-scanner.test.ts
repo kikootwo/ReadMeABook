@@ -9,9 +9,9 @@ import os from 'os';
 
 const execMock = vi.hoisted(() => {
   const mockFn = vi.fn();
-  // util.promisify on child_process.exec resolves to { stdout, stderr }
+  // util.promisify on child_process.execFile resolves to { stdout, stderr }
   // (via the [util.promisify.custom] symbol). Attach the same shape here so
-  // code that destructures `{ stdout } = await execPromise(...)` works.
+  // code that destructures `{ stdout } = await execFilePromise(...)` works.
   const customSymbol = Symbol.for('nodejs.util.promisify.custom');
   (mockFn as unknown as Record<symbol, unknown>)[customSymbol] = (
     ...args: unknown[]
@@ -29,7 +29,7 @@ const execMock = vi.hoisted(() => {
 });
 
 vi.mock('child_process', () => ({
-  exec: execMock,
+  execFile: execMock,
 }));
 
 import fs from 'fs/promises';
@@ -38,22 +38,22 @@ import {
   cleanSearchString,
   discoverAudiobooks,
   extractAsinFromString,
+  readAudioMetadata,
 } from '@/lib/utils/bulk-import-scanner';
 
 /**
  * Configure the ffprobe mock so each invocation returns canned tags
- * keyed by the file path embedded in the command string.
+ * keyed by the file path (the last argv element passed to execFile).
  */
 function mockFfprobeByFile(tagsByFile: Record<string, Record<string, string>>) {
   execMock.mockImplementation(
-    (command: string, options: unknown, callback?: unknown) => {
+    (file: string, args: string[], options: unknown, callback?: unknown) => {
       const cb = (typeof options === 'function' ? options : callback) as (
         err: Error | null,
         stdout: string,
         stderr: string,
       ) => void;
-      const match = command.match(/"([^"]+)"\s*$/);
-      const filePath = match ? match[1].replace(/\\/g, '/') : '';
+      const filePath = file === 'ffprobe' ? args[args.length - 1].replace(/\\/g, '/') : '';
       const tags = tagsByFile[filePath] ?? {};
       const payload = JSON.stringify({ format: { tags } });
       cb(null, payload, '');
@@ -312,5 +312,22 @@ describe('discoverAudiobooks integration', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].extractedAsin).toBe('B019NOKST6');
+  });
+});
+
+describe('readAudioMetadata (no shell)', () => {
+  it('runs ffprobe via execFile with the path as one untouched argv element', async () => {
+    const hostile = `/imports/My $(touch pwned) \`id\` "dq" 'sq' Book/01.m4b`;
+    execMock.mockReset();
+    mockFfprobeByFile({ [hostile]: { album: 'Hostile Album' } });
+
+    const meta = await readAudioMetadata(hostile);
+
+    expect(meta.title).toBe('Hostile Album');
+    expect(execMock).toHaveBeenCalledTimes(1);
+    const [file, args, options] = execMock.mock.calls[0];
+    expect(file).toBe('ffprobe');
+    expect(args).toEqual(['-v', 'quiet', '-print_format', 'json', '-show_format', hostile]);
+    expect(options).toEqual({ timeout: 15000 });
   });
 });

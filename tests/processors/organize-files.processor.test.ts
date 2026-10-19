@@ -248,6 +248,7 @@ describe('processOrganizeFiles', () => {
       audiobookId: 'a2',
       downloadPath: '/downloads/book',
       jobId: 'job-2',
+      downloadHistoryId: 'dh-client',
     });
 
     expect(result.success).toBe(false);
@@ -309,6 +310,7 @@ describe('processOrganizeFiles', () => {
       audiobookId: 'a6',
       downloadPath: '/downloads/book',
       jobId: 'job-6',
+      downloadHistoryId: 'dh-client',
     });
 
     expect(result.success).toBe(false);
@@ -431,6 +433,7 @@ describe('processOrganizeFiles', () => {
       audiobookId: 'a-eperm',
       downloadPath: '/data/torrents/bookbit',
       jobId: 'job-eperm',
+      downloadHistoryId: 'dh-client',
     });
 
     // Should be identified as retryable and queued for re-import

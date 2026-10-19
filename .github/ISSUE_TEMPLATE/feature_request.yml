@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest an idea or improvement for ReadMeABook.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start with the problem you're running into. A clear problem makes it much easier to find the right solution, even if it ends up different from the one you have in mind.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the situation and what makes it hard or annoying today.
+      placeholder: When I ..., I have to ..., which ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How you'd like ReadMeABook to handle it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you use today, or other approaches you thought about.
+    validations:
+      required: false
