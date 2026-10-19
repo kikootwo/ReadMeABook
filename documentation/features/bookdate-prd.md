@@ -397,7 +397,7 @@ UI Elements:
 **Configuration (Admin only - except GET):**
 - `POST /api/bookdate/config` - Create/update global BookDate config (Admin only)
 - `GET /api/bookdate/config` - Get global BookDate config (excluding API key) (All authenticated users)
-- `POST /api/bookdate/test-connection` - Validate API key, return available models (All authenticated users - admins use for setup)
+- `POST /api/bookdate/test-connection` - Validate API key, return available models (setup wizard without sign-in while setup is incomplete, built-in providers only; requires admin after setup; custom provider and saved key admin only). Errors report the provider's HTTP status or "response was not JSON", never the remote body
 - `DELETE /api/bookdate/config` - Delete global BookDate config (Admin only)
 - `DELETE /api/bookdate/swipes` - Clear ALL users' swipe history (Admin only)
 

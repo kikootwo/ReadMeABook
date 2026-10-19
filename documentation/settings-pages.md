@@ -354,7 +354,7 @@ src/app/admin/settings/
 **BookDate Endpoints:**
 - GET /api/bookdate/config - Get global BookDate configuration (API key excluded, admin only)
 - POST /api/bookdate/config - Save/update global BookDate configuration (admin only)
-- POST /api/bookdate/test-connection - Test AI provider connection and fetch available models
+- POST /api/bookdate/test-connection - Test AI provider connection and fetch available models (requires admin after setup)
 - DELETE /api/bookdate/swipes - Clear ALL users' swipe history and cached recommendations (admin only)
 - GET /api/bookdate/preferences - Get user's preferences (libraryScope, customPrompt)
 - PUT /api/bookdate/preferences - Update user's preferences (all authenticated users)
