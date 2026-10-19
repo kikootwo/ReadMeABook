@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { getEncryptionService } from '@/lib/services/encryption.service';
+import { getConfigService } from '@/lib/services/config.service';
 import { invalidateProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
@@ -26,6 +27,9 @@ export async function PUT(request: NextRequest) {
             { status: 400 }
           );
         }
+        if (typeof url !== 'string' || typeof apiKey !== 'string') {
+          return NextResponse.json({ error: 'URL and API key must be text' }, { status: 400 });
+        }
 
         // A masked key keeps the saved one — only when the URL stays the saved URL (checked before saving)
         const resolvedKey = await resolveSecretForUrl({
@@ -39,6 +43,9 @@ export async function PUT(request: NextRequest) {
           return NextResponse.json({ error: resolvedKey.error }, { status: 400 });
         }
 
+        // Encrypt first, so a failure can't leave the saved key paired with a new URL
+        const encryptedApiKey = resolvedKey.reusedSaved ? null : getEncryptionService().encrypt(resolvedKey.secret);
+
         // Update configuration
         await prisma.configuration.upsert({
           where: { key: 'prowlarr_url' },
@@ -47,15 +54,18 @@ export async function PUT(request: NextRequest) {
         });
 
         // Only update API key if a new one was entered
-        if (!resolvedKey.reusedSaved) {
-          const encryptionService = getEncryptionService();
-          const encryptedApiKey = encryptionService.encrypt(apiKey);
+        if (encryptedApiKey) {
           await prisma.configuration.upsert({
             where: { key: 'prowlarr_api_key' },
             update: { value: encryptedApiKey, encrypted: true },
             create: { key: 'prowlarr_api_key', value: encryptedApiKey, encrypted: true },
           });
         }
+
+        // Written straight to the DB: drop cached values so the next read (and re-save) sees them
+        const configCache = getConfigService();
+        configCache.clearCache('prowlarr_url');
+        configCache.clearCache('prowlarr_api_key');
 
         // Invalidate cached singleton so background jobs use new credentials
         invalidateProwlarrService();

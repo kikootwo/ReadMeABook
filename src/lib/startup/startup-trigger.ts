@@ -62,8 +62,9 @@ function specificIp(host: string | undefined): string | null {
 /**
  * Hosts the startup secret may be sent to, in order: loopback (127.0.0.1, [::1]),
  * then the server's own bound address when it is an IP literal, taken from HOSTNAME
- * or from the origin Next records after binding (`next start -H <ip>`). Host names
- * are never used: they could resolve somewhere else.
+ * or from the origin Next records after binding (`next start -H <ip>`). The only
+ * host name accepted is `localhost` in Next's own recorded origin; any other name
+ * is never used, because it could resolve somewhere else.
  */
 export function startupInitTargets(env: Env): string[] {
   const port = env.PORT?.trim() || '3000';

@@ -12,6 +12,7 @@ const MASK = '••••••••';
 const config = vi.hoisted(() => ({ values: {} as Record<string, string | null> }));
 const upsertMock = vi.hoisted(() => vi.fn());
 const setManyMock = vi.hoisted(() => vi.fn());
+const clearCacheMock = vi.hoisted(() => vi.fn());
 const plexTestMock = vi.hoisted(() => vi.fn());
 const managerMock = vi.hoisted(() => ({ getAllClients: vi.fn(), testConnection: vi.fn() }));
 
@@ -21,7 +22,7 @@ vi.mock('@/lib/middleware/auth', () => ({
 }));
 vi.mock('@/lib/db', () => ({ prisma: { configuration: { upsert: upsertMock } } }));
 vi.mock('@/lib/services/config.service', () => ({
-  getConfigService: () => ({ get: async (key: string) => config.values[key] ?? null, setMany: setManyMock }),
+  getConfigService: () => ({ get: async (key: string) => config.values[key] ?? null, setMany: setManyMock, clearCache: clearCacheMock }),
 }));
 vi.mock('@/lib/services/encryption.service', () => ({ getEncryptionService: () => ({ encrypt: (v: string) => `enc:${v}` }) }));
 vi.mock('@/lib/integrations/plex.service', () => ({ getPlexService: () => ({ testConnection: plexTestMock }) }));
@@ -59,6 +60,14 @@ describe('settings save routes keep a saved secret only for the saved URL', () =
       expect(plexTestMock).not.toHaveBeenCalled();
     });
 
+    it('rejects a non-string token without saving anything', async () => {
+      const { PUT } = await import('@/app/api/admin/settings/plex/route');
+      const response = await PUT(json({ url: 'http://elsewhere:32400', token: 1, libraryId: '1' }));
+
+      expect(response.status).toBe(400);
+      expect(upsertMock).not.toHaveBeenCalled();
+    });
+
     it('keeps the saved token for the saved URL', async () => {
       const { PUT } = await import('@/app/api/admin/settings/plex/route');
       const response = await PUT(json({ url: 'http://plex.saved:32400/', token: MASK, libraryId: '1' }));
@@ -66,6 +75,8 @@ describe('settings save routes keep a saved secret only for the saved URL', () =
       expect(response.status).toBe(200);
       expect(savedKeys()).not.toContain('plex_token');
       expect(plexTestMock).toHaveBeenCalledWith('http://plex.saved:32400/', 'saved-plex');
+      expect(clearCacheMock).toHaveBeenCalledWith('plex_url');
+      expect(clearCacheMock).toHaveBeenCalledWith('plex_token');
     });
   });
 
@@ -77,6 +88,23 @@ describe('settings save routes keep a saved secret only for the saved URL', () =
       expect(response.status).toBe(400);
       expect((await response.json()).error).toContain('Prowlarr API key');
       expect(upsertMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-string key without saving anything', async () => {
+      const { PUT } = await import('@/app/api/admin/settings/prowlarr/route');
+      const response = await PUT(json({ url: 'http://elsewhere:9696', apiKey: 1 }));
+
+      expect(response.status).toBe(400);
+      expect(upsertMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps the saved key for the saved URL', async () => {
+      const { PUT } = await import('@/app/api/admin/settings/prowlarr/route');
+      const response = await PUT(json({ url: 'http://prowlarr.saved:9696/', apiKey: MASK }));
+
+      expect(response.status).toBe(200);
+      expect(savedKeys()).toEqual(['prowlarr_url']);
+      expect(clearCacheMock).toHaveBeenCalledWith('prowlarr_api_key');
     });
 
     it('accepts a new key with a new URL', async () => {
@@ -96,6 +124,29 @@ describe('settings save routes keep a saved secret only for the saved URL', () =
       expect(response.status).toBe(400);
       expect((await response.json()).error).toContain('Audiobookshelf API token');
       expect(setManyMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['an empty token', { apiToken: '' }],
+      ['an omitted token', {}],
+    ])('rejects %s with a new URL and saves nothing', async (_label, token) => {
+      const { PUT } = await import('@/app/api/admin/settings/audiobookshelf/route');
+      const response = await PUT(json({ serverUrl: 'http://elsewhere:13378', libraryId: 'l', ...token }));
+
+      expect(response.status).toBe(400);
+      expect(setManyMock).not.toHaveBeenCalled();
+    });
+
+    it('disconnects when both URL and token are cleared', async () => {
+      const { PUT } = await import('@/app/api/admin/settings/audiobookshelf/route');
+      const response = await PUT(json({ serverUrl: '', apiToken: '', libraryId: '' }));
+
+      expect(response.status).toBe(200);
+      const updates = setManyMock.mock.calls[0][0];
+      expect(updates).toEqual(expect.arrayContaining([
+        expect.objectContaining({ key: 'audiobookshelf.server_url', value: '' }),
+        expect.objectContaining({ key: 'audiobookshelf.api_token', value: '' }),
+      ]));
     });
 
     it('keeps the saved token for the saved URL', async () => {
@@ -143,6 +194,15 @@ describe('settings save routes keep a saved secret only for the saved URL', () =
   });
 
   describe('PUT /api/admin/settings/download-client (legacy)', () => {
+    it('keeps the saved password at the same URL', async () => {
+      const { PUT } = await import('@/app/api/admin/settings/download-client/route');
+      const response = await PUT(json({ type: 'qbittorrent', url: 'http://qbit.saved:8080/', username: 'u', password: MASK }));
+
+      expect(response.status).toBe(200);
+      expect(setManyMock).toHaveBeenCalled();
+      expect(JSON.stringify(setManyMock.mock.calls)).toContain('saved-pass');
+    });
+
     it('rejects a masked password with a new URL and saves nothing', async () => {
       const { PUT } = await import('@/app/api/admin/settings/download-client/route');
       const response = await PUT(json({ type: 'qbittorrent', url: 'http://elsewhere:8080', username: 'u', password: MASK }));

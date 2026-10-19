@@ -67,6 +67,8 @@ export interface SecretChoice {
   acceptPasswordMask?: boolean;
   /** Error when the saved secret is wanted but none exists */
   missingMessage?: string;
+  /** An empty secret is fine when nothing is saved (resolves to '') */
+  optional?: boolean;
 }
 
 export type SecretResolution =
@@ -78,6 +80,9 @@ export type SecretResolution =
  * asks for it AND the URL is the saved URL.
  */
 export async function resolveSecretForUrl(choice: SecretChoice): Promise<SecretResolution> {
+  if (choice.supplied !== undefined && choice.supplied !== null && typeof choice.supplied !== 'string') {
+    return { ok: false, error: 'The password/API key/token must be text.' };
+  }
   const supplied = typeof choice.supplied === 'string' ? choice.supplied : '';
   const wantsSaved =
     isMaskedSecret(supplied) ||
@@ -87,6 +92,7 @@ export async function resolveSecretForUrl(choice: SecretChoice): Promise<SecretR
   if (!wantsSaved) return { ok: true, secret: supplied, reusedSaved: false };
   const saved = await choice.loadSaved();
   if (!saved.secret) {
+    if (choice.optional && supplied === '') return { ok: true, secret: '', reusedSaved: false };
     return { ok: false, error: choice.missingMessage ?? `No saved ${CREDENTIAL_HELP[choice.kind]} found. Please enter it.` };
   }
   if (!isSameServiceUrl(choice.url, saved.url)) {
