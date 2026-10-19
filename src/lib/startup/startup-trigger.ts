@@ -9,6 +9,7 @@
  * Deliberately dependency-light: no Prisma/logger imports here.
  */
 
+import { isIP } from 'net';
 import {
   STARTUP_ATTEMPT_TIMEOUT_MS,
   STARTUP_ERROR_LOG_EVERY,
@@ -17,11 +18,10 @@ import {
   STARTUP_RETRY_MAX_MS,
   STARTUP_TOKEN_HEADER,
 } from '@/lib/constants/startup';
-import { isIP } from 'net';
 import { getOrCreateStartupSecret } from './startup-secret';
 
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', '[::1]', '::1', 'localhost']);
-const WILDCARD_HOSTS = new Set(['', '0.0.0.0', '::', '[::]']);
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+const WILDCARD_HOSTS = new Set(['', '0.0.0.0', '::']);
 
 type Env = Record<string, string | undefined>;
 
@@ -44,27 +44,32 @@ const defaultDeps: TriggerDeps = {
   env: process.env,
 };
 
-function formatHost(host: string): string {
-  return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-}
-
 /** `[fd00::5]` → `fd00::5` (IPv6 literals appear bracketed in URLs) */
 function stripBrackets(host: string): string {
   return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
 }
 
+function formatHost(host: string): string {
+  return host.includes(':') ? `[${host}]` : host;
+}
+
+/** A specific (non-wildcard, non-loopback) IP literal, or null. */
+function specificIp(host: string | undefined): string | null {
+  const bare = stripBrackets(host?.trim() ?? '');
+  return isIP(bare) !== 0 && !WILDCARD_HOSTS.has(bare) && !LOOPBACK_HOSTS.has(bare) ? bare : null;
+}
+
 /**
  * Hosts the startup secret may be sent to, in order: loopback (127.0.0.1, [::1]),
- * then the server's bound address only when HOSTNAME is an IP literal (a machine
- * name could resolve off-box), then Next's recorded origin if it is one of those.
+ * then the server's own bound address when it is an IP literal, taken from HOSTNAME
+ * or from the origin Next records after binding (`next start -H <ip>`). Host names
+ * are never used: they could resolve somewhere else.
  */
 export function startupInitTargets(env: Env): string[] {
   const port = env.PORT?.trim() || '3000';
-  const rawBound = env.HOSTNAME?.trim() ?? '';
-  const bound = stripBrackets(rawBound);
-  const boundIp = isIP(bound) !== 0 && !WILDCARD_HOSTS.has(bound) && !LOOPBACK_HOSTS.has(bound) ? bound : null;
   const targets: string[] = [`http://127.0.0.1:${port}`, `http://[::1]:${port}`];
 
+  const boundIp = specificIp(env.HOSTNAME);
   if (boundIp) targets.push(`http://${formatHost(boundIp)}:${port}`);
 
   const nextOrigin = env.__NEXT_PRIVATE_ORIGIN?.trim();
@@ -72,8 +77,7 @@ export function startupInitTargets(env: Env): string[] {
     try {
       const url = new URL(nextOrigin);
       const host = stripBrackets(url.hostname);
-      const allowed = LOOPBACK_HOSTS.has(url.hostname) || LOOPBACK_HOSTS.has(host) || (boundIp !== null && host === boundIp);
-      if (url.protocol === 'http:' && allowed) targets.push(url.origin);
+      if (url.protocol === 'http:' && (LOOPBACK_HOSTS.has(host) || specificIp(host))) targets.push(url.origin);
     } catch {
       // ignore malformed origin
     }
@@ -86,33 +90,62 @@ export function startupRetryDelay(attempt: number): number {
   return Math.min(STARTUP_RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1), STARTUP_RETRY_MAX_MS);
 }
 
+function describeFailure(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const code = (error as Error & { cause?: { code?: string } }).cause?.code;
+  return code ? `${error.message} (${code})` : error.message;
+}
+
+function isTimeout(error: unknown): boolean {
+  return error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+}
+
 /** Loop until the init route answers 200 on one of the allowed targets. Never rejects. */
 export async function triggerStartupInit(overrides: Partial<TriggerDeps> = {}): Promise<void> {
   const deps = { ...defaultDeps, ...overrides };
   const secret = getOrCreateStartupSecret();
   const targets = startupInitTargets(deps.env);
+  let hinted = false;
 
   for (let attempt = 1; ; attempt++) {
     const failures: string[] = [];
+    let anyAnswered = false;
     for (const target of targets) {
       try {
         const response = await deps.fetch(`${target}${STARTUP_INIT_PATH}`, {
           method: 'POST',
           headers: { [STARTUP_TOKEN_HEADER]: secret },
           signal: AbortSignal.timeout(STARTUP_ATTEMPT_TIMEOUT_MS),
+          // The secret header must never follow a redirect
+          redirect: 'error',
           cache: 'no-store',
         });
         if (response.status === 200) {
           deps.log('info', `Application services initialized via ${target} (attempt ${attempt})`);
           return;
         }
+        anyAnswered = true;
         failures.push(`${target} -> HTTP ${response.status}`);
         // 503/500: this is our server, not ready or init failed — retry later.
         // Anything else (e.g. 404): not this process, try the next target.
         if (response.status === 503 || response.status === 500) break;
       } catch (error) {
-        failures.push(`${target} -> ${error instanceof Error ? error.message : String(error)}`);
+        failures.push(`${target} -> ${describeFailure(error)}`);
+        // A slow but healthy init is still running: don't start it again on another target
+        if (isTimeout(error)) {
+          anyAnswered = true;
+          break;
+        }
       }
+    }
+
+    if (!anyAnswered && !hinted) {
+      hinted = true;
+      deps.log(
+        'warn',
+        `Startup init could not reach this server on ${targets.join(', ')}. If the server listens on one ` +
+          'specific address, set HOSTNAME to that IP address (not a host name), or bind to 0.0.0.0.'
+      );
     }
 
     const delay = startupRetryDelay(attempt);

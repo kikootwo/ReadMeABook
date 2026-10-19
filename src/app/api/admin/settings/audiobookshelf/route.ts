@@ -7,6 +7,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { ConfigUpdate } from '@/lib/services/config.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { isMaskedSecret, resolveSecretForUrl } from '@/lib/utils/saved-credential';
+import { savedAudiobookshelfCredential } from '@/lib/services/saved-credentials.service';
 
 const logger = RMABLogger.create('API.Admin.Settings.Audiobookshelf');
 
@@ -19,6 +21,19 @@ export async function PUT(request: NextRequest) {
 
         const { getConfigService } = await import('@/lib/services/config.service');
         const configService = getConfigService();
+
+        // A masked token keeps the saved one — only when the URL stays the saved URL (checked before saving)
+        if (apiToken && isMaskedSecret(apiToken)) {
+          const resolvedToken = await resolveSecretForUrl({
+            kind: 'audiobookshelf',
+            url: serverUrl,
+            supplied: apiToken,
+            loadSaved: savedAudiobookshelfCredential,
+          });
+          if (!resolvedToken.ok) {
+            return NextResponse.json({ error: resolvedToken.error }, { status: 400 });
+          }
+        }
 
         // Build updates array, skipping masked values
         const updates: ConfigUpdate[] = [

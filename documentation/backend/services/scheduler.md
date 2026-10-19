@@ -38,10 +38,11 @@ Manages recurring/scheduled jobs providing automated tasks (Plex scans, Audible 
 
 **Files:** `src/instrumentation.ts`, `src/lib/startup/{startup-trigger,startup-secret,app-init}.ts`, `src/app/api/init/route.ts`, constants `src/lib/constants/startup.ts`
 - Next.js `register()` (every `next start` / standalone `server.js`: Docker and bare metal) skips the edge runtime and `NEXT_PHASE=phase-production-build`, then fires `triggerStartupInit()` without awaiting it (Next awaits `register()`)
-- Trigger POSTs `/api/init` with header `x-rmab-startup-token` = per-process secret (32 random bytes, hex; kept only in memory on `globalThis`, never logged/env/disk)
-- Targets, in order: `http://127.0.0.1:$PORT`, `http://[::1]:$PORT`, bound `HOSTNAME` only if it is an IP literal, `__NEXT_PRIVATE_ORIGIN` only if loopback or that IP. 404 → try next target; 503/500 → retry later
+- Trigger POSTs `/api/init` with header `x-rmab-startup-token` = per-process secret (32 random bytes, hex; process singleton in memory, never logged/env/disk); `redirect: 'error'` so the header never follows a redirect
+- Targets, in order: `http://127.0.0.1:$PORT`, `http://[::1]:$PORT`, then the server's own address only when it is an IP literal (`HOSTNAME`, or `__NEXT_PRIVATE_ORIGIN` from `next start -H <ip>`); host names are never used. 404 → try next target; 503/500 → retry later; attempt timeout (120s) → retry later without re-POSTing to other targets
+- **Bound to one address (bare metal):** set `HOSTNAME` to that IP address (not a host name) or bind `0.0.0.0`; otherwise init never runs and the log shows a one-time hint plus the connection error code
 - Retry: capped backoff 1s → 60s (`STARTUP_RETRY_*`), never gives up, warn per failure, error when capped and every 10th attempt; stops after one 200 (logs which target worked)
-- `POST /api/init`: wrong/missing secret → 404; GET → 405. Readiness: DB `SELECT 1` + Redis `PING` (`LOADING` = not ready) → 503. Then `runCredentialMigration()` + `scheduler.start()` once per process (single-flight; later calls → 200 `alreadyInitialized`). Failure → generic 500, details in logs
+- `POST /api/init`: wrong/missing secret → 404; GET → 405. Readiness: DB `SELECT 1` + Redis `PING` with the ready check off and a `STARTUP_REDIS_PING_TIMEOUT_MS` deadline (`LOADING` reply or no answer = not ready) → 503. Then `runCredentialMigration()` + `scheduler.start()` once per process (single-flight; later calls → 200 `alreadyInitialized`). Failure → generic 500, details in logs
 - Init runs inside a route handler so processors share the settings caches that admin routes invalidate
 - Prisma, JobQueue and Scheduler singletons live on `globalThis` (`src/lib/utils/process-singleton.ts`) so a second module copy never starts a second set of processors
 - **Single process only:** PM2 `-i N` / Node cluster is unsupported (peers would 404 on init, and N processes would each run a scheduler)

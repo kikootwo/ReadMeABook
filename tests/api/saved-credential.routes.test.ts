@@ -1,12 +1,12 @@
 /**
- * Component: Saved Credential Reuse + Fail-closed Setup Guard Tests
+ * Component: Saved Credential Reuse Tests (connection test + settings save routes)
  * Documentation: documentation/settings-pages.md
  *
  * A masked secret means "use the saved one"; it may only be sent to the saved URL.
  */
 
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const MASK = '••••••••';
 // tests/setup.ts replaces fetch in beforeAll; keep the real one for the local ABS server
@@ -49,7 +49,13 @@ describe('test-abs never sends the saved token to a different URL (real HTTP)', 
     absUrl = `http://127.0.0.1:${address.port}`;
   });
   afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  // Put back the unmocked-fetch guard from tests/setup.ts
+  afterEach(() => {
+    globalThis.fetch = guardedFetch;
+  });
+  let guardedFetch: typeof fetch;
   beforeEach(() => {
+    guardedFetch = globalThis.fetch;
     globalThis.fetch = realFetch;
     received.length = 0;
     config.values = { 'audiobookshelf.api_token': 'saved-abs-token', 'audiobookshelf.server_url': 'http://abs.saved:13378' };
@@ -141,5 +147,27 @@ describe('sibling test routes apply the same rule', () => {
     expect(payload.error).toContain('download client password or API key');
     expect(managerMock.testConnection).not.toHaveBeenCalled();
     expect(managerMock.createClientFromConfig).not.toHaveBeenCalled();
+  });
+
+  it('test-download-client (legacy): reuses the password of the same-type client saved at that URL', async () => {
+    managerMock.getAllClients.mockResolvedValue([
+      { id: 'c1', type: 'qbittorrent', url: 'http://qbit-a:8080', password: 'pass-a' },
+      { id: 'c2', type: 'qbittorrent', url: 'http://qbit-b:8080', password: 'pass-b' },
+    ]);
+    managerMock.testConnection.mockResolvedValue({ success: true, message: 'ok' });
+    const { POST } = await import('@/app/api/admin/settings/test-download-client/route');
+
+    const response = await POST(json({ type: 'qbittorrent', url: 'http://qbit-b:8080', password: MASK }));
+
+    expect(response.status).toBe(200);
+    expect(managerMock.testConnection).toHaveBeenCalledWith(expect.objectContaining({ password: 'pass-b' }));
+  });
+
+  it('download-clients/test: a missing URL is reported before any saved-password check', async () => {
+    const { POST } = await import('@/app/api/admin/settings/download-clients/test/route');
+    const response = await POST(json({ clientId: 'c1', type: 'qbittorrent' }));
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe('URL is required');
   });
 });

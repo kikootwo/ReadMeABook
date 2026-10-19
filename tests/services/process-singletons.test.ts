@@ -44,7 +44,7 @@ describe('process-wide singletons survive a second module instance', () => {
     const schedulerA = first.scheduler.getSchedulerService();
     const registrationsAfterFirst = processRegistrations.count;
 
-    // Fresh module registry = a second copy of every module (like Next's instrument layer)
+    // Fresh module registry = a second evaluation of every module in the same process
     vi.resetModules();
     const second = {
       db: await import('@/lib/db'),

@@ -9,6 +9,8 @@ import { prisma } from '@/lib/db';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { invalidateProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
+import { savedProwlarrCredential } from '@/lib/services/saved-credentials.service';
 
 const logger = RMABLogger.create('API.Admin.Settings.Prowlarr');
 
@@ -25,6 +27,18 @@ export async function PUT(request: NextRequest) {
           );
         }
 
+        // A masked key keeps the saved one — only when the URL stays the saved URL (checked before saving)
+        const resolvedKey = await resolveSecretForUrl({
+          kind: 'prowlarr',
+          url,
+          supplied: apiKey,
+          missingMessage: 'No stored API key found. Please re-enter your Prowlarr API key.',
+          loadSaved: savedProwlarrCredential,
+        });
+        if (!resolvedKey.ok) {
+          return NextResponse.json({ error: resolvedKey.error }, { status: 400 });
+        }
+
         // Update configuration
         await prisma.configuration.upsert({
           where: { key: 'prowlarr_url' },
@@ -32,8 +46,8 @@ export async function PUT(request: NextRequest) {
           create: { key: 'prowlarr_url', value: url },
         });
 
-        // Only update API key if it's not the masked value
-        if (!apiKey.startsWith('••••')) {
+        // Only update API key if a new one was entered
+        if (!resolvedKey.reusedSaved) {
           const encryptionService = getEncryptionService();
           const encryptedApiKey = encryptionService.encrypt(apiKey);
           await prisma.configuration.upsert({

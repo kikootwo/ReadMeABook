@@ -6,7 +6,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const dbReady = vi.hoisted(() => ({ value: true }));
-const redisPing = vi.hoisted(() => ({ value: 'PONG' as string | Error }));
+/** 'ready' | 'loading' (dataset still loading) | 'silent' (accepts TCP, never answers) */
+const redisState = vi.hoisted(() => ({ value: 'ready' as 'ready' | 'loading' | 'silent', errorListeners: 0 }));
 const schedulerStart = vi.hoisted(() => vi.fn());
 const credentialMigration = vi.hoisted(() => vi.fn());
 
@@ -18,21 +19,39 @@ vi.mock('@/lib/db', () => ({
     },
   },
 }));
+// Shaped like ioredis: with the ready check on, connect() waits until loading ends;
+// with it off, PING gets "-LOADING" as a reply error. A silent server never answers.
 vi.mock('ioredis', () => ({
   default: class {
-    async connect() {}
-    async ping() {
-      if (redisPing.value instanceof Error) throw redisPing.value;
-      return redisPing.value;
+    constructor(_url: string, private readonly options: { enableReadyCheck?: boolean } = {}) {}
+    on(event: string) {
+      if (event === 'error') redisState.errorListeners++;
+      return this;
+    }
+    connect() {
+      if (redisState.value === 'silent') return new Promise(() => undefined);
+      if (redisState.value === 'loading' && this.options.enableReadyCheck !== false) return new Promise(() => undefined);
+      return Promise.resolve();
+    }
+    ping() {
+      if (redisState.value === 'silent') return new Promise(() => undefined);
+      if (redisState.value === 'loading') {
+        return Promise.reject(Object.assign(new Error('LOADING Redis is loading the dataset in memory'), { name: 'ReplyError' }));
+      }
+      return Promise.resolve('PONG');
     }
     disconnect() {}
   },
 }));
+vi.mock('@/lib/constants/startup', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  STARTUP_REDIS_PING_TIMEOUT_MS: 200,
+}));
 vi.mock('@/lib/services/scheduler.service', () => ({ getSchedulerService: () => ({ start: schedulerStart }) }));
 vi.mock('@/lib/services/credential-migration.service', () => ({ runCredentialMigration: credentialMigration }));
 
-const INIT_STATE = Symbol.for('rmab.startup.init-state');
-const SECRET = Symbol.for('rmab.startup.secret');
+const INIT_STATE = Symbol.for('rmab.singleton.startup-init-state');
+const SECRET = Symbol.for('rmab.singleton.startup-secret');
 
 function post(token?: string) {
   const headers = new Headers();
@@ -51,7 +70,7 @@ describe('/api/init', () => {
     delete (globalThis as any)[INIT_STATE];
     delete (globalThis as any)[SECRET];
     dbReady.value = true;
-    redisPing.value = 'PONG';
+    redisState.value = 'ready';
     schedulerStart.mockResolvedValue(undefined);
     credentialMigration.mockResolvedValue(undefined);
   });
@@ -110,19 +129,28 @@ describe('/api/init', () => {
 
   it.each([
     ['the database is down', () => { dbReady.value = false; }],
-    ['Redis is still loading', () => { redisPing.value = new Error('LOADING Redis is loading the dataset in memory'); }],
+    ['Redis is still loading its dataset', () => { redisState.value = 'loading'; }],
+    ['Redis accepts connections but never answers', () => { redisState.value = 'silent'; }],
   ])('returns 503 when %s, then initializes once ready', async (_label, breakIt) => {
     const { route, secret } = await load();
     breakIt();
 
+    const started = Date.now();
     const notReady = await route.POST(post(secret));
     expect(notReady.status).toBe(503);
+    expect(Date.now() - started).toBeLessThan(2000);
     expect(schedulerStart).not.toHaveBeenCalled();
 
     dbReady.value = true;
-    redisPing.value = 'PONG';
+    redisState.value = 'ready';
     expect((await route.POST(post(secret))).status).toBe(200);
     expect(schedulerStart).toHaveBeenCalledTimes(1);
+  });
+
+  it('listens for Redis probe errors (no "Unhandled error event")', async () => {
+    const { route, secret } = await load();
+    await route.POST(post(secret));
+    expect(redisState.errorListeners).toBeGreaterThan(0);
   });
 
   it('returns a generic 500 on failure and retries on the next call', async () => {

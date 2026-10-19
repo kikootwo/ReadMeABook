@@ -9,6 +9,8 @@ import { prisma } from '@/lib/db';
 import { getPlexService } from '@/lib/integrations/plex.service';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
+import { savedPlexCredential } from '@/lib/services/saved-credentials.service';
 
 const logger = RMABLogger.create('API.AdminPlexSettings');
 
@@ -25,6 +27,18 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    // A masked token keeps the saved one — only when the URL stays the saved URL (checked before saving)
+    const resolvedToken = await resolveSecretForUrl({
+      kind: 'plex',
+      url,
+      supplied: token,
+      missingMessage: 'No stored token found. Please re-enter your Plex token.',
+      loadSaved: savedPlexCredential,
+    });
+    if (!resolvedToken.ok) {
+      return NextResponse.json({ error: resolvedToken.error }, { status: 400 });
+    }
+
     // Update configuration
     await prisma.configuration.upsert({
       where: { key: 'plex_url' },
@@ -32,8 +46,8 @@ export async function PUT(request: NextRequest) {
       create: { key: 'plex_url', value: url },
     });
 
-    // Only update token if it's not the masked value
-    if (!token.startsWith('••••')) {
+    // Only update token if a new one was entered
+    if (!resolvedToken.reusedSaved) {
       const encryptionService = getEncryptionService();
       const encryptedToken = encryptionService.encrypt(token);
       await prisma.configuration.upsert({
@@ -60,12 +74,7 @@ export async function PUT(request: NextRequest) {
     // This is needed for BookDate per-user rating functionality
     try {
       const plexService = getPlexService();
-      const actualToken = token.startsWith('••••') ? null : token;
-
-      // Get token from DB if it was masked (decrypted via ConfigService)
-      const { getConfigService } = await import('@/lib/services/config.service');
-      const configService = getConfigService();
-      const tokenToUse = actualToken || await configService.get('plex_token');
+      const tokenToUse = resolvedToken.secret;
 
       if (tokenToUse) {
         const serverInfo = await plexService.testConnection(url, tokenToUse);

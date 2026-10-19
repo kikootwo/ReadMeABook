@@ -151,13 +151,17 @@ describe('Setup route guard - setup-only endpoints (requireSetupIncomplete)', ()
     expect(response.status).not.toBe(403);
   });
 
-  it('allows requests through when database is not ready', async () => {
+  it('fails closed with 503 (handler not run) when the setup state cannot be read', async () => {
     prismaMock.configuration.findUnique.mockRejectedValue(new Error('DB not ready'));
 
     const { POST } = await import('@/app/api/setup/test-download-client/route');
     const response = await POST(makeRequest({ type: 'qbittorrent', url: 'http://qbt' }));
+    const payload = await response.json();
 
-    expect(response.status).not.toBe(403);
+    expect(response.status).toBe(503);
+    // The guard's own body, not the route's (the route answers success/error for a connection test)
+    expect(payload.error).toBe('ServiceUnavailable');
+    expect(payload).not.toHaveProperty('success');
   });
 });
 
