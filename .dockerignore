@@ -59,8 +59,13 @@ docker-compose.yml
 .dockerignore
 
 # Data directories (will be mounted as volumes)
+bookdrop
+cache
 config
 downloads
 media
 pgdata
-redisdata
+redis
+
+# Local tooling
+.claude

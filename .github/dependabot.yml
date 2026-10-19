@@ -1,0 +1,43 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Dependabot's docker ecosystem picks up any file whose name contains
+  # "dockerfile" (case-insensitive), so dockerfile.unified in the repo root is found.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    ignore:
+      # The static-ffmpeg tag, its digest and FFMPEG_VERSION in dockerfile.unified
+      # must move together (the build's version guard fails otherwise), so bump it by hand.
+      - dependency-name: "mwader/static-ffmpeg"
+      # CI tests on Node 20; a new Node major needs CI and the image moved together.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+    groups:
+      docker-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
