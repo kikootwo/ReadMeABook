@@ -33,6 +33,8 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
 6. Request marked as `downloaded` (terminal)
 7. "Available" notification sent
 
+**Interactive picks** (`POST /api/audiobooks/[asin]/select-ebook`, admin `requests/[id]/select-ebook`, admin approve): only the result's `md5` is used; download links are rebuilt server-side via `getSlowDownloadLinks(md5, ebook_sidecar_base_url, flaresolverr)` (`resolveAnnasArchiveLinks`, `src/lib/services/download-selection-guard.ts`). Indexer picks (`source: 'prowlarr'`) must be a magnet or Prowlarr download link. User route requires interactive search access.
+
 ### Flow (Indexer Search)
 1. Audiobook organization completes
 2. Ebook request created automatically (if source enabled)

@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
+import { guardTorrentSelection, rejectedSelectionResponse } from '@/lib/services/download-selection-guard';
 import { replaceAudiobook, ReportedIssueError } from '@/lib/services/reported-issue.service';
 import { z } from 'zod';
 import { RMABLogger } from '@/lib/utils/logger';
@@ -53,7 +54,10 @@ export async function POST(
         const body = await req.json();
         const { torrent } = ReplaceSchema.parse(body);
 
-        const result = await replaceAudiobook(id, req.user.id, torrent);
+        const torrentCheck = await guardTorrentSelection(torrent);
+        if (!torrentCheck.ok) return rejectedSelectionResponse(torrentCheck.error);
+
+        const result = await replaceAudiobook(id, req.user.id, torrentCheck.value);
 
         return NextResponse.json({
           success: true,

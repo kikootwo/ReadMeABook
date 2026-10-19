@@ -10,6 +10,8 @@ import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '@/lib/interfaces/download-client.interface';
 import { CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
+import { ADMIN_REQUEST_DETAIL_INCLUDE, OWNER_REQUEST_DETAIL_SELECT } from '@/lib/services/request-detail-query';
+import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 
 const logger = RMABLogger.create('API.RequestById');
 
@@ -32,29 +34,13 @@ export async function GET(
 
       const { id } = await params;
 
-      const requestRecord = await prisma.request.findFirst({
-        where: {
-          id,
-          deletedAt: null, // Only show active requests
-        },
-        include: {
-          audiobook: true,
-          user: {
-            select: {
-              id: true,
-              plexUsername: true,
-            },
-          },
-          downloadHistory: {
-            where: { selected: true },
-            take: 1,
-          },
-          jobs: {
-            orderBy: { createdAt: 'desc' },
-            take: 5,
-          },
-        },
-      });
+      const isAdmin = req.user.role === 'admin';
+      const where = { id, deletedAt: null }; // Only show active requests
+
+      // Non-admins (owners, API tokens) get an explicit field list without internal job/download data
+      const requestRecord = isAdmin
+        ? await prisma.request.findFirst({ where, include: ADMIN_REQUEST_DETAIL_INCLUDE })
+        : await prisma.request.findFirst({ where, select: OWNER_REQUEST_DETAIL_SELECT });
 
       if (!requestRecord) {
         return NextResponse.json(
@@ -73,7 +59,7 @@ export async function GET(
 
       return NextResponse.json({
         success: true,
-        request: requestRecord,
+        request: isAdmin ? requestRecord : await stripProwlarrKeyFromResults(requestRecord),
       });
     } catch (error) {
       logger.error('Failed to get request', { error: error instanceof Error ? error.message : String(error) });

@@ -13,6 +13,10 @@ import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { z } from 'zod';
 import { RMABLogger } from '@/lib/utils/logger';
+import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
+import { sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
+import { guardTorrentSelection, rejectedSelectionResponse } from '@/lib/services/download-selection-guard';
+import { hideStoredPick } from '@/lib/services/request-detail-query';
 
 const logger = RMABLogger.create('API.RequestWithTorrent');
 
@@ -61,8 +65,16 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const accessDenied = await denyWithoutInteractiveSearchAccess(req.user.id);
+      if (accessDenied) return accessDenied;
+
       const body = await req.json();
-      const { audiobook, torrent } = RequestWithTorrentSchema.parse(body);
+      const { audiobook, torrent: pickedTorrent } = RequestWithTorrentSchema.parse(body);
+
+      // Only magnet links or Prowlarr download links may be fetched on the user's behalf
+      const torrentCheck = await guardTorrentSelection(pickedTorrent);
+      if (!torrentCheck.ok) return rejectedSelectionResponse(torrentCheck.error);
+      const torrent = torrentCheck.value;
 
       // First check: Is there an existing audiobook request in 'downloaded' or 'available' status?
       // This catches the gap where files are organized but Plex hasn't scanned yet
@@ -164,7 +176,7 @@ export async function POST(request: NextRequest) {
             author: audiobook.author,
             narrator: audiobook.narrator,
             description: audiobook.description,
-            coverArtUrl: audiobook.coverArtUrl,
+            coverArtUrl: sanitizeCoverArtUrl(audiobook.coverArtUrl),
             year,
             series,
             seriesPart,
@@ -203,7 +215,7 @@ export async function POST(request: NextRequest) {
             {
               error: 'DuplicateRequest',
               message: 'You have already requested this audiobook',
-              request: existingRequest,
+              request: hideStoredPick(existingRequest, req.user.role),
             },
             { status: 409 }
           );
@@ -298,7 +310,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
           success: true,
-          request: newRequest,
+          request: hideStoredPick(newRequest, req.user.role),
           message: 'Request submitted for admin approval',
         }, { status: 201 });
       } else {
@@ -350,7 +362,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
           success: true,
-          request: newRequest,
+          request: hideStoredPick(newRequest, req.user.role),
         }, { status: 201 });
       }
     } catch (error) {

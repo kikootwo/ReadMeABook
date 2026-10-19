@@ -186,7 +186,9 @@ export async function GET(request: NextRequest) {
         const isCompleted = COMPLETED_STATUSES.includes(r.status as typeof COMPLETED_STATUSES[number]);
         const downloadAvailable = isCompleted && !!r.audiobook?.filePath;
         const audiobook = r.audiobook ? { ...r.audiobook, filePath: undefined } : r.audiobook;
-        return { ...r, audiobook, downloadAvailable };
+        // Stored release picks are internal (they can carry source credentials); admins only
+        const selectedTorrent = isAdmin ? r.selectedTorrent : undefined;
+        return { ...r, selectedTorrent, audiobook, downloadAvailable };
       });
 
       // ── Accurate counts per group (always scoped to ownership/type filter) ──
