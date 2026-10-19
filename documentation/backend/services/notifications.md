@@ -102,7 +102,9 @@ model NotificationBackend {
 
 **Masking:** Sensitive values returned as `••••••••` in API responses
 
-**Preservation:** Masked values preserved on update (if value === '••••••••', use existing encrypted value)
+**Preservation:** `NotificationService.mergeMaskedSecrets(type, existing, updated)` on update: a masked value (`MASKED_CONFIG_VALUE` = `••••••••`) keeps the existing encrypted value
+- Providers with `secretBoundUrl` (Apprise: `serverUrl`; ntfy: `serverUrl`, default `https://ntfy.sh`): a kept secret requires the same server URL (`isSameServiceUrl`; empty = default on both sides) → else `PUT` returns 400 `{ error: 'ValidationError', message }` naming the fields to re-enter, nothing saved
+- Discord, Pushover: no server URL binding
 
 ## Message Formatting
 
@@ -145,7 +147,7 @@ model NotificationBackend {
 - Get single backend (sensitive values masked)
 
 **PUT /api/admin/notifications/[id]**
-- Update backend (preserves masked values, encrypts new values)
+- Update backend (masked values kept via `mergeMaskedSecrets`, URL-bound for Apprise/ntfy; new values encrypted)
 
 **DELETE /api/admin/notifications/[id]**
 - Delete backend
@@ -216,6 +218,7 @@ src/lib/services/notification/
 **INotificationProvider interface:**
 - `type: string` — provider identifier (registry key)
 - `sensitiveFields: string[]` — fields needing encryption/masking
+- `secretBoundUrl?: { field, defaultUrl?, credentialKind }` — config field holding the server URL the sensitive fields are sent to (Apprise, ntfy)
 - `metadata: ProviderMetadata` — self-describing UI/validation metadata
 - `send(config, payload): Promise<void>` — receives decrypted config
 

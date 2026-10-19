@@ -34,6 +34,7 @@ Used by manager's `getClientForProtocol()` and UI's protocol-level enforcement.
 
 ### Configuration Structure
 **Key:** `download_clients` (JSON array, replaces legacy flat keys)
+**Storage:** every writer serialises via `serializeDownloadClients()` (`src/lib/services/download-client-storage.ts`): passwords stored encrypted, values already in encrypted format kept as-is. `getAllClients()` returns them decrypted
 
 ```typescript
 interface DownloadClientConfig {
