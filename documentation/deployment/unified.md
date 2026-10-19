@@ -665,7 +665,8 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
 **13. Scheduled jobs not initialized (setup wizard errors)**
 - Issue: Setup wizard shows "Job configuration not found" for Audible/Plex jobs
 - Cause: `/api/init` endpoint never called, so `schedulerService.start()` never runs and default jobs aren't created
-- Fix: Created `app-start.sh` wrapper script that starts server then calls `/api/init`, supervisord uses wrapper instead of direct node command
+- Fix (original): `app-start.sh` called `/api/init` after the health check
+- Fix (current): the app starts its own init from `src/instrumentation.ts` (loopback POST with a per-process secret, retries until DB + Redis are ready). `app-start.sh` only starts the server, waits for `/api/health` for logging, and verifies UID/GID. `/api/init` answers 404 to any other caller. See [scheduler.md](../backend/services/scheduler.md#startup-initialization)
 
 **14. PostgreSQL binary mismatch in supervisord**
 - Issue: Container logs `spawnerr: can't find command '/usr/lib/postgresql/15/bin/postgres'` and app can't reach DB.

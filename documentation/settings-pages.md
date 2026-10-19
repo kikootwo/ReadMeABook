@@ -265,6 +265,12 @@ src/app/admin/settings/
    - "Test Connection" when URL/API key changed
    - "Refresh Indexers" when connection info unchanged
 
+**Saved credentials in test and save routes** (`resolveSecretForUrl`, `src/lib/utils/saved-credential.ts`; loaders in `src/lib/services/saved-credentials.service.ts`):
+- A masked secret (`••••…`; `********` for download clients; empty for ABS test / download clients with a saved password) means "use the saved one"
+- Reused only when the URL being tested or saved equals the saved URL (`isSameServiceUrl`: same origin + path, trailing slash ignored) → else 400 "re-enter … for the new address" naming where to find it (`CREDENTIAL_HELP`); nothing is saved or contacted
+- Test routes: `setup/test-abs` (`audiobookshelf.server_url`), `admin/settings/test-plex` (`plex_url`), `admin/settings/test-prowlarr` (`prowlarr_url` → `PROWLARR_URL`), `admin/settings/download-clients/{test,categories}` (client by `clientId`), legacy `test-download-client` (the same-type client saved at that URL)
+- Save routes: `PUT admin/settings/plex`, `prowlarr`, `audiobookshelf`, `download-clients/[id]`, legacy `download-client` (checked before anything is written)
+
 **BookDate (Admin Settings):**
 1. **On tab load:** Current BookDate global configuration loaded from database automatically
 2. **Changing AI provider:** Resets model selection

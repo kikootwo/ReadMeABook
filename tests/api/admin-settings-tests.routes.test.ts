@@ -238,7 +238,7 @@ describe('Admin settings test routes', () => {
   it('uses stored password when masked password is provided', async () => {
     // Mock download client manager to return the stored password
     downloadClientManagerMock.getAllClients.mockResolvedValueOnce([
-      { type: 'qbittorrent', password: 'stored-pass' },
+      { type: 'qbittorrent', url: 'http://qbt', password: 'stored-pass' },
     ]);
     downloadClientManagerMock.testConnection.mockResolvedValueOnce({
       success: true,
