@@ -337,7 +337,7 @@ describe('Admin requests routes', () => {
   });
 
   it('returns 404 when approving a missing request', async () => {
-    prismaMock.request.findUnique.mockResolvedValueOnce(null);
+    prismaMock.request.findFirst.mockResolvedValueOnce(null);
     const request = { json: vi.fn().mockResolvedValue({ action: 'approve' }) };
 
     const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
@@ -349,7 +349,7 @@ describe('Admin requests routes', () => {
   });
 
   it('returns 400 when request is not awaiting approval', async () => {
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-2',
       status: 'pending',
       audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
@@ -366,7 +366,7 @@ describe('Admin requests routes', () => {
   });
 
   it('approves request with a selected torrent and triggers download', async () => {
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-3',
       status: 'awaiting_approval',
       selectedTorrent: { title: 'Torrent' },
@@ -393,7 +393,7 @@ describe('Admin requests routes', () => {
   });
 
   it('approves request without a selected torrent and triggers search', async () => {
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-4',
       status: 'awaiting_approval',
       selectedTorrent: null,
@@ -420,7 +420,7 @@ describe('Admin requests routes', () => {
   });
 
   it('denies request without triggering jobs', async () => {
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-5',
       status: 'awaiting_approval',
       selectedTorrent: null,

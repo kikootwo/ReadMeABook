@@ -20,6 +20,26 @@ export interface Settings {
   downloadClient: DownloadClientSettings;
   paths: PathsSettings;
   ebook: EbookSettings;
+  discord: DiscordSettings;
+}
+
+/**
+ * Discord bot configuration (slash-command requesting).
+ * Persisted via `/api/admin/settings/discord` (category 'discord').
+ */
+export interface DiscordSettings {
+  enabled: boolean;
+  botToken: string;
+  guildId: string;
+  requestChannelId: string;
+  adminRoleId: string;
+  adminNotifyChannelId: string;
+  /** Delivery mode for the persistent request card: 'public' | 'dm' | 'both'. */
+  requestCardMode: 'public' | 'dm' | 'both';
+  /** Optional role that gates who may make requests (blank = anyone linked; admins always pass). */
+  requesterRoleId: string;
+  /** Who may use the /delete command: 'anyone_any' | 'own_only' | 'admin_only' | 'disabled'. */
+  deletePermission: 'anyone_any' | 'own_only' | 'admin_only' | 'disabled';
 }
 
 /**
@@ -262,4 +282,4 @@ export interface BookDateModel {
 /**
  * Tab identifier type
  */
-export type SettingsTab = 'library' | 'auth' | 'prowlarr' | 'download' | 'paths' | 'ebook' | 'bookdate' | 'notifications' | 'api';
+export type SettingsTab = 'library' | 'auth' | 'prowlarr' | 'download' | 'paths' | 'ebook' | 'bookdate' | 'notifications' | 'discord' | 'api';

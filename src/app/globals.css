@@ -25,6 +25,47 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* Themed main page scrollbar: the viewport scrollbar is owned by the root <html> element
+   (not <body>), so it must be styled here. Transparent track so it blends with the background,
+   with a subtle thumb (gray in light mode, white in dark/Night mode). */
+/* Chromium honors ::-webkit-scrollbar (forces a persistent, themed bar); the standard
+   scrollbar-width/scrollbar-color are gated to Firefox via @supports below, because when
+   both APIs are present Chromium 121+ ignores ::-webkit-scrollbar and falls back to a
+   thin auto-hiding overlay. */
+html::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+html::-webkit-scrollbar-track {
+  background: transparent;
+}
+html::-webkit-scrollbar-thumb {
+  background-color: rgba(107, 114, 128, 0.5);
+  border-radius: 9999px;
+}
+html::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(107, 114, 128, 0.7);
+}
+@supports not selector(::-webkit-scrollbar) {
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(107, 114, 128, 0.5) transparent;
+  }
+}
+@media (prefers-color-scheme: dark) {
+  html::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.85);
+  }
+  html::-webkit-scrollbar-thumb:hover {
+    background-color: #ffffff;
+  }
+  @supports not selector(::-webkit-scrollbar) {
+    html {
+      scrollbar-color: rgba(255, 255, 255, 0.85) transparent;
+    }
+  }
+}
+
 @keyframes slide-in-right {
   from {
     transform: translateX(100%);
@@ -246,4 +287,42 @@ body {
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+
+/* Slim, theme-aware scrollbar: transparent track so it blends with the background behind it,
+   with a subtle thumb (gray in light mode, white in dark/Night mode). */
+.scrollbar-themed::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.scrollbar-themed::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-themed::-webkit-scrollbar-thumb {
+  background-color: rgba(107, 114, 128, 0.5);
+  border-radius: 9999px;
+}
+.scrollbar-themed::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(107, 114, 128, 0.7);
+}
+/* Firefox only (lacks ::-webkit-scrollbar): use the standard properties so Chromium 121+
+   doesn't suppress the styled ::-webkit-scrollbar bar above in favor of a thin overlay. */
+@supports not selector(::-webkit-scrollbar) {
+  .scrollbar-themed {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(107, 114, 128, 0.5) transparent; /* thumb track */
+  }
+}
+@media (prefers-color-scheme: dark) {
+  .scrollbar-themed::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.85);
+  }
+  .scrollbar-themed::-webkit-scrollbar-thumb:hover {
+    background-color: #ffffff;
+  }
+  @supports not selector(::-webkit-scrollbar) {
+    .scrollbar-themed {
+      scrollbar-color: rgba(255, 255, 255, 0.85) transparent;
+    }
+  }
 }

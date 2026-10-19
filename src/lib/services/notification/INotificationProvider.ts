@@ -9,6 +9,19 @@ export type { NotificationEvent } from '@/lib/constants/notification-events';
 // Backend type — string-based, registry is the runtime source of truth
 export type NotificationBackendType = string;
 
+// Rich book metadata for visually enhanced notifications (e.g. Discord embeds).
+// Sourced from the DB (Audiobook + AudibleCache) — never requires the Discord bot.
+export interface NotificationBookMeta {
+  coverArtUrl?: string | null;
+  narrator?: string | null;
+  series?: string | null;
+  seriesPart?: string | null;
+  year?: number | null;
+  genres?: string[] | null;
+  durationMinutes?: number | null;
+  description?: string | null;
+}
+
 // Notification payload
 export interface NotificationPayload {
   event: import('@/lib/constants/notification-events').NotificationEvent;
@@ -19,6 +32,7 @@ export interface NotificationPayload {
   userName: string;
   message?: string; // For error/issue events
   requestType?: string; // 'audiobook' | 'ebook' — drives type-specific titles via getEventTitle()
+  book?: NotificationBookMeta; // Optional rich metadata for embed-capable providers
   timestamp: Date;
 }
 

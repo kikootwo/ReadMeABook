@@ -42,6 +42,12 @@ vi.mock('@/lib/services/config.service', () => ({
   getConfigService: () => ({}),
 }));
 
+const deleteRequestMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@/lib/services/request-delete.service', () => ({
+  deleteRequest: deleteRequestMock,
+}));
+
 vi.mock('@/lib/middleware/auth', () => ({
   requireAuth: requireAuthMock,
 }));
@@ -56,6 +62,14 @@ describe('Request by ID API routes', () => {
     };
     requireAuthMock.mockImplementation((_req: any, handler: any) => handler(authRequest));
     downloadClientManagerMock.getClientServiceForProtocol.mockReset();
+    deleteRequestMock.mockResolvedValue({
+      success: true,
+      message: 'Request deleted successfully',
+      filesDeleted: false,
+      torrentsRemoved: 0,
+      torrentsKeptSeeding: 0,
+      torrentsKeptUnlimited: 0,
+    });
   });
 
   it('returns 403 when user is not authorized to view the request', async () => {
@@ -379,9 +393,13 @@ describe('Request by ID API routes', () => {
     expect(payload.error).toBe('ValidationError');
   });
 
-  it('allows admins to delete requests', async () => {
+  it('allows admins to delete any request via cascading soft-delete', async () => {
     authRequest.user = { id: 'admin-1', role: 'admin' };
-    prismaMock.request.delete.mockResolvedValueOnce({});
+    prismaMock.request.findFirst.mockResolvedValueOnce({ userId: 'user-2' });
+    deleteRequestMock.mockResolvedValueOnce({
+      success: true, message: 'Request deleted successfully',
+      filesDeleted: false, torrentsRemoved: 0, torrentsKeptSeeding: 0, torrentsKeptUnlimited: 0,
+    });
 
     const { DELETE } = await import('@/app/api/requests/[id]/route');
     const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-4' }) });
@@ -389,11 +407,29 @@ describe('Request by ID API routes', () => {
 
     expect(response.status).toBe(200);
     expect(payload.success).toBe(true);
-    expect(prismaMock.request.delete).toHaveBeenCalledWith({ where: { id: 'req-4' } });
+    expect(deleteRequestMock).toHaveBeenCalledWith('req-4', 'admin-1');
   });
 
-  it('blocks delete for non-admin users', async () => {
+  it('allows users to delete their own requests', async () => {
+    authRequest.user = { id: 'user-1', role: 'user' };
+    prismaMock.request.findFirst.mockResolvedValueOnce({ userId: 'user-1' });
+    deleteRequestMock.mockResolvedValueOnce({
+      success: true, message: 'Request deleted successfully',
+      filesDeleted: false, torrentsRemoved: 0, torrentsKeptSeeding: 0, torrentsKeptUnlimited: 0,
+    });
+
+    const { DELETE } = await import('@/app/api/requests/[id]/route');
+    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-5' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(deleteRequestMock).toHaveBeenCalledWith('req-5', 'user-1');
+  });
+
+  it('blocks users from deleting other users requests', async () => {
     authRequest.user = { id: 'user-2', role: 'user' };
+    prismaMock.request.findFirst.mockResolvedValueOnce({ userId: 'user-1' });
 
     const { DELETE } = await import('@/app/api/requests/[id]/route');
     const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-9' }) });

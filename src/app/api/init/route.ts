@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSchedulerService } from '@/lib/services/scheduler.service';
 import { runCredentialMigration } from '@/lib/services/credential-migration.service';
+import { getDiscordBotService } from '@/lib/services/discord/discord-bot.service';
 import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('API.Init');
@@ -25,6 +26,9 @@ export async function GET(request: NextRequest) {
     // Initialize scheduler service
     const schedulerService = getSchedulerService();
     await schedulerService.start();
+
+    // Start the Discord bot if configured + enabled (gated internally; never throws into init)
+    await getDiscordBotService().start();
 
     logger.info('Application services initialized successfully');
 

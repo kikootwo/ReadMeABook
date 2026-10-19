@@ -114,10 +114,13 @@ model NotificationBackend {
 - Format: Event title + book details + user + error (if applicable)
 
 **Discord (Rich Embeds):**
-- Color-coded by event (yellow=pending, green=approved, blue=available, red=error, orange=issue)
-- Fields: Title, Author, Requested/Reported By, Error/Reason (if applicable)
-- Footer: Request/Issue ID
-- Timestamp: Event time
+- Color-coded by event severity (yellow=info, green=success, red=error, orange=warning)
+- **Rich book detail** (mirrors the Discord bot's request card, but standalone — no bot required): cover-art **thumbnail**, year folded into the Title (`Title (1979)`), HTML-stripped **description**, inline fields Author (top-listed) / Narrator / Duration / Series (`name #part`) / Genre (up to 2) / Requested-Reported By
+- **Narrator + Duration are audiobook-only** (omitted when `requestType === 'ebook'`)
+- Error/Reason/Details field appended when `message` present
+- Footer: Request/Issue ID | Timestamp: Event time
+- Provider builds raw embed JSON (no `discord.js`) — works with the Discord bot disabled/unloaded
+- **Enrichment:** `book` metadata (cover/narrator/series/year/genres/duration/description) is attached by the **send-notification processor** via `enrichBookMeta(requestId)` ([notification-enrichment.ts](../../../src/lib/services/notification/notification-enrichment.ts)) — DB-only (Audiobook + AudibleCache), best-effort (notification still sends if enrichment fails). All call sites unchanged.
 
 **ntfy (JSON Publishing to Base URL):**
 - Endpoint: POST to base `serverUrl` (default: https://ntfy.sh), topic in JSON body
@@ -152,8 +155,9 @@ model NotificationBackend {
 
 **POST /api/admin/notifications/test**
 - Test notification (synchronous, not via job queue)
-- Body: `{type, config}` (plaintext for testing)
-- Sends test payload: "The Hitchhiker's Guide to the Galaxy" by Douglas Adams
+- Body: `{type, config}` or `{backendId}` (+ optional `allEvents: boolean`)
+- Sends test payload: "Project Hail Mary" by Andy Weir — includes rich sample `book` meta (real public cover URL, narrator, genres, duration, description) so the test reflects the enriched embed and the thumbnail actually renders
+- `allEvents: true` → sends one sample per event in `NOTIFICATION_EVENT_KEYS` (sequential), returns `Sent N of M test notifications`. Driven by the **"Test all event types"** checkbox beside Send Test in the NotificationsTab modal (unchecked by default)
 
 ## UI Components
 
@@ -167,7 +171,7 @@ model NotificationBackend {
 - Type-first selection (user clicks "Add Discord" or "Add Pushover")
 - Password inputs for sensitive values
 - Event subscription checkboxes (5 events, default: available + error)
-- Test button (sends synchronous test notification)
+- Test button (sends synchronous test notification) + **"Test all event types"** checkbox (sends a sample for every event at once)
 - Save button (validates and creates/updates backend)
 
 ## Job Queue Integration
