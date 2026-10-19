@@ -4,18 +4,30 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { goodreadsRssUrlSchema, isGoodreadsHttpsUrl, toGoodreadsRssUrl } from '@/lib/utils/goodreads-rss-url';
+import { isGoodreadsHttpsUrl, toGoodreadsRssUrl } from '@/lib/utils/goodreads-rss-url';
+import { goodreadsRssUrlSchema } from '@/lib/utils/goodreads-rss-url.schema';
 
 describe('toGoodreadsRssUrl', () => {
   it.each([
     ['https://www.goodreads.com/review/list_rss/12345?key=abc&shelf=to-read', 'https://www.goodreads.com/review/list_rss/12345?key=abc&shelf=to-read'],
-    ['https://goodreads.com/review/list_rss/12345', 'https://goodreads.com/review/list_rss/12345'],
+    ['https://goodreads.com/review/list_rss/12345', 'https://www.goodreads.com/review/list_rss/12345'],
     ['HTTPS://WWW.GOODREADS.COM/review/list_rss/1', 'https://www.goodreads.com/review/list_rss/1'],
     ['https://www.goodreads.com:443/review/list_rss/1', 'https://www.goodreads.com/review/list_rss/1'],
     ['  https://www.goodreads.com/review/list_rss/1  ', 'https://www.goodreads.com/review/list_rss/1'],
     ['http://www.goodreads.com/review/list_rss/1?shelf=read', 'https://www.goodreads.com/review/list_rss/1?shelf=read'],
+    ['http://goodreads.com/review/list_rss/1', 'https://www.goodreads.com/review/list_rss/1'],
   ])('accepts %s', (input, expected) => {
     expect(toGoodreadsRssUrl(input)).toBe(expected);
+  });
+
+  it('gives every accepted form of one feed the same normalised URL', () => {
+    const forms = [
+      'http://goodreads.com/review/list_rss/7?shelf=read',
+      'https://goodreads.com/review/list_rss/7?shelf=read',
+      'http://www.goodreads.com/review/list_rss/7?shelf=read',
+      'https://WWW.goodreads.com/review/list_rss/7?shelf=read',
+    ];
+    expect(new Set(forms.map(toGoodreadsRssUrl))).toEqual(new Set(['https://www.goodreads.com/review/list_rss/7?shelf=read']));
   });
 
   it.each([
@@ -30,6 +42,7 @@ describe('toGoodreadsRssUrl', () => {
     ['a non-feed path', 'https://www.goodreads.com/user/show/1'],
     ['the feed path in the query only', 'https://www.goodreads.com/search?q=/review/list_rss/1'],
     ['another scheme', 'ftp://www.goodreads.com/review/list_rss/1'],
+    ['a protocol-relative URL', '//www.goodreads.com/review/list_rss/1'],
     ['not a URL', 'goodreads.com/review/list_rss/1'],
     ['an empty string', ''],
   ])('rejects %s', (_label, input) => {
@@ -40,6 +53,7 @@ describe('toGoodreadsRssUrl', () => {
 describe('isGoodreadsHttpsUrl', () => {
   it('allows any https path on a Goodreads host (redirect hops)', () => {
     expect(isGoodreadsHttpsUrl('https://www.goodreads.com/user/sign_in')).toBe(true);
+    expect(isGoodreadsHttpsUrl('https://goodreads.com/review/list_rss/1')).toBe(true);
   });
 
   it.each(['http://www.goodreads.com/review/list_rss/1', 'https://127.0.0.1/review/list_rss/1', 'https://www.goodreads.com.evil.example/'])(
@@ -51,8 +65,8 @@ describe('isGoodreadsHttpsUrl', () => {
 });
 
 describe('goodreadsRssUrlSchema', () => {
-  it('parses to the normalised https URL', () => {
-    expect(goodreadsRssUrlSchema.parse('http://goodreads.com/review/list_rss/9')).toBe('https://goodreads.com/review/list_rss/9');
+  it('parses to the normalised URL', () => {
+    expect(goodreadsRssUrlSchema.parse('http://goodreads.com/review/list_rss/9')).toBe('https://www.goodreads.com/review/list_rss/9');
   });
 
   it('fails with a message naming the expected URL', () => {

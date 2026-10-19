@@ -102,6 +102,51 @@ describe('PATCH /api/user/goodreads-shelves/[id]', () => {
       json: vi.fn().mockResolvedValue({ rssUrl: NEW_RSS }),
     };
     requireAuthMock.mockImplementation((_req: any, handler: any) => handler(authRequest));
+    prismaMock.goodreadsShelf.findMany.mockResolvedValue([]);
+  });
+
+  const patch = async (body: Record<string, unknown>) => {
+    const { PATCH } = await import('@/app/api/user/goodreads-shelves/[id]/route');
+    return PATCH({ json: vi.fn().mockResolvedValue(body) } as any, { params: Promise.resolve({ id: 'shelf-1' }) });
+  };
+
+  it('returns 409 when another of the user\'s shelves has the same feed in an older form', async () => {
+    prismaMock.goodreadsShelf.findUnique.mockResolvedValueOnce(SHELF);
+    prismaMock.goodreadsShelf.findMany.mockResolvedValue([
+      { id: 'shelf-1', rssUrl: SHELF.rssUrl },
+      { id: 'shelf-2', rssUrl: 'http://goodreads.com/review/list_rss/99999' },
+    ]);
+    const response = await patch({ rssUrl: NEW_RSS });
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toBe('DuplicateShelf');
+    expect(prismaMock.goodreadsShelf.update).not.toHaveBeenCalled();
+  });
+
+  it('lets a shelf be re-saved with its own feed URL', async () => {
+    prismaMock.goodreadsShelf.findUnique.mockResolvedValueOnce(SHELF);
+    prismaMock.goodreadsShelf.findMany.mockResolvedValue([{ id: 'shelf-1', rssUrl: 'http://goodreads.com/review/list_rss/12345' }]);
+    prismaMock.goodreadsShelf.update.mockResolvedValueOnce(SHELF);
+    const response = await patch({ rssUrl: SHELF.rssUrl });
+
+    expect(response.status).toBe(200);
+  });
+
+  it('returns 409 when the update hits the unique constraint', async () => {
+    prismaMock.goodreadsShelf.findUnique.mockResolvedValueOnce(SHELF);
+    prismaMock.goodreadsShelf.update.mockRejectedValueOnce(Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }));
+    const response = await patch({ rssUrl: NEW_RSS });
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toBe('DuplicateShelf');
+  });
+
+  it('returns the validation message for the UI', async () => {
+    prismaMock.goodreadsShelf.findUnique.mockResolvedValueOnce(SHELF);
+    const response = await patch({ rssUrl: 'https://evil.example/review/list_rss/1' });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).message).toContain('https://www.goodreads.com/review/list_rss/');
   });
 
   it('returns 404 when shelf does not exist', async () => {

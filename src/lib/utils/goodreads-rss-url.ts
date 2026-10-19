@@ -3,60 +3,44 @@
  * Documentation: documentation/backend/services/goodreads-sync.md
  *
  * Goodreads shelf feeds are only ever fetched from Goodreads itself, over https.
+ * Client-safe (no server imports): the add/manage shelf modals use it too.
  */
 
-import { z } from 'zod';
+import { parseHttpUrl } from './prowlarr-url';
 
 /** Hosts a Goodreads shelf feed (and any redirect while fetching it) may use */
 export const GOODREADS_HOSTS: readonly string[] = ['goodreads.com', 'www.goodreads.com'];
+
+/** Host every saved/fetched feed URL is normalised to */
+export const GOODREADS_CANONICAL_HOST = 'www.goodreads.com';
 
 /** Path every Goodreads shelf RSS feed starts with */
 export const GOODREADS_RSS_PATH_PREFIX = '/review/list_rss/';
 
 export const GOODREADS_RSS_URL_HINT = 'https://www.goodreads.com/review/list_rss/...';
 
-function parse(value: string): URL | null {
-  try {
-    return new URL(value.trim());
-  } catch {
-    return null;
-  }
+export const GOODREADS_RSS_URL_ERROR = `URL must be a Goodreads shelf RSS URL (${GOODREADS_RSS_URL_HINT})`;
+
+/** Goodreads host, default port, no credentials (URL already lowercases the host) */
+function isPlainGoodreadsHost(url: URL): boolean {
+  return GOODREADS_HOSTS.includes(url.hostname) && url.port === '' && url.username === '' && url.password === '';
 }
 
 /** True for an https URL on a Goodreads host with no credentials or custom port. */
 export function isGoodreadsHttpsUrl(value: string): boolean {
-  const url = parse(value);
-  return (
-    url !== null &&
-    url.protocol === 'https:' &&
-    GOODREADS_HOSTS.includes(url.hostname.toLowerCase()) &&
-    url.port === '' &&
-    url.username === '' &&
-    url.password === ''
-  );
+  const url = parseHttpUrl(value);
+  return url !== null && url.protocol === 'https:' && isPlainGoodreadsHost(url);
 }
 
 /**
- * Normalise a pasted Goodreads shelf RSS URL: an http:// Goodreads link is upgraded to
- * https://. Returns null unless the result is an https Goodreads /review/list_rss/ URL.
+ * Normalise a Goodreads shelf RSS URL to `https://www.goodreads.com/review/list_rss/...`
+ * (an http:// or bare goodreads.com link is accepted and rewritten). Returns null for
+ * anything that is not a Goodreads shelf feed.
  */
 export function toGoodreadsRssUrl(value: string): string | null {
-  const url = parse(value);
-  if (!url) return null;
-  if (url.protocol === 'http:' && GOODREADS_HOSTS.includes(url.hostname.toLowerCase()) && url.port === '') {
-    url.protocol = 'https:';
-  }
-  const normalised = url.toString();
-  if (!isGoodreadsHttpsUrl(normalised) || !url.pathname.startsWith(GOODREADS_RSS_PATH_PREFIX)) return null;
-  return normalised;
+  const url = parseHttpUrl(value);
+  if (!url || !isPlainGoodreadsHost(url) || !url.pathname.startsWith(GOODREADS_RSS_PATH_PREFIX)) return null;
+  url.protocol = 'https:';
+  url.hostname = GOODREADS_CANONICAL_HOST;
+  return url.toString();
 }
-
-/** Request-body field for a Goodreads shelf RSS URL; parses to the normalised https URL. */
-export const goodreadsRssUrlSchema = z.string().transform((value, ctx) => {
-  const feedUrl = toGoodreadsRssUrl(value);
-  if (!feedUrl) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `URL must be a Goodreads shelf RSS URL (${GOODREADS_RSS_URL_HINT})` });
-    return z.NEVER;
-  }
-  return feedUrl;
-});

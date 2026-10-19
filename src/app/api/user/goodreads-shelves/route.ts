@@ -10,7 +10,8 @@ import { fetchAndValidateRss } from '@/lib/services/goodreads-sync.service';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { z } from 'zod';
 import { RMABLogger } from '@/lib/utils/logger';
-import { goodreadsRssUrlSchema } from '@/lib/utils/goodreads-rss-url';
+import { goodreadsRssUrlSchema } from '@/lib/utils/goodreads-rss-url.schema';
+import { DUPLICATE_SHELF_MESSAGE, findShelfWithSameFeed, isUniqueConstraintError } from '@/lib/services/goodreads-shelf-match';
 
 const logger = RMABLogger.create('API.GoodreadsShelves');
 
@@ -90,14 +91,12 @@ export async function POST(request: NextRequest) {
       const body = await req.json();
       const { rssUrl, autoRequest } = AddShelfSchema.parse(body);
 
-      // Check for duplicate
-      const existing = await prisma.goodreadsShelf.findUnique({
-        where: { userId_rssUrl: { userId: req.user.id, rssUrl } },
-      });
+      // Check for duplicate (compares normalised feed URLs, so older http/bare-host rows match)
+      const existing = await findShelfWithSameFeed(req.user.id, rssUrl);
 
       if (existing) {
         return NextResponse.json(
-          { error: 'DuplicateShelf', message: 'You have already added this shelf' },
+          { error: 'DuplicateShelf', message: DUPLICATE_SHELF_MESSAGE },
           { status: 409 }
         );
       }
@@ -163,9 +162,13 @@ export async function POST(request: NextRequest) {
 
       if (error instanceof z.ZodError) {
         return NextResponse.json(
-          { error: 'ValidationError', details: error.errors },
+          { error: 'ValidationError', message: error.errors[0]?.message, details: error.errors },
           { status: 400 }
         );
+      }
+
+      if (isUniqueConstraintError(error)) {
+        return NextResponse.json({ error: 'DuplicateShelf', message: DUPLICATE_SHELF_MESSAGE }, { status: 409 });
       }
 
       return NextResponse.json({ error: 'Failed to add shelf' }, { status: 500 });
