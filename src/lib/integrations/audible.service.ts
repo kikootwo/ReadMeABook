@@ -677,8 +677,10 @@ export class AudibleService {
         author: data.authors?.map((a: any) => a.name).join(', ') || '',
         authorAsin: data.authors?.[0]?.asin || undefined,
         narrator: data.narrators?.map((n: any) => n.name).join(', ') || '',
-        // Prefer the full summary (HTML) over the short description blurb
-        description: (typeof data.summary === 'string' ? stripHtml(data.summary) : '') || data.description || '',
+        // Prefer the full summary over the short description blurb; both become plain text
+        description:
+          (typeof data.summary === 'string' ? stripHtml(data.summary) : '') ||
+          (typeof data.description === 'string' ? stripHtml(data.description) : ''),
         coverArtUrl: data.image || '',
         durationMinutes: data.runtimeLengthMin ? parseInt(data.runtimeLengthMin) : undefined,
         releaseDate: data.releaseDate || undefined,

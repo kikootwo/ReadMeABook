@@ -1357,6 +1357,17 @@ describe('AudibleService', () => {
       expect(apiClientMock.get).not.toHaveBeenCalled();
     });
 
+    it('turns an HTML description fallback into plain text too', async () => {
+      axiosMock.get.mockResolvedValueOnce({
+        data: { title: 'Audnexus Book', description: '<p>Short &amp; <b>sweet</b>.</p>' },
+      });
+
+      const service = new AudibleService();
+      const details = await service.getAudiobookDetails('B000HTMLDSC');
+
+      expect(details?.description).toBe('Short & sweet.');
+    });
+
     it('falls back to the catalog API when Audnexus returns 404', async () => {
       axiosMock.get.mockRejectedValueOnce({ response: { status: 404 }, message: 'Not found' });
 
