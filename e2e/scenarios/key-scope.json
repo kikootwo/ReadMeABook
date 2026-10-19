@@ -1,0 +1,20 @@
+{
+  "name": "key-scope",
+  "description": "Prowlarr API key scope: grab paths that leave the Prowlarr origin. Each release is one case; pick it with request-with-torrent or by loading a single-release definition. The key must reach only fake-arr:9696.",
+  "book": "phm",
+  "indexers": [
+    { "id": 1, "name": "E2E Torrents", "protocol": "torrent", "priority": 25 },
+    { "id": 2, "name": "E2E Usenet", "protocol": "usenet", "priority": 25 }
+  ],
+  "releases": [
+    { "id": "t-direct", "title": "{{author}} - {{title}} [MP3] direct", "sizeMB": 400, "seeders": 40, "fixture": "phm-mp3", "grab": { "direct": true } },
+    { "id": "t-other-port", "title": "{{author}} - {{title}} [MP3] other-port", "sizeMB": 400, "seeders": 39, "fixture": "phm-mp3", "grab": { "redirects": ["other-port"] } },
+    { "id": "t-tracker", "title": "{{author}} - {{title}} [MP3] tracker", "sizeMB": 400, "seeders": 38, "fixture": "phm-mp3", "grab": { "redirects": ["tracker"] } },
+    { "id": "t-relative", "title": "{{author}} - {{title}} [MP3] relative", "sizeMB": 400, "seeders": 37, "fixture": "phm-mp3", "grab": { "redirects": ["relative"] } },
+    { "id": "t-magnet-hop2", "title": "{{author}} - {{title}} [MP3] magnet-hop2", "sizeMB": 400, "seeders": 36, "fixture": "phm-mp3", "grab": { "redirects": ["tracker", "magnet"] } },
+    { "id": "u-direct", "protocol": "usenet", "indexerId": 2, "title": "{{author}} - {{title}} [M4B] nzb direct", "sizeMB": 380, "fixture": "phm-m4b", "grab": { "direct": true } },
+    { "id": "u-other-port", "protocol": "usenet", "indexerId": 2, "title": "{{author}} - {{title}} [M4B] nzb other-port", "sizeMB": 380, "fixture": "phm-m4b", "grab": { "redirects": ["other-port"] } },
+    { "id": "u-tracker", "protocol": "usenet", "indexerId": 2, "title": "{{author}} - {{title}} [M4B] nzb tracker", "sizeMB": 380, "fixture": "phm-m4b", "grab": { "redirects": ["tracker"] } },
+    { "id": "u-relative", "protocol": "usenet", "indexerId": 2, "title": "{{author}} - {{title}} [M4B] nzb relative", "sizeMB": 380, "fixture": "phm-m4b", "grab": { "redirects": ["relative"] } }
+  ]
+}

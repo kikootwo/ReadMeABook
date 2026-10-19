@@ -1,0 +1,8 @@
+{
+  "name": "wrong-files",
+  "description": "Torrent metadata advertises audio but the completed download contains only text files.",
+  "book": "phm",
+  "releases": [
+    { "id": "bogus", "title": "{{author}} - {{title}} (Unabridged) [MP3]", "sizeMB": 400, "seeders": 40, "fixture": "phm-mp3", "download": { "dropFixture": "wrong-files" } }
+  ]
+}

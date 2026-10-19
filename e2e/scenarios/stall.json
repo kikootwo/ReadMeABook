@@ -1,0 +1,8 @@
+{
+  "name": "stall",
+  "description": "Download stalls at 40% with 0 B/s forever (stalled-download handling).",
+  "book": "phm",
+  "releases": [
+    { "id": "stuck", "title": "{{author}} - {{title}} (Unabridged) [MP3]", "sizeMB": 400, "seeders": 40, "fixture": "phm-mp3", "download": { "completeMs": 10000, "stallAtPct": 40 } }
+  ]
+}
