@@ -31,6 +31,9 @@ function parseGoodreadsRss(xml: string): { shelfName: string; books: ShelfBook[]
     ignoreAttributes: false,
     attributeNamePrefix: '@_',
     allowBooleanAttributes: true,
+    // Decode numeric (&#39;, &#x27;, &#233;) and HTML named entities in titles/authors;
+    // fast-xml-parser 5.6+ no longer decodes numeric references by default
+    htmlEntities: true,
   });
 
   const parsed = parser.parse(xml);

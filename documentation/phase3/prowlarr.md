@@ -97,6 +97,7 @@ interface TorrentResult {
 
 **Automatic Feed Monitoring:** Enabled per-indexer via setup wizard or settings page
 **Schedule:** Every 15 minutes (default, configurable)
+**XML parsing:** fast-xml-parser with `htmlEntities: true` (also Goodreads RSS) so numeric references (`&#39;`, `&#x27;`, `&#233;`) decode in titles/authors; HTML named entities (`&eacute;`) stay as-is. Pinned in `tests/integrations/xml-entity-decoding.test.ts`
 **Process:**
 1. Fetch RSS feeds from all indexers with RSS enabled
 2. Fuzzy match results against requests in 'awaiting_search' status
