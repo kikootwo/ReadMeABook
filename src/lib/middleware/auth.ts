@@ -358,6 +358,18 @@ export async function isLocalAdmin(userId: string): Promise<boolean> {
   return user.isSetupAdmin && user.plexId.startsWith('local-');
 }
 
+/** 503 when the setup state cannot be read (setup/admin guards fail closed). */
+function setupStateUnavailable(request: NextRequest, error: unknown): NextResponse {
+  logger.error('Could not read setup state; refusing request', {
+    path: request.nextUrl?.pathname,
+    error: error instanceof Error ? error.message : String(error),
+  });
+  return NextResponse.json(
+    { error: 'ServiceUnavailable', message: 'Database is not ready. Try again shortly.' },
+    { status: 503 }
+  );
+}
+
 /**
  * Middleware: Require setup to be incomplete
  * Blocks access to setup-only endpoints after initial setup is finished.
@@ -384,8 +396,9 @@ export async function requireSetupIncomplete(
         { status: 403 }
       );
     }
-  } catch {
-    // If database is not ready, setup is definitely not complete — allow through
+  } catch (error) {
+    // Fail closed: without the setup state we cannot tell whether this endpoint is still allowed
+    return setupStateUnavailable(request, error);
   }
 
   return handler(request);
@@ -407,9 +420,9 @@ export async function requireSetupIncompleteOrAdmin(
       where: { key: 'setup_completed' },
     });
     setupComplete = config?.value === 'true';
-  } catch {
-    // If database is not ready, setup is definitely not complete — allow through
-    return handler(request);
+  } catch (error) {
+    // Fail closed: without the setup state we cannot tell whether auth is required
+    return setupStateUnavailable(request, error);
   }
 
   if (!setupComplete) {

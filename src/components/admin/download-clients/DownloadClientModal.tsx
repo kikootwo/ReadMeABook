@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { fetchWithAuth } from '@/lib/utils/api';
 import { DownloadClientType, getClientDisplayName, CLIENT_PROTOCOL_MAP } from '@/lib/interfaces/download-client.interface';
+import { MASKED_PASSWORD } from '@/lib/utils/saved-credential';
 
 interface DownloadClientModalProps {
   isOpen: boolean;
@@ -81,7 +82,7 @@ export function DownloadClientModal({
         setUsername(initialClient.username || '');
         // In wizard mode, use actual password from local state
         // In settings mode, mask password (server doesn't send real passwords)
-        setPassword(apiMode === 'wizard' ? initialClient.password : '********');
+        setPassword(apiMode === 'wizard' ? initialClient.password : MASKED_PASSWORD);
         setEnabled(initialClient.enabled);
         setDisableSSLVerify(initialClient.disableSSLVerify);
         setRemotePathMappingEnabled(initialClient.remotePathMappingEnabled);
@@ -124,7 +125,7 @@ export function DownloadClientModal({
     }
 
     // SABnzbd always requires API key; qBittorrent credentials are optional (supports IP whitelist auth)
-    if (type === 'sabnzbd' && (!password.trim() || (mode === 'add' && password === '********'))) {
+    if (type === 'sabnzbd' && (!password.trim() || (mode === 'add' && password === MASKED_PASSWORD))) {
       newErrors.password = 'API key is required';
     }
 
@@ -148,7 +149,7 @@ export function DownloadClientModal({
   const fetchCategories = async () => {
     setFetchingCategories(true);
     try {
-      const isPasswordMasked = password === '********';
+      const isPasswordMasked = password === MASKED_PASSWORD;
       const categoryData = {
         type,
         name,
@@ -199,7 +200,7 @@ export function DownloadClientModal({
 
     try {
       // If editing and password is masked, send clientId so server uses stored password
-      const isPasswordMasked = password === '********';
+      const isPasswordMasked = password === MASKED_PASSWORD;
 
       const testData = {
         type,
@@ -279,7 +280,7 @@ export function DownloadClientModal({
         name,
         url,
         username: type !== 'sabnzbd' && type !== 'deluge' ? username : undefined,
-        password: password === '********' ? undefined : password, // Don't send masked password on edit
+        password: password === MASKED_PASSWORD ? undefined : password, // Don't send masked password on edit
         enabled,
         disableSSLVerify,
         remotePathMappingEnabled,

@@ -105,6 +105,10 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 
 **requireAuth()** - Verifies JWT exists/valid, adds user to request, returns 401 if invalid
 **requireAdmin()** - Checks `user.role === 'admin'`, returns 403 if not, chains after requireAuth
+**requireSetupIncomplete()** - Setup-only routes; 403 once `setup_completed='true'`
+**requireSetupIncompleteOrAdmin()** - Shared setup/settings routes; open during setup, admin after
+- Both **fail closed**: if the `setup_completed` lookup throws → 503 `ServiceUnavailable` (handler not run; details logged only)
+- `/api/*` is not covered by `src/middleware.ts`; every route must call its own guard
 
 ## First User Setup
 

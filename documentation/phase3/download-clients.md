@@ -142,6 +142,29 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 3. Route to correct service (qBittorrent, Transmission, or SABnzbd)
 4. Create download history record
 
+### Source Fetch & Prowlarr Key Scoping
+**File:** `src/lib/integrations/download-source.ts` (`fetchDownloadSource`), rules in `src/lib/utils/prowlarr-url.ts`, constants in `src/lib/constants/download-source.ts`
+- RMAB fetches every .torrent/.nzb itself (all 5 clients), then hands the file or magnet to the client
+- Redirects followed one hop at a time, max `MAX_SOURCE_REDIRECT_HOPS` (5); `Location` resolved against the current hop (relative OK)
+- `magnet:` accepted at any hop or as the response body (torrent clients only). Strict form everywhere (`isMagnetUri`: `^magnet:\?[^\s]+$`, no whitespace) because clients split URL lists on newlines; the processor drops releases with a malformed magnet before trying any client
+- Hard deadline for the whole fetch (caller timeout; `AbortSignal.timeout`, since axios `timeout` is only an inactivity timer) → `DownloadSourceTimeoutError` (`code: 'ETIMEDOUT'`, transient: Bull retries the job); file size cap `MAX_SOURCE_FILE_BYTES` (50 MB)
+- Unusable source (invalid/non-http redirect, malformed magnet hop, magnet for usenet, redirect loop) → `UnusableDownloadSourceError`: the processor tries the next ranked release; if it was the last, an earlier 429/5xx (retryable) error wins
+- `httpsAgent` (usenet clients' "disable SSL verify") applies only to hops on the configured Prowlarr origin, and only when that origin is https
+- **Prowlarr key:** `AddDownloadOptions.sourceAuth = { prowlarrBaseUrl, apiKey }` (built in `download-torrent.processor.ts` from `getProwlarrConnection()`). Key sent (`X-Api-Key` + `apikey` query restored if missing) **only** when the hop is exactly the configured scheme/host/port/credentials + `<base path>/{indexerId}/download` (`isProwlarrDownloadUrl`). Any other origin or Prowlarr path gets no key. Every grab is rewritten onto the configured base first (`toConfiguredProwlarrUrl(..., { withCredentials: true })`), which is the only place configured `user:pass@` is added
+- Logs/errors: `urlForLog()` keeps scheme + host only (`magnet:` for magnets); `DownloadSourceError.sourceUrl` uses the same form
+- HTTP error from source → `DownloadSourceError` (processor tries next ranked release on 429/5xx)
+
+### User-Picked Releases
+**File:** `src/lib/services/download-selection-guard.ts`
+- Torrent/NZB picks (`request-with-torrent`, `select-torrent`, `select-ebook` indexer source, admin `replace`, admin `approve` incl. stored picks, admin `retry-download` when it re-adds a stored link): `downloadUrl` must be a `magnet:?` URI or a Prowlarr download link → else 400 `ValidationError`
+- Prowlarr link match (`toConfiguredProwlarrUrl`): same host name as `prowlarr_url` (case-insensitive) + base path (case-insensitive) + `/{indexerId}/download`; tolerates http↔https (TLS proxy without `X-Forwarded-Proto`) and default-port differences, never a different host or non-default port. The pick is then **rewritten** onto the configured base (scheme, port, base path) **without credentials** (candidate credentials discarded), so stored picks, `DownloadHistory.magnetLink` and job payloads never hold them; non-admin pick responses omit `selectedTorrent` (`hideStoredPick`)
+- Approve: an unusable stored user pick (or Anna's Archive with no links left) → warning, pick cleared, approve falls back to automatic search and the response says so (`selectionDropped`); Anna's Archive/FlareSolverr unreachable (`getSlowDownloadLinks(..., { throwOnError: true })`) → 503 `SourceUnavailable`, pick kept; an unusable admin-provided pick → 400. E-book pick routes also answer 503 when the source can't be reached
+- Magnets are accepted as-is, so a user can choose a magnet's tracker list (accepted)
+- Anna's Archive picks: only `md5` (32 hex) is trusted; links rebuilt with `getSlowDownloadLinks(md5, ebook_sidecar_base_url, flaresolverr)`; client `downloadUrl(s)` ignored
+- Search responses (`search-torrents`, `requests/[id]/interactive-search`, both `interactive-search-ebook`): `stripProwlarrKeyFromResults()` removes any `apikey=<configured key>` on any origin from every string field (fetcher restores it for Prowlarr hops)
+- Interactive search permission (`denyWithoutInteractiveSearchAccess`, `src/lib/middleware/interactive-search-access.ts`) enforced on all search + pick routes above (user routes) → 403
+- Known limit: if Prowlarr publishes links on a different host name (or non-default port) than `prowlarr_url`, interactive picks get 400 (automatic grabs still work); set `prowlarr_url` to the host Prowlarr links use
+
 ### Migration
 **Auto-migration** from legacy single-client config to new JSON array format on first access:
 - Reads legacy keys: `download_client_type`, `download_client_url`, etc.
@@ -240,7 +263,9 @@ Accepts both legacy single client and new array format:
 | `src/lib/integrations/transmission.service.ts` | Transmission RPC implementation |
 | `src/lib/services/download-client-manager.service.ts` | Core multi-client service, protocol-based routing |
 | `src/lib/integrations/prowlarr.service.ts:379` | Protocol filtering logic (both clients = all results) |
-| `src/lib/processors/download-torrent.processor.ts:44` | Download routing (detect protocol → route) |
+| `src/lib/processors/download-torrent.processor.ts:44` | Download routing (detect protocol → route), builds `sourceAuth` |
+| `src/lib/integrations/download-source.ts` | Shared .torrent/.nzb fetch, redirect hops, key scoping |
+| `src/lib/services/download-selection-guard.ts` | Pick validation, Anna's Archive link rebuild, key stripping |
 | `src/app/api/admin/settings/download-clients/*` | CRUD API routes, protocol-level duplicate check |
 | `src/components/admin/download-clients/*` | UI components (3-column card layout, protocol enforcement) |
 | `src/app/admin/settings/tabs/DownloadTab/DownloadTab.tsx` | Replaced with management component |

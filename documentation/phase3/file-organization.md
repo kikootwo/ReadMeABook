@@ -43,7 +43,7 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 4. Apply template to create target path: `[media_dir]/[template result]/`
 5. **Copy** files (not move - originals stay for seeding)
 6. **Tag metadata** (if enabled) - writes correct title, author, narrator, ASIN to audio files
-7. Copy cover art if found, else download from Audible
+7. Copy cover art if found, else download from Audible. `coverArtUrl` must be a cached thumbnail `/api/cache/thumbnails/<file>` (plain file name, resolved in `/app/cache/thumbnails`) or an https URL on `COVER_ART_HOSTS` (`*.media-amazon.com`, `*.ssl-images-amazon.com`, `*.images-amazon.com`), up to `MAX_COVER_ART_REDIRECTS` (3) redirects with every hop checked; anything else is skipped with a warning (`src/lib/utils/cover-art-url.ts`). Downloaded and copied covers get the library file mode. At request creation, covers are stored for display if they are any http(s) URL or a safe cached path (`sanitizeCoverArtUrl`; shelf-sync Goodreads/Hardcover fallbacks stay visible); a stored cover the library can't use is replaced by a later usable one (`isLibraryCoverSource`)
 8. **Coerce file formats** (if enabled) - rename .mp4 → .m4b and single-file .m4a → .m4b for Plex compatibility (see: Plex Format Coercion below)
 9. **Generate file hash** - SHA256 of sorted audio filenames for library matching (see: [fixes/file-hash-matching.md](../fixes/file-hash-matching.md))
 10. Update request status to `downloaded` and store file hash in `audiobooks.files_hash`
@@ -226,6 +226,37 @@ When user deletes and re-requests the same audiobook:
 - If found → Keeps torrent, only removes soft-deleted database record
 - Prevents deleting source files for active requests during chapter merging
 
+## Post-Organize Cleanup Safety
+
+**Code:** `src/lib/processors/organize-cleanup.ts`, `src/lib/utils/delete-guard.ts`
+
+**Download cleanup** (indexer `removeAfterProcessing`, non-torrent) runs only when all hold:
+- Job payload carries `downloadHistoryId` (set by monitor-download, retry-failed-imports, direct-download, request retry route; never by manual or bulk import)
+- That row belongs to the request, `downloadStatus = completed`, stored `downloadPath` == job `downloadPath`
+- Protocol: indexer `protocol` (case-insensitive), else `CLIENT_PROTOCOL_MAP[downloadClient]`; unknown or `torrent` → skip
+- retry-failed-imports writes a client-reported (mapped) path back to the row before queueing; a failed write only skips cleanup
+
+**`assertSafeToDelete(path, ctx)`** guards every delete in both cleanups (download + manual-import `cleanupSource`). Refused deletes log a warning; the job still succeeds.
+
+| Rule | Refuses |
+|------|---------|
+| a | Equals, contains, or is inside the organize target |
+| b | Equals or contains any root: `media_dir`, `download_dir`, `download_dir/customPath` per client, mapped `localPath` per client, `/bookdrop` |
+| c | Inside `media_dir`, unless inside a download root that itself sits strictly inside `media_dir` (`allowMediaSources` bypasses c for `cleanupSource` files only; a whole folder inside `media_dir` is never removed) |
+
+- Comparison: realpath of candidate, target and roots (symlinks, junctions), plus dev+inode identity of the entry and its ancestors (case-insensitive mounts). Inode 0 never matches.
+- Acts on the path the guard returns (the canonical path it checked). For a symlink candidate the rules check the link's target and only the link is removed; the link's own location is not checked against the rules.
+- Fail closed: roots are read straight from the database (`download_dir`, `download_clients`, legacy mapped path; no cache, no swallowed errors). Any database, decryption or JSON error → nothing is deleted (job still succeeds).
+- Empty-parent sweep: bounded by the nearest configured root containing the deleted path; never removes a root (download_dir, client customPath / mapped localPath, media_dir, bookdrop) and never climbs from a download root into `media_dir`.
+- `cleanupSource` + `selectedFiles`: each file is checked; files inside the target are kept and listed in a warning (in-place renamed re-imports keep the old-named file).
+- Ebook `cleanupSource` removes only the imported ebook file (`result.sourceFile`; the original EPUB when the Kindle fix ran), never its folder.
+- Direct HTTP download files (`downloadClient = direct`) are removed by `cleanupDirectDownloadSource` (same provenance gate + guard); the organizer itself never deletes its source.
+- Manual vs download job: `isManualImport = !downloadHistoryId && typeof cleanupSource === 'boolean'` (manual sends `true`, bulk `false`; download jobs leave it unset). A failed manual/bulk import → request `failed` with `Import from <path> did not complete: <error>. Fix the folder and run the import again.`, one notification without the path, result `success: false` (not thrown, so no queue retries); never `awaiting_import` (that path re-queues the request's last client download).
+- Windows drive roots normalize to `C:/` (`normalizeGuardPath`), never `C:.` (the drive's current directory).
+- `media_dir` resolution shared via `src/lib/utils/media-dir.ts` (`media_dir` → `MEDIA_DIR` → `/media/audiobooks`).
+
+**Same-file copies:** `copyFile` is a no-op when source and destination are the same file (`isSameFile`: realpath equal, or same dev + non-zero inode); the organizer skips audio and cover art already in place.
+
 ## Interface
 
 ```typescript
@@ -270,6 +301,8 @@ async function organize(
 **4. Single file downloads** - Now supports files directly in downloads folder (not just directories)
 **5. Hardcoded media path** - Now reads `media_dir` from database config instead of hardcoded `/media/audiobooks`
 **6. Invalid URL error for cached cover art** - Fixed by detecting local cached thumbnails (`/api/cache/thumbnails/*`) and copying from `/app/cache/thumbnails/` instead of attempting HTTP download
+**7. Manual import deleted library folders (#242)** - Download cleanup used the request's newest download row regardless of origin and `rm -rf`'d the import folder (even the media root); `cleanupSource` with source == target unlinked the library files; in-place re-import truncated `cover.jpg` to 0 bytes. Fixed by provenance gate + delete guard + same-file copy skip (see Post-Organize Cleanup Safety)
+   - Upgrade note: organize jobs queued before this change carry no `downloadHistoryId`, so they skip download cleanup once (files stay on disk, client history entry is not archived). Their import retry on transient errors is unchanged; only manual/bulk imports fail without retry
 
 ## Tech Stack
 

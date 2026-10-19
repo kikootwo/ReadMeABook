@@ -706,14 +706,14 @@ describe('QBittorrentService', () => {
     });
 
     const error = await service.addDownload(
-      'https://prowlarr/1/download/limited',
-      { sourceHeaders: { 'X-Api-Key': 'secret' } }
+      'https://prowlarr/1/download',
+      { sourceAuth: { prowlarrBaseUrl: 'https://prowlarr', apiKey: 'secret' } }
     ).catch((caught) => caught);
 
     expect(error).toBeInstanceOf(DownloadSourceError);
     expect(error).toMatchObject({ status: 500 });
     expect(axiosMock.get).toHaveBeenCalledWith(
-      'https://prowlarr/1/download/limited',
+      'https://prowlarr/1/download?apikey=secret',
       expect.objectContaining({
         headers: expect.objectContaining({ 'X-Api-Key': 'secret' }),
       })

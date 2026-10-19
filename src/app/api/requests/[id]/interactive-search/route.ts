@@ -12,7 +12,8 @@ import { groupIndexersByCategories, getGroupDescription } from '@/lib/utils/inde
 import { getLanguageForRegion } from '@/lib/constants/language-config';
 import type { AudibleRegion } from '@/lib/types/audible';
 import { RMABLogger } from '@/lib/utils/logger';
-import { resolveInteractiveSearchAccess } from '@/lib/utils/permissions';
+import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
+import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 
 const logger = RMABLogger.create('API.InteractiveSearch');
 const MAX_RANKED_RESULTS = 100;
@@ -77,16 +78,8 @@ export async function POST(
       }
 
       // Check interactive search access permission
-      const callingUser = await prisma.user.findUnique({
-        where: { id: req.user.id },
-        select: { role: true, interactiveSearchAccess: true },
-      });
-      if (!callingUser || !(await resolveInteractiveSearchAccess(callingUser.role, callingUser.interactiveSearchAccess))) {
-        return NextResponse.json(
-          { error: 'Forbidden', message: 'You do not have interactive search access. Contact your admin to enable this permission.' },
-          { status: 403 }
-        );
-      }
+      const accessDenied = await denyWithoutInteractiveSearchAccess(req.user.id);
+      if (accessDenied) return accessDenied;
 
       // Get enabled indexers from configuration
       const { getConfigService } = await import('@/lib/services/config.service');
@@ -262,7 +255,7 @@ export async function POST(
 
       return NextResponse.json({
         success: true,
-        results: resultsWithRank,
+        results: await stripProwlarrKeyFromResults(resultsWithRank),
         truncated,
         rawCount: results.length,
         message: limitedRankedResults.length > 0

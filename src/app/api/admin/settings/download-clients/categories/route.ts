@@ -9,6 +9,8 @@ import { getConfigService } from '@/lib/services/config.service';
 import { getDownloadClientManager, DownloadClientConfig } from '@/lib/services/download-client-manager.service';
 import { SUPPORTED_CLIENT_TYPES } from '@/lib/interfaces/download-client.interface';
 import { RMABLogger } from '@/lib/utils/logger';
+import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
+import { savedClientCredential } from '@/lib/services/saved-credentials.service';
 
 const logger = RMABLogger.create('API.Admin.Settings.DownloadClients.Categories');
 
@@ -66,7 +68,19 @@ export async function POST(request: NextRequest) {
             );
           }
 
-          effectivePassword = existingClient.password;
+          // Saved secret is only reused for the client's saved URL
+          const resolved = await resolveSecretForUrl({
+            kind: 'downloadClient',
+            url,
+            supplied: '',
+            emptyMeansSaved: Boolean(existingClient.password),
+            loadSaved: () => savedClientCredential(existingClient),
+          });
+          if (!resolved.ok) {
+            return NextResponse.json({ error: resolved.error }, { status: 400 });
+          }
+
+          effectivePassword = resolved.secret;
           if (!username && existingClient.username) {
             effectiveUsername = existingClient.username;
           }

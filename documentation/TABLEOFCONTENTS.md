@@ -66,14 +66,17 @@
 - **Search via Prowlarr (torrents + NZBs)** → [phase3/prowlarr.md](phase3/prowlarr.md)
 - **Torrent ranking/selection** → [phase3/ranking-algorithm.md](phase3/ranking-algorithm.md)
 - **Multi-download-client support (qBittorrent, Transmission, SABnzbd, NZBGet)** → [phase3/download-clients.md](phase3/download-clients.md)
+- **.torrent/.nzb fetch, redirects, Prowlarr key scoping, user-picked release validation** → [phase3/download-clients.md](phase3/download-clients.md#source-fetch--prowlarr-key-scoping)
 - **qBittorrent integration (torrents)** → [phase3/qbittorrent.md](phase3/qbittorrent.md)
 - **SABnzbd integration (Usenet/NZB)** → [phase3/sabnzbd.md](phase3/sabnzbd.md)
 - **File organization, seeding** → [phase3/file-organization.md](phase3/file-organization.md)
+- **Post-organize cleanup safety (delete guard, remove-after-processing gate)** → [phase3/file-organization.md](phase3/file-organization.md#post-organize-cleanup-safety)
 - **Chapter merging (auto-merge to M4B)** → [features/chapter-merging.md](features/chapter-merging.md)
 
 ## Background Jobs
 - **Bull queue, processors, retry logic** → [backend/services/jobs.md](backend/services/jobs.md)
 - **Scheduled/recurring jobs (cron)** → [backend/services/scheduler.md](backend/services/scheduler.md)
+- **Startup initialization (instrumentation hook, /api/init, single-process rule)** → [backend/services/scheduler.md](backend/services/scheduler.md#startup-initialization)
 - **Job types:** search, download monitor, organize, Plex scan, cleanup, retries
 
 ## Logging

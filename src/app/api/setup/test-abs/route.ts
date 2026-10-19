@@ -5,6 +5,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSetupIncompleteOrAdmin } from '@/lib/middleware/auth';
+import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
+import { savedAudiobookshelfCredential } from '@/lib/services/saved-credentials.service';
 
 export async function POST(request: NextRequest) {
   return requireSetupIncompleteOrAdmin(request, async (req) => {
@@ -18,22 +20,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // If API token is masked, try to get the saved token
-    let effectiveApiToken = apiToken;
-    if (!apiToken || apiToken.startsWith('••••')) {
-      const { getConfigService } = await import('@/lib/services/config.service');
-      const configService = getConfigService();
-      const savedToken = await configService.get('audiobookshelf.api_token');
-
-      if (!savedToken) {
-        return NextResponse.json(
-          { error: 'API token is required' },
-          { status: 400 }
-        );
-      }
-
-      effectiveApiToken = savedToken;
+    // A masked or empty token reuses the saved one — but only for the saved server URL
+    const token = await resolveSecretForUrl({
+      kind: 'audiobookshelf',
+      url: serverUrl,
+      supplied: apiToken,
+      emptyMeansSaved: true,
+      missingMessage: 'API token is required',
+      loadSaved: savedAudiobookshelfCredential,
+    });
+    if (!token.ok) {
+      return NextResponse.json({ error: token.error }, { status: 400 });
     }
+    const effectiveApiToken = token.secret;
 
     // Test connection by fetching libraries (which also validates auth)
     const libResponse = await fetch(`${serverUrl.replace(/\/$/, '')}/api/libraries`, {

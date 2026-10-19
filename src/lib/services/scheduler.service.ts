@@ -7,6 +7,7 @@ import { getJobQueueService, ScanPlexPayload } from './job-queue.service';
 import { getNotificationService } from './notification';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
+import { processSingleton } from '../utils/process-singleton';
 
 const logger = RMABLogger.create('Scheduler');
 
@@ -730,11 +731,7 @@ export class SchedulerService {
 }
 
 // Singleton instance
-let schedulerService: SchedulerService | null = null;
-
 export function getSchedulerService(): SchedulerService {
-  if (!schedulerService) {
-    schedulerService = new SchedulerService();
-  }
-  return schedulerService;
+  // Process-wide singleton (shared even if this module is evaluated more than once)
+  return processSingleton('scheduler-service', () => new SchedulerService());
 }

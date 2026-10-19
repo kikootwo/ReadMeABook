@@ -10,11 +10,12 @@ import path from 'path';
 import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
 import * as parseTorrentModule from 'parse-torrent';
 import { RMABLogger } from '../utils/logger';
+import { fetchDownloadSource } from './download-source';
+import { urlForLog } from '../utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import {
   IDownloadClient, DownloadClientType, ProtocolType,
   DownloadInfo, DownloadStatus, AddDownloadOptions, ConnectionTestResult,
-  DownloadSourceError,
 } from '../interfaces/download-client.interface';
 
 const parseTorrent = (parseTorrentModule as any).default || parseTorrentModule;
@@ -187,50 +188,17 @@ export class DelugeService implements IDownloadClient {
   }
 
   private async addTorrentFile(torrentUrl: string, category: string, options?: AddDownloadOptions): Promise<string> {
-    logger.info(`Downloading .torrent file from: ${torrentUrl}`);
+    logger.info(`Downloading .torrent file from: ${urlForLog(torrentUrl)}`);
 
-    let torrentResponse;
-    try {
-      torrentResponse = await axios.get(torrentUrl, {
-        responseType: 'arraybuffer', maxRedirects: 0,
-        validateStatus: (s) => s >= 200 && s < 300, timeout: DOWNLOAD_CLIENT_TIMEOUT,
-        headers: { 'User-Agent': RMAB_USER_AGENT, ...options?.sourceHeaders },
-      });
-      if (torrentResponse.data.length > 0) {
-        const magnetMatch = torrentResponse.data.toString().match(/^magnet:\?[^\s]+$/);
-        if (magnetMatch) return this.addMagnetLink(magnetMatch[0], category, options);
-      }
-    } catch (error) {
-      if (!axios.isAxiosError(error) || !error.response) throw error;
-      const status = error.response.status;
-      if (status >= 300 && status < 400) {
-        const loc = error.response.headers['location'];
-        if (loc?.startsWith('magnet:')) return this.addMagnetLink(loc, category, options);
-        if (loc?.startsWith('http://') || loc?.startsWith('https://')) {
-          try { torrentResponse = await axios.get(loc, { responseType: 'arraybuffer', timeout: DOWNLOAD_CLIENT_TIMEOUT, maxRedirects: 5, headers: { 'User-Agent': RMAB_USER_AGENT, ...options?.sourceHeaders } }); }
-          catch (redirectError) {
-            if (axios.isAxiosError(redirectError) && redirectError.response?.status) {
-              throw new DownloadSourceError(
-                `Grab failed: source returned HTTP ${redirectError.response.status}`,
-                redirectError.response.status,
-                loc,
-                redirectError
-              );
-            }
-            throw new Error('Failed to download torrent file after redirect');
-          }
-        } else { throw new Error(`Invalid redirect location: ${loc}`); }
-      } else {
-        throw new DownloadSourceError(
-          `Grab failed: source returned HTTP ${status}`,
-          status,
-          torrentUrl,
-          error
-        );
-      }
-    }
+    // Shared fetcher: every redirect hop, magnet at any hop, Prowlarr key scoped to Prowlarr download hops
+    const source = await fetchDownloadSource(torrentUrl, {
+      sourceAuth: options?.sourceAuth,
+      allowMagnet: true,
+      timeoutMs: DOWNLOAD_CLIENT_TIMEOUT,
+    });
+    if (source.kind === 'magnet') return this.addMagnetLink(source.magnetUrl, category, options);
 
-    const torrentBuffer = Buffer.from(torrentResponse.data);
+    const torrentBuffer = source.data;
     let parsed: any;
     try { parsed = await parseTorrent(torrentBuffer); }
     catch { throw new Error('Invalid .torrent file - failed to parse'); }

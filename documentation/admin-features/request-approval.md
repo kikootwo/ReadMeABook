@@ -45,6 +45,7 @@ Allows admins to review and approve/deny user requests before they are processed
 **Admin approval actions:**
 - **Approve:**
   - If request has `selectedTorrent` → Download that specific torrent (clear `selectedTorrent` field)
+  - Admin-provided and stored picks pass the same check as user picks (`guardTorrentSelection` / `guardEbookSelection`); Anna's Archive picks get links rebuilt from `md5`; an unusable admin-provided pick → 400 (request stays `awaiting_approval`); an unusable stored user pick, or an Anna's Archive pick with no links left, is cleared with a warning and approval falls back to the automatic search
   - If no `selectedTorrent` → Trigger automatic search job (status: 'pending')
   - Send approved notification
 - **Deny:** → Change status to 'denied', no further processing

@@ -64,6 +64,7 @@ Allow admins to manually import audiobook files from the server filesystem into 
 - [ ] Metadata tagging, cover art download, file hash generation all work as normal
 - [ ] Library scan triggered after organization (if configured)
 - [ ] Request status progresses: processing → downloaded → available (via scheduled scan)
+- Indexer "remove after processing" cleanup never runs for manual imports (no `downloadHistoryId`); `cleanupSource` never deletes the organize target, a configured root, files inside the target, or a whole folder inside the media library. A failed manual import is marked `failed` (re-run it); it is never retried as a client download. See [file-organization.md](../phase3/file-organization.md#post-organize-cleanup-safety)
 
 ### AC-7: Docker Build
 - [ ] `docker compose build readmeabook` succeeds with no errors

@@ -39,6 +39,22 @@ vi.mock('@/lib/integrations/audible.service', () => ({
   getAudibleService: () => audibleServiceMock,
 }));
 
+
+// Prowlarr connection used by the download-URL guard and key stripping
+vi.mock('@/lib/integrations/prowlarr-connection', () => ({
+  getProwlarrConnection: async () => ({
+    baseUrl: 'http://prowlarr:9696',
+    apiKey: 'test-prowlarr-key',
+    base: { origin: 'http://prowlarr:9696', protocol: 'http:', hostname: 'prowlarr', host: 'prowlarr:9696', port: '9696', defaultPort: false, userinfo: '', basePath: '' },
+  }),
+}));
+
+
+// Interactive search permission is covered by tests/api/interactive-search-access.test.ts
+vi.mock('@/lib/middleware/interactive-search-access', () => ({
+  denyWithoutInteractiveSearchAccess: async () => null,
+}));
+
 describe('Request with torrent route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -53,7 +69,7 @@ describe('Request with torrent route', () => {
   it('returns 409 when audiobook is already being processed', async () => {
     authRequest.json.mockResolvedValue({
       audiobook: { asin: 'ASIN', title: 'Title', author: 'Author' },
-      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'url', publishDate: '2024-01-01' },
+      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'http://prowlarr:9696/1/download', publishDate: '2024-01-01' },
     });
     prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-1',
@@ -84,7 +100,7 @@ describe('Request with torrent route', () => {
   it('returns 409 when audiobook is already available', async () => {
     authRequest.json.mockResolvedValue({
       audiobook: { asin: 'ASIN', title: 'Title', author: 'Author' },
-      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'url', publishDate: '2024-01-01' },
+      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'http://prowlarr:9696/1/download', publishDate: '2024-01-01' },
     });
     prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-1',
@@ -104,7 +120,7 @@ describe('Request with torrent route', () => {
   it('returns 409 when Plex match already exists', async () => {
     authRequest.json.mockResolvedValue({
       audiobook: { asin: 'ASIN', title: 'Title', author: 'Author' },
-      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'url', publishDate: '2024-01-01' },
+      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'http://prowlarr:9696/1/download', publishDate: '2024-01-01' },
     });
     prismaMock.request.findFirst.mockResolvedValueOnce(null);
     findPlexMatchMock.mockResolvedValueOnce({ plexGuid: 'plex://item' });
@@ -121,7 +137,7 @@ describe('Request with torrent route', () => {
   it('returns 409 for duplicate active requests', async () => {
     authRequest.json.mockResolvedValue({
       audiobook: { asin: 'ASIN', title: 'Title', author: 'Author' },
-      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'url', publishDate: '2024-01-01' },
+      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'http://prowlarr:9696/1/download', publishDate: '2024-01-01' },
     });
     prismaMock.request.findFirst.mockResolvedValueOnce(null);
     findPlexMatchMock.mockResolvedValueOnce(null);
@@ -139,7 +155,7 @@ describe('Request with torrent route', () => {
   it('deletes failed requests before creating a new one', async () => {
     authRequest.json.mockResolvedValue({
       audiobook: { asin: 'ASIN', title: 'Title', author: 'Author' },
-      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'url', publishDate: '2024-01-01' },
+      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'http://prowlarr:9696/1/download', publishDate: '2024-01-01' },
     });
     prismaMock.request.findFirst.mockResolvedValueOnce(null);
     findPlexMatchMock.mockResolvedValueOnce(null);
@@ -170,7 +186,7 @@ describe('Request with torrent route', () => {
   it('returns 404 when user lookup fails', async () => {
     authRequest.json.mockResolvedValue({
       audiobook: { asin: 'ASIN', title: 'Title', author: 'Author' },
-      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'url', publishDate: '2024-01-01' },
+      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'http://prowlarr:9696/1/download', publishDate: '2024-01-01' },
     });
     prismaMock.request.findFirst.mockResolvedValueOnce(null);
     findPlexMatchMock.mockResolvedValueOnce(null);
@@ -189,7 +205,7 @@ describe('Request with torrent route', () => {
   it('stores selected torrent when approval is required', async () => {
     authRequest.json.mockResolvedValue({
       audiobook: { asin: 'ASIN', title: 'Title', author: 'Author' },
-      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'url', publishDate: '2024-01-01' },
+      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'http://prowlarr:9696/1/download', publishDate: '2024-01-01' },
     });
     prismaMock.request.findFirst.mockResolvedValueOnce(null);
     findPlexMatchMock.mockResolvedValueOnce(null);
@@ -234,7 +250,7 @@ describe('Request with torrent route', () => {
   it('updates year from Audnexus when audiobook already exists', async () => {
     authRequest.json.mockResolvedValue({
       audiobook: { asin: 'ASIN', title: 'Title', author: 'Author' },
-      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'url', publishDate: '2024-01-01' },
+      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'http://prowlarr:9696/1/download', publishDate: '2024-01-01' },
     });
     prismaMock.request.findFirst.mockResolvedValueOnce(null);
     findPlexMatchMock.mockResolvedValueOnce(null);
@@ -283,7 +299,7 @@ describe('Request with torrent route', () => {
   it('creates request and queues download job', async () => {
     authRequest.json.mockResolvedValue({
       audiobook: { asin: 'ASIN', title: 'Title', author: 'Author' },
-      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'url', publishDate: '2024-01-01' },
+      torrent: { guid: 'guid', title: 'Torrent', size: 100, indexer: 'Indexer', downloadUrl: 'http://prowlarr:9696/1/download', publishDate: '2024-01-01' },
     });
     prismaMock.request.findFirst.mockResolvedValueOnce(null);
     findPlexMatchMock.mockResolvedValueOnce(null);

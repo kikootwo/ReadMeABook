@@ -102,7 +102,11 @@ describe('processMonitorDownload', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-1',
       'a1',
-      expect.stringMatching(/downloads[\\/]+Book/)
+      expect.stringMatching(/downloads[\\/]+Book/),
+      undefined,
+      undefined,
+      undefined,
+      'dh-1'
     );
     // Verify downloadPath is stored in download history on completion
     expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith(
@@ -312,7 +316,11 @@ describe('processMonitorDownload', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-4',
       'a4',
-      '/usenet/complete/Book'
+      '/usenet/complete/Book',
+      undefined,
+      undefined,
+      undefined,
+      'dh-4'
     );
     // Verify downloadPath is stored in download history on completion
     expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith(
@@ -373,7 +381,11 @@ describe('processMonitorDownload', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-nzbget',
       'a-nzbget',
-      '/downloads/readmeabook/Book'
+      '/downloads/readmeabook/Book',
+      undefined,
+      undefined,
+      undefined,
+      'dh-nzbget'
     );
   });
 

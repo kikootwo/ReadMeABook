@@ -14,6 +14,8 @@ import { getDownloadClientManager, invalidateDownloadClientManager, DownloadClie
 import { SUPPORTED_CLIENT_TYPES, getClientDisplayName } from '@/lib/interfaces/download-client.interface';
 import { PathMapper } from '@/lib/utils/path-mapper';
 import { RMABLogger } from '@/lib/utils/logger';
+import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
+import { savedClientCredential } from '@/lib/services/saved-credentials.service';
 import { randomUUID } from 'crypto';
 
 const logger = RMABLogger.create('API.Admin.Settings.DownloadClient');
@@ -95,6 +97,18 @@ export async function PUT(request: NextRequest) {
         // Find existing client of same type to update, or create new
         const existingIndex = existingClients.findIndex(c => c.type === type);
 
+        // A masked password keeps the saved one — only when the URL stays the saved URL
+        const resolvedPassword = await resolveSecretForUrl({
+          kind: 'downloadClient',
+          url,
+          supplied: password,
+          missingMessage: 'No stored password/API key found. Please re-enter it.',
+          loadSaved: () => savedClientCredential(existingIndex >= 0 ? existingClients[existingIndex] : null),
+        });
+        if (!resolvedPassword.ok) {
+          return NextResponse.json({ error: resolvedPassword.error }, { status: 400 });
+        }
+
         const updatedClient: DownloadClientConfig = {
           id: existingIndex >= 0 ? existingClients[existingIndex].id : randomUUID(),
           type,
@@ -102,10 +116,7 @@ export async function PUT(request: NextRequest) {
           enabled: true,
           url,
           username: username || undefined,
-          // Only update password if it's not the masked value
-          password: password.startsWith('••••') && existingIndex >= 0
-            ? existingClients[existingIndex].password
-            : password,
+          password: resolvedPassword.secret,
           disableSSLVerify: disableSSLVerify || false,
           remotePathMappingEnabled: remotePathMappingEnabled || false,
           remotePath: remotePath || undefined,

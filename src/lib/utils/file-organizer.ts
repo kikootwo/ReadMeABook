@@ -9,7 +9,9 @@ import axios from 'axios';
 import { RMAB_USER_AGENT } from './user-agent';
 import { tagMultipleFiles, checkFfmpegAvailable } from './metadata-tagger';
 import { RMABLogger } from './logger';
-import { copyFile } from './copy-file';
+import { copyFile, isSameFile } from './copy-file';
+import { getMediaDir } from './media-dir';
+import { MAX_COVER_ART_BYTES, MAX_COVER_ART_REDIRECTS, cachedThumbnailPath, isAllowedRemoteCoverUrl, isLibraryCoverSource } from './cover-art-url';
 
 const moduleLogger = RMABLogger.create('FileOrganizer');
 import {
@@ -49,6 +51,8 @@ export interface EbookOrganizationResult {
   targetPath: string;
   errors: string[];
   format?: string;
+  /** The ebook file that was read (may be a temp copy when a fixed EPUB was organized). */
+  sourceFile?: string;
 }
 
 export interface ValidationResult {
@@ -377,10 +381,15 @@ export class FileOrganizer {
           continue;
         }
 
-        // Check if target already exists (skip if already copied)
+        // Check if target already exists (skip if already copied, or if the
+        // source already is the target, e.g. an in-place re-import from the library)
         try {
           await fs.access(targetFilePath);
-          moduleLogger.debug(`File already exists, skipping: ${filename}`);
+          if (await isSameFile(originalSourcePath, targetFilePath)) {
+            await logger?.info(`Already in place, skipping copy: ${filename}`);
+          } else {
+            moduleLogger.debug(`File already exists, skipping: ${filename}`);
+          }
           result.audioFiles.push(targetFilePath);
 
           // Clean up tagged temp file if it exists
@@ -471,16 +480,28 @@ export class FileOrganizer {
         const targetCoverPath = path.join(targetPath, 'cover.jpg');
 
         try {
-          // Copy cover art (do NOT delete original)
-          await copyFile(sourcePath, targetCoverPath);
-          await fs.chmod(targetCoverPath, this.fileMode);
-          result.coverArtFile = targetCoverPath;
-          result.filesMovedCount++;
-          await logger?.info(`Copied cover art`);
+          if (await isSameFile(sourcePath, targetCoverPath)) {
+            // In-place re-import: the cover already is the target file. Copying
+            // it onto itself would truncate it.
+            result.coverArtFile = targetCoverPath;
+            await logger?.info(`Cover art already in place, skipping copy`);
+          } else {
+            // Copy cover art (do NOT delete original)
+            await copyFile(sourcePath, targetCoverPath);
+            await fs.chmod(targetCoverPath, this.fileMode);
+            result.coverArtFile = targetCoverPath;
+            result.filesMovedCount++;
+            await logger?.info(`Copied cover art`);
+          }
         } catch (error) {
           await logger?.warn(`Failed to copy cover art: ${error instanceof Error ? error.message : 'Unknown error'}`);
           result.errors.push('Failed to copy cover art');
         }
+      } else if (audiobook.coverArtUrl && !isLibraryCoverSource(audiobook.coverArtUrl)) {
+        // Display-only cover (e.g. a shelf-sync fallback host): never fetched into the library
+        const message = 'Cover art is not from a cached thumbnail or known cover image host; skipping cover.jpg';
+        if (logger) await logger.warn(message);
+        else moduleLogger.warn(message);
       } else if (audiobook.coverArtUrl) {
         // Download cover art from Audible if not in torrent
         try {
@@ -726,26 +747,33 @@ export class FileOrganizer {
     const targetPath = path.join(targetDir, 'cover.jpg');
 
     try {
-      // Check if this is a cached thumbnail (local file)
-      if (url.startsWith('/api/cache/thumbnails/')) {
-        // Extract filename from the API path
-        const filename = url.replace('/api/cache/thumbnails/', '');
-        const cachedPath = path.join('/app/cache/thumbnails', filename);
-
-        // Copy from local cache instead of downloading
+      // Cached thumbnail (plain file name inside the cache dir only)
+      const cachedPath = cachedThumbnailPath(url);
+      if (cachedPath) {
         await copyFile(cachedPath, targetPath);
         await fs.chmod(targetPath, this.fileMode);
-        moduleLogger.debug(`Copied cover art from cache: ${filename}`);
-      } else {
-        // Download from external URL (e.g., Audible CDN)
+        moduleLogger.debug(`Copied cover art from cache: ${path.basename(cachedPath)}`);
+      } else if (isAllowedRemoteCoverUrl(url)) {
+        // Known Audible/Amazon image host over https; every redirect hop must be one too
         const response = await axios.get(url, {
           responseType: 'arraybuffer',
           timeout: 30000,
+          maxRedirects: MAX_COVER_ART_REDIRECTS,
+          beforeRedirect: (redirect: { href?: string; protocol?: string; hostname?: string }) => {
+            const next = redirect.href ?? `${redirect.protocol}//${redirect.hostname}/`;
+            if (!isAllowedRemoteCoverUrl(next)) {
+              throw new Error('Cover art redirected to a host that is not a known cover image host');
+            }
+          },
+          maxContentLength: MAX_COVER_ART_BYTES,
           headers: { 'User-Agent': RMAB_USER_AGENT },
         });
 
         await fs.writeFile(targetPath, response.data);
+        await fs.chmod(targetPath, this.fileMode);
         moduleLogger.debug(`Downloaded cover art from URL`);
+      } else {
+        throw new Error('Cover art URL is not a cached thumbnail or a known cover image host');
       }
     } catch (error) {
       moduleLogger.error('Failed to download cover art', { error: error instanceof Error ? error.message : String(error) });
@@ -840,6 +868,7 @@ export class FileOrganizer {
 
       // Build full path to source file
       const sourceFilePath = isFile ? downloadPath : path.join(baseSourcePath, ebookFile);
+      result.sourceFile = sourceFilePath;
       await logger?.info(`Found ebook file: ${ebookFile}`);
 
       // Detect format from extension
@@ -903,15 +932,9 @@ export class FileOrganizer {
 
       await logger?.info(`Copied ebook: ${targetFilename}`);
 
-      // Clean up source file ONLY for direct HTTP downloads (not indexer downloads which need to seed)
-      if (!isIndexerDownload && isFile) {
-        try {
-          await fs.unlink(sourceFilePath);
-          await logger?.info(`Cleaned up source file: ${sourceFilename}`);
-        } catch {
-          // Ignore cleanup errors
-        }
-      } else if (isIndexerDownload) {
+      // The source is never deleted here. Direct HTTP download files are removed
+      // afterwards by the post-organize cleanup, behind the delete guard.
+      if (isIndexerDownload) {
         await logger?.info(`Keeping source file for seeding: ${sourceFilename}`);
       }
 
@@ -988,12 +1011,7 @@ export class FileOrganizer {
  * Reads media_dir, file_chmod, dir_chmod from database configuration
  */
 export async function getFileOrganizer(): Promise<FileOrganizer> {
-  // Read media_dir from database config
-  const config = await prisma.configuration.findUnique({
-    where: { key: 'media_dir' },
-  });
-
-  const mediaDir = config?.value || process.env.MEDIA_DIR || '/media/audiobooks';
+  const mediaDir = await getMediaDir();
   const tempDir = process.env.TEMP_DIR || '/tmp/readmeabook';
 
   // Read file/directory permission settings

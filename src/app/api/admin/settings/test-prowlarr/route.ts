@@ -5,9 +5,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
-import { getConfigService } from '@/lib/services/config.service';
 import { ProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
+import { savedProwlarrCredential } from '@/lib/services/saved-credentials.service';
 
 const logger = RMABLogger.create('API.Admin.Settings.TestProwlarr');
 
@@ -24,21 +25,18 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // If API key is masked, fetch the actual value from database (decrypted)
-        let actualApiKey = apiKey;
-        if (apiKey.startsWith('••••')) {
-          const configService = getConfigService();
-          const storedApiKey = await configService.get('prowlarr_api_key');
-
-          if (!storedApiKey) {
-            return NextResponse.json(
-              { success: false, error: 'No stored API key found. Please re-enter your Prowlarr API key.' },
-              { status: 400 }
-            );
-          }
-
-          actualApiKey = storedApiKey;
+        // A masked API key reuses the saved one — only for the saved Prowlarr URL
+        const resolved = await resolveSecretForUrl({
+          kind: 'prowlarr',
+          url,
+          supplied: apiKey,
+          missingMessage: 'No stored API key found. Please re-enter your Prowlarr API key.',
+          loadSaved: savedProwlarrCredential,
+        });
+        if (!resolved.ok) {
+          return NextResponse.json({ success: false, error: resolved.error }, { status: 400 });
         }
+        const actualApiKey = resolved.secret;
 
         // Create a new ProwlarrService instance with test credentials
         const prowlarrService = new ProwlarrService(url, actualApiKey);

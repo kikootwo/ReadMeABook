@@ -45,6 +45,22 @@ vi.mock('@/lib/utils/indexer-grouping', () => ({
   getGroupDescription: groupDescriptionMock,
 }));
 
+
+// Prowlarr connection used by the download-URL guard and key stripping
+vi.mock('@/lib/integrations/prowlarr-connection', () => ({
+  getProwlarrConnection: async () => ({
+    baseUrl: 'http://prowlarr:9696',
+    apiKey: 'test-prowlarr-key',
+    base: { origin: 'http://prowlarr:9696', protocol: 'http:', hostname: 'prowlarr', host: 'prowlarr:9696', port: '9696', defaultPort: false, userinfo: '', basePath: '' },
+  }),
+}));
+
+
+// Interactive search permission is covered by tests/api/interactive-search-access.test.ts
+vi.mock('@/lib/middleware/interactive-search-access', () => ({
+  denyWithoutInteractiveSearchAccess: async () => null,
+}));
+
 describe('Audiobooks search torrents route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
