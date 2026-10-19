@@ -9,6 +9,7 @@ Syncs user-subscribed Goodreads shelves via RSS feeds, resolves books to Audible
 
 ### Files
 - `src/lib/services/goodreads-sync.service.ts` — RSS fetch/parse, delegates to shared core
+- `src/lib/utils/goodreads-rss-url.ts` — Feed URL rules (`toGoodreadsRssUrl`, `isGoodreadsHttpsUrl`, `goodreadsRssUrlSchema`)
 - `src/lib/services/shelf-sync-core.service.ts` — Shared sync logic (Audible lookup, cover enrichment, request creation)
 - `src/lib/utils/shelf-helpers.ts` — Shared `processBooks()` utility for cover URL parsing
 - `src/lib/hooks/createShelfHooks.ts` — Generic hook factory for shelf CRUD operations
@@ -24,6 +25,8 @@ Syncs user-subscribed Goodreads shelves via RSS feeds, resolves books to Audible
 ## Goodreads RSS Feed
 - **Format:** `https://www.goodreads.com/review/list_rss/{userId}?shelf={shelfName}`
 - **Auth:** None required (public RSS)
+- **Allowed URLs:** `https://` + host `goodreads.com` or `www.goodreads.com` (no port, no credentials) + path `/review/list_rss/`. An `http://` Goodreads link is upgraded to `https://` (POST/PATCH store the https form). Anything else → 400 `ValidationError` on POST/PATCH; sync refuses it too
+- **Redirects:** axios `maxRedirects: 0`; up to 3 redirects followed by hand, each target must be an https Goodreads host before it is requested
 - **Parsing:** `fast-xml-parser` extracts `item` entries with `book_id`, `title`, `author_name`, `book_image_url`
 
 ## Shared Sync Core

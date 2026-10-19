@@ -146,6 +146,37 @@ describe('PATCH /api/user/goodreads-shelves/[id]', () => {
     expect(payload.error).toBe('ValidationError');
   });
 
+  it.each([
+    'http://10.0.0.1/goodreads.com/review/list_rss/1',
+    'https://evil.example/review/list_rss/1',
+  ])('refuses a non-Goodreads feed URL (%s) without saving or syncing', async (rssUrl) => {
+    prismaMock.goodreadsShelf.findUnique.mockResolvedValueOnce(SHELF);
+
+    const { PATCH } = await import('@/app/api/user/goodreads-shelves/[id]/route');
+    const response = await PATCH(
+      { json: vi.fn().mockResolvedValue({ rssUrl }) } as any,
+      { params: Promise.resolve({ id: 'shelf-1' }) }
+    );
+
+    expect(response.status).toBe(400);
+    expect(prismaMock.goodreadsShelf.update).not.toHaveBeenCalled();
+    expect(jobQueueMock.addSyncShelvesJob).not.toHaveBeenCalled();
+  });
+
+  it('stores an http:// Goodreads feed URL as https://', async () => {
+    prismaMock.goodreadsShelf.findUnique.mockResolvedValueOnce(SHELF);
+    prismaMock.goodreadsShelf.update.mockResolvedValueOnce({ ...SHELF, rssUrl: NEW_RSS });
+
+    const { PATCH } = await import('@/app/api/user/goodreads-shelves/[id]/route');
+    const response = await PATCH(
+      { json: vi.fn().mockResolvedValue({ rssUrl: 'http://www.goodreads.com/review/list_rss/99999' }) } as any,
+      { params: Promise.resolve({ id: 'shelf-1' }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.goodreadsShelf.update.mock.calls[0][0].data.rssUrl).toBe(NEW_RSS);
+  });
+
   it('updates the shelf, clears sync metadata, and triggers a sync job', async () => {
     prismaMock.goodreadsShelf.findUnique.mockResolvedValueOnce(SHELF);
     const updatedShelf = { ...SHELF, rssUrl: NEW_RSS, lastSyncAt: null };

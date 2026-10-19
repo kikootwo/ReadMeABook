@@ -8,12 +8,13 @@ import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
+import { goodreadsRssUrlSchema } from '@/lib/utils/goodreads-rss-url';
 import { z } from 'zod';
 
 const logger = RMABLogger.create('API.GoodreadsShelves');
 
 const UpdateGoodreadsSchema = z.object({
-  rssUrl: z.string().url('Must be a valid URL').optional(),
+  rssUrl: goodreadsRssUrlSchema.optional(),
   autoRequest: z.boolean().optional(),
 });
 

@@ -10,16 +10,12 @@ import { fetchAndValidateRss } from '@/lib/services/goodreads-sync.service';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { z } from 'zod';
 import { RMABLogger } from '@/lib/utils/logger';
+import { goodreadsRssUrlSchema } from '@/lib/utils/goodreads-rss-url';
 
 const logger = RMABLogger.create('API.GoodreadsShelves');
 
-const GOODREADS_RSS_PATTERN = /goodreads\.com\/review\/list_rss\//;
-
 const AddShelfSchema = z.object({
-  rssUrl: z.string().url().refine(
-    (url) => GOODREADS_RSS_PATTERN.test(url),
-    { message: 'URL must be a Goodreads shelf RSS URL (goodreads.com/review/list_rss/...)' }
-  ),
+  rssUrl: goodreadsRssUrlSchema,
   autoRequest: z.boolean().optional().default(true),
 });
 
