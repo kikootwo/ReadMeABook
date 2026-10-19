@@ -11,7 +11,7 @@ Backend unit tests (Node) and frontend component tests (jsdom) with isolated moc
 - **Setup:** `tests/setup.ts` sets `NODE_ENV=test`, `TZ=UTC`, jest-dom, DOM polyfills, Next.js `Link/Image` mocks
 - **Frontend helpers:** `tests/helpers/render.tsx`, `tests/helpers/mock-auth.ts`, `tests/helpers/mock-next-navigation.ts`
 - **Backend helpers:** `tests/helpers/prisma.ts`, `tests/helpers/job-queue.ts`
-- **GitHub Actions:** Manual workflow `.github/workflows/manual-tests.yml` runs `npm test`
+- **GitHub Actions:** `.github/workflows/run-tests.yml` (manual dispatch, also called by the release image build) runs `npm test`; `.github/workflows/pr-ci.yml` runs on every `pull_request` (`npm ci`, `npx prisma generate`, ffmpeg install, `npm test`)
 - **Coverage:** `npm run test:coverage` (reports in `coverage/`)
 - **Scope:** Unit tests only; no real network or services
 

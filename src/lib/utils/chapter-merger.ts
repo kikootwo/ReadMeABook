@@ -6,14 +6,16 @@
  * with proper chapter markers.
  */
 
-import { exec, spawn } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
 import { RMABLogger } from './logger';
 import { CHAPTER_MERGE_FORMATS } from '../constants/audio-formats';
 
-const execPromise = promisify(exec);
+// Media tools run via execFile/spawn with argv arrays (never a shell): file
+// names come from downloads and import folders and are untrusted.
+const execFilePromise = promisify(execFile);
 
 // Supported audio formats for chapter merging (from shared constants)
 const SUPPORTED_FORMATS: readonly string[] = CHAPTER_MERGE_FORMATS;
@@ -112,10 +114,10 @@ export async function detectChapterFiles(files: string[], logger?: RMABLogger): 
  * Probe an audio file to extract duration and metadata
  */
 export async function probeAudioFile(filePath: string): Promise<AudioProbeResult> {
-  const command = `ffprobe -v quiet -print_format json -show_format -show_streams "${filePath}"`;
+  const args = ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath];
 
   try {
-    const { stdout } = await execPromise(command, { timeout: 30000 });
+    const { stdout } = await execFilePromise('ffprobe', args, { timeout: 30000 });
     const data = JSON.parse(stdout);
 
     const format = data.format || {};
@@ -408,7 +410,7 @@ function generateChapterMetadata(chapters: ChapterFile[]): string {
       .replace(/=/g, '\\=')
       .replace(/;/g, '\\;')
       .replace(/#/g, '\\#')
-      .replace(/\n/g, '');
+      .replace(/[\r\n\0]/g, ''); // ffmetadata ends a line at \r or \n
 
     metadata += '\n[CHAPTER]\n';
     metadata += 'TIMEBASE=1/1000\n';
@@ -471,8 +473,8 @@ function bitrateToVbrQuality(bitrateStr: string): number {
  */
 async function checkLibFdkAac(): Promise<boolean> {
   try {
-    const { stdout } = await execPromise('ffmpeg -encoders 2>&1', { timeout: 5000 });
-    return stdout.includes('libfdk_aac');
+    const { stdout, stderr } = await execFilePromise('ffmpeg', ['-encoders'], { timeout: 5000 });
+    return `${stdout}${stderr}`.includes('libfdk_aac');
   } catch {
     // ffmpeg not available or error checking - assume not available
     return false;
@@ -480,21 +482,15 @@ async function checkLibFdkAac(): Promise<boolean> {
 }
 
 /**
- * Execute FFmpeg command with real-time progress logging
+ * Execute FFmpeg (argv array, no shell) with real-time progress logging
  */
 async function executeFFmpegWithProgress(
-  command: string,
+  args: string[],
   timeout: number,
   expectedDuration: number, // milliseconds
   logger?: RMABLogger
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    // Parse the command to extract args (remove 'ffmpeg' and handle quotes)
-    const args = command
-      .replace(/^ffmpeg\s+/, '')
-      .match(/(?:[^\s"]+|"[^"]*")+/g)
-      ?.map(arg => arg.replace(/^"|"$/g, '')) || [];
-
     const ffmpeg = spawn('ffmpeg', args);
 
     let stderrBuffer = '';
@@ -619,7 +615,13 @@ export async function mergeChapters(
     // Ensure temp directory exists
     await fs.mkdir(tempDir, { recursive: true, ...(options.dirMode !== undefined && { mode: options.dirMode }) });
 
-    // Create concat file
+    // Create concat file. The list is line-based with no escape for a line break
+    // (or NUL), so a path containing one could smuggle in extra directives:
+    // refuse it (the caller then organizes the files individually).
+    const unsafeChapter = chapters.find(c => /[\r\n\0]/.test(c.path));
+    if (unsafeChapter) {
+      throw new Error(`Cannot merge: file path contains a line break or NUL character (${JSON.stringify(unsafeChapter.path)})`);
+    }
     const concatContent = chapters
       .map(c => `file '${c.path.replace(/'/g, "'\\''")}'`)
       .join('\n');
@@ -635,14 +637,14 @@ export async function mergeChapters(
     const inputFormat = path.extname(chapters[0].path).toLowerCase();
     const needsReencode = inputFormat === '.mp3' || inputFormat === '.flac' || inputFormat === '.aac';
 
-    // Build ffmpeg command
+    // Build ffmpeg argv (passed directly to spawn - values need no quoting or escaping)
     const args: string[] = [
-      'ffmpeg',
       '-y',
       '-f', 'concat',
       '-safe', '0',
-      '-i', `"${concatFile}"`,
-      '-i', `"${metadataFile}"`,
+      '-protocol_whitelist', 'file', // Concat entries may only open local files
+      '-i', concatFile,
+      '-i', metadataFile,
       '-map_metadata', '1',
       '-map', '0:a', // Explicit audio stream mapping
     ];
@@ -680,39 +682,29 @@ export async function mergeChapters(
     args.push('-avoid_negative_ts', 'make_zero'); // Handle negative timestamps
     args.push('-max_muxing_queue_size', '9999'); // Prevent buffer overflow on long files
 
-    // Add book metadata (escape for double-quoted shell context)
-    // Single quotes do NOT need escaping inside double quotes - they are literal
-    const escapeMetadata = (val: string): string =>
-      val
-        .replace(/\\/g, '\\\\') // Backslashes first
-        .replace(/"/g, '\\"') // Double quotes
-        .replace(/`/g, '\\`') // Backticks
-        .replace(/\$/g, '\\$'); // Dollar signs
-
-    args.push('-metadata', `title="${escapeMetadata(options.title)}"`);
-    args.push('-metadata', `album="${escapeMetadata(options.title)}"`);
-    args.push('-metadata', `album_artist="${escapeMetadata(options.author)}"`);
-    args.push('-metadata', `artist="${escapeMetadata(options.author)}"`);
+    // Add book metadata (raw values: argv elements reach ffmpeg verbatim)
+    args.push('-metadata', `title=${options.title}`);
+    args.push('-metadata', `album=${options.title}`);
+    args.push('-metadata', `album_artist=${options.author}`);
+    args.push('-metadata', `artist=${options.author}`);
 
     if (options.narrator) {
-      args.push('-metadata', `composer="${escapeMetadata(options.narrator)}"`);
+      args.push('-metadata', `composer=${options.narrator}`);
     }
 
     if (options.year) {
-      args.push('-metadata', `date="${options.year}"`);
+      args.push('-metadata', `date=${options.year}`);
     }
 
     if (options.asin) {
       // Custom iTunes tag for ASIN
-      args.push('-metadata', `----:com.apple.iTunes:ASIN="${escapeMetadata(options.asin)}"`);
+      args.push('-metadata', `----:com.apple.iTunes:ASIN=${options.asin}`);
       await logger?.info(`Embedding ASIN: ${options.asin}`);
     }
 
     // Output format
     args.push('-f', 'mp4');
-    args.push(`"${options.outputPath}"`);
-
-    const command = args.join(' ');
+    args.push(options.outputPath);
 
     // Calculate timeout based on operation type and total duration
     const totalDurationMinutes = totalDuration / 1000 / 60;
@@ -734,13 +726,14 @@ export async function mergeChapters(
       await logger?.info(`This is a long audiobook (${Math.round(totalDurationMinutes / 60)}h). Encoding may take ${estimatedMinEncoding}-${estimatedMaxEncoding} minutes depending on CPU speed.`);
     }
 
-    // Log command for debugging (truncate if too long)
+    // Log command for debugging (display only - quoting is cosmetic; truncate if too long)
+    const command = ['ffmpeg', ...args].map(a => (/[\s"']/.test(a) ? JSON.stringify(a) : a)).join(' ');
     const commandPreview = command.length > 500 ? command.substring(0, 500) + '...' : command;
     await logger?.info(`FFmpeg command: ${commandPreview}`);
 
     // Execute FFmpeg with progress logging
     try {
-      await executeFFmpegWithProgress(command, timeout, totalDuration, logger);
+      await executeFFmpegWithProgress(args, timeout, totalDuration, logger);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       await logger?.error(`FFmpeg merge failed: ${errorMsg}`);
@@ -845,12 +838,10 @@ async function validateMergedFile(
 
     try {
       // Test first 10 seconds
-      const firstDecodeCommand = `ffmpeg -v error -i "${outputPath}" -t 10 -f null -`;
-      await execPromise(firstDecodeCommand, { timeout: 30000 }); // 30 sec timeout
+      await execFilePromise('ffmpeg', ['-v', 'error', '-i', outputPath, '-t', '10', '-f', 'null', '-'], { timeout: 30000 }); // 30 sec timeout
 
       // Test last 10 seconds (seeks to 10 seconds before end)
-      const lastDecodeCommand = `ffmpeg -v error -sseof -10 -i "${outputPath}" -f null -`;
-      await execPromise(lastDecodeCommand, { timeout: 30000 }); // 30 sec timeout
+      await execFilePromise('ffmpeg', ['-v', 'error', '-sseof', '-10', '-i', outputPath, '-f', 'null', '-'], { timeout: 30000 }); // 30 sec timeout
 
       await logger?.info('✓ File integrity test passed (beginning and end playable)');
     } catch (decodeError) {
@@ -910,14 +901,15 @@ export function formatDuration(ms: number): string {
  */
 export async function checkDiskSpace(directory: string): Promise<number | null> {
   try {
-    // Use df on Unix-like systems
-    const { stdout } = await execPromise(`df -k "${directory}" | tail -1 | awk '{print $4}'`);
-    const availableKb = parseInt(stdout.trim());
-    if (!isNaN(availableKb)) {
-      return availableKb * 1024; // Convert to bytes
+    // Blocks available to unprivileged users x block size. Close to `df` "Available";
+    // may differ where fragment size != block size (e.g. some FUSE/virtiofs mounts)
+    const stats = await fs.statfs(directory);
+    const available = stats.bavail * stats.bsize;
+    if (Number.isFinite(available)) {
+      return available;
     }
   } catch {
-    // df not available (Windows) or other error
+    // Directory missing or statfs unsupported
   }
 
   return null;

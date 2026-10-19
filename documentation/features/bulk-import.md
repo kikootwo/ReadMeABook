@@ -14,7 +14,7 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 - **Access:** Admin-only, modal opened from admin dashboard Quick Actions
 - **Audio detection:** Uses `AUDIO_EXTENSIONS` from `src/lib/constants/audio-formats.ts`
 - **Audiobook boundary:** A folder containing audio files = one audiobook. Files with matching metadata tags are grouped by title+author+narrator. Files with no metadata title tag are all grouped together per folder (one entry, not one per file).
-- **Metadata extraction:** ffprobe reads `album` (title), `album_artist` (author), `composer` (narrator) from all audio files in folder
+- **Metadata extraction:** ffprobe (`execFile` argv, no shell) reads `album` (title), `album_artist` (author), `composer` (narrator) from all audio files in folder
 - **Search term fallback chain** (when no `album` tag):
   1. **ASIN in folder name** — scans folder name for pattern `B[A-Z0-9]{9}` bounded by bracket/paren/space; if found, uses direct ASIN lookup instead of text search; no badge shown
   2. **Folder name** — cleaned (strips bracketed ASIN/year, underscores→spaces); skipped if generic (CD1, Disc 2, Part 3, Vol 1, etc.); shows "Low Confidence" badge

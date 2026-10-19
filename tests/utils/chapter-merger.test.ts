@@ -16,27 +16,34 @@ import {
   probeAudioFile,
 } from '@/lib/utils/chapter-merger';
 
+type ExecHandler = (command: string, args: string[]) => { stdout?: string; error?: Error };
+
 const execState = vi.hoisted(() => {
   const state = {
-    handler: null as null | ((command: string) => { stdout?: string; error?: Error }),
+    handler: null as null | ExecHandler,
   };
   const custom = Symbol.for('nodejs.util.promisify.custom');
-  const exec = vi.fn();
-  (exec as any)[custom] = (command: string) =>
+  const execFile = vi.fn();
+  // promisify(execFile) -> { stdout, stderr }. Record the raw (file, args, options)
+  // call; handlers get a display string for routing plus the untouched argv.
+  (execFile as unknown as Record<symbol, unknown>)[custom] = (file: string, args: string[], options?: unknown) =>
     new Promise((resolve, reject) => {
-      const result = state.handler ? state.handler(command) : { stdout: '' };
+      execFile(file, args, options);
+      const command = [file, ...args].join(' ');
+      const result = state.handler ? state.handler(command, args) : { stdout: '' };
       if (result.error) {
         reject(result.error);
         return;
       }
       resolve({ stdout: result.stdout ?? '', stderr: '' });
     });
-  return { exec, state };
+  return { execFile, state };
 });
 const spawnMock = vi.hoisted(() => vi.fn());
 const fsMock = vi.hoisted(() => ({
   access: vi.fn(),
   stat: vi.fn(),
+  statfs: vi.fn(),
   writeFile: vi.fn(),
   mkdir: vi.fn(),
   unlink: vi.fn(),
@@ -44,7 +51,7 @@ const fsMock = vi.hoisted(() => ({
 }));
 
 vi.mock('child_process', () => ({
-  exec: execState.exec,
+  execFile: execState.execFile,
   spawn: spawnMock,
 }));
 
@@ -71,7 +78,7 @@ function createSpawnProcess(exitCode = 0, stderrData = '') {
   return proc;
 }
 
-function mockExecImplementation(handlers: (command: string) => { stdout?: string; error?: Error }) {
+function mockExecImplementation(handlers: ExecHandler) {
   execState.state.handler = handlers;
 }
 
@@ -99,9 +106,8 @@ describe('chapter merger', () => {
       '/tmp/c.mp3': { duration: 60, bitrate: 128000, track: 3 },
     };
 
-    mockExecImplementation((command) => {
-      const matches = command.match(/"([^"]+)"/g) ?? [];
-      const filePath = matches.length > 0 ? matches[matches.length - 1].replace(/"/g, '') : '';
+    mockExecImplementation((_command, args) => {
+      const filePath = args[args.length - 1];
       const probe = probeMap[filePath];
       if (!probe) {
         throw new Error(`Missing probe data for ${filePath}`);
@@ -130,9 +136,8 @@ describe('chapter merger', () => {
       '/tmp/03 - End.mp3': { duration: 60, bitrate: 128000 },
     };
 
-    mockExecImplementation((command) => {
-      const matches = command.match(/"([^"]+)"/g) ?? [];
-      const filePath = matches.length > 0 ? matches[matches.length - 1].replace(/"/g, '') : '';
+    mockExecImplementation((_command, args) => {
+      const filePath = args[args.length - 1];
       const probe = probeMap[filePath];
       if (!probe) {
         throw new Error(`Missing probe data for ${filePath}`);
@@ -166,9 +171,8 @@ describe('chapter merger', () => {
       '/tmp/03.mp3': { duration: 60, bitrate: 128000, track: 3, title: 'Book Title' },
     };
 
-    mockExecImplementation((command) => {
-      const matches = command.match(/"([^"]+)"/g) ?? [];
-      const filePath = matches.length > 0 ? matches[matches.length - 1].replace(/"/g, '') : '';
+    mockExecImplementation((_command, args) => {
+      const filePath = args[args.length - 1];
       const probe = probeMap[filePath];
       if (!probe) {
         throw new Error(`Missing probe data for ${filePath}`);
@@ -197,9 +201,8 @@ describe('chapter merger', () => {
       '/tmp/03 - Three.mp3': { duration: 60, bitrate: 128000, track: 4 },
     };
 
-    mockExecImplementation((command) => {
-      const matches = command.match(/"([^"]+)"/g) ?? [];
-      const filePath = matches.length > 0 ? matches[matches.length - 1].replace(/"/g, '') : '';
+    mockExecImplementation((_command, args) => {
+      const filePath = args[args.length - 1];
       const probe = probeMap[filePath];
       if (!probe) {
         throw new Error(`Missing probe data for ${filePath}`);
@@ -240,16 +243,18 @@ describe('chapter merger', () => {
     expect(size).toBe(330);
   });
 
-  it('checks disk space when df output is available', async () => {
-    mockExecImplementation(() => ({ stdout: '1024\n' }));
+  it('checks disk space via statfs (available blocks x block size), not a shell', async () => {
+    fsMock.statfs.mockResolvedValue({ bavail: 1024, bsize: 4096, bfree: 2048, blocks: 9999 });
 
-    const space = await checkDiskSpace('/tmp');
+    const space = await checkDiskSpace('/tmp/dir $(x) `y`');
 
-    expect(space).toBe(1024 * 1024);
+    expect(space).toBe(1024 * 4096);
+    expect(fsMock.statfs).toHaveBeenCalledWith('/tmp/dir $(x) `y`');
+    expect(execState.execFile).not.toHaveBeenCalled();
   });
 
   it('returns null when disk space cannot be determined', async () => {
-    mockExecImplementation(() => ({ error: new Error('df missing') }));
+    fsMock.statfs.mockRejectedValue(new Error('ENOENT'));
 
     const space = await checkDiskSpace('/tmp');
 
@@ -666,26 +671,22 @@ describe('chapter merger', () => {
       const spawnCall = spawnMock.mock.calls[0];
       const args = spawnCall[1] as string[];
 
-      // Find the title metadata arg (format after parsing: title="It's Not Her)
+      // argv elements reach ffmpeg verbatim: key=value with no quoting or escaping
       const titleArg = args.find((arg: string) => arg.startsWith('title='));
       const albumArtistArg = args.find((arg: string) => arg.startsWith('album_artist='));
       const composerArg = args.find((arg: string) => arg.startsWith('composer='));
 
       // Single quotes should appear as-is ('s), NOT escaped with backslash (\'s)
-      // The args contain the value with opening quote: title="It's Not Her
-      expect(titleArg).toContain("It's Not Her");
-      expect(titleArg).not.toContain("\\'"); // No escaped single quotes
-      expect(albumArtistArg).toContain("O'Brien");
-      expect(albumArtistArg).not.toContain("\\'");
-      expect(composerArg).toContain("Jane's Voice");
-      expect(composerArg).not.toContain("\\'");
+      expect(titleArg).toBe("title=It's Not Her");
+      expect(albumArtistArg).toBe("album_artist=O'Brien");
+      expect(composerArg).toBe("composer=Jane's Voice");
 
       // Verify no backslash-escaped single quotes anywhere in args
       const allArgsJoined = args.join(' ');
       expect(allArgsJoined).not.toContain("\\'");
     });
 
-    it('properly escapes double quotes and special shell characters', async () => {
+    it('passes double quotes and shell characters through verbatim (no shell, no escaping)', async () => {
       const outputPath = '/tmp/output.m4b';
       const chapters = [
         { path: '/tmp/one.m4a', filename: 'one.m4a', duration: 60000, bitrate: 128, chapterTitle: 'One' },
@@ -728,12 +729,9 @@ describe('chapter merger', () => {
       const spawnCall = spawnMock.mock.calls[0];
       const args = spawnCall[1] as string[];
 
-      // Find the title arg - double quotes and $ should be escaped
+      // Previously the command-string tokenizer produced `title="Book \"Quoted\" \$100`
       const titleArg = args.find((arg: string) => arg.startsWith('title='));
-
-      // Verify escaping is present for double quotes and dollar signs
-      expect(titleArg).toContain('\\"Quoted\\"');
-      expect(titleArg).toContain('\\$100');
+      expect(titleArg).toBe('title=Book "Quoted" $100');
     });
   });
 });

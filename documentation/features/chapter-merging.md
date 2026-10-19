@@ -132,6 +132,8 @@ title=Chapter 2: The Journey
 
 ### FFmpeg Implementation
 
+- **No shell:** ffprobe/ffmpeg run via `execFile`/`spawn` argv arrays (paths + metadata values passed verbatim, no quoting/escaping); disk space via `fs.statfs`; concat input limited by `-protocol_whitelist file`
+
 **For M4A/M4B files (same format, no re-encode):**
 ```bash
 # 1. Create concat list
@@ -142,7 +144,7 @@ echo "file '/path/ch02.m4a'" >> filelist.txt
 # [Create chapters.txt with timing from durations]
 
 # 3. Merge with chapters (v2 - enhanced)
-ffmpeg -y -f concat -safe 0 -i filelist.txt \
+ffmpeg -y -f concat -safe 0 -protocol_whitelist file -i filelist.txt \
   -i chapters.txt \
   -map_metadata 1 \
   -map 0:a \
@@ -165,7 +167,7 @@ ffmpeg -y -f concat -safe 0 -i filelist.txt \
 ```bash
 # Re-encode to M4B (AAC) with quality preservation
 # Uses libfdk_aac if available (higher quality) or native aac with VBR
-ffmpeg -y -f concat -safe 0 -i filelist.txt \
+ffmpeg -y -f concat -safe 0 -protocol_whitelist file -i filelist.txt \
   -i chapters.txt \
   -map_metadata 1 \
   -map 0:a \
@@ -498,6 +500,7 @@ All merged files are validated before marked successful:
 | Missing chapters (1, 2, 4) | Merge available, log warning |
 | Single chapter file | Skip merge (not a multi-file book) |
 | No chapter indicators | Skip merge, copy individually |
+| File path contains line break or NUL | Merge refused (concat list is line-based), copy individually |
 
 ### Error Handling
 

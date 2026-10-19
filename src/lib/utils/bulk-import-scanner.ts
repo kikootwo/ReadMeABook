@@ -7,13 +7,14 @@
  * matching. Used by the bulk import API.
  */
 
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
 import { AUDIO_EXTENSIONS } from '../constants/audio-formats';
 
-const execPromise = promisify(exec);
+// ffprobe runs via execFile with an argv array (never a shell): paths are untrusted.
+const execFilePromise = promisify(execFile);
 
 /** Maximum recursion depth for folder scanning. */
 export const MAX_SCAN_DEPTH = 10;
@@ -86,8 +87,8 @@ export function extractAsinFromString(str: string): string | null {
  */
 export async function readAudioMetadata(filePath: string): Promise<AudioFileMetadata> {
   try {
-    const command = `ffprobe -v quiet -print_format json -show_format "${filePath}"`;
-    const { stdout } = await execPromise(command, { timeout: 15000 });
+    const args = ['-v', 'quiet', '-print_format', 'json', '-show_format', filePath];
+    const { stdout } = await execFilePromise('ffprobe', args, { timeout: 15000 });
     const data = JSON.parse(stdout);
 
     const tags = data?.format?.tags || {};
