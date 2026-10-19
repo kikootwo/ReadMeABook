@@ -6,7 +6,8 @@
  * feeds RMAB parses, so a parser upgrade that changes titles/authors fails here.
  * Both parsers set `htmlEntities: true` (fast-xml-parser 5.6+ stopped decoding
  * numeric references by default). That also decodes other numeric references
- * such as &#233;, which older versions left as-is; HTML named entities such as
+ * such as &#233;, which older versions left as-is, and a short list of named ones
+ * (&nbsp;, dashes, curly quotes, &hellip;, currency); other HTML named entities such as
  * &eacute; are still left as-is.
  */
 

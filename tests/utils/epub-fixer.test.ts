@@ -47,9 +47,9 @@ const CH2 = `<?xml version="1.0"?>
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01, 0x02, 0x03, 0xff]);
 
-// Today (adm-zip 0.5.x): entries are written sorted by name (case-insensitive), so `mimetype`
-// is NOT the first entry even though the EPUB container spec asks for it. Pinned as-is;
-// a zip-library change to ordering shows up here and should be reviewed, not just updated.
+// adm-zip (0.5.x and 0.6.x alike) writes entries sorted by name (case-insensitive), so
+// `mimetype` is NOT the first entry even though the EPUB container spec asks for it. Pinned
+// as-is; a zip-library change to ordering shows up here and should be reviewed, not just updated.
 const ENTRY_ORDER = ['META-INF/container.xml', 'mimetype', 'OEBPS/ch1.xhtml', 'OEBPS/ch2.xhtml', 'OEBPS/content.opf', 'OEBPS/pic.png'];
 
 describe('fixEpubForKindle round trip', () => {
