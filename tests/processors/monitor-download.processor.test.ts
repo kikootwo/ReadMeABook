@@ -115,6 +115,42 @@ describe('processMonitorDownload', () => {
     );
   });
 
+  it('stops monitoring without touching the client when the request was cancelled', async () => {
+    prismaMock.request.findUnique.mockResolvedValueOnce({ status: 'cancelled', deletedAt: null });
+
+    const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+    const result = await processMonitorDownload({
+      requestId: 'req-cancelled',
+      downloadHistoryId: 'dh-1',
+      downloadClientId: 'hash-1',
+      downloadClient: 'transmission',
+      jobId: 'job-cancelled',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.completed).toBe(true);
+    expect(downloadClientManagerMock.getClientServiceForProtocol).not.toHaveBeenCalled();
+    expect(jobQueueMock.addMonitorJob).not.toHaveBeenCalled();
+    expect(prismaMock.request.update).not.toHaveBeenCalled();
+  });
+
+  it('stops monitoring when the request was deleted', async () => {
+    prismaMock.request.findUnique.mockResolvedValueOnce({ status: 'downloading', deletedAt: new Date() });
+
+    const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+    const result = await processMonitorDownload({
+      requestId: 'req-deleted',
+      downloadHistoryId: 'dh-1',
+      downloadClientId: 'hash-1',
+      downloadClient: 'transmission',
+      jobId: 'job-deleted',
+    });
+
+    expect(result.completed).toBe(true);
+    expect(downloadClientManagerMock.getClientServiceForProtocol).not.toHaveBeenCalled();
+    expect(jobQueueMock.addMonitorJob).not.toHaveBeenCalled();
+  });
+
   it('re-schedules monitoring when download is still active', async () => {
     const qbtClientMock = {
       clientType: 'qbittorrent',

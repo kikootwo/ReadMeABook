@@ -211,6 +211,7 @@ exiftool "audiobook.m4b" | grep -i asin
 **Config:** `seeding_time_minutes` (0 = unlimited, never cleanup)
 
 **Cleanup Job:** `cleanup_seeded_torrents` (every 30 mins)
+**Cleanup scope:** pages through ALL available/downloaded/soft-deleted requests (no fixed window); also removes torrent+files for `cancelled` requests (no seeding rules, skipped if another active request shares the hash). Monitor job and its failure handler never overwrite `cancelled`/deleted requests with `failed`
 1. Find requests with status 'available' or soft-deleted (orphaned downloads)
 2. Query qBittorrent for actual `seeding_time` field
 3. **CRITICAL: Check if torrent hash is shared by other active requests**

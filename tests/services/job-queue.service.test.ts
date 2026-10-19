@@ -504,6 +504,30 @@ describe('JobQueueService', () => {
     );
   });
 
+  it.each([
+    ['cancelled', { status: 'cancelled', deletedAt: null }],
+    ['deleted', { status: 'downloading', deletedAt: new Date() }],
+  ])('does not overwrite a %s request when monitor retries are exhausted', async (_label, existing) => {
+    prismaMock.request.findUnique.mockResolvedValueOnce(existing);
+
+    const { JobQueueService } = await import('@/lib/services/job-queue.service');
+    new JobQueueService();
+
+    const handlers = Object.fromEntries(queueMock.on.mock.calls.map(([event, handler]) => [event, handler]));
+    await handlers.failed(
+      {
+        id: 'bull-12',
+        name: 'monitor_download',
+        data: { requestId: 'req-cancelled', downloadHistoryId: 'hist-1' },
+        attemptsMade: 3,
+      },
+      new Error('Download not found in transmission')
+    );
+
+    expect(prismaMock.request.update).not.toHaveBeenCalled();
+    expect(prismaMock.downloadHistory.update).not.toHaveBeenCalled();
+  });
+
   it('updates database fields for completed jobs', async () => {
     prismaMock.job.updateMany.mockResolvedValue({});
 

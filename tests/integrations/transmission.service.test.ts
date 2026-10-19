@@ -362,7 +362,7 @@ describe('TransmissionService', () => {
       expect(info).toBeNull();
     });
 
-    it('maps error code to failed status', async () => {
+    it('maps local error (3) to failed status', async () => {
       const service = new TransmissionService('http://transmission', 'user', 'pass');
 
       clientMock.post.mockResolvedValueOnce({
@@ -381,8 +381,8 @@ describe('TransmissionService', () => {
               labels: [],
               downloadDir: '/downloads',
               doneDate: 0,
-              errorString: 'Tracker error',
-              error: 2,
+              errorString: 'No space left on device',
+              error: 3,
               uploadRatio: -1,
               uploadedEver: 0,
             }],
@@ -394,15 +394,15 @@ describe('TransmissionService', () => {
 
       expect(info).not.toBeNull();
       expect(info!.status).toBe('failed');
-      expect(info!.errorMessage).toBe('Tracker error');
+      expect(info!.errorMessage).toBe('No space left on device');
     });
   });
 
   describe('status mapping', () => {
     const makeService = () => new TransmissionService('http://transmission', '', '');
 
-    const mapStatus = (service: TransmissionService, status: number, error = 0) => {
-      return (service as any).mapStatus(status, error);
+    const mapStatus = (service: TransmissionService, status: number, error = 0, percentDone = 0) => {
+      return (service as any).mapStatus(status, error, percentDone);
     };
 
     it('maps 0 (stopped) to paused', () => {
@@ -433,9 +433,19 @@ describe('TransmissionService', () => {
       expect(mapStatus(makeService(), 6)).toBe('seeding');
     });
 
-    it('maps any status with error > 0 to failed', () => {
-      expect(mapStatus(makeService(), 4, 1)).toBe('failed');
-      expect(mapStatus(makeService(), 6, 2)).toBe('failed');
+    it('maps local error (3) to failed', () => {
+      expect(mapStatus(makeService(), 4, 3)).toBe('failed');
+      expect(mapStatus(makeService(), 6, 3)).toBe('failed');
+    });
+
+    it('does not fail on transient tracker warnings/errors (1, 2)', () => {
+      expect(mapStatus(makeService(), 4, 1)).toBe('downloading');
+      expect(mapStatus(makeService(), 6, 2)).toBe('seeding');
+    });
+
+    it('maps stopped torrent at 100% to completed', () => {
+      expect(mapStatus(makeService(), 0, 0, 1)).toBe('completed');
+      expect(mapStatus(makeService(), 0, 0, 0.5)).toBe('paused');
     });
   });
 

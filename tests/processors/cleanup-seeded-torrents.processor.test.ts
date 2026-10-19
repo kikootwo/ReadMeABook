@@ -511,6 +511,180 @@ describe('processCleanupSeededTorrents', () => {
     expect(result.skipped).toBe(1);
     expect(qbtClientMock.deleteDownload).not.toHaveBeenCalled();
   });
+  describe('request paging', () => {
+    it('pages through all candidate requests instead of stopping at the first 100', async () => {
+      configMock.get.mockResolvedValue(
+        JSON.stringify([{ name: 'IndexerA', seedingTimeMinutes: 30 }])
+      );
+      const qbtClientMock = {
+        clientType: 'qbittorrent',
+        protocol: 'torrent',
+        getDownload: vi.fn().mockResolvedValue({
+          id: 'hash-new',
+          name: 'Torrent',
+          size: 0,
+          bytesDownloaded: 0,
+          progress: 1.0,
+          status: 'seeding',
+          downloadSpeed: 0,
+          eta: 0,
+          category: 'readmeabook',
+          seedingTime: 60 * 40,
+        }),
+        deleteDownload: vi.fn().mockResolvedValue(undefined),
+      };
+      downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(qbtClientMock);
+
+      const oldRequests = Array.from({ length: 100 }, (_, i) => ({
+        id: `req-old-${i}`,
+        deletedAt: null,
+        downloadHistory: [],
+      }));
+
+      prismaMock.request.findMany.mockReset();
+      prismaMock.request.findMany
+        .mockResolvedValueOnce(oldRequests)
+        .mockResolvedValueOnce([
+          {
+            id: 'req-new',
+            type: 'audiobook',
+            deletedAt: null,
+            downloadHistory: [
+              {
+                selected: true,
+                downloadStatus: 'completed',
+                indexerName: 'IndexerA',
+                torrentHash: 'hash-new',
+                downloadClientId: 'hash-new',
+                downloadClient: 'qbittorrent',
+              },
+            ],
+          },
+        ])
+        .mockResolvedValueOnce([]) // other active requests sharing the torrent
+        .mockResolvedValueOnce([]); // cancelled requests
+
+      const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
+      const result = await processCleanupSeededTorrents({ jobId: 'job-page' });
+
+      const firstQuery = prismaMock.request.findMany.mock.calls[0][0];
+      const secondQuery = prismaMock.request.findMany.mock.calls[1][0];
+      expect(firstQuery.take).toBe(100);
+      expect(firstQuery.cursor).toBeUndefined();
+      expect(secondQuery.cursor).toEqual({ id: 'req-old-99' });
+      expect(secondQuery.skip).toBe(1);
+
+      expect(result.totalChecked).toBe(101);
+      expect(result.cleaned).toBe(1);
+      expect(qbtClientMock.deleteDownload).toHaveBeenCalledWith('hash-new', true);
+    });
+  });
+
+  describe('cancelled requests', () => {
+    const makeTorrentClient = (downloadResult: unknown) => ({
+      clientType: 'transmission',
+      protocol: 'torrent',
+      getDownload: vi.fn().mockResolvedValue(downloadResult),
+      deleteDownload: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const cancelledRequest = (history: Record<string, unknown>) => ({
+      id: 'req-cancelled',
+      status: 'cancelled',
+      deletedAt: null,
+      downloadHistory: [{ selected: true, indexerName: 'IndexerA', ...history }],
+    });
+
+    const torrentHistory = {
+      torrentHash: 'hash-c',
+      downloadClientId: 'hash-c',
+      downloadClient: 'transmission',
+    };
+
+    beforeEach(() => {
+      configMock.get.mockResolvedValue(
+        JSON.stringify([{ name: 'IndexerA', seedingTimeMinutes: 0 }])
+      );
+      prismaMock.request.findMany.mockReset();
+    });
+
+    it('removes the torrent and files for a cancelled request', async () => {
+      const client = makeTorrentClient({ id: 'hash-c', name: 'Verity (Unabridged).m4b' });
+      downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(client);
+      prismaMock.request.findMany
+        .mockResolvedValueOnce([]) // no available/downloaded/deleted requests
+        .mockResolvedValueOnce([cancelledRequest(torrentHistory)]);
+      prismaMock.request.count.mockResolvedValueOnce(0);
+
+      const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
+      const result = await processCleanupSeededTorrents({ jobId: 'job-cancel-1' });
+
+      expect(prismaMock.request.findMany.mock.calls[1][0].where).toEqual({
+        status: 'cancelled',
+        deletedAt: null,
+      });
+      expect(client.deleteDownload).toHaveBeenCalledWith('hash-c', true);
+      expect(result.cleaned).toBe(1);
+    });
+
+    it('keeps the torrent when another active request still uses it', async () => {
+      const client = makeTorrentClient({ id: 'hash-c', name: 'Shared' });
+      downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(client);
+      prismaMock.request.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([cancelledRequest(torrentHistory)]);
+      prismaMock.request.count.mockResolvedValueOnce(1);
+
+      const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
+      const result = await processCleanupSeededTorrents({ jobId: 'job-cancel-2' });
+
+      expect(client.deleteDownload).not.toHaveBeenCalled();
+      expect(result.cleaned).toBe(0);
+    });
+
+    it('ignores cancelled Usenet requests', async () => {
+      prismaMock.request.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          cancelledRequest({
+            nzbId: 'nzb-1',
+            torrentHash: null,
+            downloadClientId: 'nzb-1',
+            downloadClient: 'sabnzbd',
+          }),
+        ]);
+
+      const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
+      const result = await processCleanupSeededTorrents({ jobId: 'job-cancel-3' });
+
+      expect(downloadClientManagerMock.getClientServiceForProtocol).not.toHaveBeenCalled();
+      expect(result.cleaned).toBe(0);
+    });
+
+    it('does nothing when the torrent is already gone from the client', async () => {
+      const client = makeTorrentClient(null);
+      downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(client);
+      prismaMock.request.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([cancelledRequest(torrentHistory)]);
+      prismaMock.request.count.mockResolvedValueOnce(0);
+
+      const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
+      const result = await processCleanupSeededTorrents({ jobId: 'job-cancel-4' });
+
+      expect(client.deleteDownload).not.toHaveBeenCalled();
+      expect(result.cleaned).toBe(0);
+    });
+
+    it('still succeeds when the cancelled-request query fails', async () => {
+      prismaMock.request.findMany
+        .mockResolvedValueOnce([])
+        .mockRejectedValueOnce(new Error('db down'));
+
+      const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
+      const result = await processCleanupSeededTorrents({ jobId: 'job-cancel-5' });
+
+      expect(result.success).toBe(true);
+    });
+  });
 });
-
-

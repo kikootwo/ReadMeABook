@@ -259,24 +259,35 @@ export class JobQueueService {
 
         // Update request status to failed (only happens after all retries exhausted)
         try {
-          await prisma.request.update({
+          // Never overwrite a user's cancellation (or a deletion) with 'failed'
+          const existing = await prisma.request.findUnique({
             where: { id: payload.requestId },
-            data: {
-              status: 'failed',
-              errorMessage: error.message || 'Failed to monitor download after multiple retries',
-              updatedAt: new Date(),
-            },
+            select: { status: true, deletedAt: true },
           });
+          const isCancelledOrDeleted = !!existing && (existing.status === 'cancelled' || !!existing.deletedAt);
 
-          // Update download history
-          if (payload.downloadHistoryId) {
-            await prisma.downloadHistory.update({
-              where: { id: payload.downloadHistoryId },
+          if (isCancelledOrDeleted) {
+            logger.info(`Request ${payload.requestId} is ${existing!.deletedAt ? 'deleted' : 'cancelled'}, leaving status unchanged after monitor failure`);
+          } else {
+            await prisma.request.update({
+              where: { id: payload.requestId },
               data: {
-                downloadStatus: 'failed',
-                downloadError: error.message || 'Failed to monitor download',
+                status: 'failed',
+                errorMessage: error.message || 'Failed to monitor download after multiple retries',
+                updatedAt: new Date(),
               },
             });
+
+            // Update download history
+            if (payload.downloadHistoryId) {
+              await prisma.downloadHistory.update({
+                where: { id: payload.downloadHistoryId },
+                data: {
+                  downloadStatus: 'failed',
+                  downloadError: error.message || 'Failed to monitor download',
+                },
+              });
+            }
           }
         } catch (updateError) {
           logger.error('Failed to update request/download status', { error: updateError instanceof Error ? updateError.message : String(updateError) });

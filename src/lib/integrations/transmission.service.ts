@@ -537,13 +537,13 @@ export class TransmissionService implements IDownloadClient {
       size: torrent.totalSize,
       bytesDownloaded: torrent.downloadedEver,
       progress: torrent.percentDone,
-      status: this.mapStatus(torrent.status, torrent.error),
+      status: this.mapStatus(torrent.status, torrent.error, torrent.percentDone),
       downloadSpeed: torrent.rateDownload,
       eta: torrent.eta < 0 ? 0 : torrent.eta,
       category: torrent.labels?.[0] || '',
       downloadPath,
       completedAt: torrent.doneDate > 0 ? new Date(torrent.doneDate * 1000) : undefined,
-      errorMessage: torrent.error > 0 ? torrent.errorString : undefined,
+      errorMessage: torrent.error === 3 ? torrent.errorString : undefined,
       seedingTime: torrent.secondsSeeding,
       ratio: torrent.uploadRatio >= 0 ? torrent.uploadRatio : undefined,
     };
@@ -553,10 +553,21 @@ export class TransmissionService implements IDownloadClient {
    * Map Transmission numeric status to unified DownloadStatus.
    * 0=stopped, 1=check-pending, 2=checking, 3=download-pending,
    * 4=downloading, 5=seed-pending, 6=seeding
+   *
+   * `error` codes: 0=ok, 1=tracker warning, 2=tracker error, 3=local error.
+   * Only a LOCAL error (3) is a real download failure. Tracker warnings/errors
+   * are transient (tracker down, announce timeout, rate limit) and must not
+   * fail a download or hide a finished one.
    */
-  private mapStatus(status: TransmissionStatus, errorCode: number): DownloadStatus {
-    if (errorCode > 0) {
+  private mapStatus(status: TransmissionStatus, errorCode: number, percentDone: number = 0): DownloadStatus {
+    if (errorCode === 3) {
       return 'failed';
+    }
+
+    // Stopped/paused but fully downloaded: the download is done (e.g. stopped by
+    // a global ratio/idle limit or manually). Report completed so it gets processed.
+    if (status === 0 && percentDone >= 1) {
+      return 'completed';
     }
 
     const statusMap: Record<TransmissionStatus, DownloadStatus> = {

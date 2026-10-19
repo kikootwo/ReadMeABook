@@ -63,7 +63,7 @@ interface DownloadClientConfig {
 - **Download path:** `download-dir` argument on `torrent-add`
 - **Torrent files:** Base64-encoded via `metainfo` field
 - **Status codes:** 0=stopped→paused, 1=check-pending→checking, 2=checking→checking, 3=download-pending→queued, 4=downloading→downloading, 5=seed-pending→seeding, 6=seeding→seeding
-- **Error handling:** `error > 0` → failed status
+- **Error handling:** only `error === 3` (local error) → failed. `error` 1/2 (tracker warning/error) are transient and ignored. Stopped (status 0) with `percentDone >= 1` → completed (so it gets processed)
 - **postProcess():** No-op (same as qBittorrent)
 
 ### NZBGet Service

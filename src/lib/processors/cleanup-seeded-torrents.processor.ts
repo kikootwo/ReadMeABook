@@ -54,39 +54,56 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
     // Before deleting torrent, we check if other active requests are using it
     // NOTE: Ebooks downloaded via indexer search use torrent clients and need seeding cleanup too.
     //       Direct HTTP ebook downloads are naturally skipped (no torrent hash / unknown client type).
-    const completedRequests = await prisma.request.findMany({
-      where: {
-        OR: [
-          // Audiobook requests that are fully available (matched in Plex/ABS)
-          {
-            type: 'audiobook',
-            status: 'available',
-            deletedAt: null,
-          },
-          // Ebook requests that are fully downloaded (terminal state for ebooks)
-          {
-            type: 'ebook',
-            status: 'downloaded',
-            deletedAt: null,
-          },
-          // Soft-deleted requests of any type (orphaned downloads)
-          {
-            deletedAt: { not: null },
-          },
-        ],
-      },
-      include: {
-        downloadHistory: {
-          where: {
-            selected: true,
-            downloadStatus: 'completed',
-          },
-          orderBy: { completedAt: 'desc' },
-          take: 1,
+    // Page through ALL candidates. A fixed "take: 100" window with no ordering meant
+    // that once 100+ old requests existed (whose torrents were already removed or
+    // are unlimited-seed), newer requests were never reached and never cleaned up.
+    const PAGE_SIZE = 100;
+    const fetchBatch = (cursorId?: string) =>
+      prisma.request.findMany({
+        where: {
+          OR: [
+            // Audiobook requests that are fully available (matched in Plex/ABS)
+            {
+              type: 'audiobook',
+              status: 'available',
+              deletedAt: null,
+            },
+            // Ebook requests that are fully downloaded (terminal state for ebooks)
+            {
+              type: 'ebook',
+              status: 'downloaded',
+              deletedAt: null,
+            },
+            // Soft-deleted requests of any type (orphaned downloads)
+            {
+              deletedAt: { not: null },
+            },
+          ],
         },
-      },
-      take: 100, // Limit to 100 requests per run
-    });
+        include: {
+          downloadHistory: {
+            where: {
+              selected: true,
+              downloadStatus: 'completed',
+            },
+            orderBy: { completedAt: 'desc' },
+            take: 1,
+          },
+        },
+        orderBy: { id: 'asc' },
+        take: PAGE_SIZE,
+        ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+      });
+
+    const completedRequests: Awaited<ReturnType<typeof fetchBatch>> = [];
+    let lastId: string | undefined;
+    while (true) {
+      const batch = await fetchBatch(lastId);
+      if (batch.length === 0) break;
+      completedRequests.push(...batch);
+      lastId = batch[batch.length - 1].id;
+      if (batch.length < PAGE_SIZE) break;
+    }
 
     logger.info(`Found ${completedRequests.length} requests to check (audiobook: available, ebook: downloaded, or soft-deleted)`);
 
@@ -254,6 +271,64 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
       } catch (error) {
         logger.error(`Failed to cleanup request ${request.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
+    }
+
+    // Cancelled requests: cancelling only flips the request status, it never told the
+    // download client to drop the torrent. Remove those torrents (and partial data) here.
+    try {
+      const cancelledRequests = await prisma.request.findMany({
+        where: { status: 'cancelled', deletedAt: null },
+        include: {
+          downloadHistory: {
+            where: { selected: true },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+        },
+        take: 200,
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      for (const request of cancelledRequests) {
+        try {
+          const history = request.downloadHistory[0];
+          if (!history || history.nzbId && !history.torrentHash) continue;
+          const clientId = history.downloadClientId || history.torrentHash;
+          const clientType = history.downloadClient;
+          if (!clientId || !clientType) continue;
+          const protocol = CLIENT_PROTOCOL_MAP[clientType as DownloadClientType];
+          if (protocol !== 'torrent') continue;
+          if (deletedHashes.has(clientId.toLowerCase())) continue;
+
+          // Don't remove a torrent another live request is still using
+          if (history.torrentHash) {
+            const others = await prisma.request.count({
+              where: {
+                id: { not: request.id },
+                deletedAt: null,
+                status: { notIn: ['cancelled', 'failed'] },
+                downloadHistory: { some: { torrentHash: history.torrentHash, selected: true } },
+              },
+            });
+            if (others > 0) continue;
+          }
+
+          const client = await manager.getClientServiceForProtocol('torrent');
+          if (!client) continue;
+
+          const info = await client.getDownload(clientId).catch(() => null);
+          if (!info) continue; // already gone
+
+          await client.deleteDownload(clientId, true);
+          deletedHashes.add(clientId.toLowerCase());
+          cleaned++;
+          logger.info(`Removed cancelled request ${request.id} download ${info.name} from ${clientType}`);
+        } catch (error) {
+          logger.error(`Failed to clean cancelled request ${request.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      }
+    } catch (error) {
+      logger.error(`Cancelled-request cleanup failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 
     logger.info(`Cleanup complete: ${cleaned} downloads cleaned, ${skipped} still seeding, ${noConfig} unlimited`);

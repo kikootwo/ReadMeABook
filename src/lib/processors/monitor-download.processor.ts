@@ -64,6 +64,19 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
   const logger = RMABLogger.forJob(jobId, 'MonitorDownload');
 
   try {
+    // Stop monitoring if the request was cancelled or deleted. Without this, a
+    // cancelled request's torrent gets removed from the client, the monitor then
+    // gets "not found", retries, and the job-failure handler flips the request
+    // from 'cancelled' to 'failed'.
+    const currentRequest = await prisma.request.findUnique({
+      where: { id: requestId },
+      select: { status: true, deletedAt: true },
+    });
+    if (currentRequest && (currentRequest.status === 'cancelled' || currentRequest.deletedAt)) {
+      logger.info(`Request ${requestId} is ${currentRequest.deletedAt ? 'deleted' : 'cancelled'}, stopping download monitoring`);
+      return { success: true, completed: true, message: 'Request cancelled or deleted, monitoring stopped', requestId };
+    }
+
     // Get the download client service via the manager
     const configService = getConfigService();
     const manager = getDownloadClientManager(configService);
