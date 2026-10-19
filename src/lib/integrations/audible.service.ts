@@ -532,7 +532,16 @@ export class AudibleService {
     return audiobooks;
   }
 
-  async search(query: string, page: number = 1): Promise<AudibleSearchResult> {
+  /**
+   * Keyword search on the catalog API, which returns every language.
+   * `respectLanguageFilter` applies the admin `audible.language_filter` setting
+   * (products with no language are kept).
+   */
+  async search(
+    query: string,
+    page: number = 1,
+    options: { respectLanguageFilter?: boolean } = {},
+  ): Promise<AudibleSearchResult> {
     await this.initialize();
 
     try {
@@ -556,20 +565,33 @@ export class AudibleService {
       const products = envelope.products ?? [];
       const totalResults = envelope.total_results ?? 0;
 
-      const results = products.map(mapCatalogProduct);
+      const filterLanguage =
+        options.respectLanguageFilter && (await getConfigService().getAudibleLanguageFilter());
+      const kept = filterLanguage
+        ? products.filter(
+            (p) => !p.language || isAcceptedLanguage(p.language, getLanguageForRegion(this.region)),
+          )
+        : products;
+      const results = kept.map(mapCatalogProduct);
 
-      logger.info(` Found ${results.length} results for "${query}"`);
+      logger.info(
+        ` Found ${results.length} results for "${query}"` +
+          (kept.length < products.length
+            ? ` (${products.length - kept.length} in other languages hidden)`
+            : ''),
+      );
 
+      // Paginate on the raw page: a page whose books were all filtered out is not the last one
       return {
         query,
         results,
         totalResults,
         page,
         hasMore:
-          results.length > 0 &&
+          products.length > 0 &&
           (totalResults > 0
             ? totalResults > page * AUDIBLE_PAGE_SIZE
-            : results.length >= AUDIBLE_PAGE_SIZE),
+            : products.length >= AUDIBLE_PAGE_SIZE),
       };
     } catch (error) {
       logger.error('Search failed', {

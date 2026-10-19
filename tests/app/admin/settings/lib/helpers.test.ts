@@ -21,6 +21,7 @@ const baseSettings = {
   hasLocalUsers: true,
   hasLocalAdmins: true,
   audibleRegion: 'us',
+  audibleLanguageFilter: false,
   plex: { url: 'http://plex', token: 'token', libraryId: 'lib', triggerScanAfterImport: false },
   audiobookshelf: { serverUrl: 'http://abs', apiToken: 'abs-token', libraryId: 'abs-lib', triggerScanAfterImport: false },
   oidc: {
@@ -217,7 +218,10 @@ describe('admin settings helpers', () => {
 
     expect(fetchWithAuthMock).toHaveBeenCalledWith(
       '/api/admin/settings/audible',
-      expect.objectContaining({ method: 'PUT' })
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ region: 'us', languageFilter: false }),
+      })
     );
     expect(fetchWithAuthMock).toHaveBeenCalledWith(
       '/api/admin/settings/plex',

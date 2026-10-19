@@ -39,11 +39,14 @@ export const saveTabSettings = async (
 ): Promise<void> => {
   switch (activeTab) {
     case 'library':
-      // Save Audible region
+      // Save Audible region and language filter
       await fetchWithAuth('/api/admin/settings/audible', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ region: settings.audibleRegion }),
+        body: JSON.stringify({
+          region: settings.audibleRegion,
+          languageFilter: settings.audibleLanguageFilter,
+        }),
       }).then(res => {
         if (!res.ok) throw new Error('Failed to save Audible region settings');
       });

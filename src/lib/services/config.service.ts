@@ -238,6 +238,13 @@ export class ConfigurationService {
   }
 
   /**
+   * Check if the Audible language filter is enabled
+   */
+  async getAudibleLanguageFilter(): Promise<boolean> {
+    return (await this.get('audible.language_filter')) === 'true';
+  }
+
+  /**
    * Clear the cache for a specific key or all keys
    */
   clearCache(key?: string): void {

@@ -64,8 +64,8 @@ src/app/admin/settings/
 
 ## Sections
 
-1. **Plex** - URL, token (masked), library ID, Audible region, filesystem scan trigger toggle
-2. **Audiobookshelf** - URL, API token (masked), library ID, Audible region, filesystem scan trigger toggle
+1. **Plex** - URL, token (masked), library ID, Audible region, language filter toggle, filesystem scan trigger toggle
+2. **Audiobookshelf** - URL, API token (masked), library ID, Audible region, language filter toggle, filesystem scan trigger toggle
 3. **Prowlarr** - URL, API key (masked), indexer selection with priority, seeding time, RSS monitoring toggle, **audiobook/ebook categories per indexer**
 4. **Download Client** - Type (qBittorrent, Transmission, SABnzbd), URL, credentials (masked), custom download path (per-client relative sub-path with live preview)
 5. **Paths** - Download + media directories, audiobook organization template, metadata tagging toggle, chapter merging toggle, Plex format coercion toggle
@@ -175,6 +175,11 @@ src/app/admin/settings/
 - **Cache management**: ConfigService cache and AudibleService initialization are cleared when region changes
 - **Smart re-initialization**: Service automatically detects region changes and re-initializes before each request
 - See: `documentation/integrations/audible.md` for technical details
+
+**Language filter toggle** ("Only show books in the region's language"):
+- Key: `audible.language_filter` (boolean as string, default off)
+- UI: `AudibleLanguageFilterOption` checkbox under the region dropdown, shared by both sections
+- Effect: hides other-language editions from search, BookDate and shelf sync. See `documentation/integrations/audible.md#region-configuration`
 
 ## Audiobook Organization Template
 
@@ -310,9 +315,9 @@ src/app/admin/settings/
 - Requires prior successful test if values changed
 
 **PUT /api/admin/settings/audible**
-- Updates Audible region
-- Body: `{ region: string }` (one of: us, ca, uk, au, in, es, fr)
-- No validation required
+- Updates Audible region and, when sent, the language filter
+- Body: `{ region: string, languageFilter?: boolean }` (region one of: us, ca, uk, au, in, es, fr)
+- 400 if `region` is invalid or `languageFilter` is not a boolean; omitted `languageFilter` leaves the stored value unchanged
 
 **PUT /api/admin/settings/prowlarr/indexers**
 - Updates indexer configuration (enabled, priority, seeding time, RSS)

@@ -205,7 +205,7 @@ async function performAudibleLookup(
     const fullQuery = `${book.title} ${book.author}`;
     log.info(`Searching Audible for: "${fullQuery}"`);
 
-    let searchResult = await audibleService.search(fullQuery);
+    let searchResult = await audibleService.search(fullQuery, 1, { respectLanguageFilter: true });
     let firstResult = searchResult.results[0];
 
     if (!firstResult?.asin) {
@@ -213,7 +213,7 @@ async function performAudibleLookup(
       if (cleanTitle !== book.title) {
         const cleanQuery = `${cleanTitle} ${book.author}`;
         log.info(`No results with full title, retrying without series info: "${cleanQuery}"`);
-        searchResult = await audibleService.search(cleanQuery);
+        searchResult = await audibleService.search(cleanQuery, 1, { respectLanguageFilter: true });
         firstResult = searchResult.results[0];
       }
     }

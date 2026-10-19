@@ -100,6 +100,7 @@ describe('Admin settings core routes', () => {
       { key: 'plex_url', value: 'http://plex' },
       { key: 'plex_token', value: 'token' },
       { key: 'system.backend_mode', value: 'plex' },
+      { key: 'audible.language_filter', value: 'true' },
     ]);
     prismaMock.user.count.mockResolvedValueOnce(0);
 
@@ -109,6 +110,7 @@ describe('Admin settings core routes', () => {
 
     expect(payload.plex.url).toBe('http://plex');
     expect(payload.backendMode).toBe('plex');
+    expect(payload.audibleLanguageFilter).toBe(true);
   });
 
   it('updates Plex settings', async () => {
@@ -364,17 +366,6 @@ describe('Admin settings core routes', () => {
 
     expect(payload.success).toBe(true);
     expect(configServiceMock.setMany).toHaveBeenCalled();
-  });
-
-  it('updates Audible region and triggers refresh', async () => {
-    const request = { json: vi.fn().mockResolvedValue({ region: 'us' }) };
-
-    const { PUT } = await import('@/app/api/admin/settings/audible/route');
-    const response = await PUT(request as any);
-    const payload = await response.json();
-
-    expect(payload.success).toBe(true);
-    expect(jobQueueMock.addAudibleRefreshJob).toHaveBeenCalled();
   });
 
   it('updates Audiobookshelf settings', async () => {

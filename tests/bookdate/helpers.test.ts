@@ -822,7 +822,9 @@ describe('BookDate helpers', () => {
     const result = await matchToAudnexus('Missing', 'Author');
 
     expect(result).toBeNull();
-    expect(audibleState.instance.search).toHaveBeenCalled();
+    expect(audibleState.instance.search).toHaveBeenCalledWith('Missing Author', 1, {
+      respectLanguageFilter: true,
+    });
   });
 
   it('returns null when Audible details are unavailable', async () => {

@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
       hasLocalUsers,
       hasLocalAdmins,
       audibleRegion: configMap.get('audible.region') || 'us',
+      audibleLanguageFilter: configMap.get('audible.language_filter') === 'true',
       plex: {
         url: configMap.get('plex_url') || '',
         token: maskValue('token', configMap.get('plex_token')),

@@ -23,6 +23,7 @@ const axiosMock = vi.hoisted(() => ({
 
 const configServiceMock = vi.hoisted(() => ({
   getAudibleRegion: vi.fn(),
+  getAudibleLanguageFilter: vi.fn(),
 }));
 
 vi.mock('axios', () => ({
@@ -210,6 +211,7 @@ describe('AudibleService', () => {
     apiClientMock.get.mockReset();
     axiosMock.get.mockReset();
     configServiceMock.getAudibleRegion.mockReset();
+    configServiceMock.getAudibleLanguageFilter.mockReset();
 
     // Default: first create() → htmlClient, second → apiClient.
     axiosMock.create
@@ -217,6 +219,7 @@ describe('AudibleService', () => {
       .mockReturnValueOnce(apiClientMock);
 
     configServiceMock.getAudibleRegion.mockResolvedValue('us');
+    configServiceMock.getAudibleLanguageFilter.mockResolvedValue(false);
   });
 
   // -------------------------------------------------------------------------
@@ -433,6 +436,62 @@ describe('AudibleService', () => {
 
       expect(apiClientMock.get).toHaveBeenCalled();
       expect(htmlClientMock.get).not.toHaveBeenCalled();
+    });
+
+    describe('language filter', () => {
+      const mixedLanguages = () => [
+        makeProduct({ asin: 'BFR0000001', language: 'french' }),
+        makeProduct({ asin: 'BEN0000001', language: 'english' }),
+        makeProduct({ asin: 'BES0000001', language: 'spanish' }),
+        makeProduct({ asin: 'BNO0000001', language: undefined }),
+      ];
+
+      beforeEach(() => {
+        configServiceMock.getAudibleRegion.mockResolvedValue('fr');
+      });
+
+      it('hides other-language products when the caller opts in and the setting is on', async () => {
+        configServiceMock.getAudibleLanguageFilter.mockResolvedValue(true);
+        apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(mixedLanguages())));
+
+        const service = new AudibleService();
+        const result = await service.search('test', 1, { respectLanguageFilter: true });
+
+        expect(result.results.map((b) => b.asin)).toEqual(['BFR0000001', 'BNO0000001']);
+      });
+
+      it('keeps every product when the setting is off', async () => {
+        apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(mixedLanguages())));
+
+        const service = new AudibleService();
+        const result = await service.search('test', 1, { respectLanguageFilter: true });
+
+        expect(result.results).toHaveLength(4);
+      });
+
+      it('ignores the setting when the caller does not opt in', async () => {
+        configServiceMock.getAudibleLanguageFilter.mockResolvedValue(true);
+        apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(mixedLanguages())));
+
+        const service = new AudibleService();
+        const result = await service.search('test', 1);
+
+        expect(result.results).toHaveLength(4);
+      });
+
+      it('keeps paginating when every book on the page was filtered out', async () => {
+        configServiceMock.getAudibleLanguageFilter.mockResolvedValue(true);
+        const englishPage = Array.from({ length: 50 }, (_, i) =>
+          makeProduct({ asin: `B${String(i).padStart(9, '0')}`, language: 'english' }),
+        );
+        apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(englishPage, 150)));
+
+        const service = new AudibleService();
+        const result = await service.search('test', 1, { respectLanguageFilter: true });
+
+        expect(result.results).toEqual([]);
+        expect(result.hasMore).toBe(true);
+      });
     });
   });
 

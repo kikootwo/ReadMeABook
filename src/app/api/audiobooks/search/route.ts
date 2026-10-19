@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
     }
 
     const audibleService = getAudibleService();
-    const results = await audibleService.search(query, page);
+    const results = await audibleService.search(query, page, { respectLanguageFilter: true });
 
     // Get current user (optional — JWT or API token — for request-status enrichment)
     const currentUser = await getCurrentUserAsync(request);
