@@ -689,7 +689,7 @@ export class AudibleService {
         author: data.authors?.map((a: any) => a.name).join(', ') || '',
         authorAsin: data.authors?.[0]?.asin || undefined,
         narrator: data.narrators?.map((n: any) => n.name).join(', ') || '',
-        description: data.description || data.summary || '',
+        description: data.summary ? stripHtml(data.summary) : data.description || '',
         coverArtUrl: data.image || '',
         durationMinutes: data.runtimeLengthMin ? parseInt(data.runtimeLengthMin) : undefined,
         releaseDate: data.releaseDate || undefined,
