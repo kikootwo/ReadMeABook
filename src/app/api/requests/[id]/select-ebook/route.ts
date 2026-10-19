@@ -10,28 +10,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
-import { getConfigService } from '@/lib/services/config.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { startAnnasArchiveDownload, startIndexerEbookDownload, type SelectedEbook } from '@/lib/services/ebook-selection.service';
+import { guardEbookSelection, selectionFailureResponse } from '@/lib/services/download-selection-guard';
 
 const logger = RMABLogger.create('API.SelectEbook');
-
-interface SelectedEbook {
-  guid: string;
-  title: string;
-  size: number;
-  seeders: number;
-  indexer: string;
-  indexerId?: number;
-  downloadUrl: string;
-  infoUrl?: string;
-  score: number;
-  finalScore: number;
-  source: 'annas_archive' | 'prowlarr';
-  format?: string;
-  md5?: string;
-  downloadUrls?: string[];
-  protocol?: string; // 'torrent' or 'usenet' - determines download client
-}
 
 export async function POST(
   request: NextRequest,
@@ -42,7 +25,7 @@ export async function POST(
       try {
         const { id: parentRequestId } = await params;
         const body = await request.json();
-        const selectedEbook = body.ebook as SelectedEbook;
+        let selectedEbook = body.ebook as SelectedEbook;
 
         if (!selectedEbook) {
           return NextResponse.json({ error: 'No ebook selected' }, { status: 400 });
@@ -51,6 +34,11 @@ export async function POST(
         if (!selectedEbook.source) {
           return NextResponse.json({ error: 'Ebook source not specified' }, { status: 400 });
         }
+
+        // Indexer picks must be Prowlarr/magnet links; Anna's Archive links are rebuilt from the md5
+        const ebookCheck = await guardEbookSelection(selectedEbook);
+        if (!ebookCheck.ok) return selectionFailureResponse(ebookCheck);
+        selectedEbook = ebookCheck.value;
 
         // Get the request - could be an audiobook request or an existing ebook request
         const foundRequest = await prisma.request.findUnique({
@@ -142,7 +130,7 @@ export async function POST(
         // Route to appropriate download based on source
         if (selectedEbook.source === 'annas_archive') {
           // Anna's Archive: Direct HTTP download
-          await handleAnnasArchiveDownload(
+          await startAnnasArchiveDownload(
             ebookRequest.id,
             audiobook,
             selectedEbook,
@@ -150,7 +138,7 @@ export async function POST(
           );
         } else {
           // Indexer: Torrent/NZB download
-          await handleIndexerDownload(
+          await startIndexerEbookDownload(
             ebookRequest.id,
             audiobook,
             selectedEbook,
@@ -173,105 +161,4 @@ export async function POST(
       }
     });
   });
-}
-
-/**
- * Handle Anna's Archive download (direct HTTP)
- */
-async function handleAnnasArchiveDownload(
-  requestId: string,
-  audiobook: { id: string; title: string; author: string },
-  selectedEbook: SelectedEbook,
-  jobQueue: ReturnType<typeof getJobQueueService>
-) {
-  const configService = getConfigService();
-  const preferredFormat = await configService.get('ebook_sidecar_preferred_format') || 'epub';
-
-  logger.info(`Starting Anna's Archive download for "${audiobook.title}"`);
-  logger.info(`MD5: ${selectedEbook.md5}, Format: ${selectedEbook.format || preferredFormat}`);
-
-  // Create download history record
-  const downloadHistory = await prisma.downloadHistory.create({
-    data: {
-      requestId,
-      indexerName: "Anna's Archive",
-      torrentName: `${audiobook.title} - ${audiobook.author}.${selectedEbook.format || preferredFormat}`,
-      torrentSizeBytes: null, // Unknown until download starts
-      qualityScore: selectedEbook.score,
-      selected: true,
-      downloadClient: 'direct',
-      downloadStatus: 'queued',
-    },
-  });
-
-  // Store all download URLs for retry purposes
-  if (selectedEbook.downloadUrls && selectedEbook.downloadUrls.length > 0) {
-    await prisma.downloadHistory.update({
-      where: { id: downloadHistory.id },
-      data: {
-        torrentUrl: JSON.stringify(selectedEbook.downloadUrls),
-      },
-    });
-  }
-
-  // Trigger direct download job
-  await jobQueue.addStartDirectDownloadJob(
-    requestId,
-    downloadHistory.id,
-    selectedEbook.downloadUrl,
-    `${audiobook.title} - ${audiobook.author}.${selectedEbook.format || preferredFormat}`,
-    undefined // Size unknown
-  );
-
-  logger.info(`Queued direct download job for request ${requestId}`);
-}
-
-/**
- * Handle indexer download (torrent/NZB)
- */
-async function handleIndexerDownload(
-  requestId: string,
-  audiobook: { id: string; title: string; author: string },
-  selectedEbook: SelectedEbook,
-  jobQueue: ReturnType<typeof getJobQueueService>
-) {
-  logger.info(`Starting indexer download for "${audiobook.title}"`);
-  logger.info(`Torrent: "${selectedEbook.title}", Indexer: ${selectedEbook.indexer}`);
-
-  // Convert to RankedTorrent shape expected by download job
-  // Note: format is omitted as ebook formats (epub, pdf) differ from audiobook formats (M4B, M4A, MP3)
-  const torrentForJob = {
-    guid: selectedEbook.guid,
-    title: selectedEbook.title,
-    size: selectedEbook.size,
-    seeders: selectedEbook.seeders || 0,
-    indexer: selectedEbook.indexer,
-    indexerId: selectedEbook.indexerId,
-    downloadUrl: selectedEbook.downloadUrl,
-    infoUrl: selectedEbook.infoUrl,
-    publishDate: new Date(),
-    score: selectedEbook.score,
-    finalScore: selectedEbook.finalScore,
-    bonusPoints: 0,
-    bonusModifiers: [],
-    rank: 1,
-    breakdown: {
-      formatScore: 0,
-      sizeScore: 0,
-      seederScore: 0,
-      matchScore: 0,
-      totalScore: selectedEbook.score,
-      notes: [],
-    },
-    protocol: selectedEbook.protocol, // Pass through protocol for torrent vs usenet routing
-  };
-
-  // Use the download job (same as audiobooks)
-  await jobQueue.addDownloadJob(requestId, {
-    id: audiobook.id,
-    title: audiobook.title,
-    author: audiobook.author,
-  }, torrentForJob as any); // Cast to any since ebook torrents don't have audiobook format field
-
-  logger.info(`Queued download job for request ${requestId}`);
 }

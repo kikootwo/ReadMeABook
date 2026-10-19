@@ -7,10 +7,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
 import { RMABLogger } from '@/lib/utils/logger';
+import { THUMBNAIL_CACHE_DIR } from '@/lib/utils/cover-art-url';
 
 const logger = RMABLogger.create('API.Thumbnails');
 
-const CACHE_DIR = '/app/cache/thumbnails';
+const CACHE_DIR = THUMBNAIL_CACHE_DIR;
 
 export async function GET(
   request: NextRequest,

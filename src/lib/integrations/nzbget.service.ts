@@ -8,6 +8,8 @@ import { RMAB_USER_AGENT } from '@/lib/utils/user-agent';
 import https from 'https';
 import zlib from 'zlib';
 import { RMABLogger } from '@/lib/utils/logger';
+import { fetchDownloadSource } from '@/lib/integrations/download-source';
+import { urlForLog } from '@/lib/utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '@/lib/utils/path-mapper';
 import {
   IDownloadClient,
@@ -210,7 +212,7 @@ export class NZBGetService implements IDownloadClient {
    * Downloads the NZB file from the source URL and uploads to NZBGet via append().
    */
   async addDownload(url: string, options?: AddDownloadOptions): Promise<string> {
-    logger.info(`Adding NZB from URL: ${url.substring(0, 150)}...`);
+    logger.info(`Adding NZB from URL: ${urlForLog(url)}`);
 
     const category = options?.category || this.defaultCategory;
 
@@ -225,18 +227,18 @@ export class NZBGetService implements IDownloadClient {
     try {
       logger.info('Downloading NZB file from source URL...');
 
-      const nzbResponse = await axios.get(url, {
-        responseType: 'arraybuffer',
-        timeout: 30000,
-        maxRedirects: 5,
-        headers: {
-          'User-Agent': RMAB_USER_AGENT,
-          ...options?.sourceHeaders,
-        },
-        httpsAgent: url.startsWith('https') ? this.httpsAgent : undefined,
+      // Shared fetcher: follows redirects hop by hop and scopes the Prowlarr key to Prowlarr download hops
+      const source = await fetchDownloadSource(url, {
+        sourceAuth: options?.sourceAuth,
+        allowMagnet: false,
+        timeoutMs: 30000,
+        httpsAgent: this.httpsAgent,
       });
+      if (source.kind !== 'file') {
+        throw new Error('Download source did not return an NZB file');
+      }
 
-      nzbBuffer = Buffer.from(nzbResponse.data);
+      nzbBuffer = source.data;
 
       if (nzbBuffer.length === 0) {
         throw new Error('NZB file is empty (0 bytes)');
@@ -251,7 +253,7 @@ export class NZBGetService implements IDownloadClient {
         nzbBuffer = zlib.gunzipSync(nzbBuffer);
         logger.info(`Decompressed NZB file: ${nzbBuffer.length} bytes`);
       }
-      filename = this.extractNZBFilename(url, nzbResponse.headers['content-disposition']);
+      filename = this.extractNZBFilename(url, source.headers['content-disposition'] as string | undefined);
     } catch (error) {
       if (axios.isAxiosError(error)) {
         const status = error.response?.status;
@@ -259,7 +261,7 @@ export class NZBGetService implements IDownloadClient {
           throw new DownloadSourceError(
             `Grab failed: source returned HTTP ${status}`,
             status,
-            url,
+            urlForLog(url),
             error
           );
         }

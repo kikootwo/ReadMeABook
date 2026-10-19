@@ -6,7 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import path from 'path';
-import { clearMd5Cache, downloadEbook, testFlareSolverrConnection } from '@/lib/services/ebook-scraper';
+import { AnnasArchiveUnavailableError, clearMd5Cache, downloadEbook, getSlowDownloadLinks, testFlareSolverrConnection } from '@/lib/services/ebook-scraper';
 
 const axiosMock = vi.hoisted(() => ({
   get: vi.fn(),
@@ -697,5 +697,20 @@ describe('E-book sidecar', () => {
     expect(result.error).toContain('All 1 download attempts failed');
 
     vi.useRealTimers();
+  });
+
+  it('tells an unreachable source apart from "no links" only when asked', async () => {
+    axiosMock.get.mockRejectedValue(new Error('connect ECONNREFUSED'));
+
+    await expect(getSlowDownloadLinks('abc123', 'https://annas.example')).resolves.toEqual([]);
+    await expect(getSlowDownloadLinks('abc123', 'https://annas.example', undefined, undefined, { throwOnError: true }))
+      .rejects.toBeInstanceOf(AnnasArchiveUnavailableError);
+  });
+
+  it('treats a challenge page as unreachable when asked', async () => {
+    axiosMock.get.mockResolvedValue({ data: '<div class="challenge-running"></div>' });
+
+    await expect(getSlowDownloadLinks('abc123', 'https://annas.example', undefined, undefined, { throwOnError: true }))
+      .rejects.toBeInstanceOf(AnnasArchiveUnavailableError);
   });
 });

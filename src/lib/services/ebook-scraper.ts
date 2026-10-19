@@ -490,15 +490,24 @@ export async function searchByTitle(
   }
 }
 
+/** Anna's Archive (or FlareSolverr) could not be reached or answered with a challenge page */
+export class AnnasArchiveUnavailableError extends Error {
+  readonly name = 'AnnasArchiveUnavailableError';
+}
+
 /**
  * Step 3: Get slow download links from MD5 page (no waitlist only)
- * Exported for use by search-ebook processor
+ * Exported for use by search-ebook processor.
+ * By default any failure returns [] (search flows). With `throwOnError`, a fetch
+ * failure or challenge page throws AnnasArchiveUnavailableError, so callers can
+ * tell "source unreachable" from "no links".
  */
 export async function getSlowDownloadLinks(
   md5: string,
   baseUrl: string,
   logger?: RMABLogger,
-  flaresolverrUrl?: string
+  flaresolverrUrl?: string,
+  options: { throwOnError?: boolean } = {}
 ): Promise<string[]> {
   try {
     const md5Url = `${baseUrl}/md5/${md5}`;
@@ -511,6 +520,7 @@ export async function getSlowDownloadLinks(
     // Check if we got a Cloudflare challenge page
     if (html.includes('challenge-running') || html.includes('cf-browser-verification')) {
       moduleLogger.warn('Appears to be Cloudflare challenge page');
+      if (options.throwOnError) throw new AnnasArchiveUnavailableError("Anna's Archive answered with a challenge page");
     }
 
     const $ = cheerio.load(html);
@@ -564,6 +574,13 @@ export async function getSlowDownloadLinks(
       `Failed to get slow links: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
     moduleLogger.debug('Error getting slow links', { error: error instanceof Error ? error.message : String(error) });
+    if (options.throwOnError) {
+      throw error instanceof AnnasArchiveUnavailableError
+        ? error
+        : new AnnasArchiveUnavailableError(
+            `Anna's Archive could not be reached: ${error instanceof Error ? error.message : String(error)}`
+          );
+    }
     return [];
   }
 }

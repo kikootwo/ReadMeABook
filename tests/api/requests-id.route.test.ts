@@ -46,6 +46,16 @@ vi.mock('@/lib/middleware/auth', () => ({
   requireAuth: requireAuthMock,
 }));
 
+
+// Prowlarr connection used by the download-URL guard and key stripping
+vi.mock('@/lib/integrations/prowlarr-connection', () => ({
+  getProwlarrConnection: async () => ({
+    baseUrl: 'http://prowlarr:9696',
+    apiKey: 'test-prowlarr-key',
+    base: { origin: 'http://prowlarr:9696', protocol: 'http:', hostname: 'prowlarr', host: 'prowlarr:9696', port: '9696', defaultPort: false, userinfo: '', basePath: '' },
+  }),
+}));
+
 describe('Request by ID API routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -14,6 +14,8 @@ import { getLanguageForRegion } from '@/lib/constants/language-config';
 import type { AudibleRegion } from '@/lib/types/audible';
 import { z } from 'zod';
 import { RMABLogger } from '@/lib/utils/logger';
+import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
+import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 
 const logger = RMABLogger.create('API.AudiobookSearch');
 const MAX_RANKED_RESULTS = 100;
@@ -37,6 +39,9 @@ export async function POST(request: NextRequest) {
           { status: 401 }
         );
       }
+
+      const accessDenied = await denyWithoutInteractiveSearchAccess(req.user.id);
+      if (accessDenied) return accessDenied;
 
       const body = await req.json();
       const { title, author, asin } = SearchSchema.parse(body);
@@ -215,7 +220,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        results: resultsWithRank,
+        results: await stripProwlarrKeyFromResults(resultsWithRank),
         truncated,
         rawCount: results.length,
         message: limitedRankedResults.length > 0

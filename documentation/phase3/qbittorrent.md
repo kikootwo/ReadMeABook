@@ -250,10 +250,11 @@ type TorrentState =
 - Key insight: any `*UP` state is post-download; any `*DL` state is pre-completion
 
 **17. Prowlarr grab errors blamed on qBittorrent** - Source HTTP errors were collapsed into `Failed to add torrent to qBittorrent`, so a rate-limited indexer permanently failed the request. Fixed by:
-- Forwarding Prowlarr source headers when fetching `.torrent` files
+- Forwarding Prowlarr source headers when fetching `.torrent` files (now scoped to Prowlarr download hops, see #18)
 - Preserving the upstream HTTP status as a structured source-grab error
 - Trying the remaining ranked releases on HTTP `429`/`5xx`
 - Reporting the indexer, release, and upstream status instead of blaming a healthy qBittorrent instance
+**18. Magnet at a later redirect hop (#298)** - Only the first `Location` was checked; later hops went through axios, which cannot follow `magnet:`. Fixed by the shared fetcher (`download-source.ts`): every hop checked, relative redirects resolved, Prowlarr key sent only to Prowlarr download hops (see [download-clients.md](./download-clients.md#source-fetch--prowlarr-key-scoping))
 
 ## Tech Stack
 
