@@ -11,6 +11,7 @@ import { GenericShelf } from '@/lib/hooks/useShelves';
 import { useUpdateGoodreadsShelf } from '@/lib/hooks/useGoodreadsShelves';
 import { useUpdateHardcoverShelf } from '@/lib/hooks/useHardcoverShelves';
 import { cn } from '@/lib/utils/cn';
+import { GOODREADS_RSS_URL_ERROR, toGoodreadsRssUrl } from '@/lib/utils/goodreads-rss-url';
 
 interface ManageShelfModalProps {
   shelf: GenericShelf | null;
@@ -22,6 +23,7 @@ export function ManageShelfModal({ shelf, isOpen, onClose }: ManageShelfModalPro
   const [rssUrl, setRssUrl] = useState('');
   const [listId, setListId] = useState('');
   const [apiToken, setApiToken] = useState('');
+  const [validationError, setValidationError] = useState('');
 
   const { updateShelf: updateGoodreads, isLoading: isUpdatingGoodreads, error: goodreadsError } = useUpdateGoodreadsShelf();
   const { updateShelf: updateHardcover, isLoading: isUpdatingHardcover, error: hardcoverError } = useUpdateHardcoverShelf();
@@ -32,19 +34,25 @@ export function ManageShelfModal({ shelf, isOpen, onClose }: ManageShelfModalPro
       setRssUrl(shelf.type === 'goodreads' ? shelf.sourceId : '');
       setListId(shelf.type === 'hardcover' ? shelf.sourceId : '');
       setApiToken('');
+      setValidationError('');
     }
   }, [shelf?.id]);
 
   if (!shelf) return null;
 
   const isUpdating = isUpdatingGoodreads || isUpdatingHardcover;
-  const currentError = shelf.type === 'goodreads' ? goodreadsError : hardcoverError;
+  const currentError = validationError || (shelf.type === 'goodreads' ? goodreadsError : hardcoverError);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       if (shelf.type === 'goodreads') {
         if (!rssUrl.trim()) return;
+        if (!toGoodreadsRssUrl(rssUrl)) {
+          setValidationError(GOODREADS_RSS_URL_ERROR);
+          return;
+        }
+        setValidationError('');
         await updateGoodreads(shelf.id, { rssUrl: rssUrl.trim() });
       } else {
         if (!listId.trim()) return;

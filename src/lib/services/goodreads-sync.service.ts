@@ -12,6 +12,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { prisma } from '@/lib/db';
 import { Prisma } from '@/generated/prisma/client';
 import { RMABLogger } from '@/lib/utils/logger';
+import { GOODREADS_RSS_URL_HINT, isGoodreadsHttpsUrl, toGoodreadsRssUrl } from '@/lib/utils/goodreads-rss-url';
 import {
   ShelfBook,
   ShelfSyncStats,
@@ -72,13 +73,48 @@ const GOODREADS_PAGE_SIZE = 100;
 /** Safety cap to avoid infinite loops */
 const MAX_PAGES = 50;
 
+/** Redirects followed per feed page; every hop must stay on https Goodreads */
+const MAX_REDIRECTS = 3;
+
+const FETCH_TIMEOUT_MS = 15000;
+
+/**
+ * GET one feed page. Redirects are followed by hand so each hop's target is checked
+ * before it is requested: only https Goodreads hosts are ever contacted.
+ */
+async function getGoodreadsPage(pageUrl: string): Promise<string> {
+  let current = pageUrl;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    if (!isGoodreadsHttpsUrl(current)) {
+      throw new Error(`Goodreads feeds are only fetched from ${GOODREADS_RSS_URL_HINT}`);
+    }
+    const response = await axios.get(current, {
+      timeout: FETCH_TIMEOUT_MS,
+      headers: { 'User-Agent': RMAB_USER_AGENT },
+      maxRedirects: 0,
+      validateStatus: (status) => status >= 200 && status < 400,
+    });
+    const isRedirect = response.status >= 300 && response.status < 400;
+    if (!isRedirect) return response.data;
+
+    const location = response.headers?.location;
+    if (!location) throw new Error(`Goodreads returned HTTP ${response.status} without a redirect target`);
+    current = new URL(String(location), current).toString();
+  }
+  throw new Error('Too many redirects while fetching the Goodreads feed');
+}
+
 /**
  * Fetch and validate a Goodreads RSS URL.
  * Automatically paginates (sort=title, page=1,2,...) when a page returns 100 items.
  * Deduplicates by bookId across pages.
  */
 export async function fetchAndValidateRss(rssUrl: string): Promise<{ shelfName: string; books: ShelfBook[] }> {
-  const url = new URL(rssUrl);
+  const feedUrl = toGoodreadsRssUrl(rssUrl);
+  if (!feedUrl) {
+    throw new Error(`Not a Goodreads shelf RSS URL (${GOODREADS_RSS_URL_HINT})`);
+  }
+  const url = new URL(feedUrl);
   url.searchParams.set('sort', 'title');
 
   let shelfName = 'Goodreads Shelf';
@@ -88,8 +124,7 @@ export async function fetchAndValidateRss(rssUrl: string): Promise<{ shelfName: 
   for (let page = 1; page <= MAX_PAGES; page++) {
     url.searchParams.set('page', page.toString());
 
-    const response = await axios.get(url.toString(), { timeout: 15000, headers: { 'User-Agent': RMAB_USER_AGENT } });
-    const parsed = parseGoodreadsRss(response.data);
+    const parsed = parseGoodreadsRss(await getGoodreadsPage(url.toString()));
 
     if (page === 1) {
       shelfName = parsed.shelfName;
