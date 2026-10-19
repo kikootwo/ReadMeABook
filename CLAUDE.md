@@ -1,6 +1,6 @@
 # CLAUDE.md - Project Standards & Workflow
 
-**Critical:** This document defines AI-optimized documentation standards and development workflow. **NEVER PERFORM COMMITS ON THE REPOSITORY.**
+**Critical:** This document defines AI-optimized documentation standards and development workflow. **Commit freely on branches. NEVER push to `main`: all work lands on `main` through a PR. Releases (version bumps, `v*` tags) are Zach's only.**
 
 **ALWAYS DO:** When you feel work is complete, you MUST verify BOTH of the following pass before reporting the work as ready to test:
 1. `docker compose build readmeabook` — must succeed with no errors.
@@ -15,6 +15,8 @@ Only after BOTH succeed may you tell the user the work is ready to be tested.
 4. Only after approval: implement, build, and report results.
 
 This applies to bug fixes, feature requests, and any code changes. Investigation and analysis are always fine — writing code is not until approved.
+
+**Exception:** an autonomous maintainer run (`/maintain`) treats its critic-reviewed plan as approval. The rule above still applies to every interactive session.
 
 ---
 
