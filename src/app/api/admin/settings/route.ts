@@ -57,6 +57,7 @@ export async function GET(request: NextRequest) {
         apiToken: maskValue('api_token', configMap.get('audiobookshelf.api_token')),
         libraryId: configMap.get('audiobookshelf.library_id') || '',
         triggerScanAfterImport: configMap.get('audiobookshelf.trigger_scan_after_import') === 'true',
+        tagRequester: configMap.get('audiobookshelf.tag_requester') === 'true',
       },
       oidc: {
         enabled: configMap.get('oidc.enabled') === 'true',

@@ -26,6 +26,10 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
   const backendMode = await configService.getBackendMode();
   logger.info(`Backend mode: ${backendMode}`);
 
+  // Whether to tag matched ABS items with the requester's `req:<username>` tag.
+  // Read once per run; only meaningful for the Audiobookshelf backend.
+  const tagRequester = (await configService.get('audiobookshelf.tag_requester')) === 'true';
+
   // Validate configuration based on backend mode
   if (backendMode === 'audiobookshelf') {
     const absConfig = await configService.getMany([
@@ -333,6 +337,18 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
             });
 
             matchedDownloads++;
+
+            // Tag the matched ABS item with the requester's username (best-effort).
+            // Mirrors scan-plex.processor.ts — this is the second match path that
+            // flips a request to 'available', so it must tag too.
+            const username = request.user.plexUsername;
+            if (tagRequester && backendMode === 'audiobookshelf' && match.plexGuid && username) {
+              const { addABSItemTags, formatRequesterTag } = await import('../services/audiobookshelf/api');
+              const tag = formatRequesterTag(username);
+              if (tag) {
+                await addABSItemTags(match.plexGuid, [tag]);
+              }
+            }
 
             // Note: Audiobookshelf metadata matching is handled in the file hash phase above
             // Items without ASIN get file-hash-matched ASIN, items with ASIN already have correct metadata

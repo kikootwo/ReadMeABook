@@ -58,6 +58,13 @@ export function AudiobookshelfSection({
     });
   };
 
+  const handleTagRequesterChange = (tagRequester: boolean) => {
+    onChange({
+      ...settings,
+      audiobookshelf: { ...settings.audiobookshelf, tagRequester },
+    });
+  };
+
   const handleAudibleRegionChange = (audibleRegion: string) => {
     onChange({
       ...settings,
@@ -143,6 +150,28 @@ export function AudiobookshelfSection({
               Automatically triggers Audiobookshelf to scan its filesystem after organizing downloaded files.
               Only enable this if you have Audiobookshelf's filesystem watcher (automatic scanning) disabled.
               Most users should leave this disabled and rely on Audiobookshelf's built-in automatic detection.
+            </p>
+          </div>
+        </label>
+      </div>
+
+      <div className="space-y-2">
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={settings.audiobookshelf.tagRequester}
+            onChange={(e) => handleTagRequesterChange(e.target.checked)}
+            className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800"
+          />
+          <div className="flex-1">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Tag items with the requester's username
+            </span>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              When a requested audiobook becomes available, RMAB adds a <code>req:&lt;username&gt;</code> tag
+              to the matched Audiobookshelf item. Tags are merged, so multiple requesters and manual tags are
+              preserved. Audiobookshelf can use these tags to filter what each user sees in their library.
+              Enabling this kicks off a one-time backfill of already-available requests.
             </p>
           </div>
         </label>
