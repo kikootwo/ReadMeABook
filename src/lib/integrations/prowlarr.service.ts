@@ -341,6 +341,10 @@ export class ProwlarrService {
         ignoreAttributes: false,
         attributeNamePrefix: '@_',
         allowBooleanAttributes: true,
+        // Decode numeric references (&#39;, &#x27;, &#233;) plus a short list of named ones
+        // (&nbsp;, dashes, curly quotes, &hellip;, currency, &copy;/&reg;/&trade;) in titles/authors.
+        // Other named entities (e.g. &eacute;) stay as-is. fast-xml-parser 5.6+ needs this for numeric ones.
+        htmlEntities: true,
       });
 
       const parsed = parser.parse(response.data);

@@ -35,6 +35,14 @@ yarn-error.log*
 # Environment files
 .env*
 !.env.example
+# Fixed, obviously fake e2e harness values (committed on purpose)
+!e2e/.env.test
+
+# E2E harness local state (tokens, Playwright output)
+e2e/.auth/
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
 
 # Vercel
 .vercel

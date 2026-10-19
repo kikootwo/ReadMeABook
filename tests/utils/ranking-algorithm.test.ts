@@ -33,6 +33,17 @@ describe('ranking-algorithm', () => {
     expect(ranked[0].guid).toBe('big');
   });
 
+  it('scores a title with non-breaking spaces (decoded &nbsp;) like one with plain spaces', () => {
+    const plain = { ...baseTorrent, guid: 'plain', title: 'Great Book - Author Name' };
+    const nbsp = { ...baseTorrent, guid: 'nbsp', title: 'Great Book - Author Name' };
+
+    const ranked = rankTorrents([plain, nbsp], { title: 'Great Book', author: 'Author Name' });
+    const score = (guid: string) => ranked.find((r) => r.guid === guid)!.breakdown.matchScore;
+
+    expect(score('nbsp')).toBe(score('plain'));
+    expect(score('plain')).toBeGreaterThan(50);
+  });
+
   it('prefers strong title/author matches over weaker ones', () => {
     const good = { ...baseTorrent, guid: 'good', title: 'Great Book - Author Name' };
     const bad = { ...baseTorrent, guid: 'bad', title: 'Different Title - Other Author' };

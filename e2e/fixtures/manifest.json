@@ -1,0 +1,17 @@
+{
+  "_comment": "Books are referenced by ASIN only; title/author/narrator are resolved from Audnexus when fixtures are generated. Fixture audio is synthetic (ffmpeg tones).",
+  "books": {
+    "phm": { "asin": "B08G9PRS1K" },
+    "martian": { "asin": "B082BHJMFF" },
+    "artemis": { "asin": "B072R1CY4P" }
+  },
+  "fixtures": {
+    "phm-mp3": { "book": "phm", "kind": "mp3-multi", "tracks": 3, "seconds": 6, "folder": "{{title}}" },
+    "phm-m4b": { "book": "phm", "kind": "m4b-chapters", "chapters": 3, "seconds": 4, "folder": "{{title}}" },
+    "phm-asin": { "book": "phm", "kind": "mp3-multi", "tracks": 2, "seconds": 5, "folder": "{{title}} [{{asin}}]" },
+    "martian-m4b": { "book": "martian", "kind": "m4b-chapters", "chapters": 2, "seconds": 4, "folder": "{{title}}" },
+    "martian-mp3": { "book": "martian", "kind": "mp3-multi", "tracks": 2, "seconds": 5, "folder": "{{title}}" },
+    "artemis-mp3": { "book": "artemis", "kind": "mp3-multi", "tracks": 2, "seconds": 5, "folder": "{{title}}" },
+    "wrong-files": { "kind": "wrong", "folder": "Sample Pack" }
+  }
+}

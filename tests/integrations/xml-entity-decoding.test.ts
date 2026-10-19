@@ -4,6 +4,11 @@
  *
  * Pins how fast-xml-parser decodes escaped entities and CDATA in the two RSS
  * feeds RMAB parses, so a parser upgrade that changes titles/authors fails here.
+ * Both parsers set `htmlEntities: true` (fast-xml-parser 5.6+ stopped decoding
+ * numeric references by default). That also decodes other numeric references
+ * such as &#233;, which older versions left as-is, and a short list of named ones
+ * (&nbsp;, dashes, curly quotes, &hellip;, currency); other HTML named entities such as
+ * &eacute; are still left as-is.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -50,6 +55,7 @@ describe('Prowlarr RSS entity decoding (getRssFeed)', () => {
     ['&amp;', 'Tom &amp; Jerry - Author', 'Tom & Jerry - Author'],
     ['&#39;', 'The Hitchhiker&#39;s Guide', "The Hitchhiker's Guide"],
     ['&#x27;', 'The Hitchhiker&#x27;s Guide', "The Hitchhiker's Guide"],
+    ['&#233; (decoded) and &eacute; (left as-is)', 'Caf&#233; &eacute;t&eacute;', 'Café &eacute;t&eacute;'],
     ['escaped <b>', '&lt;b&gt;Bold&lt;/b&gt; Title', '<b>Bold</b> Title'],
     ['CDATA with <b> and &amp;', '<![CDATA[<b>Bold</b> &amp; Title]]>', '<b>Bold</b> &amp; Title'],
   ])('decodes %s in a title', async (_label, xmlTitle, expected) => {
@@ -89,6 +95,7 @@ describe('Goodreads RSS entity decoding (fetchAndValidateRss)', () => {
     ['&amp;', 'Pride &amp; Prejudice', 'Pride & Prejudice'],
     ['&#39;', 'Ender&#39;s Game', "Ender's Game"],
     ['&#x27;', 'Ender&#x27;s Game', "Ender's Game"],
+    ['&#233; (decoded) and &eacute; (left as-is)', 'Les Mis&#233;rables &eacute;dition', 'Les Misérables &eacute;dition'],
     ['escaped <b>', '&lt;b&gt;Dune&lt;/b&gt;', '<b>Dune</b>'],
     ['CDATA with <b> and &amp;', '<![CDATA[<b>Dune</b> &amp; Sequel]]>', '<b>Dune</b> &amp; Sequel'],
   ])('decodes %s in a book title', async (_label, xmlTitle, expected) => {

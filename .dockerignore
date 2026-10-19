@@ -65,7 +65,11 @@ config
 downloads
 media
 pgdata
+redisdata
 redis
 
 # Local tooling
 .claude
+
+# E2E harness (never part of the app image)
+e2e/
