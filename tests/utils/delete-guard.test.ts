@@ -179,6 +179,17 @@ describe('assertSafeToDelete', () => {
 
       expect(result).toBe(toGuardForm(link));
     });
+
+    it('returns the link itself when the symlink candidate has a trailing separator', async () => {
+      const downloads = dir('downloads');
+      const realDir = dir('downloads', 'real');
+      const link = path.join(downloads, 'link');
+      linkDir(realDir, link);
+      const ctx = { mediaDir: dir('media'), downloadRoots: [downloads] };
+
+      expect(await assertSafeToDelete(`${link}/`, ctx)).toBe(toGuardForm(link));
+      expect(await assertSafeToDelete(`${link}${path.sep}`, ctx)).toBe(toGuardForm(link));
+    });
   });
 
   describe('drive roots', () => {

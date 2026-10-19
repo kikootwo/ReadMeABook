@@ -22,6 +22,7 @@ const formatCoercionMock = vi.hoisted(() => ({ coerceToPlexCompatible: vi.fn() }
 const clientState = vi.hoisted(() => ({
   clients: [] as Array<Record<string, unknown>>,
   failClients: false,
+  corruptClients: false,
   postProcess: vi.fn(async () => undefined),
 }));
 
@@ -33,10 +34,7 @@ vi.mock('@/lib/services/job-queue.service', () => ({ getJobQueueService: () => j
 vi.mock('@/lib/utils/format-coercion', () => formatCoercionMock);
 vi.mock('@/lib/services/download-client-manager.service', () => ({
   getDownloadClientManager: () => ({
-    getAllClients: async () => {
-      if (clientState.failClients) throw new Error('database unavailable');
-      return clientState.clients;
-    },
+    getAllClients: async () => clientState.clients,
     getClientForProtocol: async () => null,
     getClientServiceForProtocol: async () => ({ clientType: 'sabnzbd', postProcess: clientState.postProcess }),
   }),
@@ -105,6 +103,7 @@ describe('post-organize cleanup safety', () => {
     indexers = [{ id: 7, protocol: 'usenet', removeAfterProcessing: true }];
     clientState.clients = [];
     clientState.failClients = false;
+    clientState.corruptClients = false;
 
     prismaMock.request.findUnique.mockResolvedValue({
       id: 'req-1', userId: 'u1', type: 'audiobook', user: { plexUsername: 'tester' },
@@ -113,9 +112,16 @@ describe('post-organize cleanup safety', () => {
     prismaMock.audiobook.findUnique.mockResolvedValue({
       id: 'a1', title: 'Book', author: 'Author', narrator: null, coverArtUrl: null, audibleAsin: null, year: 2020,
     });
-    prismaMock.configuration.findUnique.mockImplementation(async ({ where }: { where?: { key?: string } }) =>
-      where?.key === 'media_dir' ? { value: media } : null
-    );
+    prismaMock.configuration.findUnique.mockImplementation(async ({ where }: { where?: { key?: string } }) => {
+      if (where?.key === 'media_dir') return { value: media };
+      if (where?.key === 'download_dir') return { value: downloadDirSetting };
+      if (where?.key === 'download_clients') {
+        if (clientState.failClients) throw new Error('database unavailable');
+        if (clientState.corruptClients) return { value: '[{"customPath": "sab"' };
+        return clientState.clients.length > 0 ? { value: JSON.stringify(clientState.clients) } : null;
+      }
+      return null;
+    });
     configMock.getBackendMode.mockResolvedValue('plex');
     configMock.get.mockImplementation(async (key: string) => {
       if (key === 'download_dir') return downloadDirSetting;
@@ -420,36 +426,57 @@ describe('post-organize cleanup safety', () => {
     expect(fs.existsSync(libraryFile)).toBe(true);
   });
 
-  describe('failed manual import', () => {
-    it('marks the request failed instead of queueing a retry of the last client download', async () => {
+  describe('failed imports', () => {
+    const failOrganize = () => {
       prismaMock.request.findUnique.mockResolvedValue({
         id: 'req-1', userId: 'u1', type: 'audiobook', user: { plexUsername: 'tester' },
         audiobook: { title: 'Book', author: 'Author' },
       });
-      const source = path.join(media, 'Unsorted', 'Book');
-      mkfile(path.join(source, 'Book.m4b'));
-      useHistory(historyRow({ id: 'dh-old' }));
       organizerMock.organize.mockResolvedValue({
         success: false, targetPath: '', filesMovedCount: 0, audioFiles: [],
         errors: ["ENOENT: no such file or directory, open 'Book.m4b'"],
       });
+    };
+    const statuses = () =>
+      prismaMock.request.update.mock.calls.map((call: Array<{ data?: { status?: string } }>) => call[0]?.data?.status);
 
-      await expect(
-        runOrganize({ downloadPath: source, cleanupSource: true, selectedFiles: ['Book.m4b'] })
-      ).rejects.toThrow(/ENOENT/);
+    it.each([
+      ['manual import (cleanupSource true)', true],
+      ['bulk import (cleanupSource false)', false],
+    ])('%s fails once without throwing or queueing a client-download retry', async (_label, cleanupSource) => {
+      failOrganize();
+      const source = path.join(media, 'Unsorted', 'Book');
+      mkfile(path.join(source, 'Book.m4b'));
+      useHistory(historyRow({ id: 'dh-old' }));
 
-      const statuses = prismaMock.request.update.mock.calls.map((call: Array<{ data?: { status?: string } }>) => call[0]?.data?.status);
-      expect(statuses).not.toContain('awaiting_import');
-      expect(prismaMock.request.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            status: 'failed',
-            errorMessage: expect.stringContaining(`Import from ${source} failed`),
-          }),
-        })
+      const result = await runOrganize({ downloadPath: source, cleanupSource, selectedFiles: ['Book.m4b'] });
+
+      expect(result).toMatchObject({ success: false });
+      expect(statuses()).not.toContain('awaiting_import');
+      const failedCall = prismaMock.request.update.mock.calls.find(
+        (call: Array<{ data?: { status?: string } }>) => call[0]?.data?.status === 'failed'
       );
+      const message = (failedCall?.[0] as { data: { errorMessage: string } }).data.errorMessage;
+      expect(message).toContain(`Import from ${source} did not complete: ENOENT`);
+      expect(message).not.toMatch(/failed: File organization failed/);
+      expect(message).not.toContain('..');
       expect(prismaMock.downloadHistory.update).not.toHaveBeenCalled();
+      expect(jobQueueMock.addNotificationJob).toHaveBeenCalledTimes(1);
+      const notificationText = (jobQueueMock.addNotificationJob.mock.calls[0] as unknown[])[5] as string;
+      expect(notificationText).not.toContain(source);
       expect(fs.existsSync(path.join(source, 'Book.m4b'))).toBe(true);
+    });
+
+    it('keeps the import retry for a download job queued before download history ids existed', async () => {
+      failOrganize();
+      const download = path.join(downloads, 'Book.Name');
+      useHistory(historyRow());
+
+      const result = await runOrganize({ downloadPath: download });
+
+      expect(result).toMatchObject({ success: false });
+      expect(statuses()).toContain('awaiting_import');
+      expect(statuses()).not.toContain('failed');
     });
   });
 
@@ -519,6 +546,19 @@ describe('post-organize cleanup safety', () => {
   describe('fail closed', () => {
     it('keeps the download when the client list cannot be read', async () => {
       clientState.failClients = true;
+      const download = path.join(downloads, 'Book.Name');
+      mkfile(path.join(download, 'Book.m4b'));
+      useHistory(historyRow());
+      organizeInto(path.join(media, 'Author', 'Book'));
+
+      await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
+
+      expect(fs.existsSync(download)).toBe(true);
+      expect(clientState.postProcess).not.toHaveBeenCalled();
+    });
+
+    it('keeps the download when the client list is corrupt', async () => {
+      clientState.corruptClients = true;
       const download = path.join(downloads, 'Book.Name');
       mkfile(path.join(download, 'Book.m4b'));
       useHistory(historyRow());

@@ -245,13 +245,13 @@ When user deletes and re-requests the same audiobook:
 | c | Inside `media_dir`, unless inside a download root that itself sits strictly inside `media_dir` (`allowMediaSources` bypasses c for `cleanupSource` files only; a whole folder inside `media_dir` is never removed) |
 
 - Comparison: realpath of candidate, target and roots (symlinks, junctions), plus dev+inode identity of the entry and its ancestors (case-insensitive mounts). Inode 0 never matches.
-- Acts on the path the guard returns (the canonical path it checked; a symlink candidate is removed as a link, never followed).
-- Fail closed: if the download client list cannot be read, nothing is deleted (job still succeeds).
+- Acts on the path the guard returns (the canonical path it checked). For a symlink candidate the rules check the link's target and only the link is removed; the link's own location is not checked against the rules.
+- Fail closed: roots are read straight from the database (`download_dir`, `download_clients`, legacy mapped path; no cache, no swallowed errors). Any database, decryption or JSON error → nothing is deleted (job still succeeds).
 - Empty-parent sweep: bounded by the nearest configured root containing the deleted path; never removes a root (download_dir, client customPath / mapped localPath, media_dir, bookdrop) and never climbs from a download root into `media_dir`.
 - `cleanupSource` + `selectedFiles`: each file is checked; files inside the target are kept and listed in a warning (in-place renamed re-imports keep the old-named file).
 - Ebook `cleanupSource` removes only the imported ebook file (`result.sourceFile`; the original EPUB when the Kindle fix ran), never its folder.
 - Direct HTTP download files (`downloadClient = direct`) are removed by `cleanupDirectDownloadSource` (same provenance gate + guard); the organizer itself never deletes its source.
-- Failed manual/bulk import (no `downloadHistoryId`): request → `failed` with `Import from <path> failed: <error>. Fix the folder and run the import again.`; never `awaiting_import` (that path re-queues the request's last client download).
+- Manual vs download job: `isManualImport = !downloadHistoryId && typeof cleanupSource === 'boolean'` (manual sends `true`, bulk `false`; download jobs leave it unset). A failed manual/bulk import → request `failed` with `Import from <path> did not complete: <error>. Fix the folder and run the import again.`, one notification without the path, result `success: false` (not thrown, so no queue retries); never `awaiting_import` (that path re-queues the request's last client download).
 - Windows drive roots normalize to `C:/` (`normalizeGuardPath`), never `C:.` (the drive's current directory).
 - `media_dir` resolution shared via `src/lib/utils/media-dir.ts` (`media_dir` → `MEDIA_DIR` → `/media/audiobooks`).
 
@@ -302,7 +302,7 @@ async function organize(
 **5. Hardcoded media path** - Now reads `media_dir` from database config instead of hardcoded `/media/audiobooks`
 **6. Invalid URL error for cached cover art** - Fixed by detecting local cached thumbnails (`/api/cache/thumbnails/*`) and copying from `/app/cache/thumbnails/` instead of attempting HTTP download
 **7. Manual import deleted library folders (#242)** - Download cleanup used the request's newest download row regardless of origin and `rm -rf`'d the import folder (even the media root); `cleanupSource` with source == target unlinked the library files; in-place re-import truncated `cover.jpg` to 0 bytes. Fixed by provenance gate + delete guard + same-file copy skip (see Post-Organize Cleanup Safety)
-   - Upgrade note: organize jobs queued before this change carry no `downloadHistoryId`, so they skip download cleanup once (files stay on disk, client history entry is not archived)
+   - Upgrade note: organize jobs queued before this change carry no `downloadHistoryId`, so they skip download cleanup once (files stay on disk, client history entry is not archived). Their import retry on transient errors is unchanged; only manual/bulk imports fail without retry
 
 ## Tech Stack
 

@@ -9,49 +9,9 @@ import { RMABLogger } from '../utils/logger';
 import type { ConfigurationService } from '../services/config.service';
 import { getDownloadClientManager } from '../services/download-client-manager.service';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
-import { isPathBelowBoundary, normalizePath, removeEmptyParentDirectories } from '../utils/cleanup-helpers';
-import { assertSafeToDelete, canonicalPath, DeleteGuardContext, UnsafeDeleteError } from '../utils/delete-guard';
-import { getMediaDir } from '../utils/media-dir';
-
-const BOOKDROP_PATH = '/bookdrop';
-
-// =========================================================================
-// PROTECTED ROOTS
-// =========================================================================
-
-/**
- * Collect the roots the delete guard protects: media dir, global download_dir,
- * each client's download_dir/customPath, each client's mapped localPath, and
- * the bookdrop mount. Throws when the client list cannot be read.
- */
-export async function collectGuardRoots(
-  configService: ConfigurationService
-): Promise<Omit<DeleteGuardContext, 'targetPath' | 'allowMediaSources'>> {
-  const downloadDir = (await configService.get('download_dir')) || '/downloads';
-  const mediaDir = await getMediaDir();
-  const downloadRoots = new Set<string>([downloadDir]);
-
-  // Fail closed: without the client list the guard would protect fewer roots,
-  // so the caller's delete is aborted instead.
-  let clients;
-  try {
-    clients = await getDownloadClientManager(configService).getAllClients();
-  } catch (error) {
-    throw new Error(
-      `Could not read download client paths for the delete guard, nothing deleted: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-  for (const client of clients) {
-    if (client.customPath) {
-      downloadRoots.add(path.join(downloadDir, client.customPath));
-    }
-    if (client.remotePathMappingEnabled && client.localPath) {
-      downloadRoots.add(client.localPath);
-    }
-  }
-
-  return { mediaDir, downloadRoots: [...downloadRoots], otherRoots: [BOOKDROP_PATH] };
-}
+import { normalizePath } from '../utils/cleanup-helpers';
+import { assertSafeToDelete, DeleteGuardContext, UnsafeDeleteError } from '../utils/delete-guard';
+import { collectGuardRoots, guardAllows, sweepEmptyParents } from './organize-cleanup-guard';
 
 // =========================================================================
 // DOWNLOAD CLEANUP
@@ -118,68 +78,13 @@ async function findCompletedDownloadForJob(
   return downloadHistory;
 }
 
-type GuardRoots = Awaited<ReturnType<typeof collectGuardRoots>>;
-
-/**
- * Run the guard. Returns the path to act on (the canonical path it checked),
- * or null after logging a refusal; other errors propagate.
- */
-async function guardAllows(candidate: string, ctx: DeleteGuardContext, logger: RMABLogger, label: string): Promise<string | null> {
-  try {
-    return await assertSafeToDelete(candidate, ctx);
-  } catch (guardError) {
-    if (guardError instanceof UnsafeDeleteError) {
-      logger.warn(`${label} skipped: ${guardError.message}`);
-      return null;
-    }
-    throw guardError;
-  }
-}
-
-/**
- * Remove empty parent directories above a deleted path, bounded by the nearest
- * configured root that contains it. The sweep never removes a configured root
- * (download_dir, a client customPath or mapped localPath, media_dir, bookdrop)
- * and never climbs from a download root into a media dir above it.
- */
-async function sweepEmptyParents(
-  deletedPath: string,
-  roots: GuardRoots,
-  jobId: string | undefined,
-  logger: RMABLogger,
-  context: string
-): Promise<void> {
-  const canonicalRoots = await Promise.all(
-    [roots.mediaDir, ...roots.downloadRoots, ...(roots.otherRoots || [])].filter(Boolean).map(canonicalPath)
-  );
-  const deleted = normalizePath(await canonicalPath(deletedPath));
-  const boundary = canonicalRoots
-    .filter((root) => isPathBelowBoundary(deleted, normalizePath(root)))
-    .sort((a, b) => b.length - a.length)[0];
-
-  if (!boundary) {
-    logger.info(`No configured root contains ${deletedPath}, leaving parent directories alone`);
-    return;
-  }
-
-  const cleanupResult = await removeEmptyParentDirectories(deleted, {
-    boundaryPath: boundary,
-    protectedPaths: canonicalRoots,
-    logContext: jobId ? { jobId, context } : undefined,
-  });
-
-  if (cleanupResult.removedDirectories.length > 0) {
-    logger.info(`Cleaned up ${cleanupResult.removedDirectories.length} empty parent directories`);
-  }
-}
-
 /**
  * Remove a direct HTTP download file (e.g. an ebook fetched over HTTP) after it
  * was copied into the library. Same provenance gate and guard as the indexer
  * cleanup; only single files from the 'direct' client are removed.
  */
 export async function cleanupDirectDownloadSource(params: DownloadCleanupParams): Promise<void> {
-  const { requestId, downloadPath, downloadHistoryId, targetPath, configService, logger } = params;
+  const { requestId, downloadPath, downloadHistoryId, targetPath, logger } = params;
   try {
     const downloadHistory = await findCompletedDownloadForJob(requestId, downloadPath, downloadHistoryId, logger);
     if (!downloadHistory || downloadHistory.downloadClient !== 'direct') {
@@ -192,7 +97,7 @@ export async function cleanupDirectDownloadSource(params: DownloadCleanupParams)
       return;
     }
 
-    const roots = await collectGuardRoots(configService);
+    const roots = await collectGuardRoots();
     const deletePath = await guardAllows(downloadPath, { ...roots, targetPath }, logger, 'Direct download cleanup');
     if (!deletePath) {
       return;
@@ -258,7 +163,7 @@ export async function cleanupDownloadAfterOrganize(params: DownloadCleanupParams
       return;
     }
 
-    const roots = await collectGuardRoots(configService);
+    const roots = await collectGuardRoots();
     const deletePath = await guardAllows(downloadPath, { ...roots, targetPath }, logger, 'Download cleanup');
     if (!deletePath) {
       return;
@@ -270,7 +175,7 @@ export async function cleanupDownloadAfterOrganize(params: DownloadCleanupParams
     const fs = await import('fs/promises');
 
     try {
-      // Act on the canonical path the guard checked (lstat: a symlink is removed, not followed)
+      // Act on the path the guard returned; lstat so a symlink is removed as a link
       const stats = await fs.lstat(deletePath);
 
       if (stats.isDirectory()) {
@@ -341,7 +246,7 @@ export async function cleanupSourceAfterOrganize(
 
     logger.info(`Cleaning up source files: ${downloadPath}`);
 
-    const roots = await collectGuardRoots(configService);
+    const roots = await collectGuardRoots();
     const guardContext: DeleteGuardContext = { ...roots, targetPath, allowMediaSources: true };
 
     if (selectedFiles && selectedFiles.length > 0) {

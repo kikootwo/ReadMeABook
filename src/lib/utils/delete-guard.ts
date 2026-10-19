@@ -126,9 +126,9 @@ function isStrictlyInside(child: CanonicalPath, parent: CanonicalPath): boolean 
  *  c. candidate is inside the media dir, unless it is inside a download root
  *     that itself sits strictly inside the media dir (or allowMediaSources)
  *
- * Returns the path the caller must act on: the canonical path that was checked,
- * or, when the candidate itself is a symlink, the link in its canonical parent
- * (removing a link never removes what it points to).
+ * Returns the path the caller must act on: the canonical path that was checked.
+ * When the candidate is a symlink, the rules above are applied to the link's
+ * target and the returned path is the link itself, so only the link is removed.
  */
 export async function assertSafeToDelete(candidate: string, ctx: DeleteGuardContext): Promise<string> {
   if (!candidate || !candidate.trim()) {
@@ -165,10 +165,12 @@ export async function assertSafeToDelete(candidate: string, ctx: DeleteGuardCont
     }
   }
 
+  // Strip trailing separators first: lstat('link/') would follow the link
+  const linkPath = candidate.replace(/[\\/]+$/, '') || candidate;
   try {
-    const linkStat = await fs.lstat(candidate);
+    const linkStat = await fs.lstat(linkPath);
     if (linkStat.isSymbolicLink()) {
-      const resolved = path.resolve(candidate);
+      const resolved = path.resolve(linkPath);
       return joinGuardPath(await realpathLenient(path.dirname(resolved)), path.basename(resolved));
     }
   } catch {

@@ -371,14 +371,48 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
 
     const rawErrorMessage = error instanceof Error ? error.message : 'File organization failed';
 
-    // A job without a download row is a manual or bulk import: its folder, file
-    // selection and cleanup choice exist only in this payload. The import-retry
-    // path re-queues the request's last client download instead, so these jobs
-    // never go there; they fail with a message telling the admin to re-run them.
-    const isClientDownload = !!downloadHistoryId;
+    // Manual imports pass cleanupSource true, bulk imports false; download jobs
+    // leave it unset (dropped from the JSON payload), including jobs queued
+    // before downloadHistoryId existed. A manual or bulk import's folder, file
+    // selection and cleanup choice exist only in this payload, and the import
+    // retry path would re-queue the request's last client download instead, so
+    // these fail once with a message telling the admin to re-run them.
+    const isManualImport = !downloadHistoryId && typeof cleanupSource === 'boolean';
+    const isClientDownload = !isManualImport;
+    const detail = rawErrorMessage
+      .replace(/^(File|Ebook) organization failed:\s*/, '')
+      .replace(/[.\s]+$/, '');
     const errorMessage = isClientDownload
       ? rawErrorMessage
-      : `Import from ${downloadPath} failed: ${rawErrorMessage}. Fix the folder and run the import again.`;
+      : `Import from ${downloadPath} did not complete: ${detail}. Fix the folder and run the import again.`;
+
+    if (isManualImport) {
+      await prisma.request.update({
+        where: { id: requestId },
+        data: { status: 'failed', errorMessage, updatedAt: new Date() },
+      });
+
+      const failedRequest = await prisma.request.findUnique({
+        where: { id: requestId },
+        include: { audiobook: true, user: { select: { plexUsername: true } } },
+      });
+      if (failedRequest?.audiobook) {
+        await getJobQueueService().addNotificationJob(
+          'request_error',
+          failedRequest.id,
+          failedRequest.audiobook.title,
+          failedRequest.audiobook.author,
+          failedRequest.user?.plexUsername || 'Unknown User',
+          'Import did not complete. Check the selected folder and run the import again.'
+        ).catch((notifyError) => {
+          logger.error('Failed to queue notification', { error: notifyError instanceof Error ? notifyError.message : String(notifyError) });
+        });
+      }
+
+      // Returned, not thrown: a queue retry would re-run the import and send
+      // another notification for the same failure.
+      return { success: false, message: errorMessage, requestId };
+    }
 
     // Check if this is a retryable error (transient filesystem issues or no files found)
     // These errors may resolve on retry (e.g., files still being extracted, permissions being set)
@@ -390,7 +424,7 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       rawErrorMessage.includes('EACCES') || // Permission denied (might be temporary)
       rawErrorMessage.includes('EPERM');    // Operation not permitted (might be temporary)
 
-    if (isRetryableError && isClientDownload) {
+    if (isRetryableError) {
       // Get current request to check retry count
       const currentRequest = await prisma.request.findFirst({
         where: {
