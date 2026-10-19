@@ -20,14 +20,15 @@ const { buildPrismaCliLock } = require('../../docker/unified/prisma-cli-lock.js'
 
 const appLock = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'package-lock.json'), 'utf8'));
 
-// The prisma CLI closure in the current lockfile. Changes only when prisma (or one of its deps) is bumped.
-const EXPECTED_NAMES = [
+// The prisma CLI closure in the current lockfile, as install paths (two deps resolve to a nested copy).
+// Changes only when prisma (or one of its deps) is bumped: update this list with the lockfile.
+const EXPECTED_PATHS = [
   '@prisma/config', '@prisma/debug', '@prisma/engines', '@prisma/engines-version', '@prisma/fetch-engine',
   '@prisma/get-platform', '@standard-schema/spec', 'c12', 'chokidar', 'citty', 'confbox', 'consola',
   'deepmerge-ts', 'defu', 'destr', 'dotenv', 'effect', 'empathic', 'exsolve', 'fast-check', 'giget', 'jiti',
-  'node-fetch-native', 'nypm', 'ohash', 'pathe', 'perfect-debounce', 'pkg-types', 'prisma', 'pure-rand', 'rc9',
-  'readdirp', 'tinyexec',
-];
+  'node-fetch-native', 'nypm', 'nypm/node_modules/citty', 'ohash', 'pathe', 'perfect-debounce', 'pkg-types',
+  'pkg-types/node_modules/confbox', 'prisma', 'pure-rand', 'rc9', 'readdirp', 'tinyexec',
+].map((p) => `node_modules/${p}`);
 
 const entry = (extra: Record<string, unknown> = {}) => ({
   version: '1.0.0',
@@ -46,7 +47,7 @@ describe('buildPrismaCliLock (real package-lock.json)', () => {
   });
 
   it('contains exactly the prisma CLI closure (no optional peers such as typescript)', () => {
-    expect(result.names).toEqual([...EXPECTED_NAMES].sort());
+    expect(Object.keys(result.lock.packages).filter(Boolean).sort()).toEqual([...EXPECTED_PATHS].sort());
     expect(result.names).not.toContain('typescript');
   });
 
