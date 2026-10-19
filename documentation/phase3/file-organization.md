@@ -144,12 +144,11 @@ exiftool "audiobook.m4b" | grep -i asin
 - Integrated into `src/lib/utils/file-organizer.ts`
 
 **Requirements:**
-- ffmpeg must be installed in the container
-- **Multi-container setup** (`Dockerfile`): Added at line 56 via `apk add ffmpeg`
-- **Unified setup** (`dockerfile.unified`): Added at line 16 via `apt-get install ffmpeg`
-- **Verify installation:**
-  - Multi-container: `docker exec readmeabook ffmpeg -version`
-  - Unified: `docker exec readmeabook-unified ffmpeg -version`
+- ffmpeg + ffprobe must be on PATH (`/usr/local/bin`)
+- **Image install** (`dockerfile.unified`): see [deployment/unified.md](../deployment/unified.md) → ffmpeg (pinned static 9.0.2, amd64 + arm64)
+- Codecs/formats RMAB needs: demux concat/ffmetadata/mov/mp3/flac/aac; decode mp3/flac/aac; encode aac (libfdk_aac optional, not in image); mux mp4/mp3/flac/null; bsf aac_adtstoasc
+- **Verify installation:** `docker exec readmeabook ffmpeg -version`
+- **Fixed (#230):** arm64 images shipped an amd64 ffprobe (`Exec format error`), silently disabling tagging + chapter merge
 
 ## Plex Format Coercion
 

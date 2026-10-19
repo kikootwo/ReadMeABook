@@ -43,6 +43,15 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - redis-server
 - supervisor
 - curl, openssl
+- ffmpeg + ffprobe 9.0.2 (static-pie, no runtime deps) → `/usr/local/bin`
+
+**ffmpeg source:**
+- `FROM mwader/static-ffmpeg:9.0.2-1@sha256:<index digest> AS ffmpeg` + `COPY --from=ffmpeg /ffmpeg /ffprobe`
+- Digest = multi-arch index (amd64 + arm64); BuildKit copies the TARGETPLATFORM variant. Other platforms fail the build (no match)
+- Build guard: ELF arch byte of each binary must match `uname -m`, and `-version` must equal `FFMPEG_VERSION`
+- License: GPLv3 build (no nonfree/libfdk-aac); bundled lib versions at `/usr/local/share/ffmpeg/versions.json`
+- Bump: change tag + digest on the `FROM` line AND `ARG FFMPEG_VERSION` together
+- **Fixed (#230):** previously an unpinned amd64-only tarball from johnvansickle.com (host outages broke builds; arm64 got amd64 binaries)
 
 **Build process:**
 1. Install dependencies (production only)
