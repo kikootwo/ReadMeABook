@@ -81,6 +81,7 @@ vi.mock('@/lib/services/encryption.service', () => ({
   getEncryptionService: () => ({
     encrypt: (value: string) => `enc-${value}`,
     decrypt: (value: string) => value.replace('enc-', ''),
+    isEncryptedFormat: (value: string) => typeof value === 'string' && value.startsWith('enc-'),
   }),
 }));
 
