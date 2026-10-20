@@ -174,26 +174,38 @@ export async function shotBox(page: Page, name: string) {
 /**
  * Pointer path for the "more" chevron: it must sit inside the box; each click scrolls the box (never the
  * modal) until the end, where the chevron goes away. Takes `midShot` after the first click.
+ * Page-side click events are counted, and a smooth scroll that starts late (a loaded host can stall the
+ * renderer for a few hundred ms) gets up to 2s more; each step records both, so a dropped click and a
+ * slow animation are told apart in metrics.json.
  */
 export async function chevronWalk(page: Page, midShot?: string) {
   const more = page.getByTestId('book-summary-more');
   if (!(await more.count())) return { ok: false, reason: 'no chevron' };
-  await page.evaluate(`(${AREA_JS}).querySelector('[data-testid="book-summary"]').scrollIntoView({ block: 'center' })`);
+  await page.evaluate(`(() => { window.__summaryMoreClicks = 0;
+    document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('[data-testid="book-summary-more"]')) window.__summaryMoreClicks += 1; }, true);
+    (${AREA_JS}).querySelector('[data-testid="book-summary"]').scrollIntoView({ block: 'center' }); })()`);
   await settle(page, 300);
   const rects = (await page.evaluate(`(() => { const a = ${AREA_JS};
     const r = (el) => { const b = el.getBoundingClientRect(); return { top: b.top, right: b.right, bottom: b.bottom, left: b.left }; };
     return { box: r(a.querySelector('[data-testid="book-summary-scroll"]')), more: r(a.querySelector('[data-testid="book-summary-more"]')) }; })()`)) as Record<'box' | 'more', { top: number; right: number; bottom: number; left: number }>;
   const inside = rects.more.top >= rects.box.top && rects.more.bottom <= rects.box.bottom && rects.more.left >= rects.box.left && rects.more.right <= rects.box.right;
-  const steps: { modalTop: number; boxTop: number | null }[] = [];
+  const steps: { modalTop: number; boxTop: number | null; clickEvents: number; extraWaitMs: number }[] = [];
   const start = await scrollState(page);
+  const clickEvents = () => page.evaluate('window.__summaryMoreClicks') as Promise<number>;
   let clicks = 0;
   while (clicks < 40 && (await more.count())) {
     const before = await scrollState(page);
     await more.click();
     clicks += 1;
     await settle(page, 700);
-    const after = await scrollState(page);
-    steps.push({ modalTop: after.modalTop, boxTop: after.boxTop });
+    let after = await scrollState(page);
+    let extraWaitMs = 0;
+    while (!((after.boxTop ?? 0) > (before.boxTop ?? 0)) && extraWaitMs < 2000) {
+      await settle(page, 100);
+      extraWaitMs += 100;
+      after = await scrollState(page);
+    }
+    steps.push({ modalTop: after.modalTop, boxTop: after.boxTop, clickEvents: await clickEvents(), extraWaitMs });
     if (!((after.boxTop ?? 0) > (before.boxTop ?? 0))) break;
     if (clicks === 1 && midShot) await shot(page, midShot);
   }
@@ -202,8 +214,10 @@ export async function chevronWalk(page: Page, midShot?: string) {
   const focusMoved = await page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'book-summary-more');
   const boxMoved = steps.length > 0 && (steps[0].boxTop ?? 0) > (start.boxTop ?? 0);
   const modalStill = steps.every((s) => s.modalTop === start.modalTop);
+  const clicksDelivered = (await clickEvents()) === clicks;
   const atEnd = end.boxTop !== null && end.boxMax !== null && end.boxTop >= end.boxMax - 1;
-  return { ok: inside && boxMoved && modalStill && gone && atEnd && !focusMoved, inside, boxMoved, modalStill, gone, atEnd, focusMoved, clicks, rects, start, steps, end };
+  const late = steps.filter((s) => s.extraWaitMs > 0).length;
+  return { ok: inside && boxMoved && modalStill && gone && atEnd && !focusMoved && clicksDelivered, inside, boxMoved, modalStill, gone, atEnd, focusMoved, clicksDelivered, clicks, late, rects, start, steps, end };
 }
 
 /** Scroll the summary box to its end and centre it in the modal; returns the modal's scrollTop. */
