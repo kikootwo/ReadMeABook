@@ -21,7 +21,10 @@ docker exec -it <container-name> npm run rmab:recover
 ## What It Does
 1. Loads `DATABASE_URL` and `CONFIG_ENCRYPTION_KEY` from env (falls back to `/etc/environment`)
 2. Diagnoses key health by attempting to decrypt an existing encrypted Configuration row
-3. Lists local users (`authProvider='local'`, not soft-deleted); prompts for one
+3. Lists users who log in with a password; prompts for one (`scripts/lib/password-users.js`)
+   - Rule: not soft-deleted, `plexId` starts with `local-`, `authProvider` is `local`, `plex` or null (legacy). Password = encrypted bcrypt in `authToken`
+   - Covers local users and the Plex-mode setup admin (`authProvider='plex'`, logs in via `/api/auth/admin/login`, which looks up `plexId = local-<username>`); labelled `Plex-mode admin`
+   - Never offers Plex users (numeric `plexId`) or OIDC users (incl. a subject starting with `local-`): no password to reset
 4. Prompts for new password twice (masked); validates length unless `ALLOW_WEAK_PASSWORD=true`
    - Prompts: `scripts/lib/terminal-prompt.js`. Questions use a short-lived readline closed before returning; the password is read in raw mode with no readline attached, so it is never echoed (one `*` per character). Raw mode is restored on Enter, Ctrl+C/Ctrl+D (exit 130, "Cancelled. No changes made."), SIGTERM/SIGHUP and process exit
 5. Prints the exact plan (mode + what will be cleared); requires typing `confirm` verbatim
@@ -75,6 +78,10 @@ docker exec -it <container-name> npm run rmab:recover
 **Typed password echoed on screen**
 - **Cause:** the readline interface for the username prompt stayed open (only paused) while the hidden password prompt put stdin in raw mode; readline's keypress handling still echoed each character
 - **Fix:** prompts moved to `scripts/lib/terminal-prompt.js` (no readline alive during the hidden read); tests drive a fake TTY and assert the password never reaches stdout (`tests/scripts/terminal-prompt.test.ts`)
+
+**Plex-mode admin could not be recovered ("No local users exist")**
+- **Cause:** the user list queried `authProvider='local'`, but setup stores the Plex-mode admin with `authProvider='plex'` (plexId `local-<username>`, bcrypt in `authToken`)
+- **Fix:** list by the password-login rule above (`listPasswordUsers`); tests in `tests/scripts/password-users.test.ts`
 
 ## Related
 - `backend/services/auth.md` — local auth flow + the decrypt-then-compare path

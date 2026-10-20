@@ -19,6 +19,7 @@ const path = require('path');
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const { createPrompter, CANCELLED } = require('./lib/terminal-prompt');
+const { listPasswordUsers, describePasswordUser, findPasswordUser } = require('./lib/password-users');
 
 const SECRETS_FILE = '/app/config/.secrets';
 const ENVIRONMENT_FILE = '/etc/environment';
@@ -381,36 +382,24 @@ async function main() {
     }
 
     // -------------------------------------------------------------------------
-    // List local users
+    // List users who log in with a password (local users and the Plex-mode admin)
     // -------------------------------------------------------------------------
     console.log('');
-    console.log('Step 2/5 — Selecting local user to reset...');
-    const localUsers = await prisma.user.findMany({
-      where: { authProvider: 'local', deletedAt: null },
-      select: {
-        id: true,
-        plexUsername: true,
-        plexId: true,
-        role: true,
-        isSetupAdmin: true,
-        authToken: true,
-      },
-      orderBy: [{ isSetupAdmin: 'desc' }, { plexUsername: 'asc' }],
-    });
+    console.log('Step 2/5 — Selecting the user to reset...');
+    const passwordUsers = await listPasswordUsers(prisma);
 
-    if (localUsers.length === 0) {
+    if (passwordUsers.length === 0) {
       console.error('');
-      console.error('ERROR: No local users exist in the database.');
-      console.error('       Use the setup wizard / registration page to create one instead.');
+      console.error('ERROR: No user in the database logs in with a username and password.');
+      console.error('       Plex and OIDC users sign in through their provider and have no password to reset.');
+      console.error('       Use the setup wizard / registration page to create a local user instead.');
       process.exit(1);
     }
 
     console.log('');
-    console.log('  Local users:');
-    for (const u of localUsers) {
-      const tag = [u.role];
-      if (u.isSetupAdmin) tag.push('setup-admin');
-      console.log(`    - ${u.plexUsername}   [${tag.join(', ')}]`);
+    console.log('  Users with a password login:');
+    for (const u of passwordUsers) {
+      console.log(`    - ${describePasswordUser(u)}`);
     }
     console.log('');
 
@@ -418,9 +407,9 @@ async function main() {
     while (!chosenUser) {
       const typed = (await prompter.ask('  Username to reset: ')).trim().toLowerCase();
       if (!typed) continue;
-      chosenUser = localUsers.find((u) => u.plexUsername === typed);
+      chosenUser = findPasswordUser(passwordUsers, typed);
       if (!chosenUser) {
-        console.log(`  No local user named "${typed}". Try again, or Ctrl+C to abort.`);
+        console.log(`  No password-login user named "${typed}". Try again, or Ctrl+C to abort.`);
       }
     }
 
