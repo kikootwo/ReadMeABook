@@ -193,6 +193,29 @@ describe('FileOrganizer placement records', () => {
     expect(result.errors.join(' ')).toContain('Part 2.mp3 not imported');
   });
 
+  it('records a library symlink to the download as differs, unverified (tagged, no byte compare)', async (ctx) => {
+    configState.values.set('metadata_tagging_enabled', 'true');
+    const original = write(path.join(source, 'Book.m4b'), 'original-bytes');
+    const placed = path.join(media, 'Author', 'Book', 'Book.m4b');
+    fs.mkdirSync(path.dirname(placed), { recursive: true });
+    try {
+      fs.symlinkSync(original, placed, 'file');
+    } catch (error) {
+      // File symlinks need a privilege on Windows; organize-copy.symlink.test.ts simulates this case
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') return ctx.skip();
+      throw error;
+    }
+
+    const organizer = new FileOrganizer(media, path.join(root, 'tmp'));
+    const result = await organizer.organize(source, { title: 'Book', author: 'Author' }, '{author}/{title}', undefined, undefined, undefined, {
+      compareExisting: false,
+    });
+
+    expect(result.records![0]).toMatchObject({ source: original, status: 'differs', verified: false });
+    expect(fs.lstatSync(placed).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(original, 'utf8')).toBe('original-bytes');
+  });
+
   it('succeeds when every file is already in the library with different content (nothing overwritten)', async () => {
     write(path.join(source, 'Part 1.mp3'), 'new download one');
     const target = path.join(media, 'Author', 'Book');

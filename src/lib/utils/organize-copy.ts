@@ -155,7 +155,7 @@ async function placeUnlocked(source: string, target: string, options: PlaceOptio
   if (!targetStat.isFile()) {
     return { status: 'differs', target: existing, reason: 'existing target is not a regular file' };
   }
-  if (await isSameFile(source, existing)) {
+  if (await isSameRegularFile(source, existing)) {
     return { status: 'identical', target: existing };
   }
 
@@ -181,6 +181,20 @@ async function placeUnlocked(source: string, target: string, options: PlaceOptio
   } catch (error) {
     return { status: 'failed', target: existing, reason: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/**
+ * True when `target` is itself a regular file (not a symlink) and the same
+ * file as `source`: the same path or a hard link. isSameFile alone follows
+ * symlinks, and a library symlink to the download is not a copy of it.
+ */
+async function isSameRegularFile(source: string, target: string): Promise<boolean> {
+  try {
+    if (!(await fs.lstat(target)).isFile()) return false;
+  } catch {
+    return false;
+  }
+  return isSameFile(source, target);
 }
 
 /** True when `status` means the content is proven to be at the target. */
@@ -232,9 +246,10 @@ export async function placeAudio(
   target: string,
   options: AudioPlaceOptions
 ): Promise<AudioPlacement> {
-  // The target already is the original (same path, hard link or symlink): nothing to place,
-  // and no probe or compare of the derivative (which is a different file of the same size)
-  if (await isSameFile(original, target)) {
+  // The target already is the original (same path, or a hard link): nothing to place, and no
+  // probe or compare of the derivative (a different file of the same size). A symlinked target
+  // falls through: placeUnlocked reports it as `differs`, so it is never evidence for a delete.
+  if (await isSameRegularFile(original, target)) {
     return { status: 'identical', target, verified: true, usedDerivative: false };
   }
   if (!derivative) {

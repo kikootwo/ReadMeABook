@@ -278,4 +278,15 @@ describe('placeAudio (tagged derivative)', () => {
     expect(probe).not.toHaveBeenCalled();
     expect(fs.readFileSync(target).equals(SOURCE)).toBe(true);
   });
+
+  it('never counts a library symlink to the original as identical: differs, link and source left alone', async (ctx) => {
+    if (!linkFile(original, target)) return ctx.skip();
+
+    for (const compareExisting of [false, true]) {
+      const result = await placeAudio(original, tagged, target, { fileMode: 0o664, compareExisting, probeDuration: async () => 60000 });
+      expect(result).toMatchObject({ status: 'differs', verified: false });
+    }
+    expect(fs.lstatSync(target).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(original).equals(SOURCE)).toBe(true);
+  });
 });
