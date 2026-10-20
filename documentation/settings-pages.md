@@ -182,8 +182,9 @@ src/app/admin/settings/
 
 **Configuration:**
 - Key: `audiobook_path_template` (string, default: `{author}/{title} {asin}`)
-- Variables: `{author}`, `{title}`, `{narrator}`, `{asin}`, `{year}`
-- Optional variables (narrator, asin, year) removed if not available
+- Variables: `{author}`, `{primaryAuthor}`, `{title}`, `{narrator}`, `{asin}`, `{year}`, `{series}`, `{seriesPart}`
+- `{primaryAuthor}` contains the first entry from the full `{author}` value
+- Optional variables are removed if not available
 - Template validated on test, shows preview examples
 
 **UI (PathsTab):**
@@ -194,12 +195,15 @@ src/app/admin/settings/
 - Preview examples showing 2-3 sample paths with actual data
 
 **Validation:**
-- Must contain at least `{author}` or `{title}` (required variables)
-- Cannot be empty or only contain optional variables
-- Invalid templates show error message
+- Cannot be empty
+- Any template variables used must be supported
+- Must be a relative path
+- Invalid path characters outside template variables are rejected
+- Invalid templates show an error message
 - Valid templates show preview paths
 
 **Examples:**
+- `{primaryAuthor}/{title}` → `Douglas Adams/The Hitchhiker's Guide to the Galaxy/`
 - `{author}/{title} {asin}` → `Douglas Adams/The Hitchhiker's Guide to the Galaxy B0009JKV9W/`
 - `{author}/{title} ({year})` → `Douglas Adams/The Hitchhiker's Guide to the Galaxy (2005)/`
 - `{author}/{narrator}/{title}` → `Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/`
