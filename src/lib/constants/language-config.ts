@@ -229,7 +229,7 @@ const ITALIAN_CONFIG: LanguageConfig = {
     releaseDatePatterns: [/Data di pubblicazione:\s*(.+)/i],
     descriptionExcludePatterns: [
       /\$\d+\.\d+/,
-      /\d+,\d+\s*€/,
+      /\d+,\d+\s*\u20ac/,
       /prova gratis/i,
       /cancella quando vuoi/i,
       /abbonamento/i,
