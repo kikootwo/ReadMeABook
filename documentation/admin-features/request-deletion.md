@@ -87,33 +87,37 @@ model Request {
        → torrentsRemoved++
    ```
 
-3. **Delete Media Files**
-   - Path: persisted `Audiobook.filePath` recorded during file organization
-   - Never rebuilds the path from the current `media_dir` or path template
-   - **ONLY deletes title folder** (not author folder)
-   - Missing stored path: skips file deletion and returns `filesDeleted: false`
-   - Handles missing folders gracefully
+3. **Library Delete Guard** (`src/lib/utils/library-delete-guard.ts`, run from `src/lib/services/request-delete-files.ts`)
+   - Path: persisted `Audiobook.filePath` only (never rebuilt from `media_dir` or a template)
+   - The stored folder is removed (`rm -rf`) only when ALL hold, else nothing is removed:
+     | Rule | Refusal reason (`filesKeptReason`) |
+     |------|------------------------------------|
+     | a. strictly inside `media_dir` | `it is the media library root` / `it is outside the media library (...)` |
+     | b. equals/contains no configured root (download dirs, client paths, mapped paths, `/bookdrop`) | `it is a configured root (...)` / `it contains a configured root (...)` |
+     | c. equals/contains no other book's `filePath` (each row canonicalized: realpath + dev/ino; missing rows skipped) | `it is also the folder of "<title>"` / `it contains the folder of "<title>"` |
+     | evidence: audio directly in the folder hashes to `filesHash` | `folder contents changed since import` / `there is no import record (files hash) for this folder` |
+     | evidence: no audio in any subfolder (the removal is recursive) | `it has audio files in a subfolder` |
+   - Roots are read strictly from the DB (`collectGuardRoots`, fail closed: any error refuses)
+   - Symlinked title folder: rules a-c on the target AND the link location; only the link is removed
+   - No stored path but a library item (`absItemId`/`plexGuid`): kept (`RMAB has no stored folder ...`); no path and no item: nothing to remove
+   - `rm` failure (e.g. EACCES): kept (`the folder could not be removed (EACCES)`)
+   - After removal: empty parents swept up to the nearest root (`sweepEmptyParents`)
+   - **Ebook requests (D2):** rules a-c on `filePath`, then unlink every ebook file directly in it if the folder passes the evidence rule, or the only one if it holds exactly one; otherwise kept (`it holds N ebook files and is not provably this book's folder (...)`). A shared `{author}` or flat `Ebooks` folder fails rule c when another book points at it. Never a sweep of other books' ebooks
+   - Not handled (needs a separate ebook location, PR2): an ebook in a separate folder (custom `ebook_path_template`) is not removed by the audiobook delete
 
-4. **Delete from Library Backend**
-   - **Audiobookshelf Mode:** Delete library item via API if `absItemId` exists
-     - Prevents "ghost" entries in Audiobookshelf library
-     - Only removes from ABS database, not files (already deleted in step 3)
-   - **Plex Mode:** Delete library item via API if `plexGuid` exists
-     - Queries plex_library table to get plexRatingKey from audiobook's plexGuid
-     - Calls Plex DELETE `/library/metadata/{ratingKey}` endpoint with the ratingKey
-     - Requires deletion enabled in Plex: Settings > Server > Library
+4. **Files kept: library left exactly as it is**
+   - No backend delete, no plex_library cleanup, no status reset, linkage and stored paths kept
+   - Request still soft-deleted; result `filesDeleted: false`, `filesKeptReason`, message `Request deleted; files kept: <reason>`
 
-5. **Delete plex_library Cache Records**
-   - **Primary:** Delete by ASIN (same query as availability check)
-     - `WHERE asin = audiobookAsin OR plexGuid CONTAINS audiobookAsin`
-     - Ensures exact same record found during availability check gets deleted
-   - **Fallback:** Delete by exact title/author (for legacy records without ASIN)
-     - Only used if ASIN-based deletion finds no records
-   - **Result:** Book immediately shows as NOT available, can be re-requested
+5. **Backend item (only after RMAB removed the folder, or found it already gone)**
+   - **Audiobookshelf:** `DELETE /api/items/<id>?hard=0` (database entry only; RMAB already removed the files), only when the item's `path` is inside the removed folder, or its `relPath` matches the folder's path relative to `media_dir` (ABS mounting the library elsewhere). Otherwise skipped (a second copy elsewhere survives)
+   - **Plex:** `DELETE /library/metadata/{ratingKey}` only when every file Plex lists for the item and its tracks (`getItemFilePaths`: Media > Part `file`) is inside the removed folder; otherwise skipped, the next library scan drops it
+   - `deleteABSItem(id, { hard })`: `hard: true` (`?hard=1`) also deletes files; only the reported-issue replace without an RMAB request (`deleteFromLibrary`) uses it
 
-6. **Clear Audiobook Linkage**
-   - Reset audiobook.status to 'requested'
-   - Clear plexGuid (Plex mode) or absItemId (ABS mode)
+6. **plex_library records, linkage, stored paths** (only after removal / already gone)
+   - plex_library delete by ASIN, fallback exact title/author
+   - Audiobook: `status = 'requested'`, clear `absItemId` (ABS) or `plexGuid` (Plex), clear `filePath`, `filesHash`, `fileFormat`
+   - Child requests soft-deleted: `parentRequestId = id`, and ebook requests with no parent on the same book row
 
 7. **Soft Delete Request**
    - UPDATE: `deletedAt = NOW(), deletedBy = adminUserId`
@@ -156,10 +160,12 @@ where: {
     "filesDeleted": true,
     "torrentsRemoved": 2,
     "torrentsKeptSeeding": 1,
-    "torrentsKeptUnlimited": 0
+    "torrentsKeptUnlimited": 0,
+    "filesKeptReason": "folder contents changed since import"
   }
 }
 ```
+- `filesKeptReason` present only when library files were kept; the request is still deleted (HTTP 200)
 
 **Errors:**
 - 401: Unauthorized (not logged in)
@@ -179,6 +185,7 @@ where: {
 - State management for confirmation dialog
 - SWR cache invalidation after deletion
 - Loading states during deletion
+- Files kept: warning toast `Request deleted; files kept: <reason>` (10 s) instead of the success toast
 
 ## Re-Requesting After Deletion
 
@@ -218,6 +225,8 @@ where: {
 15. ✅ **No ASIN available** - Falls back to exact title/author matching
 16. ✅ **Path template changed after organization** - Deletes only the persisted organized path
 17. ✅ **Legacy row has no stored path** - Skips file deletion without guessing a path
+18. ✅ **Folder shared with other books, foreign files, symlinks, roots** - Library delete guard keeps the files and says why
+19. ✅ **Reported-issue replace when files would be kept** - `replaceAudiobook` stops with HTTP 409 and the reason before deleting anything (and again if `deleteRequest` kept files); no record reset, no new request, issue stays open
 
 ## Fixed Issues ✅
 
@@ -234,12 +243,19 @@ where: {
 - **Fix:** Delete only the persisted path; legacy rows without one skip file cleanup
 - **Result:** Configuration changes cannot redirect deletion to a newly rendered directory
 
+**3. Deleting a Request Removed Other Books' Files**
+- **Issue:** `fs.rm(filePath, { recursive })` with no checks; an ebook import overwrote `filePath` with its folder (`{author}` or flat `Ebooks` templates), and the ebook delete unlinked every ebook in that folder. ABS deletes always sent `hard=1`
+- **Fix:** library delete guard (rules a-c + evidence); backend deletes only after RMAB removed the folder, ABS with `hard=0`, Plex only for items inside the folder
+- **Note:** `filesHash` covers file names only (a same-named replacement passes); it is built from this import's audio after format coercion, excluding files the library already held with different content (`differs`)
+
 ## File Structure
 
 ```
 Backend:
 - prisma/schema.prisma (deletedAt, deletedBy fields)
 - src/lib/services/request-delete.service.ts (deletion logic)
+- src/lib/services/request-delete-files.ts (library files, backend items, plex_library records)
+- src/lib/utils/library-delete-guard.ts (assertSafeLibraryDelete, planEbookDelete)
 - src/app/api/admin/requests/[id]/route.ts (DELETE endpoint)
 - src/lib/processors/cleanup-seeded-torrents.processor.ts (orphaned cleanup)
 

@@ -62,6 +62,7 @@ export async function DELETE(
             torrentsRemoved: result.torrentsRemoved,
             torrentsKeptSeeding: result.torrentsKeptSeeding,
             torrentsKeptUnlimited: result.torrentsKeptUnlimited,
+            ...(result.filesKeptReason && { filesKeptReason: result.filesKeptReason }),
           },
         });
       } catch (error) {

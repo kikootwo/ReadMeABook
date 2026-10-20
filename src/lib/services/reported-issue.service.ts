@@ -152,6 +152,8 @@ export async function replaceAudiobook(
           narrator: true,
           plexGuid: true,
           absItemId: true,
+          filePath: true,
+          filesHash: true,
         },
       },
     },
@@ -179,9 +181,23 @@ export async function replaceAudiobook(
 
   // Step 2: Delete old content
   if (existingRequest) {
+    // The old files must go before new ones are fetched: when the library delete
+    // guard would keep them, stop before touching anything
+    const { audiobookFolderKeptReason } = await import('./request-delete-files');
+    const keptReason = await audiobookFolderKeptReason(audiobook);
+    if (keptReason) {
+      logger.warn(`Replace for "${audiobook.title}" stopped: files kept: ${keptReason}`);
+      throw new ReportedIssueError(`Replace stopped: the current files were kept (${keptReason}). Remove them manually, then replace again.`, 409);
+    }
+
     // Has an RMAB request — use deleteRequest which handles torrent cleanup, files, library backend
     const { deleteRequest } = await import('./request-delete.service');
     const deleteResult = await deleteRequest(existingRequest.id, adminUserId);
+    if (deleteResult.filesKeptReason) {
+      // Changed since the check above (or the removal failed): no reset, no new request
+      logger.warn(`Replace for "${audiobook.title}" stopped after delete: files kept: ${deleteResult.filesKeptReason}`);
+      throw new ReportedIssueError(`Replace stopped: the current files were kept (${deleteResult.filesKeptReason}). Remove them manually, then replace again.`, 409);
+    }
     if (!deleteResult.success) {
       logger.warn(`deleteRequest partial failure for ${existingRequest.id}: ${deleteResult.error}`);
       // Continue anyway - we want replacement to proceed
