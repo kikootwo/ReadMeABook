@@ -105,6 +105,51 @@ describe('AudiobookDetailsModal', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('renders the trimmed summary in its own scroll box', async () => {
+    useAudiobookDetailsMock.mockReturnValue({
+      audiobook: { ...audiobookDetails, description: '  First paragraph.\n\nSecond paragraph.  ' },
+      isLoading: false,
+      error: null,
+    });
+    const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+    render(<AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} />);
+    await act(async () => {});
+
+    expect(screen.getByRole('heading', { name: 'Summary' })).toBeInTheDocument();
+    const box = screen.getByTestId('book-summary-scroll');
+    expect(box.querySelector('p')?.textContent).toBe('First paragraph.\n\nSecond paragraph.');
+  });
+
+  it('keeps the summary inside a shrinkable column of the modal scroll area (so the card cannot grow)', async () => {
+    const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+    render(<AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} />);
+    await act(async () => {});
+
+    // BookSummary's wrapper must be a direct flex item of a min-h-0 column inside the flex scroll area;
+    // without min-h-0 the column refuses to shrink and the whole modal scrolls again.
+    const column = screen.getByTestId('book-summary').parentElement!;
+    expect(column).toHaveClass('flex', 'flex-col', 'min-h-0');
+    expect(column.parentElement).toHaveClass('overflow-y-auto', 'flex', 'flex-col');
+  });
+
+  it('omits the summary section when the description is only whitespace', async () => {
+    useAudiobookDetailsMock.mockReturnValue({
+      audiobook: { ...audiobookDetails, description: ' \n\n  ' },
+      isLoading: false,
+      error: null,
+    });
+    const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+    render(<AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} />);
+    await act(async () => {});
+
+    expect(screen.getByText('Detail Book')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Summary' })).toBeNull();
+    expect(screen.queryByTestId('book-summary-scroll')).toBeNull();
+  });
+
   it('creates requests and auto-closes after success', async () => {
     vi.useFakeTimers();
     createRequestMock.mockResolvedValueOnce(undefined);
