@@ -86,6 +86,16 @@ describe('Apprise credentials through the notification routes', () => {
     expect(leaks(logged)).toBe(false);
   });
 
+  it('POST refuses a non-text secret value and stores nothing', async () => {
+    const { POST } = await import('@/app/api/admin/notifications/route');
+    const response = await POST(json({ type: 'apprise', name: 'Apprise', events, config: { serverUrl: 'http://apprise:8000', authToken: 424242 } }));
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).message).toBe('Auth Token must be text.');
+    expect(backends.create).not.toHaveBeenCalled();
+    expect(JSON.stringify(logged)).not.toContain('424242');
+  });
+
   it('the test route refuses an unparseable URL with @ without echoing it', async () => {
     const { POST } = await import('@/app/api/admin/notifications/test/route');
     const response = await POST(json({ type: 'apprise', config: { serverUrl: 'http//alice:hunter2-p@ss@apprise', urls: 'x://y' } }));

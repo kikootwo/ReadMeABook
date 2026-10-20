@@ -6,7 +6,7 @@
 import { getEncryptionService } from '../encryption.service';
 import { RMABLogger } from '../../utils/logger';
 import { prisma } from '../../db';
-import { INotificationProvider, NotificationPayload, ProviderMetadata } from './INotificationProvider';
+import { INotificationProvider, MASKED_CONFIG_VALUE, NotificationPayload, ProviderMetadata } from './INotificationProvider';
 import { AppriseProvider } from './providers/apprise.provider';
 import { DiscordProvider } from './providers/discord.provider';
 import { NtfyProvider } from './providers/ntfy.provider';
@@ -15,8 +15,7 @@ import { isSameServiceUrl, isServiceUrl, savedCredentialUrlMismatch } from '../.
 
 const logger = RMABLogger.create('NotificationService');
 
-/** Placeholder sent to the UI instead of a saved sensitive value */
-export const MASKED_CONFIG_VALUE = '••••••••';
+export { MASKED_CONFIG_VALUE };
 
 export type MaskedSecretMerge =
   | { ok: true; config: Record<string, any> }
@@ -138,8 +137,12 @@ export class NotificationService {
 
     const encrypted = { ...config };
     for (const field of provider.sensitiveFields) {
-      if (encrypted[field] && !this.encryptionService.isEncryptedFormat(encrypted[field])) {
-        encrypted[field] = this.encryptionService.encrypt(encrypted[field]);
+      const value = encrypted[field];
+      if (!value) continue;
+      // Never hand a non-string to encrypt(): its error text would include the value
+      if (typeof value !== 'string') throw new Error(`Sensitive field "${field}" is not text`);
+      if (!this.encryptionService.isEncryptedFormat(value)) {
+        encrypted[field] = this.encryptionService.encrypt(value);
       }
     }
     return encrypted;
@@ -198,6 +201,14 @@ export class NotificationService {
     const lifted = provider.liftStoredSecrets?.(config ?? {});
     const masked = { ...(lifted ? lifted.config : config) };
     if (lifted?.password) masked[lifted.passwordField] = MASKED_CONFIG_VALUE;
+
+    // A stored server URL that is not a valid http(s) URL can't be migrated; if it holds
+    // something like "user:pass@host", show only the part after the last '@'
+    const urlField = provider.secretBoundUrl?.field;
+    const storedUrl = urlField ? masked[urlField] : undefined;
+    if (typeof storedUrl === 'string' && storedUrl.includes('@') && !isServiceUrl(storedUrl)) {
+      masked[urlField!] = storedUrl.slice(storedUrl.lastIndexOf('@') + 1);
+    }
     for (const field of provider.sensitiveFields) {
       if (masked[field]) {
         masked[field] = MASKED_CONFIG_VALUE;
@@ -223,7 +234,12 @@ export class NotificationService {
     const prepared = { ...normalized.config };
     for (const field of provider.sensitiveFields) {
       const value = prepared[field];
-      if (typeof value === 'string' && value !== '' && value !== MASKED_CONFIG_VALUE) {
+      if (value === undefined || value === null || value === '') continue;
+      if (typeof value !== 'string') {
+        const label = provider.metadata.configFields.find((f) => f.name === field)?.label ?? field;
+        return { ok: false, error: `${label} must be text.` };
+      }
+      if (value !== MASKED_CONFIG_VALUE) {
         prepared[field] = this.encryptionService.encrypt(value);
       }
     }
@@ -285,27 +301,40 @@ export class NotificationService {
       const backends = await prisma.notificationBackend.findMany();
 
       for (const backend of backends) {
-        const provider = getProvider(backend.type);
-        if (!provider) continue;
+        // One bad row must not stop the others
+        try {
+          const provider = getProvider(backend.type);
+          if (!provider) continue;
 
-        const config = backend.config as any;
-        let needsUpdate = false;
-        const updatedConfig = { ...config };
+          const config = backend.config as any;
+          let needsUpdate = false;
+          const updatedConfig = { ...config };
 
-        for (const field of provider.sensitiveFields) {
-          if (updatedConfig[field] && !this.encryptionService.isEncryptedFormat(updatedConfig[field])) {
-            updatedConfig[field] = this.encryptionService.encrypt(updatedConfig[field]);
-            needsUpdate = true;
+          for (const field of provider.sensitiveFields) {
+            const value = updatedConfig[field];
+            if (!value) continue;
+            if (typeof value !== 'string') {
+              logger.warn(`Skipping non-text sensitive field "${field}" for backend: ${backend.name}`);
+              continue;
+            }
+            if (!this.encryptionService.isEncryptedFormat(value)) {
+              updatedConfig[field] = this.encryptionService.encrypt(value);
+              needsUpdate = true;
+            }
           }
-        }
 
-        if (needsUpdate) {
-          await prisma.notificationBackend.update({
-            where: { id: backend.id },
-            data: { config: updatedConfig },
+          if (needsUpdate) {
+            await prisma.notificationBackend.update({
+              where: { id: backend.id },
+              data: { config: updatedConfig },
+            });
+            fixed++;
+            logger.info(`Re-encrypted plaintext sensitive fields for backend: ${backend.name}`);
+          }
+        } catch (error) {
+          logger.error(`Failed to re-encrypt backend: ${backend.name}`, {
+            error: error instanceof Error ? error.message : String(error),
           });
-          fixed++;
-          logger.info(`Re-encrypted plaintext sensitive fields for backend: ${backend.name}`);
         }
       }
 

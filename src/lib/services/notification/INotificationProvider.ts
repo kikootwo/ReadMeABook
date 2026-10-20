@@ -8,6 +8,9 @@ import type { CredentialKind } from '@/lib/utils/saved-credential';
 // Re-export event types from central source of truth
 export type { NotificationEvent } from '@/lib/constants/notification-events';
 
+/** Placeholder sent to the UI instead of a saved sensitive value (and sent back to keep it) */
+export const MASKED_CONFIG_VALUE = '••••••••';
+
 // Backend type — string-based, registry is the runtime source of truth
 export type NotificationBackendType = string;
 

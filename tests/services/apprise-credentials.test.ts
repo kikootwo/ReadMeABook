@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 process.env.CONFIG_ENCRYPTION_KEY ??= 'test-config-encryption-key-32-bytes!';
 
 const prismaMock = vi.hoisted(() => ({
-  notificationBackend: { findMany: vi.fn(), updateMany: vi.fn() },
+  notificationBackend: { findMany: vi.fn(), updateMany: vi.fn(), update: vi.fn() },
 }));
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/utils/logger', () => ({
@@ -36,6 +36,8 @@ describe('splitUrlCredentials', () => {
     ['percent-encoded @ and : in the password', LEGACY_URL, STRIPPED_URL, 'alice', 'p@ss:word'],
     ['an unencoded @ inside the password (last @ ends the userinfo)', 'https://alice:p@ss@host.example/', 'https://host.example/', 'alice', 'p@ss'],
     ['a % that is not valid percent-encoding (kept raw)', 'https://alice:100%zz@host.example/', 'https://host.example/', 'alice', '100%zz'],
+    ['a stray % next to a character the parser encodes', 'https://alice:Ab^c%9@host.example/', 'https://host.example/', 'alice', 'Ab^c%9'],
+    ['an escape run that is not valid UTF-8 (kept as-is)', 'https://alice:x%E2%82y%41@host.example/', 'https://host.example/', 'alice', 'x%E2%82yA'],
     ['an IPv6 host', 'http://u:pw@[::1]:8000/api', 'http://[::1]:8000/api', 'u', 'pw'],
     ['a username only', 'https://bob@host.example/', 'https://host.example/', 'bob', ''],
     ['path, query and fragment', 'https://u:p@h.example/a/b?c=1&d=2#e', 'https://h.example/a/b?c=1&d=2#e', 'u', 'p'],
@@ -76,6 +78,18 @@ describe('normalizeAppriseConfig', () => {
     expect(normalizeAppriseConfig({ serverUrl: LEGACY_URL, basicAuthUser: 'typed', basicAuthPassword: 'typed-pw' })).toMatchObject({
       ok: true, config: { serverUrl: STRIPPED_URL, basicAuthUser: 'typed', basicAuthPassword: 'typed-pw' },
     });
+  });
+
+  it('takes the username from the URL together with its password when that fills a masked field', () => {
+    const result = normalizeAppriseConfig({ serverUrl: 'https://bob:newpw@host.example/', basicAuthUser: 'alice', basicAuthPassword: MASK });
+
+    expect(result).toEqual({ ok: true, config: { serverUrl: 'https://host.example/', basicAuthUser: 'bob', basicAuthPassword: 'newpw' } });
+  });
+
+  it('keeps a typed username when a typed password wins over the URL', () => {
+    const result = normalizeAppriseConfig({ serverUrl: 'https://bob:urlpw@host.example/', basicAuthUser: 'alice', basicAuthPassword: 'typed' });
+
+    expect(result).toMatchObject({ ok: true, config: { basicAuthUser: 'alice', basicAuthPassword: 'typed' } });
   });
 
   it('a username-only URL sets the username and leaves the password field alone', () => {
@@ -165,6 +179,29 @@ describe('NotificationService (apprise credentials)', () => {
     expect(service.migrateStoredConfig('ntfy', { serverUrl: 'https://u:p@ntfy.example', accessToken: 'enc' })).toBeNull();
   });
 
+  it('refuses a non-text secret value instead of storing it', () => {
+    const result = service.prepareSubmittedConfig('apprise', { serverUrl: 'http://apprise:8000', authToken: 424242 });
+
+    expect(result).toEqual({ ok: false, error: 'Auth Token must be text.' });
+  });
+
+  it('encryptConfig refuses a non-text secret without repeating the value', () => {
+    let message = '';
+    try {
+      service.encryptConfig('apprise', { serverUrl: 'http://apprise:8000', authToken: 424242 });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toBe('Sensitive field "authToken" is not text');
+  });
+
+  it('shows only the host part of an unparseable server URL that holds credentials', () => {
+    const masked = service.maskConfig('apprise', { serverUrl: 'alice:hunter2@apprise:8000', urls: enc.encrypt('x') });
+
+    expect(masked.serverUrl).toBe('apprise:8000');
+    expect(JSON.stringify(masked)).not.toContain('hunter2');
+  });
+
   it('shows a legacy row in its migrated form: no credentials in the URL, password masked', () => {
     const masked = service.maskConfig('apprise', { serverUrl: LEGACY_URL, urls: enc.encrypt('slack://t') });
 
@@ -243,6 +280,39 @@ describe('NotificationService.migrateStoredSecrets', () => {
   });
 });
 
+describe('NotificationService.reEncryptUnprotectedBackends', () => {
+  const service = new NotificationService();
+
+  beforeEach(() => {
+    prismaMock.notificationBackend.findMany.mockReset();
+    prismaMock.notificationBackend.update.mockReset();
+  });
+
+  it('skips a non-text secret and still re-encrypts the other rows', async () => {
+    prismaMock.notificationBackend.findMany.mockResolvedValue([
+      { id: 'a', type: 'apprise', name: 'A', config: { serverUrl: 'http://apprise:8000', authToken: 424242 } },
+      { id: 'b', type: 'apprise', name: 'B', config: { serverUrl: 'http://apprise:8000', urls: 'slack://plain' } },
+    ]);
+    prismaMock.notificationBackend.update.mockResolvedValue({});
+
+    await expect(service.reEncryptUnprotectedBackends()).resolves.toBe(1);
+    const call = prismaMock.notificationBackend.update.mock.calls[0][0];
+    expect(call.where).toEqual({ id: 'b' });
+    expect(enc.decrypt(call.data.config.urls)).toBe('slack://plain');
+  });
+
+  it('continues past a row whose update fails', async () => {
+    prismaMock.notificationBackend.findMany.mockResolvedValue([
+      { id: 'a', type: 'apprise', name: 'A', config: { urls: 'one' } },
+      { id: 'b', type: 'apprise', name: 'B', config: { urls: 'two' } },
+    ]);
+    prismaMock.notificationBackend.update.mockRejectedValueOnce(new Error('db hiccup')).mockResolvedValueOnce({});
+
+    await expect(service.reEncryptUnprotectedBackends()).resolves.toBe(1);
+    expect(prismaMock.notificationBackend.update).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('AppriseProvider.send', () => {
   const provider = new AppriseProvider();
   const payload = { event: 'request_available', title: 'T', author: 'A', userName: 'U', timestamp: new Date() } as any;
@@ -272,6 +342,12 @@ describe('AppriseProvider.send', () => {
     expect(sent().url).not.toContain('alice');
     expect(sent().url).not.toContain('p%40ss');
     expect(sent().auth.Authorization).toBe(basic('alice', 'p@ss:word'));
+  });
+
+  it('ignores URL credentials when either Basic Auth field is set', async () => {
+    await provider.send({ serverUrl: LEGACY_URL, basicAuthUser: 'svc', urls: 'x://y' }, payload);
+
+    expect(sent().auth.Authorization).toBe(basic('svc', ''));
   });
 
   it('keeps a malformed % in a legacy password as typed', async () => {

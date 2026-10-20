@@ -37,8 +37,8 @@ export class AppriseProvider implements INotificationProvider {
     iconColor: 'bg-purple-500',
     configFields: [
       { name: 'serverUrl', label: 'Server URL', type: 'text', required: true, placeholder: 'http://apprise:8000', helpText: 'Without credentials; use the Basic Auth fields below.' },
-      { name: 'basicAuthUser', label: 'Basic Auth Username', type: 'text', required: false, placeholder: 'Optional' },
-      { name: 'basicAuthPassword', label: 'Basic Auth Password', type: 'password', required: false, placeholder: 'Optional' },
+      { name: 'basicAuthUser', label: 'Basic Auth Username', type: 'text', required: false },
+      { name: 'basicAuthPassword', label: 'Basic Auth Password', type: 'password', required: false, helpText: 'Not used when an Auth Token is set (the token takes precedence).' },
       { name: 'urls', label: 'Notification URLs', type: 'password', required: false, placeholder: 'slack://token, discord://webhook_id/token, ...' },
       { name: 'configKey', label: 'Config Key', type: 'text', required: false, placeholder: 'Persistent configuration key' },
       { name: 'tag', label: 'Tag', type: 'text', required: false, placeholder: 'Filter tag for stateful config' },
@@ -70,17 +70,19 @@ export class AppriseProvider implements INotificationProvider {
       'Content-Type': 'application/json',
     };
 
-    // Basic auth from the fields; credentials still inside a legacy URL are the fallback.
-    // The request URL never carries userinfo.
-    const user = appriseConfig.basicAuthUser || split.user;
-    const password = appriseConfig.basicAuthPassword || split.password;
+    // Basic auth from the fields; credentials still inside a legacy URL are used only when
+    // both fields are empty (as the migration and maskConfig treat them). The request URL
+    // never carries userinfo.
+    const fromFields = Boolean(appriseConfig.basicAuthUser || appriseConfig.basicAuthPassword);
+    const user = fromFields ? appriseConfig.basicAuthUser || '' : split.user;
+    const password = fromFields ? appriseConfig.basicAuthPassword || '' : split.password;
     if (user || password) {
       headers['Authorization'] = `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`;
     }
 
     const notificationType = SEVERITY_TYPES[meta.severity];
 
-    // Explicit authToken (Bearer) takes precedence over URL-embedded credentials
+    // An auth token (Bearer) takes precedence over Basic auth
     if (appriseConfig.authToken) {
       headers['Authorization'] = `Bearer ${appriseConfig.authToken}`;
     }

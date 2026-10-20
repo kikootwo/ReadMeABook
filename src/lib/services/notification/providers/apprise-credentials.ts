@@ -9,8 +9,7 @@
  * Nothing here ever puts a value back into a URL, and errors never include the URL.
  */
 
-/** Placeholder the UI sends for a saved secret (same value as MASKED_CONFIG_VALUE) */
-const MASK = '••••••••';
+import { MASKED_CONFIG_VALUE as MASK } from '../INotificationProvider';
 
 export interface UrlCredentials {
   /** serverUrl with any userinfo removed (path, query and port kept) */
@@ -20,13 +19,20 @@ export interface UrlCredentials {
   hadUserinfo: boolean;
 }
 
-/** decodeURIComponent that keeps the raw text when it is not valid percent-encoding */
-function decodeLenient(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
+/**
+ * Undo the URL parser's percent-encoding of userinfo. Each run of valid %XX escapes is
+ * decoded on its own, so one stray '%' (e.g. "Ab^c%9", which the parser stores as
+ * "Ab%5Ec%9") does not stop the other escapes from decoding. A run that is not valid
+ * UTF-8 is kept as-is.
+ */
+export function decodeUserinfo(value: string): string {
+  return value.replace(/(?:%[0-9a-fA-F]{2})+/g, (run) => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run;
+    }
+  });
 }
 
 /**
@@ -43,8 +49,8 @@ export function splitUrlCredentials(value: string): UrlCredentials | null {
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
   const hadUserinfo = parsed.username !== '' || parsed.password !== '';
-  const user = decodeLenient(parsed.username);
-  const password = decodeLenient(parsed.password);
+  const user = decodeUserinfo(parsed.username);
+  const password = decodeUserinfo(parsed.password);
   parsed.username = '';
   parsed.password = '';
   return { url: hadUserinfo ? parsed.toString() : value.trim(), user, password, hadUserinfo };
@@ -60,7 +66,8 @@ export type AppriseNormalizeResult =
  * Normalise a submitted Apprise config (POST, PUT before merging, test route):
  * credentials typed into serverUrl move into the fields and are stripped from the URL.
  * The URL's password fills basicAuthPassword when that field is empty, missing or the
- * mask; a non-empty typed value wins. A URL that does not parse but contains '@' is
+ * mask (and then the URL's username replaces basicAuthUser, so the pair stays together);
+ * a non-empty typed password wins, and the username is only filled when blank. A URL that does not parse but contains '@' is
  * refused, since its credentials cannot be removed safely.
  */
 export function normalizeAppriseConfig(config: Record<string, any>): AppriseNormalizeResult {
@@ -80,9 +87,12 @@ export function normalizeAppriseConfig(config: Record<string, any>): AppriseNorm
   if (!split.hadUserinfo) return { ok: true, config: { ...config } };
 
   const next: Record<string, any> = { ...config, serverUrl: split.url };
-  if (isBlank(next.basicAuthUser) && split.user) next.basicAuthUser = split.user;
-  if ((isBlank(next.basicAuthPassword) || next.basicAuthPassword === MASK) && split.password) {
+  const urlSuppliesPassword = Boolean(split.password) && (isBlank(next.basicAuthPassword) || next.basicAuthPassword === MASK);
+  if (urlSuppliesPassword) {
     next.basicAuthPassword = split.password;
+    next.basicAuthUser = split.user;
+  } else if (isBlank(next.basicAuthUser) && split.user) {
+    next.basicAuthUser = split.user;
   }
   return { ok: true, config: next };
 }
