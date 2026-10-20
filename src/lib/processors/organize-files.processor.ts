@@ -814,6 +814,8 @@ async function processEbookOrganization(
   // Check if Kindle EPUB fix is needed
   let effectiveDownloadPath = downloadPath;
   let fixedEpubPath: string | null = null;
+  // Request note when a Kindle-fixed copy failed its read-back check (the original is imported)
+  let kindleFixNote: string | null = null;
 
   // Detect the actual EPUB file path (handles both single file and directory downloads)
   const epubFilePath = await detectEpubFilePath(downloadPath);
@@ -845,8 +847,11 @@ async function processEbookOrganization(
           logger.info(`Kindle fixes applied: encoding=${encodingFixes}, bodyIdLinks=${bodyIdLinkFixes}, language=${languageFix}, strayImages=${strayImgFixes}`);
         }
       } else {
-        // Fix failed - continue with original file
+        // Fix failed - continue with original file (its own placement is the import evidence)
         logger.warn(`Kindle EPUB fix failed: ${fixResult.error}. Continuing with original file.`);
+        if (fixResult.verificationFailed) {
+          kindleFixNote = 'Kindle fix could not be verified; original imported';
+        }
       }
     } else {
       logger.info('Kindle EPUB fix disabled - organizing original file');
@@ -903,7 +908,8 @@ async function processEbookOrganization(
   // The organizer reads a temp copy when the Kindle fix ran; the original is epubFilePath
   const importedFile = fixedEpubPath ? epubFilePath : result.sourceFile;
   const ebookEvidence = await buildEbookEvidence(result, importedFile ?? undefined, downloadPath);
-  const ebookMessage = reportImportStatus(ebookEvidence, logger, { folderRemovalPlanned: cleanupKind === 'indexer' });
+  const ebookMessage = [kindleFixNote, reportImportStatus(ebookEvidence, logger, { folderRemovalPlanned: cleanupKind === 'indexer' })]
+    .filter(Boolean).join('; ') || null;
 
   // Update book record with file path
   await prisma.audiobook.update({

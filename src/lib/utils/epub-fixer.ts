@@ -10,6 +10,10 @@
  * 2. Body ID link fix - Removes #bodyid fragments from hyperlinks
  * 3. Language validation - Ensures dc:language uses Amazon KDP-approved codes
  * 4. Stray IMG removal - Removes <img> tags without src attributes
+ *
+ * The written copy is re-opened and checked (entry names, CRCs, sha256 of every entry
+ * against what was meant to be written) before it is reported as a success; a copy that
+ * fails is deleted and the caller imports the original instead.
  */
 
 import AdmZip from 'adm-zip';
@@ -18,6 +22,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { RMABLogger } from './logger';
 import { getConfigService } from '../services/config.service';
+import { intendedEntries, verifyWrittenEpub } from './epub-verify';
 
 const moduleLogger = RMABLogger.create('EpubFixer');
 
@@ -61,6 +66,8 @@ export interface EpubFixResult {
     strayImgFixes: number;
   };
   error?: string;
+  /** True when the fixed copy was written but failed its read-back check (and was deleted). */
+  verificationFailed?: boolean;
 }
 
 /**
@@ -214,8 +221,20 @@ export async function fixEpubForKindle(
     const sourceFilename = path.basename(sourcePath);
     const outputPath = path.join(uniqueDir, sourceFilename);
 
-    // Write fixed EPUB
+    // Write fixed EPUB, then read it back: only a copy that matches what was meant to be
+    // written may be imported (a truncated or corrupted copy would replace the original)
+    const intended = intendedEntries(zip);
     zip.writeZip(outputPath);
+    const problem = verifyWrittenEpub(outputPath, intended);
+    if (problem) {
+      await fs.rm(uniqueDir, { recursive: true, force: true }).catch(() => undefined);
+      const message = `Fixed EPUB failed verification: ${problem}`;
+      if (logger) await logger.warn(message);
+      else moduleLogger.warn(message);
+      result.error = message;
+      result.verificationFailed = true;
+      return result;
+    }
 
     await logger?.info(`Fixed EPUB written to temp directory, preserving filename: ${sourceFilename}`);
 

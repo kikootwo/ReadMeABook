@@ -9,13 +9,29 @@
 
 import AdmZip from 'adm-zip';
 import fs from 'fs/promises';
+import { writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const warn = vi.hoisted(() => vi.fn());
+// adm-zip builds its methods per instance, so writes are intercepted through a thin wrapper:
+// when `writeHook.bytes` is set, writeZip(target) writes those bytes instead of the archive.
+const writeHook = vi.hoisted(() => ({ bytes: null as null | ((zip: any) => Buffer) }));
+vi.mock('adm-zip', async (importOriginal) => {
+  const Real = ((await importOriginal()) as { default: any }).default;
+  function Wrapped(this: unknown, ...args: unknown[]) {
+    const zip = new Real(...args);
+    const realWrite = zip.writeZip.bind(zip);
+    zip.writeZip = (target: string, ...rest: unknown[]) =>
+      writeHook.bytes ? writeFileSync(target, writeHook.bytes(zip)) : realWrite(target, ...rest);
+    return zip;
+  }
+  return { default: Wrapped };
+});
 vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => ({ get: async () => null }) }));
 vi.mock('@/lib/utils/logger', () => ({
-  RMABLogger: { create: () => ({ info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() }), forJob: vi.fn() },
+  RMABLogger: { create: () => ({ info: vi.fn(), debug: vi.fn(), warn, error: vi.fn() }), forJob: vi.fn() },
 }));
 
 const CONTAINER = `<?xml version="1.0" encoding="UTF-8"?>
@@ -109,6 +125,85 @@ describe('fixEpubForKindle round trip', () => {
 
     // The source is left untouched
     expect(new AdmZip(source).readAsText('OEBPS/ch1.xhtml')).toBe(CH1);
+  });
+
+  describe('read-back verification of the written copy', () => {
+    afterEach(() => {
+      writeHook.bytes = null;
+    });
+
+    /** Make the fixer's writeZip produce `bytes(zip)` instead of the real archive. */
+    function writeInstead(bytes: (zip: AdmZip) => Buffer) {
+      writeHook.bytes = bytes;
+    }
+
+    async function fixAndExpectRejected(reason: RegExp) {
+      const { fixEpubForKindle } = await import('@/lib/utils/epub-fixer');
+      const result = await fixEpubForKindle(source, dir);
+
+      expect(result).toMatchObject({ success: false, outputPath: null, verificationFailed: true });
+      expect(result.error).toMatch(reason);
+      // The bad copy and its temp folder are gone; the source is untouched
+      expect((await fs.readdir(dir)).filter((n) => n.startsWith('kindle-fix-'))).toEqual([]);
+      expect(new AdmZip(source).readAsText('OEBPS/ch1.xhtml')).toBe(CH1);
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(reason));
+      return result;
+    }
+
+    it('accepts a copy that reads back as written', async () => {
+      const { fixEpubForKindle } = await import('@/lib/utils/epub-fixer');
+      const result = await fixEpubForKindle(source, dir);
+
+      expect(result.success).toBe(true);
+      expect(result.verificationFailed).toBeUndefined();
+    });
+
+    it('rejects a truncated copy', async () => {
+      writeInstead((zip) => {
+        const full = zip.toBuffer();
+        return full.subarray(0, Math.floor(full.length / 2));
+      });
+      await fixAndExpectRejected(/could not be opened/);
+    });
+
+    it('rejects a copy whose entry data is corrupted, naming the entry and never its content', async () => {
+      writeInstead((zip) => {
+        const full = Buffer.from(zip.toBuffer());
+        // mimetype is stored uncompressed, so its bytes appear verbatim in the archive
+        const at = full.indexOf('application/epub+zip');
+        expect(at).toBeGreaterThan(0);
+        full[at + 3] ^= 0x20;
+        return full;
+      });
+      const result = await fixAndExpectRejected(/entry "mimetype"/);
+      expect(result.error).not.toMatch(/epub\+zip/);
+    });
+
+    it('rejects a valid archive whose entry differs from what the fixer meant to write', async () => {
+      writeInstead((zip) => {
+        const copy = new AdmZip(zip.toBuffer());
+        copy.updateFile('OEBPS/ch2.xhtml', Buffer.from('tampered chapter text'));
+        return copy.toBuffer();
+      });
+      const result = await fixAndExpectRejected(/entry "OEBPS\/ch2\.xhtml" does not match/);
+      expect(result.error).not.toContain('tampered');
+    });
+
+    it('rejects a copy with a missing or an extra entry', async () => {
+      writeInstead((zip) => {
+        const copy = new AdmZip(zip.toBuffer());
+        copy.deleteFile('OEBPS/pic.png');
+        return copy.toBuffer();
+      });
+      await fixAndExpectRejected(/entry "OEBPS\/pic\.png" is missing/);
+
+      writeInstead((zip) => {
+        const copy = new AdmZip(zip.toBuffer());
+        copy.addFile('OEBPS/extra.xhtml', Buffer.from('x'));
+        return copy.toBuffer();
+      });
+      await fixAndExpectRejected(/unexpected entry "OEBPS\/extra\.xhtml"/);
+    });
   });
 
   it('reports a missing source without throwing', async () => {

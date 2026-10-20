@@ -12,12 +12,30 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
+import AdmZip from 'adm-zip';
 
 const prismaMock = createPrismaMock();
 const organizerMock = vi.hoisted(() => ({ organize: vi.fn(), organizeEbook: vi.fn() }));
 const jobQueueMock = vi.hoisted(() => ({ addNotificationJob: vi.fn(() => Promise.resolve()) }));
 const configMock = vi.hoisted(() => ({ getBackendMode: vi.fn(), get: vi.fn() }));
 const postProcess = vi.hoisted(() => vi.fn(async () => undefined));
+// adm-zip builds its methods per instance: a thin wrapper lets a test make the Kindle
+// fixer's writeZip produce a truncated file
+const truncateWrites = vi.hoisted(() => ({ on: false }));
+vi.mock('adm-zip', async (importOriginal) => {
+  const Real = ((await importOriginal()) as { default: any }).default;
+  function Wrapped(this: unknown, ...args: unknown[]) {
+    const zip = new Real(...args);
+    const realWrite = zip.writeZip.bind(zip);
+    zip.writeZip = (target: string, ...rest: unknown[]) => {
+      if (!truncateWrites.on) return realWrite(target, ...rest);
+      const full: Buffer = zip.toBuffer();
+      fs.writeFileSync(target, full.subarray(0, Math.floor(full.length / 2)));
+    };
+    return zip;
+  }
+  return { default: Wrapped };
+});
 
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/utils/file-organizer', () => ({ getFileOrganizer: () => organizerMock }));
@@ -362,6 +380,64 @@ describe('verified-import cleanup', () => {
 
       expect(requestUpdateData()).toMatchObject({ status: 'downloaded', errorMessage: 'already in the library with different content; source kept' });
       expect(fs.existsSync(imported)).toBe(true);
+    });
+
+    describe('with the Kindle EPUB fix enabled', () => {
+      let tempDir: string;
+      let download: string;
+      let original: string;
+
+      beforeEach(() => {
+        tempDir = path.join(root, 'tmp');
+        vi.stubEnv('TEMP_DIR', tempDir);
+        configMock.get.mockImplementation(async (key: string) => {
+          if (key === 'prowlarr_indexers') return JSON.stringify(indexers);
+          if (key === 'ebook_kindle_fix_enabled') return 'true';
+          return null;
+        });
+        download = path.join(downloads, 'Ebook');
+        fs.mkdirSync(download, { recursive: true });
+        original = path.join(download, 'Book.epub');
+        const zip = new AdmZip();
+        zip.addFile('mimetype', Buffer.from('application/epub+zip'));
+        zip.addFile('OEBPS/content.opf', Buffer.from('<package><metadata><dc:language>english</dc:language></metadata></package>'));
+        zip.addFile('OEBPS/ch1.xhtml', Buffer.from('<html><body><p>One</p></body></html>'));
+        fs.writeFileSync(original, zip.toBuffer());
+        useCompletedDownload(download);
+        organizerMock.organizeEbook.mockImplementation(async (sourcePath: string) => ({
+          success: true, targetPath: path.join(media, 'Author', 'Book'), format: 'epub', errors: [],
+          sourceFile: sourcePath,
+          record: { source: sourcePath, target: path.join(media, 'Author', 'Book', 'Book.epub'), status: 'copied', verified: true },
+        }));
+      });
+
+      afterEach(() => {
+        truncateWrites.on = false;
+        vi.unstubAllEnvs();
+      });
+
+      it('imports the verified fixed copy, keyed on the original', async () => {
+        await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
+
+        const imported = organizerMock.organizeEbook.mock.calls[0][0] as string;
+        expect(imported).not.toBe(original);
+        expect(imported).toContain(`${path.sep}kindle-fix-`);
+        expect(requestUpdateData()).toMatchObject({ status: 'downloaded', errorMessage: null });
+      });
+
+      it('imports the original when the fixed copy fails its read-back check, and says so', async () => {
+        truncateWrites.on = true;
+
+        await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
+
+        // The organizer got the original EPUB, never the truncated copy
+        expect(organizerMock.organizeEbook.mock.calls[0][0]).toBe(download);
+        expect(fs.readdirSync(tempDir).filter((n) => n.startsWith('kindle-fix-'))).toEqual([]);
+        expect(requestUpdateData()).toMatchObject({
+          status: 'downloaded',
+          errorMessage: 'Kindle fix could not be verified; original imported',
+        });
+      });
     });
 
     it('removes an ebook download folder that holds only the imported ebook', async () => {

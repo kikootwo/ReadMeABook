@@ -94,6 +94,7 @@ A scheduled `find_missing_ebooks` job (daily midnight, enabled by default) backs
 - Creates temp fixed file → organizes temp file → cleans up temp file
 - Original download file stays intact (important for seeding torrents)
 - Non-blocking: if fix fails, continues with original file
+- **Read-back check** (`src/lib/utils/epub-verify.ts`): after `writeZip`, the copy is re-opened; entry names must match and every entry must read back (adm-zip CRC check) with the sha256 the fixer meant to write. On failure: temp copy deleted, warn log naming the entry (never content), `verificationFailed: true` → the original EPUB is imported and the request message is `Kindle fix could not be verified; original imported`
 
 **Source:** Based on [kindle-epub-fix](https://github.com/innocenat/kindle-epub-fix)
 
@@ -233,6 +234,7 @@ Search: https://annas-archive.gl/search?q=Title+Author&ext=epub&lang=en
 - `src/lib/utils/ranking-algorithm.ts` (`rankEbookTorrents` function)
 - `src/lib/utils/indexer-grouping.ts` (supports `'ebook'` type)
 - `src/lib/utils/epub-fixer.ts` (Kindle EPUB compatibility fixes)
+- `src/lib/utils/epub-verify.ts` (read-back check of the fixed copy)
 
 **UI:**
 - `src/components/requests/RequestCard.tsx` (ebook badge)

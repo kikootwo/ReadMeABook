@@ -305,8 +305,9 @@ When user deletes and re-requests the same audiobook:
 | source folder not fully readable | `... source folder could not be fully read; source files kept` |
 | tagged file failed its length check or could not be saved (untagged original copied) | `the file was imported without metadata tags (<reasons>)` (one-file book), `1 file imported ...`, or `<n> of <m> files imported ...`; counted per library file (a merge is one), every distinct reason listed (`the length could not be checked`, `the tagged version had a different length`, `the tagged version could not be saved to the library`); appended with `; ` to any message above |
 | ebook download that cleanup would remove (`downloadCleanupKind` = `indexer`) holds more ebook files than were imported; import itself complete | `download kept: it holds several ebook formats and only one was imported; remove it from the download client once you no longer need the others` (`several ebook files` when they share one extension) |
+| Kindle-fixed EPUB failed its read-back check (ebooks) | `Kindle fix could not be verified; original imported` (placed before any message above, joined with `; `) |
 
-- Kindle-fixed EPUB: the library gets the fixed copy; the original EPUB counts as imported once that copy is placed (`copied`/`identical`).
+- Kindle-fixed EPUB: the library gets the fixed copy only after it passes its read-back check (entries + CRCs + hashes); the original EPUB then counts as imported once that copy is placed (`copied`/`identical`). A copy that fails the check is never imported: the original is placed instead (its own byte-verified placement is the evidence) and the message is `Kindle fix could not be verified; original imported`.
 - EPUB folders: other files next to the ebook (cover, opf, extras) are not verified and go with the folder when it is removed.
 - Not covered here: seeded-torrent cleanup (`cleanup_seeded_torrents`) removes torrent data after seeding without import evidence, and library matching clears the partial-import message. Tracked separately.
 
