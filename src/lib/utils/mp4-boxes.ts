@@ -38,14 +38,32 @@ export interface TrackTables {
   /** Offset of the first stco/co64 entry inside the moov buffer. */
   entriesStart: number;
   wide: boolean; // co64
-  offsets: number[];
-  chunkSizes: number[];
+  /** Typed arrays: 16 bytes per chunk, about what the moov's own tables hold. */
+  offsets: Float64Array;
+  chunkSizes: Float64Array;
 }
 
-export interface MoovAnalysis {
+interface MetaPath {
+  udta: BoxRef;
+  meta: BoxRef;
+  metaSkip: number; // 4 for a full box (ISO), 0 for the QuickTime form
+  ilst: BoxRef;
+}
+
+export interface MoovAnalysis extends MetaPath {
+  /** The moov box and its children (offsets inside the moov buffer). */
+  moov: BoxRef;
+  kids: BoxRef[];
   tracks: TrackTables[];
   /** ilst items (offsets inside the moov buffer). */
   items: BoxRef[];
+}
+
+/** Payload range [start, end) of a top-level mdat and how far the rewrite moves it. */
+export interface MdatShift {
+  start: number;
+  end: number;
+  shift: number;
 }
 
 export interface CopySegment {
@@ -62,8 +80,14 @@ export interface RewritePlan {
   segments: CopySegment[];
   outputSize: number;
   oldTracks: TrackTables[];
-  /** Per track, the chunk offsets the output must hold. */
-  expectedOffsets: number[][];
+  /** Where each chunk lands: its input offset plus the shift of its mdat (see shiftedOffset). */
+  mdatShifts: MdatShift[];
+}
+
+/** Output offset of the chunk at input `offset` (refused when no mdat payload holds it). */
+export function shiftedOffset(shifts: MdatShift[], offset: number, length = 0): number {
+  const owner = shifts.find((m) => offset >= m.start && offset + length <= m.end);
+  return owner ? offset + owner.shift : fail(`chunk at ${offset} is not inside an mdat box`);
 }
 
 const TOP_LEVEL_ALLOWED = new Set(['ftyp', 'free', 'skip', 'wide', 'mdat', 'moov']);
@@ -153,10 +177,10 @@ function readTrack(buf: Buffer, trak: BoxRef): TrackTables {
   const wide = table.type === 'co64';
   const count = buf.readUInt32BE(fullPayload(table));
   if (table.size !== table.headerSize + 8 + count * (wide ? 8 : 4)) fail(`${table.type} size does not match its entry count`);
-  const offsets: number[] = [];
+  const offsets = new Float64Array(count);
   for (let i = 0; i < count; i++) {
     const at = fullPayload(table) + 4 + i * (wide ? 8 : 4);
-    offsets.push(wide ? Number(buf.readBigUInt64BE(at)) : buf.readUInt32BE(at));
+    offsets[i] = wide ? Number(buf.readBigUInt64BE(at)) : buf.readUInt32BE(at);
   }
   if (stblKids.some((b) => b.type === 'stz2')) fail('stz2 sample sizes are not supported');
   const chunkSizes = readChunkSizes(buf, only(stblKids, 'stsc', 'stbl'), only(stblKids, 'stsz', 'stbl'), count);
@@ -164,7 +188,7 @@ function readTrack(buf: Buffer, trak: BoxRef): TrackTables {
 }
 
 /** Byte size of each chunk, from stsc (samples per chunk) and stsz (sample sizes). */
-function readChunkSizes(buf: Buffer, stsc: BoxRef, stsz: BoxRef, chunkCount: number): number[] {
+function readChunkSizes(buf: Buffer, stsc: BoxRef, stsz: BoxRef, chunkCount: number): Float64Array {
   const runs = buf.readUInt32BE(fullPayload(stsc));
   if (stsc.size !== stsc.headerSize + 8 + runs * 12) fail('stsc size does not match its entry count');
   const fixedSize = buf.readUInt32BE(fullPayload(stsz));
@@ -172,23 +196,24 @@ function readChunkSizes(buf: Buffer, stsc: BoxRef, stsz: BoxRef, chunkCount: num
   const sizesAt = fullPayload(stsz) + 8;
   if (fixedSize === 0 && stsz.size !== stsz.headerSize + 12 + sampleCount * 4) fail('stsz size does not match its sample count');
 
-  const sizes: number[] = [];
+  const sizes = new Float64Array(chunkCount);
+  let filled = 0;
   let sample = 0;
   for (let r = 0; r < runs; r++) {
     const at = fullPayload(stsc) + 4 + r * 12;
     const first = buf.readUInt32BE(at);
     const perChunk = buf.readUInt32BE(at + 4);
     const next = r + 1 < runs ? buf.readUInt32BE(at + 12) : chunkCount + 1;
-    if (first !== sizes.length + 1 || next <= first) fail('invalid stsc run');
+    if (first !== filled + 1 || next <= first) fail('invalid stsc run');
     for (let chunk = first; chunk < next && chunk <= chunkCount; chunk++) {
       if (sample + perChunk > sampleCount) fail('stsc references more samples than stsz holds');
-      let bytes = 0;
-      for (let s = 0; s < perChunk; s++) bytes += fixedSize || buf.readUInt32BE(sizesAt + (sample + s) * 4);
-      sizes.push(bytes);
+      let bytes = perChunk * fixedSize; // fixed sample size: no per-sample table
+      if (fixedSize === 0) for (let s = 0; s < perChunk; s++) bytes += buf.readUInt32BE(sizesAt + (sample + s) * 4);
+      sizes[filled++] = bytes;
       sample += perChunk;
     }
   }
-  if (sizes.length !== chunkCount) fail('stsc does not cover every chunk');
+  if (filled !== chunkCount) fail('stsc does not cover every chunk');
   return sizes;
 }
 
@@ -203,13 +228,6 @@ function countTableCodes(buf: Buffer, start: number, end: number): number {
     }
   }
   return count;
-}
-
-interface MetaPath {
-  udta: BoxRef;
-  meta: BoxRef;
-  metaSkip: number; // 4 for a full box (ISO), 0 for the QuickTime form
-  ilst: BoxRef;
 }
 
 function findMeta(buf: Buffer, moovKids: BoxRef[]): MetaPath {
@@ -230,7 +248,8 @@ export function analyzeMoov(buf: Buffer): MoovAnalysis {
   if (kids.some((b) => b.type === 'mvex')) fail('fragmented MP4 is not supported');
   const tracks = kids.filter((b) => b.type === 'trak').map((trak) => readTrack(buf, trak));
   if (tracks.length === 0) fail('no tracks');
-  const { udta, ilst } = findMeta(buf, kids);
+  const metaPath = findMeta(buf, kids);
+  const { udta, ilst } = metaPath;
 
   // Census: a chunk offset table the parser did not reach (e.g. inside a box it
   // does not walk) would leave stale offsets, so every table code outside the
@@ -238,7 +257,7 @@ export function analyzeMoov(buf: Buffer): MoovAnalysis {
   const census = countTableCodes(buf, 0, udta.start) + countTableCodes(buf, udta.start + udta.size, buf.length);
   if (census !== tracks.length) fail(`found ${census} chunk offset table codes for ${tracks.length} tables`);
 
-  return { tracks, items: childrenOf(buf, ilst) };
+  return { ...metaPath, moov, kids, tracks, items: childrenOf(buf, ilst) };
 }
 
 /** mean/name/value of a '----' item, or null for any other item. */
@@ -296,23 +315,18 @@ const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 /**
  * Plan the rewrite. `top` is the input's top-level boxes (absolute offsets,
- * covering the file), `moovBuf` the moov box bytes.
+ * covering the file), `moovBuf` the moov box bytes. To keep peak memory near
+ * 2x the moov, `moovBuf` is the scratch copy: its chunk offsets are shifted in
+ * place and the new moov is assembled from it in one allocation.
  */
 export function planFreeformRewrite(top: BoxRef[], moovBuf: Buffer, tags: FreeformTag[]): RewritePlan {
   validateTags(tags);
-  const { ftyp, moov, mdats } = validateTopLevel(top);
+  const { ftyp, moov } = validateTopLevel(top);
   if (moovBuf.length !== moov.size) fail('moov buffer does not match the moov box');
   const analysis = analyzeMoov(moovBuf);
-
-  // Every chunk lies wholly inside one mdat payload, so it moves with that mdat.
-  const containing = (offset: number, length: number) =>
-    mdats.find((m) => offset >= m.start + m.headerSize && offset + length <= m.start + m.size) ??
-    fail(`chunk at ${offset} is not inside an mdat box`);
-  const owners = analysis.tracks.map((t) => t.offsets.map((o, i) => containing(o, t.chunkSizes[i])));
+  const { udta, meta, metaSkip, ilst } = analysis;
 
   // New ilst: unrelated items unchanged, same-named freeform items replaced.
-  const kids = childrenOf(moovBuf, parseBoxHeader(moovBuf.subarray(0, 16), 0, moovBuf.length));
-  const { udta, meta, metaSkip, ilst } = findMeta(moovBuf, kids);
   const kept = analysis.items.filter((item) => {
     const ff = readFreeform(moovBuf, item);
     return !(ff && ff.mean === ITUNES_MEAN && tags.some((t) => sameName(t.name, ff.name)));
@@ -322,50 +336,48 @@ export function planFreeformRewrite(top: BoxRef[], moovBuf: Buffer, tags: Freefo
   const metaPrefix = moovBuf.subarray(meta.start + meta.headerSize, meta.start + meta.headerSize + metaSkip);
   const newMeta = rebox(moovBuf, meta, metaPrefix, childrenOf(moovBuf, meta, metaSkip).map((b) => (b.start === ilst.start ? newIlst : slice(b))));
   const newUdta = rebox(moovBuf, udta, Buffer.alloc(0), childrenOf(moovBuf, udta).map((b) => (b.start === meta.start ? newMeta : slice(b))));
-  const newMoovSize = moov.size - udta.size + newUdta.length;
 
   // Output order: ftyp, moov, then every other top-level box in input order.
   const segments: CopySegment[] = [];
-  let cursor = ftyp.size + newMoovSize;
-  const moved = new Map<BoxRef, number>();
+  const mdatShifts: MdatShift[] = [];
+  let cursor = ftyp.size + moov.size - udta.size + newUdta.length;
   for (const b of top) {
     if (b === ftyp || b === moov) continue;
     segments.push({ start: b.start, end: b.start + b.size, newStart: cursor });
-    moved.set(b, cursor - b.start);
+    if (b.type === 'mdat') mdatShifts.push({ start: b.start + b.headerSize, end: b.start + b.size, shift: cursor - b.start });
     cursor += b.size;
   }
 
-  // Shift each track's chunk offsets in a copy of moov, then splice in the new udta.
-  const work = Buffer.from(moovBuf);
-  const expectedOffsets = analysis.tracks.map((t, ti) =>
-    t.offsets.map((offset, i) => {
-      const next = offset + (moved.get(owners[ti][i]) as number);
+  // Every chunk lies wholly inside one mdat payload and moves with it. The
+  // tables sit outside udta, so the new udta (already copied) is unaffected.
+  for (const t of analysis.tracks) {
+    t.offsets.forEach((offset, i) => {
+      const next = shiftedOffset(mdatShifts, offset, t.chunkSizes[i]);
       const at = t.entriesStart + i * (t.wide ? 8 : 4);
-      if (t.wide) work.writeBigUInt64BE(BigInt(next), at);
+      if (t.wide) moovBuf.writeBigUInt64BE(BigInt(next), at);
       else if (next > 0xffffffff) fail('a chunk offset would exceed the 32-bit stco range');
-      else work.writeUInt32BE(next, at);
-      return next;
-    })
-  );
-  const workKids = childrenOf(work, parseBoxHeader(work.subarray(0, 16), 0, work.length));
-  const newMoov = rebox(work, { ...moov, start: 0 }, Buffer.alloc(0), workKids.map((b) => (b.start === udta.start ? newUdta : work.subarray(b.start, b.start + b.size))));
+      else moovBuf.writeUInt32BE(next, at);
+    });
+  }
+  const newMoov = rebox(moovBuf, analysis.moov, Buffer.alloc(0), analysis.kids.map((b) => (b.start === udta.start ? newUdta : slice(b))));
 
-  return { ftyp, newMoov, segments, outputSize: cursor, oldTracks: analysis.tracks, expectedOffsets };
+  return { ftyp, newMoov, segments, outputSize: cursor, oldTracks: analysis.tracks, mdatShifts };
 }
 
 /**
  * Check a rewritten moov against the plan: same tracks, every chunk offset
- * where the plan says (computed from the input, not from this moov), and each
- * tag present exactly once with its value.
+ * where the plan says (computed from the input, not from this moov), same
+ * chunk sizes, and each tag present exactly once with its value.
  */
 export function verifyRewrittenMoov(plan: RewritePlan, moovBuf: Buffer, tags: FreeformTag[]): void {
   const analysis = analyzeMoov(moovBuf);
-  if (analysis.tracks.length !== plan.expectedOffsets.length) fail('track count changed');
+  if (analysis.tracks.length !== plan.oldTracks.length) fail('track count changed');
   analysis.tracks.forEach((t, ti) => {
-    const expected = plan.expectedOffsets[ti];
-    if (t.offsets.length !== expected.length || t.offsets.some((o, i) => o !== expected[i])) {
-      fail(`track ${ti + 1} chunk offsets do not match the plan`);
-    }
+    const old = plan.oldTracks[ti];
+    const same =
+      t.offsets.length === old.offsets.length &&
+      old.offsets.every((o, i) => t.offsets[i] === shiftedOffset(plan.mdatShifts, o) && t.chunkSizes[i] === old.chunkSizes[i]);
+    if (!same) fail(`track ${ti + 1} chunk offsets do not match the plan`);
   });
   for (const tag of tags) {
     const matches = analysis.items

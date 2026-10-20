@@ -41,8 +41,8 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 2. Identify audiobook files (.m4b, .m4a, .mp3, .mp4, .aa, .aax, .flac, .ogg) - supports both directories and single files
 3. Read media directory and path template from database config (`media_dir`, `audiobook_path_template`)
 4. Apply template to create target path: `[media_dir]/[template result]/`
-5. **Copy** files (not move - originals stay for seeding)
-6. **Tag metadata** (if enabled) - writes correct title, author, narrator, ASIN to audio files
+5. **Tag metadata** (if enabled, before the move) - writes correct title, author, narrator, ASIN to tagged copies of the audio files
+6. **ASIN step** - adds the MP4 freeform `ASIN` to the file about to be placed, when RMAB wrote it (see MP4 Freeform Tags), then **copy** files (not move - originals stay for seeding)
 7. Copy cover art if found, else download from Audible. `coverArtUrl` must be a cached thumbnail `/api/cache/thumbnails/<file>` (plain file name, resolved in `/app/cache/thumbnails`) or an https URL on `COVER_ART_HOSTS` (`*.media-amazon.com`, `*.ssl-images-amazon.com`, `*.images-amazon.com`), up to `MAX_COVER_ART_REDIRECTS` (3) redirects with every hop checked; anything else is skipped with a warning (`src/lib/utils/cover-art-url.ts`). An existing `cover.jpg` is never replaced and not fetched for (kept, debug log; a re-import with the same cover lands here too); an empty regular-file `cover.jpg` (older interrupted write) counts as missing and is replaced (`replace` publish, size re-checked under the lock). New covers are published like audio (`src/lib/utils/cover-placement.ts` → `publishCover`): hidden partial (`copyFile` for a cached thumbnail, `writeFileAtomic` for downloaded bytes), fsync + size check, `create` publish (`EEXIST` → kept), under the per-target lock; an interrupted write leaves no `cover.jpg`. Downloaded and copied covers get the library file mode (`applyFileMode`: a refused chmod is a permission warning, a missing file a failure). At request creation, covers are stored for display if they are any http(s) URL or a safe cached path (`sanitizeCoverArtUrl`; shelf-sync Goodreads/Hardcover fallbacks stay visible); a stored cover the library can't use is replaced by a later usable one (`isLibraryCoverSource`)
 8. **Coerce file formats** (if enabled) - rename .mp4 → .m4b and single-file .m4a → .m4b for Plex compatibility (see: Plex Format Coercion below)
 9. **Generate file hash** - SHA256 of sorted audio filenames for library matching (see: [fixes/file-hash-matching.md](../fixes/file-hash-matching.md))
@@ -119,7 +119,7 @@ ffprobe -v quiet -print_format json -show_format "audiobook.m4b" | grep -i asin
 exiftool "audiobook.m4b" | grep -i asin
 ```
 
-**MP4 layout:** every tagged MP4 is written moov first (faststart): by the freeform post-step when there are freeform tags, else by ffmpeg `-movflags +faststart`. A post-step that refuses or fails leaves ffmpeg's output (moov last, no freeform tags) and logs a warning.
+**MP4 layout:** every tagged MP4 is written moov first: ffmpeg `-movflags +faststart` on the tagging pass (always), and the freeform post-step also writes moov first. A post-step that refuses or fails leaves ffmpeg's output as it is (moov first, no freeform tags) and logs a warning.
 
 ### MP4 Freeform Tags
 
@@ -129,16 +129,22 @@ exiftool "audiobook.m4b" | grep -i asin
 
 **API:**
 - `buildMp4FreeformTags(metadata)` (`metadata-tagger.ts`) → `FreeformTag[]` (`{ name, value }`); the one place new freeform fields are mapped
-- `addFreeformTags(file, tags)` → `{ written, warning? }`, never throws; writes `<file>.tags-<rand>.tmp`, verifies, renames it over `file`; no-op for `[]`
+- `addMp4FreeformTags(file, sourceExt, metadata)` (`metadata-tagger.ts`) → `{ written, warning? }`: the organizer's one call; no-op unless `sourceExt` is an MP4 container
+- `addFreeformTags(file, tags)` → `{ written, warning? }`, never throws; sweeps stale partials in the folder (`removeStalePartials`), writes a `.rmab-partial-<hash>-<rand>.part` sibling (`partialNameFor`, short name), verifies, renames it over `file`, fsyncs the folder; no-op for `[]`. A failed write removes only what this run created; a failed rename removes the verified copy
 - `writeFreeformTaggedCopy(input, output, tags)`: output must differ from input and not exist (`wx`); input is only read
 
 **Rewrite:** output = `ftyp` + new `moov` + every other top-level box in input order; existing `----` items with the same name (case-insensitive) replaced, all other ilst items byte-identical; each `stco`/`co64` entry shifted by the move of the `mdat` holding its chunk.
 
-**Refused (file unchanged, warning):** top-level box other than `ftyp/free/skip/wide/mdat/moov`; not exactly one `ftyp` (first) and `moov`; no `mdat`; `mvex`; missing `udta`/`meta`/`ilst` (never created); meta handler ≠ `mdir`; a `trak` without exactly one `stco|co64`, `stsc`, `stsz` (or with `stz2`); non-self-contained `dref`; a chunk not wholly inside an `mdat` payload; `stco`/`co64` code count in moov (outside `udta`) ≠ tables read; a shifted `stco` entry > 0xFFFFFFFF; moov > 128 MiB.
+**Refused (file unchanged, warning):** top-level box other than `ftyp/free/skip/wide/mdat/moov`; not exactly one `ftyp` (first) and `moov`; no `mdat`; `mvex`; missing `udta`/`meta`/`ilst` (never created); meta handler ≠ `mdir`; a `trak` without exactly one `stco|co64`, `stsc`, `stsz` (or with `stz2`); non-self-contained `dref`; a chunk not wholly inside an `mdat` payload; `stco`/`co64` code count in moov (outside `udta`) ≠ tables read; a shifted `stco` entry > 0xFFFFFFFF; moov > 128 MiB; more than 1000 top-level boxes.
 
-**Verification before rename:** output size and top-level layout as planned; new moov's chunk offsets = offsets computed from the input; each tag present exactly once; chunk bytes equal input's (every chunk of non-audio tracks up to 1 MiB each, 64 spread audio chunks × 4 KiB); ffprobe reads every tag. All handles closed before rename (Windows).
+**Verification:** before anything is written, the new moov's chunk offsets = offsets computed from the input, chunk sizes unchanged, each tag present exactly once; after the write and before rename: output size and top-level layout as planned, written moov bytes = the verified moov, chunk bytes equal input's (every chunk of non-audio tracks up to 1 MiB each, 64 spread audio chunks × 4 KiB), ffprobe reads every tag. All handles closed before rename (Windows).
 
-**Call sites:** tagger after ffmpeg (`${file}.tmp`); merger (`writeFreeformTags`, set by file-organizer only when `metadata_tagging_enabled` is off, since the tagging pass re-muxes the merged file and writes the tags itself).
+**Call site (one):** `file-organizer.ts`, per audio file right before placement, on the file about to be placed when RMAB wrote it: the tagged copy (`${file}.tmp`), else the merged file (tagging off, or the tagging pass failed on it). Never on a download's own file (tagging off, no merge → no ASIN in MP4s). It runs after the merge's own checks. The merger and tagger never write the ASIN; `metadata_tagging_enabled` is read once per `organize()`.
+
+**Resources:**
+- Disk: the merge check (`TEMP_DIR`) counts 2x the estimated merged size with tagging off (merged file + post-step copy) and 3x with tagging on (+ the tagged copy). A tagged single file needs 2x its size next to the download (tagged copy + post-step copy)
+- Memory: peak ≈ 2x the moov while planning (the read moov is the scratch copy, offsets shifted in place, plus the assembled new moov; then 1x) + 16 bytes per chunk (`Float64Array` offsets/sizes); moov capped at 128 MiB. Read-back compares run in 1 MiB chunks
+- Time: tagging ffmpeg timeout `ffmpegRemuxTimeoutMs(size)` = 120 s + 120 s/GiB (+faststart writes the file twice); the merger's codec-copy timeout is at least that for its estimated size
 
 **Adding a field (#208):** push `{ name: 'PUBLISHER' | 'SUBTITLE' | 'LANGUAGE', value }` in `buildMp4FreeformTags`; Audiobookshelf 2.37.1 reads `publisher`, `subtitle`, `language` from these names.
 
@@ -148,11 +154,11 @@ exiftool "audiobook.m4b" | grep -i asin
 - Configurable in: Setup wizard (Paths step), Admin settings (Paths tab)
 
 **Implementation:**
-- Uses ffmpeg with `-codec copy` (no re-encoding, metadata only), then the MP4 freeform post-step
-- Warnings (`TaggingResult.warnings`, e.g. ASIN not written) are logged; they do not fail the import
+- Uses ffmpeg with `-codec copy -movflags +faststart` for MP4 (no re-encoding, metadata only); timeout scales with the file size
+- The ASIN step (MP4 Freeform Tags) runs later, on the file being placed; its warnings are logged and do not fail the import
 - Fast (no audio transcoding)
 - Lossless (original audio preserved)
-- Runs after file copy, before cover art download
+- Runs before the move (tagged copies are placed, originals stay for seeding), before cover art download
 - Non-blocking (errors don't fail file organization)
 - Logs success/failure per file
 
@@ -387,7 +393,7 @@ async function organize(
 **11. Cover art replaced the library cover** - A cached thumbnail was copied in replace mode and a downloaded cover was written with a plain `fs.writeFile`, so an existing `cover.jpg` was overwritten and an interrupted download left a truncated one. Fixed: covers are published without replacing (see Process step 7); an empty `cover.jpg` an older version left behind is replaced. Known limit: replacing an empty cover is check-then-rename; all RMAB writers share the per-target lock, but an outside writer (e.g. Audiobookshelf storing covers with the item) landing a cover in that window would be replaced
 **12. Silent keeps** - A usenet ebook release with several formats was kept with no request message, and a tagged copy that failed its duration check only showed in job errors. Fixed: both now get a request message (see Verified Import)
 **13. Chapter merge verified a merge that lost audio** - Codec-copy AAC merges count each later chapter's priming + trimmed last packet as full frames (~69 ms/boundary at 22.05 kHz, ~35 ms at 44.1 kHz). The symmetric 1 s + 50 ms/chapter content window let that surplus cancel real loss (80 chapters, last one read short → verified) and failed correct merges past ~56 chapters (and short-chapter merges at the 2% check). Fixed: copy verified by exact packet count (same frame); re-encode shortfall capped at 1 s. VBR MP3 without a Xing header placed later chapters at ffprobe's estimate (holes, markers off) yet the merge succeeded: a timeline with gaps or an end far from the audio now fails the merge. Re-encodes of chapters with one decoded format get `asetpts=N/SR/TB` (ADTS `.aac`, Xing-less VBR MP3 verify instead of failing on estimate drift that grows with chapter length); mixed formats keep container timestamps (a filter-graph rebuild restarts the count). A re-encode over 1 s short fails the merge (rebuilt timestamps leave no gap to catch a short read)
-**14. ASIN never written into .m4b/.m4a; tagging dropped faststart (#208)** - ffmpeg's mp4 muxer silently dropped `-metadata ----:com.apple.iTunes:ASIN=…` (tagger and merger), so Audiobookshelf got no ASIN from RMAB imports (the default `{title} {asin}` folder has no `[ASIN]` brackets). The tagger also had no `+faststart`, so every tagged MP4 (merged ones included) ended moov last, undoing the merger's playback-delay fix. Fixed: MP4 Freeform Tags post-step (moov first, verified), `+faststart` when there are no freeform tags
+**14. ASIN never written into .m4b/.m4a; tagging dropped faststart (#208)** - ffmpeg's mp4 muxer silently dropped `-metadata ----:com.apple.iTunes:ASIN=…` (tagger and merger), so Audiobookshelf got no ASIN from RMAB imports (the default `{title} {asin}` folder has no `[ASIN]` brackets). The tagger also had no `+faststart`, so every tagged MP4 (merged ones included) ended moov last, undoing the merger's playback-delay fix. Fixed: MP4 Freeform Tags post-step (moov first, verified) as one organizer step on the file being placed, so the ASIN also survives a failed tagging pass after a merge; the tagger always uses `+faststart`
 
 ## Tech Stack
 

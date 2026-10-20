@@ -10,7 +10,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import fsp from 'fs/promises';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { PARTIAL_FILE_PATTERN } from '@/lib/utils/copy-file';
 import { addFreeformTags, testHooks, writeFreeformTaggedCopy } from '@/lib/utils/mp4-freeform-tags';
 import { TAGS, audioMd5, available, countFreeform, ffmpeg, makeDir, makeM4b, probe, topLevelTypes } from './mp4-tags.helpers';
 
@@ -27,7 +29,7 @@ afterEach(() => {
   testHooks.afterPlan = undefined;
 });
 
-const leftovers = () => fs.readdirSync(dir).filter((f) => f.includes('.tags-'));
+const leftovers = () => fs.readdirSync(dir).filter((f) => PARTIAL_FILE_PATTERN.test(f));
 
 describe.skipIf(!available)('addFreeformTags on ffmpeg output (real ffmpeg)', () => {
   it.each([
@@ -86,6 +88,48 @@ describe.skipIf(!available)('addFreeformTags on ffmpeg output (real ffmpeg)', ()
     expect(result.warning).toMatch(/ASIN tag not written \(track 2 chunk offsets/);
     expect(fs.readFileSync(file).equals(original)).toBe(true);
     expect(leftovers()).toEqual([]);
+  }, 60_000);
+
+  it('a failure mid-copy (input ends early) removes the partial copy; the input is untouched', async () => {
+    const file = await makeM4b(dir, 'midcopy.m4b', { faststart: false });
+    const original = fs.readFileSync(file);
+    testHooks.afterPlan = (plan) => {
+      // The last segment now runs past the end of the input: copyRange hits EOF after writing ftyp, moov and the rest
+      const last = plan.segments[plan.segments.length - 1];
+      plan.segments[plan.segments.length - 1] = { ...last, end: last.end + 4096 };
+    };
+    const result = await addFreeformTags(file, ASIN);
+    expect(result.written).toBe(false);
+    expect(result.warning).toMatch(/ASIN tag not written \(input ended while copying\)/);
+    expect(fs.readFileSync(file).equals(original)).toBe(true);
+    expect(leftovers()).toEqual([]);
+  }, 60_000);
+
+  it('a failed rename removes the verified copy and keeps ffmpeg output as it was', async () => {
+    const file = await makeM4b(dir, 'rename.m4b', { faststart: true });
+    const original = fs.readFileSync(file);
+    const rename = vi.spyOn(fsp, 'rename').mockRejectedValueOnce(Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' }));
+    try {
+      const result = await addFreeformTags(file, ASIN);
+      expect(result).toEqual({ written: false, warning: 'ASIN tag not written (EBUSY: resource busy)' });
+    } finally {
+      rename.mockRestore();
+    }
+    expect(fs.readFileSync(file).equals(original)).toBe(true);
+    expect(leftovers()).toEqual([]);
+  }, 60_000);
+
+  it('a crash leftover for the same file is swept before the next run; another file is kept', async () => {
+    const file = await makeM4b(dir, 'sweep.m4b', { faststart: true });
+    const { partialNameFor } = await import('@/lib/utils/copy-file');
+    const mine = path.join(dir, partialNameFor('sweep.m4b'));
+    const other = path.join(dir, partialNameFor('other.m4b'));
+    fs.writeFileSync(mine, 'stale');
+    fs.writeFileSync(other, 'in progress');
+    expect((await addFreeformTags(file, ASIN)).written).toBe(true);
+    expect(fs.existsSync(mine)).toBe(false);
+    expect(fs.readFileSync(other, 'utf8')).toBe('in progress');
+    fs.unlinkSync(other);
   }, 60_000);
 
   it('refuses mdta (use_metadata_tags) files and leaves them untouched', async () => {

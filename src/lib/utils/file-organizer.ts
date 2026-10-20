@@ -7,7 +7,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import axios from 'axios';
 import { RMAB_USER_AGENT } from './user-agent';
-import { tagMultipleFiles, checkFfmpegAvailable } from './metadata-tagger';
+import { tagMultipleFiles, checkFfmpegAvailable, addMp4FreeformTags } from './metadata-tagger';
 import { RMABLogger } from './logger';
 import { hasCover, publishCover, type CoverPlacement } from './cover-placement';
 import { placeAudio, placeFile, isVerifiedStatus, type AudioPlacement } from './organize-copy';
@@ -158,6 +158,9 @@ export class FileOrganizer {
       // Determine base path for source files
       const baseSourcePath = isFile ? path.dirname(downloadPath) : downloadPath;
 
+      // Read once (merge disk-space check + tagging pass); unreadable → untagged, as a failed tagging pass leaves it
+      const metadataTaggingEnabled = (await prisma.configuration.findUnique({ where: { key: 'metadata_tagging_enabled' } }).catch(() => null))?.value === 'true';
+
       // Track if we created a merged file that needs cleanup
       let tempMergedFile: string | null = null;
       // Original chapter files behind the merged file, and whether its duration was verified
@@ -188,8 +191,8 @@ export class FileOrganizer {
             const isChapterDownload = await detectChapterFiles(sourceFilePaths, logger ?? undefined);
 
             if (isChapterDownload) {
-              // Check disk space
-              const estimatedSize = await estimateOutputSize(sourceFilePaths);
+              // Check disk space: the merged file, the freeform post-step's full copy, and the tagged copy when tagging
+              const estimatedSize = (await estimateOutputSize(sourceFilePaths)) * (metadataTaggingEnabled ? 3 : 2);
               const availableSpace = await checkDiskSpace(this.tempDir);
 
               if (availableSpace !== null && availableSpace < estimatedSize) {
@@ -211,12 +214,6 @@ export class FileOrganizer {
                   const outputFilename = `${this.sanitizePath(audiobook.title)}.m4b`;
                   const outputPath = path.join(this.tempDir, outputFilename);
 
-                  // A tagging pass after the merge re-muxes the file and writes the
-                  // freeform tags itself; without one the merger writes them
-                  const taggingConfig = await prisma.configuration.findUnique({
-                    where: { key: 'metadata_tagging_enabled' },
-                  });
-
                   // Perform merge
                   const mergeResult = await mergeChapters(
                     chapters,
@@ -225,10 +222,8 @@ export class FileOrganizer {
                       author: audiobook.author,
                       narrator: audiobook.narrator,
                       year: audiobook.year,
-                      asin: audiobook.asin,
                       outputPath,
                       dirMode: this.dirMode,
-                      writeFreeformTags: taggingConfig?.value !== 'true',
                     },
                     logger ?? undefined
                   );
@@ -274,12 +269,6 @@ export class FileOrganizer {
       const taggedFileMap = new Map<string, string>();
 
       try {
-        const config = await prisma.configuration.findUnique({
-          where: { key: 'metadata_tagging_enabled' },
-        });
-
-        const metadataTaggingEnabled = config?.value === 'true';
-
         if (metadataTaggingEnabled && audioFiles.length > 0) {
           await logger?.info(`Metadata tagging enabled, checking ffmpeg availability...`);
 
@@ -323,12 +312,6 @@ export class FileOrganizer {
                   .join(', ')
               }`);
               result.errors.push(`Failed to tag ${failCount} file(s) with metadata`);
-            }
-
-            for (const tagResult of taggingResults) {
-              for (const warning of tagResult.warnings ?? []) {
-                await logger?.warn(`${path.basename(tagResult.filePath)}: ${warning}`);
-              }
             }
 
             // Build map of successfully tagged files
@@ -423,6 +406,10 @@ export class FileOrganizer {
 
         // Tagged derivative (when tagging succeeded); the original stays untouched for seeding
         const taggedFilePath = taggedFileMap.get(originalSourcePath);
+        // The one ASIN step (MP4 freeform tag), only on a file RMAB wrote: the tagged copy, else the merged file
+        const ownOutput = taggedFilePath ?? (originalSourcePath === tempMergedFile ? tempMergedFile : undefined);
+        const freeform = ownOutput ? await addMp4FreeformTags(ownOutput, path.extname(audioFile), audiobook) : null;
+        if (freeform?.warning) await logger?.warn(`${path.basename(audioFile)}: ${freeform.warning}`);
 
         const placed: AudioPlacement = await placeAudio(originalSourcePath, taggedFilePath, targetFilePath, {
           fileMode: this.fileMode,

@@ -11,17 +11,19 @@
  */
 
 import { execFile } from 'child_process';
-import { randomBytes } from 'crypto';
 import fs from 'fs/promises';
 import type { FileHandle } from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
+import { partialNameFor, syncDirectory } from './copy-file';
+import { removeStalePartials } from './organize-copy';
 import {
   FreeformTag,
   Mp4UnsupportedError,
   RewritePlan,
   parseBoxHeader,
   planFreeformRewrite,
+  shiftedOffset,
   validateTags,
   verifyRewrittenMoov,
   type BoxRef,
@@ -52,6 +54,16 @@ async function readExactly(fh: FileHandle, length: number, position: number): Pr
   return buf;
 }
 
+/** Write all of buf[start, end) at `position` (a positional write may be short). */
+async function writeAll(fh: FileHandle, buf: Buffer, position: number, start = 0, end = buf.length): Promise<void> {
+  let done = start;
+  while (done < end) {
+    const { bytesWritten } = await fh.write(buf, done, end - done, position + (done - start));
+    if (bytesWritten === 0) throw new Error('write made no progress');
+    done += bytesWritten;
+  }
+}
+
 /** Top-level boxes of an open file (they must cover it exactly). */
 async function scanTopLevel(fh: FileHandle, fileSize: number): Promise<BoxRef[]> {
   const boxes: BoxRef[] = [];
@@ -79,13 +91,18 @@ async function copyRange(src: FileHandle, dst: FileHandle, start: number, end: n
   while (pos < end) {
     const { bytesRead } = await src.read(buf, 0, Math.min(buf.length, end - pos), pos);
     if (bytesRead === 0) throw new Mp4UnsupportedError('input ended while copying');
-    let written = 0;
-    while (written < bytesRead) {
-      const { bytesWritten } = await dst.write(buf, written, bytesRead - written, dstStart + (pos - start) + written);
-      written += bytesWritten;
-    }
+    await writeAll(dst, buf, dstStart + (pos - start), 0, bytesRead);
     pos += bytesRead;
   }
+}
+
+/** The bytes at `position` equal `expected`, read back a chunk at a time. */
+async function bytesMatch(fh: FileHandle, expected: Buffer, position: number): Promise<boolean> {
+  for (let at = 0; at < expected.length; at += COPY_CHUNK) {
+    const length = Math.min(COPY_CHUNK, expected.length - at);
+    if (!(await readExactly(fh, length, position + at)).equals(expected.subarray(at, at + length))) return false;
+  }
+  return true;
 }
 
 /** Chunk indexes to compare: every chunk of non-audio tracks, a spread of audio chunks. */
@@ -104,7 +121,7 @@ async function compareChunks(input: FileHandle, output: FileHandle, plan: Rewrit
       const length = Math.min(track.chunkSizes[i], audio ? AUDIO_COMPARE_BYTES : OTHER_COMPARE_LIMIT);
       if (length === 0) continue;
       const before = await readExactly(input, length, track.offsets[i]);
-      const after = await readExactly(output, length, plan.expectedOffsets[ti][i]);
+      const after = await readExactly(output, length, shiftedOffset(plan.mdatShifts, track.offsets[i]));
       if (!before.equals(after)) throw new Mp4UnsupportedError(`track ${ti + 1} chunk ${i + 1} moved to the wrong place`);
     }
   }
@@ -122,7 +139,7 @@ async function probeTags(filePath: string, tags: FreeformTag[]): Promise<void> {
   }
 }
 
-/** Check the written file: layout, moov, chunk placement, ffprobe read-back. */
+/** Check the written file: layout, moov bytes (verified before the write), chunk placement, ffprobe read-back. */
 async function verifyOutput(input: FileHandle, outputPath: string, plan: RewritePlan, tags: FreeformTag[]): Promise<void> {
   const out = await fs.open(outputPath, 'r');
   try {
@@ -133,8 +150,7 @@ async function verifyOutput(input: FileHandle, outputPath: string, plan: Rewrite
     if (top.length !== expected.length || top.some((b, i) => b.size !== expected[i]) || top[1].type !== 'moov') {
       throw new Mp4UnsupportedError('output layout does not match the plan');
     }
-    const moov = await readMoov(out, top);
-    verifyRewrittenMoov(plan, moov, tags);
+    if (!(await bytesMatch(out, plan.newMoov, top[1].start))) throw new Mp4UnsupportedError('written moov differs from the plan');
     await compareChunks(input, out, plan);
   } finally {
     await out.close();
@@ -144,8 +160,9 @@ async function verifyOutput(input: FileHandle, outputPath: string, plan: Rewrite
 
 /**
  * Write `outputPath` (must not exist) as `inputPath` with `tags` added and moov
- * first. Throws Mp4UnsupportedError (or an I/O error) and removes the partial
- * output on any failure; `inputPath` is only ever read.
+ * first. Throws Mp4UnsupportedError (or an I/O error) and removes the output
+ * on any failure after creating it; `inputPath` is only ever read.
+ * Peak memory: about 2x the moov while planning, then 1x (moov <= 128 MiB).
  */
 export async function writeFreeformTaggedCopy(inputPath: string, outputPath: string, tags: FreeformTag[]): Promise<void> {
   validateTags(tags);
@@ -157,13 +174,14 @@ export async function writeFreeformTaggedCopy(inputPath: string, outputPath: str
   try {
     const inputSize = (await input.stat()).size;
     const top = await scanTopLevel(input, inputSize);
-    const plan = planFreeformRewrite(top, await readMoov(input, top), tags);
+    const plan = planFreeformRewrite(top, await readMoov(input, top), tags); // the read moov is scratch, dropped here
     testHooks.afterPlan?.(plan);
+    verifyRewrittenMoov(plan, plan.newMoov, tags); // before anything is written
 
     output = await fs.open(outputPath, 'wx');
     created = true;
     await copyRange(input, output, plan.ftyp.start, plan.ftyp.start + plan.ftyp.size, 0);
-    await output.write(plan.newMoov, 0, plan.newMoov.length, plan.ftyp.size);
+    await writeAll(output, plan.newMoov, plan.ftyp.size);
     for (const segment of plan.segments) await copyRange(input, output, segment.start, segment.end, segment.newStart);
     await output.sync();
     await output.close();
@@ -186,19 +204,30 @@ export interface FreeformTagResult {
 }
 
 /**
- * Add `tags` to `filePath`, an MP4 RMAB's own ffmpeg run just wrote: the
- * tagged copy replaces it only after it verifies. Never throws.
+ * Add `tags` to `filePath`, an MP4 RMAB's own ffmpeg run just wrote: a tagged
+ * copy (hidden `.rmab-partial-*.part` sibling, swept like other partials)
+ * replaces it only after it verifies. Never throws.
  */
 export async function addFreeformTags(filePath: string, tags: FreeformTag[]): Promise<FreeformTagResult> {
   if (tags.length === 0) return { written: false };
-  const tempPath = `${filePath}.tags-${randomBytes(4).toString('hex')}.tmp`;
+  const failed = (error: unknown): FreeformTagResult => ({
+    written: false,
+    warning: `${tags.map((t) => t.name).join(', ')} tag not written (${error instanceof Error ? error.message : String(error)})`,
+  });
+  const dir = path.dirname(filePath);
+  await removeStalePartials(dir, path.basename(filePath));
+  const tempPath = path.join(dir, partialNameFor(path.basename(filePath)));
   try {
-    await writeFreeformTaggedCopy(filePath, tempPath, tags);
-    await fs.rename(tempPath, filePath); // every handle is closed, so this also works on Windows
-    return { written: true };
+    await writeFreeformTaggedCopy(filePath, tempPath, tags); // removes its own output on failure
   } catch (error) {
-    await fs.unlink(tempPath).catch(() => undefined);
-    const reason = error instanceof Error ? error.message : String(error);
-    return { written: false, warning: `${tags.map((t) => t.name).join(', ')} tag not written (${reason})` };
+    return failed(error);
   }
+  try {
+    await fs.rename(tempPath, filePath); // every handle is closed, so this also works on Windows
+  } catch (error) {
+    await fs.unlink(tempPath).catch(() => undefined); // ours: created and verified above
+    return failed(error);
+  }
+  await syncDirectory(dir).catch(() => undefined); // durability only: the data is already fsynced
+  return { written: true };
 }

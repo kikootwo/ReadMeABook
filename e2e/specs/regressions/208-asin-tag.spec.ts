@@ -15,13 +15,28 @@
 
 import { test, expect } from '@playwright/test';
 import { Abs, authState, execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, stackExecSync, waitFor, writeEvidence, Rmab, type Book } from '../../lib/harness';
-import { psql } from './242-helpers';
+import { psql, sqlStr } from './242-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
 test.describe.configure({ mode: 'default' });
 
-const setConfig = (key: string, value: string) =>
-  psql(`update configuration set value = '${value}' where key = '${key}' returning value`);
+type Settings = Partial<Record<'chapter_merging_enabled' | 'metadata_tagging_enabled', 'true' | 'false'>>;
+
+function setConfig(key: string, value: string) {
+  const stored = psql(`update configuration set value = ${sqlStr(value)} where key = ${sqlStr(key)} returning value`);
+  if (stored !== value) throw new Error(`setting ${key} is not in the configuration table`);
+}
+
+/** Run `fn` with these settings (each test states all it relies on), then restore what was there. */
+async function withSettings<T>(settings: Settings, fn: () => Promise<T>): Promise<T> {
+  const saved = Object.keys(settings).map((key) => [key, psql(`select value from configuration where key = ${sqlStr(key)}`)] as const);
+  try {
+    for (const [key, value] of Object.entries(settings)) setConfig(key, value as string);
+    return await fn();
+  } finally {
+    for (const [key, value] of saved) setConfig(key, value);
+  }
+}
 
 /** Top-level MP4 box types of a file inside the Audiobookshelf container. */
 function topLevelTypes(file: string): string[] {
@@ -84,28 +99,22 @@ function expectAsinInFile(book: Book, e: Awaited<ReturnType<typeof importAndScan
 }
 
 test('#208: single m4b, tagging on: the tagged m4b carries the ASIN', async () => {
-  const { book, evidence } = await importAndScan('asin-m4b', 'martian', 'single m4b');
-  expectAsinInFile(book, evidence, 2);
+  await withSettings({ chapter_merging_enabled: 'false', metadata_tagging_enabled: 'true' }, async () => {
+    const { book, evidence } = await importAndScan('asin-m4b', 'martian', 'single m4b');
+    expectAsinInFile(book, evidence, 2);
+  });
 });
 
 test('#208: chapter merge, tagging off: the merged m4b carries the ASIN', async () => {
-  setConfig('chapter_merging_enabled', 'true');
-  setConfig('metadata_tagging_enabled', 'false');
-  try {
+  await withSettings({ chapter_merging_enabled: 'true', metadata_tagging_enabled: 'false' }, async () => {
     const { book, evidence } = await importAndScan('asin-merge', 'artemis', 'merge, tagging off');
     expectAsinInFile(book, evidence, 3);
-  } finally {
-    setConfig('chapter_merging_enabled', 'false');
-    setConfig('metadata_tagging_enabled', 'true');
-  }
+  });
 });
 
 test('#208: chapter merge, tagging on: the merged and tagged m4b carries the ASIN', async () => {
-  setConfig('chapter_merging_enabled', 'true');
-  try {
+  await withSettings({ chapter_merging_enabled: 'true', metadata_tagging_enabled: 'true' }, async () => {
     const { book, evidence } = await importAndScan('asin-merge-tagged', 'phm', 'merge, tagging on');
     expectAsinInFile(book, evidence, 3);
-  } finally {
-    setConfig('chapter_merging_enabled', 'false');
-  }
+  });
 });

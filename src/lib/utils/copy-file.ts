@@ -105,7 +105,7 @@ async function unlinkQuietly(filePath: string): Promise<void> {
 }
 
 /** Best-effort directory fsync so the publish is durable; unsupported platforms are ignored. */
-async function syncDirectory(dir: string): Promise<void> {
+export async function syncDirectory(dir: string): Promise<void> {
   let handle: fsp.FileHandle | undefined;
   try {
     handle = await fsp.open(dir, 'r');

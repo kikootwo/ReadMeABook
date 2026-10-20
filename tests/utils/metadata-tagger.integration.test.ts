@@ -16,8 +16,9 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { tagAudioFileMetadata } from '@/lib/utils/metadata-tagger';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { addMp4FreeformTags, tagAudioFileMetadata } from '@/lib/utils/metadata-tagger';
+import { testHooks } from '@/lib/utils/mp4-freeform-tags';
 import { audioMd5, countFreeform, makeM4b, probe, topLevelTypes } from './mp4-tags.helpers';
 
 const execFileP = promisify(execFile);
@@ -153,26 +154,38 @@ describe('metadata-tagger integration (real ffmpeg)', () => {
 });
 
 describe.skipIf(skipReal)('m4b ASIN and layout (real ffmpeg)', () => {
+  afterEach(() => {
+    testHooks.afterPlan = undefined;
+  });
+
+  /** The organizer's order: the tagging pass, then the one ASIN step on the tagged copy. */
+  async function tagWithAsin(src: string, asin: string) {
+    const result = await tagAudioFileMetadata(src, { title: 'Book', author: 'Author', asin });
+    expect(result.success).toBe(true);
+    const step = await addMp4FreeformTags(result.taggedFilePath!, path.extname(src), { asin });
+    return { tagged: result.taggedFilePath!, step };
+  }
+
   it('the ASIN is written: ffprobe (the reader Audiobookshelf uses) reads format tag ASIN', async () => {
     const src = await makeM4b(workDir, 'asin-src.m4b', { faststart: false });
-    const result = await tagAudioFileMetadata(src, { title: 'Book', author: 'Author', asin: 'B0TESTASIN' });
-    expect(result.success).toBe(true);
-    expect(result.warnings).toBeUndefined();
-    const { tags } = await probe(result.taggedFilePath!);
+    const { tagged, step } = await tagWithAsin(src, 'B0TESTASIN');
+    expect(step).toEqual({ written: true });
+    const { tags } = await probe(tagged);
     expect(tags.ASIN).toBe('B0TESTASIN');
     expect(tags.title).toBe('Book');
-    expect(countFreeform(result.taggedFilePath!, 'ASIN')).toBe(1);
+    expect(countFreeform(tagged, 'ASIN')).toBe(1);
   }, 60_000);
 
   it.each([
-    ['with an ASIN (post-step)', 'B0TESTASIN'],
-    ['without an ASIN (ffmpeg +faststart)', undefined],
+    ['with the ASIN step', 'B0TESTASIN'],
+    ['without an ASIN (ffmpeg +faststart only)', undefined],
   ])('the tagged copy is moov first (faststart) %s, cover and text-track chapters intact', async (_name, asin) => {
-    const src = await makeM4b(workDir, `layout-${asin ?? 'none'}.m4b`, { faststart: true });
+    const src = await makeM4b(workDir, `layout-${asin ?? 'none'}.m4b`, { faststart: false });
     const before = await probe(src);
     const md5 = await audioMd5(src);
-    const result = await tagAudioFileMetadata(src, { title: 'Book', author: 'Author', asin });
-    const tagged = result.taggedFilePath!;
+    const tagged = asin
+      ? (await tagWithAsin(src, asin)).tagged
+      : (await tagAudioFileMetadata(src, { title: 'Book', author: 'Author' })).taggedFilePath!;
     expect(topLevelTypes(tagged).slice(0, 2)).toEqual(['ftyp', 'moov']);
     const after = await probe(tagged);
     expect(after.streams).toEqual(before.streams);
@@ -183,15 +196,28 @@ describe.skipIf(skipReal)('m4b ASIN and layout (real ffmpeg)', () => {
     expect(await audioMd5(tagged)).toBe(md5);
   }, 60_000);
 
+  it('a refused ASIN step still leaves the tagged copy moov first (ffmpeg +faststart), unchanged', async () => {
+    const src = await makeM4b(workDir, 'refused.m4b', { faststart: false });
+    const result = await tagAudioFileMetadata(src, { title: 'Book', author: 'Author', asin: 'B0TESTASIN' });
+    const original = await fs.readFile(result.taggedFilePath!);
+    testHooks.afterPlan = () => {
+      throw new Error('refused for the test');
+    };
+    const step = await addMp4FreeformTags(result.taggedFilePath!, '.m4b', { asin: 'B0TESTASIN' });
+    expect(step).toEqual({ written: false, warning: 'ASIN tag not written (refused for the test)' });
+    expect((await fs.readFile(result.taggedFilePath!)).equals(original)).toBe(true);
+    expect(topLevelTypes(result.taggedFilePath!).slice(0, 2)).toEqual(['ftyp', 'moov']);
+  }, 60_000);
+
   it('re-tagging a tagged copy that already holds an ASIN: exactly one ASIN item (the new one), moov first', async () => {
     const src = await makeM4b(workDir, 'retag.m4b', { faststart: true });
-    const first = await tagAudioFileMetadata(src, { title: 'Book', author: 'Author', asin: 'B0FIRST000' });
-    expect(countFreeform(first.taggedFilePath!, 'ASIN')).toBe(1);
+    const first = await tagWithAsin(src, 'B0FIRST000');
+    expect(countFreeform(first.tagged, 'ASIN')).toBe(1);
     const tagged = path.join(workDir, 'retag-tagged.m4b');
-    await fs.rename(first.taggedFilePath!, tagged);
-    const result = await tagAudioFileMetadata(tagged, { title: 'Book', author: 'Author', asin: 'B0TESTASIN' });
-    expect(countFreeform(result.taggedFilePath!, 'ASIN')).toBe(1);
-    expect((await probe(result.taggedFilePath!)).tags.ASIN).toBe('B0TESTASIN');
-    expect(topLevelTypes(result.taggedFilePath!).slice(0, 2)).toEqual(['ftyp', 'moov']);
+    await fs.rename(first.tagged, tagged);
+    const { tagged: again } = await tagWithAsin(tagged, 'B0TESTASIN');
+    expect(countFreeform(again, 'ASIN')).toBe(1);
+    expect((await probe(again)).tags.ASIN).toBe('B0TESTASIN');
+    expect(topLevelTypes(again).slice(0, 2)).toEqual(['ftyp', 'moov']);
   }, 60_000);
 });

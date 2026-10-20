@@ -4,11 +4,19 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildMp4FreeformTags, checkFfmpegAvailable, tagAudioFileMetadata, tagMultipleFiles } from '@/lib/utils/metadata-tagger';
+import {
+  addMp4FreeformTags,
+  buildMp4FreeformTags,
+  checkFfmpegAvailable,
+  ffmpegRemuxTimeoutMs,
+  tagAudioFileMetadata,
+  tagMultipleFiles,
+} from '@/lib/utils/metadata-tagger';
 
 const execFileMock = vi.hoisted(() => vi.fn());
 const fsMock = vi.hoisted(() => ({
   access: vi.fn(),
+  stat: vi.fn(async () => ({ size: 1024 })), // the size scales the ffmpeg timeout
   unlink: vi.fn(),
 }));
 
@@ -122,11 +130,10 @@ describe('metadata tagger', () => {
     expectMetadataArg(argv, 'artist', 'Author');
     expectMetadataArg(argv, 'composer', 'Narrator');
     expectMetadataArg(argv, 'date', '2020');
-    // ffmpeg drops freeform keys: the ASIN goes to the post-step, which also writes moov first
+    // ffmpeg drops freeform keys: the organizer adds the ASIN later (addMp4FreeformTags)
     expect(hasFreeformArg(argv)).toBe(false);
-    expect(argv).not.toContain('-movflags');
-    expect(freeform.calls).toEqual([['/tmp/book.m4b.tmp', [{ name: 'ASIN', value: 'ASIN123' }]]]);
-    expect(result.warnings).toBeUndefined();
+    expect(argv[argv.indexOf('-movflags') + 1]).toBe('+faststart');
+    expect(freeform.calls).toEqual([]);
 
     expect(argv).toContain('/tmp/book.m4b');
     expect(argv).toContain('/tmp/book.m4b.tmp');
@@ -197,50 +204,64 @@ describe('metadata tagger', () => {
     expect(fsMock.unlink).toHaveBeenCalledWith('/tmp/book.mp3.tmp');
   });
 
-  it('m4b without an ASIN: no post-step tags, ffmpeg writes moov first (+faststart)', async () => {
-    fsMock.access.mockResolvedValue(undefined);
+  it.each([
+    ['with an ASIN', 'B0TESTASIN'],
+    ['without an ASIN', undefined],
+  ])('m4b %s: ffmpeg always writes moov first (+faststart), so a refused post-step still leaves it first', async (_n, asin) => {
     mockExecFileSuccess('done');
 
-    const result = await tagAudioFileMetadata('/tmp/book.m4b', { title: 'Book', author: 'Author' });
+    await tagAudioFileMetadata('/tmp/book.m4b', { title: 'Book', author: 'Author', asin });
 
-    expect(result.success).toBe(true);
     const argv = lastCallArgv();
     expect(argv[argv.indexOf('-movflags') + 1]).toBe('+faststart');
-    expect(freeform.calls).toEqual([['/tmp/book.m4b.tmp', []]]);
+    expect(freeform.calls).toEqual([]); // the tagger never runs the post-step itself
   });
 
-  it('a freeform tag that cannot be written is a warning: the file is still tagged', async () => {
-    fsMock.access.mockResolvedValue(undefined);
+  it('the ffmpeg timeout scales with the file size (+faststart writes it twice)', async () => {
+    fsMock.stat.mockResolvedValueOnce({ size: 3 * 1024 ** 3 });
     mockExecFileSuccess('done');
-    freeform.result = { written: false, warning: 'ASIN tag not written (meta handler is not mdir)' };
 
-    const result = await tagAudioFileMetadata('/tmp/book.m4a', { title: 'Book', author: 'Author', asin: 'B0TESTASIN' });
+    await tagAudioFileMetadata('/tmp/big.m4b', { title: 'Book', author: 'Author' });
 
-    expect(result).toEqual({
-      success: true,
-      filePath: '/tmp/book.m4a',
-      taggedFilePath: '/tmp/book.m4a.tmp',
-      warnings: ['ASIN tag not written (meta handler is not mdir)'],
-    });
+    expect(execFileMock.mock.calls.at(-1)?.[2]).toMatchObject({ timeout: 480_000 });
   });
 
-  it('mp3/flac keep the ASIN in argv; the MP4 post-step gets nothing', async () => {
-    fsMock.access.mockResolvedValue(undefined);
+  it('ffmpegRemuxTimeoutMs: 120 s plus 120 s per GiB', () => {
+    expect(ffmpegRemuxTimeoutMs(0)).toBe(120_000);
+    expect(ffmpegRemuxTimeoutMs(1024 ** 3)).toBe(240_000);
+    expect(ffmpegRemuxTimeoutMs(1.5 * 1024 ** 3)).toBe(300_000);
+    expect(ffmpegRemuxTimeoutMs(10 * 1024 ** 3)).toBe(1_320_000);
+  });
+
+  it('a missing file is an error, ffmpeg never runs', async () => {
+    fsMock.stat.mockRejectedValueOnce(Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' }));
+
+    const result = await tagAudioFileMetadata('/tmp/gone.m4b', { title: 'Book', author: 'Author' });
+
+    expect(result).toMatchObject({ success: false, error: expect.stringContaining('ENOENT') });
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
+  it('mp3/flac keep the ASIN in argv', async () => {
     for (const file of ['/tmp/book.mp3', '/tmp/book.flac']) {
       mockExecFileSuccess('done');
       await tagAudioFileMetadata(file, { title: 'Book', author: 'Author', asin: 'B0TESTASIN' });
       expectMetadataArg(lastCallArgv(), 'ASIN', 'B0TESTASIN');
-      expect(freeform.calls.at(-1)).toEqual([`${file}.tmp`, []]);
     }
+    expect(freeform.calls).toEqual([]);
   });
 
-  it('ffmpeg failure: the post-step never runs', async () => {
-    fsMock.access.mockResolvedValue(undefined);
-    fsMock.unlink.mockResolvedValue(undefined);
-    mockExecFileFailure('exec failed');
+  it.each(['.m4b', '.M4A', '.mp4'])('addMp4FreeformTags (%s): the sanitized ASIN goes to the post-step, its result comes back', async (ext) => {
+    freeform.result = { written: false, warning: 'ASIN tag not written (meta handler is not mdir)' };
 
-    await tagAudioFileMetadata('/tmp/book.m4b', { title: 'Book', author: 'Author', asin: 'B0TESTASIN' });
+    const result = await addMp4FreeformTags('/tmp/merged.part', ext, { asin: ' B0TESTASIN\n' });
 
+    expect(freeform.calls).toEqual([['/tmp/merged.part', [{ name: 'ASIN', value: 'B0TESTASIN' }]]]);
+    expect(result).toEqual({ written: false, warning: 'ASIN tag not written (meta handler is not mdir)' });
+  });
+
+  it.each(['.mp3', '.flac'])('addMp4FreeformTags (%s): not an MP4, nothing to do', async (ext) => {
+    expect(await addMp4FreeformTags('/tmp/book.tmp', ext, { asin: 'B0TESTASIN' })).toEqual({ written: false });
     expect(freeform.calls).toEqual([]);
   });
 
@@ -548,7 +569,6 @@ describe('metadata tagger', () => {
       expectMetadataArg(argv, 'album_artist', 'Clean Author');
       expectMetadataArg(argv, 'composer', 'Clean Narrator');
       expect(hasFreeformArg(argv)).toBe(false);
-      expect(freeform.calls.at(-1)).toEqual(['/tmp/book.m4b.tmp', [{ name: 'ASIN', value: 'B0009JKV9W' }]]);
       expectMetadataArg(argv, 'show', 'Clean Series');
       expectMetadataArg(argv, 'episode_id', '1');
     });

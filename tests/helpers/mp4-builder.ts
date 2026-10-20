@@ -34,8 +34,12 @@ function u64(...values: number[]): Buffer {
 export interface TrackSpec {
   handler?: string;
   offsets: number[];
-  /** Bytes per chunk (one sample per chunk). */
+  /** Bytes per chunk. */
   chunkSize?: number;
+  /** Samples per chunk (default 1), each chunkSize / samplesPerChunk bytes. */
+  samplesPerChunk?: number;
+  /** Write a per-sample stsz table instead of one fixed sample size. */
+  sampleTable?: boolean;
   wide?: boolean;
   externalData?: boolean;
   /** Number of stco boxes in stbl (default 1). */
@@ -47,14 +51,19 @@ export interface TrackSpec {
 export function trak(spec: TrackSpec): Buffer {
   const n = spec.offsets.length;
   const size = spec.chunkSize ?? 100;
+  const per = spec.samplesPerChunk ?? 1;
+  const sampleSize = size / per;
+  const stsz = spec.sampleTable
+    ? full('stsz', 0, u32(0, n * per, ...Array.from({ length: n * per }, () => sampleSize)))
+    : full('stsz', 0, u32(sampleSize, n * per));
   const table = spec.wide ? full('co64', 0, u32(n), u64(...spec.offsets)) : full('stco', 0, u32(n), u32(...spec.offsets));
   const tables = Array.from({ length: spec.tables ?? 1 }, () => table);
   const stbl = box(
     'stbl',
     full('stsd', 0, u32(0)),
     full('stts', 0, u32(0)),
-    full('stsc', 0, u32(1), u32(1, 1, 1)),
-    full('stsz', 0, u32(size, n)),
+    full('stsc', 0, u32(1), u32(1, per, 1)),
+    stsz,
     ...tables,
     ...(spec.extraStbl ? [spec.extraStbl] : [])
   );
