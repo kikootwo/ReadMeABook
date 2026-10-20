@@ -72,7 +72,8 @@ vi.mock('@/lib/utils/audio-content', () => ({
       const duration = parseFloat(probe.stdout ? JSON.parse(probe.stdout).format?.duration : '');
       if (Number.isFinite(duration)) contentMs = Math.round(duration * 1000);
     }
-    return { contentMs, gapMs: 0, frameMs: 21.3, endMs: contentMs, packets: 1 };
+    // 1 ms frames: a codec-copy output verifies only when its content equals the chapters' total
+    return { contentMs, gapMs: 0, frameMs: 1, framedMs: contentMs, endMs: contentMs, packets: contentMs };
   }),
 }));
 

@@ -41,13 +41,14 @@ const fsMock = vi.hoisted(() => ({
 
 vi.mock('child_process', () => ({ execFile: execFileMock, spawn: spawnMock }));
 // Measured audio content used to verify a merge (per file path), and timeline gaps
-const streamDurations = vi.hoisted(() => ({ byPath: new Map<string, number>(), gaps: new Map<string, number>(), fallback: 60000 }));
+const streamDurations = vi.hoisted(() => ({ byPath: new Map<string, number>(), gaps: new Map<string, number>(), ends: new Map<string, number>(), fallback: 60000 }));
 vi.mock('@/lib/utils/audio-content', () => ({
   probeAudioContent: vi.fn(async (p: string) => {
     // Merged outputs default to the mocked container duration; chapters to 60 s
     const fallback = p.endsWith('out.m4b') ? Number(probeState.duration) * 1000 : streamDurations.fallback;
     const contentMs = streamDurations.byPath.get(p) ?? fallback;
-    return { contentMs, gapMs: streamDurations.gaps.get(p) ?? 0, frameMs: 21.3, endMs: contentMs, packets: 1 };
+    // 1 ms frames: a codec-copy output verifies only when its content equals the chapters' total
+    return { contentMs, gapMs: streamDurations.gaps.get(p) ?? 0, frameMs: 1, framedMs: contentMs, endMs: streamDurations.ends.get(p) ?? contentMs, packets: contentMs };
   }),
 }));
 vi.mock('fs/promises', () => ({ default: fsMock, ...fsMock }));
@@ -77,6 +78,7 @@ beforeEach(() => {
   probeState.duration = '120';
   streamDurations.byPath.clear();
   streamDurations.gaps.clear();
+  streamDurations.ends.clear();
   streamDurations.fallback = 60000;
   fsMock.access.mockResolvedValue(undefined);
   fsMock.mkdir.mockResolvedValue(undefined);
@@ -106,8 +108,8 @@ describe('chapter merge verification', () => {
     expect(result.durationVerified).toBe(true);
   });
 
-  it('keeps the merge but does not verify it when the merged audio is off by more than 1 s + 50 ms per chapter', async () => {
-    // Two 60 s chapters: the window is 1.1 s; 1.2 s short passes the 2% merge check but not the source check
+  it('keeps a codec-copy merge but does not verify it when audio packets are missing', async () => {
+    // 1.2 s short passes the 2% merge check; a copy must carry every packet
     streamDurations.byPath.set('/t/out.m4b', 118800);
 
     const result = await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
@@ -116,15 +118,36 @@ describe('chapter merge verification', () => {
     expect(result.durationVerified).toBe(false);
   });
 
-  it('does not verify a merged file with a timeline gap, even at the full length', async () => {
-    // A chapter that ended early during the merge: ffmpeg bridges the hole with one stretched packet
-    streamDurations.byPath.set('/t/out.m4b', 120000);
-    streamDurations.gaps.set('/t/out.m4b', 2600);
+  it('keeps a re-encoded merge but does not verify it when it holds over 1 s less audio', async () => {
+    // Two 60 s chapters: 1.2 s short; a surplus may reach 1.1 s, a shortfall only 1 s
+    streamDurations.byPath.set('/t/out.m4b', 118800);
 
     const result = await mergeChapters([chapter('/dl/01.mp3'), chapter('/dl/02.mp3')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
 
     expect(result.success).toBe(true);
     expect(result.durationVerified).toBe(false);
+  });
+
+  it('fails the merge (files organized individually) when the merged timeline has a gap, even at the full length', async () => {
+    // A chapter that ended early, or timestamps offset by a chapter's estimated duration
+    streamDurations.byPath.set('/t/out.m4b', 120000);
+    streamDurations.gaps.set('/t/out.m4b', 2600);
+
+    const result = await mergeChapters([chapter('/dl/01.mp3'), chapter('/dl/02.mp3')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Merged timeline does not match its audio');
+    expect(fsMock.unlink).toHaveBeenCalledWith('/t/out.m4b');
+  });
+
+  it('fails the merge when the merged timeline ends far from its audio', async () => {
+    streamDurations.byPath.set('/t/out.m4b', 120000);
+    streamDurations.ends.set('/t/out.m4b', 121200); // window for 2 chapters: 1.1 s
+
+    const result = await mergeChapters([chapter('/dl/01.mp3'), chapter('/dl/02.mp3')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('ends at 121.2 s but holds 120.0 s of audio');
   });
 
   it('does not verify when a chapter cannot be probed', async () => {

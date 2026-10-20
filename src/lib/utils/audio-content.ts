@@ -33,6 +33,12 @@ export interface AudioContent {
   gapMs: number;
   /** Most common packet duration (ms), the codec's frame. */
   frameMs: number;
+  /**
+   * Every packet as one full frame (ms, unrounded): no end trim, no discarded
+   * samples. A codec-copy merge carries every source packet over, so its
+   * framedMs equals the sum of the chapters' framedMs exactly.
+   */
+  framedMs: number;
   /** Timestamp where the last packet ends (ms); not the content. */
   endMs: number;
   packets: number;
@@ -132,6 +138,7 @@ export async function probeAudioContent(filePath: string): Promise<AudioContent>
         contentMs: Math.round((framedSeconds - skippedSeconds) * 1000),
         gapMs: Math.round(gaps * timeBase * 1000),
         frameMs: Math.round(frame * timeBase * 10000) / 10,
+        framedMs: packets * frame * timeBase * 1000,
         endMs: Math.round(end * timeBase * 1000),
         packets,
       });
