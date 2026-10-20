@@ -98,6 +98,8 @@ export interface ImportEvidence {
   records: PlacementRecord[];
   coverRecord?: PlacementRecord;
   inventory: ImportInventory;
+  /** Placed files whose permissions could not be set (never affects what is verified). */
+  permissionWarnings?: string[];
 }
 
 export function verifiedSourceKeys(evidence: ImportEvidence): Set<string> {

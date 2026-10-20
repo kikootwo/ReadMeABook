@@ -71,6 +71,8 @@ describe('symlinked library target (simulated)', () => {
       expect(result.status).toBe('differs');
       expect(result.verified).toBe(false);
       expect(isVerifiedStatus(result.status)).toBe(false);
+      // Tagged copy and original refused for the same reason: stated once
+      expect(result.reason).toBe('existing target is not a regular file');
     }
     expect(fs.readFileSync(original).equals(SOURCE)).toBe(true);
     expect(fs.readFileSync(target, 'utf8')).toBe('placeholder');

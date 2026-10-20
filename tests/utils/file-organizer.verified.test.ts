@@ -20,6 +20,8 @@ const taggingState = vi.hoisted(() => ({
 const probeState = vi.hoisted(() => ({ libraryDuration: 60000, sourceDuration: 60000, taggedDuration: 60000, libraryRoot: '' }));
 const lockedDirs = vi.hoisted(() => new Set<string>());
 const mergeState = vi.hoisted(() => ({ durationVerified: true }));
+/** Error code chmod fails with (mergerfs/NFS/FUSE refuse chmod after a successful write). */
+const chmodState = vi.hoisted(() => ({ error: null as string | null }));
 
 vi.mock('fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs/promises')>();
@@ -27,7 +29,11 @@ vi.mock('fs/promises', async (importOriginal) => {
     if (lockedDirs.has(String(dir))) throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
     return (actual.readdir as (...a: unknown[]) => unknown)(dir, ...rest);
   }) as typeof actual.readdir;
-  return { ...actual, default: { ...actual, readdir }, readdir };
+  const chmod = (async (p: unknown, mode: unknown) => {
+    if (chmodState.error) throw Object.assign(new Error(`${chmodState.error}: operation not permitted, chmod '${p}'`), { code: chmodState.error });
+    return (actual.chmod as (...a: unknown[]) => unknown)(p, mode);
+  }) as typeof actual.chmod;
+  return { ...actual, default: { ...actual, readdir, chmod }, readdir, chmod };
 });
 
 vi.mock('@/lib/db', () => ({
@@ -127,6 +133,7 @@ describe('FileOrganizer placement records', () => {
     probeState.taggedDuration = 60000;
     lockedDirs.clear();
     mergeState.durationVerified = true;
+    chmodState.error = null;
   });
 
   afterEach(() => {
@@ -174,6 +181,25 @@ describe('FileOrganizer placement records', () => {
     expect(fs.readFileSync(placed, 'utf8')).toBe('original-bytes');
     expect(result.records![0]).toMatchObject({ status: 'copied', verified: true });
     expect(fs.existsSync(path.join(source, 'Book.m4b.tmp'))).toBe(false);
+  });
+
+  it.each(['EPERM', 'ENOTSUP'])('a %s chmod after the tagged copy keeps the tagged file and the import succeeds', async (code) => {
+    configState.values.set('metadata_tagging_enabled', 'true');
+    write(path.join(source, 'Book.m4b'), 'original-bytes');
+    write(path.join(source, 'cover.jpg'), 'cover-bytes');
+    chmodState.error = code;
+
+    const result = await organize();
+
+    const placed = path.join(media, 'Author', 'Book', 'Book.m4b');
+    expect(result.success).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(fs.readFileSync(placed, 'utf8')).toBe('TAGSoriginal-bytes');
+    expect(result.records![0]).toMatchObject({ status: 'copied', verified: true });
+    expect(result.coverRecord).toMatchObject({ status: 'copied', verified: true });
+    // Collected for one summary per job, not logged per file
+    expect(result.permissionWarnings).toHaveLength(2);
+    expect(result.permissionWarnings!.every((w) => w.includes(code))).toBe(true);
   });
 
   it('re-copies a truncated library file and keeps a different one untouched', async () => {
