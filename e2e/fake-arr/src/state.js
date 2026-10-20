@@ -56,6 +56,7 @@ export class State {
     this.sabCategories = {};
     this.sabPaused = false;
     this.plexRefreshes = 0;
+    this.plexSeen = new Map(); // ratingKey -> album last seen on disk (with its audio files), like Plex's database
     this.resetScenario();
   }
 
