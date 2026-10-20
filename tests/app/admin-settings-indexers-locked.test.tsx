@@ -114,8 +114,9 @@ describe('Indexers tab while the saved list is not loaded', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => expect(lockedNote()).not.toBeInTheDocument(), { timeout: 5000 });
-    // Flag rules were never loaded: still locked, and not part of the save
+    // Flag rules were never loaded: still locked (with a note), and not part of the save
     expect(screen.getByRole('button', { name: '+ Add Flag Rule' })).toBeDisabled();
+    expect(screen.getByText(/Your saved flag rules are kept/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
 
     await waitFor(() => expect(configStore.get('prowlarr_indexers')).toBe('[]'), { timeout: 5000 });
@@ -132,8 +133,13 @@ describe('Indexers tab while the saved list is not loaded', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Keep saved indexers' }));
 
     // Tested without clearing: still not loaded, nothing removed
-    expect(await screen.findByText(/Connected to Prowlarr/, {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByText(/Connected to Prowlarr\. Found 1 indexers\. Save to load your saved indexers from the new address\./, {}, { timeout: 5000 })).toBeInTheDocument();
     expect(lockedNote()).toBeInTheDocument();
+    // No reload through the old address (it would only fail again and post a second load-failure banner)
+    const indexerGets = () => fetchWithAuthMock.mock.calls.filter(
+      ([url, init]) => url === '/api/admin/settings/prowlarr/indexers' && !(init as RequestInit | undefined)?.method
+    ).length;
+    expect(indexerGets()).toBe(1); // only the initial load
 
     // The new address answers once it is saved
     bridge.savedListFails = false;

@@ -220,6 +220,11 @@ export function IndexersTab({
           </p>
         </div>
 
+        {indexersLoaded && !flagsLoaded && (
+          <p role="status" className="text-sm text-amber-700 dark:text-amber-300 mb-3">
+            Your saved flag rules are kept. Click &quot;Test Connection&quot; after saving to load and edit them.
+          </p>
+        )}
         <fieldset disabled={!indexersLoaded || !flagsLoaded} className="m-0 min-w-0 border-0 p-0">
         {flagConfigs.length > 0 && (
           <div className="space-y-3 mb-4">

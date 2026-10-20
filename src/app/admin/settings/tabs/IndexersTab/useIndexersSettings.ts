@@ -77,13 +77,16 @@ export function useIndexersSettings({
             message: `Connected to Prowlarr. Found ${data.indexers?.length || 0} indexers. Previous indexer configurations have been removed — please re-add indexers from the new instance.`,
           });
         } else {
+          // The saved list is read through the SAVED connection: with an unsaved new URL or key,
+          // reloading would only hit the old address (and report a load failure)
+          const connectionUnsaved = hasConnectionChanged();
           setTestResult({
             success: true,
-            message: `Connected to Prowlarr. Found ${data.indexers?.length || 0} indexers`,
+            message: `Connected to Prowlarr. Found ${data.indexers?.length || 0} indexers`
+              + (connectionUnsaved && !indexersLoaded ? '. Save to load your saved indexers from the new address.' : ''),
           });
 
-          // Refresh indexers from database if callback provided
-          if (onRefreshIndexers) {
+          if (onRefreshIndexers && !connectionUnsaved) {
             await onRefreshIndexers();
           }
         }
@@ -128,9 +131,6 @@ export function useIndexersSettings({
   };
 
   /**
-   * User cancelled the credential change confirmation
-   */
-  /**
    * Same Prowlarr at a new address: test it without clearing the saved indexers.
    * After saving, the page loads the list from the new address.
    */
@@ -139,6 +139,9 @@ export function useIndexersSettings({
     await executeTest(false);
   };
 
+  /**
+   * User cancelled the credential change confirmation
+   */
   const cancelConnectionChange = () => {
     setShowConnectionChangeConfirm(false);
   };
