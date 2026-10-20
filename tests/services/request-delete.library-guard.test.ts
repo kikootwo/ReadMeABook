@@ -189,7 +189,7 @@ describe('deleteRequest (audiobook): stored folder behind the guard', () => {
 
     const result = await deleteRequest('req-1', 'admin-1');
 
-    expect(result.filesKeptReason).toBe('the folder could not be removed (EACCES)');
+    expect(result.filesKeptReason).toBe('the folder was partly removed (permission denied); remove the rest manually');
     expect(fs.existsSync(dir)).toBe(true);
     expectLibraryUntouched();
   });
@@ -235,7 +235,8 @@ describe('deleteRequest (audiobook): stored folder behind the guard', () => {
     expect(absMock.deleteABSItem).toHaveBeenCalledWith('abs-1', { hard: false });
   });
 
-  it('a folder already gone: library item deleted only if it lived there, row cleared', async () => {
+  it('a folder already gone (library mounted): library item deleted only if it lived there, row cleared', async () => {
+    imported('Other Author/Other Book');
     const gone = path.join(media, 'Author', 'Gone');
     absMock.getABSItem.mockResolvedValue({ path: gone });
     request(book(gone));
@@ -246,6 +247,18 @@ describe('deleteRequest (audiobook): stored folder behind the guard', () => {
     expect(result.filesKeptReason).toBeUndefined();
     expect(absMock.deleteABSItem).toHaveBeenCalledWith('abs-1', { hard: false });
     expect(prismaMock.audiobook.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ filePath: null }) }));
+  });
+
+  it('a missing folder on an empty (unmounted) media volume: everything kept, row and linkage stay', async () => {
+    const gone = path.join(media, 'Author', 'Gone');
+    absMock.getABSItem.mockResolvedValue({ path: gone });
+    request(book(gone));
+
+    const result = await deleteRequest('req-1', 'admin-1');
+
+    expect(result.filesKeptReason).toContain('is the media volume mounted?');
+    expect(absMock.getABSItem).not.toHaveBeenCalled();
+    expectLibraryUntouched();
   });
 
   describe('Plex', () => {
@@ -272,6 +285,19 @@ describe('deleteRequest (audiobook): stored folder behind the guard', () => {
 
       await deleteRequest('req-1', 'admin-1');
 
+      expect(plexMock.deleteItem).not.toHaveBeenCalled();
+    });
+
+    it('leaves the Plex item alone when the folder was already gone (no evidence its files are)', async () => {
+      imported('Other Author/Other Book');
+      const gone = path.join(media, 'Author', 'Gone');
+      plexMock.getItemFilePaths.mockResolvedValue([path.join(gone, 'Book.m4b')]);
+      request(book(gone, { absItemId: null, plexGuid: 'plex://album/1' }));
+
+      const result = await deleteRequest('req-1', 'admin-1');
+
+      expect(result.filesKeptReason).toBeUndefined();
+      expect(plexMock.getItemFilePaths).not.toHaveBeenCalled();
       expect(plexMock.deleteItem).not.toHaveBeenCalled();
     });
 

@@ -71,7 +71,9 @@ export async function removeAudiobookFolder(book: DeleteBook): Promise<LibraryFi
     logger.error(`Could not remove ${safe.deletePath} (${code}); keeping the library entry`, {
       error: error instanceof Error ? error.message : String(error),
     });
-    return { kind: 'kept', reason: `the folder could not be removed (${code})` };
+    // fs.rm stops at the first error: files before it are already gone
+    const why = code === 'EACCES' || code === 'EPERM' ? 'permission denied' : code;
+    return { kind: 'kept', reason: `the folder was partly removed (${why}); remove the rest manually` };
   }
   logger.info(`Deleted media directory: ${safe.deletePath}`);
   await sweepEmptyParents(safe.deletePath, safe.roots, undefined, logger, 'RequestDeleteParents').catch((error) => {
@@ -102,7 +104,8 @@ export async function removeEbookFiles(book: DeleteBook): Promise<{ deleted: num
       deleted++;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code ?? 'error';
-      return { deleted, keptReason: `${path.basename(file)} could not be removed (${code})` };
+      const why = code === 'EACCES' || code === 'EPERM' ? 'permission denied' : code;
+      return { deleted, keptReason: `${path.basename(file)} could not be removed (${why})` };
     }
   }
   logger.info(`Deleted ${deleted} ebook file(s) from: ${book.filePath}`);
@@ -115,7 +118,12 @@ async function isInsideFolder(candidate: string, folder: string): Promise<boolea
   return c === folder || isPathBelowBoundary(c, folder);
 }
 
-/** ABS item paths are as ABS sees them: match the absolute path, or the path relative to its library folder. */
+/**
+ * ABS item paths are as ABS sees them: match the absolute path, or the path
+ * relative to its library folder (ABS mounting the library elsewhere). The
+ * relative match can also hit the same relative path in another ABS library
+ * folder; the delete is hard=0, so at most that item's database entry goes.
+ */
 async function absItemInside(item: { path?: string; relPath?: string }, folder: string, mediaDir: string): Promise<boolean> {
   if (item.path && (await isInsideFolder(item.path, folder))) return true;
   if (!item.relPath) return false;
@@ -133,7 +141,7 @@ type ConfigReader = { get(key: string): Promise<string | null> };
  */
 export async function deleteBackendItem(
   book: DeleteBook,
-  outcome: { folder: string; mediaDir: string },
+  outcome: { kind: 'removed' | 'gone'; folder: string; mediaDir: string },
   backendMode: string,
   configService: ConfigReader
 ): Promise<void> {
@@ -157,6 +165,12 @@ export async function deleteBackendItem(
   }
 
   if (backendMode === 'plex' && book.plexGuid) {
+    if (outcome.kind === 'gone') {
+      // RMAB did not remove anything, so there is no evidence the Plex item's files are gone:
+      // leave it for the next library scan
+      logger.info(`Folder ${outcome.folder} was already gone; leaving Plex item ${book.plexGuid} for the next library scan`);
+      return;
+    }
     try {
       const record = await prisma.plexLibrary.findUnique({
         where: { plexGuid: book.plexGuid },

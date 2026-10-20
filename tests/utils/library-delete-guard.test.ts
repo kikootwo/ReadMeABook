@@ -161,10 +161,26 @@ describe('assertSafeLibraryDelete', () => {
     expect(path.resolve(safe.canonicalPath)).toBe(path.resolve(real.dir));
   });
 
-  it('reports a missing folder as not existing (nothing to remove), after the location rules', async () => {
+  it('reports a missing folder as already gone when the library looks mounted, after the location rules', async () => {
+    const other = titleFolder('Other/Book');
+    otherBooks = [{ id: 'book-2', title: 'Other', filePath: other.dir }];
     const missing = path.join(media, 'Author', 'Gone');
     await expect(assertSafeLibraryDelete(missing, { id: 'b', filePath: missing, filesHash: 'h' })).resolves.toMatchObject({ exists: false });
     expect(await refusal(assertSafeLibraryDelete(path.join(root, 'nope'), { id: 'b', filePath: 'x', filesHash: 'h' }))).toContain('outside');
+  });
+
+  it('refuses a missing folder when the media library is empty (an unmounted volume)', async () => {
+    const missing = path.join(media, 'Author', 'Gone');
+    const reason = await refusal(assertSafeLibraryDelete(missing, { id: 'b', filePath: missing, filesHash: 'h' }));
+    expect(reason).toContain('the folder is missing and the media library');
+    expect(reason).toContain('is the media volume mounted?');
+  });
+
+  it('refuses a missing folder when no other stored book folder exists either', async () => {
+    write(path.join(media, '.placeholder'));
+    otherBooks = [{ id: 'book-2', title: 'Other', filePath: path.join(media, 'Other', 'Gone too') }];
+    const missing = path.join(media, 'Author', 'Gone');
+    expect(await refusal(assertSafeLibraryDelete(missing, { id: 'b', filePath: missing, filesHash: 'h' }))).toContain('no stored book folder exists');
   });
 
   it('refuses a file, an empty path, and fails closed when the roots cannot be read', async () => {
@@ -210,7 +226,8 @@ describe('planEbookDelete', () => {
     expect(await refusal(planEbookDelete(dir, { id: 'b', filePath: dir, filesHash: null }))).toBe('it is also the folder of "Second"');
   });
 
-  it('returns nothing for a missing folder', async () => {
+  it('returns nothing for a missing folder (library mounted)', async () => {
+    write(path.join(media, 'Other', 'x.epub'));
     const dir = path.join(media, 'Author', 'Gone');
     await expect(planEbookDelete(dir, { id: 'b', filePath: dir, filesHash: null })).resolves.toEqual([]);
   });

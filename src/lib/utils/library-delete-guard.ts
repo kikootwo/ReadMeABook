@@ -11,6 +11,8 @@
  *     rows whose folder no longer exists are skipped)
  *  evidence: the audio files directly in the folder hash to the book's
  *     filesHash, and no subfolder holds audio (the removal is recursive)
+ * A missing folder counts as already gone only when the library looks mounted
+ * (media_dir readable and not empty, and some other stored folder exists).
  * Rules a-c apply to the canonical folder and, for a symlink, to the link's own
  * location too; only the link is then removed. Reuses the post-import delete
  * guard's canonicalization and its fail-closed root list.
@@ -49,8 +51,11 @@ export interface SafeLibraryDelete {
 
 const ROW_BATCH = 50;
 
-/** Other books' stored folders, canonicalized; rows whose folder no longer exists are skipped. */
-async function otherBookFolders(bookId: string): Promise<Array<{ title: string; canonical: CanonicalPath }>> {
+/**
+ * Other books' stored folders, canonicalized; rows whose folder no longer exists are skipped.
+ * `stored` counts every other row with a folder (missing or not).
+ */
+async function otherBookFolders(bookId: string): Promise<{ folders: Array<{ title: string; canonical: CanonicalPath }>; stored: number }> {
   const rows = await prisma.audiobook.findMany({
     where: { id: { not: bookId }, filePath: { not: null } },
     select: { id: true, title: true, filePath: true },
@@ -65,7 +70,24 @@ async function otherBookFolders(bookId: string): Promise<Array<{ title: string; 
     );
     for (const folder of batch) if (folder) folders.push(folder);
   }
-  return folders;
+  return { folders, stored: rows.length };
+}
+
+/**
+ * Why a missing stored folder may not mean "already gone": the media volume
+ * looks unmounted (media_dir unreadable or empty, e.g. the container started
+ * before an NFS/SMB mount), or no other book's stored folder exists either.
+ * Null when the library looks mounted.
+ */
+async function unmountedLibraryReason(mediaDir: string, others: { folders: unknown[]; stored: number }): Promise<string | null> {
+  const entries = await fs.readdir(mediaDir).catch(() => null);
+  if (!entries || entries.length === 0) {
+    return `the media library (${mediaDir}) is unreadable or empty; is the media volume mounted?`;
+  }
+  if (others.stored > 0 && others.folders.length === 0) {
+    return `no stored book folder exists under the media library (${mediaDir}); is the media volume mounted?`;
+  }
+  return null;
 }
 
 /**
@@ -138,7 +160,8 @@ export async function assertSafeLibraryDelete(
   const otherRoots = await Promise.all(
     [...roots.downloadRoots, ...(roots.otherRoots ?? [])].filter(Boolean).map(canonicalize)
   );
-  const others = await otherBookFolders(book.id);
+  const otherBooks = await otherBookFolders(book.id);
+  const others = otherBooks.folders;
 
   const linkPath = filePath.replace(/[\\/]+$/, '') || filePath;
   const entry = await fs.lstat(linkPath).catch((error: NodeJS.ErrnoException) => {
@@ -149,6 +172,9 @@ export async function assertSafeLibraryDelete(
   const target = await canonicalize(filePath);
   checkLocation(filePath, target, media, otherRoots, others, '');
   if (!entry) {
+    // Already gone only if the library looks mounted; otherwise nothing is touched
+    const unmounted = await unmountedLibraryReason(roots.mediaDir, otherBooks);
+    if (unmounted) throw new UnsafeDeleteError(filePath, `the folder is missing and ${unmounted}`);
     return { deletePath: target.path, canonicalPath: target.path, exists: false, roots };
   }
 

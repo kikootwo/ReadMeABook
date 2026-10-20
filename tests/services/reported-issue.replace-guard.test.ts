@@ -19,6 +19,8 @@ vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/services/request-delete-files', () => ({ audiobookFolderKeptReason: keptReasonMock }));
 vi.mock('@/lib/services/request-delete.service', () => ({ deleteRequest: deleteRequestMock }));
 vi.mock('@/lib/services/job-queue.service', () => ({ getJobQueueService: () => jobQueueMock }));
+const replaceContentMock = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/services/replace-library-content', () => ({ removeLibraryContentForReplace: replaceContentMock }));
 
 const { replaceAudiobook } = await import('@/lib/services/reported-issue.service');
 
@@ -72,6 +74,20 @@ describe('replaceAudiobook with the library delete guard', () => {
 
     expect(error).toMatchObject({ statusCode: 409 });
     expect(error.message).toContain('the folder could not be removed (EACCES)');
+    expect(error.message).toContain('the old request was deleted but its files were kept');
+    expectStoppedCleanly();
+  });
+
+  it('with no active request (an earlier delete kept the files), stops with 409 when the guarded removal keeps them', async () => {
+    prismaMock.request.findFirst.mockResolvedValue(null);
+    replaceContentMock.mockResolvedValue('folder contents changed since import');
+
+    const error = await replaceAudiobook('issue-1', 'admin-1', { guid: 't' }).catch((e) => e);
+
+    expect(error).toMatchObject({ statusCode: 409 });
+    expect(error.message).toContain('Nothing was changed');
+    expect(replaceContentMock).toHaveBeenCalledWith(expect.objectContaining({ filePath: '/media/Author/Book', filesHash: 'hash' }));
+    expect(deleteRequestMock).not.toHaveBeenCalled();
     expectStoppedCleanly();
   });
 

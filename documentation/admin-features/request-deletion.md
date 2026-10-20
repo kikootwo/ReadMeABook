@@ -100,7 +100,8 @@ model Request {
    - Roots are read strictly from the DB (`collectGuardRoots`, fail closed: any error refuses)
    - Symlinked title folder: rules a-c on the target AND the link location; only the link is removed
    - No stored path but a library item (`absItemId`/`plexGuid`): kept (`RMAB has no stored folder ...`); no path and no item: nothing to remove
-   - `rm` failure (e.g. EACCES): kept (`the folder could not be removed (EACCES)`)
+   - Missing folder: "already gone" only when the library looks mounted (`media_dir` readable and not empty, and some other stored book folder exists when other rows have one); otherwise kept (`the folder is missing and ... is the media volume mounted?`): no backend call, row untouched (protects against a media volume not mounted yet)
+   - `rm` failure: kept (`the folder was partly removed (permission denied); remove the rest manually`); `fs.rm` stops at the first error, so earlier files are gone; backend and row untouched
    - After removal: empty parents swept up to the nearest root (`sweepEmptyParents`)
    - **Ebook requests (D2):** rules a-c on `filePath`, then unlink every ebook file directly in it if the folder passes the evidence rule, or the only one if it holds exactly one; otherwise kept (`it holds N ebook files and is not provably this book's folder (...)`). A shared `{author}` or flat `Ebooks` folder fails rule c when another book points at it. Never a sweep of other books' ebooks
    - Not handled (needs a separate ebook location, PR2): an ebook in a separate folder (custom `ebook_path_template`) is not removed by the audiobook delete
@@ -110,9 +111,9 @@ model Request {
    - Request still soft-deleted; result `filesDeleted: false`, `filesKeptReason`, message `Request deleted; files kept: <reason>`
 
 5. **Backend item (only after RMAB removed the folder, or found it already gone)**
-   - **Audiobookshelf:** `DELETE /api/items/<id>?hard=0` (database entry only; RMAB already removed the files), only when the item's `path` is inside the removed folder, or its `relPath` matches the folder's path relative to `media_dir` (ABS mounting the library elsewhere). Otherwise skipped (a second copy elsewhere survives)
-   - **Plex:** `DELETE /library/metadata/{ratingKey}` only when every file Plex lists for the item and its tracks (`getItemFilePaths`: Media > Part `file`) is inside the removed folder; otherwise skipped, the next library scan drops it
-   - `deleteABSItem(id, { hard })`: `hard: true` (`?hard=1`) also deletes files; only the reported-issue replace without an RMAB request (`deleteFromLibrary`) uses it
+   - **Audiobookshelf:** `DELETE /api/items/<id>?hard=0` (database entry only; RMAB already removed the files), only when the item's `path` is inside the removed folder, or its `relPath` matches the folder's path relative to `media_dir` (ABS mounting the library elsewhere). Otherwise skipped (a second copy elsewhere survives). The `relPath` match can also hit the same relative path in another ABS library folder; with `hard=0` only that item's database entry goes (the next ABS scan re-adds it)
+   - **Plex:** `DELETE /library/metadata/{ratingKey}` only after RMAB removed the folder itself, and only when every file Plex lists for the item and its tracks (`getItemFilePaths`: Media > Part `file`) is inside it; otherwise (incl. a folder that was already gone) skipped, the next library scan drops it
+   - `deleteABSItem(id, { hard })`: `hard: true` (`?hard=1`) also deletes files; only a replace of a book added outside RMAB (no request, no stored folder; `replace-library-content.ts`) uses it
 
 6. **plex_library records, linkage, stored paths** (only after removal / already gone)
    - plex_library delete by ASIN, fallback exact title/author
@@ -227,6 +228,7 @@ where: {
 17. ✅ **Legacy row has no stored path** - Skips file deletion without guessing a path
 18. ✅ **Folder shared with other books, foreign files, symlinks, roots** - Library delete guard keeps the files and says why
 19. ✅ **Reported-issue replace when files would be kept** - `replaceAudiobook` stops with HTTP 409 and the reason before deleting anything (and again if `deleteRequest` kept files); no record reset, no new request, issue stays open
+20. ✅ **Replace with no active request but a stored folder** (an earlier delete kept the files) - `removeLibraryContentForReplace`: the folder goes through the guard (409 when kept), backend item as in step 5; never an ABS hard delete
 
 ## Fixed Issues ✅
 
@@ -256,6 +258,7 @@ Backend:
 - src/lib/services/request-delete.service.ts (deletion logic)
 - src/lib/services/request-delete-files.ts (library files, backend items, plex_library records)
 - src/lib/utils/library-delete-guard.ts (assertSafeLibraryDelete, planEbookDelete)
+- src/lib/services/replace-library-content.ts (replace with no active request)
 - src/app/api/admin/requests/[id]/route.ts (DELETE endpoint)
 - src/lib/processors/cleanup-seeded-torrents.processor.ts (orphaned cleanup)
 
