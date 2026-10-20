@@ -9,7 +9,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, firefox, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { evidencePath, loginAdminUi, type Book } from '../../lib/harness';
 
 export type FixtureKey = 'short' | 'mid' | 'long' | 'huge' | 'giant' | 'wolves' | 'boxset' | 'token' | 'nineLines' | 'tenLines' | 'whitespace';
@@ -57,14 +57,18 @@ export class SummaryRoutes {
   }
 }
 
-export interface Session { ctx: BrowserContext; page: Page; routes: SummaryRoutes }
+export type Engine = 'chromium' | 'webkit' | 'firefox';
+export interface Session { ctx: BrowserContext; page: Page; routes: SummaryRoutes; engine: Engine }
 
+/** `browser` may be the spec's Chromium fixture or a manually launched WebKit/Firefox (see launchEngine). */
 export async function openSession(browser: Browser, v: Vp, opts: { dark?: boolean; tallCovers?: boolean } = {}): Promise<Session> {
+  const engine = browser.browserType().name() as Engine;
   const ctx = await browser.newContext({
     baseURL: process.env.E2E_BASE_URL,
     viewport: { width: v.width, height: v.height },
     deviceScaleFactor: 1,
-    isMobile: Boolean(v.touch),
+    // Firefox has no isMobile emulation; it still gets touch (coarse pointer) on phone sizes.
+    ...(engine === 'firefox' ? {} : { isMobile: Boolean(v.touch) }),
     hasTouch: Boolean(v.touch),
     colorScheme: opts.dark ? 'dark' : 'light',
   });
@@ -75,8 +79,11 @@ export async function openSession(browser: Browser, v: Vp, opts: { dark?: boolea
   await routes.install(ctx);
   const page = await ctx.newPage();
   await loginAdminUi(page);
-  return { ctx, page, routes };
+  return { ctx, page, routes, engine };
 }
+
+/** WebKit or Firefox from the pinned Playwright image (the spec's `browser` fixture is Chromium). */
+export const launchEngine = (engine: Exclude<Engine, 'chromium'>): Promise<Browser> => (engine === 'webkit' ? webkit : firefox).launch();
 
 /** The details modal's scroll area (the only overscroll-contain scroller that holds an h2 title). */
 const AREA_JS = `[...document.querySelectorAll('div.overflow-y-auto.overscroll-contain')].find((el) => el.querySelector('h2'))`;
@@ -112,7 +119,7 @@ export interface Geometry {
   areaClientH: number; areaScrollH: number; overflow: number; hOverflow: number;
   summaryChars: number; summaryH: number | null; boxScrollH: number | null;
   region: string | null; tabindex: string | null; label: string | null; overscrollY: string | null;
-  heading: boolean; fadeTop: boolean; fadeBottom: boolean;
+  heading: boolean; fadeTop: boolean; fadeBottom: boolean; more: boolean; lifted: boolean;
 }
 
 export async function measure(page: Page): Promise<Geometry> {
@@ -134,8 +141,65 @@ export async function measure(page: Page): Promise<Geometry> {
       heading: [...area.querySelectorAll('h3')].some((h) => h.textContent.trim().toLowerCase() === 'summary'),
       fadeTop: !!area.querySelector('[data-testid="book-summary-fade-top"]'),
       fadeBottom: !!area.querySelector('[data-testid="book-summary-fade-bottom"]'),
+      more: !!area.querySelector('[data-testid="book-summary-more"]'),
+      lifted: !!(box && box.parentElement.style.maxHeight),
     };
   })()`);
+}
+
+/** The summary heading at the top of the viewport, box scrolled to its start (phone evidence). */
+export async function showBoxTop(page: Page) {
+  await page.evaluate(`(() => {
+    const area = ${AREA_JS};
+    const box = area.querySelector('[data-testid="book-summary-scroll"]');
+    if (!box) return;
+    box.scrollTop = 0;
+    box.parentElement.previousElementSibling.scrollIntoView({ block: 'start' });
+  })()`);
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+}
+
+/** Screenshot of the summary heading + box only (padded), for a close look at the fade and chevron. */
+export async function shotBox(page: Page, name: string) {
+  const r = (await page.evaluate(`(() => { const a = ${AREA_JS}; const w = a.querySelector('[data-testid="book-summary"]');
+    const h = w.previousElementSibling.getBoundingClientRect(), b = w.getBoundingClientRect();
+    return { x: b.left - 16, y: h.top - 8, width: b.width + 32, height: b.bottom - h.top + 24 }; })()`)) as { x: number; y: number; width: number; height: number };
+  await page.screenshot({ path: evidencePath('summary-scroll', `${name}.png`), clip: { x: Math.max(0, r.x), y: Math.max(0, r.y), width: r.width, height: r.height } });
+}
+
+/**
+ * Pointer path for the "more" chevron: it must sit inside the box; each click scrolls the box (never the
+ * modal) until the end, where the chevron goes away. Takes `midShot` after the first click.
+ */
+export async function chevronWalk(page: Page, midShot?: string) {
+  await page.evaluate(`${AREA_JS}.querySelector('[data-testid="book-summary"]').scrollIntoView({ block: 'center' })`);
+  await settle(page, 300);
+  const more = page.getByTestId('book-summary-more');
+  if (!(await more.count())) return { ok: false, reason: 'no chevron' };
+  const rects = (await page.evaluate(`(() => { const a = ${AREA_JS};
+    const r = (el) => { const b = el.getBoundingClientRect(); return { top: b.top, right: b.right, bottom: b.bottom, left: b.left }; };
+    return { box: r(a.querySelector('[data-testid="book-summary-scroll"]')), more: r(a.querySelector('[data-testid="book-summary-more"]')) }; })()`)) as Record<'box' | 'more', { top: number; right: number; bottom: number; left: number }>;
+  const inside = rects.more.top >= rects.box.top && rects.more.bottom <= rects.box.bottom && rects.more.left >= rects.box.left && rects.more.right <= rects.box.right;
+  const steps: { modalTop: number; boxTop: number | null }[] = [];
+  const start = await scrollState(page);
+  let clicks = 0;
+  while (clicks < 40 && (await more.count())) {
+    const before = await scrollState(page);
+    await more.click();
+    clicks += 1;
+    await settle(page, 700);
+    const after = await scrollState(page);
+    steps.push({ modalTop: after.modalTop, boxTop: after.boxTop });
+    if (!((after.boxTop ?? 0) > (before.boxTop ?? 0))) break;
+    if (clicks === 1 && midShot) await shot(page, midShot);
+  }
+  const end = await scrollState(page);
+  const gone = (await more.count()) === 0;
+  const focusMoved = await page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'book-summary-more');
+  const boxMoved = steps.length > 0 && (steps[0].boxTop ?? 0) > (start.boxTop ?? 0);
+  const modalStill = steps.every((s) => s.modalTop === start.modalTop);
+  const atEnd = end.boxTop !== null && end.boxMax !== null && end.boxTop >= end.boxMax - 1;
+  return { ok: inside && boxMoved && modalStill && gone && atEnd && !focusMoved, inside, boxMoved, modalStill, gone, atEnd, focusMoved, clicks, rects, start, steps, end };
 }
 
 /** Scroll the summary box to its end and centre it in the modal; returns the modal's scrollTop. */
@@ -221,13 +285,12 @@ export async function keyboardReach(page: Page, author: string) {
   return { ok: reached && (after.boxTop ?? 0) > (before.boxTop ?? 0), start, tabs, reached, before, after };
 }
 
-const AXE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.10.2/axe.min.js';
 let axeSource: string | null = null;
 
-/** axe-core over the modal (injected through CDP, so the app's CSP is untouched). */
+/** axe-core (pinned e2e devDependency) over the modal, injected through CDP, so the app's CSP is untouched. */
 export async function axeModal(page: Page) {
   try {
-    axeSource ??= await (await fetch(AXE_URL)).text();
+    axeSource ??= fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
     await page.evaluate(axeSource);
     const result = await page.evaluate(`(async () => {
       const r = await axe.run(${AREA_JS}.parentElement, { resultTypes: ['violations'] });
