@@ -96,7 +96,6 @@ export function useEbookSettings({ ebook, onChange, onSuccess, onError, markAsSa
 
       onSuccess('E-book sidecar settings saved successfully!');
       markAsSaved();
-      setTimeout(() => onSuccess(''), 3000);
     } catch (error) {
       onError(error instanceof Error ? error.message : 'Failed to save e-book settings');
     } finally {

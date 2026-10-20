@@ -324,6 +324,25 @@ test('plex: identity, sections, library listing from the media volume, refresh c
   assert.equal((await control('/state')).plexRefreshes, 1);
 });
 
+test('plex: album children list the audio files in the album folder as track parts', async () => {
+  const hdr = { 'X-Plex-Token': 'plextoken', Accept: 'application/json' };
+  const dir = path.join(tmp, 'media', 'audiobooks', 'Kids Author', 'Kids Book');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, '01.mp3'), 'a');
+  fs.writeFileSync(path.join(dir, 'cover.jpg'), 'c');
+  const album = (await control('/plex-library')).albums.find((a) => a.title === 'Kids Book');
+  const children = await fetch(`${base('plex')}/library/metadata/${album.ratingKey}/children`, { headers: hdr }).then((r) => r.json());
+  assert.deepEqual(children.MediaContainer.Metadata.map((t) => t.Media[0].Part[0].file), [path.posix.join(album.dir, '01.mp3')]);
+  assert.equal((await fetch(`${base('plex')}/library/metadata/999999/children`, { headers: hdr })).status, 404);
+
+  // Folder removed: the item and its file paths stay until a refresh (as in Plex's database)
+  fs.rmSync(dir, { recursive: true, force: true });
+  const kept = await fetch(`${base('plex')}/library/metadata/${album.ratingKey}/children`, { headers: hdr }).then((r) => r.json());
+  assert.equal(kept.MediaContainer.Metadata[0].Media[0].Part[0].file, path.posix.join(album.dir, '01.mp3'));
+  await fetch(`${base('plex')}/library/sections/1/refresh`, { headers: hdr });
+  assert.equal((await fetch(`${base('plex')}/library/metadata/${album.ratingKey}`, { headers: hdr })).status, 404);
+});
+
 test('control API: token required (except /health); wrong token rejected', async () => {
   assert.equal((await fetch(`${base('control')}/__control/health`)).status, 200);
   assert.equal((await fetch(`${base('control')}/__control/requests`)).status, 401);

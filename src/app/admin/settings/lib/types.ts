@@ -237,6 +237,8 @@ export interface TestResult {
 export interface Message {
   type: 'success' | 'error';
   text: string;
+  /** Clear the banner after 3 s (save confirmations). Unset: it stays until replaced, e.g. "… You can now save." */
+  autoClear?: boolean;
 }
 
 /**

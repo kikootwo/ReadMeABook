@@ -218,6 +218,23 @@ describe('RecentRequestsTable', () => {
     expect(toastMock.success).toHaveBeenCalledWith('Request deleted successfully');
   });
 
+  it('shows a warning toast with the reason when the files were kept', async () => {
+    fetchWithAuthMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, details: { filesDeleted: false, filesKeptReason: 'folder contents changed since import' } }),
+    });
+
+    render(<RecentRequestsTable />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Trigger' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => {
+      expect(toastMock.warning).toHaveBeenCalledWith('Request deleted; files kept: folder contents changed since import', 10000);
+    });
+    expect(toastMock.success).not.toHaveBeenCalledWith('Request deleted successfully');
+  });
+
   it('warns when ebook fetch fails', async () => {
     fetchWithAuthMock.mockResolvedValue({
       ok: true,

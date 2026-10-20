@@ -274,13 +274,17 @@ describe('Audiobookshelf API client', () => {
       ok: true,
     });
 
-    await expect(deleteABSItem('item-1')).resolves.toBeUndefined();
+    await expect(deleteABSItem('item-1', { hard: true })).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledWith('http://abs/api/items/item-1?hard=1', {
       method: 'DELETE',
       headers: {
         'Authorization': 'Bearer token',
       },
     });
+
+    // hard: false removes only the ABS database entry, never the files
+    await expect(deleteABSItem('item-1', { hard: false })).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenLastCalledWith('http://abs/api/items/item-1?hard=0', expect.objectContaining({ method: 'DELETE' }));
   });
 
   it('throws when delete fails', async () => {
@@ -295,6 +299,6 @@ describe('Audiobookshelf API client', () => {
       statusText: 'Boom',
     });
 
-    await expect(deleteABSItem('item-1')).rejects.toThrow('ABS API error: 500 Boom');
+    await expect(deleteABSItem('item-1', { hard: false })).rejects.toThrow('ABS API error: 500 Boom');
   });
 });

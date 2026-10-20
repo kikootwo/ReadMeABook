@@ -43,6 +43,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const refreshTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // A refresh still in flight at unmount must not arm a new timer afterwards
+  const unmountedRef = useRef(false);
 
   // Clear any existing refresh timer
   const clearRefreshTimer = () => {
@@ -55,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Schedule auto-refresh before token expires
   const scheduleTokenRefresh = (token: string) => {
     clearRefreshTimer();
+    if (unmountedRef.current) return;
 
     const refreshTimeMs = getRefreshTimeMs(token);
     if (refreshTimeMs === null || refreshTimeMs <= 0) {
@@ -68,6 +71,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refreshToken();
     }, refreshTimeMs);
   };
+
+  // Track mount state. Declared before every other effect so that, when StrictMode
+  // re-runs effects after its simulated unmount, the flag is reset before they run.
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+      clearRefreshTimer();
+    };
+  }, []);
 
   // Load user from localStorage on mount
   useEffect(() => {
@@ -146,7 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const refreshTokenToUse = storedRefreshToken || localStorage.getItem('refreshToken');
 
     if (!refreshTokenToUse) {
-      logout();
+      logoutIfMounted();
       return;
     }
 
@@ -175,12 +188,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Schedule next refresh
         scheduleTokenRefresh(data.accessToken);
       } else {
-        logout();
+        logoutIfMounted();
       }
     } catch (error) {
       console.error('Token refresh error:', error);
-      logout();
+      logoutIfMounted();
     }
+  };
+
+  // A refresh that fails after unmount must not redirect (logout uses window.location)
+  const logoutIfMounted = () => {
+    if (!unmountedRef.current) logout();
+  };
+
+  // Wait between login polls; stops polling once the provider is unmounted
+  const waitForNextLoginPoll = async () => {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    if (unmountedRef.current) throw new Error('Login cancelled');
   };
 
   // Poll Plex OAuth callback during login
@@ -197,7 +221,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!response.ok) {
           // 202 means still waiting for user to authorize - continue polling
           if (response.status === 202) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await waitForNextLoginPoll();
             attempts++;
             continue;
           }
@@ -232,7 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         // Still waiting for authorization
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await waitForNextLoginPoll();
         attempts++;
       } catch (error) {
         // If it's our custom error, re-throw it to display to user
@@ -242,7 +266,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // Network error or other issue - log and retry
         console.error('Login polling error:', error);
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await waitForNextLoginPoll();
         attempts++;
       }
     }
@@ -274,13 +298,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAccessToken(newAccessToken);
     scheduleTokenRefresh(newAccessToken);
   };
-
-  // Cleanup timer on unmount
-  useEffect(() => {
-    return () => {
-      clearRefreshTimer();
-    };
-  }, []);
 
   // Listen for logout in other tabs (cross-tab sync)
   useEffect(() => {
