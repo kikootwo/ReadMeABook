@@ -118,21 +118,21 @@ describe('OIDC sign-in accounts', () => {
     expect(users.get('sub-carol')).toMatchObject({ authProvider: 'oidc', role: 'user' });
   });
 
-  it('signs in an older OIDC account without a provider and records the provider', async () => {
-    const result = await signIn('sub-dan');
-
-    expect(result.success).toBe(true);
-    expect(users.get('sub-dan')).toMatchObject({ id: 'row-old', authProvider: 'oidc' });
-  });
-
-  it('refuses a row without a provider whose subject does not match', async () => {
-    seed({ ...OLDER_OIDC_ROW, oidcSubject: 'someone-else' });
+  it('refuses a row without a provider', async () => {
     const before = snapshot('sub-dan');
 
     const result = await signIn('sub-dan');
 
     expect(result.success).toBe(false);
     expect(snapshot('sub-dan')).toBe(before);
+  });
+
+  it.each(['local-someone', 'LOCAL-Someone'])('refuses a reserved subject (%s)', async (sub) => {
+    const result = await signIn(sub);
+
+    expect(result.success).toBe(false);
+    expect(prismaMock.user.create).not.toHaveBeenCalled();
+    expect(users.has(sub)).toBe(false);
   });
 
   it('creates a new OIDC account for a new subject', async () => {

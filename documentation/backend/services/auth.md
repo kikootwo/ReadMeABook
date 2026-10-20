@@ -190,7 +190,7 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 - **Redirect URI**: `{BASE_URL}/api/auth/oidc/callback`
 
 ### OIDC Accounts
-- The user row is keyed on the IdP subject (`plexId` = `oidcSubject`); OIDC sign-in only uses an OIDC account's row (`authProvider: 'oidc'`, or an older row with no provider and the same `oidcSubject`) → otherwise sign-in is refused with a generic message
+- The user row is keyed on the IdP subject (`plexId` = `oidcSubject`); OIDC sign-in only uses an OIDC account's row (`authProvider: 'oidc'`) → otherwise sign-in is refused with a generic message
 - Create and update set `authProvider: 'oidc'`
 - `PlexAuthProvider.handleCallback` is not used (Plex sign-in completes in `/api/auth/plex/callback` and `/api/auth/plex/switch-profile`) and always refuses
 
