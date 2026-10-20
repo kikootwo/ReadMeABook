@@ -349,26 +349,11 @@ This works fine for most deployments, but files will have different owners on th
 
 **File:** `.github/workflows/build-unified-image.yml`
 
-**Triggers:**
-- Push to `main` branch
-- Tags matching `v*`
-- Manual workflow dispatch
-- Pull requests (build only, no push)
-
-**Platforms:**
-- linux/amd64
-- linux/arm64
-
-**Tags:**
-- `latest` (main branch)
-- `v1.2.3` (version tags)
-- `v1.2` (minor version)
-- `v1` (major version)
-- `main-<sha>` (commit SHA)
-
-**Registry:** GitHub Container Registry (ghcr.io)
-
-**Permissions:** Uses `GITHUB_TOKEN` (no manual setup needed)
+- **Triggers:** `v*` tags (test, build, publish); manual dispatch (on a branch: test + build only, nothing published). No image build on PRs.
+- **Platforms:** linux/amd64, linux/arm64
+- **Tags (from `v1.2.3`):** `1.2.3`, `1.2`, `1`, `latest`, `sha-<short>`
+- **Registry:** ghcr.io via `GITHUB_TOKEN` (`packages: write` on the build job only)
+- **Details:** [ci-workflows.md](ci-workflows.md)
 
 ## Logs
 
