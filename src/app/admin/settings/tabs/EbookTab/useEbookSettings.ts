@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { fetchWithAuth } from '@/lib/utils/api';
 import type { EbookSettings, TestResult } from '../../lib/types';
 
@@ -21,11 +21,6 @@ export function useEbookSettings({ ebook, onChange, onSuccess, onError, markAsSa
   const [saving, setSaving] = useState(false);
   const [testingFlaresolverr, setTestingFlaresolverr] = useState(false);
   const [flaresolverrTestResult, setFlaresolverrTestResult] = useState<TestResult | null>(null);
-  // Clears the success message after a few seconds; cancelled when the tab unmounts
-  const clearMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (clearMessageTimerRef.current) clearTimeout(clearMessageTimerRef.current);
-  }, []);
 
   /**
    * Update a single ebook field
@@ -101,8 +96,6 @@ export function useEbookSettings({ ebook, onChange, onSuccess, onError, markAsSa
 
       onSuccess('E-book sidecar settings saved successfully!');
       markAsSaved();
-      if (clearMessageTimerRef.current) clearTimeout(clearMessageTimerRef.current);
-      clearMessageTimerRef.current = setTimeout(() => onSuccess(''), 3000);
     } catch (error) {
       onError(error instanceof Error ? error.message : 'Failed to save e-book settings');
     } finally {

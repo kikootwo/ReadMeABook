@@ -23,6 +23,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -210,7 +211,9 @@ function useAutoRefreshControlImpl(): AutoRefreshControl {
 // ---------------------------------------------------------------------------
 export function useRegisterPauseReason(reason: string, active: boolean): void {
   const { register, unregister } = useAutoRefreshControl();
-  useEffect(() => {
+  // Layout effect: on unmount its cleanup runs before the provider's passive cleanup,
+  // so the provider still clears any debounce this unregister arms
+  useLayoutEffect(() => {
     if (active) register(reason);
     else unregister(reason);
     return () => unregister(reason);

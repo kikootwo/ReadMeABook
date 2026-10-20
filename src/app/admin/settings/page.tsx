@@ -36,6 +36,13 @@ export default function AdminSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<Message | null>(null);
+  // Success banners clear themselves after 3 s. One timer, keyed on the message, so a newer
+  // message or leaving the page cancels it (tabs only report messages, they keep no timers)
+  useEffect(() => {
+    if (message?.type !== 'success') return;
+    const timer = setTimeout(() => setMessage(null), 3000);
+    return () => clearTimeout(timer);
+  }, [message]);
   const [activeTab, setActiveTab] = useState<SettingsTab>('library');
 
   // Validation state (tracks if each tab's settings are valid)
@@ -165,8 +172,6 @@ export default function AdminSettings() {
         setOriginalConfiguredIndexers(JSON.parse(JSON.stringify(configuredIndexers)));
         setOriginalFlagConfigs(JSON.parse(JSON.stringify(flagConfigs)));
       }
-
-      setTimeout(() => setMessage(null), 3000);
     } catch (error) {
       setMessage({
         type: 'error',
