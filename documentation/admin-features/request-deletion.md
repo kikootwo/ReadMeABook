@@ -265,7 +265,7 @@ Queries Updated (deletedAt: null filters):
 ## Configuration
 
 **No new config required** - uses existing:
-- `prowlarr_indexers` (per indexer `seedingTimeMinutes` and `ratioLimit`), matched to the download by Prowlarr indexer id, else by name (`findIndexerConfig()`)
+- `prowlarr_indexers` (per indexer `seedingTimeMinutes` and `ratioLimit`), matched to the download by Prowlarr indexer id, else by name (`findIndexerConfig()`; the id is ignored when the recorded name is another configured indexer or the id's indexer has another protocol). Not a JSON list → the download is left in the client
 
 ## Security
 

@@ -20,10 +20,15 @@ vi.mock('@/lib/services/download-client-manager.service', () => ({
   getDownloadClientManager: () => downloadClientManagerMock,
 }));
 
-function setup(history: { indexerName: string; indexerId?: number | null }, download: { seedingTime: number; ratio: number }) {
-  configMock.get.mockResolvedValue(
-    JSON.stringify([{ id: 7, name: 'New Name', protocol: 'torrent', seedingTimeMinutes: 0, ratioLimit: 2 }])
-  );
+const DEFAULT_CONFIG = [{ id: 7, name: 'New Name', protocol: 'torrent', seedingTimeMinutes: 0, ratioLimit: 2 }];
+
+function setup(
+  history: { indexerName: string; indexerId?: number | null },
+  download: { seedingTime: number; ratio: number },
+  config: unknown = DEFAULT_CONFIG,
+  deletedAt: Date | null = null
+) {
+  configMock.get.mockResolvedValue(typeof config === 'string' ? config : JSON.stringify(config));
   const client = {
     clientType: 'qbittorrent',
     protocol: 'torrent',
@@ -35,7 +40,7 @@ function setup(history: { indexerName: string; indexerId?: number | null }, down
     .mockResolvedValueOnce([
       {
         id: 'req-1',
-        deletedAt: null,
+        deletedAt,
         downloadHistory: [
           {
             selected: true,
@@ -95,6 +100,52 @@ describe('processCleanupSeededTorrents indexer lookup', () => {
     const result = await processCleanupSeededTorrents({ jobId: 'job-4' });
 
     expect(result).toMatchObject({ unlimited: 1, cleaned: 0 });
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+  });
+
+  // Prowlarr rebuilt or replaced: ids start from 1 again, so an old download's id can name another indexer
+  const reusedIds = [
+    { id: 3, name: 'PublicTracker', protocol: 'torrent', seedingTimeMinutes: 60, ratioLimit: 0 },
+    { id: 5, name: 'PrivateTracker', protocol: 'torrent', seedingTimeMinutes: 0, ratioLimit: 2 },
+  ];
+
+  it("uses the recorded name's settings when the id now belongs to a different indexer", async () => {
+    // Recorded as PrivateTracker (ratio 2) with id 3, which is now PublicTracker (60 min, no ratio)
+    const client = setup({ indexerName: 'PrivateTracker', indexerId: 3 }, { seedingTime: 61 * 60, ratio: 0.5 }, reusedIds);
+
+    const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
+    const result = await processCleanupSeededTorrents({ jobId: 'job-5' });
+
+    expect(result).toMatchObject({ skipped: 1, cleaned: 0 });
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+  });
+
+  it('ignores an id that now belongs to a usenet indexer and uses the name', async () => {
+    const config = [
+      { id: 3, name: 'SomeNZB', protocol: 'usenet', removeAfterProcessing: true },
+      { id: 5, name: 'PublicTracker', protocol: 'torrent', seedingTimeMinutes: 60, ratioLimit: 0 },
+    ];
+    const client = setup({ indexerName: 'PublicTracker', indexerId: 3 }, { seedingTime: 61 * 60, ratio: 0.5 }, config);
+
+    const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
+    const result = await processCleanupSeededTorrents({ jobId: 'job-6' });
+
+    expect(result).toMatchObject({ cleaned: 1, unlimited: 0 });
+    expect(client.deleteDownload).toHaveBeenCalledWith('hash-1', true);
+  });
+
+  it.each([
+    ['an object', { id: 7 }],
+    ['invalid JSON', 'not json'],
+  ])('changes nothing when the saved indexer configuration is %s', async (_label, config) => {
+    const client = setup({ indexerName: 'New Name', indexerId: 7 }, { seedingTime: 99999, ratio: 9 }, config, new Date());
+
+    const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
+    const result = await processCleanupSeededTorrents({ jobId: 'job-7' });
+
+    expect(result).toMatchObject({ skipped: true, success: false });
+    expect(prismaMock.request.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.request.delete).not.toHaveBeenCalled();
     expect(client.deleteDownload).not.toHaveBeenCalled();
   });
 });
