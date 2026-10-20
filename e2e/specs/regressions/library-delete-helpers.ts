@@ -76,10 +76,12 @@ export interface BookRow {
 }
 
 export function bookRow(id: string): BookRow {
-  const [filePath, filesHash, fileFormat, absItemId, plexGuid, status] = psql(
-    `select coalesce(file_path,''), coalesce(files_hash,''), coalesce(file_format,''), coalesce(abs_item_id,''), coalesce(plex_guid,''), status from audiobooks where id = ${sqlStr(id)}`
-  ).split('\t');
-  return { filePath, filesHash, fileFormat, absItemId, plexGuid, status };
+  // One JSON value: psql() trims its output, which drops leading empty tab-separated fields.
+  return JSON.parse(
+    psql(
+      `select json_build_object('filePath', coalesce(file_path,''), 'filesHash', coalesce(files_hash,''), 'fileFormat', coalesce(file_format,''), 'absItemId', coalesce(abs_item_id,''), 'plexGuid', coalesce(plex_guid,''), 'status', status)::text from audiobooks where id = ${sqlStr(id)}`
+    )
+  ) as BookRow;
 }
 
 /** Generated audio files (AAC in MP4 for .m4a/.m4b), owned by the app user. */

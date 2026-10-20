@@ -36,7 +36,18 @@ export function validateExec(body) {
   return body;
 }
 
-function execInStack({ project, env, tainted }, { op, service, user, argv, input }) {
+// Docker Desktop sometimes refuses to attach under load ("unable to upgrade to tcp"). The command
+// never started, so running it again is safe; any other failure is returned as-is.
+async function execInStack(stack, request) {
+  for (let attempt = 1; ; attempt++) {
+    const result = await execOnce(stack, request);
+    const notStarted = result.status !== 0 && result.stdout === '' && /unable to upgrade to tcp/i.test(result.stderr);
+    if (!notStarted || attempt > 2) return result;
+    await new Promise((r) => setTimeout(r, 2000 * attempt));
+  }
+}
+
+function execOnce({ project, env, tainted }, { op, service, user, argv, input }) {
   return new Promise((resolve) => {
     const sub = op === 'logs' ? ['logs', '--no-color', service] : ['exec', '-T', ...(user ? ['-u', String(user)] : []), service, ...argv];
     // Nothing here may throw past the request handler: a crash would kill run.mjs before cleanup.
