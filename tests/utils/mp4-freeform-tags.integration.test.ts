@@ -69,7 +69,8 @@ describe.skipIf(!available)('addFreeformTags on ffmpeg output (real ffmpeg)', ()
     expect(countFreeform(file, 'DISCSUBTITLE')).toBe(1);
     const tags = (await probe(file)).tags;
     expect(tags.ASIN).toBe('B0TESTASIN');
-    expect(Object.entries(tags).find(([k]) => k.toLowerCase() === 'discsubtitle')?.[1]).toBe('Disc A');
+    // 9.0.2's demuxer maps it back to its own key, disc_subtitle
+    expect(Object.entries(tags).find(([k]) => /^disc_?subtitle$/i.test(k))?.[1]).toBe('Disc A');
   }, 60_000);
 
   it('a writer fault (one track table left unshifted) is rejected and the file is untouched', async () => {
