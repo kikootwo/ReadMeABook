@@ -170,6 +170,7 @@ interface ScheduledJob {
 - ✅ Requests failing permanently (no torrents) → retry system with 'awaiting_search'
 - ✅ Requests failing permanently (no files) → retry system with max 5 retries + 'warn' status
 - ✅ Failed requests blocking re-requests → allow re-requesting failed/warn/cancelled
+- ✅ Shelf sync re-grabbing the same dead release every 6 h (#312) → a re-request replaces the failed request atomically and keeps its blocklist ([release-blocklist.md](../../admin-features/release-blocklist.md)); only auto-blocked failures stop looping, failed requests without a block are still recreated each sync
 - ✅ Files deleted immediately → kept until seeding requirements met
 - ✅ No seeding time config → added `seeding_time_minutes`
 - ✅ No ratio-based seeding policy → added per-indexer `ratioLimit` (AND-semantics with `seedingTimeMinutes`; `0` disables; undefined client ratio = safe-deny)
