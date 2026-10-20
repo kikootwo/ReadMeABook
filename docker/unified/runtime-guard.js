@@ -105,17 +105,43 @@ function checkRecovery() {
   ok('credential recovery loads its Prisma client and bcrypt');
 }
 
+// Never shipped: the tracer sweeps in the whole project root (dynamic fs access in routes), and
+// next.config.ts outputFileTracingExcludes keeps these out of .next/standalone.
+const NOT_SHIPPED = [
+  'src/app', 'src/components', 'src/contexts', 'src/hooks', 'src/lib', 'tests', 'e2e', 'screenshots',
+  'documentation', 'docker', 'dockerfile.unified', 'package-lock.json', 'tsconfig.json',
+];
+
 function checkLayout() {
-  for (const rel of ['server.js', 'prisma/schema.prisma', 'prisma/data-migrations', 'public', '.next/static', 'scripts/recover-credentials.js']) {
-    if (!fs.existsSync(path.join(APP, rel))) fail(`missing /app/${rel}`);
-  }
-  ok('runtime layout present');
+  const absent = ['server.js', 'prisma/schema.prisma', 'prisma/data-migrations', 'public', '.next/static', 'scripts/recover-credentials.js']
+    .filter((rel) => !fs.existsSync(path.join(APP, rel)));
+  const shipped = NOT_SHIPPED.filter((rel) => fs.existsSync(path.join(APP, rel)));
+  for (const rel of absent) fail(`missing /app/${rel}`);
+  if (shipped.length) fail(`non-runtime files in /app (check outputFileTracingExcludes in next.config.ts): ${shipped.join(', ')}`);
+  if (!absent.length && !shipped.length) ok(`runtime layout present; none of ${NOT_SHIPPED.length} non-runtime paths shipped`);
+}
+
+/** bull 4 loads its Lua from lib/scripts/<name>-<keys>.js (precompiled copies of lib/commands/*.lua). */
+function checkBullScripts() {
+  const root = path.dirname(fs.realpathSync(createRequire(path.join(APP, 'server.js')).resolve('bull/package.json')));
+  const commands = require(path.join(root, 'lib/scripts/index.js'));
+  const names = Object.keys(commands);
+  const bad = names.filter((n) => typeof commands[n]?.content !== 'string' || commands[n].content.length === 0 || typeof commands[n].keys !== 'number');
+  if (names.length < 20) fail(`bull lib/scripts exports only ${names.length} commands`);
+  if (bad.length) fail(`bull commands without Lua content: ${bad.join(', ')}`);
+  const luaDir = path.join(root, 'lib/commands');
+  const lua = fs.existsSync(luaDir) ? fs.readdirSync(luaDir).filter((f) => f.endsWith('.lua')).map((f) => f.slice(0, -4)) : [];
+  if (!lua.length) fail(`no ${luaDir}/*.lua`);
+  const unmatched = lua.filter((n) => !names.includes(n));
+  if (unmatched.length) fail(`bull lib/commands/*.lua without a lib/scripts entry: ${unmatched.join(', ')}`);
+  ok(`bull ${names.length} Lua commands load (${lua.length} lib/commands/*.lua)`);
 }
 
 function checkServerRequires() {
   const builtins = new Set(builtinModules);
   const missing = new Map();
   const seen = new Set();
+  const toLoad = new Map();
   let checked = 0;
   walk(path.join(APP, '.next/server'), (file) => {
     if (!file.endsWith('.js')) return;
@@ -131,6 +157,9 @@ function checkServerRequires() {
         const allowedIn = ALLOWED_UNRESOLVED.get(spec);
         if (!(allowedIn && allowedIn.test(path.basename(file)))) missing.set(spec, path.relative(APP, file));
       }
+      // App externals (not Next's own runtime files) are also loaded, so a missing transitive
+      // dependency fails here rather than on the first request that needs it.
+      if (resolved && !spec.startsWith('next/') && !toLoad.has(spec)) toLoad.set(spec, { req, file });
       const alias = spec.match(HASHED_ALIAS);
       if (alias && resolved) {
         // A hashed alias must point at the real package under /app/node_modules.
@@ -144,6 +173,14 @@ function checkServerRequires() {
   for (const [spec, file] of missing) fail(`unresolvable require("${spec}") in ${file}`);
   for (const spec of EXPECTED_EXTERNALS) if (!seen.has(spec)) fail(`no require("${spec}") (or a hashed alias of it) found in .next/server (scan is blind)`);
   ok(`${checked} bare require() calls (${seen.size} specifiers) in .next/server resolve`);
+  for (const [spec, { req, file }] of toLoad) {
+    try {
+      req(spec);
+    } catch (error) {
+      fail(`require("${spec}") from ${path.relative(APP, file)} resolves but does not load: ${error.message.split('\n')[0]}`);
+    }
+  }
+  ok(`${toLoad.size} app externals load: ${[...toLoad.keys()].join(', ')}`);
 }
 
 function checkElfArch() {
@@ -176,6 +213,7 @@ try {
   checkPrisma(prismaCliFromEntrypoint());
   checkRecovery();
   checkServerRequires();
+  checkBullScripts();
   checkElfArch();
 } catch (error) {
   fail(error.stack || String(error));

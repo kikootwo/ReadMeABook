@@ -61,6 +61,7 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 | `builder` | `node:20-bookworm` | `npm ci` (all deps) → `COPY . .` → `prisma generate` → `next build` (standalone) | no |
 | `prisma-cli` | `node:20-bookworm` | Prisma CLI closure from `package-lock.json` → `/opt/prisma-cli` | no |
 | `runtime` | `base` | app artifacts below + guard | yes |
+- Requires BuildKit (`RUN --network=none`, `RUN --mount=type=bind`): the legacy builder (`DOCKER_BUILDKIT=0`, the default before Docker 23, e.g. on 20.10) can't build it; use Docker 23+ or `docker buildx build`
 - `builder`/`prisma-cli` must stay on bookworm and build for TARGETPLATFORM (never `--platform=$BUILDPLATFORM`): Prisma engines + bcrypt are native
 - `builder` WORKDIR must stay `/app` (generated client records absolute paths)
 - Version vars: `builder` sets `APP_VERSION`/`GIT_COMMIT`/`BUILD_DATE` + `NEXT_PUBLIC_*` before `next build` (inlined into VersionBadge); `runtime` re-declares the ARGs + ENVs (`/api/version`)
@@ -75,7 +76,8 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 | `node_modules/{prisma,@prisma/engines,…}` + `.bin/prisma` | `prisma-cli`, ONE `COPY` merged into `node_modules` (a lone `.bin/prisma` copy flattens the symlink and the CLI can't find its wasm) |
 | `scripts/` | build context, explicit `COPY` |
 | `app-start.sh`, `redis-start.sh`, `postgres-start.sh`; `/entrypoint.sh` | `docker/unified/` |
-- Not shipped: devDependencies, untraced prod deps (`@next/swc-*`), app source outside the trace, build `.next/cache`
+- Not shipped: devDependencies, untraced prod deps (`@next/swc-*`; msgpackr's native `@msgpackr-extract/*` binary, so bull's msgpackr uses its JS fallback), app source (`src/` except `src/generated/prisma`), `tests/`, `e2e/`, `screenshots/`, `documentation/`, `docker/`, root config/docs files, build `.next/cache`
+- Whole-project trace: routes that open admin-configured paths (`fs` on download/media dirs) make Turbopack trace the whole project root ("Dynamic filesystem access causes tracing of the whole project" build warnings). `next.config.ts` `outputFileTracingExcludes['*']` keeps the non-runtime paths above out of `.next/standalone`; the runtime guard fails the build if any of them reappears in `/app`
 - Foreign-platform prebuilds: every `node_modules/**/prebuilds/<platform>-<arch>/` except `linux-<build arch>` is deleted (bcrypt 6 ships all platforms; tracing copies the folder); a missing mapping for the arch fails the build
 
 **Prisma CLI provenance (`docker/unified/prisma-cli-lock.js`):**
@@ -84,6 +86,7 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - `npm ci --ignore-scripts` (tarball integrity checked against the lockfile) → `npm rebuild prisma @prisma/engines` (only install scripts allowed) → delete `@prisma/engines/node_modules/.cache`
 - Engines (`schema-engine-*`, `libquery_engine-*`) are NOT lockfile-verified: `@prisma/engines` downloads them from `binaries.prisma.sh` and checks a sha256 served by that host. Never set `PRISMA_ENGINES_MIRROR`, `PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING` or `PRISMA_*_BINARY`
 - Stage guard: installed prisma == lockfile version; exactly one executable `schema-engine-*`
+- Dependency bumps: when the Prisma CLI closure changes (a `prisma` bump, or any of its deps moving in the lockfile), update `EXPECTED_PATHS` in `tests/docker/prisma-cli-lock.test.ts` in the same PR (`npm test` fails until it matches)
 
 **Runtime guard (`RUN --network=none`, `docker/unified/runtime-guard.js`, bind-mounted, never in a layer):**
 - Runs the entrypoint's `prisma-cli-preflight` block verbatim, then the entrypoint's exact `PRISMA_CLI`
@@ -93,6 +96,9 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - Recovery: generated client + bcrypt load from `/app/scripts`; `package.json` has `rmab:recover`
 - Every bare `require("…")` in `.next/server/**/*.js` resolves from its chunk (externals today: `bcrypt`, `bull`, `keyv`, `next/dist/...`); `bcrypt` + `bull` must be seen (else the scan is blind). Only allowlisted miss: `something` in `[turbopack]_runtime.js` (a code comment)
 - Next >= 16.4 requires externals through hashed aliases (`require("bcrypt-a3fecf8c027c10c9")`) backed by relative symlinks in `.next/node_modules/` (`-> ../../node_modules/bcrypt`); an alias counts as its package and must resolve inside `/app/node_modules/<pkg>/`
+- Each resolved app external (not `next/…`) is also `require`d once, so a missing transitive dependency fails the build
+- bull: `lib/scripts/index.js` exports ≥20 commands, each with Lua `content`, and every `lib/commands/*.lua` has its `lib/scripts` entry (bull 4 loads the precompiled `lib/scripts/<name>-<keys>.js`, not the `.lua` files)
+- Layout: required runtime paths exist; none of the non-runtime paths (`src/{app,components,contexts,hooks,lib}`, `tests`, `e2e`, `screenshots`, `documentation`, `docker`, `dockerfile.unified`, `package-lock.json`, `tsconfig.json`) is in `/app`
 - Note: Next 16 `next build` uses Turbopack even with `TURBOPACK=0` (chunk names `[turbopack]_runtime.js`)
 - Every ELF file in `/app` + ffmpeg/ffprobe has the build arch's `e_machine`; expects 1 schema engine, ≥2 `libquery_engine` copies, a bcrypt `.node` binding (bcrypt 5 `bcrypt_lib.node`, bcrypt 6 `prebuilds/linux-<arch>/bcrypt.*.node`)
 
@@ -100,6 +106,8 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - `prisma X installed, lockfile says Y` / `prisma CLI X != generated client Y` → split or stale Prisma bump (`prisma` and `@prisma/client` must move together)
 - `… is not a symlink` → CLI tree copied piecemeal; copy `/opt/prisma-cli/node_modules` whole
 - `unresolvable require("x") in .next/server/…` → standalone tracing missed a server external; fix tracing or add an explicit `COPY`
+- `require("x") … resolves but does not load` → a traced external is missing one of its own dependencies (tracing gap); same fix
+- `non-runtime files in /app` → a new top-level path or `src/` folder is swept in by the whole-project trace; add it to `outputFileTracingExcludes` in `next.config.ts`
 - `e_machine 0x.., expected 0x..` → wrong-arch native file (e.g. a `--platform=$BUILDPLATFORM` stage); never ship it
 
 **Build process:**

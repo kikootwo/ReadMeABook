@@ -165,7 +165,8 @@ ENV TURBOPACK=0
 
 WORKDIR /app
 
-# Next.js standalone output: server.js, .next/server, traced node_modules (bcrypt, bull, ...)
+# Next.js standalone output: server.js, .next/server, traced node_modules (bcrypt, bull, ...).
+# next.config.ts outputFileTracingExcludes keeps the whole-project trace's source/tests/docs out.
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
@@ -247,8 +248,9 @@ RUN sed -i 's/\r$//' /app/postgres-start.sh && chmod +x /app/postgres-start.sh
 # Guard (offline, final stage): runs the entrypoint's own Prisma CLI preflight block, then
 # docker/unified/runtime-guard.js (bind-mounted, never in a layer) with the entrypoint's exact
 # PRISMA_CLI: CLI/client/engine versions agree, the schema engine renders the schema, credential
-# recovery loads its client + bcrypt, every bare require() in .next/server resolves, and every
-# ELF file in /app (+ ffmpeg/ffprobe) matches the build arch. Failure meanings: unified.md.
+# recovery loads its client + bcrypt, every bare require() in .next/server resolves (app externals
+# also load), bull's Lua commands are present, no non-runtime source/docs/tests are in /app, and
+# every ELF file in /app (+ ffmpeg/ffprobe) matches the build arch. Failure meanings: unified.md.
 RUN --network=none \
     --mount=type=bind,source=docker/unified/runtime-guard.js,target=/tmp/guard/runtime-guard.js \
     node /tmp/guard/runtime-guard.js
