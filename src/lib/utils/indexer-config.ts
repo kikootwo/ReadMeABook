@@ -4,13 +4,13 @@
  *
  * One mapping for the per-indexer settings stored in `prowlarr_indexers`.
  * Every place that reads, rebuilds or saves those settings (the settings page,
- * GET and PUT /api/admin/settings/prowlarr/indexers) goes through
- * toSavedIndexerConfig(), so a field added here round-trips everywhere.
+ * GET and PUT /api/admin/settings/prowlarr/indexers, setup completion) goes
+ * through toSavedIndexerConfig(), so a field added here round-trips everywhere.
  */
 
+import { DEFAULT_AUDIOBOOK_CATEGORIES, DEFAULT_EBOOK_CATEGORIES } from './torrent-categories';
+
 export const DEFAULT_INDEXER_PRIORITY = 10;
-export const DEFAULT_AUDIOBOOK_CATEGORIES: readonly number[] = [3030];
-export const DEFAULT_EBOOK_CATEGORIES: readonly number[] = [7020];
 
 /** Per-indexer settings as persisted in the `prowlarr_indexers` config key. */
 export interface SavedIndexerConfig {

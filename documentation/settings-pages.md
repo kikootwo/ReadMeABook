@@ -425,7 +425,7 @@ src/app/admin/settings/
 **4. Indexer Ratio Limit Reset on Save (#319, #282)**
 - Issue: torrent indexer Ratio Limit showed `0` after a page reload; saving anything on the Indexers tab wrote `ratioLimit: 0` for every torrent indexer, so seeding cleanup removed torrents on seeding time alone
 - Cause: `fetchIndexers()` in `src/app/admin/settings/page.tsx` rebuilt each indexer by hand and left out `ratioLimit`; the GET and PUT routes kept their own copies of the same field list
-- Fix: one mapping, `toSavedIndexerConfig()` (`src/lib/utils/indexer-config.ts`), used by the page, GET and PUT; round trip covered by `tests/app/admin-settings-indexer-roundtrip.test.tsx`
+- Fix: one mapping, `toSavedIndexerConfig()` (`src/lib/utils/indexer-config.ts`), used by the page, GET and PUT, and setup completion (`POST /api/setup/complete`); round trip covered by `tests/app/admin-settings-indexer-roundtrip.test.tsx`
 - Upgrade note: ratio limits already reset to `0` by this bug cannot be recovered; re-enter them per indexer (Settings → Indexers → Edit) and save
 
 ## Notifications
