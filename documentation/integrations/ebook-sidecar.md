@@ -236,7 +236,8 @@ Search: https://annas-archive.gl/search?q=Title+Author&ext=epub&lang=en
 - `src/lib/utils/file-organizer.ts` (`organizeEbook` method)
 - `src/lib/utils/ranking-algorithm.ts` (`rankEbookTorrents` function)
 - `src/lib/utils/indexer-grouping.ts` (supports `'ebook'` type)
-- `src/lib/utils/epub-fixer.ts` (Kindle EPUB compatibility fixes)
+- `src/lib/utils/epub-fixer.ts` (Kindle EPUB fix: load, write, read-back)
+- `src/lib/utils/epub-fixes.ts` (the four content fixes)
 - `src/lib/utils/epub-verify.ts` (read-back check of the fixed copy)
 
 **UI:**
