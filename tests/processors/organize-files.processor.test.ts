@@ -507,7 +507,7 @@ describe('processOrganizeFiles', () => {
     );
   });
 
-  it('offers format coercion only files holding this import's content, never other library files', async () => {
+  it('offers format coercion only the library files holding this import content, never other library files', async () => {
     prismaMock.audiobook.findUnique.mockResolvedValue({
       id: 'a-coerce-own', title: 'Book', author: 'Author', narrator: null, coverArtUrl: null, audibleAsin: null,
     });
