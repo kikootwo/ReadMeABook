@@ -75,8 +75,12 @@ export async function POST(request: NextRequest) {
 
         const notificationService = getNotificationService();
 
-        // Encrypt sensitive config values
-        const encryptedConfig = notificationService.encryptConfig(type, config);
+        // Normalise (e.g. credentials out of a server URL) and encrypt sensitive values
+        const prepared = notificationService.prepareSubmittedConfig(type, config);
+        if (!prepared.ok) {
+          return NextResponse.json({ error: 'ValidationError', message: prepared.error }, { status: 400 });
+        }
+        const encryptedConfig = prepared.config;
 
         // Create backend
         const backend = await prisma.notificationBackend.create({
