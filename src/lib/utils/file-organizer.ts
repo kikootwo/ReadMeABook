@@ -9,8 +9,11 @@ import axios from 'axios';
 import { RMAB_USER_AGENT } from './user-agent';
 import { tagMultipleFiles, checkFfmpegAvailable } from './metadata-tagger';
 import { RMABLogger } from './logger';
-import { copyFile, isSameFile } from './copy-file';
+import { copyFile } from './copy-file';
+import { placeAudio, placeFile, isVerifiedStatus, type AudioPlacement } from './organize-copy';
+import { walkFiles, ORGANIZER_EBOOK_FORMATS, type ImportInventory, type PlacementRecord } from './import-inventory';
 import { getMediaDir } from './media-dir';
+import { probeStreamDurationMs } from './audio-duration';
 import { MAX_COVER_ART_BYTES, MAX_COVER_ART_REDIRECTS, cachedThumbnailPath, isAllowedRemoteCoverUrl, isLibraryCoverSource } from './cover-art-url';
 
 const moduleLogger = RMABLogger.create('FileOrganizer');
@@ -44,6 +47,16 @@ export interface OrganizationResult {
   errors: string[];
   audioFiles: string[];
   coverArtFile?: string;
+  /** One record per original audio source: where it went and whether that is proven. */
+  records?: PlacementRecord[];
+  coverRecord?: PlacementRecord;
+  /** Every audio file found in the source (before file selection). */
+  inventory?: ImportInventory;
+}
+
+export interface PlacementOptions {
+  /** Compare same-size existing targets byte-for-byte; only worth it when a delete depends on it. */
+  compareExisting?: boolean;
 }
 
 export interface EbookOrganizationResult {
@@ -53,6 +66,10 @@ export interface EbookOrganizationResult {
   format?: string;
   /** The ebook file that was read (may be a temp copy when a fixed EPUB was organized). */
   sourceFile?: string;
+  /** Placement of the ebook file (source is the file that was read). */
+  record?: PlacementRecord;
+  /** Every ebook file found in the source. */
+  inventory?: ImportInventory;
 }
 
 export interface ValidationResult {
@@ -88,7 +105,8 @@ export class FileOrganizer {
     template: string,
     loggerConfig?: LoggerConfig,
     renameConfig?: { enabled: boolean; template: string },
-    selectedFiles?: string[]
+    selectedFiles?: string[],
+    placement?: PlacementOptions
   ): Promise<OrganizationResult> {
     // Create logger if config provided
     const logger = loggerConfig ? RMABLogger.forJob(loggerConfig.jobId, loggerConfig.context) : null;
@@ -99,13 +117,26 @@ export class FileOrganizer {
       filesMovedCount: 0,
       errors: [],
       audioFiles: [],
+      records: [],
     };
 
     try {
       await logger?.info(`Organizing: ${downloadPath}`);
 
       // Find audiobook files
-      let { audioFiles, coverFile, isFile } = await this.findAudiobookFiles(downloadPath);
+      const found = await this.findAudiobookFiles(downloadPath);
+      let { audioFiles } = found;
+      const { coverFile, isFile } = found;
+      const baseForInventory = isFile ? path.dirname(downloadPath) : downloadPath;
+      result.inventory = {
+        kind: 'audio',
+        files: audioFiles.map((f) => (isFile ? downloadPath : path.join(baseForInventory, f))),
+        coverFile: coverFile ? path.join(baseForInventory, coverFile) : undefined,
+        complete: found.complete,
+      };
+      if (!found.complete) {
+        await logger?.warn('Some folders in the source could not be read; the source will not be removed');
+      }
 
       // Filter to only selected files if specified
       if (selectedFiles && selectedFiles.length > 0) {
@@ -125,6 +156,9 @@ export class FileOrganizer {
 
       // Track if we created a merged file that needs cleanup
       let tempMergedFile: string | null = null;
+      // Original chapter files behind the merged file, and whether its duration was verified
+      let mergedInputs: string[] = [];
+      let mergeDurationVerified = false;
 
       // Check for chapter merging if multiple files
       if (audioFiles.length > 1) {
@@ -195,6 +229,8 @@ export class FileOrganizer {
 
                     // Mark for cleanup after copy
                     tempMergedFile = mergeResult.outputPath;
+                    mergedInputs = chapters.map((c) => c.path);
+                    mergeDurationVerified = mergeResult.durationVerified === true;
 
                     await logger?.info(`Chapter merge complete - organizing single M4B file`);
 
@@ -368,99 +404,66 @@ export class FileOrganizer {
 
         const targetFilePath = path.join(targetPath, filename);
 
-        // Check if we have a tagged version of this file
+        // Tagged derivative (when tagging succeeded); the original stays untouched for seeding
         const taggedFilePath = taggedFileMap.get(originalSourcePath);
-        const sourcePath = taggedFilePath || originalSourcePath; // Use tagged version if available, otherwise use original
 
-        // Check if source exists
-        try {
-          await fs.access(sourcePath, fs.constants.R_OK);
-        } catch {
-          moduleLogger.warn(`Source file not found or not readable: ${sourcePath}`);
-          result.errors.push(`Source file not found: ${audioFile}`);
-          continue;
+        const placed: AudioPlacement = await placeAudio(originalSourcePath, taggedFilePath, targetFilePath, {
+          fileMode: this.fileMode,
+          compareExisting: placement?.compareExisting === true,
+          probeDuration: probeStreamDurationMs,
+        });
+
+        // Records are keyed on the original source; a merged file stands for all its chapters
+        const sources = tempMergedFile && originalSourcePath === tempMergedFile ? mergedInputs : [originalSourcePath];
+        for (const source of sources) {
+          result.records!.push({
+            source,
+            target: placed.target,
+            status: placed.status,
+            verified: placed.verified && (sources === mergedInputs ? mergeDurationVerified : true),
+            reason: placed.reason,
+          });
         }
 
-        // Check if target already exists (skip if already copied, or if the
-        // source already is the target, e.g. an in-place re-import from the library)
-        try {
-          await fs.access(targetFilePath);
-          if (await isSameFile(originalSourcePath, targetFilePath)) {
+        if (taggedFilePath) {
+          try {
+            await fs.unlink(taggedFilePath);
+            await logger?.info(`Cleaned up temp file: ${path.basename(taggedFilePath)}`);
+          } catch {
+            // Ignore cleanup errors
+          }
+        }
+
+        switch (placed.status) {
+          case 'copied':
+            result.audioFiles.push(placed.target);
+            result.filesMovedCount++;
+            await logger?.info(
+              placed.usedDerivative ? `Copied tagged file: ${filename}` : `Copied: ${filename}`
+            );
+            if (placed.reason) {
+              result.errors.push(`${filename}: ${placed.reason}`);
+            }
+            break;
+          case 'identical':
+            result.audioFiles.push(placed.target);
             await logger?.info(`Already in place, skipping copy: ${filename}`);
-          } else {
+            break;
+          case 'present':
+            result.audioFiles.push(placed.target);
             moduleLogger.debug(`File already exists, skipping: ${filename}`);
-          }
-          result.audioFiles.push(targetFilePath);
-
-          // Clean up tagged temp file if it exists
-          if (taggedFilePath) {
-            try {
-              await fs.unlink(taggedFilePath);
-              await logger?.info(`Cleaned up temp file: ${path.basename(taggedFilePath)}`);
-            } catch {
-              // Ignore cleanup errors
+            break;
+          case 'differs':
+            // The library already has a file by this name; it stays, and so does the source
+            await logger?.warn(`Not imported, left untouched: ${filename} (${placed.reason})`);
+            result.errors.push(`${filename} not imported: ${placed.reason}`);
+            if ((await fs.lstat(placed.target).catch(() => null))?.isFile()) {
+              result.audioFiles.push(placed.target);
             }
-          }
-          continue;
-        } catch {
-          // File doesn't exist, continue with copy
-        }
-
-        // Copy file (do NOT delete original - needed for seeding)
-        try {
-          // Copy file via streams (avoids copy_file_range EPERM on NFS/FUSE)
-          await copyFile(sourcePath, targetFilePath);
-          // Set explicit permissions after copy
-          await fs.chmod(targetFilePath, this.fileMode);
-
-          result.audioFiles.push(targetFilePath);
-          result.filesMovedCount++;
-
-          if (taggedFilePath) {
-            await logger?.info(`Copied tagged file: ${filename}`);
-            // Clean up the tagged temp file after successful copy
-            try {
-              await fs.unlink(taggedFilePath);
-              await logger?.info(`Cleaned up temp file: ${path.basename(taggedFilePath)}`);
-            } catch (cleanupError) {
-              await logger?.warn(`Failed to clean up temp file: ${path.basename(taggedFilePath)}`);
-            }
-          } else {
-            await logger?.info(`Copied: ${filename}`);
-          }
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-          await logger?.error(`Failed to copy ${filename}: ${errorMsg}`);
-
-          // If the tagged temp file failed to copy, clean it up and try the original untagged file
-          if (taggedFilePath) {
-            // Clean up the tagged temp file that failed to copy
-            try {
-              await fs.unlink(taggedFilePath);
-              await logger?.info(`Cleaned up temp file after copy failure: ${path.basename(taggedFilePath)}`);
-            } catch {
-              // Ignore cleanup errors
-            }
-
-            // Fallback: attempt to copy the original untagged file instead
-            await logger?.info(`Attempting fallback copy of original (untagged) file: ${filename}`);
-            try {
-              await fs.access(originalSourcePath, fs.constants.R_OK);
-              await copyFile(originalSourcePath, targetFilePath);
-              await fs.chmod(targetFilePath, this.fileMode);
-              result.audioFiles.push(targetFilePath);
-              result.filesMovedCount++;
-              await logger?.info(`Fallback copy succeeded (without metadata tags): ${filename}`);
-              result.errors.push(`Tagged copy failed for ${filename}, copied original without metadata tags`);
-              continue;
-            } catch (fallbackError) {
-              const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : 'Unknown error';
-              await logger?.error(`Fallback copy of original file also failed: ${fallbackMsg}`);
-            }
-          }
-
-          result.errors.push(`Failed to copy ${audioFile}: ${errorMsg}`);
-          // Continue with other files instead of throwing
+            break;
+          default:
+            await logger?.error(`Failed to copy ${filename}: ${placed.reason}`);
+            result.errors.push(`Failed to copy ${audioFile}: ${placed.reason}`);
         }
       }
 
@@ -478,24 +481,28 @@ export class FileOrganizer {
       if (coverFile) {
         const sourcePath = path.join(baseSourcePath, coverFile);
         const targetCoverPath = path.join(targetPath, 'cover.jpg');
-
-        try {
-          if (await isSameFile(sourcePath, targetCoverPath)) {
-            // In-place re-import: the cover already is the target file. Copying
-            // it onto itself would truncate it.
-            result.coverArtFile = targetCoverPath;
-            await logger?.info(`Cover art already in place, skipping copy`);
-          } else {
-            // Copy cover art (do NOT delete original)
-            await copyFile(sourcePath, targetCoverPath);
-            await fs.chmod(targetCoverPath, this.fileMode);
-            result.coverArtFile = targetCoverPath;
-            result.filesMovedCount++;
-            await logger?.info(`Copied cover art`);
-          }
-        } catch (error) {
-          await logger?.warn(`Failed to copy cover art: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        const placedCover = await placeFile(sourcePath, targetCoverPath, {
+          fileMode: this.fileMode,
+          compareExisting: placement?.compareExisting === true,
+        });
+        result.coverRecord = {
+          source: sourcePath,
+          target: placedCover.target,
+          status: placedCover.status,
+          verified: isVerifiedStatus(placedCover.status),
+          reason: placedCover.reason,
+        };
+        if (placedCover.status === 'copied') {
+          result.coverArtFile = targetCoverPath;
+          result.filesMovedCount++;
+          await logger?.info(`Copied cover art`);
+        } else if (placedCover.status === 'failed') {
+          await logger?.warn(`Failed to copy cover art: ${placedCover.reason}`);
           result.errors.push('Failed to copy cover art');
+        } else {
+          // Already in place (or the library keeps its own cover): never copied onto itself
+          result.coverArtFile = targetCoverPath;
+          await logger?.info(`Cover art already in place, skipping copy`);
         }
       } else if (audiobook.coverArtUrl && !isLibraryCoverSource(audiobook.coverArtUrl)) {
         // Display-only cover (e.g. a shelf-sync fallback host): never fetched into the library
@@ -547,7 +554,7 @@ export class FileOrganizer {
    */
   private async findAudiobookFiles(
     downloadPath: string
-  ): Promise<{ audioFiles: string[]; coverFile?: string; isFile: boolean }> {
+  ): Promise<{ audioFiles: string[]; coverFile?: string; isFile: boolean; complete: boolean }> {
     const audioExtensions: readonly string[] = AUDIO_EXTENSIONS;
     const coverPatterns = [
       /cover\.(jpg|jpeg|png)$/i,
@@ -558,6 +565,7 @@ export class FileOrganizer {
     const audioFiles: string[] = [];
     let coverFile: string | undefined;
     let isFile = false;
+    let complete = true;
 
     try {
       // Check if downloadPath is a file or directory
@@ -574,9 +582,13 @@ export class FileOrganizer {
         }
       } else {
         // Handle directory case
-        const files = await this.walkDirectory(downloadPath);
+        const walk = await walkFiles(downloadPath);
+        complete = walk.complete;
+        if (!walk.complete) {
+          moduleLogger.error(`Some folders under ${downloadPath} could not be read`);
+        }
 
-        for (const file of files) {
+        for (const file of walk.files) {
           const ext = path.extname(file).toLowerCase();
 
           // Check if it's an audio file
@@ -596,34 +608,7 @@ export class FileOrganizer {
       throw error;
     }
 
-    return { audioFiles, coverFile, isFile };
-  }
-
-  /**
-   * Recursively walk directory to find all files
-   */
-  private async walkDirectory(dir: string, baseDir: string = ''): Promise<string[]> {
-    const files: string[] = [];
-
-    try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        const relativePath = baseDir ? path.join(baseDir, entry.name) : entry.name;
-
-        if (entry.isDirectory()) {
-          const subFiles = await this.walkDirectory(fullPath, relativePath);
-          files.push(...subFiles);
-        } else {
-          files.push(relativePath);
-        }
-      }
-    } catch (error) {
-      moduleLogger.error(`Error reading directory ${dir}`, { error: error instanceof Error ? error.message : String(error) });
-    }
-
-    return files;
+    return { audioFiles, coverFile, isFile, complete };
   }
 
   /**
@@ -782,20 +767,6 @@ export class FileOrganizer {
   }
 
   /**
-   * Clean up download directory
-   */
-  async cleanup(downloadPath: string): Promise<void> {
-    try {
-      // Remove download directory and all remaining files
-      await fs.rm(downloadPath, { recursive: true, force: true });
-      moduleLogger.debug(`Cleaned up: ${downloadPath}`);
-    } catch (error) {
-      moduleLogger.error(`Cleanup failed for ${downloadPath}`, { error: error instanceof Error ? error.message : String(error) });
-      // Don't throw - cleanup is non-critical
-    }
-  }
-
-  /**
    * Validate directory structure
    */
   async validate(basePath: string): Promise<ValidationResult> {
@@ -844,7 +815,8 @@ export class FileOrganizer {
     template: string,
     loggerConfig?: LoggerConfig,
     isIndexerDownload: boolean = false,
-    renameConfig?: { enabled: boolean; template: string }
+    renameConfig?: { enabled: boolean; template: string },
+    placement?: PlacementOptions
   ): Promise<EbookOrganizationResult> {
     const logger = loggerConfig ? RMABLogger.forJob(loggerConfig.jobId, loggerConfig.context) : null;
 
@@ -857,10 +829,15 @@ export class FileOrganizer {
     try {
       await logger?.info(`Organizing ebook: ${downloadPath}`);
 
-      const ebookFormats = ['epub', 'pdf', 'mobi', 'azw', 'azw3', 'fb2', 'cbz', 'cbr'];
+      const ebookFormats = ORGANIZER_EBOOK_FORMATS;
 
       // Find ebook file (handle both file and directory cases)
-      const { ebookFile, baseSourcePath, isFile } = await this.findEbookFile(downloadPath, ebookFormats);
+      const { ebookFile, baseSourcePath, isFile, allEbookFiles, complete } = await this.findEbookFile(downloadPath, ebookFormats);
+      result.inventory = {
+        kind: 'ebook',
+        files: allEbookFiles.map((f) => (isFile ? downloadPath : path.join(baseSourcePath, f))),
+        complete,
+      };
 
       if (!ebookFile) {
         throw new Error(`No ebook files found in download (looking for: ${ebookFormats.join(', ')})`);
@@ -915,22 +892,31 @@ export class FileOrganizer {
       }
       const targetPath = path.join(targetDir, targetFilename);
 
-      // Check if target already exists
-      try {
-        await fs.access(targetPath);
-        await logger?.info(`Ebook already exists at target, skipping copy: ${targetFilename}`);
-        result.success = true;
-        result.targetPath = targetDir;
-        return result;
-      } catch {
-        // File doesn't exist, continue with copy
+      const placed = await placeFile(sourceFilePath, targetPath, {
+        fileMode: this.fileMode,
+        compareExisting: placement?.compareExisting === true,
+      });
+      result.record = {
+        source: sourceFilePath,
+        target: placed.target,
+        status: placed.status,
+        verified: isVerifiedStatus(placed.status),
+        reason: placed.reason,
+      };
+      if (placed.status === 'failed') {
+        throw new Error(`Failed to copy ebook ${targetFilename}: ${placed.reason}`);
       }
-
-      // Copy ebook file (do NOT delete original - may need for seeding or retry)
-      await copyFile(sourceFilePath, targetPath);
-      await fs.chmod(targetPath, this.fileMode);
-
-      await logger?.info(`Copied ebook: ${targetFilename}`);
+      if (placed.status === 'differs') {
+        // Not a failure: the library keeps its own file, the source stays
+        await logger?.warn(`Ebook not imported, left untouched: ${targetFilename} (${placed.reason})`);
+        result.errors.push(`${targetFilename} not imported: ${placed.reason}`);
+      } else {
+        await logger?.info(
+          placed.status === 'copied'
+            ? `Copied ebook: ${targetFilename}`
+            : `Ebook already exists at target, skipping copy: ${targetFilename}`
+        );
+      }
 
       // The source is never deleted here. Direct HTTP download files are removed
       // afterwards by the post-organize cleanup, behind the delete guard.
@@ -957,9 +943,11 @@ export class FileOrganizer {
   private async findEbookFile(
     downloadPath: string,
     ebookFormats: string[]
-  ): Promise<{ ebookFile: string | null; baseSourcePath: string; isFile: boolean }> {
+  ): Promise<{ ebookFile: string | null; baseSourcePath: string; isFile: boolean; allEbookFiles: string[]; complete: boolean }> {
     let ebookFile: string | null = null;
     let isFile = false;
+    let allEbookFiles: string[] = [];
+    let complete = true;
 
     try {
       const stats = await fs.stat(downloadPath);
@@ -971,13 +959,15 @@ export class FileOrganizer {
 
         if (ebookFormats.includes(ext)) {
           ebookFile = path.basename(downloadPath);
+          allEbookFiles = [ebookFile];
         }
       } else {
         // Handle directory case - find ebook files inside
-        const files = await this.walkDirectory(downloadPath);
+        const walk = await walkFiles(downloadPath);
+        complete = walk.complete;
 
         // Filter to ebook files and sort by preference (epub > pdf > others)
-        const ebookFiles = files.filter(file => {
+        const ebookFiles = walk.files.filter(file => {
           const ext = path.extname(file).toLowerCase().slice(1);
           return ebookFormats.includes(ext);
         });
@@ -992,6 +982,7 @@ export class FileOrganizer {
           });
 
           ebookFile = ebookFiles[0];
+          allEbookFiles = ebookFiles;
         }
       }
     } catch {
@@ -1002,6 +993,8 @@ export class FileOrganizer {
       ebookFile,
       baseSourcePath: downloadPath,
       isFile,
+      allEbookFiles,
+      complete,
     };
   }
 }

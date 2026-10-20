@@ -82,6 +82,59 @@ vi.mock('fs/promises', () => ({
 
 vi.mock('@/lib/utils/copy-file', () => copyFileMock);
 
+// Placement is covered on the real filesystem in organize-copy.test.ts; here it
+// keeps the organizer's previous contract: an existing target (fs.access) is
+// kept, otherwise the file is copied, and a failed tagged copy falls back to
+// the original.
+const placementMock = vi.hoisted(() => {
+  const place = async (source: string, target: string, fileMode: number) => {
+    try {
+      await fsMock.access(source);
+    } catch {
+      return { status: 'failed' as const, target, reason: `Source file not found: ${source}` };
+    }
+    try {
+      await fsMock.access(target);
+      return { status: 'present' as const, target };
+    } catch {
+      // Not there yet
+    }
+    try {
+      await copyFileMock.copyFile(source, target);
+      await fsMock.chmod(target, fileMode);
+      return { status: 'copied' as const, target };
+    } catch (error) {
+      return { status: 'failed' as const, target, reason: error instanceof Error ? error.message : String(error) };
+    }
+  };
+  return {
+    isVerifiedStatus: (status: string) => status === 'copied' || status === 'identical',
+    placeFile: vi.fn(async (source: string, target: string, options: { fileMode: number }) =>
+      place(source, target, options.fileMode)
+    ),
+    placeAudio: vi.fn(async (original: string, derivative: string | undefined, target: string, options: { fileMode: number }) => {
+      if (derivative) {
+        const tagged = await place(derivative, target, options.fileMode);
+        if (tagged.status !== 'failed') {
+          return { ...tagged, verified: tagged.status === 'copied', usedDerivative: true };
+        }
+        const fallback = await place(original, target, options.fileMode);
+        return {
+          ...fallback,
+          verified: fallback.status === 'copied',
+          usedDerivative: false,
+          reason: fallback.status === 'copied'
+            ? `Tagged copy failed (${tagged.reason}); original placed without metadata tags`
+            : fallback.reason,
+        };
+      }
+      const placed = await place(original, target, options.fileMode);
+      return { ...placed, verified: placed.status === 'copied', usedDerivative: false };
+    }),
+  };
+});
+vi.mock('@/lib/utils/organize-copy', () => placementMock);
+
 vi.mock('axios', () => ({
   default: axiosMock,
   ...axiosMock,
@@ -723,29 +776,13 @@ describe('file organizer', () => {
     await expect((organizer as any).findAudiobookFiles('/downloads/bad')).rejects.toThrow('bad path');
   });
 
-  it('returns an empty list when walkDirectory fails', async () => {
+  it('reports an incomplete listing when a directory cannot be read', async () => {
     fsMock.readdir.mockRejectedValue(new Error('no perms'));
 
-    const organizer = new FileOrganizer('/media', '/tmp');
-    const files = await (organizer as any).walkDirectory('/downloads');
+    const { walkFiles } = await import('@/lib/utils/import-inventory');
+    const walk = await walkFiles('/downloads');
 
-    expect(files).toEqual([]);
-  });
-
-  it('cleans up download directories safely', async () => {
-    fsMock.rm.mockRejectedValue(new Error('rm failed'));
-
-    const organizer = new FileOrganizer('/media', '/tmp');
-    await expect(organizer.cleanup('/downloads/book')).resolves.toBeUndefined();
-    expect(fsMock.rm).toHaveBeenCalledWith('/downloads/book', { recursive: true, force: true });
-  });
-
-  it('cleans up download directories on success', async () => {
-    fsMock.rm.mockResolvedValue(undefined);
-
-    const organizer = new FileOrganizer('/media', '/tmp');
-    await expect(organizer.cleanup('/downloads/book')).resolves.toBeUndefined();
-    expect(fsMock.rm).toHaveBeenCalledWith('/downloads/book', { recursive: true, force: true });
+    expect(walk).toEqual({ files: [], complete: false });
   });
 
   it('validates writable directories without issues', async () => {

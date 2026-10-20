@@ -10,7 +10,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
 
 const prismaMock = createPrismaMock();
@@ -27,7 +27,54 @@ const clientState = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
-vi.mock('@/lib/utils/file-organizer', () => ({ getFileOrganizer: () => organizerMock }));
+/**
+ * The organizer is mocked, but cleanup now deletes only what the organize step
+ * proved it placed. Unless a test supplies its own records, the wrapper below
+ * reports every audio file found under the job's source as verified (a fully
+ * successful import), so the guard is what each test exercises.
+ */
+const evidenceFor = vi.hoisted(() => async (downloadPath: string) => {
+  const nodeFs = await import('fs');
+  const nodePath = await import('path');
+  const audio = ['.m4b', '.m4a', '.mp3', '.mp4', '.flac', '.ogg', '.opus', '.aac', '.wma', '.aa', '.aax'];
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of nodeFs.readdirSync(dir, { withFileTypes: true })) {
+      const full = nodePath.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (audio.includes(nodePath.extname(entry.name).toLowerCase())) files.push(full);
+    }
+  };
+  try {
+    if (nodeFs.lstatSync(downloadPath).isDirectory()) walk(downloadPath);
+    else if (audio.includes(nodePath.extname(downloadPath).toLowerCase())) files.push(downloadPath);
+  } catch {
+    // Missing source
+  }
+  return files;
+});
+vi.mock('@/lib/utils/file-organizer', () => ({
+  getFileOrganizer: () => ({
+    organize: async (downloadPath: string, ...rest: unknown[]) => {
+      const result = await organizerMock.organize(downloadPath, ...rest);
+      if (!result || result.records) return result;
+      const files = await evidenceFor(downloadPath);
+      return {
+        ...result,
+        records: files.map((f) => ({ source: f, target: result.targetPath, status: 'copied', verified: true })),
+        inventory: { kind: 'audio', files, complete: true },
+      };
+    },
+    organizeEbook: async (...args: unknown[]) => {
+      const result = await organizerMock.organizeEbook(...args);
+      if (!result || result.record || !result.sourceFile) return result;
+      return {
+        ...result,
+        record: { source: result.sourceFile, target: result.targetPath, status: 'copied', verified: true },
+      };
+    },
+  }),
+}));
 vi.mock('@/lib/services/library', () => ({ getLibraryService: () => libraryServiceMock }));
 vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => configMock }));
 vi.mock('@/lib/services/job-queue.service', () => ({ getJobQueueService: () => jobQueueMock }));
@@ -92,6 +139,11 @@ async function runOrganize(payload: Record<string, unknown>) {
 }
 
 describe('post-organize cleanup safety', () => {
+  // The processor's first import is slow under a loaded parallel run; pay it once here
+  beforeAll(async () => {
+    await import('@/lib/processors/organize-files.processor');
+  }, 60000);
+
   beforeEach(() => {
     vi.clearAllMocks();
     root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rmab-cleanup-')));
@@ -301,7 +353,9 @@ describe('post-organize cleanup safety', () => {
     mkfile(path.join(download, 'book.epub'), 'epub');
     const targetDir = path.join(media, 'Author', 'Book');
     const targetFile = mkfile(path.join(targetDir, 'Book.epub'), 'epub');
-    organizerMock.organizeEbook.mockResolvedValue({ success: true, targetPath: targetDir, format: 'epub', errors: [] });
+    organizerMock.organizeEbook.mockResolvedValue({
+      success: true, targetPath: targetDir, format: 'epub', errors: [], sourceFile: path.join(download, 'book.epub'),
+    });
     useHistory(historyRow({ downloadPath: download }));
 
     const result = await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
@@ -508,6 +562,48 @@ describe('post-organize cleanup safety', () => {
   });
 
   describe('empty-parent sweep', () => {
+    it('does not sweep when the nearest root is only a mapped download path', async () => {
+      const mappedRoot = path.join(downloads, 'mapped');
+      clientState.clients = [{ id: 'c1', type: 'sabnzbd', remotePathMappingEnabled: true, localPath: mappedRoot }];
+      const category = path.join(mappedRoot, 'category');
+      const download = path.join(category, 'Book.Name');
+      mkfile(path.join(download, 'Book.m4b'));
+      useHistory(historyRow({ downloadPath: download }));
+      organizeInto(path.join(media, 'Author', 'Book'));
+
+      await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
+
+      expect(fs.existsSync(download)).toBe(false);
+      expect(fs.existsSync(category)).toBe(true);
+    });
+
+    it('still sweeps when the mapped path is the download dir itself', async () => {
+      clientState.clients = [{ id: 'c1', type: 'sabnzbd', remotePathMappingEnabled: true, localPath: downloads }];
+      const category = path.join(downloads, 'category');
+      const download = path.join(category, 'Book.Name');
+      mkfile(path.join(download, 'Book.m4b'));
+      useHistory(historyRow({ downloadPath: download }));
+      organizeInto(path.join(media, 'Author', 'Book'));
+
+      await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
+
+      expect(fs.existsSync(category)).toBe(false);
+      expect(fs.existsSync(downloads)).toBe(true);
+    });
+
+    it('deletes nothing when a configured root is a filesystem root', async () => {
+      downloadDirSetting = path.parse(root).root;
+      const download = path.join(downloads, 'Book.Name');
+      mkfile(path.join(download, 'Book.m4b'));
+      useHistory(historyRow({ downloadPath: download }));
+      organizeInto(path.join(media, 'Author', 'Book'));
+
+      await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
+
+      expect(fs.existsSync(download)).toBe(true);
+      expect(clientState.postProcess).not.toHaveBeenCalled();
+    });
+
     it('never removes a client custom path root, even when empty', async () => {
       clientState.clients = [{ id: 'c1', type: 'sabnzbd', customPath: 'sab' }];
       const clientRoot = path.join(downloads, 'sab');

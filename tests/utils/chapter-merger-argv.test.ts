@@ -12,6 +12,7 @@ import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mergeChapters, probeAudioFile, type ChapterFile } from '@/lib/utils/chapter-merger';
 
+const probeState = vi.hoisted(() => ({ duration: '120' }));
 const execFileMock = vi.hoisted(() => {
   const execFile = vi.fn();
   // promisify(execFile) -> { stdout, stderr }; records the raw (file, args, options) call
@@ -22,7 +23,7 @@ const execFileMock = vi.hoisted(() => {
   ) => {
     execFile(file, args, options);
     const stdout = file === 'ffprobe'
-      ? JSON.stringify({ format: { duration: '120', bit_rate: '128000', tags: {} } })
+      ? JSON.stringify({ format: { duration: probeState.duration, bit_rate: '128000', tags: {} } })
       : '';
     return Promise.resolve({ stdout, stderr: '' });
   };
@@ -63,6 +64,7 @@ function writtenFile(prefix: string): { file: string; content: string } | undefi
 
 beforeEach(() => {
   vi.clearAllMocks();
+  probeState.duration = '120';
   fsMock.access.mockResolvedValue(undefined);
   fsMock.mkdir.mockResolvedValue(undefined);
   fsMock.writeFile.mockResolvedValue(undefined);
@@ -71,6 +73,35 @@ beforeEach(() => {
     filePath.endsWith('.m4b') ? { size: 2 * 1024 * 1024 } : { size: 500 * 1024 }
   );
   spawnMock.mockImplementation(() => createSpawnProcess());
+});
+
+describe('chapter merge verification', () => {
+  it('never uses -xerror: a single bad frame must not drop the merge (durationVerified guards deletes)', async () => {
+    await mergeChapters([chapter('/dl/01.mp3'), chapter('/dl/02.mp3')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+    await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+
+    for (const call of spawnMock.mock.calls) {
+      expect(call[1] as string[]).not.toContain('-xerror');
+    }
+  });
+
+  it('marks the duration verified when the merged file matches the chapters', async () => {
+    const result = await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+
+    expect(result.success).toBe(true);
+    expect(result.durationVerified).toBe(true);
+  });
+
+  it('keeps the merge but does not verify it when the duration is off by more than half the shortest chapter', async () => {
+    // 62 s of chapters; 1.1 s off is inside the 2% merge check (1.24 s) but beyond half the 2 s chapter
+    probeState.duration = '63.1';
+    const chapters = [chapter('/dl/01.m4a'), { ...chapter('/dl/02.m4a'), duration: 2000 }];
+
+    const result = await mergeChapters(chapters, { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+
+    expect(result.success).toBe(true);
+    expect(result.durationVerified).toBe(false);
+  });
 });
 
 describe('chapter merger argv safety (no shell)', () => {

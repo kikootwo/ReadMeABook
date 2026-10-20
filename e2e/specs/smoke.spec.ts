@@ -4,7 +4,7 @@
  */
 
 import { test, expect, type Page } from '@playwright/test';
-import { snap, env, evidencePath, writeEvidence, waitFor, fakeArr, keyLeaks, authState, Rmab, Abs } from '../lib/harness';
+import { snap, env, evidencePath, writeEvidence, waitFor, fakeArr, keyLeaks, authState, loginAdminUi, Rmab, Abs } from '../lib/harness';
 
 const shot = (page: Page, name: string) => snap(page, 'smoke', name);
 
@@ -14,17 +14,7 @@ test('smoke: a requested book is grabbed, downloaded, organized and shows up in 
   const plexMode = env('E2E_BACKEND') === 'plex';
 
   await test.step('sign in through the local admin form', async () => {
-    await page.goto('/login');
-    if (plexMode) {
-      // Plex mode hides the local form behind the "Admin Login" toggle (Plex OAuth can't be automated).
-      await shot(page, '00-login-plex-mode');
-      await page.getByRole('button', { name: /Admin Login/ }).click();
-    }
-    await page.locator('#admin-username').fill(env('E2E_ADMIN_USER'));
-    await page.locator('#admin-password').fill(env('E2E_ADMIN_PASSWORD'));
-    // Local form submit is "Login"; the Plex-mode admin form's is "Login as Admin".
-    await page.getByRole('button', { name: /^Login( as Admin)?$/ }).click();
-    await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 30_000 });
+    await loginAdminUi(page, { beforeToggle: () => shot(page, '00-login-plex-mode') });
     await shot(page, '01-home');
   });
 

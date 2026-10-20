@@ -39,20 +39,16 @@ export class UnsafeDeleteError extends Error {
 }
 
 /** Canonical form of a path plus filesystem identities of it and its ancestors. */
-interface CanonicalPath {
+export interface CanonicalPath {
   path: string;
   id?: FileIdentity;
   /** Identities of existing strict ancestors, nearest first. */
   ancestors: FileIdentity[];
 }
 
-/**
- * normalizePath plus drive-root handling: on Windows path.normalize('C:') is
- * 'C:.' (the drive's current directory), so drive roots become 'C:/'.
- */
+/** Normalized form used by the guard (drive roots become 'C:/'; see normalizePath). */
 export function normalizeGuardPath(p: string): string {
-  const normalized = normalizePath(p);
-  return /^[A-Za-z]:\.?$/.test(normalized) ? `${normalized.slice(0, 2)}/` : normalized;
+  return normalizePath(p);
 }
 
 async function statIdentity(p: string): Promise<FileIdentity | undefined> {
@@ -90,9 +86,7 @@ export async function canonicalPath(p: string): Promise<string> {
   return realpathLenient(p);
 }
 
-async function canonicalize(p: string): Promise<CanonicalPath> {
-  const canonical = await realpathLenient(p);
-  const id = await statIdentity(canonical);
+async function ancestorIdentities(canonical: string): Promise<FileIdentity[]> {
   const ancestors: FileIdentity[] = [];
   let current = canonical;
   while (true) {
@@ -102,16 +96,40 @@ async function canonicalize(p: string): Promise<CanonicalPath> {
     if (parentId) ancestors.push(parentId);
     current = parent;
   }
-  return { path: canonical, id, ancestors };
+  return ancestors;
 }
 
-function isSameEntry(a: CanonicalPath, b: CanonicalPath): boolean {
+/** Canonical path (symlinks resolved) with the identities of it and its ancestors. */
+export async function canonicalize(p: string): Promise<CanonicalPath> {
+  const canonical = await realpathLenient(p);
+  return { path: canonical, id: await statIdentity(canonical), ancestors: await ancestorIdentities(canonical) };
+}
+
+/**
+ * The link's own location: canonical parent plus the link name, with the
+ * link entry's identity (lstat). Used so a symlink inside a protected folder
+ * is judged by where it sits, not only by what it points to.
+ */
+async function canonicalizeLinkLocation(linkPath: string): Promise<CanonicalPath> {
+  const resolved = path.resolve(linkPath);
+  const location = joinGuardPath(await realpathLenient(path.dirname(resolved)), path.basename(resolved));
+  let id: FileIdentity | undefined;
+  try {
+    const s = await fs.lstat(resolved, { bigint: true });
+    id = { dev: s.dev, ino: s.ino };
+  } catch {
+    id = undefined;
+  }
+  return { path: location, id, ancestors: await ancestorIdentities(location) };
+}
+
+export function isSameEntry(a: CanonicalPath, b: CanonicalPath): boolean {
   if (a.path === b.path) return true;
   return !!a.id && !!b.id && sameIdentity(a.id, b.id);
 }
 
 /** True when child sits strictly inside parent (by path or by ancestor identity). */
-function isStrictlyInside(child: CanonicalPath, parent: CanonicalPath): boolean {
+export function isStrictlyInside(child: CanonicalPath, parent: CanonicalPath): boolean {
   if (isPathBelowBoundary(child.path, parent.path)) return true;
   const parentId = parent.id;
   return !!parentId && child.ancestors.some((ancestor) => sameIdentity(ancestor, parentId));
@@ -135,46 +153,56 @@ export async function assertSafeToDelete(candidate: string, ctx: DeleteGuardCont
     throw new UnsafeDeleteError(candidate, 'empty path');
   }
 
-  const c = await canonicalize(candidate);
-
-  // Rule a: organize target
-  if (ctx.targetPath) {
-    const t = await canonicalize(ctx.targetPath);
-    if (isSameEntry(c, t)) throw new UnsafeDeleteError(candidate, 'it is the organize target');
-    if (isStrictlyInside(t, c)) throw new UnsafeDeleteError(candidate, 'it contains the organize target');
-    if (isStrictlyInside(c, t)) throw new UnsafeDeleteError(candidate, 'it is inside the organize target');
-  }
-
+  const target = ctx.targetPath ? await canonicalize(ctx.targetPath) : undefined;
   const media = await canonicalize(ctx.mediaDir);
   const downloads = await Promise.all(ctx.downloadRoots.filter(Boolean).map(canonicalize));
   const others = await Promise.all((ctx.otherRoots || []).filter(Boolean).map(canonicalize));
 
-  // Rule b: configured roots
-  for (const root of [media, ...downloads, ...others]) {
-    if (isSameEntry(c, root)) throw new UnsafeDeleteError(candidate, `it is a configured root (${root.path})`);
-    if (isStrictlyInside(root, c)) throw new UnsafeDeleteError(candidate, `it contains a configured root (${root.path})`);
-  }
+  const checkRules = (c: CanonicalPath, what: string) => {
+    const refuse = (reason: string) => new UnsafeDeleteError(candidate, what ? `${what} ${reason}` : reason);
 
-  // Rule c: media library
-  if (isStrictlyInside(c, media) && !ctx.allowMediaSources) {
-    const insideNestedDownloadRoot = downloads.some(
-      (d) => isStrictlyInside(d, media) && isStrictlyInside(c, d)
-    );
-    if (!insideNestedDownloadRoot) {
-      throw new UnsafeDeleteError(candidate, 'it is inside the media library');
+    // Rule a: organize target
+    if (target) {
+      if (isSameEntry(c, target)) throw refuse('it is the organize target');
+      if (isStrictlyInside(target, c)) throw refuse('it contains the organize target');
+      if (isStrictlyInside(c, target)) throw refuse('it is inside the organize target');
     }
-  }
+
+    // Rule b: configured roots
+    for (const root of [media, ...downloads, ...others]) {
+      if (isSameEntry(c, root)) throw refuse(`it is a configured root (${root.path})`);
+      if (isStrictlyInside(root, c)) throw refuse(`it contains a configured root (${root.path})`);
+    }
+
+    // Rule c: media library
+    if (isStrictlyInside(c, media) && !ctx.allowMediaSources) {
+      const insideNestedDownloadRoot = downloads.some(
+        (d) => isStrictlyInside(d, media) && isStrictlyInside(c, d)
+      );
+      if (!insideNestedDownloadRoot) {
+        throw refuse('it is inside the media library');
+      }
+    }
+  };
+
+  const c = await canonicalize(candidate);
+  checkRules(c, '');
 
   // Strip trailing separators first: lstat('link/') would follow the link
   const linkPath = candidate.replace(/[\\/]+$/, '') || candidate;
+  let isLink = false;
   try {
-    const linkStat = await fs.lstat(linkPath);
-    if (linkStat.isSymbolicLink()) {
-      const resolved = path.resolve(linkPath);
-      return joinGuardPath(await realpathLenient(path.dirname(resolved)), path.basename(resolved));
-    }
+    isLink = (await fs.lstat(linkPath)).isSymbolicLink();
   } catch {
     // Missing candidate: nothing to resolve
   }
-  return c.path;
+  if (!isLink) {
+    return c.path;
+  }
+
+  // A symlink is removed as a link, so where the link itself sits must pass the
+  // same rules (a library entry that is a link to a seeding file stays put)
+  const location = await canonicalizeLinkLocation(linkPath);
+  checkRules(location, 'the link:');
+  return location.path;
 }

@@ -9,7 +9,7 @@
 
 import { test, expect } from '@playwright/test';
 import { waitFor, fakeArr, ctl, execBridgeAvailable, EXEC_BRIDGE_SKIP, Rmab } from '../../lib/harness';
-import { MEDIA, sh, q, psql, sqlStr, dbNow, listing, exists, eventsSince, fmtEvents, waitOrganized, sabHistoryDeletes, setRemoveAfterProcessing, requestState, CaseRun } from './242-helpers';
+import { MEDIA, sh, q, psql, sqlStr, markJobs, listing, exists, eventsSince, fmtEvents, waitOrganized, sabHistoryDeletes, setRemoveAfterProcessing, requestState, CaseRun } from './242-helpers';
 
 // Needs docker exec into the stack (sha256 snapshots, psql, symlinks, Bull): untainted runs only.
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
@@ -30,7 +30,7 @@ test('3B usenet download with remote path mapping on: source removed, library co
     `Case 3B. Scenario usenet-smoke. fake SABnzbd complete_dir = /sab-remote (compose override; same downloads volume). RMAB SABnzbd client: remote path mapping on, /sab-remote -> /downloads. Remove after processing on.\nTrigger: POST /api/requests for ${book.title}.\nExpect: as 3A, plus download_history.download_path = /downloads/<name> (mapped) and "Download completed" with organizePath "/downloads/<name> (mapped)".\n`
   );
   c.save('listing-before.txt', `# /media\n${listing('/media')}\n\n# /downloads\n${listing('/downloads')}\n`);
-  const since = dbNow();
+  const since = markJobs();
   const created = await rmab.requestBook(book);
   const requestId = created.request.id;
   await waitFor('request downloaded/available', async () => ['downloaded', 'available'].includes(psql(`select status from requests where id = ${sqlStr(requestId)}`)) || null, { timeoutMs: 300_000, intervalMs: 3_000 });

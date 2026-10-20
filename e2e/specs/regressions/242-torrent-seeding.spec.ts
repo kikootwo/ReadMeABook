@@ -9,7 +9,7 @@
 
 import { test, expect } from '@playwright/test';
 import { waitFor, fakeArr, ctl, execBridgeAvailable, EXEC_BRIDGE_SKIP, Rmab } from '../../lib/harness';
-import { MEDIA, sh, q, psql, sqlStr, dbNow, shas, listing, exists, eventsSince, fmtEvents, waitOrganized, requestState, CaseRun, fmtShas } from './242-helpers';
+import { MEDIA, sh, q, psql, sqlStr, markJobs, shas, listing, exists, eventsSince, fmtEvents, waitOrganized, requestState, CaseRun, fmtShas } from './242-helpers';
 
 // Needs docker exec into the stack (sha256 snapshots, psql, symlinks, Bull): untainted runs only.
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
@@ -38,7 +38,7 @@ test('2 torrent download keeps seeding: source untouched, library copy present',
     `Case 2. Inline scenario ${def.name}: torrent "${book.title}" (fixture martian-mp3) on indexer 1 via fake qBittorrent, path mapping off.\nTrigger: POST /api/requests for ${book.title}; search, grab, download and organize run for real.\nExpect: /downloads/${book.title}/ intact (sha equal to the fixture), library .mp3 files present, torrent still seeding, no torrents/delete call, no download cleanup.\n`
   );
   c.save('listing-before.txt', `# /media\n${listing('/media')}\n\n# /downloads\n${listing('/downloads')}\n`);
-  const since = dbNow();
+  const since = markJobs();
   const created = await rmab.requestBook(book);
   const requestId = created.request.id;
   await waitFor('request downloaded/available', async () => ['downloaded', 'available'].includes(psql(`select status from requests where id = ${sqlStr(requestId)}`)) || null, { timeoutMs: 300_000, intervalMs: 3_000 });

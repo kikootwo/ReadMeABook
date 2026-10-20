@@ -704,6 +704,11 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                             {request.errorMessage}
                           </div>
                         )}
+                        {request.errorMessage && (request.status === 'downloaded' || request.status === 'available') && (
+                          <div className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                            {request.errorMessage}
+                          </div>
+                        )}
                       </div>
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">

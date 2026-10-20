@@ -52,6 +52,27 @@ export function dbNow(): string {
   return psql("select to_char(clock_timestamp() at time zone 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US')");
 }
 
+/**
+ * What existed before a trigger: every job id, plus the DB clock. New jobs are
+ * found by id, not by created_at: the Docker VM's wall clock can step back a
+ * few seconds, and a `created_at > since` filter then misses the new job.
+ */
+export interface JobMark {
+  at: string;
+  jobIds: string[];
+}
+
+export function markJobs(): JobMark {
+  // Ids first: a job created in between is then "new" (by id) rather than missed
+  const jobIds = psql('select id from jobs').split('\n').filter(Boolean);
+  return { at: dbNow(), jobIds };
+}
+
+/** SQL condition on `jobs` rows: created after the mark (an id the mark did not see). */
+export function newJobsWhere(mark: JobMark): string {
+  return mark.jobIds.length ? `not (id = any(array[${mark.jobIds.map(sqlStr).join(',')}]::text[]))` : 'true';
+}
+
 /** sha256 of every regular file below dir (symlinks not followed), path -> sha. */
 export function shas(dir: string, prune: string[] = []): Record<string, string> {
   const pr = prune.map((p) => `-path ${q(p)} -prune -o`).join(' ');
@@ -87,11 +108,18 @@ export interface JobEventRow {
   metadata: string;
 }
 
-/** Every job event created after `since` (UTC timestamp from dbNow). */
-export function eventsSince(since: string): JobEventRow[] {
+/**
+ * Job events after the mark: every event of a job created after it (matched by
+ * id, so a clock step cannot drop them), plus events of older jobs logged
+ * after the mark's timestamp.
+ */
+export function eventsSince(since: JobMark): JobEventRow[] {
   const out = psql(
     `select to_char(e.created_at at time zone 'UTC','HH24:MI:SS.MS'), e.level, e.context, replace(replace(e.message, E'\\t', ' '), E'\\n', ' '), coalesce(replace(e.metadata::text, E'\\t', ' '), '')
-     from job_events e where e.created_at at time zone 'UTC' > ${sqlStr(since)}::timestamp order by e.created_at, e.id`
+     from job_events e
+     where e.job_id in (select id from jobs where ${newJobsWhere(since)})
+        or e.created_at at time zone 'UTC' > ${sqlStr(since.at)}::timestamp
+     order by e.created_at, e.id`
   );
   return out
     .split('\n')
@@ -104,12 +132,12 @@ export function eventsSince(since: string): JobEventRow[] {
 
 export const fmtEvents = (rows: JobEventRow[]) => rows.map((r) => `${r.at} ${r.level.padEnd(5)} [${r.context}] ${r.message}${r.metadata ? `  ${r.metadata}` : ''}`).join('\n');
 
-/** Wait for every organize_files job created after `since` to finish, and the request to leave `processing`. */
-export async function waitOrganized(since: string, requestId: string, timeoutMs = 180_000) {
+/** Wait for every organize_files job created after the mark (found by id) to finish, and the request to leave `processing`. */
+export async function waitOrganized(since: JobMark, requestId: string, timeoutMs = 180_000) {
   return waitFor(
     'organize job finished',
     async () => {
-      const jobs = psql(`select status from jobs where type = 'organize_files' and created_at at time zone 'UTC' > ${sqlStr(since)}::timestamp`).split('\n').filter(Boolean);
+      const jobs = psql(`select status from jobs where type = 'organize_files' and ${newJobsWhere(since)}`).split('\n').filter(Boolean);
       if (jobs.length === 0 || jobs.some((s) => !['completed', 'failed'].includes(s))) return null;
       const status = psql(`select status from requests where id = ${sqlStr(requestId)}`);
       return status && status !== 'processing' ? { jobs, status } : null;

@@ -4,14 +4,19 @@
  */
 
 import * as path from 'path';
-import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import type { ConfigurationService } from '../services/config.service';
 import { getDownloadClientManager } from '../services/download-client-manager.service';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
-import { normalizePath } from '../utils/cleanup-helpers';
 import { assertSafeToDelete, DeleteGuardContext, UnsafeDeleteError } from '../utils/delete-guard';
-import { collectGuardRoots, guardAllows, sweepEmptyParents } from './organize-cleanup-guard';
+import { collectGuardRoots, guardAllows, planDownloadCleanup, sweepEmptyParents } from './organize-cleanup-guard';
+import {
+  folderRemovalBlocker,
+  type ImportEvidence,
+  rewalkBlocker,
+  sourceKey,
+  verifiedSourceKeys,
+} from '../utils/import-inventory';
 
 // =========================================================================
 // DOWNLOAD CLEANUP
@@ -25,57 +30,19 @@ export interface DownloadCleanupParams {
   downloadHistoryId?: string;
   /** Folder the files were organized into. */
   targetPath: string;
+  /** What the organize step found and what verifiably reached the library. */
+  evidence: ImportEvidence;
   configService: ConfigurationService;
   jobId: string | undefined;
   logger: RMABLogger;
 }
 
 /**
- * Load the DownloadHistory row behind this job, but only when the job is a
- * download RMAB completed: the job carries the row id, the row belongs to the
- * request, it is completed, and its stored (mapped) path equals the job path.
- * Returns null otherwise (manual/bulk import, stale or mismatched rows).
+ * Reason a whole source (folder or single file) must stay, or null when every
+ * imported file is verified and a fresh walk finds nothing new.
  */
-async function findCompletedDownloadForJob(
-  requestId: string,
-  downloadPath: string,
-  downloadHistoryId: string | undefined,
-  logger: RMABLogger
-) {
-  if (!downloadHistoryId) {
-    logger.info('Not a download RMAB completed (manual or bulk import), skipping download cleanup');
-    return null;
-  }
-
-  const downloadHistory = await prisma.downloadHistory.findUnique({
-    where: { id: downloadHistoryId },
-  });
-
-  logger.info(`Download history found: ${downloadHistory ? 'yes' : 'no'}`, {
-    hasDownloadClientId: !!downloadHistory?.downloadClientId,
-    hasIndexerId: !!downloadHistory?.indexerId,
-    downloadClient: downloadHistory?.downloadClient || 'none',
-  });
-
-  if (!downloadHistory || downloadHistory.requestId !== requestId) {
-    return null;
-  }
-
-  if (
-    downloadHistory.downloadStatus !== 'completed' ||
-    !downloadHistory.downloadPath ||
-    !downloadPath ||
-    normalizePath(path.resolve(downloadHistory.downloadPath)) !== normalizePath(path.resolve(downloadPath))
-  ) {
-    logger.info('Job path does not match the completed download path, skipping download cleanup', {
-      status: downloadHistory.downloadStatus || 'none',
-      storedPath: downloadHistory.downloadPath || 'none',
-      jobPath: downloadPath,
-    });
-    return null;
-  }
-
-  return downloadHistory;
+async function sourceRemovalBlocker(sourcePath: string, evidence: ImportEvidence): Promise<string | null> {
+  return folderRemovalBlocker(evidence) ?? (await rewalkBlocker(sourcePath, evidence));
 }
 
 /**
@@ -84,10 +51,16 @@ async function findCompletedDownloadForJob(
  * cleanup; only single files from the 'direct' client are removed.
  */
 export async function cleanupDirectDownloadSource(params: DownloadCleanupParams): Promise<void> {
-  const { requestId, downloadPath, downloadHistoryId, targetPath, logger } = params;
+  const { requestId, downloadPath, downloadHistoryId, targetPath, evidence, configService, logger } = params;
   try {
-    const downloadHistory = await findCompletedDownloadForJob(requestId, downloadPath, downloadHistoryId, logger);
-    if (!downloadHistory || downloadHistory.downloadClient !== 'direct') {
+    const plan = await planDownloadCleanup(
+      requestId, downloadPath, downloadHistoryId, () => configService.get('prowlarr_indexers'), logger
+    );
+    if (plan?.kind !== 'direct') {
+      return;
+    }
+    if (!verifiedSourceKeys(evidence).has(sourceKey(downloadPath))) {
+      logger.warn('Direct download cleanup skipped: the file was not verified in the library; download kept');
       return;
     }
 
@@ -123,43 +96,23 @@ export async function cleanupDirectDownloadSource(params: DownloadCleanupParams)
  * download path must equal the job's path. Every delete then passes the guard.
  */
 export async function cleanupDownloadAfterOrganize(params: DownloadCleanupParams): Promise<void> {
-  const { requestId, downloadPath, downloadHistoryId, targetPath, configService, jobId, logger } = params;
+  const { requestId, downloadPath, downloadHistoryId, targetPath, evidence, configService, jobId, logger } = params;
   try {
     logger.info('Checking if cleanup is needed for this download');
 
-    const downloadHistory = await findCompletedDownloadForJob(requestId, downloadPath, downloadHistoryId, logger);
-    if (!downloadHistory) {
+    const plan = await planDownloadCleanup(
+      requestId, downloadPath, downloadHistoryId, () => configService.get('prowlarr_indexers'), logger
+    );
+    if (plan?.kind !== 'indexer') {
       return;
     }
+    const { downloadHistory } = plan;
 
-    if (!downloadHistory.indexerId || !downloadHistory.downloadClientId) {
-      return;
-    }
-
-    // Get indexer configuration
-    const indexersConfig = await configService.get('prowlarr_indexers');
-    if (!indexersConfig) {
-      return;
-    }
-
-    const indexers: Array<{ id: number; protocol?: string; removeAfterProcessing?: boolean }> = JSON.parse(indexersConfig);
-    const indexer = indexers.find(idx => idx.id === downloadHistory.indexerId);
-
-    // Indexer protocol, falling back to the protocol of the client that downloaded it
-    const protocol = (
-      indexer?.protocol ||
-      CLIENT_PROTOCOL_MAP[downloadHistory.downloadClient as DownloadClientType] ||
-      ''
-    ).toLowerCase();
-
-    logger.info(`Indexer found in config: ${indexer ? 'yes' : 'no'}`, {
-      indexerId: downloadHistory.indexerId,
-      protocol: protocol || 'none',
-      removeAfterProcessing: indexer?.removeAfterProcessing ?? 'undefined',
-    });
-
-    // Only non-torrent downloads with cleanup enabled (torrents keep seeding)
-    if (!indexer || !indexer.removeAfterProcessing || !protocol || protocol === 'torrent') {
+    // Only remove what verifiably reached the library; otherwise keep the
+    // download and leave it in the client's history
+    const blocker = await sourceRemovalBlocker(downloadPath, evidence);
+    if (blocker) {
+      logger.warn(`Download cleanup skipped: ${blocker}; download kept`);
       return;
     }
 
@@ -169,7 +122,7 @@ export async function cleanupDownloadAfterOrganize(params: DownloadCleanupParams
       return;
     }
 
-    logger.info(`Cleaning up download ${downloadHistory.downloadClientId} (cleanup enabled for indexer ${indexer.id})`);
+    logger.info(`Cleaning up download ${downloadHistory.downloadClientId} (cleanup enabled for indexer ${plan.indexerId})`);
     logger.info(`Removing download files from filesystem: ${deletePath}`);
 
     const fs = await import('fs/promises');
@@ -198,7 +151,7 @@ export async function cleanupDownloadAfterOrganize(params: DownloadCleanupParams
     // Then use the download client interface for client-specific post-processing
     // (e.g., usenet clients archive from history, torrent clients are a no-op)
     const clientType = downloadHistory.downloadClient;
-    if (clientType && clientType !== 'direct') {
+    if (clientType && clientType !== 'direct' && downloadHistory.downloadClientId) {
       const manager = getDownloadClientManager(configService);
       const clientProtocol = CLIENT_PROTOCOL_MAP[clientType as DownloadClientType];
       if (!clientProtocol) {
@@ -239,10 +192,13 @@ export async function cleanupSourceAfterOrganize(
   configService: ConfigurationService,
   jobId: string | undefined,
   logger: RMABLogger,
+  evidence: ImportEvidence,
   selectedFiles?: string[]
 ): Promise<void> {
   try {
     const fs = await import('fs/promises');
+    const verified = verifiedSourceKeys(evidence);
+    const statusBySource = new Map(evidence.records.map((r) => [sourceKey(r.source), r.status]));
 
     logger.info(`Cleaning up source files: ${downloadPath}`);
 
@@ -252,9 +208,14 @@ export async function cleanupSourceAfterOrganize(
     if (selectedFiles && selectedFiles.length > 0) {
       // Only delete the specific files that were imported, not the entire directory
       const kept: string[] = [];
+      const unverified: string[] = [];
       let removed = 0;
       for (const fileName of selectedFiles) {
         const filePath = path.join(downloadPath, fileName);
+        if (!verified.has(sourceKey(filePath))) {
+          unverified.push(`${fileName} (${statusBySource.get(sourceKey(filePath)) ?? 'not imported'})`);
+          continue;
+        }
         let deletePath: string;
         try {
           deletePath = await assertSafeToDelete(filePath, guardContext);
@@ -279,6 +240,9 @@ export async function cleanupSourceAfterOrganize(
           `Kept ${kept.length} source file(s) that are part of the import target ${targetPath}: ${kept.join(', ')}`
         );
       }
+      if (unverified.length > 0) {
+        logger.warn(`Kept ${unverified.length} source file(s) not verified in the library: ${unverified.join(', ')}`);
+      }
       logger.info(`Removed ${removed} selected source files from ${downloadPath}`);
       if (removed > 0) {
         await sweepEmptyParents(downloadPath, roots, jobId, logger, 'CleanupSourceParents');
@@ -290,6 +254,11 @@ export async function cleanupSourceAfterOrganize(
     // media library is never removed (it can hold other books); single files may be.
     const stats = await fs.lstat(downloadPath);
     const isDirectory = stats.isDirectory();
+    const blocker = await sourceRemovalBlocker(downloadPath, evidence);
+    if (blocker) {
+      logger.warn(`Source cleanup skipped: ${blocker}; source kept`);
+      return;
+    }
     const deletePath = await guardAllows(
       downloadPath,
       { ...guardContext, allowMediaSources: !isDirectory },
@@ -317,5 +286,30 @@ export async function cleanupSourceAfterOrganize(
         { error: error instanceof Error ? error.stack : undefined }
       );
     }
+  }
+}
+
+/**
+ * Manual-import source cleanup for an ebook: only the imported ebook file is
+ * removed, never the folder around it (an import folder can also hold an
+ * audiobook or other library content).
+ */
+export async function cleanupEbookSource(
+  downloadPath: string,
+  importedFile: string | undefined,
+  targetPath: string,
+  configService: ConfigurationService,
+  jobId: string | undefined,
+  logger: RMABLogger,
+  evidence: ImportEvidence
+): Promise<void> {
+  if (!importedFile) {
+    logger.warn('Imported ebook file unknown, skipping source cleanup');
+  } else if (path.resolve(importedFile) === path.resolve(downloadPath)) {
+    await cleanupSourceAfterOrganize(downloadPath, targetPath, configService, jobId, logger, evidence);
+  } else {
+    await cleanupSourceAfterOrganize(downloadPath, targetPath, configService, jobId, logger, evidence, [
+      path.relative(downloadPath, importedFile),
+    ]);
   }
 }

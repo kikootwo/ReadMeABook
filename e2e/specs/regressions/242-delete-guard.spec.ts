@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import { test, expect } from '@playwright/test';
 import { evidencePath, waitFor, fakeArr, ctl, execBridgeAvailable, EXEC_BRIDGE_SKIP, Rmab } from '../../lib/harness';
 import {
-  MEDIA, BACKUP, PUID, PGID, sh, asApp, q, psql, sqlStr, dbNow, shas, listing, exists, fileSize, eventsSince, fmtEvents,
+  MEDIA, BACKUP, PUID, PGID, sh, asApp, q, psql, sqlStr, markJobs, shas, listing, exists, fileSize, eventsSince, fmtEvents,
   waitOrganized, sabHistoryDeletes, setRemoveAfterProcessing, requestState, CaseRun, diffShas, fmtShas, type JobEventRow,
 } from './242-helpers';
 
@@ -87,7 +87,7 @@ function snapshot(c: CaseRun, phase: 'before' | 'after'): Snapshot {
 /** Trigger a manual import over HTTP and wait for its organize job; saves request, events and fake-client calls. */
 async function manualImport(c: CaseRun, rmab: Rmab, body: Record<string, unknown>) {
   const sabBefore = (await sabHistoryDeletes()).length;
-  const since = dbNow();
+  const since = markJobs();
   c.save('trigger.json', { method: 'POST', path: '/api/admin/manual-import', body });
   const res = await rmab.raw('POST', '/api/admin/manual-import', body);
   const response = await res.json().catch(() => ({}));
@@ -143,7 +143,7 @@ test('3A seed: usenet download, mapping off, source removed and library copy kep
     ].join('\n') + '\n'
   );
   const before = snapshot(c, 'before');
-  const since = dbNow();
+  const since = markJobs();
   // Only this case's fake-client traffic: the recorder still holds the seed (3A) job and its legitimate history delete.
   const recSince = (await fakeArr.requests()).at(-1)?.seq ?? 0;
   const created = await rmab.requestBook(book);
@@ -279,6 +279,8 @@ test('1D download path that resolves to the library through a symlink', async ()
 });
 
 test('1E download path that reaches the library through a second bind mount of the media volume', async () => {
+  // The second mount comes from the media-bind compose override; without it there is nothing to test
+  test.skip(!sh(`grep -E ' ${BIND} ' /proc/self/mountinfo || true`).trim(), 'needs --overrides media-bind');
   const s = seed();
   const c = new CaseRun('1E-second-bind-path');
   const rmab = await Rmab.loginAdmin();
@@ -399,7 +401,7 @@ test('5B ebook organize from a media folder holding two EPUBs removes only the i
   c.save('bull-check.txt', sh(`cd /app && node -e "console.log(require.resolve('bull'))" 2>&1 || true`));
   c.save('scenario.txt', `Case 5B. Source ${src} with generated a-other.epub and b-this.epub (Kindle fix off).\nTrigger: an ebook request for the seeded book (SQL insert, no UI path) and an organize_files job queued on the app's Bull queue with downloadPath = ${src}, cleanupSource = true.\nExpect: exactly the EPUB named in "Found ebook file" removed; the other unchanged; ebook target holds the imported copy.\n`);
   const before = snapshot(c, 'before');
-  const since = dbNow();
+  const since = markJobs();
   const reqId = queueEbookOrganize(c, s, src);
   try {
     c.save('organize-jobs.json', await waitOrganized(since, reqId));
@@ -437,7 +439,7 @@ test('5C ebook re-import where the ebook target is the folder that holds the aud
   );
   c.save('scenario.txt', `Case 5C. ebook_path_template = {author}/{title} {asin}, so the ebook target is L = ${s.L}, which holds the audiobook, cover.jpg and a generated Book.epub.\nTrigger: ebook request + organize_files job (Bull) with downloadPath = L, cleanupSource = true.\nExpect: /media unchanged; "Kept 1 source file(s) that are part of the import target <L>: Book.epub".\n`);
   const before = snapshot(c, 'before');
-  const since = dbNow();
+  const since = markJobs();
   const reqId = queueEbookOrganize(c, s, s.L);
   try {
     c.save('organize-jobs.json', await waitOrganized(since, reqId));
@@ -479,7 +481,7 @@ test('1F completed usenet download whose stored path resolves into the media lib
   c.save('scenario.txt', `Case 1F. Inline scenario ${def.name}: NZB "${name}" for ${book.title} via fake SABnzbd, indexer 2 remove after processing on, mapping off.\nSABnzbd stores the job at /downloads/${name}, which is a symlink to ${incoming} (inside the media library).\nTrigger: POST /api/requests for ${book.title}; the download completes and is organized for real.\nExpect: ${incoming} kept with its files, no SABnzbd history delete for the nzo, "Download cleanup skipped: Refusing to delete ... it is inside the media library".\n`);
   c.save('scenario-definition.json', def);
   const before = snapshot(c, 'before');
-  const since = dbNow();
+  const since = markJobs();
   // Only this case's fake-client traffic: the recorder still holds the seed (3A) job and its legitimate history delete.
   const recSince = (await fakeArr.requests()).at(-1)?.seq ?? 0;
   const created = await rmab.requestBook(book);
