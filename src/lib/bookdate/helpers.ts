@@ -11,6 +11,7 @@ import { getPlexService } from '@/lib/integrations/plex.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { RMABLogger } from '@/lib/utils/logger';
 import {
+  AIResponseError,
   RECOMMENDATIONS_JSON_INSTRUCTION,
   describeClaudeUsage,
   extractChatCompletionText,
@@ -651,9 +652,9 @@ export async function callAI(
     }
 
     const data = await response.json();
-    const content = extractChatCompletionText(data, 'OpenAI');
-    logger.debug('OpenAI response:', { content });
-    return parseRecommendationsJson<AIRecommendation>(content, 'OpenAI');
+    const reply = extractChatCompletionText(data, 'OpenAI');
+    logger.debug('OpenAI response:', { content: reply.text });
+    return parseRecommendationsJson<AIRecommendation>(reply, 'OpenAI');
 
   } else if (provider === 'claude') {
     const userMessage = `${systemMessage}\n\n${prompt}\n\nIMPORTANT: Provide exactly 15-20 recommendations. ${RECOMMENDATIONS_JSON_INSTRUCTION} Return ONLY valid JSON with no additional text or formatting.`;
@@ -697,9 +698,9 @@ export async function callAI(
     });
 
     // Answer = all text blocks joined; thinking blocks skipped; refusal / cut-off become clear errors
-    const content = extractClaudeText(data);
-    logger.debug('Claude raw response:', { content });
-    return parseRecommendationsJson<AIRecommendation>(content, 'Claude');
+    const reply = extractClaudeText(data);
+    logger.debug('Claude raw response:', { content: reply.text });
+    return parseRecommendationsJson<AIRecommendation>(reply, 'Claude');
 
   } else if (provider === 'gemini') {
     const requestBody = {
@@ -833,9 +834,9 @@ export async function callAI(
           }
 
           const retryData = await retryResponse.json();
-          const retryContent = extractChatCompletionText(retryData, 'Custom provider');
-          logger.debug('Custom provider response (fallback):', { content: retryContent });
-          return parseRecommendationsJson<AIRecommendation>(retryContent, 'Custom provider');
+          const retryReply = extractChatCompletionText(retryData, 'Custom provider');
+          logger.debug('Custom provider response (fallback):', { content: retryReply.text });
+          return parseRecommendationsJson<AIRecommendation>(retryReply, 'Custom provider');
         }
 
         throw new Error(`Custom provider API error: ${response.status} ${errorText}`);
@@ -843,11 +844,13 @@ export async function callAI(
 
       const data = await response.json();
       // Some providers return null content (reasoning models) or still wrap JSON in fences
-      const content = extractChatCompletionText(data, 'Custom provider');
-      logger.debug('Custom provider response:', { content });
-      return parseRecommendationsJson<AIRecommendation>(content, 'Custom provider');
+      const reply = extractChatCompletionText(data, 'Custom provider');
+      logger.debug('Custom provider response:', { content: reply.text });
+      return parseRecommendationsJson<AIRecommendation>(reply, 'Custom provider');
 
     } catch (error: any) {
+      // Already user-safe and labelled; wrapping again would repeat "Custom provider"
+      if (error instanceof AIResponseError) throw error;
       logger.error('Custom provider error:', error);
       throw new Error(`Custom provider error: ${error.message}`);
     }

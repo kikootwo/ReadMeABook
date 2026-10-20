@@ -60,11 +60,21 @@ function joinTextParts(parts: unknown[]): string {
 }
 
 /**
+ * Reply text plus whether the provider stopped at a token limit. A truncated
+ * reply is still parsed: a complete JSON object followed by padding is usable,
+ * and only a failed parse is reported as "cut off".
+ */
+export interface AIReply {
+  text: string;
+  truncated: boolean;
+}
+
+/**
  * Claude Messages API: the answer is the concatenation of every `type: "text"`
  * block. `thinking` / `redacted_thinking` blocks (returned by default on current
  * models) are skipped.
  */
-export function extractClaudeText(data: unknown): string {
+export function extractClaudeText(data: unknown): AIReply {
   const body = (data ?? {}) as { content?: unknown; stop_reason?: unknown };
   const stopReason = body.stop_reason;
   const content = body.content;
@@ -81,11 +91,11 @@ export function extractClaudeText(data: unknown): string {
   };
 
   if (stopReason === 'refusal') fail(declined('Claude'));
-  if (stopReason === 'max_tokens' || stopReason === 'model_context_window_exceeded') fail(cutOff('Claude'));
+  const truncated = stopReason === 'max_tokens' || stopReason === 'model_context_window_exceeded';
 
   const text = joinTextParts(content);
-  if (text.trim() === '') fail(noText('Claude', stopReason));
-  return text;
+  if (text.trim() === '') fail(truncated ? cutOff('Claude') : noText('Claude', stopReason));
+  return { text, truncated };
 }
 
 /** Token counts from a Claude response, for logging. Numbers only, never content. */
@@ -110,7 +120,7 @@ export function describeClaudeUsage(data: unknown): {
  * OpenAI Chat Completions shape (OpenAI and OpenAI-compatible custom providers).
  * Guards null content (reasoning models, refusals) and `finish_reason: "length"`.
  */
-export function extractChatCompletionText(data: unknown, label: 'OpenAI' | 'Custom provider'): string {
+export function extractChatCompletionText(data: unknown, label: 'OpenAI' | 'Custom provider'): AIReply {
   const body = (data ?? {}) as { choices?: unknown };
   const choice = Array.isArray(body.choices) ? body.choices[0] : undefined;
   const finishReason = (choice as { finish_reason?: unknown } | undefined)?.finish_reason;
@@ -127,20 +137,29 @@ export function extractChatCompletionText(data: unknown, label: 'OpenAI' | 'Cust
   if (!choice) fail(noText(label, undefined));
   if (typeof message?.refusal === 'string' && message.refusal.trim() !== '') fail(declined(label));
   if (finishReason === 'content_filter') fail(declined(label));
-  if (finishReason === 'length') fail(cutOff(label));
+  const truncated = finishReason === 'length';
 
   const content = message?.content;
   const text = typeof content === 'string' ? content : Array.isArray(content) ? joinTextParts(content) : '';
-  if (text.trim() === '') fail(noText(label, finishReason));
-  return text;
+  if (text.trim() === '') fail(truncated ? cutOff(label) : noText(label, finishReason));
+  return { text, truncated };
 }
+
+const isUsableItem = (item: unknown): boolean => {
+  const rec = item as { title?: unknown; author?: unknown } | null;
+  return !!rec && typeof rec === 'object' && !Array.isArray(rec) &&
+    typeof rec.title === 'string' && rec.title.trim() !== '' &&
+    typeof rec.author === 'string' && rec.author.trim() !== '';
+};
 
 /**
  * Parse the reply text: trim, strip an optional ```json / ``` fence, trim, parse.
- * Requires an object with a `recommendations` array.
+ * Requires an object with a `recommendations` array; items without a string
+ * title and author are dropped. A truncated reply that fails to parse is
+ * reported as cut off.
  */
-export function parseRecommendationsJson<T>(text: string, label: string): { recommendations: T[] } {
-  const cleaned = text
+export function parseRecommendationsJson<T>(reply: AIReply, label: string): { recommendations: T[] } {
+  const cleaned = reply.text
     .trim()
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/, '')
@@ -150,8 +169,8 @@ export function parseRecommendationsJson<T>(text: string, label: string): { reco
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    logger.warn(`${label} reply was not valid JSON`, { length: cleaned.length });
-    throw new AIResponseError(`${label}'s reply was not valid JSON. ${RETRY_HINT}`);
+    logger.warn(`${label} reply was not valid JSON`, { length: cleaned.length, truncated: reply.truncated });
+    throw reply.truncated ? cutOff(label) : new AIResponseError(`${label}'s reply was not valid JSON. ${RETRY_HINT}`);
   }
 
   const recommendations =
@@ -162,7 +181,20 @@ export function parseRecommendationsJson<T>(text: string, label: string): { reco
     logger.warn(`${label} reply has no recommendations array`, {
       kind: Array.isArray(parsed) ? 'array' : parsed === null ? 'null' : typeof parsed,
     });
-    throw new AIResponseError(`${label}'s reply did not include a recommendations list. ${RETRY_HINT}`);
+    throw noList(label);
   }
-  return parsed as { recommendations: T[] };
+
+  const usable = recommendations.filter(isUsableItem);
+  if (usable.length < recommendations.length) {
+    logger.warn(`${label} reply had unusable recommendation items`, {
+      dropped: recommendations.length - usable.length,
+      kept: usable.length,
+    });
+    if (usable.length === 0) throw noList(label);
+  }
+  return { ...(parsed as object), recommendations: usable as T[] };
+}
+
+function noList(label: string): AIResponseError {
+  return new AIResponseError(`${label}'s reply did not include a recommendations list. ${RETRY_HINT}`);
 }
