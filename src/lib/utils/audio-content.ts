@@ -42,19 +42,25 @@ export interface AudioContent {
   /** Timestamp where the last packet ends (ms); not the content. */
   endMs: number;
   packets: number;
+  /**
+   * Decoded format, "<sample rate>/<channels>/<channel layout>/<sample format>":
+   * chapters that differ here make ffmpeg rebuild its filter graph mid-merge.
+   */
+  decodedFormat: string;
 }
 
-async function streamInfo(filePath: string): Promise<{ sampleRate: number; timeBase: number }> {
+async function streamInfo(filePath: string): Promise<{ sampleRate: number; timeBase: number; decodedFormat: string }> {
   const { stdout } = await execFileAsync(
     'ffprobe',
-    ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=sample_rate,time_base', '-of', 'json', filePath],
+    ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=sample_rate,time_base,channels,channel_layout,sample_fmt', '-of', 'json', filePath],
     { timeout: 30000 }
   );
   const stream = (JSON.parse(stdout).streams ?? [])[0] ?? {};
   const [num, den] = String(stream.time_base ?? '').split('/').map(Number);
   const timeBase = num > 0 && den > 0 ? num / den : 0;
   if (!(timeBase > 0)) throw new Error('no audio stream time base');
-  return { sampleRate: parseInt(stream.sample_rate, 10) || 0, timeBase };
+  const decodedFormat = [stream.sample_rate, stream.channels, stream.channel_layout, stream.sample_fmt].map((v) => String(v ?? '')).join('/');
+  return { sampleRate: parseInt(stream.sample_rate, 10) || 0, timeBase, decodedFormat };
 }
 
 /** key=value fields of one ffprobe csv line (side data keys keep only their last segment). */
@@ -69,7 +75,7 @@ function fields(line: string): Map<string, string> {
 
 /** Content of the first audio stream. Throws when ffprobe fails or finds no packets. */
 export async function probeAudioContent(filePath: string): Promise<AudioContent> {
-  const { sampleRate, timeBase } = await streamInfo(filePath);
+  const { sampleRate, timeBase, decodedFormat } = await streamInfo(filePath);
   const candidateTicks = GAP_CANDIDATE_S / timeBase;
 
   return new Promise((resolve, reject) => {
@@ -141,6 +147,7 @@ export async function probeAudioContent(filePath: string): Promise<AudioContent>
         framedMs: packets * frame * timeBase * 1000,
         endMs: Math.round(end * timeBase * 1000),
         packets,
+        decodedFormat,
       });
     });
   });

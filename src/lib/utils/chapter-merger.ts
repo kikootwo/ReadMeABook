@@ -11,7 +11,7 @@ import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
 import { probeAudioContent } from './audio-content';
-import { checkMergedTimeline, measureChapterContent, verifyMergedContent } from './merge-verification';
+import { checkMergedOutput, measureChapterContent, sameDecodedFormat, verifyMergedContent } from './merge-verification';
 import { RMABLogger } from './logger';
 import { CHAPTER_MERGE_FORMATS } from '../constants/audio-formats';
 
@@ -682,6 +682,17 @@ export async function mergeChapters(
 
       const formatLabel = inputFormat.slice(1).toUpperCase(); // '.mp3' -> 'MP3', '.flac' -> 'FLAC'
 
+      // Timestamps from the decoded sample count: the concat demuxer starts each
+      // chapter at the previous one's container duration, an estimate for ADTS
+      // .aac and VBR MP3 without a Xing/VBRI header (holes or overlaps otherwise).
+      // Only for one decoded format: a format change rebuilds the filter graph,
+      // restarting the count (those merges keep the demuxer's timestamps)
+      if (sameDecodedFormat(measured)) {
+        args.push('-af', 'asetpts=N/SR/TB');
+      } else {
+        await logger?.info('Chapters differ in sample rate/channels/sample format (or were not measured): keeping container timestamps');
+      }
+
       if (hasFdkAac) {
         args.push('-c:a', 'libfdk_aac');
         args.push('-vbr', '4'); // VBR mode 4 (~128-160kbps, high quality)
@@ -778,13 +789,13 @@ export async function mergeChapters(
     const outputContent = await probeAudioContent(options.outputPath).catch((error: Error) => ({ error: error.message }));
     const verification = verifyMergedContent(measured, chapters.length, outputContent, needsReencode ? 'reencode' : 'copy');
 
-    // A timeline that doesn't match the audio (gaps, or an end far from it)
-    // puts chapter markers and seeking in the wrong place: fail the merge, so
-    // the files are organized individually. Then the usual checks, on the
-    // verification's actual audio (undefined: container estimate).
-    const timelineProblem = checkMergedTimeline(verification, outputContent);
-    const validation = timelineProblem
-      ? { valid: false, error: `Merged timeline does not match its audio: ${timelineProblem}` }
+    // A broken output fails the merge, so the files are organized individually:
+    // a timeline that doesn't match the audio (gaps, or an end far from it: chapter
+    // markers and seeking wrong) or a re-encode over 1 s short. Then the usual
+    // checks, on the verification's actual audio (undefined: container estimate).
+    const outputProblem = checkMergedOutput(verification, outputContent);
+    const validation = outputProblem
+      ? { valid: false, error: `Merged file rejected: ${outputProblem}` }
       : await validateMergedFile(options.outputPath, totalDuration, logger, verification.actualMs);
 
     if (!validation.valid) {

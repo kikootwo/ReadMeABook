@@ -73,7 +73,7 @@ vi.mock('@/lib/utils/audio-content', () => ({
       if (Number.isFinite(duration)) contentMs = Math.round(duration * 1000);
     }
     // 1 ms frames: a codec-copy output verifies only when its content equals the chapters' total
-    return { contentMs, gapMs: 0, frameMs: 1, framedMs: contentMs, endMs: contentMs, packets: contentMs };
+    return { contentMs, gapMs: 0, frameMs: 1, framedMs: contentMs, endMs: contentMs, packets: contentMs, decodedFormat: '44100/2/stereo/fltp' };
   }),
 }));
 

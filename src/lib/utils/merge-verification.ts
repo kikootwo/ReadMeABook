@@ -16,10 +16,14 @@
  * - Re-encode: the output's content may exceed the chapters' by up to
  *   1 s + 50 ms per chapter but fall short by at most 1 s (a shortfall is lost
  *   audio; measured re-encodes come out 0-50 ms long whatever the chapter count).
- * Either way the output must have no timeline gap. checkMergedTimeline also
- * fails the merge itself when the output's timeline does not match its audio
- * (gaps, or an end far from the content), since its chapter markers and seeking
- * would then be wrong. This checks the amount of audio, not its bytes.
+ * Either way the output must have no timeline gap. checkMergedOutput also
+ * fails the merge itself (files organized individually) when the output's
+ * timeline does not match its audio (gaps, or an end far from the content: its
+ * chapter markers and seeking would be wrong), or when a re-encode is over 1 s
+ * short. A re-encode of chapters with one decoded format (sameDecodedFormat)
+ * has its timestamps rebuilt from the sample count (asetpts), so there a
+ * chapter that read short leaves no gap, only less audio.
+ * This checks the amount of audio, not its bytes.
  */
 
 import { type AudioContent, probeAudioContent } from './audio-content';
@@ -47,7 +51,20 @@ export interface ChapterMeasurement {
   packets?: number[];
   /** Packets x frame (ms) per chapter (set with contentMs). */
   framedMs?: number[];
+  /** Decoded format per chapter (set with contentMs). */
+  decodedFormats?: string[];
   error?: string;
+}
+
+/**
+ * Whether every chapter decodes to the same sample rate, channels, layout and
+ * sample format. Only then may a re-encode rebuild timestamps from the sample
+ * count: a format change makes ffmpeg rebuild its filter graph, which restarts
+ * the count (the output would be broken).
+ */
+export function sameDecodedFormat(chapters: ChapterMeasurement): boolean {
+  const formats = chapters.decodedFormats;
+  return !!formats && formats.length > 0 && !!formats[0] && formats.every((f) => f === formats[0]);
 }
 
 /** Measure every chapter's audio content. Fails as a whole if any chapter cannot be measured in time. */
@@ -83,10 +100,12 @@ export async function measureChapterContent(
     contentMs: measured.map((c) => c.contentMs),
     packets: measured.map((c) => c.packets),
     framedMs: measured.map((c) => c.framedMs),
+    decodedFormats: measured.map((c) => c.decodedFormat),
   };
 }
 
 export interface MergeVerification {
+  mode: MergeMode;
   verified: boolean;
   /** Why it is not verified (for the log). */
   reason?: string;
@@ -118,15 +137,16 @@ export function verifyMergedContent(
   mode: MergeMode
 ): MergeVerification {
   const toleranceMs = mergeToleranceMs(chapterCount);
+  const verify = (result: Omit<MergeVerification, 'mode' | 'toleranceMs'>): MergeVerification => ({ mode, toleranceMs, ...result });
   if (!chapters.contentMs || !chapters.packets || !chapters.framedMs) {
     const error = chapters.error ?? 'chapters were not measured';
-    return { verified: false, reason: `could not measure the chapters (${error})`, toleranceMs, error };
+    return verify({ verified: false, reason: `could not measure the chapters (${error})`, error });
   }
   const expectedMs = sum(chapters.contentMs);
   if ('error' in output) {
-    return { verified: false, reason: `could not measure the merged file (${output.error})`, expectedMs, toleranceMs, error: output.error };
+    return verify({ verified: false, reason: `could not measure the merged file (${output.error})`, expectedMs, error: output.error });
   }
-  const base = { expectedMs, gapMs: output.gapMs, endMs: output.endMs, toleranceMs };
+  const base = { expectedMs, gapMs: output.gapMs, endMs: output.endMs };
   const gapReason = output.gapMs > 0 ? `its timeline has ${seconds(output.gapMs)} of gaps` : undefined;
 
   if (mode === 'copy') {
@@ -140,7 +160,7 @@ export function verifyMergedContent(
         : Math.abs(framedDiffMs) >= 1
           ? `its audio frames differ from the chapters' (${seconds(Math.abs(framedDiffMs))} difference)`
           : gapReason;
-    return { ...base, verified: !reason, reason, actualMs, expectedPackets, packets: output.packets };
+    return verify({ ...base, verified: !reason, reason, actualMs, expectedPackets, packets: output.packets });
   }
 
   const actualMs = output.contentMs;
@@ -151,24 +171,30 @@ export function verifyMergedContent(
       : -deficitMs > toleranceMs
         ? `it holds ${seconds(-deficitMs)} more audio than the chapters (at most ${toleranceMs} ms allowed)`
         : gapReason;
-  return { ...base, verified: !reason, reason, actualMs };
+  return verify({ ...base, verified: !reason, reason, actualMs });
 }
 
 /**
- * Whether the merged file's timeline matches its audio: a gap (a chapter that
- * ended early, or timestamps offset by a chapter's estimated duration) or an
- * end far from the audio means its chapter markers and seeking are wrong, so
- * the merge itself fails. Returns the problem, or undefined. Without a
- * comparable content (chapters or output unmeasured) only gaps are checked.
+ * Whether the merged file is broken, so the merge itself fails (files
+ * organized individually): a timeline gap (a chapter that ended early, or
+ * timestamps offset by a chapter's estimated duration) or an end far from the
+ * audio (chapter markers and seeking wrong), or a re-encode over 1 s short (a
+ * chapter read short; with rebuilt timestamps that leaves no gap). Returns the
+ * problem, or undefined. Without a comparable content (chapters or output
+ * unmeasured) only gaps are checked.
  */
-export function checkMergedTimeline(verification: MergeVerification, output: AudioContent | { error: string }): string | undefined {
+export function checkMergedOutput(verification: MergeVerification, output: AudioContent | { error: string }): string | undefined {
   if ('error' in output) return undefined;
   if (output.gapMs > 0) {
     return `the merged timeline has ${seconds(output.gapMs)} of gaps (ends at ${seconds(output.endMs)})`;
   }
-  const { actualMs, toleranceMs } = verification;
-  if (actualMs !== undefined && Math.abs(output.endMs - actualMs) > toleranceMs) {
+  const { actualMs, expectedMs, toleranceMs } = verification;
+  if (actualMs === undefined || expectedMs === undefined) return undefined;
+  if (Math.abs(output.endMs - actualMs) > toleranceMs) {
     return `the merged timeline ends at ${seconds(output.endMs)} but holds ${seconds(actualMs)} of audio`;
+  }
+  if (verification.mode === 'reencode' && expectedMs - actualMs > MERGE_BASE_TOLERANCE_MS) {
+    return `the re-encoded audio is ${seconds(expectedMs - actualMs)} shorter than the chapters' ${seconds(expectedMs)} (a chapter read short)`;
   }
   return undefined;
 }

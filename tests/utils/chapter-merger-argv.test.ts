@@ -41,14 +41,14 @@ const fsMock = vi.hoisted(() => ({
 
 vi.mock('child_process', () => ({ execFile: execFileMock, spawn: spawnMock }));
 // Measured audio content used to verify a merge (per file path), and timeline gaps
-const streamDurations = vi.hoisted(() => ({ byPath: new Map<string, number>(), gaps: new Map<string, number>(), ends: new Map<string, number>(), fallback: 60000 }));
+const streamDurations = vi.hoisted(() => ({ byPath: new Map<string, number>(), gaps: new Map<string, number>(), ends: new Map<string, number>(), formats: new Map<string, string>(), fallback: 60000 }));
 vi.mock('@/lib/utils/audio-content', () => ({
   probeAudioContent: vi.fn(async (p: string) => {
     // Merged outputs default to the mocked container duration; chapters to 60 s
     const fallback = p.endsWith('out.m4b') ? Number(probeState.duration) * 1000 : streamDurations.fallback;
     const contentMs = streamDurations.byPath.get(p) ?? fallback;
     // 1 ms frames: a codec-copy output verifies only when its content equals the chapters' total
-    return { contentMs, gapMs: streamDurations.gaps.get(p) ?? 0, frameMs: 1, framedMs: contentMs, endMs: streamDurations.ends.get(p) ?? contentMs, packets: contentMs };
+    return { contentMs, gapMs: streamDurations.gaps.get(p) ?? 0, frameMs: 1, framedMs: contentMs, endMs: streamDurations.ends.get(p) ?? contentMs, packets: contentMs, decodedFormat: streamDurations.formats.get(p) ?? '44100/2/stereo/fltp' };
   }),
 }));
 vi.mock('fs/promises', () => ({ default: fsMock, ...fsMock }));
@@ -79,6 +79,7 @@ beforeEach(() => {
   streamDurations.byPath.clear();
   streamDurations.gaps.clear();
   streamDurations.ends.clear();
+  streamDurations.formats.clear();
   streamDurations.fallback = 60000;
   fsMock.access.mockResolvedValue(undefined);
   fsMock.mkdir.mockResolvedValue(undefined);
@@ -118,14 +119,31 @@ describe('chapter merge verification', () => {
     expect(result.durationVerified).toBe(false);
   });
 
-  it('keeps a re-encoded merge but does not verify it when it holds over 1 s less audio', async () => {
+  it('fails a re-encoded merge (files organized individually) that holds over 1 s less audio', async () => {
     // Two 60 s chapters: 1.2 s short; a surplus may reach 1.1 s, a shortfall only 1 s
     streamDurations.byPath.set('/t/out.m4b', 118800);
 
     const result = await mergeChapters([chapter('/dl/01.mp3'), chapter('/dl/02.mp3')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
 
-    expect(result.success).toBe(true);
-    expect(result.durationVerified).toBe(false);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('re-encoded audio is 1.2 s shorter than the chapters');
+    expect(fsMock.unlink).toHaveBeenCalledWith('/t/out.m4b');
+  });
+
+  it('re-encodes chapters of one decoded format with timestamps rebuilt from the sample count', async () => {
+    await mergeChapters([chapter('/dl/01.mp3'), chapter('/dl/02.mp3')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+    const args = spawnMock.mock.calls[0][1] as string[];
+    expect(args[args.indexOf('-af') + 1]).toBe('asetpts=N/SR/TB');
+  });
+
+  it('keeps container timestamps when the chapters decode differently (a filter graph rebuild would restart the count) or for codec copy', async () => {
+    streamDurations.formats.set('/dl/02.mp3', '22050/1/mono/fltp');
+    await mergeChapters([chapter('/dl/01.mp3'), chapter('/dl/02.mp3')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+    expect(spawnMock.mock.calls[0][1] as string[]).not.toContain('-af');
+
+    spawnMock.mockClear();
+    await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+    expect(spawnMock.mock.calls[0][1] as string[]).not.toContain('-af');
   });
 
   it('fails the merge (files organized individually) when the merged timeline has a gap, even at the full length', async () => {
@@ -136,7 +154,7 @@ describe('chapter merge verification', () => {
     const result = await mergeChapters([chapter('/dl/01.mp3'), chapter('/dl/02.mp3')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Merged timeline does not match its audio');
+    expect(result.error).toContain('Merged file rejected: the merged timeline has 2.6 s of gaps');
     expect(fsMock.unlink).toHaveBeenCalledWith('/t/out.m4b');
   });
 

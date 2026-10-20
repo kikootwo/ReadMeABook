@@ -6,9 +6,10 @@
 import { describe, expect, it } from 'vitest';
 import type { AudioContent } from '@/lib/utils/audio-content';
 import {
-  checkMergedTimeline,
+  checkMergedOutput,
   measureChapterContent,
   mergeToleranceMs,
+  sameDecodedFormat,
   verifyMergedContent,
   type ChapterMeasurement,
 } from '@/lib/utils/merge-verification';
@@ -20,7 +21,7 @@ const FRAME_MS = (1024 / 22050) * 1000;
 function aacChapter(packets: number): AudioContent {
   const framedMs = packets * FRAME_MS;
   const contentMs = Math.round(framedMs - FRAME_MS - FRAME_MS / 2); // priming + trimmed last frame
-  return { contentMs, gapMs: 0, frameMs: 46.4, framedMs, endMs: contentMs, packets };
+  return { contentMs, gapMs: 0, frameMs: 46.4, framedMs, endMs: contentMs, packets, decodedFormat: '22050/1/mono/fltp' };
 }
 
 function measurement(chapters: AudioContent[]): ChapterMeasurement {
@@ -28,6 +29,7 @@ function measurement(chapters: AudioContent[]): ChapterMeasurement {
     contentMs: chapters.map((c) => c.contentMs),
     packets: chapters.map((c) => c.packets),
     framedMs: chapters.map((c) => c.framedMs),
+    decodedFormats: chapters.map((c) => c.decodedFormat),
   };
 }
 
@@ -40,7 +42,7 @@ function copiedOutput(chapters: AudioContent[], missingPackets = 0): AudioConten
   const packets = chapters.reduce((s, c) => s + c.packets, 0) - missingPackets;
   const framedMs = packets * FRAME_MS;
   const contentMs = Math.round(framedMs - FRAME_MS / 2);
-  return { contentMs, gapMs: 0, frameMs: 46.4, framedMs, endMs: Math.round(framedMs - 1.5 * FRAME_MS * chapters.length), packets };
+  return { contentMs, gapMs: 0, frameMs: 46.4, framedMs, endMs: Math.round(framedMs - 1.5 * FRAME_MS * chapters.length), packets, decodedFormat: '22050/1/mono/fltp' };
 }
 
 const eighty = Array.from({ length: 80 }, () => aacChapter(196)); // ~9.1 s each
@@ -92,8 +94,8 @@ describe('verifyMergedContent: codec copy', () => {
 });
 
 describe('verifyMergedContent: re-encode', () => {
-  const chapters = Array.from({ length: 80 }, (): AudioContent => ({ contentMs: 8500, gapMs: 0, frameMs: 46.4, framedMs: 8600, endMs: 8500, packets: 186 }));
-  const output = (contentMs: number): AudioContent => ({ contentMs, gapMs: 0, frameMs: 46.4, framedMs: contentMs + 46, endMs: contentMs, packets: 14640 });
+  const chapters = Array.from({ length: 80 }, (): AudioContent => ({ contentMs: 8500, gapMs: 0, frameMs: 46.4, framedMs: 8600, endMs: 8500, packets: 186, decodedFormat: '22050/1/mono/fltp' }));
+  const output = (contentMs: number): AudioContent => ({ contentMs, gapMs: 0, frameMs: 46.4, framedMs: contentMs + 46, endMs: contentMs, packets: 14640, decodedFormat: '22050/1/mono/fltp' });
 
   it('verifies a re-encode within 1 s + 50 ms per chapter over the chapters', () => {
     expect(verifyMergedContent(measurement(chapters), 80, output(680046), 'reencode').verified).toBe(true);
@@ -126,28 +128,62 @@ describe('verifyMergedContent: measurement failures never verify', () => {
   });
 });
 
-describe('checkMergedTimeline', () => {
-  const content = (over: Partial<AudioContent>): AudioContent => ({ contentMs: 36093, gapMs: 0, frameMs: 26.1, framedMs: 36096, endMs: 36093, packets: 1383, ...over });
+describe('checkMergedOutput (fails the merge)', () => {
+  const content = (over: Partial<AudioContent>): AudioContent => ({ contentMs: 36093, gapMs: 0, frameMs: 26.1, framedMs: 36096, endMs: 36093, packets: 1383, decodedFormat: '44100/2/stereo/fltp', ...over });
 
   it('accepts a timeline that matches the audio', () => {
     const v = verifyMergedContent(measurement([content({}), content({}), content({})].map((c) => ({ ...c, contentMs: 12031 }))), 3, content({}), 'reencode');
-    expect(checkMergedTimeline(v, content({}))).toBeUndefined();
+    expect(checkMergedOutput(v, content({}))).toBeUndefined();
   });
 
   it('rejects gaps (chapter 2 placed at chapter 1\'s 37.8 s estimate) and an end far from the audio', () => {
     const chapters = measurement([0, 1, 2].map(() => content({ contentMs: 12031 })));
     const gapped = content({ gapMs: 51540, endMs: 87633 });
-    expect(checkMergedTimeline(verifyMergedContent(chapters, 3, gapped, 'reencode'), gapped)).toContain('51.5 s of gaps');
+    expect(checkMergedOutput(verifyMergedContent(chapters, 3, gapped, 'reencode'), gapped)).toContain('51.5 s of gaps');
 
     const late = content({ endMs: 36093 + 1200 });
-    expect(checkMergedTimeline(verifyMergedContent(chapters, 3, late, 'reencode'), late)).toContain('ends at 37.3 s but holds 36.1 s');
+    expect(checkMergedOutput(verifyMergedContent(chapters, 3, late, 'reencode'), late)).toContain('ends at 37.3 s but holds 36.1 s');
   });
 
   it('checks only gaps when the audio could not be compared, and nothing when the output was not measured', () => {
     const late = content({ endMs: 99_000 });
-    expect(checkMergedTimeline(verifyMergedContent({ error: 'x' }, 3, late, 'copy'), late)).toBeUndefined();
+    expect(checkMergedOutput(verifyMergedContent({ error: 'x' }, 3, late, 'copy'), late)).toBeUndefined();
     const gapped = content({ gapMs: 500 });
-    expect(checkMergedTimeline(verifyMergedContent({ error: 'x' }, 3, gapped, 'copy'), gapped)).toContain('gaps');
-    expect(checkMergedTimeline(verifyMergedContent({ error: 'x' }, 3, { error: 'y' }, 'copy'), { error: 'y' })).toBeUndefined();
+    expect(checkMergedOutput(verifyMergedContent({ error: 'x' }, 3, gapped, 'copy'), gapped)).toContain('gaps');
+    expect(checkMergedOutput(verifyMergedContent({ error: 'x' }, 3, { error: 'y' }, 'copy'), { error: 'y' })).toBeUndefined();
+  });
+});
+
+describe('checkMergedOutput: re-encode shortfall', () => {
+  const chapters = measurement(Array.from({ length: 10 }, () => ({ contentMs: 12000, gapMs: 0, frameMs: 21.3, framedMs: 12000, endMs: 12000, packets: 460, decodedFormat: '44100/1/mono/fltp' })));
+  const output = (contentMs: number): AudioContent => ({ contentMs, gapMs: 0, frameMs: 21.3, framedMs: contentMs, endMs: contentMs, packets: 5600, decodedFormat: '44100/1/mono/fltp' });
+
+  it('fails a re-encode over 1 s short, though its timeline matches its audio (timestamps rebuilt from samples)', () => {
+    const short = output(117_900);
+    expect(checkMergedOutput(verifyMergedContent(chapters, 10, short, 'reencode'), short)).toContain('2.1 s shorter than the chapters');
+    const ok = output(119_000);
+    expect(checkMergedOutput(verifyMergedContent(chapters, 10, ok, 'reencode'), ok)).toBeUndefined();
+  });
+
+  it('leaves a short copy to source verification (kept, not verified): its packets show the loss', () => {
+    const short = output(117_900);
+    expect(checkMergedOutput(verifyMergedContent(chapters, 10, short, 'copy'), short)).toBeUndefined();
+  });
+});
+
+describe('sameDecodedFormat (timestamps rebuilt from samples only then)', () => {
+  const m = (formats?: string[]): ChapterMeasurement => ({ decodedFormats: formats });
+
+  it('is true only when every chapter decodes alike', () => {
+    expect(sameDecodedFormat(m(['44100/1/mono/fltp', '44100/1/mono/fltp']))).toBe(true);
+    expect(sameDecodedFormat(m(['44100/1/mono/fltp', '22050/1/mono/fltp']))).toBe(false);
+    expect(sameDecodedFormat(m(['44100/1/mono/fltp', '44100/2/stereo/fltp']))).toBe(false);
+    expect(sameDecodedFormat(m(['44100/2/stereo/s16', '44100/2/stereo/s32']))).toBe(false);
+  });
+
+  it('is false when the chapters were not measured', () => {
+    expect(sameDecodedFormat(m())).toBe(false);
+    expect(sameDecodedFormat(m([]))).toBe(false);
+    expect(sameDecodedFormat({ error: 'x' })).toBe(false);
   });
 });
