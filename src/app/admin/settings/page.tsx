@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/Button';
 import Link from 'next/link';
 import { fetchWithAuth } from '@/lib/utils/api';
 import { IndexerFlagConfig } from '@/lib/utils/ranking-algorithm';
+import { toSavedIndexerConfig } from '@/lib/utils/indexer-config';
 
 // Tab Components
 import { LibraryTab } from './tabs/LibraryTab/LibraryTab';
@@ -97,30 +98,11 @@ export default function AdminSettings() {
         setFlagConfigs(flags);
         setOriginalFlagConfigs(JSON.parse(JSON.stringify(flags)));
 
-        // Extract configured indexers (enabled ones)
-        const configured = (data.indexers || [])
+        // Extract configured indexers (enabled ones). Shared mapping keeps every
+        // per-indexer field (e.g. ratioLimit) so saving the tab cannot reset it.
+        const configured: SavedIndexerConfig[] = (data.indexers || [])
           .filter((idx: IndexerConfig) => idx.enabled)
-          .map((idx: IndexerConfig) => {
-            const config: any = {
-              id: idx.id,
-              name: idx.name,
-              protocol: idx.protocol,
-              priority: idx.priority,
-              rssEnabled: idx.rssEnabled,
-              audiobookCategories: idx.audiobookCategories || [3030],
-              ebookCategories: idx.ebookCategories || [7020],
-            };
-
-            // Add protocol-specific fields
-            const isTorrent = idx.protocol?.toLowerCase() === 'torrent';
-            if (isTorrent) {
-              config.seedingTimeMinutes = idx.seedingTimeMinutes ?? 0;
-            } else {
-              config.removeAfterProcessing = idx.removeAfterProcessing ?? true;
-            }
-
-            return config;
-          });
+          .map((idx: IndexerConfig) => toSavedIndexerConfig(idx));
         setConfiguredIndexers(configured);
         setOriginalConfiguredIndexers(JSON.parse(JSON.stringify(configured)));
       } else {
