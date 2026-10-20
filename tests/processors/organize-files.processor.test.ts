@@ -483,6 +483,7 @@ describe('processOrganizeFiles', () => {
       filesMovedCount: 1,
       errors: [],
       audioFiles: ['/media/Author/Book/Book.mp4'],
+      records: [{ source: '/downloads/book/Book.mp4', target: '/media/Author/Book/Book.mp4', status: 'copied', verified: true }],
     });
     configMock.getBackendMode.mockResolvedValue('plex');
     configMock.get.mockResolvedValue('false');
@@ -498,8 +499,46 @@ describe('processOrganizeFiles', () => {
     expect(result.success).toBe(true);
     expect(formatCoercionMock.coerceToPlexCompatible).toHaveBeenCalledWith(
       ['/media/Author/Book/Book.mp4'],
+      new Set(['/media/Author/Book/Book.mp4']),
       expect.anything()
     );
+  });
+
+  it('offers only files this import placed to format coercion, never existing library files', async () => {
+    prismaMock.audiobook.findUnique.mockResolvedValue({
+      id: 'a-coerce-own', title: 'Book', author: 'Author', narrator: null, coverArtUrl: null, audibleAsin: null,
+    });
+    prismaMock.configuration.findUnique.mockResolvedValue(undefined);
+    const lib = '/media/Author/Book';
+    organizerMock.organize.mockResolvedValue({
+      success: true,
+      targetPath: lib,
+      filesMovedCount: 1,
+      errors: [],
+      audioFiles: [`${lib}/Part 1.mp4`, `${lib}/Part 2.mp4`, `${lib}/Part 3.mp4`, `${lib}/Part 4.mp4`],
+      records: [
+        { source: '/downloads/book/Part 1.mp4', target: `${lib}/Part 1.mp4`, status: 'copied', verified: true },
+        { source: '/downloads/book/Part 2.mp4', target: `${lib}/Part 2.mp4`, status: 'differs', verified: false },
+        { source: '/downloads/book/Part 3.mp4', target: `${lib}/Part 3.mp4`, status: 'present', verified: false },
+        { source: '/downloads/book/Part 4.mp4', target: `${lib}/Part 4.mp4`, status: 'identical', verified: true },
+      ],
+    });
+    formatCoercionMock.coerceToPlexCompatible.mockResolvedValueOnce({
+      renamed: [{ from: `${lib}/Part 1.mp4`, to: `${lib}/Part 1.m4b` }],
+      warnings: [],
+      errors: [],
+      finalAudioFiles: [`${lib}/Part 1.m4b`, `${lib}/Part 2.mp4`, `${lib}/Part 3.mp4`, `${lib}/Part 4.mp4`],
+    });
+    configMock.getBackendMode.mockResolvedValue('plex');
+    configMock.get.mockResolvedValue('false');
+
+    const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+    await processOrganizeFiles({
+      requestId: 'req-coerce-own', audiobookId: 'a-coerce-own', downloadPath: '/downloads/book', jobId: 'job-coerce-own',
+    });
+
+    const placed = formatCoercionMock.coerceToPlexCompatible.mock.calls[0][1] as Set<string>;
+    expect([...placed]).toEqual([`${lib}/Part 1.mp4`]);
   });
 
   it('skips Plex format coercion when disabled', async () => {

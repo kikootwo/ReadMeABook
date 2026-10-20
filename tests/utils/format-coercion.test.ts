@@ -9,27 +9,36 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { coerceToPlexCompatible } from '@/lib/utils/format-coercion';
 
 const fsMock = vi.hoisted(() => ({
-  access: vi.fn(),
+  link: vi.fn(),
+  unlink: vi.fn(),
+  lstat: vi.fn(),
   rename: vi.fn(),
 }));
 
-vi.mock('fs', () => ({
-  promises: fsMock,
-  default: { promises: fsMock },
-}));
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return { ...actual, promises: fsMock, default: { ...actual, promises: fsMock } };
+});
 
-/** Make `fs.access` reject with ENOENT (target does not exist) for every path. */
-function targetMissing(): void {
-  fsMock.access.mockImplementation(() => {
-    const err = new Error('ENOENT: no such file or directory') as NodeJS.ErrnoException;
-    err.code = 'ENOENT';
-    return Promise.reject(err);
-  });
+function errno(code: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(`${code}: simulated`), { code });
 }
 
-/** Make `fs.rename` resolve successfully. */
+/** Target does not exist: the hard link succeeds and lstat reports ENOENT. */
+function targetMissing(): void {
+  fsMock.link.mockResolvedValue(undefined);
+  fsMock.lstat.mockRejectedValue(errno('ENOENT'));
+}
+
+/** Dropping the old name (and the no-link fallback rename) succeeds. */
 function renameOk(): void {
+  fsMock.unlink.mockResolvedValue(undefined);
   fsMock.rename.mockResolvedValue(undefined);
+}
+
+/** Every input path was placed by this import. */
+function placed(paths: string[]): Set<string> {
+  return new Set(paths);
 }
 
 function makeLogger() {
@@ -43,7 +52,7 @@ function makeLogger() {
 
 describe('coerceToPlexCompatible', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   describe('happy paths', () => {
@@ -52,12 +61,12 @@ describe('coerceToPlexCompatible', () => {
       renameOk();
       const input = ['/media/Book/Book.mp4'];
 
-      const result = await coerceToPlexCompatible(input);
+      const result = await coerceToPlexCompatible(input, placed(input));
 
       expect(result.renamed).toEqual([{ from: '/media/Book/Book.mp4', to: path.join('/media/Book', 'Book.m4b') }]);
       expect(result.finalAudioFiles).toEqual([path.join('/media/Book', 'Book.m4b')]);
       expect(result.warnings).toEqual([]);
-      expect(fsMock.rename).toHaveBeenCalledTimes(1);
+      expect(fsMock.link).toHaveBeenCalledTimes(1);
     });
 
     it('renames single-file .m4a to .m4b', async () => {
@@ -65,7 +74,7 @@ describe('coerceToPlexCompatible', () => {
       renameOk();
       const input = ['/media/Book/Book.m4a'];
 
-      const result = await coerceToPlexCompatible(input);
+      const result = await coerceToPlexCompatible(input, placed(input));
 
       expect(result.renamed).toEqual([{ from: '/media/Book/Book.m4a', to: path.join('/media/Book', 'Book.m4b') }]);
       expect(result.finalAudioFiles).toEqual([path.join('/media/Book', 'Book.m4b')]);
@@ -77,11 +86,11 @@ describe('coerceToPlexCompatible', () => {
       renameOk();
       const input = ['/media/Book/Chapter01.m4a', '/media/Book/Chapter02.m4a'];
 
-      const result = await coerceToPlexCompatible(input);
+      const result = await coerceToPlexCompatible(input, placed(input));
 
       expect(result.renamed).toEqual([]);
       expect(result.finalAudioFiles).toEqual(input);
-      expect(fsMock.rename).not.toHaveBeenCalled();
+      expect(fsMock.link).not.toHaveBeenCalled();
     });
 
     it('handles mixed .mp4 + .mp3: renames mp4, leaves mp3 untouched', async () => {
@@ -89,7 +98,7 @@ describe('coerceToPlexCompatible', () => {
       renameOk();
       const input = ['/media/Book/Book.mp4', '/media/Other/Intro.mp3'];
 
-      const result = await coerceToPlexCompatible(input);
+      const result = await coerceToPlexCompatible(input, placed(input));
 
       expect(result.renamed).toEqual([
         { from: '/media/Book/Book.mp4', to: path.join('/media/Book', 'Book.m4b') },
@@ -98,13 +107,13 @@ describe('coerceToPlexCompatible', () => {
         path.join('/media/Book', 'Book.m4b'),
         '/media/Other/Intro.mp3',
       ]);
-      expect(fsMock.rename).toHaveBeenCalledTimes(1);
+      expect(fsMock.link).toHaveBeenCalledTimes(1);
     });
 
     it('returns empty result for empty input', async () => {
-      const result = await coerceToPlexCompatible([]);
+      const result = await coerceToPlexCompatible([], new Set());
       expect(result).toEqual({ renamed: [], warnings: [], errors: [], finalAudioFiles: [] });
-      expect(fsMock.rename).not.toHaveBeenCalled();
+      expect(fsMock.link).not.toHaveBeenCalled();
     });
   });
 
@@ -118,12 +127,12 @@ describe('coerceToPlexCompatible', () => {
         '/media/Third/Track.flac',
       ];
 
-      const result = await coerceToPlexCompatible(input);
+      const result = await coerceToPlexCompatible(input, placed(input));
 
       expect(result.renamed).toEqual([]);
       expect(result.warnings).toEqual([]);
       expect(result.finalAudioFiles).toEqual(input);
-      expect(fsMock.rename).not.toHaveBeenCalled();
+      expect(fsMock.link).not.toHaveBeenCalled();
     });
   });
 
@@ -132,20 +141,20 @@ describe('coerceToPlexCompatible', () => {
       const logger = makeLogger();
       const input = ['/media/Book/Book.aa'];
 
-      const result = await coerceToPlexCompatible(input, logger as never);
+      const result = await coerceToPlexCompatible(input, placed(input), logger as never);
 
       expect(result.renamed).toEqual([]);
       expect(result.finalAudioFiles).toEqual(input);
       expect(result.warnings.length).toBe(1);
       expect(result.warnings[0]).toMatch(/DRM/i);
       expect(logger.warn).toHaveBeenCalledTimes(1);
-      expect(fsMock.rename).not.toHaveBeenCalled();
+      expect(fsMock.link).not.toHaveBeenCalled();
     });
 
     it('warns on .aax (DRM) and skips rename', async () => {
       const input = ['/media/Book/Book.aax'];
 
-      const result = await coerceToPlexCompatible(input);
+      const result = await coerceToPlexCompatible(input, placed(input));
 
       expect(result.renamed).toEqual([]);
       expect(result.warnings.length).toBe(1);
@@ -157,7 +166,7 @@ describe('coerceToPlexCompatible', () => {
       const logger = makeLogger();
       const input = ['/media/Book/Book.ogg'];
 
-      const result = await coerceToPlexCompatible(input, logger as never);
+      const result = await coerceToPlexCompatible(input, placed(input), logger as never);
 
       expect(result.renamed).toEqual([]);
       expect(result.warnings.length).toBe(1);
@@ -169,17 +178,18 @@ describe('coerceToPlexCompatible', () => {
 
   describe('idempotency (collision)', () => {
     it('does not overwrite an existing target file', async () => {
-      // First access resolves (target exists), rename should not be called.
-      fsMock.access.mockResolvedValue(undefined);
+      // The hard link reports the target exists: nothing is renamed or removed.
+      fsMock.link.mockRejectedValue(errno('EEXIST'));
       const logger = makeLogger();
       const input = ['/media/Book/Book.mp4'];
 
-      const result = await coerceToPlexCompatible(input, logger as never);
+      const result = await coerceToPlexCompatible(input, placed(input), logger as never);
 
       expect(result.renamed).toEqual([]);
       expect(result.finalAudioFiles).toEqual(input);
       expect(result.warnings.length).toBe(1);
       expect(result.warnings[0]).toMatch(/already exists/i);
+      expect(fsMock.unlink).not.toHaveBeenCalled();
       expect(fsMock.rename).not.toHaveBeenCalled();
     });
   });
@@ -189,11 +199,12 @@ describe('coerceToPlexCompatible', () => {
       targetMissing();
       const epermErr = new Error('EPERM: operation not permitted') as NodeJS.ErrnoException;
       epermErr.code = 'EPERM';
+      fsMock.link.mockRejectedValueOnce(errno('EPERM')); // no hard links: checked rename
       fsMock.rename.mockRejectedValueOnce(epermErr);
       const logger = makeLogger();
       const input = ['/media/Book/Book.mp4'];
 
-      const result = await coerceToPlexCompatible(input, logger as never);
+      const result = await coerceToPlexCompatible(input, placed(input), logger as never);
 
       expect(result.renamed).toEqual([]);
       expect(result.finalAudioFiles).toEqual(input);
@@ -210,7 +221,7 @@ describe('coerceToPlexCompatible', () => {
       const input = ['/media/Book/Book.mp4'];
 
       // Must not throw when logger is omitted.
-      const result = await coerceToPlexCompatible(input);
+      const result = await coerceToPlexCompatible(input, placed(input));
 
       expect(result.renamed.length).toBe(1);
       expect(result.finalAudioFiles).toEqual([path.join('/media/Book', 'Book.m4b')]);

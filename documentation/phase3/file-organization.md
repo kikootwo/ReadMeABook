@@ -179,7 +179,9 @@ exiftool "audiobook.m4b" | grep -i asin
 
 **Behavior:**
 - Each audio file evaluated independently (mixed-format folders supported).
-- Pre-rename collision check: if target exists → no-op + info log. Never overwrites.
+- Only files this import wrote (`copied` records) are renamed; `identical`/`present`/`differs` targets were already in the library and are never touched. `.m4a` siblings are still counted over every organized file.
+- Never overwrites: `link(old, new)` then `unlink(old)` (`EEXIST` → no-op + info log, both files kept), under the same per-target lock as `placeFile` (`withTargetLock`, key = folder + name without extension), so a concurrent organize job (queue concurrency 2) placing `Book.m4b` is never replaced. No hard links on the filesystem → lstat + rename (in-process serialized by the lock).
+- Renamed placement records get the new target path.
 - Idempotent: re-running on already-coerced folder is a no-op (extension is the signal — no marker files).
 - Operates on `targetPath` (organized library files) only — never touches `/downloads` (seeding-safe).
 
@@ -192,7 +194,7 @@ exiftool "audiobook.m4b" | grep -i asin
 - `src/lib/utils/format-coercion.ts` — coercion module
 - `src/lib/constants/audio-formats.ts` — `PLEX_COMPATIBLE_EXTENSIONS`, `COERCION_RENAME_MAP`, `DRM_EXTENSIONS`, `TRANSCODE_REQUIRED_EXTENSIONS`
 - Invoked from `src/lib/processors/organize-files.processor.ts` between file organization and `generateFilesHash`
-- `fs.rename` (same filesystem — no cross-mount issues)
+- `fs.link` + `fs.unlink` (same folder — no cross-mount issues)
 
 **Hash Interaction:**
 - File hash (`audiobooks.files_hash`) is generated AFTER coercion → reflects post-coercion filenames.
@@ -353,6 +355,7 @@ async function organize(
    - Upgrade note: organize jobs queued before this change carry no `downloadHistoryId`, so they skip download cleanup once (files stay on disk, client history entry is not archived). Their import retry on transient errors is unchanged; only manual/bulk imports fail without retry
 **8. Cleanup after partial or interrupted imports** - A download was removed when at least one file copied, an interrupted copy left a truncated file under the final name that later counted as done, and a same-named existing file skipped the copy while the source was still deleted. Fixed by atomic copies, per-file placement records and verified-only deletes (see Verified Import)
 **9. chmod refused after a successful copy (#233)** - Before verified import, a post-copy `chmod` EPERM on mergerfs/NFS/FUSE failed the import (`awaiting_import`) and the fallback copied the untagged original over the tagged copy. Verified import already made audio chmod non-fatal; on top of it: permission warnings (one per job, plus a request note), best-effort chmod for downloaded/cached cover art, chmod ENOENT/ENOTDIR = failed, and a fallback that never replaces a landed copy
+**10. Format coercion could replace a library file** - The `.mp4`/`.m4a` → `.m4b` rename checked for the target and then renamed outside the placement lock, so a concurrent organize job's fresh `Book.m4b` could be overwritten, and files already in the library (`differs`, `present`) were renamed too. Fixed: only files this import copied are renamed, by link + unlink under the per-target lock (see Plex Format Coercion)
 
 ## Tech Stack
 

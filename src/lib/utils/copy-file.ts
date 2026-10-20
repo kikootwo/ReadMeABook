@@ -87,7 +87,7 @@ export interface CopyOptions {
 }
 
 /** Codes meaning the filesystem cannot hard-link here; 'create' then falls back to a checked rename. */
-const LINK_UNSUPPORTED = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV', 'EMLINK', 'EINVAL']);
+export const LINK_UNSUPPORTED: ReadonlySet<string> = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV', 'EMLINK', 'EINVAL']);
 
 function existsError(destination: string): NodeJS.ErrnoException {
   return Object.assign(new Error(`EEXIST: ${path.basename(destination)} already exists`), { code: 'EEXIST' });

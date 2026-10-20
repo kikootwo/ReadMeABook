@@ -143,10 +143,11 @@ async function copyInto(
     : { status: 'copied', target };
 }
 
-// Placements into the same target (any extension: .mp4 and its coerced .m4b) run one at a time
+// Placements into the same target (any extension: .mp4 and its coerced .m4b) run one at a time,
+// and so does the coercion rename between those names (format-coercion.ts)
 const targetLocks = new Map<string, Promise<void>>();
 
-async function withTargetLock<T>(target: string, fn: () => Promise<T>): Promise<T> {
+export async function withTargetLock<T>(target: string, fn: () => Promise<T>): Promise<T> {
   const key = path.join(path.resolve(path.dirname(target)), path.basename(target, path.extname(target))).toLowerCase();
   const previous = targetLocks.get(key) ?? Promise.resolve();
   let release!: () => void;

@@ -237,10 +237,17 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     if (coercionEnabled && result.audioFiles.length > 0) {
       try {
         const { coerceToPlexCompatible } = await import('../utils/format-coercion');
-        const coercion = await coerceToPlexCompatible(result.audioFiles, logger);
+        // Only files this import wrote are renamed; existing library files are never touched
+        const records = result.records ?? [];
+        const placedThisImport = new Set(records.filter((r) => r.status === 'copied').map((r) => r.target));
+        const coercion = await coerceToPlexCompatible(result.audioFiles, placedThisImport, logger);
         if (coercion.renamed.length > 0) {
           logger.info(`Plex format coercion: renamed ${coercion.renamed.length} file(s)`);
           result.audioFiles = coercion.finalAudioFiles;
+          const renamedTo = new Map(coercion.renamed.map((r) => [r.from, r.to]));
+          for (const record of records) {
+            record.target = renamedTo.get(record.target) ?? record.target;
+          }
         }
         coercion.warnings.forEach(w => logger.warn(`Plex format coercion: ${w}`));
       } catch (err) {
