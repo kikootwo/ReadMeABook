@@ -26,6 +26,7 @@ const ALIVE_STATUSES = new Set([
   'queued',
   'paused',
   'checking',
+  'processing', // e.g. a 100% SABnzbd item still finishing; re-adding would duplicate it
   'seeding',
   'completed',
 ]);

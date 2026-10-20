@@ -3,7 +3,8 @@
  * Documentation: documentation/phase3/download-clients.md
  *
  * The stored link is only checked when the download is re-added; resuming
- * monitoring of a live torrent never uses it.
+ * monitoring of a live torrent never uses it. A download the client still
+ * reports as processing counts as live.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -48,6 +49,23 @@ describe('POST /api/admin/requests/[id]/retry-download', () => {
 
     expect(response.status).toBe(200);
     expect(jobQueueMock.addMonitorJob).toHaveBeenCalled();
+    expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
+  });
+
+  it('resumes monitoring a SABnzbd download that is still processing instead of re-adding it', async () => {
+    // A 100% SABnzbd queue item reports processing; re-adding it would give SABnzbd a duplicate NZB.
+    prismaMock.downloadHistory.findFirst.mockResolvedValue({
+      id: 'dh-2', magnetLink: 'http://prowlarr-new:9696/1/download?link=abc', downloadClient: 'sabnzbd',
+      downloadClientId: 'SABnzbd_nzo_1', torrentName: 'Release', indexerName: 'Indexer', indexerId: 1,
+      torrentSizeBytes: null, seeders: null, leechers: null, torrentHash: null, torrentUrl: null,
+    });
+    clientMock.getDownload.mockResolvedValue({ status: 'processing', progress: 1 });
+    const { POST } = await import('@/app/api/admin/requests/[id]/retry-download/route');
+    const response = await POST({} as any, { params: Promise.resolve({ id: 'req-1' }) });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ path: 'resumed_monitoring' });
+    expect(jobQueueMock.addMonitorJob).toHaveBeenCalledWith('req-1', 'dh-2', 'SABnzbd_nzo_1', 'sabnzbd', 0);
     expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
   });
 

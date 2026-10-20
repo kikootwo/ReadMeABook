@@ -167,7 +167,7 @@ interface SABnzbdConfig {
 
 **Queue vs History:**
 - **Queue:** Active downloads (downloading, queued, paused)
-- **History:** Completed or failed downloads
+- **History:** Post-processing (Verifying, Repairing, Extracting, Moving, Running), then Completed or Failed
 
 **Monitoring Flow:**
 1. Check queue for NZB ID
@@ -181,7 +181,8 @@ interface SABnzbdConfig {
 - `Paused` → Manually paused
 - `Extracting/Unpacking` → Post-processing extraction
 - `Repairing/Verifying` → Post-processing par2 repair
-- Queue item at 100% (any other status) → `extracting` (unified `processing`); not completed until it reaches history
+- Queue item at 100% (any other status) → `extracting` (unified `processing`): the tail of file assembly (and direct unpack), not completion
+- History post-processing statuses → not completed; monitoring keeps polling
 - `Completed` (history) → Successfully downloaded and extracted; `storage` gives the download path
 - `Failed` → Download or post-processing failed
 
@@ -242,7 +243,7 @@ organizePath = PathMapper.transform(sabPath, config)
    - Applying `reverseTransform()` when setting category path (outgoing)
    - Applying `transform()` when processing completed downloads (incoming)
    - Using same `PathMapper` utility as qBittorrent for consistency
-**8. Requests failed at 100% during post-processing** - A queue item at 100% mapped to `completed` before SABnzbd had a storage path, so the monitor failed the request with "Download path not available". Fixed by mapping it to `extracting` in `getDownloadProgress()`; completion comes from history only.
+**8. Requests failed at 100% before post-processing finished** - A queue item at 100% (the tail of file assembly, before SABnzbd moves the job to history for post-processing) mapped to `completed` with no storage path, so the monitor failed the request with "Download path not available". Fixed by mapping it to `extracting` in `getDownloadProgress()`; only a `Completed` history slot completes. Admin Retry treats `processing` as alive (`ALIVE_STATUSES` in `retry-download/route.ts`), so it resumes monitoring instead of re-adding the NZB.
 
 ## Automatic Cleanup
 
