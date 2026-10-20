@@ -97,7 +97,8 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - Every bare `require("…")` in `.next/server/**/*.js` resolves from its chunk (externals today: `bcrypt`, `bull`, `keyv`, `next/dist/...`); `bcrypt` + `bull` must be seen (else the scan is blind). Only allowlisted miss: `something` in `[turbopack]_runtime.js` (a code comment)
 - Next >= 16.4 requires externals through hashed aliases (`require("bcrypt-a3fecf8c027c10c9")`) backed by relative symlinks in `.next/node_modules/` (`-> ../../node_modules/bcrypt`); an alias counts as its package and must resolve inside `/app/node_modules/<pkg>/`
 - Each resolved app external (not `next/…`) is also `require`d once, so a missing transitive dependency fails the build
-- bull: `lib/scripts/index.js` exports ≥20 commands, each with Lua `content`, and every `lib/commands/*.lua` has its `lib/scripts` entry (bull 4 loads the precompiled `lib/scripts/<name>-<keys>.js`, not the `.lua` files)
+- bull: `lib/scripts/index.js` exports ≥20 commands, each with Lua `content` (bull 4 loads the precompiled `lib/scripts/<name>-<keys>.js`, not the `.lua` files). When `lib/commands/*.lua` is shipped (it arrives only via a broad route trace), each must have its `lib/scripts` entry; when absent the cross-check is skipped
+- Recovery also requires every `/app/scripts/lib/*.js`; `terminal-prompt.js` and `password-users.js` must exist
 - Layout: required runtime paths exist; none of the non-runtime paths (`src/{app,components,contexts,hooks,lib}`, `tests`, `e2e`, `screenshots`, `documentation`, `docker`, `dockerfile.unified`, `package-lock.json`, `tsconfig.json`) is in `/app`
 - Note: Next 16 `next build` uses Turbopack even with `TURBOPACK=0` (chunk names `[turbopack]_runtime.js`)
 - Every ELF file in `/app` + ffmpeg/ffprobe has the build arch's `e_machine`; expects 1 schema engine, ≥2 `libquery_engine` copies, a bcrypt `.node` binding (bcrypt 5 `bcrypt_lib.node`, bcrypt 6 `prebuilds/linux-<arch>/bcrypt.*.node`)
@@ -107,7 +108,7 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - `… is not a symlink` → CLI tree copied piecemeal; copy `/opt/prisma-cli/node_modules` whole
 - `unresolvable require("x") in .next/server/…` → standalone tracing missed a server external; fix tracing or add an explicit `COPY`
 - `require("x") … resolves but does not load` → a traced external is missing one of its own dependencies (tracing gap); same fix
-- `non-runtime files in /app` → a new top-level path or `src/` folder is swept in by the whole-project trace; add it to `outputFileTracingExcludes` in `next.config.ts`
+- `non-runtime files in /app` → one of the guard's listed paths (`NOT_SHIPPED` in `runtime-guard.js`) is back in the whole-project trace; restore its `outputFileTracingExcludes` entry in `next.config.ts`. The guard checks only that list, not every new path: keep `NOT_SHIPPED` and the excludes in sync, and add a new top-level dir or `src/` folder to both
 - `e_machine 0x.., expected 0x..` → wrong-arch native file (e.g. a `--platform=$BUILDPLATFORM` stage); never ship it
 
 **Build process:**

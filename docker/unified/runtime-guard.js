@@ -102,7 +102,18 @@ function checkRecovery() {
   if (!bcrypt.compareSync('guard', bcrypt.hashSync('guard', 4))) fail('bcrypt round-trip failed');
   const pkg = JSON.parse(fs.readFileSync(path.join(APP, 'package.json'), 'utf8'));
   if (pkg.scripts?.['rmab:recover'] !== 'node scripts/recover-credentials.js') fail('package.json lacks rmab:recover');
-  ok('credential recovery loads its Prisma client and bcrypt');
+  // The script's own helpers (side-effect free modules): each must be present and load.
+  const libDir = path.join(APP, 'scripts/lib');
+  const libs = fs.existsSync(libDir) ? fs.readdirSync(libDir).filter((f) => f.endsWith('.js')).sort() : [];
+  for (const need of ['terminal-prompt.js', 'password-users.js']) if (!libs.includes(need)) fail(`missing /app/scripts/lib/${need}`);
+  for (const lib of libs) {
+    try {
+      scriptRequire(path.join(libDir, lib));
+    } catch (error) {
+      fail(`/app/scripts/lib/${lib} does not load: ${error.message.split('\n')[0]}`);
+    }
+  }
+  ok(`credential recovery loads its Prisma client, bcrypt and scripts/lib (${libs.join(', ')})`);
 }
 
 // Never shipped: the tracer sweeps in the whole project root (dynamic fs access in routes), and
@@ -129,12 +140,13 @@ function checkBullScripts() {
   const bad = names.filter((n) => typeof commands[n]?.content !== 'string' || commands[n].content.length === 0 || typeof commands[n].keys !== 'number');
   if (names.length < 20) fail(`bull lib/scripts exports only ${names.length} commands`);
   if (bad.length) fail(`bull commands without Lua content: ${bad.join(', ')}`);
+  // Optional cross-check: the .lua sources arrive only through a broad route trace and are not
+  // loaded at runtime, so their absence is fine; when present, each must have its lib/scripts entry.
   const luaDir = path.join(root, 'lib/commands');
   const lua = fs.existsSync(luaDir) ? fs.readdirSync(luaDir).filter((f) => f.endsWith('.lua')).map((f) => f.slice(0, -4)) : [];
-  if (!lua.length) fail(`no ${luaDir}/*.lua`);
   const unmatched = lua.filter((n) => !names.includes(n));
   if (unmatched.length) fail(`bull lib/commands/*.lua without a lib/scripts entry: ${unmatched.join(', ')}`);
-  ok(`bull ${names.length} Lua commands load (${lua.length} lib/commands/*.lua)`);
+  ok(`bull ${names.length} Lua commands load (${lua.length ? `${lua.length} lib/commands/*.lua cross-checked` : 'lib/commands/*.lua not shipped, cross-check skipped'})`);
 }
 
 function checkServerRequires() {
