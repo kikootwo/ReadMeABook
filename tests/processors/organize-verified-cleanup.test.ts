@@ -249,18 +249,6 @@ describe('verified-import cleanup', () => {
       // The untagged originals are verified copies: the download still goes
       expect(fs.existsSync(download)).toBe(false);
     });
-
-    it('an unprobed tagged copy (no delete depended on it) is not reported as a kept merge, and keeps the download', async () => {
-      organizeWith(target(), { [parts[0]]: 'copied', [parts[1]]: 'copied' });
-      const placed = await organizerMock.organize();
-      placed.records = placed.records.map((r: Record<string, unknown>) => ({ ...r, verified: false, unchecked: true }));
-      organizerMock.organize.mockResolvedValue(placed);
-
-      await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
-
-      expect(requestUpdateData()?.errorMessage).toBeNull();
-      expect(parts.every((p) => fs.existsSync(p))).toBe(true);
-    });
   });
 
   describe('manual import source cleanup', () => {

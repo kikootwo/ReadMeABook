@@ -93,7 +93,6 @@ describe.skipIf(!available)('tagged copies of real audio keep their duration', (
     const placed = await placeAudio(original, tagged.taggedFilePath, target, {
       fileMode: 0o664,
       compareExisting: true,
-      verifyDerivative: true,
       probeDuration: probeStreamDurationMs,
     });
 
@@ -111,7 +110,6 @@ describe.skipIf(!available)('tagged copies of real audio keep their duration', (
     const placed = await placeAudio(original, truncated, target, {
       fileMode: 0o664,
       compareExisting: true,
-      verifyDerivative: true,
       probeDuration: probeStreamDurationMs,
     });
 

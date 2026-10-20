@@ -205,25 +205,21 @@ describe('FileOrganizer placement records', () => {
     expect(result.permissionWarnings!.every((w) => w.includes(code))).toBe(true);
   });
 
-  it('places tagged copies without probing when no delete depends on the import (e.g. a seeding torrent)', async () => {
+  it('never places a short tagged copy for a torrent import (no delete now, seeding cleanup removes the download later)', async () => {
     configState.values.set('metadata_tagging_enabled', 'true');
-    write(path.join(source, 'Part 1.mp3'), 'one');
-    write(path.join(source, 'Part 2.mp3'), 'two');
-    vi.mocked(probeStreamDurationMs).mockClear();
+    write(path.join(source, 'Book.mp3'), 'original-bytes');
+    probeState.sourceDuration = 10000;
+    probeState.taggedDuration = 4049;
 
     const organizer = new FileOrganizer(media, path.join(root, 'tmp'));
     const result = await organizer.organize(source, { title: 'Book', author: 'Author' }, '{author}/{title}', undefined, undefined, undefined, {
       compareExisting: false,
     });
 
-    expect(probeStreamDurationMs).not.toHaveBeenCalled();
-    expect(fs.readFileSync(path.join(media, 'Author', 'Book', 'Part 1.mp3'), 'utf8')).toBe('TAGSone');
-    // Not proven, so never evidence for a delete, but nothing to report either
-    for (const record of result.records!) {
-      expect(record).toMatchObject({ status: 'copied', verified: false, unchecked: true });
-    }
+    expect(fs.readFileSync(path.join(media, 'Author', 'Book', 'Book.mp3'), 'utf8')).toBe('original-bytes');
+    expect(result.records![0]).toMatchObject({ status: 'copied', verified: true });
+    expect(result.records![0].tagsDropped).toBeDefined();
   });
-
   it('re-copies a truncated library file and keeps a different one untouched', async () => {
     write(path.join(source, 'Part 1.mp3'), 'complete first part');
     write(path.join(source, 'Part 2.mp3'), 'complete second part');

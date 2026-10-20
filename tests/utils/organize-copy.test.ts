@@ -223,7 +223,6 @@ describe('placeAudio (tagged derivative)', () => {
   it('keeps the tagged copy when its duration matches the original within 1 s', async () => {
     const result = await placeAudio(original, tagged, target, {
       ...OPTS,
-      verifyDerivative: true,
       probeDuration: probeWith({ original: 60000, placed: 60400 }),
     });
 
@@ -234,7 +233,6 @@ describe('placeAudio (tagged derivative)', () => {
   it('places the original untagged when the tagged duration is off', async () => {
     const result = await placeAudio(original, tagged, target, {
       ...OPTS,
-      verifyDerivative: true,
       probeDuration: probeWith({ original: 60000, placed: 30000 }),
     });
 
@@ -247,7 +245,6 @@ describe('placeAudio (tagged derivative)', () => {
   it('places the original untagged when the duration cannot be probed', async () => {
     const result = await placeAudio(original, tagged, target, {
       ...OPTS,
-      verifyDerivative: true,
       probeDuration: async () => { throw new Error('ffprobe missing'); },
     });
 
@@ -256,23 +253,21 @@ describe('placeAudio (tagged derivative)', () => {
     expect(fs.readFileSync(target).equals(SOURCE)).toBe(true);
   });
 
-  it('places the tagged copy without probing when no delete depends on it, and never counts it as verified', async () => {
-    const probe = vi.fn(async () => 60000);
+  it('checks the tagged copy even when no delete depends on the import (a seeding torrent is removed later)', async () => {
+    const result = await placeAudio(original, tagged, target, {
+      ...OPTS,
+      compareExisting: false,
+      probeDuration: probeWith({ original: 10000, placed: 4049 }),
+    });
 
-    const result = await placeAudio(original, tagged, target, { ...OPTS, compareExisting: false, verifyDerivative: false, probeDuration: probe });
-
-    expect(probe).not.toHaveBeenCalled();
-    expect(result).toMatchObject({ status: 'copied', verified: false, unchecked: true, usedDerivative: true });
-    expect(result.tagsDropped).toBeUndefined();
-    expect(fs.readFileSync(target).equals(TAGGED)).toBe(true);
+    expect(result).toMatchObject({ status: 'copied', verified: true, usedDerivative: false });
+    expect(fs.readFileSync(target).equals(SOURCE)).toBe(true);
   });
-
   it('verifies against the original when the library already holds the untagged bytes', async () => {
     fs.writeFileSync(target, SOURCE);
 
     const result = await placeAudio(original, tagged, target, {
       ...OPTS,
-      verifyDerivative: true,
       probeDuration: probeWith({ original: 60000, placed: 60000 }),
     });
 
@@ -288,8 +283,8 @@ describe('placeAudio (tagged derivative)', () => {
     fs.linkSync(original, target);
     const probe = vi.fn(async () => 60000);
 
-    const viaLink = await placeAudio(original, tagged, target, { fileMode: 0o664, compareExisting: false, verifyDerivative: true, probeDuration: probe });
-    const samePath = await placeAudio(original, tagged, original, { fileMode: 0o664, compareExisting: false, verifyDerivative: true, probeDuration: probe });
+    const viaLink = await placeAudio(original, tagged, target, { fileMode: 0o664, compareExisting: false, probeDuration: probe });
+    const samePath = await placeAudio(original, tagged, original, { fileMode: 0o664, compareExisting: false, probeDuration: probe });
 
     expect(viaLink).toEqual({ status: 'identical', target, verified: true, usedDerivative: false });
     expect(samePath).toEqual({ status: 'identical', target: original, verified: true, usedDerivative: false });
@@ -301,7 +296,7 @@ describe('placeAudio (tagged derivative)', () => {
     if (!linkFile(original, target)) return ctx.skip();
 
     for (const compareExisting of [false, true]) {
-      const result = await placeAudio(original, tagged, target, { fileMode: 0o664, compareExisting, verifyDerivative: compareExisting, probeDuration: async () => 60000 });
+      const result = await placeAudio(original, tagged, target, { fileMode: 0o664, compareExisting, probeDuration: async () => 60000 });
       expect(result).toMatchObject({ status: 'differs', verified: false });
     }
     expect(fs.lstatSync(target).isSymbolicLink()).toBe(true);

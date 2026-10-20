@@ -7,7 +7,7 @@ import * as path from 'path';
 import type { RMABLogger } from '../utils/logger';
 import { getConfigService } from '../services/config.service';
 import { planDownloadCleanup } from './organize-cleanup-guard';
-import { ebookInventory, isUncheckedRecord, type ImportEvidence, type ImportInventory, type PlacementRecord } from '../utils/import-inventory';
+import { ebookInventory, type ImportEvidence, type ImportInventory, type PlacementRecord } from '../utils/import-inventory';
 import type { EbookOrganizationResult, OrganizationResult } from '../utils/file-organizer';
 import { summarizePermissionWarnings } from '../utils/organize-copy';
 
@@ -38,8 +38,7 @@ export function deleteMayFollowFor(kind: DownloadCleanupKind, cleanupSource: boo
 /**
  * True when this job may delete source files after organizing (manual
  * cleanupSource, or a download that cleanup would remove). Only then are
- * same-size existing library files compared byte-for-byte and tagged copies
- * probed against their originals.
+ * same-size existing library files compared byte-for-byte.
  */
 export async function deleteMayFollow(
   requestId: string,
@@ -112,7 +111,7 @@ function placementStatusMessage(evidence: ImportEvidence): string | null {
   const total = evidence.records.length;
   const failed = evidence.records.filter((r) => r.status === 'failed');
   const differs = evidence.records.filter((r) => r.status === 'differs');
-  const unverifiedCopies = evidence.records.filter((r) => r.status === 'copied' && !r.verified && !r.unchecked);
+  const unverifiedCopies = evidence.records.filter((r) => r.status === 'copied' && !r.verified);
   const incomplete = !evidence.inventory.complete && evidence.inventory.files.length > 0;
 
   if (total > 0 && differs.length === total) {
@@ -154,7 +153,7 @@ function severalEbooksMessage(evidence: ImportEvidence, context: ImportStatusCon
 /** Log detail for the records behind importStatusMessage. */
 export function describeUnverified(records: PlacementRecord[]): string {
   return records
-    .filter((r) => (!r.verified && !isUncheckedRecord(r)) || r.tagsDropped)
+    .filter((r) => (!r.verified && r.status !== 'present') || r.tagsDropped)
     .map((r) => `${path.basename(r.source)} (${r.status}${r.reason ? `: ${r.reason}` : ''})`)
     .join(', ');
 }

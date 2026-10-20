@@ -267,20 +267,12 @@ export function isVerifiedStatus(status: PlacementStatus): boolean {
 export interface AudioPlaceOptions extends PlaceOptions {
   /** Audio duration in ms (from stream packets); throws or returns <= 0 when it cannot be probed. */
   probeDuration: (filePath: string) => Promise<number>;
-  /**
-   * Probe the tagged derivative against the original before placing it. Only
-   * worth the two probes when a delete depends on the import; otherwise the
-   * derivative is placed unchecked (`unchecked`, never verified).
-   */
-  verifyDerivative: boolean;
 }
 
 export interface AudioPlacement extends PlaceResult {
   verified: boolean;
   /** True when the library holds the tagged derivative rather than the original bytes. */
   usedDerivative: boolean;
-  /** The tagged derivative was placed without its duration check: not proven, but only because no delete depends on it. */
-  unchecked?: boolean;
   /** Short reason this import placed the untagged original instead of the tagged derivative. */
   tagsDropped?: string;
 }
@@ -318,8 +310,8 @@ async function placeOriginal(original: string, target: string, options: PlaceOpt
 }
 
 /**
- * Place one audio source. When verifyDerivative is set, the tagged derivative
- * is checked first, where it was written: its audio duration (from the
+ * Place one audio source. The tagged derivative is checked first, where it
+ * was written: its audio duration (from the
  * stream's packets) must match the original's within
  * TAGGED_DURATION_TOLERANCE_MS. Otherwise the original is placed untagged
  * (byte-checked by the copy) and `tagsDropped` says why. A derivative that
@@ -343,9 +335,7 @@ export async function placeAudio(
     return placeOriginal(original, target, options);
   }
 
-  const mismatch = options.verifyDerivative
-    ? await derivativeMismatch(original, derivative, options.probeDuration)
-    : null;
+  const mismatch = await derivativeMismatch(original, derivative, options.probeDuration);
   if (mismatch) {
     const untagged = await placeOriginal(original, target, options);
     return {
@@ -378,9 +368,6 @@ export async function placeAudio(
       return { ...fallback, status: 'failed', verified: false, reason };
     }
     return { ...fallback, reason: fallback.status === 'identical' ? fallback.reason : reason };
-  }
-  if (!options.verifyDerivative) {
-    return { ...tagged, verified: false, usedDerivative: true, unchecked: true };
   }
   return { ...tagged, verified: isVerifiedStatus(tagged.status), usedDerivative: true };
 }

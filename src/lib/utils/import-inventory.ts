@@ -82,8 +82,6 @@ export interface PlacementRecord {
   status: PlacementStatus;
   /** True only when the source's content is proven to be in the library. */
   verified: boolean;
-  /** Not proven only because no delete depended on it (tagged copy placed without its duration check). */
-  unchecked?: boolean;
   /** Short reason the library got the untagged original instead of the tagged copy (shown on the request). */
   tagsDropped?: string;
   reason?: string;
@@ -111,21 +109,13 @@ export function verifiedSourceKeys(evidence: ImportEvidence): Set<string> {
 }
 
 /**
- * True when a record is not proven only because nothing was going to be
- * deleted on its account: a same-size file left uncompared ('present') or a
- * tagged copy placed without its duration check (`unchecked`).
- */
-export function isUncheckedRecord(record: PlacementRecord): boolean {
-  return record.status === 'present' || record.unchecked === true;
-}
-
-/**
  * Records for sources not proven to be in the library: failed, different
  * content, or placed but not verified (e.g. a merge whose duration was off).
- * Unchecked records (isUncheckedRecord) are not counted.
+ * Same-size files left uncompared ('present') are not counted: nothing is
+ * deleted on their account.
  */
 export function unverifiedRecords(evidence: ImportEvidence): PlacementRecord[] {
-  return evidence.records.filter((r) => !r.verified && !isUncheckedRecord(r));
+  return evidence.records.filter((r) => !r.verified && r.status !== 'present');
 }
 
 /** Every ebook file at `sourcePath` (a file or a folder), for the ebook branch's evidence. */
