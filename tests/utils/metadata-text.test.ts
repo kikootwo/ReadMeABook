@@ -7,8 +7,11 @@ import { describe, expect, it } from 'vitest';
 import {
   capUtf8Bytes,
   describeFfmpegFailure,
+  languageTagValue,
   MAX_DESCRIPTION_BYTES,
   MAX_RAW_DESCRIPTION_LENGTH,
+  MAX_SHORT_TAG_BYTES,
+  sanitizeShortTagValue,
   truncateRawText,
 } from '@/lib/utils/metadata-text';
 
@@ -59,5 +62,43 @@ describe('metadata text helpers', () => {
     ['a plain error', new Error('spawn ffmpeg ENOENT'), 'spawn ffmpeg ENOENT'],
   ])('describeFfmpegFailure: %s', (_label, error, expected) => {
     expect(describeFfmpegFailure(error)).toBe(expected);
+  });
+
+  describe('sanitizeShortTagValue (publisher, subtitle)', () => {
+    it.each([
+      ['surrounding and inner whitespace runs', '  Penguin \t Audio \r\n ', 'Penguin Audio'],
+      ['control characters', 'Pen\u0000gu\u0007in', 'Penguin'],
+      ['a lone surrogate (the MP4 read-back compares bytes)', 'Before \ud800 after', 'Before � after'],
+      ['U+FFFE and U+FFFF (ffmpeg\'s UTF-8 check rejects them)', 'A ￾ B ￿ C', 'A � B � C'],
+      ['other noncharacters, which read back as written', 'A ﷐ B \u{10ffff}', 'A ﷐ B \u{10ffff}'],
+      ['a valid surrogate pair', 'Smile \u{1f600}', 'Smile \u{1f600}'],
+    ])('cleans %s', (_label, input, expected) => {
+      expect(sanitizeShortTagValue(input)).toBe(expected);
+    });
+
+    it.each([[undefined], [null], [''], ['   '], ['\r\n\t'], [42], [{ name: 'Penguin' }]])('is undefined for %j', (input) => {
+      expect(sanitizeShortTagValue(input as string)).toBeUndefined();
+    });
+
+    it('caps a long value at MAX_SHORT_TAG_BYTES with an ellipsis', () => {
+      const capped = sanitizeShortTagValue('word '.repeat(1000))!;
+      expect(Buffer.byteLength(capped, 'utf8')).toBeLessThanOrEqual(MAX_SHORT_TAG_BYTES);
+      expect(capped.endsWith('word…')).toBe(true);
+    });
+  });
+
+  describe('languageTagValue', () => {
+    it.each([
+      ['english', 'English'],
+      ['german', 'German'],
+      [' english ', 'English'],
+      ['English', 'English'],
+    ])('%j becomes %j (the name Audiobookshelf shows, not an ISO code)', (input, expected) => {
+      expect(languageTagValue(input)).toBe(expected);
+    });
+
+    it.each([[undefined], [''], ['  '], [7]])('is undefined for %j', (input) => {
+      expect(languageTagValue(input as string)).toBeUndefined();
+    });
   });
 });

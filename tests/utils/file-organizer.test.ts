@@ -168,7 +168,11 @@ vi.mock('axios', () => ({
   ...axiosMock,
 }));
 
-vi.mock('@/lib/utils/metadata-tagger', () => metadataMock);
+// The real freeform-tag builder (pure): the organizer's disk check and log come from what it would write
+vi.mock('@/lib/utils/metadata-tagger', async (importOriginal) => ({
+  ...metadataMock,
+  buildMp4FreeformTags: (await importOriginal<typeof import('@/lib/utils/metadata-tagger')>()).buildMp4FreeformTags,
+}));
 vi.mock('@/lib/utils/chapter-merger', () => chapterMock);
 vi.mock('@/lib/utils/logger', () => loggerMock);
 vi.mock('@/lib/db', () => ({
@@ -287,7 +291,7 @@ describe('file organizer', () => {
     const merged = path.join('/tmp', 'Book.m4b');
 
     /** Two mp3 chapters merged to /tmp/Book.m4b (or not), tagging on/off; sources and temp files exist, targets don't. */
-    async function run(opts: { tagging: boolean; merge: boolean; available?: number; tagResult?: (files: string[]) => unknown[]; asin?: string }) {
+    async function run(opts: { tagging: boolean; merge: boolean; available?: number; tagResult?: (files: string[]) => unknown[]; asin?: string; details?: Record<string, string> }) {
       configState.values.set('chapter_merging_enabled', String(opts.merge));
       configState.values.set('metadata_tagging_enabled', String(opts.tagging));
       configState.values.set('ebook_sidecar_enabled', 'false');
@@ -316,10 +320,32 @@ describe('file organizer', () => {
 
       const organizer = new FileOrganizer('/media', '/tmp');
       (organizer as any).findAudiobookFiles = vi.fn().mockResolvedValue({ audioFiles: ['disc1.mp3', 'disc2.mp3'], coverFile: undefined, isFile: false });
-      const book = 'asin' in opts ? { ...BOOK, asin: opts.asin } : BOOK;
+      const book = { ...('asin' in opts ? { ...BOOK, asin: opts.asin } : BOOK), ...opts.details };
       const result = await organizer.organize('/downloads/book', book, '{author}/{title}', { jobId: 'job-a', context: 'test' });
       return { result, warn, info, calls: metadataMock.addMp4FreeformTags.mock.calls };
     }
+
+    const DETAILS = { publisher: 'Penguin Audio', subtitle: 'An Easy & Proven Way', language: 'english' };
+
+    it('tagging on: publisher, subtitle and language go to the tagging pass and the ASIN step, and are logged', async () => {
+      metadataMock.addMp4FreeformTags.mockResolvedValueOnce({ written: true });
+      const { calls, info } = await run({ tagging: true, merge: true, details: DETAILS });
+      expect(metadataMock.tagMultipleFiles.mock.calls[0][1]).toMatchObject(DETAILS);
+      expect(calls).toEqual([[`${merged}.tmp`, '.m4b', { asin: 'B0TESTASIN', ...DETAILS }]]);
+      expect(info).toHaveBeenCalledWith('Embedded ASIN B0TESTASIN, PUBLISHER, SUBTITLE, LANGUAGE in Book.m4b');
+    });
+
+    it('the log names what the ASIN step writes: a value that sanitizes to nothing is not listed', async () => {
+      metadataMock.addMp4FreeformTags.mockResolvedValueOnce({ written: true });
+      const { info } = await run({ tagging: true, merge: true, details: { publisher: '\u0000', subtitle: ' ', language: 'english' } });
+      expect(info).toHaveBeenCalledWith('Embedded ASIN B0TESTASIN, LANGUAGE in Book.m4b');
+    });
+
+    it('tagging off: the ASIN step on the merged file gets the ASIN only (the others are metadata tags)', async () => {
+      const { calls } = await run({ tagging: false, merge: true, details: DETAILS });
+      expect(calls).toEqual([[merged, '.m4b', { asin: 'B0TESTASIN' }]]);
+      expect(metadataMock.tagMultipleFiles).not.toHaveBeenCalled();
+    });
 
     it('merging on, tagging on: the tagged copy of the merged file', async () => {
       const { result, calls } = await run({ tagging: true, merge: true });
@@ -390,10 +416,13 @@ describe('file organizer', () => {
       ['off, ASIN: merged + post-step copy, 2x', false, 'B0TESTASIN', 200],
       ['on, no ASIN: merged + tagged copy, 2x', true, undefined, 200],
       ['off, no ASIN: the merged file, 1x', false, undefined, 100],
-    ])('disk-space check for a 100-byte merge, tagging %s', async (_n, tagging, asin, need) => {
-      await run({ tagging, merge: true, available: need - 1, asin });
+      ['on, no ASIN, book details: merged + post-step copy + tagged copy, 3x', true, undefined, 300, DETAILS],
+      ['off, no ASIN, book details (not written untagged): the merged file, 1x', false, undefined, 100, DETAILS],
+      ['on, no ASIN, details that sanitize to nothing: merged + tagged copy, 2x', true, undefined, 200, { publisher: '\u0000', subtitle: ' ' }],
+    ])('disk-space check for a 100-byte merge, tagging %s', async (_n, tagging, asin, need, details?: Record<string, string>) => {
+      await run({ tagging, merge: true, available: need - 1, asin, details });
       expect(chapterMock.mergeChapters).not.toHaveBeenCalled();
-      await run({ tagging, merge: true, available: need, asin });
+      await run({ tagging, merge: true, available: need, asin, details });
       expect(chapterMock.mergeChapters).toHaveBeenCalledTimes(1);
     });
   });

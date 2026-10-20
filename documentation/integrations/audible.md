@@ -278,6 +278,7 @@ Response:
 interface AudibleAudiobook {
   asin: string;
   title: string;
+  subtitle?: string; // Audnexus `subtitle` / catalog `subtitle`; metadata tags
   author: string;
   authorAsin?: string;
   narrator?: string;

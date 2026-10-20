@@ -12,10 +12,12 @@ import { addFreeformTags, type FreeformTag, type FreeformTagResult } from './mp4
 import {
   capUtf8Bytes,
   describeFfmpegFailure,
+  languageTagValue,
   MAX_DESCRIPTION_BYTES,
   sanitizeGenreName,
   sanitizeMetadataValue,
   sanitizeMultilineValue,
+  sanitizeShortTagValue,
   truncateRawText,
 } from './metadata-text';
 
@@ -31,6 +33,21 @@ export interface MetadataTaggingOptions {
   seriesPart?: string;
   description?: string; // Publisher summary (plain text, may contain paragraphs)
   genres?: string[]; // Top-level genres, joined into one tag
+  publisher?: string; // Publisher name
+  subtitle?: string; // Book subtitle
+  language?: string; // Audible language name ("english"), written capitalized
+}
+
+/** What the MP4 freeform post-step writes. */
+export type Mp4FreeformMetadata = Pick<MetadataTaggingOptions, 'asin' | 'publisher' | 'subtitle' | 'language'>;
+
+/** Publisher, subtitle and language as every format writes them (undefined when empty). */
+function bookDetailValues(metadata: Mp4FreeformMetadata) {
+  return {
+    publisher: sanitizeShortTagValue(metadata.publisher),
+    subtitle: sanitizeShortTagValue(metadata.subtitle),
+    language: languageTagValue(metadata.language),
+  };
 }
 
 /**
@@ -60,25 +77,32 @@ export function ffmpegRemuxTimeoutMs(sizeBytes: number): number {
 /**
  * iTunes freeform ('----', com.apple.iTunes) tags for MP4 containers: ffmpeg's
  * mp4 muxer drops these keys, so they are added after ffmpeg by
- * addMp4FreeformTags. New custom fields (e.g. PUBLISHER) are added here.
+ * addMp4FreeformTags. New custom fields are added here. A value that is empty
+ * after sanitizing is left out: the post-step writes all tags or none, so one
+ * bad value must not cost the others (the ASIN above all).
  */
-export function buildMp4FreeformTags(metadata: Pick<MetadataTaggingOptions, 'asin'>): FreeformTag[] {
+export function buildMp4FreeformTags(metadata: Mp4FreeformMetadata): FreeformTag[] {
   const tags: FreeformTag[] = [];
   const asin = metadata.asin ? sanitizeMetadataValue(metadata.asin) : '';
   if (asin) tags.push({ name: 'ASIN', value: asin });
+  const { publisher, subtitle, language } = bookDetailValues(metadata);
+  if (publisher) tags.push({ name: 'PUBLISHER', value: publisher });
+  if (subtitle) tags.push({ name: 'SUBTITLE', value: subtitle });
+  if (language) tags.push({ name: 'LANGUAGE', value: language });
   return tags;
 }
 
 /**
- * Add the MP4 freeform tags (ASIN) to `filePath`, an MP4 RMAB's own ffmpeg run
- * just wrote (the tagged copy or the merged file); `sourceExt` is the format's
- * extension. The organizer's one call, on the file about to be placed. No-op
- * for other formats; never throws (a warning instead, the file unchanged).
+ * Add the MP4 freeform tags (ASIN, PUBLISHER, SUBTITLE, LANGUAGE) to `filePath`,
+ * an MP4 RMAB's own ffmpeg run just wrote (the tagged copy or the merged file);
+ * `sourceExt` is the format's extension. The organizer's one call, on the file
+ * about to be placed. No-op for other formats; never throws (a warning instead,
+ * the file unchanged).
  */
 export async function addMp4FreeformTags(
   filePath: string,
   sourceExt: string,
-  metadata: Pick<MetadataTaggingOptions, 'asin'>
+  metadata: Mp4FreeformMetadata
 ): Promise<FreeformTagResult> {
   return isMp4Container(sourceExt) ? addFreeformTags(filePath, buildMp4FreeformTags(metadata)) : { written: false };
 }
@@ -124,6 +148,7 @@ export async function tagAudioFileMetadata(
       ?.map(sanitizeGenreName)
       .filter((name) => name.length > 0)
       .join(GENRE_SEPARATOR);
+    const { publisher, subtitle, language } = bookDetailValues(metadata);
 
     // Create temporary file path
     const tempFile = `${filePath}.tmp`;
@@ -153,7 +178,7 @@ export async function tagAudioFileMetadata(
         args.push('-metadata', `date=${String(metadata.year)}`);
       }
 
-      // ASIN: an iTunes freeform tag, added later by addMp4FreeformTags (ffmpeg drops it)
+      // ASIN, PUBLISHER, SUBTITLE, LANGUAGE: iTunes freeform tags, added later by addMp4FreeformTags (ffmpeg drops them)
 
       if (series) {
         args.push('-metadata', `show=${series}`);
@@ -226,6 +251,20 @@ export async function tagAudioFileMetadata(
         args.push('-metadata', `genre=${genre}`);
       }
 
+      // Vorbis fields match case-insensitively, so these replace the source's PUBLISHER/SUBTITLE/LANGUAGE
+      // (ORGANIZATION and LABEL, other publisher fields, are left as they are)
+      if (publisher) {
+        args.push('-metadata', `publisher=${publisher}`);
+      }
+
+      if (subtitle) {
+        args.push('-metadata', `subtitle=${subtitle}`);
+      }
+
+      if (language) {
+        args.push('-metadata', `language=${language}`);
+      }
+
       // Explicitly specify output format
       args.push('-f', 'flac');
     }
@@ -267,6 +306,24 @@ export async function tagAudioFileMetadata(
 
       if (genre) {
         args.push('-metadata', `genre=${genre}`); // TCON frame
+      }
+
+      if (publisher) {
+        args.push('-metadata', `publisher=${publisher}`); // TPUB frame
+      }
+
+      if (subtitle) {
+        // TIT3, the ID3 subtitle frame (Mp3tag, Picard and Audiobookshelf's own embedding use it).
+        // ffmpeg's `subtitle` key is a TXXX frame, which would sit next to a source TIT3: cleared instead.
+        args.push(
+          '-metadata', `TIT3=${subtitle}`,
+          '-metadata', 'subtitle='
+        );
+      }
+
+      if (language) {
+        // TLAN frame. ID3 expects an ISO 639-2 code here; the language name is what Audiobookshelf shows
+        args.push('-metadata', `language=${language}`);
       }
 
       // Explicitly specify output format (fixes .tmp extension issue)

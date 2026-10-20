@@ -66,6 +66,31 @@ export function sanitizeGenreName(name: string): string {
     .join(' & ');
 }
 
+/** Longest publisher, subtitle or language written, in UTF-8 bytes (Audible's are well under 200). */
+export const MAX_SHORT_TAG_BYTES = 1024;
+
+/**
+ * A one-line tag value (publisher, subtitle, language): bounded, whitespace runs
+ * collapsed, control characters dropped, capped. The MP4 post-step reads every
+ * value back byte for byte, so what ffprobe would not read back as written is
+ * replaced with U+FFFD: lone surrogates, and U+FFFE/U+FFFF (ffmpeg's UTF-8 check
+ * rejects those two). Undefined when nothing is left, or for a non-string.
+ */
+export function sanitizeShortTagValue(value: string | null | undefined): string | undefined {
+  if (typeof value !== 'string' || !value) return undefined;
+  const bounded = truncateRawText(value, 4 * MAX_SHORT_TAG_BYTES).toWellFormed().replace(/[￾￿]/g, '�');
+  return capUtf8Bytes(sanitizeMultilineValue(bounded), MAX_SHORT_TAG_BYTES) || undefined;
+}
+
+/**
+ * The language tag: Audible's language name with its first letter capitalized
+ * ("english" → "English"), as Audiobookshelf shows it. Not an ISO 639 code.
+ */
+export function languageTagValue(value: string | null | undefined): string | undefined {
+  const clean = sanitizeShortTagValue(value);
+  return clean ? clean.charAt(0).toUpperCase() + clean.slice(1) : undefined;
+}
+
 /**
  * Cap `value` at `maxBytes` UTF-8 bytes. A longer value is cut at its last word
  * boundary that fits (never inside a code point) and ends with an ellipsis (left

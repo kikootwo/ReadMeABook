@@ -3,7 +3,7 @@
  * Documentation: documentation/phase3/file-organization.md
  *
  * ffmpeg's mp4 muxer writes only the iTunes atoms it knows, so custom tags
- * (ASIN, and later PUBLISHER/SUBTITLE/LANGUAGE) never reach an .m4b through
+ * (ASIN, PUBLISHER, SUBTITLE, LANGUAGE) never reach an .m4b through
  * `-metadata`. This writes a NEW file, moov first (faststart), with the tags
  * added, verifies it, then renames it over RMAB's own fresh ffmpeg output.
  * On any refusal or failure the ffmpeg output is left untouched (a valid file
