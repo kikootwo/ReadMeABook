@@ -10,6 +10,7 @@
  *   2. multi-file mp3, chapter merging on, tagging off (the merger writes it)
  *   3. multi-file mp3, chapter merging on, tagging on (merge, then the tagger writes it)
  * Each also checks the placed file is moov first (faststart) through Audiobookshelf's container.
+ * Requests all three fixture books (phm too, like smoke): run with --isolate-specs next to other specs.
  */
 
 import { test, expect } from '@playwright/test';
