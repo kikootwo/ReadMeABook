@@ -158,8 +158,10 @@ export class FileOrganizer {
       // Determine base path for source files
       const baseSourcePath = isFile ? path.dirname(downloadPath) : downloadPath;
 
-      // Read once (merge disk-space check + tagging pass); unreadable → untagged, as a failed tagging pass leaves it
-      const metadataTaggingEnabled = (await prisma.configuration.findUnique({ where: { key: 'metadata_tagging_enabled' } }).catch(() => null))?.value === 'true';
+      const metadataTaggingEnabled = await prisma.configuration.findUnique({ where: { key: 'metadata_tagging_enabled' } }).then((c) => c?.value === 'true', async (error: unknown) => {
+        const skipped = `Metadata tagging skipped: could not read setting (${error instanceof Error ? error.message : 'Unknown error'})`;
+        await logger?.warn(skipped); result.errors.push(skipped); return false;
+      }); // read once: merge disk-space check + tagging pass
 
       // Track if we created a merged file that needs cleanup
       let tempMergedFile: string | null = null;
@@ -191,8 +193,8 @@ export class FileOrganizer {
             const isChapterDownload = await detectChapterFiles(sourceFilePaths, logger ?? undefined);
 
             if (isChapterDownload) {
-              // Check disk space: the merged file, the freeform post-step's full copy, and the tagged copy when tagging
-              const estimatedSize = (await estimateOutputSize(sourceFilePaths)) * (metadataTaggingEnabled ? 3 : 2);
+              // Check disk space: the merged file, the ASIN post-step's full copy (with an ASIN), and the tagged copy when tagging
+              const estimatedSize = (await estimateOutputSize(sourceFilePaths)) * (1 + (audiobook.asin ? 1 : 0) + (metadataTaggingEnabled ? 1 : 0));
               const availableSpace = await checkDiskSpace(this.tempDir);
 
               if (availableSpace !== null && availableSpace < estimatedSize) {
@@ -410,6 +412,7 @@ export class FileOrganizer {
         const ownOutput = taggedFilePath ?? (originalSourcePath === tempMergedFile ? tempMergedFile : undefined);
         const freeform = ownOutput ? await addMp4FreeformTags(ownOutput, path.extname(audioFile), audiobook) : null;
         if (freeform?.warning) await logger?.warn(`${path.basename(audioFile)}: ${freeform.warning}`);
+        if (freeform?.written) await logger?.info(`Embedded ASIN ${audiobook.asin} in ${path.basename(audioFile)}`);
 
         const placed: AudioPlacement = await placeAudio(originalSourcePath, taggedFilePath, targetFilePath, {
           fileMode: this.fileMode,

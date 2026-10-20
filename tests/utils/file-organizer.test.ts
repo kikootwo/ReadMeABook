@@ -287,7 +287,7 @@ describe('file organizer', () => {
     const merged = path.join('/tmp', 'Book.m4b');
 
     /** Two mp3 chapters merged to /tmp/Book.m4b (or not), tagging on/off; sources and temp files exist, targets don't. */
-    async function run(opts: { tagging: boolean; merge: boolean; available?: number; tagResult?: (files: string[]) => unknown[] }) {
+    async function run(opts: { tagging: boolean; merge: boolean; available?: number; tagResult?: (files: string[]) => unknown[]; asin?: string }) {
       configState.values.set('chapter_merging_enabled', String(opts.merge));
       configState.values.set('metadata_tagging_enabled', String(opts.tagging));
       configState.values.set('ebook_sidecar_enabled', 'false');
@@ -311,12 +311,14 @@ describe('file organizer', () => {
       copyFileMock.copyFile.mockResolvedValue(undefined);
       fsMock.chmod.mockResolvedValue(undefined);
       const warn = vi.fn().mockResolvedValue(undefined);
-      loggerMock.RMABLogger.forJob.mockReturnValue({ info: vi.fn().mockResolvedValue(undefined), warn, error: vi.fn().mockResolvedValue(undefined), debug: vi.fn() });
+      const info = vi.fn().mockResolvedValue(undefined);
+      loggerMock.RMABLogger.forJob.mockReturnValue({ info, warn, error: vi.fn().mockResolvedValue(undefined), debug: vi.fn() });
 
       const organizer = new FileOrganizer('/media', '/tmp');
       (organizer as any).findAudiobookFiles = vi.fn().mockResolvedValue({ audioFiles: ['disc1.mp3', 'disc2.mp3'], coverFile: undefined, isFile: false });
-      const result = await organizer.organize('/downloads/book', BOOK, '{author}/{title}', { jobId: 'job-a', context: 'test' });
-      return { result, warn, calls: metadataMock.addMp4FreeformTags.mock.calls };
+      const book = 'asin' in opts ? { ...BOOK, asin: opts.asin } : BOOK;
+      const result = await organizer.organize('/downloads/book', book, '{author}/{title}', { jobId: 'job-a', context: 'test' });
+      return { result, warn, info, calls: metadataMock.addMp4FreeformTags.mock.calls };
     }
 
     it('merging on, tagging on: the tagged copy of the merged file', async () => {
@@ -364,13 +366,34 @@ describe('file organizer', () => {
       expect(result.errors.join(' ')).not.toContain('ASIN');
     });
 
+    it('a written ASIN is logged at info', async () => {
+      metadataMock.addMp4FreeformTags.mockResolvedValueOnce({ written: true });
+      const { info } = await run({ tagging: false, merge: true });
+      expect(info).toHaveBeenCalledWith('Embedded ASIN B0TESTASIN in Book.m4b');
+    });
+
+    it('an unreadable tagging setting: warned and reported, tagging skipped, the import goes on', async () => {
+      prismaMock.configuration.findUnique.mockImplementationOnce(async () => {
+        throw new Error('database is locked');
+      });
+      const { result, warn, calls } = await run({ tagging: true, merge: true });
+      const skipped = 'Metadata tagging skipped: could not read setting (database is locked)';
+      expect(result.success).toBe(true);
+      expect(result.errors).toContain(skipped);
+      expect(warn).toHaveBeenCalledWith(skipped);
+      expect(metadataMock.tagMultipleFiles).not.toHaveBeenCalled();
+      expect(calls).toEqual([[merged, '.m4b', expect.objectContaining({ asin: 'B0TESTASIN' })]]);
+    });
+
     it.each([
-      ['on: merged + post-step copy + tagged copy, 3x', true, 300],
-      ['off: merged + post-step copy, 2x', false, 200],
-    ])('disk-space check for a 100-byte merge, tagging %s', async (_n, tagging, need) => {
-      await run({ tagging, merge: true, available: need - 1 });
+      ['on, ASIN: merged + post-step copy + tagged copy, 3x', true, 'B0TESTASIN', 300],
+      ['off, ASIN: merged + post-step copy, 2x', false, 'B0TESTASIN', 200],
+      ['on, no ASIN: merged + tagged copy, 2x', true, undefined, 200],
+      ['off, no ASIN: the merged file, 1x', false, undefined, 100],
+    ])('disk-space check for a 100-byte merge, tagging %s', async (_n, tagging, asin, need) => {
+      await run({ tagging, merge: true, available: need - 1, asin });
       expect(chapterMock.mergeChapters).not.toHaveBeenCalled();
-      await run({ tagging, merge: true, available: need });
+      await run({ tagging, merge: true, available: need, asin });
       expect(chapterMock.mergeChapters).toHaveBeenCalledTimes(1);
     });
   });

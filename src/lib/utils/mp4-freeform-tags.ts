@@ -41,7 +41,7 @@ const AUDIO_COMPARE_BYTES = 4096;
 const OTHER_COMPARE_LIMIT = 1024 * 1024;
 
 /** Test-only fault injection (plain holder so vi.mock resets cannot clear it). */
-export const testHooks: { afterPlan?: (plan: RewritePlan) => void } = {};
+export const testHooks: { afterPlan?: (plan: RewritePlan) => void; afterWrite?: (outputPath: string) => void } = {};
 
 async function readExactly(fh: FileHandle, length: number, position: number): Promise<Buffer> {
   const buf = Buffer.alloc(length);
@@ -186,6 +186,7 @@ export async function writeFreeformTaggedCopy(inputPath: string, outputPath: str
     await output.sync();
     await output.close();
     output = undefined;
+    testHooks.afterWrite?.(outputPath);
 
     await verifyOutput(input, outputPath, plan, tags);
   } catch (error) {

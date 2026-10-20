@@ -13,6 +13,7 @@ import * as path from 'path';
 import fsp from 'fs/promises';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PARTIAL_FILE_PATTERN } from '@/lib/utils/copy-file';
+import { shiftedOffset, type RewritePlan } from '@/lib/utils/mp4-boxes';
 import { addFreeformTags, testHooks, writeFreeformTaggedCopy } from '@/lib/utils/mp4-freeform-tags';
 import { TAGS, audioMd5, available, countFreeform, ffmpeg, makeDir, makeM4b, probe, topLevelTypes } from './mp4-tags.helpers';
 
@@ -27,9 +28,30 @@ afterAll(() => {
 });
 afterEach(() => {
   testHooks.afterPlan = undefined;
+  testHooks.afterWrite = undefined;
 });
 
 const leftovers = () => fs.readdirSync(dir).filter((f) => PARTIAL_FILE_PATTERN.test(f));
+
+/** Flip one byte of the written copy (before its after-write check) at the position `at(plan)` picks. */
+function corruptWrittenCopy(at: (plan: RewritePlan) => number) {
+  let plan: RewritePlan | undefined;
+  testHooks.afterPlan = (p) => {
+    plan = p;
+  };
+  testHooks.afterWrite = (outputPath) => {
+    const fd = fs.openSync(outputPath, 'r+');
+    try {
+      const byte = Buffer.alloc(1);
+      const position = at(plan!);
+      fs.readSync(fd, byte, 0, 1, position);
+      byte[0] ^= 0xff;
+      fs.writeSync(fd, byte, 0, 1, position);
+    } finally {
+      fs.closeSync(fd);
+    }
+  };
+}
 
 describe.skipIf(!available)('addFreeformTags on ffmpeg output (real ffmpeg)', () => {
   it.each([
@@ -86,6 +108,28 @@ describe.skipIf(!available)('addFreeformTags on ffmpeg output (real ffmpeg)', ()
     const result = await addFreeformTags(file, ASIN);
     expect(result.written).toBe(false);
     expect(result.warning).toMatch(/ASIN tag not written \(track 2 chunk offsets/);
+    expect(fs.readFileSync(file).equals(original)).toBe(true);
+    expect(leftovers()).toEqual([]);
+  }, 60_000);
+
+  it.each([
+    [
+      'a byte at the first audio chunk',
+      /ASIN tag not written \(track \d+ chunk 1 moved to the wrong place\)/,
+      (plan: RewritePlan) => shiftedOffset(plan.mdatShifts, plan.oldTracks.find((t) => t.handler === 'soun')!.offsets[0]),
+    ],
+    [
+      'a byte inside the written moov',
+      /ASIN tag not written \(written moov differs from the plan\)/,
+      (plan: RewritePlan) => plan.ftyp.size + Math.floor(plan.newMoov.length / 2),
+    ],
+  ])('the after-write check catches %s changed on disk; the input is untouched', async (name, warning, at) => {
+    const file = await makeM4b(dir, `after-write-${name.endsWith('moov') ? 'moov' : 'chunk'}.m4b`, { faststart: false });
+    const original = fs.readFileSync(file);
+    corruptWrittenCopy(at);
+    const result = await addFreeformTags(file, ASIN);
+    expect(result.written).toBe(false);
+    expect(result.warning).toMatch(warning);
     expect(fs.readFileSync(file).equals(original)).toBe(true);
     expect(leftovers()).toEqual([]);
   }, 60_000);
