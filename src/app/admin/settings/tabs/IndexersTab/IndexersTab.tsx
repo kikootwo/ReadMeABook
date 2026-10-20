@@ -27,7 +27,13 @@ interface IndexersTabProps {
   onRefreshIndexers?: () => Promise<void>;
   /** Clear the list on purpose (Prowlarr connection changed); defaults to onIndexersChange([]). */
   onClearIndexers?: () => void;
+  /** False when the saved list could not be loaded: editing is locked until it loads. Default true. */
+  indexersLoaded?: boolean;
 }
+
+const LOCKED_NOTE =
+  'Your saved indexers could not be loaded from Prowlarr, so they cannot be edited yet (saving now would overwrite them). ' +
+  'Click "Test Connection" once Prowlarr is reachable to load them.';
 
 export function IndexersTab({
   settings,
@@ -40,6 +46,7 @@ export function IndexersTab({
   onValidationChange,
   onRefreshIndexers,
   onClearIndexers,
+  indexersLoaded = true,
 }: IndexersTabProps) {
   const {
     testing,
@@ -55,6 +62,7 @@ export function IndexersTab({
     originalProwlarrUrl: originalSettings?.prowlarr.url ?? '',
     originalProwlarrApiKey: originalSettings?.prowlarr.apiKey ?? '',
     configuredIndexersCount: indexers.length,
+    indexersLoaded,
     onValidationChange,
     onRefreshIndexers,
     onClearIndexers: onClearIndexers ?? (() => onIndexersChange([])),
@@ -188,6 +196,11 @@ export function IndexersTab({
           mode="settings"
           initialIndexers={indexers}
           onIndexersChange={onIndexersChange}
+          lockedReason={indexersLoaded ? undefined : LOCKED_NOTE}
+          onIndexersFetched={() => {
+            // Prowlarr answered: try loading the saved list too, which unlocks editing
+            if (!indexersLoaded) void onRefreshIndexers?.();
+          }}
         />
       </div>
 
@@ -203,6 +216,7 @@ export function IndexersTab({
           </p>
         </div>
 
+        <fieldset disabled={!indexersLoaded} className="m-0 min-w-0 border-0 p-0">
         {flagConfigs.length > 0 && (
           <div className="space-y-3 mb-4">
             {flagConfigs.map((config, index) => (
@@ -237,6 +251,7 @@ export function IndexersTab({
             No flag rules configured. Flag bonuses/penalties are optional.
           </p>
         )}
+        </fieldset>
       </div>
 
       {/* Confirmation modal for Prowlarr connection change */}
@@ -245,7 +260,9 @@ export function IndexersTab({
         onClose={cancelConnectionChange}
         onConfirm={confirmConnectionChange}
         title="Prowlarr Connection Change"
-        message={`Changing your Prowlarr connection will remove your ${configuredIndexersCount} configured indexer${configuredIndexersCount === 1 ? '' : 's'}. Indexer IDs are specific to each Prowlarr instance, so existing configurations cannot be preserved. You will need to re-add indexers from the new instance after saving.`}
+        message={`Changing your Prowlarr connection will remove ${indexersLoaded
+          ? `your ${configuredIndexersCount} configured indexer${configuredIndexersCount === 1 ? '' : 's'}`
+          : 'your saved indexer configuration (it could not be loaded, so it is not shown)'}. Indexer IDs are specific to each Prowlarr instance, so existing configurations cannot be preserved. You will need to re-add indexers from the new instance after saving.`}
         confirmText="Continue"
         cancelText="Cancel"
         variant="danger"

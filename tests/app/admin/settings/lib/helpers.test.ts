@@ -332,14 +332,23 @@ describe('admin settings helpers', () => {
       (fetchWithAuthMock.mock.calls[2][1] as RequestInit).body as string
     );
     expect(optionsBody.skipUnreleased).toBe(true);
-    expect(body.allowEmpty).toBe(true);
+    expect(body.allowEmpty).toBe(false);
   });
 
-  it('leaves saved indexers alone when the list was not loaded', async () => {
+  it('sends allowEmpty only when the plan allows an empty list', async () => {
     fetchWithAuthMock.mockResolvedValue(makeOk());
 
     const { saveTabSettings } = await import('@/app/admin/settings/lib/helpers');
-    await saveTabSettings('prowlarr', baseSettings, [], [], { indexersLoaded: false });
+    await saveTabSettings('prowlarr', baseSettings, [], [], { indexerPlan: { saveIndexers: true, allowEmpty: true } });
+
+    expect(JSON.parse((fetchWithAuthMock.mock.calls[1][1] as RequestInit).body as string).allowEmpty).toBe(true);
+  });
+
+  it('leaves saved indexers alone when the plan skips them', async () => {
+    fetchWithAuthMock.mockResolvedValue(makeOk());
+
+    const { saveTabSettings } = await import('@/app/admin/settings/lib/helpers');
+    await saveTabSettings('prowlarr', baseSettings, [], [], { indexerPlan: { saveIndexers: false, allowEmpty: false } });
 
     const urls = fetchWithAuthMock.mock.calls.map((c) => c[0]);
     expect(urls).toEqual(['/api/admin/settings/prowlarr', '/api/admin/settings/indexer-options']);

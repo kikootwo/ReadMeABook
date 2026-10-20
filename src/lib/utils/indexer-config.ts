@@ -75,11 +75,12 @@ export function toSavedIndexerConfig(input: IndexerConfigInput): SavedIndexerCon
 const LIMIT_FIELDS = ['seedingTimeMinutes', 'ratioLimit'] as const;
 
 /**
- * Validation error for an indexer's seeding limits, or null when valid.
+ * Validation error for a torrent indexer's seeding limits, or null when valid.
  * A limit may be missing (defaults to 0); when present it must be a finite
- * number >= 0.
+ * number >= 0. Other protocols are not checked: their limits are discarded.
  */
 export function invalidIndexerLimit(input: Record<string, unknown>): string | null {
+  if (!isTorrentProtocol(typeof input.protocol === 'string' ? input.protocol : undefined)) return null;
   for (const field of LIMIT_FIELDS) {
     const value = input[field];
     if (value === undefined || value === null) continue;

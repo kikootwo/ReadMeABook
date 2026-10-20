@@ -115,6 +115,12 @@ const mockTabs = () => {
           <button type="button" onClick={() => onClearIndexers()}>
             Clear for new connection
           </button>
+          <button type="button" onClick={() => void onRefreshIndexers()}>
+            Refresh list
+          </button>
+          <button type="button" onClick={() => onIndexersChange([])}>
+            Remove all
+          </button>
         </div>
       );
     },
@@ -184,7 +190,7 @@ describe('Admin settings indexer round trip', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Toggle option' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
 
-    expect(await screen.findByText(/indexer settings were not: they could not be loaded/, {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByText(/indexer settings were not changed, because they could not be loaded/, {}, { timeout: 5000 })).toBeInTheDocument();
     expect(fetchWithAuthMock).toHaveBeenCalledWith('/api/admin/settings/indexer-options', expect.objectContaining({ method: 'PUT' }));
     expect(fetchWithAuthMock).not.toHaveBeenCalledWith(
       '/api/admin/settings/prowlarr/indexers',
@@ -201,6 +207,61 @@ describe('Admin settings indexer round trip', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear for new connection' }));
     fireEvent.click(screen.getByRole('button', { name: 'Toggle option' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
+
+    await waitFor(() => expect(screen.getByText('Settings saved successfully!')).toBeInTheDocument());
+    expect(configStore.get('prowlarr_indexers')).toBe('[]');
+  });
+
+  const indexerPuts = () =>
+    fetchWithAuthMock.mock.calls.filter(
+      ([url, init]) => url === '/api/admin/settings/prowlarr/indexers' && (init as RequestInit | undefined)?.method === 'PUT'
+    );
+
+  it('keeps the loaded list and its edits when a later refresh fails', async () => {
+    await openIndexersTab();
+    await screen.findByTestId('ratio-1', {}, { timeout: 5000 });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Torrent A' }));
+
+    bridge.indexersGetFails = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh list' }));
+    await waitFor(() => expect(screen.getByText(/Failed to load indexers/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
+
+    await waitFor(() => expect(screen.getByText('Settings saved successfully!')).toBeInTheDocument());
+    expect(JSON.parse(configStore.get('prowlarr_indexers')!)[0]).toMatchObject({ id: 1, priority: 20, ratioLimit: 1.5 });
+  });
+
+  it('does not PUT the indexers when only other settings changed', async () => {
+    await openIndexersTab();
+    await screen.findByTestId('ratio-1', {}, { timeout: 5000 });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle option' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
+
+    await waitFor(() => expect(screen.getByText('Settings saved successfully!')).toBeInTheDocument());
+    expect(indexerPuts()).toHaveLength(0);
+  });
+
+  it('a Prowlarr that answers with no indexers never wipes the saved list on save', async () => {
+    prowlarrMock.getIndexers.mockResolvedValue([]);
+    const saved = configStore.get('prowlarr_indexers');
+    await openIndexersTab();
+    await waitFor(() => expect(fetchWithAuthMock).toHaveBeenCalledWith('/api/admin/settings/prowlarr/indexers'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle option' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
+
+    await waitFor(() => expect(screen.getByText('Settings saved successfully!')).toBeInTheDocument());
+    expect(indexerPuts()).toHaveLength(0);
+    expect(configStore.get('prowlarr_indexers')).toBe(saved);
+  });
+
+  it('removing every loaded indexer on purpose saves an empty list', async () => {
+    await openIndexersTab();
+    await screen.findByTestId('ratio-1', {}, { timeout: 5000 });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove all' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
 
     await waitFor(() => expect(screen.getByText('Settings saved successfully!')).toBeInTheDocument());

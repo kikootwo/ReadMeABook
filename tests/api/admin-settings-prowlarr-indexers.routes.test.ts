@@ -151,6 +151,26 @@ describe('Admin Prowlarr indexers route', () => {
       expect(status).toBe(200);
     });
 
+    it('does not check limits on usenet indexers (they are discarded)', async () => {
+      const { status } = await put({
+        indexers: [{ id: 2, name: 'NZB', protocol: 'usenet', enabled: true, priority: 5, ratioLimit: -1, seedingTimeMinutes: 'x' }],
+      });
+
+      expect(status).toBe(200);
+      const entry = configServiceMock.setMany.mock.calls[0][0].find((e: any) => e.key === 'prowlarr_indexers');
+      expect(JSON.parse(entry.value)[0].ratioLimit).toBeUndefined();
+    });
+
+    it('returns 400 for a body that is not JSON', async () => {
+      authRequest.json.mockRejectedValue(new SyntaxError('Unexpected token'));
+      const { PUT } = await import('@/app/api/admin/settings/prowlarr/indexers/route');
+
+      const response = await PUT({} as any);
+
+      expect(response.status).toBe(400);
+      expect(configServiceMock.setMany).not.toHaveBeenCalled();
+    });
+
     it('rejects a body without an indexers array', async () => {
       const { status } = await put({ flagConfigs: [] });
 

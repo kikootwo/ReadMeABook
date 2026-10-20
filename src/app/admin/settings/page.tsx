@@ -12,8 +12,6 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 import Link from 'next/link';
 import { fetchWithAuth } from '@/lib/utils/api';
-import { IndexerFlagConfig } from '@/lib/utils/ranking-algorithm';
-import { toSavedIndexerConfig } from '@/lib/utils/indexer-config';
 
 // Tab Components
 import { LibraryTab } from './tabs/LibraryTab/LibraryTab';
@@ -27,7 +25,12 @@ import { NotificationsTab } from './tabs/NotificationsTab';
 import { ApiTab } from './tabs/ApiTab/ApiTab';
 
 // Types and Helpers
-import type { Settings, SettingsTab, IndexerConfig, SavedIndexerConfig, Message } from './lib/types';
+import type { Settings, SettingsTab, Message } from './lib/types';
+import { useConfiguredIndexers } from './lib/useConfiguredIndexers';
+
+const INDEXERS_NOT_SAVED_MESSAGE =
+  'Prowlarr settings saved. Your indexer settings were not changed, because they could not be loaded from Prowlarr. ' +
+  'Click "Test Connection" on this tab once Prowlarr is reachable; editing unlocks when the list loads.';
 import { parseArrayToCommaSeparated, saveTabSettings, validateAuthSettings, getTabValidation, getTabs } from './lib/helpers';
 
 export default function AdminSettings() {
@@ -51,13 +54,18 @@ export default function AdminSettings() {
   });
 
   // Indexer-specific state (used by IndexersTab)
-  const [configuredIndexers, setConfiguredIndexers] = useState<SavedIndexerConfig[]>([]);
-  const [originalConfiguredIndexers, setOriginalConfiguredIndexers] = useState<SavedIndexerConfig[]>([]);
-  const [flagConfigs, setFlagConfigs] = useState<IndexerFlagConfig[]>([]);
-  const [originalFlagConfigs, setOriginalFlagConfigs] = useState<IndexerFlagConfig[]>([]);
-  // True once the indexer list came from the server (or was cleared on purpose); until then saving
-  // the Indexers tab must not replace the saved list
-  const [indexersLoaded, setIndexersLoaded] = useState(false);
+  const {
+    configuredIndexers,
+    setConfiguredIndexers,
+    flagConfigs,
+    setFlagConfigs,
+    indexersLoaded,
+    hasIndexerChanges,
+    savePlan,
+    fetchIndexers,
+    clearIndexers,
+    markSaved,
+  } = useConfiguredIndexers(setMessage);
 
   // Initial data fetch
   useEffect(() => {
@@ -90,42 +98,6 @@ export default function AdminSettings() {
   };
 
   /**
-   * Fetches indexers from Prowlarr (used by IndexersTab)
-   */
-  const fetchIndexers = async (force = false) => {
-    try {
-      const response = await fetchWithAuth('/api/admin/settings/prowlarr/indexers');
-      if (response.ok) {
-        const data = await response.json();
-        const flags = data.flagConfigs || [];
-        setFlagConfigs(flags);
-        setOriginalFlagConfigs(JSON.parse(JSON.stringify(flags)));
-
-        // Extract configured indexers (enabled ones). Shared mapping keeps every
-        // per-indexer field (e.g. ratioLimit) so saving the tab cannot reset it.
-        const configured: SavedIndexerConfig[] = (data.indexers || [])
-          .filter((idx: IndexerConfig) => idx.enabled)
-          .map((idx: IndexerConfig) => toSavedIndexerConfig(idx));
-        setConfiguredIndexers(configured);
-        setOriginalConfiguredIndexers(JSON.parse(JSON.stringify(configured)));
-        setIndexersLoaded(true);
-      } else {
-        setIndexersLoaded(false);
-        console.error('Failed to fetch indexers:', response.status);
-        if (force) {
-          setMessage({ type: 'error', text: 'Failed to load indexers. Check your Prowlarr settings.' });
-        }
-      }
-    } catch (error) {
-      setIndexersLoaded(false);
-      console.error('Failed to fetch indexers:', error);
-      if (force) {
-        setMessage({ type: 'error', text: 'Failed to load Prowlarr indexers. Check your Prowlarr URL and API key.' });
-      }
-    }
-  };
-
-  /**
    * Saves settings for the currently active tab
    */
   const saveSettings = async () => {
@@ -144,24 +116,24 @@ export default function AdminSettings() {
     setMessage(null);
 
     try {
-      await saveTabSettings(activeTab, settings, configuredIndexers, flagConfigs, { indexersLoaded });
+      await saveTabSettings(activeTab, settings, configuredIndexers, flagConfigs, { indexerPlan: savePlan });
+      const connectionChanged =
+        settings.prowlarr.url !== originalSettings?.prowlarr.url ||
+        settings.prowlarr.apiKey !== originalSettings?.prowlarr.apiKey;
       setOriginalSettings(JSON.parse(JSON.stringify(settings)));
+      if (activeTab === 'prowlarr' && savePlan.saveIndexers) markSaved();
 
       if (activeTab === 'prowlarr' && !indexersLoaded) {
-        // Connection and options saved; the saved indexers were left as they are
-        setMessage({
-          type: 'error',
-          text: 'Prowlarr settings saved, but indexer settings were not: they could not be loaded from Prowlarr, so your saved indexers were left unchanged. Refresh the indexers and save again.',
-        });
+        // Connection and options saved; the saved indexers were left as they are.
+        // A new connection may reach Prowlarr now: try loading the list from it.
+        if (connectionChanged && (await fetchIndexers())) {
+          setMessage({ type: 'success', text: 'Settings saved. Indexers loaded from Prowlarr.' });
+          return;
+        }
+        setMessage({ type: 'error', text: INDEXERS_NOT_SAVED_MESSAGE });
         return;
       }
       setMessage({ type: 'success', text: 'Settings saved successfully!' });
-
-      // Also update original indexers and flag configs when saving prowlarr tab
-      if (activeTab === 'prowlarr') {
-        setOriginalConfiguredIndexers(JSON.parse(JSON.stringify(configuredIndexers)));
-        setOriginalFlagConfigs(JSON.parse(JSON.stringify(flagConfigs)));
-      }
 
       setTimeout(() => setMessage(null), 3000);
     } catch (error) {
@@ -193,9 +165,7 @@ export default function AdminSettings() {
 
     // For prowlarr tab, also check indexers and flag configs
     if (activeTab === 'prowlarr') {
-      const indexersChanged = JSON.stringify(configuredIndexers) !== JSON.stringify(originalConfiguredIndexers);
-      const flagConfigsChanged = JSON.stringify(flagConfigs) !== JSON.stringify(originalFlagConfigs);
-      return settingsChanged || indexersChanged || flagConfigsChanged;
+      return settingsChanged || hasIndexerChanges;
     }
 
     return settingsChanged;
@@ -298,14 +268,11 @@ export default function AdminSettings() {
               flagConfigs={flagConfigs}
               onChange={setSettings}
               onIndexersChange={setConfiguredIndexers}
-              onClearIndexers={() => {
-                // Prowlarr connection changed and confirmed: an empty list is intended
-                setConfiguredIndexers([]);
-                setIndexersLoaded(true);
-              }}
+              onClearIndexers={clearIndexers}
+              indexersLoaded={indexersLoaded}
               onFlagConfigsChange={setFlagConfigs}
               onValidationChange={(isValid) => setValidated({ ...validated, prowlarr: isValid })}
-              onRefreshIndexers={() => fetchIndexers(true)}
+              onRefreshIndexers={async () => { await fetchIndexers(true); }}
             />
           )}
 

@@ -15,6 +15,8 @@ interface UseIndexersSettingsProps {
   originalProwlarrUrl: string;
   originalProwlarrApiKey: string;
   configuredIndexersCount: number;
+  /** False when the saved list could not be loaded: its size is unknown, so assume it has entries. */
+  indexersLoaded?: boolean;
   onValidationChange: (isValid: boolean) => void;
   onRefreshIndexers?: () => Promise<void>;
   onClearIndexers: () => void;
@@ -26,6 +28,7 @@ export function useIndexersSettings({
   originalProwlarrUrl,
   originalProwlarrApiKey,
   configuredIndexersCount,
+  indexersLoaded = true,
   onValidationChange,
   onRefreshIndexers,
   onClearIndexers,
@@ -105,10 +108,10 @@ export function useIndexersSettings({
 
   /**
    * Handle test connection click — shows confirmation if credentials changed
-   * and there are existing configured indexers.
+   * and there are (or may be: the list failed to load) configured indexers.
    */
   const testConnection = async () => {
-    if (hasConnectionChanged() && configuredIndexersCount > 0) {
+    if (hasConnectionChanged() && (configuredIndexersCount > 0 || !indexersLoaded)) {
       setShowConnectionChangeConfirm(true);
       return;
     }

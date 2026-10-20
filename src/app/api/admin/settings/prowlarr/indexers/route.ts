@@ -92,7 +92,13 @@ export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { indexers, flagConfigs, allowEmpty } = (await req.json()) ?? {};
+        let body: any;
+        try {
+          body = await req.json();
+        } catch {
+          return badRequest(400, 'Request body must be JSON');
+        }
+        const { indexers, flagConfigs, allowEmpty } = body ?? {};
         if (!Array.isArray(indexers)) {
           return badRequest(400, 'indexers must be an array');
         }
