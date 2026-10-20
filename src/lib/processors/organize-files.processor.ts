@@ -14,6 +14,7 @@ import { getDownloadClientManager } from '../services/download-client-manager.se
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import { generateFilesHash } from '../utils/files-hash';
+import { audioFileFormat, splitForeignAudio } from './organize-evidence';
 import { fixEpubForKindle, cleanupFixedEpub } from '../utils/epub-fixer';
 import { cleanupDirectDownloadSource, cleanupDownloadAfterOrganize, cleanupEbookSource, cleanupSourceAfterOrganize } from './organize-cleanup';
 import {
@@ -241,16 +242,22 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     });
     const coercionEnabled = coercionConfig?.value !== 'false';
 
-    if (coercionEnabled && result.audioFiles.length > 0) {
+    // Files the library already held with different content ('differs') are not
+    // this import's: coercion never renames them and the hash leaves them out
+    const { owned: ownedAudio, foreign: foreignAudio } = splitForeignAudio(result.audioFiles, result.records);
+    let importedAudio = ownedAudio;
+
+    if (coercionEnabled && importedAudio.length > 0) {
       try {
         const { coerceToPlexCompatible, coercibleTargets } = await import('../utils/format-coercion');
-        // Only files holding this import's content are renamed; other library files are never touched
+        // Only files holding this import's content are renamed; other library files are never
+        // touched. Every organized file still counts as an .m4a sibling.
         const records = result.records ?? [];
         const coercion = await coerceToPlexCompatible(result.audioFiles, coercibleTargets(records), logger);
         if (coercion.renamed.length > 0) {
           logger.info(`Plex format coercion: renamed ${coercion.renamed.length} file(s)`);
-          result.audioFiles = coercion.finalAudioFiles;
           const renamedTo = new Map(coercion.renamed.map((r) => [r.from, r.to]));
+          importedAudio = importedAudio.map((file) => renamedTo.get(file) ?? file);
           for (const record of records) {
             record.target = renamedTo.get(record.target) ?? record.target;
           }
@@ -260,19 +267,22 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
         logger.warn(`Plex format coercion failed (non-fatal): ${err instanceof Error ? err.message : 'unknown'}`);
       }
     }
+    result.audioFiles = [...importedAudio, ...foreignAudio];
 
-    // Generate hash from organized audio files for library matching
-    const filesHash = generateFilesHash(result.audioFiles);
+    // Hash of this import's audio, after coercion (library matching, and the
+    // evidence an admin delete checks before removing the folder)
+    const filesHash = generateFilesHash(importedAudio);
     if (filesHash) {
-      logger.info(`Generated files hash: ${filesHash.substring(0, 16)}... (${result.audioFiles.length} audio files)`);
+      logger.info(`Generated files hash: ${filesHash.substring(0, 16)}... (${importedAudio.length} audio files)`);
     }
 
-    // Update audiobook record with file path, hash, and status
+    // Update audiobook record with file path, hash, format, and status
     await prisma.audiobook.update({
       where: { id: audiobookId },
       data: {
         filePath: result.targetPath,
         filesHash: filesHash || null,
+        fileFormat: audioFileFormat(importedAudio.length > 0 ? importedAudio : result.audioFiles),
         status: 'completed',
         completedAt: new Date(),
         updatedAt: new Date(),

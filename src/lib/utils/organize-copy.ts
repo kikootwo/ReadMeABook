@@ -290,14 +290,14 @@ async function derivativeMismatch(
     b = await probe(derivative);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { short: 'its length could not be checked', detail: `audio duration could not be measured (${message})` };
+    return { short: 'the length could not be checked', detail: `audio duration could not be measured (${message})` };
   }
   if (!(a > 0 && b > 0)) {
-    return { short: 'its length could not be checked', detail: 'audio duration could not be measured (no audio packets)' };
+    return { short: 'the length could not be checked', detail: 'audio duration could not be measured (no audio packets)' };
   }
   if (Math.abs(a - b) > TAGGED_DURATION_TOLERANCE_MS) {
     return {
-      short: 'the tagged file came out a different length',
+      short: 'the tagged version had a different length',
       detail: `tagged copy duration did not match the original (${b} ms vs ${a} ms)`,
     };
   }
@@ -355,7 +355,7 @@ export async function placeAudio(
       return {
         ...fallback,
         reason: `Tagged copy failed (${tagged.reason}); original placed without metadata tags`,
-        tagsDropped: 'the tagged file could not be saved to the library',
+        tagsDropped: 'the tagged version could not be saved to the library',
       };
     }
     const fallbackReason = fallback.reason ?? fallback.status;

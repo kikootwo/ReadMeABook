@@ -4,7 +4,8 @@
  *
  * Derived from src/lib/integrations/plex.service.ts: /identity :220, /library/sections :426,
  * /library/sections/<id>/all :479/:548, /library/sections/<id>/search :639,
- * /library/sections/<id>/refresh :616, /library/metadata/<key> GET :686 / DELETE :794.
+ * /library/sections/<id>/refresh :616, /library/metadata/<key> GET :686 / DELETE :794,
+ * /library/metadata/<key>/children (tracks with Media > Part file; getItemFilePaths, request delete).
  * The library is the real shared media volume: <libraryPath>/<Author>/<Title>/ becomes one album.
  */
 
@@ -14,6 +15,7 @@ import { createHash } from 'node:crypto';
 import { sendJson, sendText, notFound } from './http-util.js';
 
 const SECTION_ID = '1';
+const AUDIO = /\.(m4b|m4a|mp3|mp4|flac|aac|ogg|opus)$/i;
 const MACHINE_ID = 'rmab-e2e-fake-plex-0001';
 
 function libraryPath(state) {
@@ -34,7 +36,7 @@ export function scanAlbums(state) {
       // Folder names may end in an ASIN ("Title B0XXXXXXXX" or "Title [B0XXXXXXXX]"): like Plex's
       // Audible agent, expose it in the guid and keep it out of the album title.
       const asin = /(?:^|\s)\[?(B0[A-Z0-9]{8})\]?\s*$/.exec(title.name)?.[1];
-      albums.push({
+      const album = {
         ratingKey,
         key: `/library/metadata/${ratingKey}/children`,
         guid: asin ? `com.plexapp.agents.audible://${asin}?lang=en` : `plex://album/e2e${ratingKey}`,
@@ -45,10 +47,22 @@ export function scanAlbums(state) {
         addedAt: Math.floor(stat.mtimeMs / 1000),
         updatedAt: Math.floor(stat.mtimeMs / 1000),
         dir,
-      });
+      };
+      albums.push(album);
+      const files = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && AUDIO.test(e.name)).map((e) => path.posix.join(dir, e.name));
+      state.plexSeen?.set(ratingKey, { album, files });
     }
   }
   return albums.sort((a, b) => b.addedAt - a.addedAt);
+}
+
+/**
+ * An album by ratingKey: live from disk, else as last seen. Real Plex keeps an item (and its file
+ * paths) in its database after the files are gone, until a scan empties the trash.
+ */
+function findAlbum(state, ratingKey) {
+  scanAlbums(state);
+  return state.plexSeen?.get(ratingKey) || null;
 }
 
 const container = (extra) => ({ MediaContainer: { size: 0, ...extra } });
@@ -76,6 +90,8 @@ export function handlePlex(state, req, res, url) {
     if (section[1] !== SECTION_ID) return notFound(res);
     if (section[2] === 'refresh') {
       state.plexRefreshes += 1;
+      // A scan drops items whose folder is gone
+      for (const [key, seen] of state.plexSeen ?? []) if (!fs.existsSync(seen.album.dir)) state.plexSeen.delete(key);
       return sendText(res, 200, '');
     }
     let albums = scanAlbums(state);
@@ -88,12 +104,30 @@ export function handlePlex(state, req, res, url) {
     const page = albums.slice(start, start + size).map(({ dir, ...a }) => a);
     return sendJson(res, 200, container({ size: page.length, totalSize: albums.length, Metadata: page }));
   }
+  // An album's tracks: one per audio file directly in its folder, with Media > Part file (the path as Plex sees it)
+  const children = /^\/library\/metadata\/(\d+)\/children$/.exec(p);
+  if (children) {
+    const seen = findAlbum(state, children[1]);
+    if (!seen) return notFound(res);
+    const tracks = seen.files.map((file, i) => ({
+      ratingKey: `${seen.album.ratingKey}${i + 1}`,
+      type: 'track',
+      title: path.posix.basename(file),
+      parentRatingKey: seen.album.ratingKey,
+      index: i + 1,
+      Media: [{ Part: [{ file }] }],
+    }));
+    return sendJson(res, 200, container({ size: tracks.length, Metadata: tracks }));
+  }
   const meta = /^\/library\/metadata\/(\d+)$/.exec(p);
   if (meta) {
-    const album = scanAlbums(state).find((a) => a.ratingKey === meta[1]);
-    if (!album) return notFound(res);
+    const seen = findAlbum(state, meta[1]);
+    if (!seen) return notFound(res);
+    const album = seen.album;
     if (req.method === 'DELETE') {
+      // Like Plex with "allow media deletion": the item and its files go
       fs.rmSync(album.dir, { recursive: true, force: true });
+      state.plexSeen?.delete(album.ratingKey);
       return sendText(res, 200, '');
     }
     const { dir, ...rest } = album;

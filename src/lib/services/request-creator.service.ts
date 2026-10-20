@@ -1,6 +1,6 @@
 /**
  * Component: Request Creator Service
- * Documentation: documentation/backend/services/requests.md
+ * Documentation: documentation/backend/services/goodreads-sync.md
  *
  * Shared request-creation logic used by both the API route and Goodreads sync.
  * Encapsulates: duplicate detection, library check, Audnexus enrichment,
@@ -16,6 +16,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { shouldSkipAutoSearch } from '@/lib/utils/release-date';
 import { seedAsin, getSiblingAsins } from '@/lib/services/works.service';
 import { isLibraryCoverSource, sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
+import { createRequestReplacing, RE_REQUESTABLE_STATUSES, RequestAlreadyReplacedError } from '@/lib/services/request-rerequest';
 
 const logger = RMABLogger.create('RequestCreator');
 
@@ -194,18 +195,18 @@ export async function createRequestForUser(
     },
   });
 
+  // A failed/warn/cancelled request is replaced by the new one (atomically, below),
+  // keeping its blocklist; it is not touched until the new request is created
+  let replacesRequest: { id: string; customSearchTerms: string | null } | null = null;
   if (existingRequest) {
-    const canReRequest = ['failed', 'warn', 'cancelled'].includes(existingRequest.status);
-    if (!canReRequest) {
+    if (!RE_REQUESTABLE_STATUSES.includes(existingRequest.status)) {
       return {
         success: false,
         reason: 'duplicate',
         message: 'You have already requested this audiobook',
       };
     }
-    // Delete existing failed/warn/cancelled request
-    logger.debug(`Deleting existing ${existingRequest.status} request ${existingRequest.id} to allow re-request`);
-    await prisma.request.delete({ where: { id: existingRequest.id } });
+    replacesRequest = { id: existingRequest.id, customSearchTerms: existingRequest.customSearchTerms ?? null };
   }
 
   // Check ANY user's active request for same audiobook (avoid duplicate processing)
@@ -281,21 +282,37 @@ export async function createRequestForUser(
     initialStatus = 'pending';
   }
 
-  // Create request
-  const newRequest = await prisma.request.create({
-    data: {
-      userId,
-      audiobookId: audiobookRecord.id,
-      status: initialStatus,
-      type: 'audiobook',
-      progress: 0,
-      releaseDate,
-    },
-    include: {
-      audiobook: true,
-      user: { select: { id: true, plexUsername: true } },
-    },
-  });
+  // Create the request (replacing a failed one keeps its blocklist and search terms)
+  let newRequest;
+  try {
+    newRequest = await createRequestReplacing(
+      {
+        data: {
+          userId,
+          audiobookId: audiobookRecord.id,
+          status: initialStatus,
+          type: 'audiobook',
+          progress: 0,
+          releaseDate,
+          ...(replacesRequest?.customSearchTerms && { customSearchTerms: replacesRequest.customSearchTerms }),
+        },
+        include: {
+          audiobook: true,
+          user: { select: { id: true, plexUsername: true } },
+        },
+      },
+      replacesRequest?.id ?? null
+    );
+  } catch (error) {
+    if (error instanceof RequestAlreadyReplacedError) {
+      logger.info(`Request ${error.requestId} was re-requested concurrently; not creating a second request`);
+      return { success: false, reason: 'duplicate', message: 'You have already requested this audiobook' };
+    }
+    throw error;
+  }
+  if (replacesRequest) {
+    logger.debug(`Replaced ${existingRequest?.status} request ${replacesRequest.id} with ${newRequest.id} (blocklist carried over)`);
+  }
 
   if (releaseGateSkip) {
     logger.info(`Skipped auto-search for unreleased book`, {

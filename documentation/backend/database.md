@@ -126,7 +126,7 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - Unique: `(request_id, release_key)` - idempotency for concurrent auto-block writes
 - Indexes: `request_id`, `release_key`, `release_hash`, `created_at DESC`
 - **Purpose:** Per-request blocklist. Search processors filter their candidate set against this table so future searches skip releases that have already failed for the same request.
-- **Soft/hard delete:** Soft-delete (sets `requests.deleted_at`) does NOT cascade - blocklist entries survive. Hard-delete cascades and wipes entries.
+- **Soft/hard delete:** Soft-delete (sets `requests.deleted_at`) does NOT cascade - blocklist entries survive. Hard-delete cascades and wipes entries. A re-request of a failed/warn/cancelled request moves its entries to the new request in the same transaction before deleting it (`request-rerequest.ts`; `download_history_id` is then historical).
 - **Match rules:** Case-insensitive exact match on `release_key` OR exact match on `release_hash`.
 - **Service:** Single writer is `src/lib/services/blocklist.service.ts` (`addAutoBlock` is idempotent via upsert; never throws).
 

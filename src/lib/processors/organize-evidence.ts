@@ -86,7 +86,7 @@ export interface ImportStatusContext {
  * Examples: "1 of 3 files not imported; source files kept",
  * "already in the library with different content; source kept",
  * "merged file kept; sources kept",
- * "1 file imported without metadata tags (its length could not be checked)",
+ * "1 file imported without metadata tags (the length could not be checked)",
  * "download kept: it holds several ebook formats and only one was imported; ...". A note is appended when file
  * permissions could not be applied ("permissions could not be applied to 2 files").
  */
@@ -180,4 +180,34 @@ export function reportImportStatus(evidence: ImportEvidence, logger: RMABLogger,
   const permissions = summarizePermissionWarnings(evidence.permissionWarnings);
   if (permissions) logger.warn(permissions);
   return message;
+}
+
+/**
+ * Split organized audio into this import's files and files the library already
+ * held with different content (`differs` records): those were not written by
+ * this import, so they are neither coerced nor part of filesHash.
+ */
+export function splitForeignAudio(
+  audioFiles: string[],
+  records: PlacementRecord[] | undefined
+): { owned: string[]; foreign: string[] } {
+  const foreignTargets = new Set(
+    (records ?? []).filter((r) => r.status === 'differs').map((r) => path.resolve(r.target))
+  );
+  const owned: string[] = [];
+  const foreign: string[] = [];
+  for (const file of audioFiles) (foreignTargets.has(path.resolve(file)) ? foreign : owned).push(file);
+  return { owned, foreign };
+}
+
+/** Audiobook.fileFormat for organized audio: the extension, or the most common one (first on a tie); null if none. */
+export function audioFileFormat(audioFiles: string[]): string | null {
+  const counts = new Map<string, number>();
+  for (const file of audioFiles) {
+    const ext = path.extname(file).toLowerCase().slice(1);
+    if (ext) counts.set(ext, (counts.get(ext) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  for (const [ext, count] of counts) if (best === null || count > counts.get(best)!) best = ext;
+  return best;
 }

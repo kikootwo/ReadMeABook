@@ -182,7 +182,7 @@ describe('FileOrganizer placement records', () => {
     const placed = path.join(media, 'Author', 'Book', 'Book.m4b');
     expect(fs.readFileSync(placed, 'utf8')).toBe('original-bytes');
     expect(result.records![0]).toMatchObject({
-      status: 'copied', verified: true, tagsDropped: 'the tagged file came out a different length',
+      status: 'copied', verified: true, tagsDropped: 'the tagged version had a different length',
     });
     expect(fs.existsSync(path.join(source, 'Book.m4b.tmp'))).toBe(false);
   });

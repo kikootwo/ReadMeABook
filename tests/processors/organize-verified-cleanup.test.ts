@@ -241,12 +241,12 @@ describe('verified-import cleanup', () => {
     it('says when files went into the library without metadata tags, and why', async () => {
       organizeWith(target(), { [parts[0]]: 'copied', [parts[1]]: 'copied' });
       const placed = await organizerMock.organize();
-      placed.records[1] = { ...placed.records[1], tagsDropped: 'its length could not be checked' };
+      placed.records[1] = { ...placed.records[1], tagsDropped: 'the length could not be checked' };
       organizerMock.organize.mockResolvedValue(placed);
 
       await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
 
-      expect(requestUpdateData()?.errorMessage).toBe('1 file imported without metadata tags (its length could not be checked)');
+      expect(requestUpdateData()?.errorMessage).toBe('1 file imported without metadata tags (the length could not be checked)');
       // The untagged originals are verified copies: the download still goes
       expect(fs.existsSync(download)).toBe(false);
     });

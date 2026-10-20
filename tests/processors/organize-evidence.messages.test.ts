@@ -19,8 +19,8 @@ function audio(records: PlacementRecord[]): ImportEvidence {
   return { records, inventory: { kind: 'audio', files: records.map((r) => r.source), complete: true } };
 }
 
-const LENGTH = 'its length could not be checked';
-const DIFFERENT = 'the tagged file came out a different length';
+const LENGTH = 'the length could not be checked';
+const DIFFERENT = 'the tagged version had a different length';
 
 describe('untagged files on the request', () => {
   it('speaks of "the file" for a one-file book', () => {

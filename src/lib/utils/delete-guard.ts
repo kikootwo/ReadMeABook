@@ -110,7 +110,7 @@ export async function canonicalize(p: string): Promise<CanonicalPath> {
  * link entry's identity (lstat). Used so a symlink inside a protected folder
  * is judged by where it sits, not only by what it points to.
  */
-async function canonicalizeLinkLocation(linkPath: string): Promise<CanonicalPath> {
+export async function canonicalizeLinkLocation(linkPath: string): Promise<CanonicalPath> {
   const resolved = path.resolve(linkPath);
   const location = joinGuardPath(await realpathLenient(path.dirname(resolved)), path.basename(resolved));
   let id: FileIdentity | undefined;
