@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
+import { createRequestReplacing, RE_REQUESTABLE_STATUSES, RequestAlreadyReplacedError } from '@/lib/services/request-rerequest';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { getAudibleService } from '@/lib/integrations/audible.service';
@@ -207,8 +208,10 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      // A failed/warn/cancelled request is replaced by the new one atomically (below),
+      // keeping its blocklist; it is not touched until the new request is created
       if (existingRequest) {
-        const canReRequest = ['failed', 'warn', 'cancelled'].includes(existingRequest.status);
+        const canReRequest = RE_REQUESTABLE_STATUSES.includes(existingRequest.status);
 
         if (!canReRequest) {
           return NextResponse.json(
@@ -220,13 +223,37 @@ export async function POST(request: NextRequest) {
             { status: 409 }
           );
         }
-
-        // Delete the existing failed/warn/cancelled request
-        logger.debug(`Deleting existing ${existingRequest.status} request ${existingRequest.id}`);
-        await prisma.request.delete({
-          where: { id: existingRequest.id },
-        });
       }
+
+      // Create the request; replacing a failed one keeps its blocklist and search terms.
+      // Null when another re-request replaced it first (nothing created).
+      const createRequest = async (status: string, extra: { selectedTorrent?: any } = {}) => {
+        try {
+          return await createRequestReplacing(
+            {
+              data: {
+                userId: req.user!.id,
+                audiobookId: audiobookRecord!.id,
+                status,
+                type: 'audiobook', // Explicit type for user-created requests
+                progress: 0,
+                ...extra,
+                ...(existingRequest?.customSearchTerms && { customSearchTerms: existingRequest.customSearchTerms }),
+              },
+              include: { audiobook: true, user: { select: { id: true, plexUsername: true } } },
+            },
+            existingRequest?.id ?? null
+          );
+        } catch (error) {
+          if (error instanceof RequestAlreadyReplacedError) return null;
+          throw error;
+        }
+      };
+      const alreadyReplaced = () =>
+        NextResponse.json(
+          { error: 'DuplicateRequest', message: 'You have already requested this audiobook' },
+          { status: 409 }
+        );
 
       // Check if request needs approval
       let needsApproval = false;
@@ -275,25 +302,9 @@ export async function POST(request: NextRequest) {
         // Create request with awaiting_approval status and store selected torrent
         logger.info('Request requires approval, storing selected torrent', { userId: req.user.id });
 
-        const newRequest = await prisma.request.create({
-          data: {
-            userId: req.user.id,
-            audiobookId: audiobookRecord.id,
-            status: 'awaiting_approval',
-            type: 'audiobook', // Explicit type for user-created requests
-            progress: 0,
-            selectedTorrent: torrent as any, // Store the selected torrent for later
-          },
-          include: {
-            audiobook: true,
-            user: {
-              select: {
-                id: true,
-                plexUsername: true,
-              },
-            },
-          },
-        });
+        // Store the selected torrent for later
+        const newRequest = await createRequest('awaiting_approval', { selectedTorrent: torrent as any });
+        if (!newRequest) return alreadyReplaced();
 
         // Send pending approval notification
         await jobQueue.addNotificationJob(
@@ -317,24 +328,8 @@ export async function POST(request: NextRequest) {
         // Auto-approved - create request with downloading status and start download
         logger.info('Request auto-approved, starting download', { userId: req.user.id });
 
-        const newRequest = await prisma.request.create({
-          data: {
-            userId: req.user.id,
-            audiobookId: audiobookRecord.id,
-            status: 'downloading',
-            type: 'audiobook', // Explicit type for user-created requests
-            progress: 0,
-          },
-          include: {
-            audiobook: true,
-            user: {
-              select: {
-                id: true,
-                plexUsername: true,
-              },
-            },
-          },
-        });
+        const newRequest = await createRequest('downloading');
+        if (!newRequest) return alreadyReplaced();
 
         // Queue download job with the selected torrent
         await jobQueue.addDownloadJob(

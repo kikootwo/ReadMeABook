@@ -30,14 +30,16 @@ Key fields:
 - `source` — `'organize_fail' | 'download_fail' | 'manual'` (manual reserved for v2).
 - `reason` — short human-readable (e.g. "No audiobook files found").
 - `reasonDetail` — longer client error (SAB `failMessage`, NZBGet par/unpack codes).
-- `downloadHistoryId` — traceability link.
+- `downloadHistoryId` — traceability link (historical: after a re-request the DownloadHistory row is gone with the old request).
 - `jobId` — for `JobEvent` filtering.
 
 Unique constraint: `(requestId, releaseKey)` — idempotent upsert under concurrent writes.
 
 Delete behavior:
 - **Soft-delete of request** → blocklist rows survive (no cascade).
-- **Hard-delete of request** → blocklist rows wiped via `onDelete: Cascade`.
+- **Hard-delete of request** → blocklist rows wiped via `onDelete: Cascade` (admin `DELETE /api/requests/[id]`, seeded-torrent cleanup of soft-deleted requests).
+- **Re-request** of a `failed`/`warn`/`cancelled` request (user re-request, shelf sync, watched lists, interactive pick; `src/lib/services/request-rerequest.ts` `createRequestReplacing`): one transaction creates the new request, moves the old request's rows to it (`updateMany`, same row ids), then deletes the old request guarded by status. The new request starts with the old blocklist and `customSearchTerms`; jobs and notifications run after commit. A concurrent re-request finds nothing to delete, rolls back and gets `duplicate` (no second request).
+- Effect (#312): a re-created request whose candidates are all blocked goes to `awaiting_search` ("all blocked"), which is not re-requestable, so shelf sync stops re-grabbing the dead release. This stops the loop only for **auto-blocked** failures; a failed request with no block (e.g. download-torrent, search, monitor-download connection, job-queue failures) is still recreated on every shelf sync.
 
 ## Service API
 **File:** `src/lib/services/blocklist.service.ts`
