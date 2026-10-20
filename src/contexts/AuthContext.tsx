@@ -43,6 +43,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const refreshTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // A refresh still in flight at unmount must not arm a new timer afterwards
+  const unmountedRef = useRef(false);
 
   // Clear any existing refresh timer
   const clearRefreshTimer = () => {
@@ -55,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Schedule auto-refresh before token expires
   const scheduleTokenRefresh = (token: string) => {
     clearRefreshTimer();
+    if (unmountedRef.current) return;
 
     const refreshTimeMs = getRefreshTimeMs(token);
     if (refreshTimeMs === null || refreshTimeMs <= 0) {
@@ -277,7 +280,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Cleanup timer on unmount
   useEffect(() => {
+    unmountedRef.current = false; // StrictMode re-runs effects after a simulated unmount
     return () => {
+      unmountedRef.current = true;
       clearRefreshTimer();
     };
   }, []);
