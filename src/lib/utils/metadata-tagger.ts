@@ -9,6 +9,15 @@ import path from 'path';
 import fs from 'fs/promises';
 import { METADATA_TAG_FORMATS, MP4_CONTAINER_FORMATS } from '../constants/audio-formats';
 import { addFreeformTags, type FreeformTag, type FreeformTagResult } from './mp4-freeform-tags';
+import {
+  capUtf8Bytes,
+  describeFfmpegFailure,
+  MAX_DESCRIPTION_BYTES,
+  sanitizeGenreName,
+  sanitizeMetadataValue,
+  sanitizeMultilineValue,
+  truncateRawText,
+} from './metadata-text';
 
 const execFilePromise = promisify(execFile);
 
@@ -20,7 +29,15 @@ export interface MetadataTaggingOptions {
   asin?: string;
   series?: string;
   seriesPart?: string;
+  description?: string; // Publisher summary (plain text, may contain paragraphs)
+  genres?: string[]; // Top-level genres, joined into one tag
 }
+
+/**
+ * Joins genres into one tag. Audiobookshelf splits genre tags on '/', '//' or ';'
+ * (first match wins), so a '/' inside a genre name becomes ' & '.
+ */
+const GENRE_SEPARATOR = '; ';
 
 export interface TaggingResult {
   success: boolean;
@@ -38,21 +55,6 @@ const isMp4Container = (ext: string) => (MP4_CONTAINER_FORMATS as readonly strin
  */
 export function ffmpegRemuxTimeoutMs(sizeBytes: number): number {
   return 120_000 + Math.ceil((sizeBytes / 1024 ** 3) * 120_000);
-}
-
-/**
- * Sanitize a metadata value before writing.
- * Conservative — only removes characters that are clearly not intent:
- * - Leading BOM, NBSP, zero-width space, zero-width non-joiner, zero-width joiner
- * - Null bytes, CR, LF anywhere (ffmpeg metadata semantics break on these)
- * - Leading/trailing whitespace
- * Does NOT normalize Unicode forms or otherwise transform content.
- */
-function sanitizeMetadataValue(value: string): string {
-  return value
-    .replace(/^[﻿ ​‌‍]+/, '') // leading BOM / NBSP / ZWSP / ZWNJ / ZWJ
-    .replace(/[\x00\r\n]/g, '') // null bytes and line breaks anywhere
-    .trim();
 }
 
 /**
@@ -115,6 +117,13 @@ export async function tagAudioFileMetadata(
     const asin = metadata.asin ? sanitizeMetadataValue(metadata.asin) : undefined;
     const series = metadata.series ? sanitizeMetadataValue(metadata.series) : undefined;
     const seriesPart = metadata.seriesPart ? sanitizeMetadataValue(metadata.seriesPart) : undefined;
+    const description = metadata.description
+      ? capUtf8Bytes(sanitizeMultilineValue(truncateRawText(metadata.description)), MAX_DESCRIPTION_BYTES) || undefined
+      : undefined;
+    const genre = metadata.genres
+      ?.map(sanitizeGenreName)
+      .filter((name) => name.length > 0)
+      .join(GENRE_SEPARATOR);
 
     // Create temporary file path
     const tempFile = `${filePath}.tmp`;
@@ -154,6 +163,23 @@ export async function tagAudioFileMetadata(
         args.push('-metadata', `episode_id=${seriesPart}`);
       }
 
+      if (description) {
+        args.push(
+          '-metadata', `description=${description}`, // desc atom (read by Audiobookshelf)
+          '-metadata', `synopsis=${description}` // ldes atom (long description)
+        );
+      }
+
+      if (genre) {
+        args.push('-metadata', `genre=${genre}`);
+      }
+
+      // Mark the file as an audiobook (stik=2) with gapless playback (pgap=1)
+      args.push(
+        '-metadata', 'media_type=2',
+        '-metadata', 'gapless_playback=1'
+      );
+
       // moov first (faststart), also when the freeform post-step later refuses the file
       args.push('-movflags', '+faststart');
 
@@ -190,6 +216,16 @@ export async function tagAudioFileMetadata(
         args.push('-metadata', `SERIES-PART=${seriesPart}`);
       }
 
+      if (description) {
+        // ffmpeg's `comment` is the Vorbis DESCRIPTION field; it replaces the source's
+        // (a `description` key would be a second DESCRIPTION, read as "old;new")
+        args.push('-metadata', `comment=${description}`);
+      }
+
+      if (genre) {
+        args.push('-metadata', `genre=${genre}`);
+      }
+
       // Explicitly specify output format
       args.push('-f', 'flac');
     }
@@ -224,6 +260,15 @@ export async function tagAudioFileMetadata(
         args.push('-metadata', `SERIES-PART=${seriesPart}`);
       }
 
+      if (description) {
+        // TXXX frame, read back as `description` (Audiobookshelf reads this)
+        args.push('-metadata', `description=${description}`);
+      }
+
+      if (genre) {
+        args.push('-metadata', `genre=${genre}`); // TCON frame
+      }
+
       // Explicitly specify output format (fixes .tmp extension issue)
       args.push('-f', 'mp3');
     }
@@ -241,7 +286,7 @@ export async function tagAudioFileMetadata(
         // Ignore cleanup errors
       }
 
-      throw new Error(`ffmpeg failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(`ffmpeg failed: ${describeFfmpegFailure(error)}`);
     }
 
     // DO NOT replace original file - return temp file path instead
