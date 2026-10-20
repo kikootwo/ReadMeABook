@@ -105,6 +105,38 @@ describe('AudiobookDetailsModal', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('renders the trimmed summary in its own scroll box', async () => {
+    useAudiobookDetailsMock.mockReturnValue({
+      audiobook: { ...audiobookDetails, description: '  First paragraph.\n\nSecond paragraph.  ' },
+      isLoading: false,
+      error: null,
+    });
+    const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+    render(<AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} />);
+    await act(async () => {});
+
+    expect(screen.getByRole('heading', { name: 'Summary' })).toBeInTheDocument();
+    const box = screen.getByTestId('book-summary-scroll');
+    expect(box.querySelector('p')?.textContent).toBe('First paragraph.\n\nSecond paragraph.');
+  });
+
+  it('omits the summary section when the description is only whitespace', async () => {
+    useAudiobookDetailsMock.mockReturnValue({
+      audiobook: { ...audiobookDetails, description: ' \n\n  ' },
+      isLoading: false,
+      error: null,
+    });
+    const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+    render(<AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} />);
+    await act(async () => {});
+
+    expect(screen.getByText('Detail Book')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Summary' })).toBeNull();
+    expect(screen.queryByTestId('book-summary-scroll')).toBeNull();
+  });
+
   it('creates requests and auto-closes after success', async () => {
     vi.useFakeTimers();
     createRequestMock.mockResolvedValueOnce(undefined);

@@ -30,7 +30,8 @@ src/components/
 **Audiobooks**
 - **AudiobookCard** ✅ - Cover, title, author, narrator, duration, request button, clickable to open details modal. Shows "Requested by [username]" when someone else has requested the book, "Requested" when current user has requested it
 - **AudiobookGrid** - Responsive grid (1/2/3/4 cols)
-- **AudiobookDetailsModal** ✅ - Full-screen modal with comprehensive metadata (description, genres, rating, release date, narrator, language, format, publisher, request functionality). Shows requesting user's name when applicable
+- **AudiobookDetailsModal** ✅ - Full-screen modal with comprehensive metadata (description, genres, rating, release date, narrator, language, format, publisher, request functionality). Shows requesting user's name when applicable. Scroll area (`flex flex-col`) holds a `flex flex-col min-h-0` content column; bottom padding is an `after:` spacer so it survives when the column is shrunk. Summary rendered by **BookSummary**
+- **BookSummary** ✅ - `src/components/audiobooks/BookSummary.tsx`. Summary h3 + capped scroll box, returned as a fragment (both are flex items of the modal content column). Phone (<640px): fixed `max-h-[38dvh]`, sheet scrolls. sm+: box absorbs leftover height: wrapper `shrink basis-[content] h-24 max-h-[15rem]` → height between min(6rem, natural) and 15rem (CSS only: auto min size = min(content, specified h-24)); 1440x900 default modal has 0 outer overflow. Overflowing only: `role=region`, `aria-labelledby` heading ("Summary"), `tabIndex=0`, bottom fade `h-6` while more text below, top fade `h-4` once scrolled, fades inset by scrollbar width. Short text: natural height, no region/tab stop/fades. `overscroll-y-auto` on every pointer (swipe/wheel at the end chains to the modal; modal scroll area is `overscroll-contain` + body lock, so the page never moves). `<p>` is `whitespace-pre-wrap break-words`, box `overflow-x-hidden`. Modal passes `description.trim()`; whitespace-only → no section
 
 **Requests**
 - **RequestCard** ✅ - Cover, title, author, status badge, progress bar, timestamps, action buttons (cancel, manual search, interactive search). When status=`awaiting_release` and `releaseDate` is set, shows "Releases &lt;Mon DD, YYYY&gt;" next to the status badge (UTC-formatted)
@@ -123,6 +124,10 @@ interface AudiobookDetailsModalProps {
   hasReportedIssue?: boolean;
   aiReason?: string | null;
   adminActions?: React.ReactNode; // Optional admin buttons (Approve/Search/Deny) rendered as second row in action bar
+}
+
+interface BookSummaryProps {
+  text: string; // already trimmed; paragraphs kept via whitespace-pre-wrap
 }
 
 interface RequestCardProps {
