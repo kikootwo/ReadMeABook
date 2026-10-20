@@ -123,6 +123,7 @@
 - **Environment variables, volumes** → [deployment/docker.md](deployment/docker.md)
 - **Volume mapping (download clients)** → [deployment/volume-mapping.md](deployment/volume-mapping.md)
 - **Database setup (Prisma), migrations** → [deployment/docker.md](deployment/docker.md)
+- **CI workflows (GitHub Actions), tag-only image publishing, action SHA pins** → [deployment/ci-workflows.md](deployment/ci-workflows.md)
 
 ## Testing
 - **Backend unit test framework, scripts** [testing.md](testing.md)
