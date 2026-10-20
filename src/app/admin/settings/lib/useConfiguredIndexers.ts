@@ -28,6 +28,13 @@ export interface IndexerSavePlan {
 
 const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 
+const LOAD_FAILED_TEXT = 'Failed to load indexers. Check your Prowlarr settings.';
+const LOAD_ERROR_TEXT = 'Failed to load Prowlarr indexers. Check your Prowlarr URL and API key.';
+
+/** True for the banner a failed indexer load posts (cleared once a connection test succeeds). */
+export const isIndexerLoadFailureMessage = (message: Message | null): boolean =>
+  message?.type === 'error' && (message.text === LOAD_FAILED_TEXT || message.text === LOAD_ERROR_TEXT);
+
 export function useConfiguredIndexers(setMessage: (message: Message) => void) {
   const [configuredIndexers, setConfiguredIndexers] = useState<SavedIndexerConfig[]>([]);
   const [originalConfiguredIndexers, setOriginalConfiguredIndexers] = useState<SavedIndexerConfig[]>([]);
@@ -48,7 +55,7 @@ export function useConfiguredIndexers(setMessage: (message: Message) => void) {
       if (!response.ok) {
         setLoadAttempted(true);
         console.error('Failed to fetch indexers:', response.status);
-        if (force) setMessage({ type: 'error', text: 'Failed to load indexers. Check your Prowlarr settings.' });
+        if (force) setMessage({ type: 'error', text: LOAD_FAILED_TEXT });
         return false;
       }
       const data = await response.json();
@@ -70,7 +77,7 @@ export function useConfiguredIndexers(setMessage: (message: Message) => void) {
       setLoadAttempted(true);
       console.error('Failed to fetch indexers:', error);
       if (force) {
-        setMessage({ type: 'error', text: 'Failed to load Prowlarr indexers. Check your Prowlarr URL and API key.' });
+        setMessage({ type: 'error', text: LOAD_ERROR_TEXT });
       }
       return false;
     }

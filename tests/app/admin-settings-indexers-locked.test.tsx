@@ -127,6 +127,7 @@ describe('Indexers tab while the saved list is not loaded', () => {
     await openIndexersTab();
     await waitFor(() => expect(lockedNote()).toBeInTheDocument(), { timeout: 5000 });
     const saved = configStore.get('prowlarr_indexers');
+    expect(await screen.findByText(/Failed to load indexers/)).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText('http://localhost:9696'), { target: { value: 'http://moved-prowlarr:9696' } });
     fireEvent.click(screen.getByRole('button', { name: 'Test Connection' }));
@@ -140,6 +141,8 @@ describe('Indexers tab while the saved list is not loaded', () => {
       ([url, init]) => url === '/api/admin/settings/prowlarr/indexers' && !(init as RequestInit | undefined)?.method
     ).length;
     expect(indexerGets()).toBe(1); // only the initial load
+    // The success replaces the mount-time load-failure banner
+    expect(screen.queryByText(/Failed to load indexers/)).not.toBeInTheDocument();
 
     // The new address answers once it is saved
     bridge.savedListFails = false;

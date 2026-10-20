@@ -26,7 +26,7 @@ import { ApiTab } from './tabs/ApiTab/ApiTab';
 
 // Types and Helpers
 import type { Settings, SettingsTab, Message } from './lib/types';
-import { useConfiguredIndexers } from './lib/useConfiguredIndexers';
+import { isIndexerLoadFailureMessage, useConfiguredIndexers } from './lib/useConfiguredIndexers';
 
 import { parseArrayToCommaSeparated, saveTabSettings, validateAuthSettings, getTabValidation, getTabs } from './lib/helpers';
 
@@ -277,7 +277,11 @@ export default function AdminSettings() {
               indexersLoaded={indexersLoaded}
               flagsLoaded={flagsLoaded}
               onFlagConfigsChange={setFlagConfigs}
-              onValidationChange={(isValid) => setValidated({ ...validated, prowlarr: isValid })}
+              onValidationChange={(isValid) => {
+                setValidated({ ...validated, prowlarr: isValid });
+                // A successful connection test supersedes an earlier "failed to load" banner
+                if (isValid) setMessage((current) => (isIndexerLoadFailureMessage(current) ? null : current));
+              }}
               onRefreshIndexers={async () => { await fetchIndexers(true); }}
             />
           )}
