@@ -30,8 +30,8 @@ updates:
       # tests fail on it); a major needs a migration of that code. Upgrade by hand.
       - dependency-name: "zod"
         update-types: ["version-update:semver-major"]
-      # ioredis is the Redis client behind the job queue; PR CI only runs unit tests (no Redis),
-      # so a major can't be checked there. Upgrade by hand with a real-Redis test.
+      # ioredis backs the startup Redis readiness check (Bull brings its own copy for the queue).
+      # PR CI mocks it and has no Redis, so a major can't be checked there. Upgrade by hand.
       - dependency-name: "ioredis"
         update-types: ["version-update:semver-major"]
       # An eslint major has to be checked against eslint-config-next, and PR CI doesn't run the
