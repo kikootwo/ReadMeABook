@@ -106,6 +106,12 @@ export async function fixEpubForKindle(
     },
   };
 
+  // The temp folder of this run, removed again on every failure path
+  let outputDir: string | null = null;
+  const removeOutputDir = async () => {
+    if (outputDir) await fs.rm(outputDir, { recursive: true, force: true }).catch(() => undefined);
+  };
+
   try {
     await logger?.info(`Starting Kindle EPUB fix for: ${path.basename(sourcePath)}`);
 
@@ -116,118 +122,17 @@ export async function fixEpubForKindle(
       throw new Error(`Source EPUB not found or not readable: ${sourcePath}`);
     }
 
-    // Load the EPUB (ZIP file)
-    const zip = new AdmZip(sourcePath);
-    const zipEntries = zip.getEntries();
+    // The in-memory zip lives only inside writeFixedEpub, so it can be collected before the
+    // written copy is read back (keeps peak memory lower for large EPUBs)
+    const { outputPath, sourceFilename, intended } = await writeFixedEpub(sourcePath, tempDir, result, logger, (dir) => {
+      outputDir = dir;
+    });
 
-    await logger?.info(`Loaded EPUB with ${zipEntries.length} entries`);
-
-    // Track OPF file for language fix
-    let opfEntry: AdmZip.IZipEntry | null = null;
-    let opfPath = '';
-
-    // Find content files and OPF
-    for (const entry of zipEntries) {
-      const entryPath = entry.entryName.toLowerCase();
-
-      // Find OPF file (metadata)
-      if (entryPath.endsWith('.opf')) {
-        opfEntry = entry;
-        opfPath = entry.entryName;
-      }
-    }
-
-    // Process content files (HTML/XHTML)
-    for (const entry of zipEntries) {
-      if (entry.isDirectory) continue;
-
-      const ext = path.extname(entry.entryName).toLowerCase();
-      if (!CONTENT_EXTENSIONS.includes(ext)) continue;
-
-      // Read file content
-      let content = entry.getData().toString('utf8');
-      let modified = false;
-
-      // Fix 1: Encoding declaration
-      const encodingResult = fixEncoding(content);
-      if (encodingResult.modified) {
-        content = encodingResult.content;
-        modified = true;
-        result.fixesApplied.encodingFixes++;
-      }
-
-      // Fix 2: Body ID links
-      const bodyIdResult = fixBodyIdLinks(content);
-      if (bodyIdResult.modified) {
-        content = bodyIdResult.content;
-        modified = true;
-        result.fixesApplied.bodyIdLinkFixes += bodyIdResult.count;
-      }
-
-      // Fix 4: Stray IMG tags (applied to HTML content)
-      const strayImgResult = fixStrayImages(content);
-      if (strayImgResult.modified) {
-        content = strayImgResult.content;
-        modified = true;
-        result.fixesApplied.strayImgFixes += strayImgResult.count;
-      }
-
-      // Update entry if modified
-      if (modified) {
-        zip.updateFile(entry.entryName, Buffer.from(content, 'utf8'));
-      }
-    }
-
-    // Fix 3: Language validation (in OPF file)
-    if (opfEntry) {
-      const opfContent = opfEntry.getData().toString('utf8');
-      const languageResult = fixLanguage(opfContent);
-
-      if (languageResult.modified) {
-        zip.updateFile(opfPath, Buffer.from(languageResult.content, 'utf8'));
-        result.fixesApplied.languageFix = true;
-        await logger?.info(`Fixed language tag: "${languageResult.originalLang}" -> "${languageResult.newLang}"`);
-      }
-    }
-
-    // Log fixes applied
-    const totalFixes =
-      result.fixesApplied.encodingFixes +
-      result.fixesApplied.bodyIdLinkFixes +
-      (result.fixesApplied.languageFix ? 1 : 0) +
-      result.fixesApplied.strayImgFixes;
-
-    if (totalFixes > 0) {
-      await logger?.info(
-        `Applied ${totalFixes} fixes: ` +
-        `encoding=${result.fixesApplied.encodingFixes}, ` +
-        `bodyIdLinks=${result.fixesApplied.bodyIdLinkFixes}, ` +
-        `language=${result.fixesApplied.languageFix}, ` +
-        `strayImages=${result.fixesApplied.strayImgFixes}`
-      );
-    } else {
-      await logger?.info('No fixes needed - EPUB is already Kindle-compatible');
-    }
-
-    // Create unique temp subdirectory to avoid filename conflicts
-    // This preserves the original filename for the final organized file
-    const uniqueDir = path.join(tempDir, `kindle-fix-${Date.now()}`);
-    const configService = getConfigService();
-    const dirChmodStr = await configService.get('dir_chmod') || '775';
-    const dirMode = parseInt(dirChmodStr, 8);
-    await fs.mkdir(uniqueDir, { recursive: true, mode: dirMode });
-
-    // Keep original filename
-    const sourceFilename = path.basename(sourcePath);
-    const outputPath = path.join(uniqueDir, sourceFilename);
-
-    // Write fixed EPUB, then read it back: only a copy that matches what was meant to be
-    // written may be imported (a truncated or corrupted copy would replace the original)
-    const intended = intendedEntries(zip);
-    zip.writeZip(outputPath);
+    // Read the copy back: only one that matches what was meant to be written may be
+    // imported (a truncated or corrupted copy would replace the original)
     const problem = verifyWrittenEpub(outputPath, intended);
     if (problem) {
-      await fs.rm(uniqueDir, { recursive: true, force: true }).catch(() => undefined);
+      await removeOutputDir();
       const message = `Fixed EPUB failed verification: ${problem}`;
       if (logger) await logger.warn(message);
       else moduleLogger.warn(message);
@@ -243,11 +148,139 @@ export async function fixEpubForKindle(
 
     return result;
   } catch (error) {
+    await removeOutputDir();
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     await logger?.error(`EPUB fix failed: ${errorMessage}`);
     result.error = errorMessage;
     return result;
   }
+}
+
+type JobLogger = ReturnType<typeof RMABLogger.forJob>;
+
+/**
+ * Load the EPUB, apply the fixes (counted on `result.fixesApplied`), write the fixed copy
+ * into a new temp folder (reported through onOutputDir as soon as it exists) and return
+ * the sha256 per entry of what was meant to be written.
+ */
+async function writeFixedEpub(
+  sourcePath: string,
+  tempDir: string,
+  result: EpubFixResult,
+  logger: JobLogger | null,
+  onOutputDir: (dir: string) => void
+): Promise<{ outputPath: string; sourceFilename: string; intended: Map<string, string | null> }> {
+  // Load the EPUB (ZIP file)
+  const zip = new AdmZip(sourcePath);
+  const zipEntries = zip.getEntries();
+
+  await logger?.info(`Loaded EPUB with ${zipEntries.length} entries`);
+
+  // Track OPF file for language fix
+  let opfEntry: AdmZip.IZipEntry | null = null;
+  let opfPath = '';
+
+  // Find content files and OPF
+  for (const entry of zipEntries) {
+    const entryPath = entry.entryName.toLowerCase();
+
+    // Find OPF file (metadata)
+    if (entryPath.endsWith('.opf')) {
+      opfEntry = entry;
+      opfPath = entry.entryName;
+    }
+  }
+
+  // Process content files (HTML/XHTML)
+  for (const entry of zipEntries) {
+    if (entry.isDirectory) continue;
+
+    const ext = path.extname(entry.entryName).toLowerCase();
+    if (!CONTENT_EXTENSIONS.includes(ext)) continue;
+
+    // Read file content
+    let content = entry.getData().toString('utf8');
+    let modified = false;
+
+    // Fix 1: Encoding declaration
+    const encodingResult = fixEncoding(content);
+    if (encodingResult.modified) {
+      content = encodingResult.content;
+      modified = true;
+      result.fixesApplied.encodingFixes++;
+    }
+
+    // Fix 2: Body ID links
+    const bodyIdResult = fixBodyIdLinks(content);
+    if (bodyIdResult.modified) {
+      content = bodyIdResult.content;
+      modified = true;
+      result.fixesApplied.bodyIdLinkFixes += bodyIdResult.count;
+    }
+
+    // Fix 4: Stray IMG tags (applied to HTML content)
+    const strayImgResult = fixStrayImages(content);
+    if (strayImgResult.modified) {
+      content = strayImgResult.content;
+      modified = true;
+      result.fixesApplied.strayImgFixes += strayImgResult.count;
+    }
+
+    // Update entry if modified
+    if (modified) {
+      zip.updateFile(entry.entryName, Buffer.from(content, 'utf8'));
+    }
+  }
+
+  // Fix 3: Language validation (in OPF file)
+  if (opfEntry) {
+    const opfContent = opfEntry.getData().toString('utf8');
+    const languageResult = fixLanguage(opfContent);
+
+    if (languageResult.modified) {
+      zip.updateFile(opfPath, Buffer.from(languageResult.content, 'utf8'));
+      result.fixesApplied.languageFix = true;
+      await logger?.info(`Fixed language tag: "${languageResult.originalLang}" -> "${languageResult.newLang}"`);
+    }
+  }
+
+  // Log fixes applied
+  const totalFixes =
+    result.fixesApplied.encodingFixes +
+    result.fixesApplied.bodyIdLinkFixes +
+    (result.fixesApplied.languageFix ? 1 : 0) +
+    result.fixesApplied.strayImgFixes;
+
+  if (totalFixes > 0) {
+    await logger?.info(
+      `Applied ${totalFixes} fixes: ` +
+      `encoding=${result.fixesApplied.encodingFixes}, ` +
+      `bodyIdLinks=${result.fixesApplied.bodyIdLinkFixes}, ` +
+      `language=${result.fixesApplied.languageFix}, ` +
+      `strayImages=${result.fixesApplied.strayImgFixes}`
+    );
+  } else {
+    await logger?.info('No fixes needed - EPUB is already Kindle-compatible');
+  }
+
+  // Create a unique temp subdirectory (mkdtemp: no collision between concurrent jobs)
+  // This preserves the original filename for the final organized file
+  const configService = getConfigService();
+  const dirChmodStr = await configService.get('dir_chmod') || '775';
+  const dirMode = parseInt(dirChmodStr, 8);
+  await fs.mkdir(tempDir, { recursive: true, mode: dirMode });
+  const uniqueDir = await fs.mkdtemp(path.join(tempDir, 'kindle-fix-'));
+  onOutputDir(uniqueDir);
+  await fs.chmod(uniqueDir, dirMode);
+
+  // Keep original filename
+  const sourceFilename = path.basename(sourcePath);
+  const outputPath = path.join(uniqueDir, sourceFilename);
+
+  // Record what is meant to be written, then write it
+  const intended = intendedEntries(zip);
+  zip.writeZip(outputPath);
+  return { outputPath, sourceFilename, intended };
 }
 
 /**

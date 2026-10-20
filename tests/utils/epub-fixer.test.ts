@@ -163,7 +163,7 @@ describe('fixEpubForKindle round trip', () => {
         const full = zip.toBuffer();
         return full.subarray(0, Math.floor(full.length / 2));
       });
-      await fixAndExpectRejected(/could not be opened/);
+      await fixAndExpectRejected(/could not be opened or listed/);
     });
 
     it('rejects a copy whose entry data is corrupted, naming the entry and never its content', async () => {
@@ -177,6 +177,57 @@ describe('fixEpubForKindle round trip', () => {
       });
       const result = await fixAndExpectRejected(/entry "mimetype"/);
       expect(result.error).not.toMatch(/epub\+zip/);
+    });
+
+    it('rejects a copy whose central directory is damaged', async () => {
+      writeInstead((zip) => {
+        const full = Buffer.from(zip.toBuffer());
+        // Break the signature of the first central directory header (PK)
+        const cen = full.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+        expect(cen).toBeGreaterThan(0);
+        full[cen + 2] = 0x09;
+        return full;
+      });
+      await fixAndExpectRejected(/could not be opened or listed/);
+    });
+
+    it('rejects a copy whose deflated entry data is damaged, naming the entry', async () => {
+      writeInstead((zip) => {
+        const full = Buffer.from(zip.toBuffer());
+        const entry = new AdmZip(full).getEntry('OEBPS/ch1.xhtml')!;
+        expect(entry.header.method).toBe(8); // deflated
+        // Local header: 30 bytes + name + extra, then the compressed data
+        const local = entry.header.offset;
+        const dataStart = local + 30 + full.readUInt16LE(local + 26) + full.readUInt16LE(local + 28);
+        full[dataStart + Math.floor(entry.header.compressedSize / 2)] ^= 0xff;
+        return full;
+      });
+      await fixAndExpectRejected(/entry "OEBPS\/ch1\.xhtml"/);
+    });
+
+    it('removes its temp folder and reports a plain failure when writing throws', async () => {
+      writeInstead(() => {
+        throw new Error('ENOSPC: no space left on device, write');
+      });
+      const { fixEpubForKindle } = await import('@/lib/utils/epub-fixer');
+      const result = await fixEpubForKindle(source, dir);
+
+      expect(result).toMatchObject({ success: false, outputPath: null });
+      expect(result.verificationFailed).toBeUndefined();
+      expect(result.error).toContain('ENOSPC');
+      expect((await fs.readdir(dir)).filter((n) => n.startsWith('kindle-fix-'))).toEqual([]);
+    });
+
+    it('gives concurrent runs separate temp folders', async () => {
+      const now = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+      const { fixEpubForKindle } = await import('@/lib/utils/epub-fixer');
+      const [a, b] = await Promise.all([fixEpubForKindle(source, dir), fixEpubForKindle(source, dir)]);
+      now.mockRestore();
+
+      expect(a.success && b.success).toBe(true);
+      expect(path.dirname(a.outputPath!)).not.toBe(path.dirname(b.outputPath!));
+      expect(new AdmZip(a.outputPath!).getEntries().length).toBe(ENTRY_ORDER.length);
+      expect(new AdmZip(b.outputPath!).getEntries().length).toBe(ENTRY_ORDER.length);
     });
 
     it('rejects a valid archive whose entry differs from what the fixer meant to write', async () => {
