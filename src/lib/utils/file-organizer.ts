@@ -38,6 +38,8 @@ export interface AudiobookMetadata {
   asin?: string;
   series?: string;
   seriesPart?: string;
+  description?: string; // Metadata tags only (not used in path templates)
+  genres?: string[]; // Metadata tags only (not used in path templates)
 }
 
 export interface OrganizationResult {
@@ -59,6 +61,8 @@ export interface OrganizationResult {
 export interface PlacementOptions {
   /** Compare same-size existing targets byte-for-byte; only worth it when a delete depends on it. */
   compareExisting?: boolean;
+  /** The caller's read of `metadata_tagging_enabled`; read here when omitted. */
+  metadataTaggingEnabled?: boolean;
 }
 
 export interface EbookOrganizationResult {
@@ -158,7 +162,7 @@ export class FileOrganizer {
       // Determine base path for source files
       const baseSourcePath = isFile ? path.dirname(downloadPath) : downloadPath;
 
-      const metadataTaggingEnabled = await prisma.configuration.findUnique({ where: { key: 'metadata_tagging_enabled' } }).then((c) => c?.value === 'true', async (error: unknown) => {
+      const metadataTaggingEnabled = placement?.metadataTaggingEnabled ?? await prisma.configuration.findUnique({ where: { key: 'metadata_tagging_enabled' } }).then((c) => c?.value === 'true', async (error: unknown) => {
         const skipped = `Metadata tagging skipped: could not read setting (${error instanceof Error ? error.message : 'Unknown error'})`;
         await logger?.warn(skipped); result.errors.push(skipped); return false;
       }); // read once: merge disk-space check + tagging pass
@@ -297,6 +301,8 @@ export class FileOrganizer {
               asin: audiobook.asin,
               series: audiobook.series,
               seriesPart: audiobook.seriesPart,
+              description: audiobook.description,
+              genres: audiobook.genres,
             });
 
             const successCount = taggingResults.filter((r) => r.success).length;

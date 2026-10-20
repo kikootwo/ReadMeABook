@@ -53,6 +53,8 @@ export interface AudibleAudiobook {
   releaseDate?: string;
   rating?: number;
   genres?: string[];
+  /** Top-level genres only (no sub-genre tags), as written into the audio file tags */
+  primaryGenres?: string[];
   series?: string;
   seriesPart?: string;
   seriesAsin?: string;
@@ -156,6 +158,14 @@ function mapCatalogProduct(product: CatalogProduct): AudibleAudiobook {
       ? [...new Set(genreNames)].slice(0, 5)
       : undefined;
 
+  // Each ladder runs from its top-level genre down to sub-genres
+  const primaryGenreNames =
+    product.category_ladders
+      ?.map((ladder) => ladder.ladder?.[0]?.name as unknown)
+      .filter((name): name is string => typeof name === 'string' && name.trim() !== '') ?? [];
+  const primaryGenres =
+    primaryGenreNames.length > 0 ? [...new Set(primaryGenreNames)] : undefined;
+
   let series: string | undefined;
   let seriesPart: string | undefined;
   let seriesAsin: string | undefined;
@@ -186,6 +196,7 @@ function mapCatalogProduct(product: CatalogProduct): AudibleAudiobook {
     releaseDate: product.release_date ?? undefined,
     rating: product.rating?.overall_distribution?.display_stars ?? undefined,
     genres,
+    primaryGenres,
     series,
     seriesPart,
     seriesAsin,
@@ -193,6 +204,18 @@ function mapCatalogProduct(product: CatalogProduct): AudibleAudiobook {
     formatType: product.format_type ?? undefined,
     publisherName: product.publisher_name ?? undefined,
   };
+}
+
+/**
+ * Top-level genres from an Audnexus genre list. Audnexus marks the top of each
+ * category ladder `type: 'genre'` and the sub-genres below it `type: 'tag'`.
+ */
+function audnexusPrimaryGenres(genres: unknown): string[] | undefined {
+  if (!Array.isArray(genres)) return undefined;
+  const names = (genres as Array<string | { name?: unknown; type?: unknown } | null>)
+    .map((g) => (typeof g === 'string' ? g : g?.type !== 'tag' ? g?.name : undefined))
+    .filter((name): name is string => typeof name === 'string' && name.trim() !== '');
+  return names.length > 0 ? [...new Set(names)] : undefined;
 }
 
 export class AudibleService {
@@ -686,6 +709,7 @@ export class AudibleService {
         releaseDate: data.releaseDate || undefined,
         rating: data.rating ? parseFloat(data.rating) : undefined,
         genres: data.genres?.map((g: any) => (typeof g === 'string' ? g : g.name)).slice(0, 5) || undefined,
+        primaryGenres: audnexusPrimaryGenres(data.genres),
         series: data.seriesPrimary?.name || undefined,
         seriesPart: data.seriesPrimary?.position || undefined,
         seriesAsin: data.seriesPrimary?.asin || undefined,

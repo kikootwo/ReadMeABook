@@ -732,6 +732,53 @@ describe('AudibleService', () => {
       expect(genreSet.size).toBe(5);
     });
 
+    it('maps primaryGenres to the deduplicated top of each category ladder', async () => {
+      const products = [
+        makeProduct({
+          category_ladders: [
+            { ladder: [{ name: 'Fiction' }, { name: 'Fantasy' }, { name: 'Epic Fantasy' }] },
+            { ladder: [{ name: 'Fiction' }, { name: 'Adventure' }] },
+            { ladder: [{ name: 'Young Adult' }, { name: 'Coming of Age' }] },
+            { ladder: [] },
+          ],
+        }),
+      ];
+      apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(products)));
+
+      const service = new AudibleService();
+      const { results } = await service.search('test', 1);
+
+      expect(results[0].primaryGenres).toEqual(['Fiction', 'Young Adult']);
+    });
+
+    it('drops blank and non-string ladder names from primaryGenres', async () => {
+      const products = [
+        makeProduct({
+          category_ladders: [
+            { ladder: [{ name: '   ' }, { name: 'Sub' }] },
+            { ladder: [{ name: 42 as unknown as string }] },
+            { ladder: [{ name: 'History' }] },
+          ],
+        }),
+      ];
+      apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(products)));
+
+      const service = new AudibleService();
+      const { results } = await service.search('test', 1);
+
+      expect(results[0].primaryGenres).toEqual(['History']);
+    });
+
+    it('leaves primaryGenres undefined without category ladders', async () => {
+      const products = [makeProduct({ category_ladders: [] })];
+      apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(products)));
+
+      const service = new AudibleService();
+      const { results } = await service.search('test', 1);
+
+      expect(results[0].primaryGenres).toBeUndefined();
+    });
+
     it('maps language from catalog product', async () => {
       const products = [makeProduct({ language: 'english' })];
       apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(products)));
@@ -1436,6 +1483,45 @@ describe('AudibleService', () => {
       expect(details?.publisherName).toBe('Test Publisher');
       // Catalog API should NOT be called when Audnexus succeeds.
       expect(apiClientMock.get).not.toHaveBeenCalled();
+    });
+
+    it('maps primaryGenres to the Audnexus genres of type genre, without the sub-genre tags', async () => {
+      axiosMock.get.mockResolvedValueOnce({
+        data: {
+          title: 'Audnexus Book',
+          genres: [
+            { asin: '1', name: 'Literature & Fiction', type: 'genre' },
+            { asin: '2', name: 'Science Fiction & Fantasy', type: 'genre' },
+            { asin: '3', name: 'Hard Science Fiction', type: 'tag' },
+            { asin: '4', name: 'Space Opera', type: 'tag' },
+          ],
+        },
+      });
+
+      const service = new AudibleService();
+      const details = await service.getAudiobookDetails('B000GENRES');
+
+      expect(details?.primaryGenres).toEqual(['Literature & Fiction', 'Science Fiction & Fantasy']);
+      // The display list keeps its existing shape (genres and tags, capped at 5)
+      expect(details?.genres).toEqual([
+        'Literature & Fiction',
+        'Science Fiction & Fantasy',
+        'Hard Science Fiction',
+        'Space Opera',
+      ]);
+    });
+
+    it.each([
+      ['plain string genres', { genres: ['Fiction', 'Fiction', 'History'] }, ['Fiction', 'History']],
+      ['only tags', { genres: [{ name: 'Space Opera', type: 'tag' }] }, undefined],
+      ['no genres', {}, undefined],
+    ])('maps Audnexus primaryGenres for %s', async (_label, extra, expected) => {
+      axiosMock.get.mockResolvedValueOnce({ data: { title: 'Audnexus Book', ...extra } });
+
+      const service = new AudibleService();
+      const details = await service.getAudiobookDetails('B000GENRE2');
+
+      expect(details?.primaryGenres).toEqual(expected);
     });
 
     it('prefers the full Audnexus summary over the short description, as plain text with paragraphs', async () => {

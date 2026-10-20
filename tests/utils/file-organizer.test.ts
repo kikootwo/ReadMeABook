@@ -433,13 +433,47 @@ describe('file organizer', () => {
     const result = await organizer.organize('/downloads/book', {
       title: 'Book',
       author: 'Author',
+      description: 'Summary.',
+      genres: ['Romance'],
     }, '{author}/{title}');
 
     const expectedDir = path.join('/media', 'Author', 'Book');
     expect(result.success).toBe(true);
     expect(result.targetPath).toBe(expectedDir);
+    // Description and genres reach the tagger (they are tags only, never path parts)
+    expect(metadataMock.tagMultipleFiles).toHaveBeenCalledWith(
+      [sourcePath],
+      expect.objectContaining({ description: 'Summary.', genres: ['Romance'] })
+    );
     expect(copyFileMock.copyFile).toHaveBeenCalledWith('/tmp/tagged.m4b', path.join(expectedDir, 'book.m4b'));
     expect(fsMock.unlink).toHaveBeenCalledWith('/tmp/tagged.m4b');
+  });
+
+  it.each([
+    [true, 'false'],
+    [false, 'true'],
+  ])('uses the tagging read passed in (%s) over the stored setting (%s), without reading it again', async (passed, stored) => {
+    configState.values.set('metadata_tagging_enabled', stored);
+    configState.values.set('ebook_sidecar_enabled', 'false');
+    metadataMock.checkFfmpegAvailable.mockResolvedValue(true);
+    const sourcePath = path.join('/downloads', 'book', 'book.m4b');
+    metadataMock.tagMultipleFiles.mockResolvedValue([{ success: true, filePath: sourcePath, taggedFilePath: '/tmp/tagged.m4b' }]);
+    fsMock.access.mockImplementation(async (filePath: string) => {
+      if (path.normalize(filePath).startsWith(path.normalize('/media'))) throw new Error('missing');
+    });
+    fsMock.mkdir.mockResolvedValue(undefined);
+    copyFileMock.copyFile.mockResolvedValue(undefined);
+    fsMock.chmod.mockResolvedValue(undefined);
+    fsMock.unlink.mockResolvedValue(undefined);
+    const organizer = new FileOrganizer('/media', '/tmp');
+    (organizer as any).findAudiobookFiles = vi.fn().mockResolvedValue({ audioFiles: ['book.m4b'], coverFile: undefined, isFile: false });
+
+    const result = await organizer.organize('/downloads/book', { title: 'Book', author: 'Author' }, '{author}/{title}',
+      undefined, undefined, undefined, { metadataTaggingEnabled: passed });
+
+    expect(result.success).toBe(true);
+    expect(metadataMock.tagMultipleFiles).toHaveBeenCalledTimes(passed ? 1 : 0);
+    expect(prismaMock.configuration.findUnique).not.toHaveBeenCalledWith({ where: { key: 'metadata_tagging_enabled' } });
   });
 
   it('skips metadata tagging when ffmpeg is unavailable', async () => {

@@ -205,11 +205,11 @@ describe('verified-import cleanup', () => {
     it('compares existing library files only when a delete depends on it', async () => {
       organizeWith(target(), { [parts[0]]: 'copied', [parts[1]]: 'copied', [parts[2]]: 'copied' });
       await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
-      expect(organizerMock.organize.mock.calls[0][6]).toEqual({ compareExisting: true });
+      expect(organizerMock.organize.mock.calls[0][6]).toEqual({ compareExisting: true, metadataTaggingEnabled: false });
 
       indexers = [{ id: 7, protocol: 'torrent', removeAfterProcessing: true }];
       await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
-      expect(organizerMock.organize.mock.calls[1][6]).toEqual({ compareExisting: false });
+      expect(organizerMock.organize.mock.calls[1][6]).toEqual({ compareExisting: false, metadataTaggingEnabled: false });
     });
   });
 
