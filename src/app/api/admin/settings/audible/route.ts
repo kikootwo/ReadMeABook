@@ -19,7 +19,7 @@ export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { region } = await request.json();
+        const { region, languageFilter } = await request.json();
 
         // Validate region
         if (!region || !VALID_REGIONS.includes(region)) {
@@ -30,19 +30,38 @@ export async function PUT(request: NextRequest) {
           );
         }
 
+        // Optional: omitting languageFilter keeps the stored value
+        if (languageFilter !== undefined && typeof languageFilter !== 'boolean') {
+          logger.warn('Invalid language filter provided', { languageFilter });
+          return NextResponse.json(
+            { success: false, error: 'languageFilter must be a boolean' },
+            { status: 400 }
+          );
+        }
+
         // Save region to configuration
         const configService = getConfigService();
-        await configService.setMany([
+        const updates = [
           {
             key: 'audible.region',
             value: region,
             category: 'system',
             description: 'Audible region for metadata and search',
           },
-        ]);
+        ];
+        if (languageFilter !== undefined) {
+          updates.push({
+            key: 'audible.language_filter',
+            value: String(languageFilter),
+            category: 'system',
+            description: "Hide books not in the region's language from search, BookDate and shelf sync",
+          });
+        }
+        await configService.setMany(updates);
 
-        // Clear config cache to ensure new region is loaded immediately
+        // Clear config cache to ensure new values are loaded immediately
         configService.clearCache('audible.region');
+        configService.clearCache('audible.language_filter');
 
         // Force AudibleService to re-initialize with new region
         const audibleService = getAudibleService();

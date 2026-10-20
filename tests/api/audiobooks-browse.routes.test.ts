@@ -62,6 +62,7 @@ describe('Audiobooks browse routes', () => {
     const payload = await response.json();
 
     expect(payload.success).toBe(true);
+    expect(audibleServiceMock.search).toHaveBeenCalledWith('query', 1, { respectLanguageFilter: true });
     expect(enrichMock).toHaveBeenCalledWith([{ asin: 'ASIN', title: 'Title', author: 'Author' }], 'user-1');
   });
 

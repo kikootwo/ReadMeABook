@@ -61,6 +61,7 @@ describe('IndexersTab - Auto-load Indexers on Tab Activation', () => {
     backendMode: 'plex',
     hasLocalUsers: false,
     audibleRegion: 'us',
+    audibleLanguageFilter: false,
     plex: {
       url: 'http://plex.local:32400',
       token: 'test-token',

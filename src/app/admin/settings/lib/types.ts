@@ -11,6 +11,7 @@ export interface Settings {
   hasLocalUsers: boolean;
   hasLocalAdmins: boolean;
   audibleRegion: string;
+  audibleLanguageFilter: boolean;
   plex: PlexSettings;
   audiobookshelf: AudiobookshelfSettings;
   oidc: OIDCSettings;

@@ -922,7 +922,7 @@ export async function matchToAudnexus(
     logger.info(`Not in cache, searching Audible for "${title}" by ${author}...`);
     const audibleService = new AudibleService();
     const searchQuery = `${title} ${author}`;
-    const searchResults = await audibleService.search(searchQuery, 1);
+    const searchResults = await audibleService.search(searchQuery, 1, { respectLanguageFilter: true });
 
     if (!searchResults.results || searchResults.results.length === 0) {
       logger.warn(`No Audible search results for "${title}" by ${author}`);

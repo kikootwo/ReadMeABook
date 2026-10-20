@@ -61,6 +61,7 @@ Populates every `AudibleAudiobook` field. Covered:
 
 - **Catalog API cannot filter preorders or surface curated bestsellers.** The API's `BestSellers` sort is a right-now velocity rank that spikes on launch-day promos and preorder windows; the `-ReleaseDate` sort returns 100% future preorders. There is no server-side `release_time`, `released-only`, `customer_rights`, or alternate sort (`Reviewed`, `MostListened`, etc.) — every plausible variant was tested and silently ignored. This is why the nightly refresh job uses the curated HTML storefront pages instead.
 - **`author=` takes a name, not an ASIN.** The catalog API has no ASIN-based author param. `searchByAuthorAsin()` queries by name, then filters client-side: keeps only products where `products[].authors[].asin === authorAsin`. Preserves ASIN-authoritative author identity. Also filters by `product.language` via `isAcceptedLanguage()` for the configured region.
+- **Keyword search returns every language.** `search()` sends no language param, so results include editions in languages other than the region's. Opt-in filter, see Language Filter below.
 - **Invalid ASIN returns HTTP 200 with stub body.** `/1.0/catalog/products/{asin}` responds 200 with `{product: {asin: INPUT}}` and no other fields. `fetchAudibleDetailsFromApi()` detects this via missing `product.title` and returns `null`.
 - **`publisher_summary` is HTML.** Converted with `stripHtml()` (`src/lib/utils/strip-html.ts`, regex-based, no cheerio) before populating `description`. Falls back to `merchandising_summary` (plain text) if `publisher_summary` missing.
 - **Audnexus details prefer `summary`.** `description` = `stripHtml(summary)` if it is a non-empty string, else `stripHtml(description)` (the short blurb). No catalog call for a missing summary.
@@ -112,6 +113,14 @@ Configurable Audible region for accurate metadata matching across international 
 - Auto-detection: Service checks config before each request and re-initializes if region changed.
 - Cache clearing: Region change clears ConfigService cache and AudibleService state.
 - Automatic refresh: Region change triggers `audible_refresh` job.
+
+**Language Filter:**
+- Key: `audible.language_filter` (`'true'`/`'false'`, default off). Read via `ConfigService.getAudibleLanguageFilter()`.
+- `search(query, page, { respectLanguageFilter: true })`: when the key is on, drops products whose `language` fails `isAcceptedLanguage()` for the region. Products without `language` are kept.
+- Opted in: search page (`/api/audiobooks/search`), BookDate (`matchToAudnexus`), shelf sync (`performAudibleLookup`). Not opted in: bulk import (matches files already on disk).
+- Shelf sync: a book with no edition in the region's language becomes a `noMatch` mapping (retried every 7 days). Mappings resolved before the filter was enabled are not re-resolved.
+- `hasMore` is computed on the raw page, so a page whose books were all filtered out does not end pagination for API callers. `totalResults` stays Audible's unfiltered total.
+- Discovery pages (popular, new releases, categories) are not filtered: they come from the region's HTML storefronts, not keyword search.
 
 **Per-region HTTP clients (on init):**
 - `apiClient` — `baseURL=apiBaseUrl`, `Accept: application/json`, `User-Agent: ReadMeABook/1.0`, no language/ipRedirect params. Used for the real-time JSON catalog operations (search, author books, categories listing, per-ASIN details fallback).
