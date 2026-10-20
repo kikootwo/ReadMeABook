@@ -71,33 +71,77 @@ function sanitizeMetadataValue(value: string): string {
 }
 
 /**
- * Sanitize a multi-paragraph value: line breaks (CR, LF, U+2028, U+2029) and tabs
- * become single spaces first, so paragraphs never run together; other C0 control
- * characters are dropped.
+ * Longest raw description read, in UTF-16 code units (each at least one UTF-8 byte,
+ * so 4x the cap): client text is unbounded, and this bounds the work before any
+ * sanitizing or HTML stripping.
+ */
+export const MAX_RAW_DESCRIPTION_LENGTH = 4 * MAX_DESCRIPTION_BYTES;
+
+/** The first `maxLength` UTF-16 code units of `value`, never ending inside a surrogate pair. */
+export function truncateRawText(value: string, maxLength: number = MAX_RAW_DESCRIPTION_LENGTH): string {
+  if (value.length <= maxLength) return value;
+  let end = Math.max(0, maxLength);
+  const last = value.charCodeAt(end - 1);
+  if (end > 0 && last >= 0xd800 && last <= 0xdbff) end--; // a high surrogate whose pair is cut off
+  return value.slice(0, end);
+}
+
+/**
+ * Sanitize a multi-paragraph value: C0 control characters other than whitespace are
+ * dropped, then every run of whitespace (space, tab, CR, LF, VT, FF, U+2028, U+2029)
+ * becomes one space, so paragraphs never run together. Linear in the input.
  */
 function sanitizeMultilineValue(value: string): string {
   return sanitizeMetadataValue(
     value
-      .replace(/[ \t]*[\r\n\u2028\u2029]+[ \t]*/g, ' ')
-      .replace(/\t/g, ' ')
-      .replace(/[\x00-\x1f]/g, '')
+      .replace(/[\x00-\x08\x0e-\x1f]/g, '')
+      .replace(/[ \t\r\n\v\f\u2028\u2029]+/g, ' ')
   );
 }
 
 /**
+ * A genre name as one part of the joined tag: '/' and ';' (Audiobookshelf's
+ * separators) inside it become ' & '. Split and trim, no regex backtracking.
+ */
+function sanitizeGenreName(name: string): string {
+  return name
+    .split(/[/;]/)
+    .map((part) => sanitizeMetadataValue(part))
+    .filter((part) => part.length > 0)
+    .join(' & ');
+}
+
+/**
  * Cap `value` at `maxBytes` UTF-8 bytes. A longer value is cut at its last word
- * boundary that fits (never inside a code point) and ends with an ellipsis.
+ * boundary that fits (never inside a code point) and ends with an ellipsis (left
+ * out when `maxBytes` is smaller than the ellipsis).
  */
 export function capUtf8Bytes(value: string, maxBytes: number): string {
   if (Buffer.byteLength(value, 'utf8') <= maxBytes) return value;
-  const ellipsis = '\u2026';
+  const ellipsisBytes = Buffer.byteLength('\u2026', 'utf8');
+  const ellipsis = maxBytes >= ellipsisBytes ? '\u2026' : '';
   const bytes = Buffer.from(value, 'utf8');
-  let end = maxBytes - Buffer.byteLength(ellipsis, 'utf8');
+  let end = Math.max(0, maxBytes - Buffer.byteLength(ellipsis, 'utf8'));
   while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--; // back to the start of a code point
   let head = bytes.subarray(0, end).toString('utf8');
   const lastSpace = head.lastIndexOf(' ');
   if (lastSpace >= head.length / 2) head = head.slice(0, lastSpace); // a word boundary, unless it drops half
   return `${head.trimEnd()}${ellipsis}`;
+}
+
+/**
+ * ffmpeg's failure without its argv (execFile's message starts with the whole
+ * command line, description included): the last lines of stderr, else the
+ * message without its "Command failed:" line, else the exit or kill reason.
+ */
+export function describeFfmpegFailure(error: unknown): string {
+  if (!(error instanceof Error)) return 'Unknown error';
+  const e = error as Error & { stderr?: unknown; killed?: boolean; signal?: unknown; code?: unknown };
+  if (e.killed) return `ffmpeg was stopped (${String(e.signal ?? 'timeout')})`;
+  const stderr = typeof e.stderr === 'string' ? e.stderr.trim() : '';
+  if (stderr) return stderr.split(/\r?\n/).slice(-3).join(' | ').slice(-500);
+  const rest = e.message.startsWith('Command failed:') ? e.message.split('\n').slice(1).join(' ').trim() : e.message.trim();
+  return rest || (e.code !== undefined ? `exit code ${String(e.code)}` : 'Unknown error');
 }
 
 /**
@@ -161,10 +205,10 @@ export async function tagAudioFileMetadata(
     const series = metadata.series ? sanitizeMetadataValue(metadata.series) : undefined;
     const seriesPart = metadata.seriesPart ? sanitizeMetadataValue(metadata.seriesPart) : undefined;
     const description = metadata.description
-      ? capUtf8Bytes(sanitizeMultilineValue(metadata.description), MAX_DESCRIPTION_BYTES) || undefined
+      ? capUtf8Bytes(sanitizeMultilineValue(truncateRawText(metadata.description)), MAX_DESCRIPTION_BYTES) || undefined
       : undefined;
     const genre = metadata.genres
-      ?.map((name) => sanitizeMetadataValue(name.replace(/\s*\/\s*/g, ' & ')))
+      ?.map(sanitizeGenreName)
       .filter((name) => name.length > 0)
       .join(GENRE_SEPARATOR);
 
@@ -329,7 +373,7 @@ export async function tagAudioFileMetadata(
         // Ignore cleanup errors
       }
 
-      throw new Error(`ffmpeg failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      throw new Error(`ffmpeg failed: ${describeFfmpegFailure(error)}`);
     }
 
     // DO NOT replace original file - return temp file path instead

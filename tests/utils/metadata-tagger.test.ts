@@ -9,10 +9,13 @@ import {
   buildMp4FreeformTags,
   capUtf8Bytes,
   checkFfmpegAvailable,
+  describeFfmpegFailure,
   MAX_DESCRIPTION_BYTES,
+  MAX_RAW_DESCRIPTION_LENGTH,
   ffmpegRemuxTimeoutMs,
   tagAudioFileMetadata,
   tagMultipleFiles,
+  truncateRawText,
 } from '@/lib/utils/metadata-tagger';
 
 const execFileMock = vi.hoisted(() => vi.fn());
@@ -445,16 +448,16 @@ describe('metadata tagger', () => {
       expectMetadataArg(lastCallArgv(), 'description', 'First line. Second line. Third line.');
     });
 
-    it('turns U+2028/U+2029 and tabs into spaces and drops other C0 controls', async () => {
+    it('turns U+2028/U+2029, tabs, VT and FF into spaces and drops other C0 controls', async () => {
       mockExecFileSuccess('done');
 
       await tagAudioFileMetadata('/tmp/book.mp3', {
         title: 'Book',
         author: 'Author',
-        description: 'One.\u2028Two.\u2029Three.\tFour\u0007\u001b five\u000b.',
+        description: 'One.\u2028Two.\u2029Three.\tFour\u0007\u001b five\u000bsix\u000cseven.',
       });
 
-      expectMetadataArg(lastCallArgv(), 'description', 'One. Two. Three. Four five.');
+      expectMetadataArg(lastCallArgv(), 'description', 'One. Two. Three. Four five six seven.');
     });
 
     it('sanitizes each genre and drops empty ones', async () => {
@@ -531,6 +534,112 @@ describe('metadata tagger', () => {
     it('leaves a description that fits unchanged', () => {
       const exact = 'a'.repeat(MAX_DESCRIPTION_BYTES);
       expect(capUtf8Bytes(exact, MAX_DESCRIPTION_BYTES)).toBe(exact);
+    });
+
+    it('collapses a whitespace-only line or a run of tabs into one space', async () => {
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.mp3', { title: 'Book', author: 'Author', description: 'One.\n   \n\t\tTwo.  \t Three.' });
+
+      expectMetadataArg(lastCallArgv(), 'description', 'One. Two. Three.');
+    });
+
+    it.each([
+      // past the raw bound: cut to spaces only, so no description at all
+      [200_000, []],
+      // inside the raw bound: the whitespace regex alone (the old one took ~30 s here)
+      [60_000, ['x']],
+    ])('sanitizes %i spaces before a word in linear time (was quadratic: ~1 min at 200k)', async (spaces, expected) => {
+      mockExecFileSuccess('done');
+      const started = performance.now();
+
+      await tagAudioFileMetadata('/tmp/book.m4b', { title: 'Book', author: 'Author', description: ' '.repeat(spaces) + 'x' });
+
+      expect(performance.now() - started).toBeLessThan(1000);
+      expect(payloadFor(lastCallArgv(), 'description')).toEqual(expected);
+    });
+
+    it('bounds a 1 MB mixed-whitespace description: fast, single spaces, within the cap', async () => {
+      mockExecFileSuccess('done');
+      const chunk = 'word \t\r\n\u000b\u000c\u2028\u2029 ';
+      const huge = chunk.repeat(Math.ceil(1_000_000 / chunk.length));
+      const started = performance.now();
+
+      await tagAudioFileMetadata('/tmp/book.m4b', { title: 'Book', author: 'Author', description: huge });
+
+      expect(performance.now() - started).toBeLessThan(1000);
+      const [value] = payloadFor(lastCallArgv(), 'description');
+      expect(Buffer.byteLength(value, 'utf8')).toBeLessThanOrEqual(MAX_DESCRIPTION_BYTES);
+      expect(value).toMatch(/^word( word)+\u2026$/);
+    });
+
+    it('cuts raw text to its bound without splitting a surrogate pair', () => {
+      expect(truncateRawText('aaa\u{1f600}b', 4)).toBe('aaa');
+      expect(truncateRawText('aaa\u{1f600}b', 5)).toBe('aaa\u{1f600}');
+      expect(truncateRawText('short', 10)).toBe('short');
+      expect(truncateRawText('x'.repeat(MAX_RAW_DESCRIPTION_LENGTH + 5))).toHaveLength(MAX_RAW_DESCRIPTION_LENGTH);
+      expect(MAX_RAW_DESCRIPTION_LENGTH).toBe(4 * MAX_DESCRIPTION_BYTES);
+    });
+
+    it("replaces ';' inside a genre name with ' & ' too", async () => {
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.m4b', { title: 'Book', author: 'Author', genres: ['Sci-Fi; Horror', ' ; History / '] });
+
+      expectMetadataArg(lastCallArgv(), 'genre', 'Sci-Fi & Horror; History');
+    });
+
+    it('sanitizes a genre with 200,000 spaces (and one with spaces around a slash) in linear time', async () => {
+      mockExecFileSuccess('done');
+      const started = performance.now();
+
+      await tagAudioFileMetadata('/tmp/book.m4b', {
+        title: 'Book',
+        author: 'Author',
+        genres: [' '.repeat(200_000) + 'x', ' '.repeat(1_000) + '/' + ' '.repeat(1_000) + 'y'],
+      });
+
+      expect(performance.now() - started).toBeLessThan(1000);
+      expectMetadataArg(lastCallArgv(), 'genre', 'x; y');
+    });
+
+    it.each([
+      [0, 'abcdef', ''],
+      [1, 'abcdef', 'a'],
+      [2, 'abcdef', 'ab'],
+      [1, '\u00e9\u00e9', ''],
+      [3, 'abcdef', '\u2026'],
+    ])('caps at maxBytes %i without going over (no ellipsis below 3 bytes)', (maxBytes, text, expected) => {
+      const capped = capUtf8Bytes(text, maxBytes);
+      expect(capped).toBe(expected);
+      expect(Buffer.byteLength(capped, 'utf8')).toBeLessThanOrEqual(maxBytes);
+    });
+
+    it('a failed run reports ffmpeg stderr, never the argv (so no description in job logs)', async () => {
+      execFileMock.mockImplementation((file: string, args: string[], options: unknown, callback?: unknown) => {
+        const cb = (typeof options === 'function' ? options : callback) as (e: Error, out: string, err: string) => void;
+        const error = Object.assign(new Error(`Command failed: ffmpeg ${args.join(' ')}\nInvalid data found`), {
+          code: 1,
+          stderr: 'Input #0 ...\n[mp3 @ 0x1] Header missing\nInvalid data found when processing input\n',
+        });
+        cb(error, '', '');
+      });
+
+      const result = await tagAudioFileMetadata('/tmp/book.mp3', { title: 'Book', author: 'Author', description: 'SECRET summary text' });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid data found when processing input');
+      expect(result.error).not.toContain('SECRET');
+      expect(result.error).not.toContain('-metadata');
+    });
+
+    it.each([
+      ['no stderr', Object.assign(new Error('Command failed: ffmpeg -metadata description=SECRET\nboom'), { code: 1 }), 'boom'],
+      ['killed', Object.assign(new Error('Command failed: ffmpeg -metadata description=SECRET'), { killed: true, signal: 'SIGTERM' }), 'ffmpeg was stopped (SIGTERM)'],
+      ['only the command line', Object.assign(new Error('Command failed: ffmpeg -metadata description=SECRET'), { code: 2 }), 'exit code 2'],
+      ['a plain error', new Error('spawn ffmpeg ENOENT'), 'spawn ffmpeg ENOENT'],
+    ])('describeFfmpegFailure: %s', (_label, error, expected) => {
+      expect(describeFfmpegFailure(error)).toBe(expected);
     });
   });
 

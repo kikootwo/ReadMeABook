@@ -161,8 +161,8 @@ function mapCatalogProduct(product: CatalogProduct): AudibleAudiobook {
   // Each ladder runs from its top-level genre down to sub-genres
   const primaryGenreNames =
     product.category_ladders
-      ?.map((ladder) => ladder.ladder[0]?.name)
-      .filter((name): name is string => !!name) ?? [];
+      ?.map((ladder) => ladder.ladder?.[0]?.name as unknown)
+      .filter((name): name is string => typeof name === 'string' && name.trim() !== '') ?? [];
   const primaryGenres =
     primaryGenreNames.length > 0 ? [...new Set(primaryGenreNames)] : undefined;
 

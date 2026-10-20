@@ -6,6 +6,8 @@
 import { prisma } from '../db';
 import type { RMABLogger } from '../utils/logger';
 import { getAudibleService, type AudibleAudiobook } from '../integrations/audible.service';
+import { stripHtml } from '../utils/strip-html';
+import { truncateRawText } from '../utils/metadata-tagger';
 
 export type AudibleDetailsLoader = () => Promise<AudibleAudiobook | null>;
 
@@ -80,7 +82,8 @@ export async function resolveTagDetails(
     clearTimeout(timer);
   }
 
-  const description = details?.description || storedDescription || undefined;
+  // The stored description is client text (older rows, or any request body): bounded, then HTML stripped like the lookup's
+  const description = details?.description || (storedDescription ? stripHtml(truncateRawText(storedDescription)) : '') || undefined;
   const genres = details?.primaryGenres?.length ? details.primaryGenres : undefined;
 
   logger.info(`Metadata tag details: description=${description ? `${description.length} chars` : 'none'}, genres=${genres ? genres.join(', ') : 'none'}`);

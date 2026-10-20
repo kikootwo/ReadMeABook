@@ -751,6 +751,24 @@ describe('AudibleService', () => {
       expect(results[0].primaryGenres).toEqual(['Fiction', 'Young Adult']);
     });
 
+    it('drops blank and non-string ladder names from primaryGenres', async () => {
+      const products = [
+        makeProduct({
+          category_ladders: [
+            { ladder: [{ name: '   ' }, { name: 'Sub' }] },
+            { ladder: [{ name: 42 as unknown as string }] },
+            { ladder: [{ name: 'History' }] },
+          ],
+        }),
+      ];
+      apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(products)));
+
+      const service = new AudibleService();
+      const { results } = await service.search('test', 1);
+
+      expect(results[0].primaryGenres).toEqual(['History']);
+    });
+
     it('leaves primaryGenres undefined without category ladders', async () => {
       const products = [makeProduct({ category_ladders: [] })];
       apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(products)));

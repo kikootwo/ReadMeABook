@@ -11,6 +11,9 @@
  *   2. multi-file mp3, chapter merging on, tagging off (on the merged file)
  *   3. multi-file mp3, chapter merging on, tagging on (on the tagged copy of the merge)
  * Each also checks the placed file is moov first (faststart) through Audiobookshelf's container.
+ * With tagging on (1 and 3) it also checks the #397 tags as Audiobookshelf reads them: the book's
+ * genres array is the genre tag split on "; " (names like "Science Fiction & Fantasy" kept whole),
+ * and the book has one description, the tag's.
  * Requests all three fixture books (phm too, like smoke): run with --isolate-specs next to other specs.
  */
 
@@ -87,6 +90,8 @@ async function importAndScan(scenario: string, bookKey: string, label: string) {
     numAudioFiles: audio.length,
     metaTags: audio[0]?.metaTags,
     bookAsin: item.media.metadata.asin,
+    bookGenres: item.media.metadata.genres as string[],
+    bookDescription: item.media.metadata.description as string | null,
     chapters: item.media.chapters?.length,
     embeddedCoverArt: audio[0]?.embeddedCoverArt ?? null,
     layout: audio[0] ? topLevelTypes(audio[0].metadata.path) : [],
@@ -104,10 +109,25 @@ function expectAsinInFile(book: Book, e: Awaited<ReturnType<typeof importAndScan
   expect(e.layout.slice(0, 2), 'moov first (faststart)').toEqual(['ftyp', 'moov']);
 }
 
+/** #397: Audiobookshelf splits the genre tag into the book's genres and shows the tag's one description. */
+function expectTagDetails(e: Awaited<ReturnType<typeof importAndScan>>['evidence']) {
+  const tagGenre = e.metaTags?.tagGenre as string | undefined;
+  expect(tagGenre, 'genre tag written').toBeTruthy();
+  const parts = tagGenre!.split('; ');
+  expect(parts.length, 'more than one top-level genre').toBeGreaterThan(1);
+  expect(e.bookGenres, 'Audiobookshelf genres = the tag split on "; "').toEqual(parts);
+  for (const genre of e.bookGenres) expect(genre).toMatch(/^[^;/]+$/);
+  expect(e.bookGenres.some((g) => g.includes(' & ')), 'an "A & B" genre stays one genre').toBe(true);
+  const tagDescription = e.metaTags?.tagDescription as string | undefined;
+  expect(tagDescription, 'description tag written').toBeTruthy();
+  expect(e.bookDescription, 'one description, the tag\'s').toBe(tagDescription);
+}
+
 test('#208: single m4b, tagging on: the tagged m4b carries the ASIN', async () => {
   await withSettings({ chapter_merging_enabled: 'false', metadata_tagging_enabled: 'true' }, async () => {
     const { book, evidence } = await importAndScan('asin-m4b', 'martian', 'single m4b');
     expectAsinInFile(book, evidence, 2);
+    expectTagDetails(evidence);
   });
 });
 
@@ -122,5 +142,6 @@ test('#208: chapter merge, tagging on: the merged and tagged m4b carries the ASI
   await withSettings({ chapter_merging_enabled: 'true', metadata_tagging_enabled: 'true' }, async () => {
     const { book, evidence } = await importAndScan('asin-merge-tagged', 'phm', 'merge, tagging on');
     expectAsinInFile(book, evidence, 3);
+    expectTagDetails(evidence);
   });
 });

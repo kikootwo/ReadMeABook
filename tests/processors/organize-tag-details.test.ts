@@ -11,6 +11,7 @@ import {
   TAG_DETAILS_TIMEOUT_MS,
 } from '@/lib/processors/organize-tag-details';
 import type { RMABLogger } from '@/lib/utils/logger';
+import { MAX_RAW_DESCRIPTION_LENGTH } from '@/lib/utils/metadata-tagger';
 
 const prismaMock = vi.hoisted(() => ({ configuration: { findUnique: vi.fn() } }));
 const audibleServiceMock = vi.hoisted(() => ({ getAudiobookDetails: vi.fn() }));
@@ -92,6 +93,25 @@ describe('organize tag details', () => {
         genres: undefined,
       });
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Audnexus down'));
+    });
+
+    it('strips HTML from the stored description (client text, older rows) like the lookup path', async () => {
+      const load = vi.fn().mockResolvedValue(null);
+
+      await expect(
+        resolveTagDetails('<p>Stored <b>blurb</b>.</p><p>Two &amp; three.</p>', load, true, logger)
+      ).resolves.toEqual({ description: 'Stored blurb.\n\nTwo & three.', genres: undefined });
+    });
+
+    it('bounds a huge stored description before stripping it', async () => {
+      const load = vi.fn().mockResolvedValue(null);
+      const started = performance.now();
+
+      const { description } = await resolveTagDetails('<b>x</b> '.repeat(200_000), load, true, logger);
+
+      expect(performance.now() - started).toBeLessThan(1000);
+      expect(description!.length).toBeLessThanOrEqual(MAX_RAW_DESCRIPTION_LENGTH);
+      expect(description!.startsWith('x x x')).toBe(true);
     });
 
     it('treats an empty summary and an empty genre list as missing', async () => {

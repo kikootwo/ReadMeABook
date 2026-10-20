@@ -893,6 +893,52 @@ describe('processOrganizeFiles', () => {
       expect(placement).toMatchObject({ metadataTaggingEnabled: false });
     });
 
+    it('runs the setup reads while the lookup is pending, and awaits it before organize()', async () => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      taggingEnabled(true);
+      let answer!: (value: unknown) => void;
+      audibleServiceMock.getAudiobookDetails.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+      const templateRead = () =>
+        prismaMock.configuration.findUnique.mock.calls.some(
+          (c: unknown[]) => (c[0] as { where?: { key?: string } } | undefined)?.where?.key === 'audiobook_path_template'
+        );
+
+      const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+      const run = processOrganizeFiles({ requestId: 'req-tags', audiobookId: 'a-tags', downloadPath: '/downloads/book', jobId: 'job-tags' });
+      await vi.waitFor(() => expect(templateRead()).toBe(true));
+      expect(organizerMock.organize).not.toHaveBeenCalled();
+
+      answer({ description: 'Full Audible summary.', primaryGenres: ['History'] });
+      await expect(run).resolves.toMatchObject({ success: true });
+      expect(organizerMock.organize.mock.calls[0][1]).toMatchObject({ description: 'Full Audible summary.', genres: ['History'] });
+    });
+
+    it('a setup failure while the lookup is pending leaves no unhandled rejection', async () => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      let fail!: (error: Error) => void;
+      audibleServiceMock.getAudiobookDetails.mockReturnValue(new Promise((_resolve, reject) => (fail = reject)));
+      prismaMock.configuration.findUnique.mockImplementation(async (args: { where?: { key?: string } }) => {
+        if (args?.where?.key === 'metadata_tagging_enabled') return { value: 'true' };
+        if (args?.where?.key === 'audiobook_path_template') throw new Error('db gone during setup');
+        return null;
+      });
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on('unhandledRejection', onUnhandled);
+      try {
+        const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+        await processOrganizeFiles({ requestId: 'req-tags', audiobookId: 'a-tags', downloadPath: '/downloads/book', jobId: 'job-tags' }).catch(
+          () => undefined
+        );
+        expect(organizerMock.organize).not.toHaveBeenCalled();
+        fail(new Error('Audnexus down, after the setup failed'));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+      }
+    });
+
     it.each([true, false])('reads the tagging switch once (tagging %s) and hands that read to the organizer', async (enabled) => {
       setupBook({ series: 'The Saga', seriesPart: '1' });
       taggingEnabled(enabled);

@@ -192,7 +192,10 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
 
     // One read of the tagging switch: the tag details lookup and the organizer both use it
     const metadataTaggingEnabled = await readMetadataTaggingEnabled(logger);
-    const tagDetails = await resolveTagDetails(audiobook.description, loadAudibleDetails, metadataTaggingEnabled, logger);
+    // Started now, awaited just before organize(): the setup below does not wait on Audible.
+    // The no-op handler keeps a rejection from going unhandled if that setup throws first.
+    const tagDetailsPending = resolveTagDetails(audiobook.description, loadAudibleDetails, metadataTaggingEnabled, logger);
+    tagDetailsPending.catch(() => undefined);
 
     // Get file organizer (reads media_dir from database config)
     const organizer = await getFileOrganizer();
@@ -217,6 +220,8 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       enabled: fileRenameEnabledConfig?.value === 'true',
       template: fileRenameTemplateConfig?.value || '{title}',
     };
+
+    const tagDetails = await tagDetailsPending;
 
     // Organize files (pass template, logger, and rename config to file organizer)
     const result = await organizer.organize(

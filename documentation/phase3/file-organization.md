@@ -109,10 +109,10 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
   - M4B/M4A/MP4: iTunes freeform item `----` (mean `com.apple.iTunes`, name `ASIN`), written after ffmpeg (see MP4 Freeform Tags)
   - MP3: ID3v2 `TXXX:ASIN`; FLAC: Vorbis comment `ASIN`
 - Read back as ffprobe format tag `ASIN`; Audiobookshelf maps it (`asin`, case-insensitive) to `tagASIN` → book `asin`
-- Description - publisher summary; line breaks (CR/LF/U+2028/U+2029) and tabs → single spaces, other C0 controls dropped; capped at `MAX_DESCRIPTION_BYTES` (16 KiB UTF-8, `capUtf8Bytes`: last word boundary + `…`; one argv string each)
+- Description - publisher summary; raw input first cut to `MAX_RAW_DESCRIPTION_LENGTH` (4x the cap, UTF-16 units, `truncateRawText`, surrogate-safe); non-whitespace C0 controls dropped, each whitespace run (space/tab/CR/LF/VT/FF/U+2028/U+2029) → one space (linear); capped at `MAX_DESCRIPTION_BYTES` (16 KiB UTF-8, `capUtf8Bytes`: last word boundary + `…`; one argv string each)
   - M4B/M4A/MP4: `description` (`desc`) + `synopsis` (`ldes`), each capped
-  - MP3: `description` (TXXX); FLAC: `comment` (= Vorbis `DESCRIPTION`, replaces the source's; a `description` key would add a second one, read as "old;new")
-- `genre` - top-level genres (`primaryGenres`, no sub-genre tags) joined with `; `; `/` in a name → ` & ` (Audiobookshelf splits on `/`, `//`, `;`)
+  - MP3: `description` (TXXX); FLAC: `comment` (= Vorbis `DESCRIPTION`; replaces the source's DESCRIPTION/COMMENT, which ffmpeg reads as one `comment`; a `description` key would add a second one, read as "old;new")
+- `genre` - top-level genres (`primaryGenres`, no sub-genre tags) joined with `; `; `/` or `;` in a name → ` & ` (split/trim/join; Audiobookshelf splits on `/`, `//`, `;`)
 - M4B/M4A/MP4 only: `media_type=2` (`stik` Audiobook), `gapless_playback=1` (`pgap`) - always written, before `-movflags +faststart`
 - Fixed set, no per-field settings; all under `metadata_tagging_enabled`
 
@@ -120,7 +120,9 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 - Processor reads `metadata_tagging_enabled` once (`readMetadataTaggingEnabled`), passes it to the lookup and `organize()` (`placement.metadataTaggingEnabled`); unreadable → undefined: no lookup, `organize()` reads it itself
 - Only when tagging is on; one `getAudiobookDetails(asin)` per import (`createAudibleDetailsLoader`), shared with the missing-series backfill
 - Series known (lookup serves tags only): raced against `TAG_DETAILS_TIMEOUT_MS` (15 s); series backfill awaits it in full (unchanged)
-- Description: Audible summary (Audnexus `summary`) → stored `Audiobook.description` fallback
+- Description: Audible summary (Audnexus `summary`) → stored `Audiobook.description` fallback (client text: bounded by `truncateRawText`, then `stripHtml` like the lookup)
+- Started right after the switch read, awaited just before `organize()` (setup reads run meanwhile; a no-op handler keeps a rejection handled if setup throws first)
+- A failed ffmpeg run reports `describeFfmpegFailure` (stderr tail, never the argv, so no description in job logs)
 - Lookup failure or timeout is non-fatal (warning): stored description, no genres
 - Genres/description are tags only (not path template variables); ebooks unchanged
 
