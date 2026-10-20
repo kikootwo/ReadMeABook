@@ -13,6 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /** Paths that "appear" (written by another job) the moment their absence is checked. */
 const appearOnCheck = vi.hoisted(() => new Map<string, string>());
+/** How unlink of a path fails once: 'vanish' = someone else removed it first (ENOENT), else that error code. */
+const unlinkFailure = vi.hoisted(() => new Map<string, string>());
 
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
@@ -32,6 +34,16 @@ vi.mock('fs', async (importOriginal) => {
   };
   const promises = {
     ...actual.promises,
+    unlink: async (target: fs.PathLike) => {
+      const failure = unlinkFailure.get(String(target));
+      if (failure === undefined) return actual.promises.unlink(target);
+      unlinkFailure.delete(String(target));
+      if (failure === 'vanish') {
+        actual.unlinkSync(String(target));
+        throw Object.assign(new Error('ENOENT: no such file or directory, unlink'), { code: 'ENOENT' });
+      }
+      throw Object.assign(new Error(`${failure}: simulated, unlink`), { code: failure });
+    },
     // Without a check first, the file lands just before the operation runs
     link: async (from: fs.PathLike, to: fs.PathLike) => {
       land(to);
@@ -75,6 +87,7 @@ describe('coerceToPlexCompatible on a real filesystem', () => {
     lib = path.join(root, 'media', 'Author', 'Book');
     fs.mkdirSync(lib, { recursive: true });
     appearOnCheck.clear();
+    unlinkFailure.clear();
   });
 
   afterEach(() => {
@@ -153,5 +166,38 @@ describe('coerceToPlexCompatible on a real filesystem', () => {
 
     expect(result.renamed).toEqual([]);
     expect(fs.readdirSync(lib).sort()).toEqual(['Chapter 1.m4a', 'Chapter 2.m4a']);
+  });
+
+  it('finishes a rename that a crash stopped between link and unlink (both names on one file)', async () => {
+    const mp4 = write(path.join(lib, 'Book.mp4'), 'placed-now');
+    fs.linkSync(mp4, path.join(lib, 'Book.m4b'));
+
+    const result = await coerceToPlexCompatible([mp4], new Set([mp4]));
+
+    expect(result.renamed).toEqual([{ from: mp4, to: path.join(lib, 'Book.m4b') }]);
+    expect(fs.readdirSync(lib)).toEqual(['Book.m4b']);
+    expect(fs.readFileSync(path.join(lib, 'Book.m4b'), 'utf8')).toBe('placed-now');
+  });
+
+  it('keeps the new name when the old one is already gone at unlink', async () => {
+    const mp4 = write(path.join(lib, 'Book.mp4'), 'placed-now');
+    unlinkFailure.set(mp4, 'vanish');
+
+    const result = await coerceToPlexCompatible([mp4], new Set([mp4]));
+
+    expect(fs.readdirSync(lib)).toEqual(['Book.m4b']);
+    expect(fs.readFileSync(path.join(lib, 'Book.m4b'), 'utf8')).toBe('placed-now');
+    expect(result.finalAudioFiles).toEqual([path.join(lib, 'Book.m4b')]);
+  });
+
+  it('undoes the link when the old name cannot be removed, keeping the file under its placed name', async () => {
+    const mp4 = write(path.join(lib, 'Book.mp4'), 'placed-now');
+    unlinkFailure.set(mp4, 'EPERM');
+
+    const result = await coerceToPlexCompatible([mp4], new Set([mp4]));
+
+    expect(fs.readdirSync(lib)).toEqual(['Book.mp4']);
+    expect(result.finalAudioFiles).toEqual([mp4]);
+    expect(result.warnings.join(' ')).toContain('EPERM');
   });
 });

@@ -86,8 +86,8 @@ export interface ImportStatusContext {
  * Examples: "1 of 3 files not imported; source files kept",
  * "already in the library with different content; source kept",
  * "merged file kept; sources kept",
- * "1 of 2 files imported without metadata tags (audio duration could not be measured)",
- * "download kept: it holds several ebook formats". A note is appended when file
+ * "1 file imported without metadata tags (its length could not be checked)",
+ * "download kept: it holds several ebook formats and only one was imported; ...". A note is appended when file
  * permissions could not be applied ("permissions could not be applied to 2 files").
  */
 export function importStatusMessage(evidence: ImportEvidence, context: ImportStatusContext = {}): string | null {
@@ -129,11 +129,20 @@ function placementStatusMessage(evidence: ImportEvidence): string | null {
   return parts.length > 0 ? `${parts.join('; ')}; source files kept` : null;
 }
 
-/** The library got the untagged original for some files (the tagged copy failed its check or could not be placed). */
+/**
+ * The library got the untagged original for some files (the tagged file failed
+ * its length check or could not be saved). Counted per library file, so a
+ * merged book is one file; every distinct reason is listed.
+ */
 function tagsMessage(evidence: ImportEvidence): string | null {
   const untagged = evidence.records.filter((r) => r.tagsDropped);
   if (untagged.length === 0) return null;
-  return `${untagged.length} of ${evidence.records.length} files imported without metadata tags (${untagged[0].tagsDropped})`;
+  const files = new Set(untagged.map((r) => r.target)).size;
+  const total = new Set(evidence.records.map((r) => r.target)).size;
+  const reasons = [...new Set(untagged.map((r) => r.tagsDropped))].join('; ');
+  if (total === 1) return `the file was imported without metadata tags (${reasons})`;
+  if (files === 1) return `1 file imported without metadata tags (${reasons})`;
+  return `${files} of ${total} files imported without metadata tags (${reasons})`;
 }
 
 /**
@@ -147,7 +156,8 @@ function severalEbooksMessage(evidence: ImportEvidence, context: ImportStatusCon
   const imported = evidence.records.filter((r) => r.verified).length;
   if (imported === 0 || inventory.files.length <= imported) return null;
   const formats = new Set(inventory.files.map((f) => path.extname(f).toLowerCase()));
-  return formats.size > 1 ? 'download kept: it holds several ebook formats' : 'download kept: it holds several ebook files';
+  const holds = formats.size > 1 ? 'several ebook formats' : 'several ebook files';
+  return `download kept: it holds ${holds} and only one was imported; remove it from the download client once you no longer need the others`;
 }
 
 /** Log detail for the records behind importStatusMessage. */

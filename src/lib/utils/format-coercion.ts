@@ -12,11 +12,13 @@
  * - Transcode-required (`.ogg`/`.opus`/`.wma`) → warn + skip (out of scope for v1)
  * - Already Plex-compatible or unrecognized → silent no-op
  * - Target path already exists → no-op + info log (never overwrite)
- * - Only files this import placed (`copied`) are renamed; files already in the
- *   library (`identical`, `present`, `differs`) are never touched
+ * - Only files that hold this import's content (`copied`, or `identical` e.g. after
+ *   a crash and retry) are renamed; other library files (`present`, `differs`) are
+ *   never touched
  * - The rename never replaces: hard link + unlink (EEXIST = leave both as they are),
  *   under the same per-target lock as placement, so a `.m4b` another organize job
- *   just placed is never overwritten
+ *   just placed is never overwritten. A crash between link and unlink leaves both
+ *   names on one file; the next run sees that and drops the old name.
  *
  * Idempotency signal is the file extension itself — no marker files, no DB column.
  * Failure mode: any per-file error is captured as a warning and the original path
@@ -31,7 +33,8 @@ import {
   PLEX_COMPATIBLE_EXTENSIONS,
   TRANSCODE_REQUIRED_EXTENSIONS,
 } from '../constants/audio-formats';
-import { LINK_UNSUPPORTED } from './copy-file';
+import { LINK_UNSUPPORTED, sameIdentity } from './copy-file';
+import type { PlacementRecord } from './import-inventory';
 import type { RMABLogger } from './logger';
 import { withTargetLock } from './organize-copy';
 
@@ -51,6 +54,15 @@ export interface CoercionResult {
   finalAudioFiles: string[];
 }
 
+/**
+ * Library paths coercion may rename: those holding this import's content,
+ * copied now or `identical` (e.g. an earlier attempt's copy after a crash).
+ * `present` (same size, never compared) and `differs` files are not ours.
+ */
+export function coercibleTargets(records: PlacementRecord[]): Set<string> {
+  return new Set(records.filter((r) => r.status === 'copied' || r.status === 'identical').map((r) => r.target));
+}
+
 const DRM_SET: ReadonlySet<string> = new Set(DRM_EXTENSIONS as readonly string[]);
 const TRANSCODE_SET: ReadonlySet<string> = new Set(
   TRANSCODE_REQUIRED_EXTENSIONS as readonly string[],
@@ -66,7 +78,7 @@ const PLEX_COMPATIBLE_SET: ReadonlySet<string> = new Set(
  * path is preserved in `finalAudioFiles` at the same index.
  *
  * @param audioFilePaths   Absolute paths to audio files (already organized into the target media dir).
- * @param placedThisImport Paths this import itself wrote (`copied`); every other path is left as it is.
+ * @param placedThisImport Paths holding this import's content (`copied`/`identical`); every other path is left as it is.
  * @param logger           Optional `RMABLogger` for per-file and per-warning visibility.
  * @returns Structured `CoercionResult`. Caller should overwrite its audio-file list with `finalAudioFiles`.
  */
@@ -181,29 +193,56 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
+/** True when both paths are regular files (not symlinks) with the same dev/ino: two names of one file. */
+async function sameRegularFile(a: string, b: string): Promise<boolean> {
+  try {
+    const [sa, sb] = await Promise.all([fs.lstat(a, { bigint: true }), fs.lstat(b, { bigint: true })]);
+    return sa.isFile() && sb.isFile() && sameIdentity(sa, sb);
+  } catch {
+    return false;
+  }
+}
+
+/** Drop the old name once `to` holds the file. If that fails while `from` still exists, undo the link. */
+async function dropOldName(from: string, to: string): Promise<void> {
+  try {
+    await fs.unlink(from);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      // Already gone: `to` is the last name of the file, so it stays
+      return;
+    }
+    if (await pathExists(from).catch(() => false)) {
+      // Keep the file under the name it was placed with only
+      await fs.unlink(to).catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
 /**
  * Move `from` to `to` without ever replacing an existing `to`: hard-link (EEXIST
- * when `to` exists), then drop the old name. Filesystems without hard links fall
- * back to an lstat check and rename; the caller holds the per-target lock, so no
- * in-process placement can land in between. 'exists' means nothing changed.
+ * when `to` exists), then drop the old name. An existing `to` that is the same
+ * file (a run that stopped between link and unlink) only needs the old name
+ * dropped. Filesystems without hard links fall back to an lstat check and
+ * rename; the caller holds the per-target lock, so no in-process placement can
+ * land in between. 'exists' means nothing changed.
  */
 async function renameWithoutReplacing(from: string, to: string): Promise<'renamed' | 'exists'> {
   try {
     await fs.link(from, to);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code || '';
-    if (code === 'EEXIST') return 'exists';
+    if (code === 'EEXIST') {
+      if (!(await sameRegularFile(from, to))) return 'exists';
+      await dropOldName(from, to);
+      return 'renamed';
+    }
     if (!LINK_UNSUPPORTED.has(code)) throw error;
     if (await pathExists(to)) return 'exists';
     await fs.rename(from, to);
     return 'renamed';
   }
-  try {
-    await fs.unlink(from);
-  } catch (error) {
-    // Keep the file under the name it was placed with only
-    await fs.unlink(to).catch(() => undefined);
-    throw error;
-  }
+  await dropOldName(from, to);
   return 'renamed';
 }

@@ -20,36 +20,48 @@ export interface CoverPlacement {
 /** Cover bytes to publish: a local file (cached thumbnail) or downloaded data. */
 export type CoverContent = { file: string } | { data: Buffer };
 
-/** True when something already exists at `target` (any kind of entry). */
-export async function coverExists(target: string): Promise<boolean> {
+/**
+ * What is at `target`: nothing, an empty regular file (a cover an older
+ * version truncated or left half-written), or anything else (kept as it is).
+ */
+export async function coverState(target: string): Promise<'missing' | 'empty' | 'present'> {
   try {
-    await fs.lstat(target);
-    return true;
+    const stat = await fs.lstat(target);
+    return stat.isFile() && stat.size === 0 ? 'empty' : 'present';
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
     throw error;
   }
+}
+
+/** True when the library already has a cover to keep (an empty cover.jpg does not count). */
+export async function hasCover(target: string): Promise<boolean> {
+  return (await coverState(target)) === 'present';
 }
 
 /**
  * Publish a cover at `target` the way audio is published: written to a hidden
  * partial, fsynced and size-checked, then linked into place without replacing
- * anything. An existing cover (or one that appears meanwhile) is kept. Runs
- * under the per-target placement lock, so it never races a cover copy from the
- * download in another organize job. The file mode is applied best-effort (a
- * refused chmod is a warning); a cover that is not there afterwards throws.
+ * anything. An existing cover (or one that appears meanwhile) is kept; only an
+ * empty regular file is replaced (renamed over, re-checked under the lock).
+ * Runs under the per-target placement lock, so it never races a cover copy
+ * from the download in another organize job. The file mode is applied
+ * best-effort (a refused chmod is a warning); a cover that is not there
+ * afterwards throws.
  */
 export async function publishCover(target: string, content: CoverContent, fileMode: number): Promise<CoverPlacement> {
   return withTargetLock(target, async () => {
     await removeStalePartials(path.dirname(target), path.basename(target));
-    if (await coverExists(target)) {
+    const state = await coverState(target);
+    if (state === 'present') {
       return { outcome: 'kept' };
     }
+    const mode = state === 'empty' ? 'replace' : 'create';
     try {
       if ('file' in content) {
-        await copyFile(content.file, target, { mode: 'create' });
+        await copyFile(content.file, target, { mode });
       } else {
-        await writeFileAtomic(target, content.data, { mode: 'create' });
+        await writeFileAtomic(target, content.data, { mode });
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
@@ -57,8 +69,8 @@ export async function publishCover(target: string, content: CoverContent, fileMo
       }
       throw error;
     }
-    const mode = await applyFileMode(target, fileMode);
-    if (mode.kind === 'missing') throw new Error(mode.reason);
-    return mode.kind === 'refused' ? { outcome: 'written', warning: mode.warning } : { outcome: 'written' };
+    const permissions = await applyFileMode(target, fileMode);
+    if (permissions.kind === 'missing') throw new Error(permissions.reason);
+    return permissions.kind === 'refused' ? { outcome: 'written', warning: permissions.warning } : { outcome: 'written' };
   });
 }

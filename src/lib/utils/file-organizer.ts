@@ -9,7 +9,7 @@ import axios from 'axios';
 import { RMAB_USER_AGENT } from './user-agent';
 import { tagMultipleFiles, checkFfmpegAvailable } from './metadata-tagger';
 import { RMABLogger } from './logger';
-import { coverExists, publishCover, type CoverPlacement } from './cover-placement';
+import { hasCover, publishCover, type CoverPlacement } from './cover-placement';
 import { placeAudio, placeFile, isVerifiedStatus, type AudioPlacement } from './organize-copy';
 import { walkFiles, ORGANIZER_EBOOK_FORMATS, type ImportInventory, type PlacementRecord } from './import-inventory';
 import { getMediaDir } from './media-dir';
@@ -27,7 +27,7 @@ import {
 } from './chapter-merger';
 import { prisma } from '../db';
 import { substituteTemplate, buildRenamedFilename, type TemplateVariables } from './path-template.util';
-import { AUDIO_EXTENSIONS } from '../constants/audio-formats';
+import { AUDIO_EXTENSIONS, COERCION_CANDIDATE_EXTENSIONS } from '../constants/audio-formats';
 
 export interface AudiobookMetadata {
   title: string;
@@ -413,7 +413,11 @@ export class FileOrganizer {
 
         const placed: AudioPlacement = await placeAudio(originalSourcePath, taggedFilePath, targetFilePath, {
           fileMode: this.fileMode,
-          compareExisting: placement?.compareExisting === true,
+          // Coercion renames only this import's content, so a retry must know whether a same-size
+          // .mp4/.m4a already there is ours (identical) rather than just present
+          compareExisting:
+            placement?.compareExisting === true ||
+            COERCION_CANDIDATE_EXTENSIONS.includes(path.extname(targetFilePath).toLowerCase()),
           probeDuration: probeStreamDurationMs,
         });
 
@@ -742,14 +746,14 @@ export class FileOrganizer {
 
   /**
    * Download cover art from URL or copy from local cache. An existing cover.jpg
-   * is never replaced ('kept') and is not fetched for. A warning is returned
+   * is never replaced ('kept') and is not fetched for; an empty one is replaced. A warning is returned
    * when the cover was written but its permissions could not be set.
    */
   private async downloadCoverArt(url: string, targetDir: string): Promise<CoverPlacement> {
     const targetPath = path.join(targetDir, 'cover.jpg');
 
     try {
-      if (await coverExists(targetPath)) {
+      if (await hasCover(targetPath)) {
         return { outcome: 'kept' };
       }
       // Cached thumbnail (plain file name inside the cache dir only)

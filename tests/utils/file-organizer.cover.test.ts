@@ -138,6 +138,19 @@ describe('FileOrganizer cover art', () => {
     expect(partialsIn(path.dirname(libraryCover))).toEqual([]);
   });
 
+  it.each([
+    ['a downloaded cover', REMOTE_COVER, 'downloaded-cover-bytes'],
+    ['a cached thumbnail', CACHED_COVER, 'cached-cover-bytes'],
+  ])('replaces an empty cover.jpg (left by an older interrupted write) with %s', async (_label, coverArtUrl, expected) => {
+    write(libraryCover, '');
+
+    const result = await organize(coverArtUrl);
+
+    expect(fs.readFileSync(libraryCover, 'utf8')).toBe(expected);
+    expect(result.errors).toEqual([]);
+    expect(partialsIn(path.dirname(libraryCover))).toEqual([]);
+  });
+
   it('keeps the existing cover on a re-import with the same cover', async () => {
     write(libraryCover, 'downloaded-cover-bytes');
 

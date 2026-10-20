@@ -237,7 +237,7 @@ describe('placeAudio (tagged derivative)', () => {
     });
 
     expect(result).toMatchObject({
-      status: 'copied', verified: true, usedDerivative: false, tagsDropped: 'tagged copy duration did not match the original',
+      status: 'copied', verified: true, usedDerivative: false, tagsDropped: 'the tagged file came out a different length',
     });
     expect(fs.readFileSync(target).equals(SOURCE)).toBe(true);
   });
@@ -248,7 +248,7 @@ describe('placeAudio (tagged derivative)', () => {
       probeDuration: async () => { throw new Error('ffprobe missing'); },
     });
 
-    expect(result).toMatchObject({ verified: true, usedDerivative: false, tagsDropped: 'audio duration could not be measured' });
+    expect(result).toMatchObject({ verified: true, usedDerivative: false, tagsDropped: 'its length could not be checked' });
     expect(result.reason).toContain('ffprobe missing');
     expect(fs.readFileSync(target).equals(SOURCE)).toBe(true);
   });

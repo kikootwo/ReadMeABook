@@ -24,7 +24,8 @@ vi.mock('@/lib/utils/file-organizer', () => ({ getFileOrganizer: () => organizer
 vi.mock('@/lib/services/library', () => ({ getLibraryService: () => ({ triggerLibraryScan: vi.fn() }) }));
 vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => configMock }));
 vi.mock('@/lib/services/job-queue.service', () => ({ getJobQueueService: () => jobQueueMock }));
-vi.mock('@/lib/utils/format-coercion', () => ({
+vi.mock('@/lib/utils/format-coercion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/utils/format-coercion')>()),
   coerceToPlexCompatible: vi.fn(async (paths: string[]) => ({ renamed: [], warnings: [], errors: [], finalAudioFiles: paths })),
 }));
 vi.mock('@/lib/services/download-client-manager.service', () => ({
@@ -240,12 +241,12 @@ describe('verified-import cleanup', () => {
     it('says when files went into the library without metadata tags, and why', async () => {
       organizeWith(target(), { [parts[0]]: 'copied', [parts[1]]: 'copied' });
       const placed = await organizerMock.organize();
-      placed.records[1] = { ...placed.records[1], tagsDropped: 'audio duration could not be measured' };
+      placed.records[1] = { ...placed.records[1], tagsDropped: 'its length could not be checked' };
       organizerMock.organize.mockResolvedValue(placed);
 
       await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
 
-      expect(requestUpdateData()?.errorMessage).toBe('1 of 2 files imported without metadata tags (audio duration could not be measured)');
+      expect(requestUpdateData()?.errorMessage).toBe('1 file imported without metadata tags (its length could not be checked)');
       // The untagged originals are verified copies: the download still goes
       expect(fs.existsSync(download)).toBe(false);
     });
@@ -299,7 +300,7 @@ describe('verified-import cleanup', () => {
       expect(fs.existsSync(imported)).toBe(true);
       expect(fs.existsSync(other)).toBe(true);
       expect(postProcess).not.toHaveBeenCalled();
-      expect(requestUpdateData()).toMatchObject({ status: 'downloaded', errorMessage: 'download kept: it holds several ebook files' });
+      expect(requestUpdateData()).toMatchObject({ status: 'downloaded', errorMessage: 'download kept: it holds several ebook files and only one was imported; remove it from the download client once you no longer need the others' });
     });
 
     it('says why a release with several ebook formats is kept', async () => {
@@ -314,7 +315,7 @@ describe('verified-import cleanup', () => {
 
       await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
 
-      expect(requestUpdateData()).toMatchObject({ status: 'downloaded', errorMessage: 'download kept: it holds several ebook formats' });
+      expect(requestUpdateData()).toMatchObject({ status: 'downloaded', errorMessage: 'download kept: it holds several ebook formats and only one was imported; remove it from the download client once you no longer need the others' });
       expect(fs.existsSync(pdf)).toBe(true);
     });
 

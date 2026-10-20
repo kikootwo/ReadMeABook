@@ -45,7 +45,10 @@ vi.mock('@/lib/services/job-queue.service', () => ({
   getJobQueueService: () => jobQueueMock,
 }));
 
-vi.mock('@/lib/utils/format-coercion', () => formatCoercionMock);
+vi.mock('@/lib/utils/format-coercion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/utils/format-coercion')>()),
+  ...formatCoercionMock,
+}));
 
 vi.mock('@/lib/integrations/audible.service', () => ({
   getAudibleService: () => audibleServiceMock,
@@ -504,7 +507,7 @@ describe('processOrganizeFiles', () => {
     );
   });
 
-  it('offers only files this import placed to format coercion, never existing library files', async () => {
+  it('offers format coercion only files holding this import's content, never other library files', async () => {
     prismaMock.audiobook.findUnique.mockResolvedValue({
       id: 'a-coerce-own', title: 'Book', author: 'Author', narrator: null, coverArtUrl: null, audibleAsin: null,
     });
@@ -538,7 +541,8 @@ describe('processOrganizeFiles', () => {
     });
 
     const placed = formatCoercionMock.coerceToPlexCompatible.mock.calls[0][1] as Set<string>;
-    expect([...placed]).toEqual([`${lib}/Part 1.mp4`]);
+    // Copied now, or identical (an earlier attempt's copy after a crash); never present or differs
+    expect([...placed]).toEqual([`${lib}/Part 1.mp4`, `${lib}/Part 4.mp4`]);
   });
 
   it('skips Plex format coercion when disabled', async () => {
