@@ -25,6 +25,7 @@ import {
 } from '../utils/scrape-resilience';
 import { parseRuntime as parseRuntimeUtil } from '../utils/parse-runtime';
 import { extractAllNarrators } from '../utils/extract-narrator';
+import { stripHtml } from '../utils/strip-html';
 
 const logger = RMABLogger.create('Audible');
 
@@ -131,19 +132,6 @@ interface CatalogProductResponse {
 
 interface CatalogCategoriesResponse {
   categories?: Array<{ id: string; name: string }>;
-}
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 function mapCatalogProduct(product: CatalogProduct): AudibleAudiobook {
@@ -689,7 +677,10 @@ export class AudibleService {
         author: data.authors?.map((a: any) => a.name).join(', ') || '',
         authorAsin: data.authors?.[0]?.asin || undefined,
         narrator: data.narrators?.map((n: any) => n.name).join(', ') || '',
-        description: data.description || data.summary || '',
+        // Prefer the full summary over the short description blurb; both become plain text
+        description:
+          (typeof data.summary === 'string' ? stripHtml(data.summary) : '') ||
+          (typeof data.description === 'string' ? stripHtml(data.description) : ''),
         coverArtUrl: data.image || '',
         durationMinutes: data.runtimeLengthMin ? parseInt(data.runtimeLengthMin) : undefined,
         releaseDate: data.releaseDate || undefined,

@@ -497,7 +497,7 @@ describe('AudibleService', () => {
     it('strips HTML tags and entities from publisher_summary to produce plain text description', async () => {
       const products = [
         makeProduct({
-          // Use a space before <br/> so whitespace is preserved after tag removal.
+          // <br/> becomes a line break; the space before it is trimmed off the line
           publisher_summary:
             '<p>A &amp; B book with&nbsp;smart text. <br/>More here.</p>',
         }),
@@ -507,7 +507,7 @@ describe('AudibleService', () => {
       const service = new AudibleService();
       const { results } = await service.search('test', 1);
 
-      expect(results[0].description).toBe('A & B book with smart text. More here.');
+      expect(results[0].description).toBe('A & B book with smart text.\nMore here.');
     });
 
     it('falls back to merchandising_summary when publisher_summary is absent', async () => {
@@ -1322,6 +1322,50 @@ describe('AudibleService', () => {
       expect(details?.publisherName).toBe('Test Publisher');
       // Catalog API should NOT be called when Audnexus succeeds.
       expect(apiClientMock.get).not.toHaveBeenCalled();
+    });
+
+    it('prefers the full Audnexus summary over the short description, as plain text with paragraphs', async () => {
+      axiosMock.get.mockResolvedValueOnce({
+        data: {
+          title: 'Audnexus Book',
+          description: 'Short merchandising blurb.',
+          summary: '<p>Full publisher summary &amp; details.</p> <p>A <b>second</b> paragraph.</p>',
+        },
+      });
+
+      const service = new AudibleService();
+      const details = await service.getAudiobookDetails('B000SUMMARY');
+
+      expect(details?.description).toBe('Full publisher summary & details.\n\nA second paragraph.');
+      expect(apiClientMock.get).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['missing', {}],
+      ['empty', { summary: '' }],
+      ['only markup', { summary: '<p> </p>' }],
+      ['not a string', { summary: 42 }],
+    ])('falls back to the Audnexus description when the summary is %s, without the catalog API', async (_label, extra) => {
+      axiosMock.get.mockResolvedValueOnce({
+        data: { title: 'Audnexus Book', description: 'Short merchandising blurb.', ...extra },
+      });
+
+      const service = new AudibleService();
+      const details = await service.getAudiobookDetails('B000NOSUMMR');
+
+      expect(details?.description).toBe('Short merchandising blurb.');
+      expect(apiClientMock.get).not.toHaveBeenCalled();
+    });
+
+    it('turns an HTML description fallback into plain text too', async () => {
+      axiosMock.get.mockResolvedValueOnce({
+        data: { title: 'Audnexus Book', description: '<p>Short &amp; <b>sweet</b>.</p>' },
+      });
+
+      const service = new AudibleService();
+      const details = await service.getAudiobookDetails('B000HTMLDSC');
+
+      expect(details?.description).toBe('Short & sweet.');
     });
 
     it('falls back to the catalog API when Audnexus returns 404', async () => {
