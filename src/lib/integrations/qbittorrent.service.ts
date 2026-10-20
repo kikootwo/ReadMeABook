@@ -312,6 +312,28 @@ export class QBittorrentService implements IDownloadClient {
   }
 
   /**
+   * Whether a /torrents/add body confirms our single submitted torrent.
+   * Accepts the legacy "Ok." text, or the qBittorrent 5.2+ JSON receipt when it
+   * reports exactly one success for this hash and no failures or pending adds.
+   */
+  private isAddAccepted(data: unknown, infoHash: string): boolean {
+    if (data === 'Ok.') return true;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+
+    const receipt = data as Record<string, unknown>;
+    const ids = receipt.added_torrent_ids;
+    return (
+      receipt.success_count === 1 &&
+      receipt.failure_count === 0 &&
+      receipt.pending_count === 0 &&
+      Array.isArray(ids) &&
+      ids.length === 1 &&
+      typeof ids[0] === 'string' &&
+      ids[0].toLowerCase() === infoHash.toLowerCase()
+    );
+  }
+
+  /**
    * Add magnet link - hash is extractable from URI (deterministic)
    */
   protected async addMagnetLink(
@@ -366,7 +388,7 @@ export class QBittorrentService implements IDownloadClient {
       },
     });
 
-    if (response.data !== 'Ok.') {
+    if (!this.isAddAccepted(response.data, infoHash)) {
       throw new Error(`qBittorrent rejected magnet link: ${response.data}`);
     }
 
@@ -460,7 +482,7 @@ export class QBittorrentService implements IDownloadClient {
       maxContentLength: Infinity,
     });
 
-    if (response.data !== 'Ok.') {
+    if (!this.isAddAccepted(response.data, infoHash)) {
       throw new Error(`qBittorrent rejected .torrent file: ${response.data}`);
     }
 

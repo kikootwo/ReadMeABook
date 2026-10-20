@@ -149,7 +149,7 @@ interface SABnzbdConfig {
 **Key Difference:** SABnzbd returns NZB ID immediately (no extraction needed)
 
 **qBittorrent:**
-- Returns "Ok." without hash
+- Returns "Ok." without hash (5.2+: a JSON receipt, checked against our hash)
 - Requires parsing magnet link or .torrent file
 - Hash extraction needed for tracking
 
