@@ -155,14 +155,18 @@ src/app/admin/settings/
 
 **Configuration:**
 - Key: `audible.region` (string, default: 'us')
-- Supported regions: US, Canada, UK, Australia, India
-- UI: Dropdown selector in Library tab (both Plex and Audiobookshelf settings)
+- Supported regions: any key of `AUDIBLE_REGIONS` (see [integrations/audible.md](integrations/audible.md#region-configuration))
+- UI: Dropdown selector in Library tab (both Plex and Audiobookshelf settings), built from `AUDIBLE_REGIONS`; non-English regions show ` *` + amber warning
 - No validation required (immediate save)
 
 **Why It Matters:**
 - Each Audible region uses different ASINs for the same audiobook
 - Users must match their RMAB region to their Plex/Audiobookshelf metadata engine region
 - Mismatched regions cause poor search results and failed metadata matching
+
+**Changing region on an existing library:**
+- Can re-request and re-download books already in the library: their ASINs differ in the new marketplace, so watched-list auto-requests treat them as missing (issue #256, not fixed)
+- Home-page category sections hold the old region's category IDs; users must remove them and pick categories again after the change
 
 **Help Text:**
 "Select the Audible region that matches your metadata engine (Audnexus/Audible Agent) configuration in [Plex/Audiobookshelf]. This ensures accurate book matching and metadata."
@@ -322,8 +326,8 @@ src/app/admin/settings/
 
 **PUT /api/admin/settings/audible**
 - Updates Audible region
-- Body: `{ region: string }` (one of: us, ca, uk, au, in, es, fr)
-- No validation required
+- Body: `{ region: string }` (any key of `AUDIBLE_REGIONS`, see [integrations/audible.md](integrations/audible.md#region-configuration))
+- Unknown region → 400 listing valid codes; success clears config cache, re-inits AudibleService, queues `audible_refresh` (job errors logged, not returned)
 
 **PUT /api/admin/settings/prowlarr/indexers**
 - Updates indexer configuration (enabled, priority, RSS, categories, seeding time, ratio limit, remove-after-processing)
