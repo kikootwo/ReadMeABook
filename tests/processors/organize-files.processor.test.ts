@@ -622,6 +622,71 @@ describe('processOrganizeFiles', () => {
     );
   });
 
+  it('leaves files the library already held (differs) out of coercion and filesHash; writes fileFormat', async () => {
+    prismaMock.audiobook.findUnique.mockResolvedValue({
+      id: 'a-differs', title: 'Book', author: 'Author', narrator: null, coverArtUrl: null, audibleAsin: 'ASIN-DF1',
+    });
+    prismaMock.configuration.findUnique.mockResolvedValue(undefined);
+    organizerMock.organize.mockResolvedValue({
+      success: true,
+      targetPath: '/media/Author/Book',
+      filesMovedCount: 1,
+      errors: [],
+      audioFiles: ['/media/Author/Book/01.mp4', '/media/Author/Book/02.mp3'],
+      records: [
+        { source: '/downloads/book/01.mp4', target: '/media/Author/Book/01.mp4', status: 'copied', verified: true },
+        { source: '/downloads/book/02.mp3', target: '/media/Author/Book/02.mp3', status: 'differs', verified: false },
+      ],
+      inventory: { kind: 'audio', files: ['/downloads/book/01.mp4', '/downloads/book/02.mp3'], complete: true },
+    });
+    formatCoercionMock.coerceToPlexCompatible.mockResolvedValueOnce({
+      renamed: [{ from: '/media/Author/Book/01.mp4', to: '/media/Author/Book/01.m4b' }],
+      warnings: [],
+      errors: [],
+      finalAudioFiles: ['/media/Author/Book/01.m4b'],
+    });
+    configMock.getBackendMode.mockResolvedValue('plex');
+    configMock.get.mockResolvedValue('false');
+
+    const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+    await processOrganizeFiles({ requestId: 'req-differs', audiobookId: 'a-differs', downloadPath: '/downloads/book', jobId: 'job-differs' });
+
+    // Only this import's file is coerced; the existing library file is never renamed
+    expect(formatCoercionMock.coerceToPlexCompatible).toHaveBeenCalledWith(['/media/Author/Book/01.mp4'], expect.anything());
+    expect(prismaMock.audiobook.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'a-differs' },
+        data: expect.objectContaining({ filesHash: generateFilesHash(['01.m4b']), fileFormat: 'm4b' }),
+      })
+    );
+  });
+
+  it('stores no filesHash when every file was already in the library with different content', async () => {
+    prismaMock.audiobook.findUnique.mockResolvedValue({
+      id: 'a-all-differs', title: 'Book', author: 'Author', narrator: null, coverArtUrl: null, audibleAsin: 'ASIN-DF2',
+    });
+    prismaMock.configuration.findUnique.mockResolvedValue(undefined);
+    organizerMock.organize.mockResolvedValue({
+      success: true,
+      targetPath: '/media/Author/Book',
+      filesMovedCount: 0,
+      errors: [],
+      audioFiles: ['/media/Author/Book/Book.mp3'],
+      records: [{ source: '/downloads/book/Book.mp3', target: '/media/Author/Book/Book.mp3', status: 'differs', verified: false }],
+      inventory: { kind: 'audio', files: ['/downloads/book/Book.mp3'], complete: true },
+    });
+    configMock.getBackendMode.mockResolvedValue('plex');
+    configMock.get.mockResolvedValue('false');
+
+    const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+    await processOrganizeFiles({ requestId: 'req-all-differs', audiobookId: 'a-all-differs', downloadPath: '/downloads/book', jobId: 'job-all-differs' });
+
+    expect(formatCoercionMock.coerceToPlexCompatible).not.toHaveBeenCalled();
+    expect(prismaMock.audiobook.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ filesHash: null, fileFormat: 'mp3' }) })
+    );
+  });
+
   it('generates and stores filesHash after successful organization', async () => {
     prismaMock.request.update.mockResolvedValue({});
     prismaMock.audiobook.findUnique.mockResolvedValue({

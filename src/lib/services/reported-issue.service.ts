@@ -13,6 +13,9 @@ import { sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 
 const logger = RMABLogger.create('ReportedIssue');
 
+/** The way out when a replace keeps the current files (the guard keeps refusing until they are gone). */
+const REPLACE_EXIT = 'Remove those files manually, then re-request the book after the next library scan.';
+
 /**
  * Report an issue with an available audiobook
  */
@@ -152,6 +155,8 @@ export async function replaceAudiobook(
           narrator: true,
           plexGuid: true,
           absItemId: true,
+          filePath: true,
+          filesHash: true,
         },
       },
     },
@@ -179,18 +184,39 @@ export async function replaceAudiobook(
 
   // Step 2: Delete old content
   if (existingRequest) {
+    // The old files must go before new ones are fetched: when the library delete
+    // guard would keep them, stop before touching anything
+    const { audiobookFolderKeptReason } = await import('./request-delete-files');
+    const keptReason = await audiobookFolderKeptReason(audiobook);
+    if (keptReason) {
+      logger.warn(`Replace for "${audiobook.title}" stopped: files kept: ${keptReason}`);
+      throw new ReportedIssueError(`Replace stopped: the current files were kept (${keptReason}). Nothing was changed. ${REPLACE_EXIT}`, 409);
+    }
+
     // Has an RMAB request — use deleteRequest which handles torrent cleanup, files, library backend
     const { deleteRequest } = await import('./request-delete.service');
     const deleteResult = await deleteRequest(existingRequest.id, adminUserId);
+    if (deleteResult.filesKeptReason) {
+      // Changed since the check above (or the removal failed): no reset, no new request
+      logger.warn(`Replace for "${audiobook.title}" stopped after delete: files kept: ${deleteResult.filesKeptReason}`);
+      throw new ReportedIssueError(`Replace stopped: the old request was deleted but its files were kept (${deleteResult.filesKeptReason}). The book was not reset and no download started. ${REPLACE_EXIT}`, 409);
+    }
     if (!deleteResult.success) {
       logger.warn(`deleteRequest partial failure for ${existingRequest.id}: ${deleteResult.error}`);
       // Continue anyway - we want replacement to proceed
     }
     logger.info(`Deleted existing request ${existingRequest.id} for replacement`);
   } else {
-    // No RMAB request — book was added to library outside RMAB
-    await deleteFromLibrary(audiobook);
-    logger.info(`Deleted library content directly for "${audiobook.title}" (no RMAB request)`);
+    // No active request. A stored folder (e.g. an earlier delete kept the files) goes
+    // through the library delete guard; only a book added outside RMAB is removed via
+    // the backend alone
+    const { removeLibraryContentForReplace } = await import('./replace-library-content');
+    const keptReason = await removeLibraryContentForReplace(audiobook);
+    if (keptReason) {
+      logger.warn(`Replace for "${audiobook.title}" stopped: files kept: ${keptReason}`);
+      throw new ReportedIssueError(`Replace stopped: the current files were kept (${keptReason}). Nothing was changed. ${REPLACE_EXIT}`, 409);
+    }
+    logger.info(`Deleted library content for "${audiobook.title}" (no active request)`);
   }
 
   // Step 3: Reset audiobook record for new request
@@ -302,102 +328,6 @@ export async function getOpenIssuesByAsins(asins: string[]): Promise<Set<string>
       .map((i) => i.audiobook.audibleAsin)
       .filter((asin): asin is string => asin !== null)
   );
-}
-
-/**
- * Delete audiobook content from library backend directly (no RMAB request).
- * Used when a book was added to Plex/ABS outside of RMAB.
- * Mirrors the library deletion logic from request-delete.service.ts lines 280-440.
- */
-async function deleteFromLibrary(audiobook: {
-  id: string;
-  title: string;
-  author: string;
-  audibleAsin: string | null;
-  plexGuid: string | null;
-  absItemId: string | null;
-}) {
-  const { getConfigService } = await import('./config.service');
-  const configService = getConfigService();
-  const backendMode = await configService.getBackendMode();
-
-  // Delete from library backend API
-  if (backendMode === 'audiobookshelf') {
-    // absItemId may be null if the book was added outside RMAB.
-    // Fall back to looking up the ABS item ID from plex_library by ASIN
-    // (plexGuid stores the ABS item ID when using ABS backend).
-    let itemId = audiobook.absItemId;
-    if (!itemId && audiobook.audibleAsin) {
-      const libraryRecord = await prisma.plexLibrary.findFirst({
-        where: {
-          OR: [
-            { asin: audiobook.audibleAsin },
-            { plexGuid: { contains: audiobook.audibleAsin } },
-          ],
-        },
-        select: { plexGuid: true },
-      });
-      itemId = libraryRecord?.plexGuid ?? null;
-    }
-
-    if (itemId) {
-      try {
-        const { deleteABSItem } = await import('./audiobookshelf/api');
-        await deleteABSItem(itemId);
-        logger.info(`Deleted ABS item ${itemId} for "${audiobook.title}"`);
-      } catch (error) {
-        logger.error(`Failed to delete ABS item ${itemId}`, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    } else {
-      logger.warn(`No ABS item ID found for "${audiobook.title}" (ASIN: ${audiobook.audibleAsin}) — skipping ABS deletion`);
-    }
-  } else if (backendMode === 'plex' && audiobook.plexGuid) {
-    try {
-      const plexLibraryRecord = await prisma.plexLibrary.findUnique({
-        where: { plexGuid: audiobook.plexGuid },
-        select: { plexRatingKey: true },
-      });
-
-      if (plexLibraryRecord?.plexRatingKey) {
-        const plexServerUrl = (await configService.get('plex_url')) || '';
-        const plexToken = (await configService.get('plex_token')) || '';
-
-        if (plexServerUrl && plexToken) {
-          const { getPlexService } = await import('../integrations/plex.service');
-          const plexService = getPlexService();
-          await plexService.deleteItem(plexServerUrl, plexToken, plexLibraryRecord.plexRatingKey);
-          logger.info(`Deleted Plex item ${plexLibraryRecord.plexRatingKey} for "${audiobook.title}"`);
-        }
-      }
-    } catch (error) {
-      logger.error(`Failed to delete Plex item for "${audiobook.title}"`, {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  // Delete plex_library records by ASIN
-  if (audiobook.audibleAsin) {
-    try {
-      const result = await prisma.plexLibrary.deleteMany({
-        where: {
-          OR: [
-            { asin: audiobook.audibleAsin },
-            { plexGuid: { contains: audiobook.audibleAsin } },
-          ],
-        },
-      });
-      if (result.count > 0) {
-        logger.info(`Deleted ${result.count} plex_library record(s) by ASIN "${audiobook.audibleAsin}"`);
-      }
-    } catch (error) {
-      logger.error(`Failed to delete plex_library records for ASIN "${audiobook.audibleAsin}"`, {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
 }
 
 /**

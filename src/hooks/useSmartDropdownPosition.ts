@@ -109,6 +109,7 @@ export function useSmartDropdownPosition(isOpen: boolean): UseSmartDropdownPosit
 
     return () => {
       cancelAnimationFrame(rafId);
+      debouncedCalculate.cancel(); // a pending recalculation would set state after unmount
       window.removeEventListener('scroll', debouncedCalculate, true);
       window.removeEventListener('resize', debouncedCalculate);
     };
@@ -118,18 +119,26 @@ export function useSmartDropdownPosition(isOpen: boolean): UseSmartDropdownPosit
 }
 
 /**
- * Debounce helper function
+ * Debounce helper function; cancel() drops a pending call.
  */
 function debounce<T extends (...args: any[]) => any>(
   func: T,
   wait: number
-): (...args: Parameters<T>) => void {
-  let timeout: NodeJS.Timeout | null = null;
+): ((...args: Parameters<T>) => void) & { cancel: () => void } {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
 
-  return (...args: Parameters<T>) => {
+  const debounced = (...args: Parameters<T>) => {
     if (timeout) {
       clearTimeout(timeout);
     }
-    timeout = setTimeout(() => func(...args), wait);
+    timeout = setTimeout(() => {
+      timeout = null;
+      func(...args);
+    }, wait);
   };
+  debounced.cancel = () => {
+    if (timeout) clearTimeout(timeout);
+    timeout = null;
+  };
+  return debounced;
 }

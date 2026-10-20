@@ -111,7 +111,7 @@
 - **System logs (filters, search, pagination, /api/admin/logs)** → [admin-dashboard.md](admin-dashboard.md)
 - **Bulk import (scan folders, match Audible, batch import)** → [features/bulk-import.md](features/bulk-import.md)
 - **Jobs management UI** → [backend/services/scheduler.md](backend/services/scheduler.md)
-- **Request deletion (soft delete, seeding awareness)** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
+- **Request deletion (soft delete, seeding awareness, library delete guard, files kept reason)** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
 - **Request approval system, auto-approve settings** → [admin-features/request-approval.md](admin-features/request-approval.md)
 - **Release blocklist (auto-block failed releases, /admin/blocklist)** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md)
 

@@ -24,7 +24,8 @@ Solves false positive matches in Audiobookshelf fuzzy search by using file hash 
 **File:** `src/lib/processors/organize-files.processor.ts`
 
 ```typescript
-const filesHash = generateFilesHash(result.audioFiles);
+// This import's audio after format coercion; 'differs' targets (files the library already held) excluded
+const filesHash = generateFilesHash(importedAudio);
 await prisma.audiobook.update({
   data: {
     filesHash: filesHash,  // SHA256 of sorted audio filenames

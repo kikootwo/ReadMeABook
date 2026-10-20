@@ -132,6 +132,7 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - **Clear all filters:** visible only when ≥1 filter or the search input is non-default
 - **Pause-on-interact reasons (registered to `useAutoRefreshControl`):**
   - `logs-status-dropdown`, `logs-type-dropdown`, `logs-date-picker`, `logs-user-typeahead`, `logs-book-input`
+  - Leaving pause is debounced 250 ms; on provider unmount the debounce is cleared and later `unregister` calls (children unmount after the provider's cleanup) arm no new timer
 - **URL = source of truth** via `useLogsUrlState` (`src/app/admin/logs/hooks/`); param names exported as `LOG_PARAMS`; same names used by `/api/admin/logs`
 - Shows related audiobook/user for request jobs
 - Expandable error messages, duration calc, attempt tracking, Bull job ID
