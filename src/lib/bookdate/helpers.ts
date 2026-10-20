@@ -10,6 +10,14 @@ import { AudibleService } from '@/lib/integrations/audible.service';
 import { getPlexService } from '@/lib/integrations/plex.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { RMABLogger } from '@/lib/utils/logger';
+import {
+  RECOMMENDATIONS_JSON_INSTRUCTION,
+  describeClaudeUsage,
+  extractChatCompletionText,
+  extractClaudeText,
+  parseRecommendationsJson,
+} from '@/lib/bookdate/ai-response';
+import { supportsLowEffort } from '@/lib/bookdate/claude-effort';
 
 const logger = RMABLogger.create('BookDate');
 
@@ -643,15 +651,18 @@ export async function callAI(
     }
 
     const data = await response.json();
-    const content = data.choices[0].message.content;
+    const content = extractChatCompletionText(data, 'OpenAI');
     logger.debug('OpenAI response:', { content });
-    return JSON.parse(content);
+    return parseRecommendationsJson<AIRecommendation>(content, 'OpenAI');
 
   } else if (provider === 'claude') {
-    const userMessage = `${systemMessage}\n\n${prompt}\n\nIMPORTANT: Provide exactly 15-20 recommendations. Return ONLY valid JSON with no additional text or formatting.`;
+    const userMessage = `${systemMessage}\n\n${prompt}\n\nIMPORTANT: Provide exactly 15-20 recommendations. ${RECOMMENDATIONS_JSON_INSTRUCTION} Return ONLY valid JSON with no additional text or formatting.`;
+    // Current models think by default; low effort (where supported) keeps thinking inside max_tokens
+    const lowEffort = await supportsLowEffort(model, apiKey);
     const requestBody = {
       model,
       max_tokens: 8192,
+      ...(lowEffort ? { output_config: { effort: 'low' } } : {}),
       messages: [
         {
           role: 'user',
@@ -679,17 +690,16 @@ export async function callAI(
     }
 
     const data = await response.json();
-    const content = data.content[0].text;
+    logger.info('Claude response received', {
+      model,
+      effort: lowEffort ? 'low' : 'default',
+      ...describeClaudeUsage(data),
+    });
+
+    // Answer = all text blocks joined; thinking blocks skipped; refusal / cut-off become clear errors
+    const content = extractClaudeText(data);
     logger.debug('Claude raw response:', { content });
-
-    // Claude sometimes wraps JSON in markdown code blocks, so clean it
-    const cleanedContent = content
-      .replace(/^```json\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
-
-    logger.debug('Claude cleaned response:', { cleanedContent });
-    return JSON.parse(cleanedContent);
+    return parseRecommendationsJson<AIRecommendation>(content, 'Claude');
 
   } else if (provider === 'gemini') {
     const requestBody = {
@@ -808,7 +818,8 @@ export async function callAI(
         if (errorText.includes('response_format') || errorText.includes('json_schema')) {
           logger.info('Retrying without response_format (provider does not support structured outputs)');
           delete requestBody.response_format;
-          requestBody.messages[0].content = systemMessage + ' Return ONLY valid JSON with no additional text or formatting.';
+          requestBody.messages[0].content = systemMessage + ' ' + RECOMMENDATIONS_JSON_INSTRUCTION +
+            ' Return ONLY valid JSON with no additional text or formatting.';
 
           const retryResponse = await fetch(endpoint, {
             method: 'POST',
@@ -822,32 +833,19 @@ export async function callAI(
           }
 
           const retryData = await retryResponse.json();
-          const retryContent = retryData.choices[0].message.content;
-
-          // Clean markdown code blocks
-          const cleanedContent = retryContent
-            .replace(/^```json\s*/i, '')
-            .replace(/\s*```$/i, '')
-            .trim();
-
-          logger.debug('Custom provider cleaned response (fallback):', { cleanedContent });
-          return JSON.parse(cleanedContent);
+          const retryContent = extractChatCompletionText(retryData, 'Custom provider');
+          logger.debug('Custom provider response (fallback):', { content: retryContent });
+          return parseRecommendationsJson<AIRecommendation>(retryContent, 'Custom provider');
         }
 
         throw new Error(`Custom provider API error: ${response.status} ${errorText}`);
       }
 
       const data = await response.json();
-      const content = data.choices[0].message.content;
+      // Some providers return null content (reasoning models) or still wrap JSON in fences
+      const content = extractChatCompletionText(data, 'Custom provider');
       logger.debug('Custom provider response:', { content });
-
-      // Clean potential markdown wrapping (some providers still wrap even with json_schema)
-      const cleanedContent = content
-        .replace(/^```json\s*/i, '')
-        .replace(/\s*```$/i, '')
-        .trim();
-
-      return JSON.parse(cleanedContent);
+      return parseRecommendationsJson<AIRecommendation>(content, 'Custom provider');
 
     } catch (error: any) {
       logger.error('Custom provider error:', error);
