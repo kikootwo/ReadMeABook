@@ -19,7 +19,15 @@ export interface MetadataTaggingOptions {
   asin?: string;
   series?: string;
   seriesPart?: string;
+  description?: string; // Publisher summary (plain text, may contain paragraphs)
+  genres?: string[]; // Top-level genres, joined into one tag
 }
+
+/**
+ * Joins genres into one tag. Audiobookshelf splits genre tags on '/', '//' or ';'
+ * (first match wins); Audible genre names contain '&' and ',' but never ';'.
+ */
+const GENRE_SEPARATOR = '; ';
 
 export interface TaggingResult {
   success: boolean;
@@ -41,6 +49,14 @@ function sanitizeMetadataValue(value: string): string {
     .replace(/^[﻿ ​‌‍]+/, '') // leading BOM / NBSP / ZWSP / ZWNJ / ZWJ
     .replace(/[\x00\r\n]/g, '') // null bytes and line breaks anywhere
     .trim();
+}
+
+/**
+ * Sanitize a multi-paragraph value: line breaks become single spaces first, so
+ * paragraphs never run together when sanitizeMetadataValue drops the breaks.
+ */
+function sanitizeMultilineValue(value: string): string {
+  return sanitizeMetadataValue(value.replace(/[ \t]*[\r\n]+[ \t]*/g, ' '));
 }
 
 /**
@@ -77,6 +93,11 @@ export async function tagAudioFileMetadata(
     const asin = metadata.asin ? sanitizeMetadataValue(metadata.asin) : undefined;
     const series = metadata.series ? sanitizeMetadataValue(metadata.series) : undefined;
     const seriesPart = metadata.seriesPart ? sanitizeMetadataValue(metadata.seriesPart) : undefined;
+    const description = metadata.description ? sanitizeMultilineValue(metadata.description) : undefined;
+    const genre = metadata.genres
+      ?.map(sanitizeMetadataValue)
+      .filter((name) => name.length > 0)
+      .join(GENRE_SEPARATOR);
 
     // Create temporary file path
     const tempFile = `${filePath}.tmp`;
@@ -119,6 +140,23 @@ export async function tagAudioFileMetadata(
         args.push('-metadata', `episode_id=${seriesPart}`);
       }
 
+      if (description) {
+        args.push(
+          '-metadata', `description=${description}`, // desc atom (read by Audiobookshelf)
+          '-metadata', `synopsis=${description}` // ldes atom (long description)
+        );
+      }
+
+      if (genre) {
+        args.push('-metadata', `genre=${genre}`);
+      }
+
+      // Mark the file as an audiobook (stik=2) with gapless playback (pgap=1)
+      args.push(
+        '-metadata', 'media_type=2',
+        '-metadata', 'gapless_playback=1'
+      );
+
       // Explicitly specify output format (fixes .tmp extension issue)
       args.push('-f', 'mp4');
     }
@@ -150,6 +188,14 @@ export async function tagAudioFileMetadata(
 
       if (seriesPart) {
         args.push('-metadata', `SERIES-PART=${seriesPart}`);
+      }
+
+      if (description) {
+        args.push('-metadata', `description=${description}`);
+      }
+
+      if (genre) {
+        args.push('-metadata', `genre=${genre}`);
       }
 
       // Explicitly specify output format
@@ -184,6 +230,15 @@ export async function tagAudioFileMetadata(
 
       if (seriesPart) {
         args.push('-metadata', `SERIES-PART=${seriesPart}`);
+      }
+
+      if (description) {
+        // TXXX frame, read back as `description` (Audiobookshelf reads this)
+        args.push('-metadata', `description=${description}`);
+      }
+
+      if (genre) {
+        args.push('-metadata', `genre=${genre}`); // TCON frame
       }
 
       // Explicitly specify output format (fixes .tmp extension issue)

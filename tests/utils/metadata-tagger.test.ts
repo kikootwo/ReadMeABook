@@ -265,6 +265,115 @@ describe('metadata tagger', () => {
     });
   });
 
+  describe('description, genre and audiobook flags', () => {
+    const DESCRIPTION = 'A heist on Luthadel.\n\nThe second paragraph.';
+    const FLAT_DESCRIPTION = 'A heist on Luthadel. The second paragraph.';
+    const GENRES = ['Science Fiction & Fantasy', 'Mystery, Thriller & Suspense'];
+
+    function metadataPayloads(argv: string[]): string[] {
+      return argv.filter((_, i) => i > 0 && argv[i - 1] === '-metadata');
+    }
+
+    it('m4b: writes desc + ldes, joined genres, media type Audiobook and gapless', async () => {
+      fsMock.access.mockResolvedValue(undefined);
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.m4b', {
+        title: 'Book',
+        author: 'Author',
+        description: DESCRIPTION,
+        genres: GENRES,
+      });
+
+      const argv = lastCallArgv();
+      expectMetadataArg(argv, 'description', FLAT_DESCRIPTION);
+      expectMetadataArg(argv, 'synopsis', FLAT_DESCRIPTION);
+      expectMetadataArg(argv, 'genre', 'Science Fiction & Fantasy; Mystery, Thriller & Suspense');
+      expectMetadataArg(argv, 'media_type', '2');
+      expectMetadataArg(argv, 'gapless_playback', '1');
+    });
+
+    it('m4b: always marks the file as an audiobook, even without description or genres', async () => {
+      fsMock.access.mockResolvedValue(undefined);
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.m4a', { title: 'Book', author: 'Author' });
+
+      const argv = lastCallArgv();
+      expectMetadataArg(argv, 'media_type', '2');
+      expectMetadataArg(argv, 'gapless_playback', '1');
+      const payloads = metadataPayloads(argv);
+      expect(payloads.some((p) => p.startsWith('description='))).toBe(false);
+      expect(payloads.some((p) => p.startsWith('synopsis='))).toBe(false);
+      expect(payloads.some((p) => p.startsWith('genre='))).toBe(false);
+    });
+
+    it.each(['/tmp/book.mp3', '/tmp/book.flac'])(
+      '%s: writes description and joined genres, no MP4-only fields',
+      async (file) => {
+        fsMock.access.mockResolvedValue(undefined);
+        mockExecFileSuccess('done');
+
+        await tagAudioFileMetadata(file, {
+          title: 'Book',
+          author: 'Author',
+          description: DESCRIPTION,
+          genres: GENRES,
+        });
+
+        const argv = lastCallArgv();
+        expectMetadataArg(argv, 'description', FLAT_DESCRIPTION);
+        expectMetadataArg(argv, 'genre', 'Science Fiction & Fantasy; Mystery, Thriller & Suspense');
+        const payloads = metadataPayloads(argv);
+        expect(payloads.some((p) => p.startsWith('synopsis='))).toBe(false);
+        expect(payloads.some((p) => p.startsWith('media_type='))).toBe(false);
+        expect(payloads.some((p) => p.startsWith('gapless_playback='))).toBe(false);
+      }
+    );
+
+    it('turns CRLF and indented line breaks into single spaces (words never run together)', async () => {
+      fsMock.access.mockResolvedValue(undefined);
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.m4b', {
+        title: 'Book',
+        author: 'Author',
+        description: '  First line.\r\n\r\n   Second line.\nThird\u0000 line.  ',
+      });
+
+      expectMetadataArg(lastCallArgv(), 'description', 'First line. Second line. Third line.');
+    });
+
+    it('sanitizes each genre and drops empty ones', async () => {
+      fsMock.access.mockResolvedValue(undefined);
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.m4b', {
+        title: 'Book',
+        author: 'Author',
+        genres: ['﻿ Romance ', '', '   ', 'History'],
+      });
+
+      expectMetadataArg(lastCallArgv(), 'genre', 'Romance; History');
+    });
+
+    it('omits description and genre when they sanitize to empty', async () => {
+      fsMock.access.mockResolvedValue(undefined);
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.mp3', {
+        title: 'Book',
+        author: 'Author',
+        description: ' \r\n ',
+        genres: [' ', ''],
+      });
+
+      const payloads = metadataPayloads(lastCallArgv());
+      expect(payloads.some((p) => p.startsWith('description='))).toBe(false);
+      expect(payloads.some((p) => p.startsWith('genre='))).toBe(false);
+    });
+  });
+
   describe('quote regression (#171) — embedded `"` flows through untouched', () => {
     const tricky = 'Test "Quoted" Book';
 

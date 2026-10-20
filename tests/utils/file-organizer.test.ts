@@ -316,11 +316,18 @@ describe('file organizer', () => {
     const result = await organizer.organize('/downloads/book', {
       title: 'Book',
       author: 'Author',
+      description: 'Summary.',
+      genres: ['Romance'],
     }, '{author}/{title}');
 
     const expectedDir = path.join('/media', 'Author', 'Book');
     expect(result.success).toBe(true);
     expect(result.targetPath).toBe(expectedDir);
+    // Description and genres reach the tagger (they are tags only, never path parts)
+    expect(metadataMock.tagMultipleFiles).toHaveBeenCalledWith(
+      [sourcePath],
+      expect.objectContaining({ description: 'Summary.', genres: ['Romance'] })
+    );
     expect(copyFileMock.copyFile).toHaveBeenCalledWith('/tmp/tagged.m4b', path.join(expectedDir, 'book.m4b'));
     expect(fsMock.unlink).toHaveBeenCalledWith('/tmp/tagged.m4b');
   });

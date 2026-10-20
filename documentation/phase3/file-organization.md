@@ -42,7 +42,7 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 3. Read media directory and path template from database config (`media_dir`, `audiobook_path_template`)
 4. Apply template to create target path: `[media_dir]/[template result]/`
 5. **Copy** files (not move - originals stay for seeding)
-6. **Tag metadata** (if enabled) - writes correct title, author, narrator, ASIN to audio files
+6. **Tag metadata** (if enabled) - writes correct title, author, narrator, ASIN, series, description, genre to audio files
 7. Copy cover art if found, else download from Audible. `coverArtUrl` must be a cached thumbnail `/api/cache/thumbnails/<file>` (plain file name, resolved in `/app/cache/thumbnails`) or an https URL on `COVER_ART_HOSTS` (`*.media-amazon.com`, `*.ssl-images-amazon.com`, `*.images-amazon.com`), up to `MAX_COVER_ART_REDIRECTS` (3) redirects with every hop checked; anything else is skipped with a warning (`src/lib/utils/cover-art-url.ts`). An existing `cover.jpg` is never replaced and not fetched for (kept, debug log; a re-import with the same cover lands here too); an empty regular-file `cover.jpg` (older interrupted write) counts as missing and is replaced (`replace` publish, size re-checked under the lock). New covers are published like audio (`src/lib/utils/cover-placement.ts` → `publishCover`): hidden partial (`copyFile` for a cached thumbnail, `writeFileAtomic` for downloaded bytes), fsync + size check, `create` publish (`EEXIST` → kept), under the per-target lock; an interrupted write leaves no `cover.jpg`. Downloaded and copied covers get the library file mode (`applyFileMode`: a refused chmod is a permission warning, a missing file a failure). At request creation, covers are stored for display if they are any http(s) URL or a safe cached path (`sanitizeCoverArtUrl`; shelf-sync Goodreads/Hardcover fallbacks stay visible); a stored cover the library can't use is replaced by a later usable one (`isLibraryCoverSource`)
 8. **Coerce file formats** (if enabled) - rename .mp4 → .m4b and single-file .m4a → .m4b for Plex compatibility (see: Plex Format Coercion below)
 9. **Generate file hash** - SHA256 of sorted audio filenames for library matching (see: [fixes/file-hash-matching.md](../fixes/file-hash-matching.md))
@@ -108,6 +108,18 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 - `ASIN` - Audible ASIN (custom tag)
   - M4B/M4A/MP4: `----:com.apple.iTunes:ASIN`
   - MP3: Custom ID3v2 tag
+- Description - publisher summary, line breaks → single spaces
+  - M4B/M4A/MP4: `description` (`desc`) + `synopsis` (`ldes`)
+  - MP3: `description` (TXXX); FLAC: `description` (Vorbis DESCRIPTION, ffprobe shows it as `comment`)
+- `genre` - top-level genres (`primaryGenres`, no sub-genre tags) joined with `; ` (Audiobookshelf splits on `;`)
+- M4B/M4A/MP4 only: `media_type=2` (`stik` Audiobook), `gapless_playback=1` (`pgap`) - always written
+- Fixed set, no per-field settings; all under `metadata_tagging_enabled`
+
+**Tag details lookup** (`src/lib/processors/organize-tag-details.ts`):
+- Only when tagging is on; one `getAudiobookDetails(asin)` per import, shared with the missing-series backfill
+- Description: Audible summary (Audnexus `summary`) → stored `Audiobook.description` fallback
+- Lookup failure is non-fatal (logged); the book is tagged with what is stored
+- Genres/description are tags only (not path template variables)
 
 **Note:** ASIN is a custom metadata tag and may not appear in standard file properties viewers (Windows/macOS/Linux). Use specialized tools to verify:
 ```bash
@@ -142,6 +154,7 @@ exiftool "audiobook.m4b" | grep -i asin
 - ffmpeg (system dependency - included in Docker image)
 - `src/lib/utils/metadata-tagger.ts` - Tagging utility
 - Integrated into `src/lib/utils/file-organizer.ts`
+- `src/lib/processors/organize-tag-details.ts` - description/genres for the tags
 
 **Requirements:**
 - ffmpeg + ffprobe must be on PATH (`/usr/local/bin`)

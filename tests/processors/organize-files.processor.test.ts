@@ -783,6 +783,97 @@ describe('processOrganizeFiles', () => {
       })
     );
   });
+
+  describe('metadata tag details', () => {
+    function setupBook(overrides: Record<string, unknown> = {}) {
+      prismaMock.request.update.mockResolvedValue({});
+      prismaMock.audiobook.findUnique.mockResolvedValue({
+        id: 'a-tags',
+        title: 'Book',
+        author: 'Author',
+        narrator: 'Narrator',
+        coverArtUrl: null,
+        audibleAsin: 'ASIN-TAGS',
+        year: 2020,
+        description: 'Stored short blurb.',
+        series: null,
+        seriesPart: null,
+        ...overrides,
+      });
+      organizerMock.organize.mockResolvedValue({
+        success: true,
+        targetPath: '/media/Author/Book',
+        filesMovedCount: 1,
+        errors: [],
+        audioFiles: ['/media/Author/Book/Book.m4b'],
+      });
+      prismaMock.audiobook.update.mockResolvedValue({});
+      configMock.getBackendMode.mockResolvedValue('audiobookshelf');
+    }
+
+    function taggingEnabled(enabled: boolean) {
+      configMock.get.mockImplementation(async (key: string) =>
+        key === 'metadata_tagging_enabled' ? String(enabled) : null
+      );
+    }
+
+    async function runOrganize() {
+      const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+      const result = await processOrganizeFiles({
+        requestId: 'req-tags',
+        audiobookId: 'a-tags',
+        downloadPath: '/downloads/book',
+        jobId: 'job-tags',
+      });
+      expect(result.success).toBe(true);
+      return organizerMock.organize.mock.calls[0][1];
+    }
+
+    it('passes the Audible summary and top-level genres, looked up once for series and tags', async () => {
+      setupBook();
+      taggingEnabled(true);
+      audibleServiceMock.getAudiobookDetails.mockResolvedValue({
+        asin: 'ASIN-TAGS',
+        title: 'Book',
+        author: 'Author',
+        description: 'Full Audible summary.',
+        primaryGenres: ['Science Fiction & Fantasy'],
+        series: 'The Saga',
+        seriesPart: '1',
+      });
+
+      const metadata = await runOrganize();
+
+      expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledTimes(1);
+      expect(metadata).toMatchObject({
+        series: 'The Saga',
+        seriesPart: '1',
+        description: 'Full Audible summary.',
+        genres: ['Science Fiction & Fantasy'],
+      });
+    });
+
+    it('falls back to the stored description when the lookup finds nothing', async () => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      taggingEnabled(true);
+      audibleServiceMock.getAudiobookDetails.mockResolvedValue(null);
+
+      const metadata = await runOrganize();
+
+      expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledWith('ASIN-TAGS');
+      expect(metadata.description).toBe('Stored short blurb.');
+      expect(metadata.genres).toBeUndefined();
+    });
+
+    it('does not look anything up for tags when metadata tagging is off', async () => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      taggingEnabled(false);
+
+      const metadata = await runOrganize();
+
+      expect(audibleServiceMock.getAudiobookDetails).not.toHaveBeenCalled();
+      expect(metadata.description).toBeUndefined();
+      expect(metadata.genres).toBeUndefined();
+    });
+  });
 });
-
-

@@ -132,6 +132,69 @@ describe('metadata-tagger integration (real ffmpeg)', () => {
     60_000
   );
 
+  describe('description, genre and audiobook flags', () => {
+    const DESCRIPTION = 'A heist on Luthadel.\n\nThe second paragraph — with "quotes".';
+    const FLAT_DESCRIPTION = 'A heist on Luthadel. The second paragraph — with "quotes".';
+    const GENRES = ['Science Fiction & Fantasy', 'Mystery, Thriller & Suspense'];
+    const GENRE_TAG = 'Science Fiction & Fantasy; Mystery, Thriller & Suspense';
+
+    it.skipIf(skipReal)(
+      'm4a: desc, ldes, genre, stik and pgap are written and read back',
+      async () => {
+        const src = await makeFixture('.m4a');
+        const result = await tagAudioFileMetadata(src, {
+          title: 'Book',
+          author: 'Author',
+          description: DESCRIPTION,
+          genres: GENRES,
+        });
+        expect(result.success).toBe(true);
+        const tagged = result.taggedFilePath!;
+        expect(await readTag(tagged, 'description')).toBe(FLAT_DESCRIPTION);
+        expect(await readTag(tagged, 'synopsis')).toBe(FLAT_DESCRIPTION);
+        expect(await readTag(tagged, 'genre')).toBe(GENRE_TAG);
+        expect(await readTag(tagged, 'media_type')).toBe('2');
+        expect(await readTag(tagged, 'gapless_playback')).toBe('1');
+      },
+      60_000
+    );
+
+    it.skipIf(skipReal)(
+      'mp3: description and genre are written and read back',
+      async () => {
+        const src = await makeFixture('.mp3');
+        const result = await tagAudioFileMetadata(src, {
+          title: 'Book',
+          author: 'Author',
+          description: DESCRIPTION,
+          genres: GENRES,
+        });
+        expect(result.success).toBe(true);
+        expect(await readTag(result.taggedFilePath!, 'description')).toBe(FLAT_DESCRIPTION);
+        expect(await readTag(result.taggedFilePath!, 'genre')).toBe(GENRE_TAG);
+      },
+      60_000
+    );
+
+    it.skipIf(skipReal)(
+      'flac: description and genre are written and read back',
+      async () => {
+        const src = await makeFixture('.flac');
+        const result = await tagAudioFileMetadata(src, {
+          title: 'Book',
+          author: 'Author',
+          description: DESCRIPTION,
+          genres: GENRES,
+        });
+        expect(result.success).toBe(true);
+        // The Vorbis DESCRIPTION field is what ffprobe reports as `comment`
+        expect(await readTag(result.taggedFilePath!, 'comment')).toBe(FLAT_DESCRIPTION);
+        expect(await readTag(result.taggedFilePath!, 'genre')).toBe(GENRE_TAG);
+      },
+      60_000
+    );
+  });
+
   it.skipIf(skipReal)(
     'm4a: author does NOT inherit a stray leading `"` when title contains `"`',
     async () => {

@@ -38,6 +38,8 @@ export interface AudiobookMetadata {
   asin?: string;
   series?: string;
   seriesPart?: string;
+  description?: string; // Metadata tags only (not used in path templates)
+  genres?: string[]; // Metadata tags only (not used in path templates)
 }
 
 export interface OrganizationResult {
@@ -299,6 +301,8 @@ export class FileOrganizer {
               asin: audiobook.asin,
               series: audiobook.series,
               seriesPart: audiobook.seriesPart,
+              description: audiobook.description,
+              genres: audiobook.genres,
             });
 
             const successCount = taggingResults.filter((r) => r.success).length;
