@@ -1,81 +1,110 @@
 /**
- * Component: Chapter Merge Source Verification (packet-accurate durations)
+ * Component: Chapter Merge Source Verification (audio content, not timestamps)
  * Documentation: documentation/features/chapter-merging.md
  *
- * Decides whether a merged M4B provably holds all of its chapter files, which
- * is what allows those chapter files to be cleaned up afterwards. Every
- * chapter and the merged file are measured from their audio packets (not
- * format.duration, which is an estimate for e.g. VBR MP3 without a Xing
- * header), and the merged file must match the chapters' total within a small
- * fixed allowance: 1 s plus 50 ms per chapter for encoder priming and frame
- * rounding at each boundary. A percentage window would let a merge that lost
- * whole chapters through on long books (2% of 13 hours is over 15 minutes).
+ * Decides whether a merged M4B holds as much audio as its chapter files did
+ * when they were measured just before the merge, which is what allows those
+ * chapter files to be cleaned up afterwards. Both sides are measured as audio
+ * content (probeAudioContent: packet durations minus discarded samples), not
+ * as end timestamps or format.duration: ffmpeg can bridge a chapter that ended
+ * early with one stretched packet, so the output still ends at full length.
+ * Verified only when the merged file has no timeline gap and its content
+ * matches the chapters' total within 1 s + 50 ms per chapter (encoder priming
+ * and frame rounding at each boundary). A percentage window would let a merge
+ * that lost whole chapters through on long books (2% of 13 h is over 15 min).
+ * This checks the amount of audio, not its bytes.
  */
 
-import { probeStreamDurationMs } from './audio-duration';
+import { type AudioContent, probeAudioContent } from './audio-content';
 
 export const MERGE_BASE_TOLERANCE_MS = 1000;
 export const MERGE_PER_CHAPTER_TOLERANCE_MS = 50;
+/** Chapters measured in parallel. */
+const MEASURE_CONCURRENCY = 4;
+/** Upper bound for measuring all chapters; past it the merge is not verified (sources kept). */
+export const MEASURE_BUDGET_MS = 30 * 60 * 1000;
 
-export type DurationProbe = (filePath: string) => Promise<number>;
+export type ContentProbe = (filePath: string) => Promise<AudioContent>;
 
 export function mergeToleranceMs(chapterCount: number): number {
   return MERGE_BASE_TOLERANCE_MS + MERGE_PER_CHAPTER_TOLERANCE_MS * chapterCount;
 }
 
 export interface ChapterMeasurement {
-  /** Packet-accurate duration (ms) per chapter, in input order; only set when every chapter was measured. */
-  durationsMs?: number[];
+  /** Audio content (ms) per chapter, in input order; only set when every chapter was measured. */
+  contentMs?: number[];
   error?: string;
 }
 
-/** Measure every chapter from its audio packets. Fails as a whole if any chapter has no measurable audio. */
-export async function measureChapterDurations(
+/** Measure every chapter's audio content. Fails as a whole if any chapter cannot be measured in time. */
+export async function measureChapterContent(
   chapterPaths: string[],
-  probe: DurationProbe = probeStreamDurationMs
+  probe: ContentProbe = probeAudioContent,
+  budgetMs: number = MEASURE_BUDGET_MS
 ): Promise<ChapterMeasurement> {
-  try {
-    const durationsMs: number[] = [];
-    for (const chapter of chapterPaths) {
-      const ms = await probe(chapter);
-      if (!(ms > 0)) throw new Error(`no audio duration for ${chapter}`);
-      durationsMs.push(ms);
+  const deadline = Date.now() + budgetMs;
+  const contentMs: number[] = new Array(chapterPaths.length);
+  let next = 0;
+  let failure: string | undefined;
+
+  const worker = async () => {
+    while (!failure && next < chapterPaths.length) {
+      const index = next++;
+      if (Date.now() > deadline) {
+        failure = `chapter measurement took longer than ${Math.round(budgetMs / 60000)} min`;
+        return;
+      }
+      try {
+        const content = await probe(chapterPaths[index]);
+        if (!(content.contentMs > 0)) throw new Error(`no audio in ${chapterPaths[index]}`);
+        contentMs[index] = content.contentMs;
+      } catch (error) {
+        failure ??= error instanceof Error ? error.message : String(error);
+      }
     }
-    return { durationsMs };
-  } catch (error) {
-    return { error: error instanceof Error ? error.message : String(error) };
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(MEASURE_CONCURRENCY, chapterPaths.length) }, worker));
+  return failure ? { error: failure } : { contentMs };
 }
 
 export interface MergeVerification {
   verified: boolean;
   expectedMs?: number;
   actualMs?: number;
+  gapMs?: number;
   toleranceMs: number;
   error?: string;
 }
 
-/**
- * Verify a merged file against its chapters' packet-accurate total.
- * `chapters` is either the paths to measure or an existing measurement of them.
- */
-export async function verifyMergedDuration(
-  chapters: string[] | ChapterMeasurement & { count: number },
+/** Compare the merged file's content with the chapters' measured content. */
+export function verifyMergedContent(
+  chapters: ChapterMeasurement,
+  chapterCount: number,
+  output: AudioContent | { error: string }
+): MergeVerification {
+  const toleranceMs = mergeToleranceMs(chapterCount);
+  if (!chapters.contentMs) {
+    return { verified: false, toleranceMs, error: chapters.error ?? 'chapters were not measured' };
+  }
+  const expectedMs = chapters.contentMs.reduce((sum, ms) => sum + ms, 0);
+  if ('error' in output) return { verified: false, expectedMs, toleranceMs, error: output.error };
+  const actualMs = output.contentMs;
+  return {
+    verified: output.gapMs === 0 && Math.abs(actualMs - expectedMs) <= toleranceMs,
+    expectedMs,
+    actualMs,
+    gapMs: output.gapMs,
+    toleranceMs,
+  };
+}
+
+/** Measure the chapters and the merged file, then compare (for checks outside a merge run). */
+export async function verifyMergedFile(
+  chapterPaths: string[],
   outputPath: string,
-  probe: DurationProbe = probeStreamDurationMs
+  probe: ContentProbe = probeAudioContent
 ): Promise<MergeVerification> {
-  const measurement = Array.isArray(chapters) ? await measureChapterDurations(chapters, probe) : chapters;
-  const count = Array.isArray(chapters) ? chapters.length : chapters.count;
-  const toleranceMs = mergeToleranceMs(count);
-  if (!measurement.durationsMs) {
-    return { verified: false, toleranceMs, error: measurement.error ?? 'chapters were not measured' };
-  }
-  const expectedMs = measurement.durationsMs.reduce((sum, ms) => sum + ms, 0);
-  try {
-    const actualMs = await probe(outputPath);
-    if (!(actualMs > 0)) throw new Error('no audio duration for the merged file');
-    return { verified: Math.abs(actualMs - expectedMs) <= toleranceMs, expectedMs, actualMs, toleranceMs };
-  } catch (error) {
-    return { verified: false, expectedMs, toleranceMs, error: error instanceof Error ? error.message : String(error) };
-  }
+  const chapters = await measureChapterContent(chapterPaths, probe);
+  const output = await probe(outputPath).catch((error: Error) => ({ error: error.message }));
+  return verifyMergedContent(chapters, chapterPaths.length, output);
 }

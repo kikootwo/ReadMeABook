@@ -40,10 +40,15 @@ const fsMock = vi.hoisted(() => ({
 }));
 
 vi.mock('child_process', () => ({ execFile: execFileMock, spawn: spawnMock }));
-// Packet-accurate durations used to verify a merge (per file path)
-const streamDurations = vi.hoisted(() => ({ byPath: new Map<string, number>(), fallback: 60000 }));
-vi.mock('@/lib/utils/audio-duration', () => ({
-  probeStreamDurationMs: vi.fn(async (p: string) => streamDurations.byPath.get(p) ?? streamDurations.fallback),
+// Measured audio content used to verify a merge (per file path), and timeline gaps
+const streamDurations = vi.hoisted(() => ({ byPath: new Map<string, number>(), gaps: new Map<string, number>(), fallback: 60000 }));
+vi.mock('@/lib/utils/audio-content', () => ({
+  probeAudioContent: vi.fn(async (p: string) => {
+    // Merged outputs default to the mocked container duration; chapters to 60 s
+    const fallback = p.endsWith('out.m4b') ? Number(probeState.duration) * 1000 : streamDurations.fallback;
+    const contentMs = streamDurations.byPath.get(p) ?? fallback;
+    return { contentMs, gapMs: streamDurations.gaps.get(p) ?? 0, frameMs: 21.3, endMs: contentMs, packets: 1 };
+  }),
 }));
 vi.mock('fs/promises', () => ({ default: fsMock, ...fsMock }));
 
@@ -71,6 +76,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   probeState.duration = '120';
   streamDurations.byPath.clear();
+  streamDurations.gaps.clear();
   streamDurations.fallback = 60000;
   fsMock.access.mockResolvedValue(undefined);
   fsMock.mkdir.mockResolvedValue(undefined);
@@ -105,6 +111,17 @@ describe('chapter merge verification', () => {
     streamDurations.byPath.set('/t/out.m4b', 118800);
 
     const result = await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+
+    expect(result.success).toBe(true);
+    expect(result.durationVerified).toBe(false);
+  });
+
+  it('does not verify a merged file with a timeline gap, even at the full length', async () => {
+    // A chapter that ended early during the merge: ffmpeg bridges the hole with one stretched packet
+    streamDurations.byPath.set('/t/out.m4b', 120000);
+    streamDurations.gaps.set('/t/out.m4b', 2600);
+
+    const result = await mergeChapters([chapter('/dl/01.mp3'), chapter('/dl/02.mp3')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
 
     expect(result.success).toBe(true);
     expect(result.durationVerified).toBe(false);
@@ -169,19 +186,16 @@ describe('chapter merger argv safety (no shell)', () => {
 
     expect(result.success).toBe(true);
     expect(writtenFile('concat_')!.content).toBe(
-      "file '/dl/O'\\''Brien'\\''s Book/01.m4a'\nduration 60.000\nfile '/dl/Tab\tBook/02.m4a'\nduration 60.000"
+      "file '/dl/O'\\''Brien'\\''s Book/01.m4a'\nfile '/dl/Tab\tBook/02.m4a'"
     );
   });
 
-  it('gives each concat entry its measured duration, and leaves it out when a chapter cannot be measured', async () => {
+  it('uses the measured content for the chapter markers', async () => {
     streamDurations.byPath.set('/dl/01.m4a', 61234);
     await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
-    expect(writtenFile('concat_')!.content).toBe("file '/dl/01.m4a'\nduration 61.234\nfile '/dl/02.m4a'\nduration 60.000");
-
-    vi.clearAllMocks();
-    streamDurations.byPath.set('/dl/02.m4a', 0);
-    await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
-    expect(writtenFile('concat_')!.content).toBe("file '/dl/01.m4a'\nfile '/dl/02.m4a'");
+    const markers = writtenFile('chapters_')!.content;
+    expect(markers).toContain('START=0\nEND=61234\n');
+    expect(markers).toContain('START=61234\nEND=121234\n');
   });
 
   it.each([

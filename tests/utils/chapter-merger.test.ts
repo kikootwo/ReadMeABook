@@ -60,10 +60,20 @@ vi.mock('fs/promises', () => ({
   ...fsMock,
 }));
 
-// Packet-accurate durations (merge measurement and verification); 60 s per file unless a test overrides it
+// Measured audio content (merge measurement and verification): chapters 60 s unless a test
+// overrides it; a merged .m4b output holds what the test's ffprobe handler reports for it
 const streamDuration = vi.hoisted(() => ({ ms: 60000 }));
-vi.mock('@/lib/utils/audio-duration', () => ({
-  probeStreamDurationMs: vi.fn(async () => streamDuration.ms),
+vi.mock('@/lib/utils/audio-content', () => ({
+  probeAudioContent: vi.fn(async (p: string) => {
+    let contentMs = streamDuration.ms;
+    if (p.endsWith('.m4b') && execState.state.handler) {
+      const probe = execState.state.handler(`ffprobe ${p}`, [p]);
+      if (probe.error) throw probe.error;
+      const duration = parseFloat(probe.stdout ? JSON.parse(probe.stdout).format?.duration : '');
+      if (Number.isFinite(duration)) contentMs = Math.round(duration * 1000);
+    }
+    return { contentMs, gapMs: 0, frameMs: 21.3, endMs: contentMs, packets: 1 };
+  }),
 }));
 
 function createSpawnProcess(exitCode = 0, stderrData = '') {

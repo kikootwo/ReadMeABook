@@ -10,7 +10,8 @@ import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
-import { measureChapterDurations, verifyMergedDuration } from './merge-verification';
+import { probeAudioContent } from './audio-content';
+import { measureChapterContent, verifyMergedContent } from './merge-verification';
 import { RMABLogger } from './logger';
 import { CHAPTER_MERGE_FORMATS } from '../constants/audio-formats';
 
@@ -73,11 +74,12 @@ export interface MergeResult {
   outputPath?: string;
   chapterCount?: number;
   totalDuration?: number;     // milliseconds
-  /** Merged file's probed duration (ms). */
+  /** Merged file's duration (ms): measured audio content, or the container estimate. */
   actualDuration?: number;
   /**
-   * True when the merged audio is within 1 s + 50 ms per chapter (packet-accurate)
-   * of the chapters' total. Only then do the input files count as imported.
+   * True when the merged file has no timeline gap and its audio content is
+   * within 1 s + 50 ms per chapter of the chapters' measured content
+   * (verifyMergedContent). Only then do the input files count as imported.
    */
   durationVerified?: boolean;
   error?: string;
@@ -596,14 +598,15 @@ export async function mergeChapters(
     await logger?.info(`Starting chapter merge: "${options.title}" by ${options.author}`);
     await logger?.info(`Output: ${path.basename(options.outputPath)}`);
 
-    // Packet-accurate chapter durations: used for the chapter markers, the merge
-    // check and the source verification (format.duration is only an estimate
-    // for some files). If any chapter can't be measured, keep the estimates and
-    // never verify the merge, so the sources are kept.
-    const measured = await measureChapterDurations(chapters.map((c) => c.path));
-    if (measured.durationsMs) {
-      const durations = measured.durationsMs;
-      chapters = chapters.map((c, i) => ({ ...c, duration: durations[i] }));
+    // Each chapter's audio content, measured from its packets: used for the
+    // chapter markers, the merge check and the source verification
+    // (format.duration is only an estimate for some files). If any chapter
+    // can't be measured, keep the estimates and never verify the merge, so the
+    // sources are kept.
+    const measured = await measureChapterContent(chapters.map((c) => c.path));
+    if (measured.contentMs) {
+      const contentMs = measured.contentMs;
+      chapters = chapters.map((c, i) => ({ ...c, duration: contentMs[i] }));
     } else {
       await logger?.warn(`Could not measure chapter audio (${measured.error}); using estimated durations, source files will be kept`);
     }
@@ -643,14 +646,8 @@ export async function mergeChapters(
     if (unsafeChapter) {
       throw new Error(`Cannot merge: file path contains a line break or NUL character (${JSON.stringify(unsafeChapter.path)})`);
     }
-    // With measured durations, give the concat demuxer each file's real length:
-    // it otherwise offsets the next file by format.duration, which for e.g. VBR
-    // MP3 without a Xing header is an estimate, and audio is lost at the boundary.
     const concatContent = chapters
-      .map(c => {
-        const entry = `file '${c.path.replace(/'/g, "'\\''")}'`;
-        return measured.durationsMs ? `${entry}\nduration ${(c.duration / 1000).toFixed(3)}` : entry;
-      })
+      .map(c => `file '${c.path.replace(/'/g, "'\\''")}'`)
       .join('\n');
     await fs.writeFile(concatFile, concatContent);
     await logger?.info(`Created concat list with ${chapters.length} files`);
@@ -775,8 +772,17 @@ export async function mergeChapters(
       throw new Error('Merged file not created');
     }
 
+    // The merged file's audio content (what the 2% check and the source
+    // verification compare; its end timestamp can hide lost audio)
+    const outputContent = await probeAudioContent(options.outputPath).catch((error: Error) => ({ error: error.message }));
+
     // Validate merged file
-    const validation = await validateMergedFile(options.outputPath, totalDuration, logger);
+    const validation = await validateMergedFile(
+      options.outputPath,
+      totalDuration,
+      logger,
+      measured.contentMs && !('error' in outputContent) ? outputContent.contentMs : undefined
+    );
 
     if (!validation.valid) {
       await logger?.error(`Output validation failed: ${validation.error}`);
@@ -802,14 +808,16 @@ export async function mergeChapters(
     await logger?.info(`  - Validation: Passed (duration accurate, file playable)`);
 
     const actualDuration = validation.actualDuration ?? 0;
-    // Whether the chapter files may be cleaned up: packet-accurate totals, tight window
-    const verification = await verifyMergedDuration({ ...measured, count: chapters.length }, options.outputPath);
+    // Whether the chapter files may be cleaned up: audio content, no gaps, tight window
+    const verification = verifyMergedContent(measured, chapters.length, outputContent);
     const durationVerified = verification.verified;
     if (!durationVerified) {
       await logger?.warn(
         verification.error
-          ? `Merged duration could not be verified (${verification.error}); source files will be kept`
-          : `Merged audio ${formatDuration(verification.actualMs ?? 0)} is not within ${verification.toleranceMs} ms of the chapters' ${formatDuration(verification.expectedMs ?? 0)}; source files will be kept`
+          ? `Merged audio could not be verified (${verification.error}); source files will be kept`
+          : verification.gapMs
+            ? `Merged audio has ${formatDuration(verification.gapMs)} of timeline gaps (a chapter delivered less audio than measured); source files will be kept`
+            : `Merged audio ${formatDuration(verification.actualMs ?? 0)} is not within ${verification.toleranceMs} ms of the chapters' ${formatDuration(verification.expectedMs ?? 0)}; source files will be kept`
       );
     }
 
@@ -849,14 +857,14 @@ export async function mergeChapters(
 async function validateMergedFile(
   outputPath: string,
   expectedDuration: number, // milliseconds
-  logger?: RMABLogger
+  logger?: RMABLogger,
+  contentMs?: number // measured audio content, when the chapters were measured the same way
 ): Promise<{ valid: boolean; error?: string; actualDuration?: number }> {
   try {
     await logger?.info('Validating merged file...');
 
-    // 1. Probe output file to get actual duration
-    const probe = await probeAudioFile(outputPath);
-    const actualDuration = probe.duration;
+    // 1. Actual duration: measured audio content, else the container's estimate
+    const actualDuration = contentMs ?? (await probeAudioFile(outputPath)).duration;
 
     await logger?.info(`Duration check: expected ${formatDuration(expectedDuration)}, got ${formatDuration(actualDuration)}`);
 
