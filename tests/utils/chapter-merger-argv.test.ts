@@ -40,6 +40,17 @@ const fsMock = vi.hoisted(() => ({
 }));
 
 vi.mock('child_process', () => ({ execFile: execFileMock, spawn: spawnMock }));
+// Measured audio content used to verify a merge (per file path), and timeline gaps
+const streamDurations = vi.hoisted(() => ({ byPath: new Map<string, number>(), gaps: new Map<string, number>(), ends: new Map<string, number>(), formats: new Map<string, string>(), fallback: 60000 }));
+vi.mock('@/lib/utils/audio-content', () => ({
+  probeAudioContent: vi.fn(async (p: string) => {
+    // Merged outputs default to the mocked container duration; chapters to 60 s
+    const fallback = p.endsWith('out.m4b') ? Number(probeState.duration) * 1000 : streamDurations.fallback;
+    const contentMs = streamDurations.byPath.get(p) ?? fallback;
+    // 1 ms frames: a codec-copy output verifies only when its content equals the chapters' total
+    return { contentMs, gapMs: streamDurations.gaps.get(p) ?? 0, frameMs: 1, framedMs: contentMs, endMs: streamDurations.ends.get(p) ?? contentMs, packets: contentMs, decodedFormat: streamDurations.formats.get(p) ?? '44100/2/stereo/fltp' };
+  }),
+}));
 vi.mock('fs/promises', () => ({ default: fsMock, ...fsMock }));
 
 const HOSTILE_DIR = '/dl/My $(touch pwned) `id` "dq" \'sq\' Book';
@@ -65,6 +76,11 @@ function writtenFile(prefix: string): { file: string; content: string } | undefi
 beforeEach(() => {
   vi.clearAllMocks();
   probeState.duration = '120';
+  streamDurations.byPath.clear();
+  streamDurations.gaps.clear();
+  streamDurations.ends.clear();
+  streamDurations.formats.clear();
+  streamDurations.fallback = 60000;
   fsMock.access.mockResolvedValue(undefined);
   fsMock.mkdir.mockResolvedValue(undefined);
   fsMock.writeFile.mockResolvedValue(undefined);
@@ -86,20 +102,78 @@ describe('chapter merge verification', () => {
   });
 
   it('marks the duration verified when the merged file matches the chapters', async () => {
+    streamDurations.byPath.set('/t/out.m4b', 120000);
     const result = await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
 
     expect(result.success).toBe(true);
     expect(result.durationVerified).toBe(true);
   });
 
-  it('keeps the merge but does not verify it when the duration is off by more than half the shortest chapter', async () => {
-    // 62 s of chapters; 1.1 s off is inside the 2% merge check (1.24 s) but beyond half the 2 s chapter
-    probeState.duration = '63.1';
-    const chapters = [chapter('/dl/01.m4a'), { ...chapter('/dl/02.m4a'), duration: 2000 }];
+  it('keeps a codec-copy merge but does not verify it when audio packets are missing', async () => {
+    // 1.2 s short passes the 2% merge check; a copy must carry every packet
+    streamDurations.byPath.set('/t/out.m4b', 118800);
 
-    const result = await mergeChapters(chapters, { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+    const result = await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
 
     expect(result.success).toBe(true);
+    expect(result.durationVerified).toBe(false);
+  });
+
+  it('fails a re-encoded merge (files organized individually) that holds over 1 s less audio', async () => {
+    // Two 60 s chapters: 1.2 s short; a surplus may reach 1.1 s, a shortfall only 1 s
+    streamDurations.byPath.set('/t/out.m4b', 118800);
+
+    const result = await mergeChapters([chapter('/dl/01.mp3'), chapter('/dl/02.mp3')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('re-encoded audio is 1.2 s shorter than the chapters');
+    expect(fsMock.unlink).toHaveBeenCalledWith('/t/out.m4b');
+  });
+
+  it('re-encodes chapters of one decoded format with timestamps rebuilt from the sample count', async () => {
+    await mergeChapters([chapter('/dl/01.mp3'), chapter('/dl/02.mp3')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+    const args = spawnMock.mock.calls[0][1] as string[];
+    expect(args[args.indexOf('-af') + 1]).toBe('asetpts=N/SR/TB');
+  });
+
+  it('keeps container timestamps when the chapters decode differently (a filter graph rebuild would restart the count) or for codec copy', async () => {
+    streamDurations.formats.set('/dl/02.mp3', '22050/1/mono/fltp');
+    await mergeChapters([chapter('/dl/01.mp3'), chapter('/dl/02.mp3')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+    expect(spawnMock.mock.calls[0][1] as string[]).not.toContain('-af');
+
+    spawnMock.mockClear();
+    await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+    expect(spawnMock.mock.calls[0][1] as string[]).not.toContain('-af');
+  });
+
+  it('fails the merge (files organized individually) when the merged timeline has a gap, even at the full length', async () => {
+    // A chapter that ended early, or timestamps offset by a chapter's estimated duration
+    streamDurations.byPath.set('/t/out.m4b', 120000);
+    streamDurations.gaps.set('/t/out.m4b', 2600);
+
+    const result = await mergeChapters([chapter('/dl/01.mp3'), chapter('/dl/02.mp3')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Merged file rejected: the merged timeline has 2.6 s of gaps');
+    expect(fsMock.unlink).toHaveBeenCalledWith('/t/out.m4b');
+  });
+
+  it('fails the merge when the merged timeline ends far from its audio', async () => {
+    streamDurations.byPath.set('/t/out.m4b', 120000);
+    streamDurations.ends.set('/t/out.m4b', 121200); // window for 2 chapters: 1.1 s
+
+    const result = await mergeChapters([chapter('/dl/01.mp3'), chapter('/dl/02.mp3')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('ends at 121.2 s but holds 120.0 s of audio');
+  });
+
+  it('does not verify when a chapter cannot be probed', async () => {
+    streamDurations.byPath.set('/dl/02.m4a', 0);
+    streamDurations.byPath.set('/t/out.m4b', 120000);
+
+    const result = await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+
     expect(result.durationVerified).toBe(false);
   });
 });
@@ -155,6 +229,14 @@ describe('chapter merger argv safety (no shell)', () => {
     expect(writtenFile('concat_')!.content).toBe(
       "file '/dl/O'\\''Brien'\\''s Book/01.m4a'\nfile '/dl/Tab\tBook/02.m4a'"
     );
+  });
+
+  it('uses the measured content for the chapter markers', async () => {
+    streamDurations.byPath.set('/dl/01.m4a', 61234);
+    await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+    const markers = writtenFile('chapters_')!.content;
+    expect(markers).toContain('START=0\nEND=61234\n');
+    expect(markers).toContain('START=61234\nEND=121234\n');
   });
 
   it.each([

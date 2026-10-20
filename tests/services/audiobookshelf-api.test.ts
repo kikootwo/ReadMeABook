@@ -248,6 +248,28 @@ describe('Audiobookshelf API client', () => {
     });
   });
 
+  it('uses region-specific provider for Italy', async () => {
+    configServiceMock.get.mockImplementation(async (key: string) => {
+      if (key === 'audiobookshelf.server_url') return 'http://abs';
+      if (key === 'audiobookshelf.api_token') return 'token';
+      return null;
+    });
+    configServiceMock.getAudibleRegion.mockResolvedValue('it');
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
+
+    await triggerABSItemMatch('item-1', 'ASIN987');
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toEqual({
+      provider: 'audible.it',
+      asin: 'ASIN987',
+      overrideDefaults: true,
+    });
+  });
+
   it('suppresses errors when metadata match fails', async () => {
     configServiceMock.get.mockImplementation(async (key: string) => {
       if (key === 'audiobookshelf.server_url') return 'http://abs';

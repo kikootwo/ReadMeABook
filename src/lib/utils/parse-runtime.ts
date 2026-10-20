@@ -3,7 +3,7 @@
  * Documentation: documentation/integrations/audible.md
  *
  * Shared runtime/duration text parser extracted from AudibleService.
- * Handles all i18n patterns (English, German, Spanish, French) via
+ * Handles all i18n patterns (English, German, Spanish, French, Italian) via
  * language-specific regex patterns in LanguageConfig.
  */
 

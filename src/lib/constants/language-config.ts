@@ -16,7 +16,7 @@ import type { AudibleRegion } from '../types/audible';
 // Types
 // ---------------------------------------------------------------------------
 
-export type SupportedLanguage = 'en' | 'de' | 'es' | 'fr';
+export type SupportedLanguage = 'en' | 'de' | 'es' | 'fr' | 'it';
 
 export interface ScrapingConfig {
   /** Audible locale query-param value (e.g. 'english', 'deutsch') */
@@ -202,6 +202,44 @@ const FRENCH_CONFIG: LanguageConfig = {
   },
 };
 
+/**
+ * Italian (audible.it). Author/narrator/length/series/language/release-date
+ * labels and the "5 ore e 54 min" duration format were read off the live
+ * audible.it storefront; rating and promo patterns are inferred.
+ */
+const ITALIAN_CONFIG: LanguageConfig = {
+  code: 'it',
+  annasArchiveLang: 'it',
+  epubCode: 'it',
+  stopWords: ['il', 'lo', 'la', 'i', 'gli', 'le', 'un', 'uno', 'una', 'di', 'del', 'della', 'dei', 'e', 'in', 'per', 'da', 'con'],
+  characterReplacements: {},
+  scraping: {
+    audibleLocaleParam: 'italiano',
+    authorPrefixes: ['Di:', 'Scritto da:', 'Autore:'],
+    narratorPrefixes: ['Letto da:', 'Narrato da:'],
+    lengthLabels: ['Durata:'],
+    languageLabels: ['Lingua:'],
+    releaseDateLabels: ['Data di pubblicazione:'],
+    seriesLabels: ['Serie:'],
+    acceptedLanguageValues: ['italiano', 'italian'],
+    // "ore"/"ora" must end the word, so "3 orecchie" is not read as 3 hours
+    runtimeHourPatterns: [/(\d+)\s*or[ae]\b/i, /(\d+)\s*h\b/i],
+    runtimeMinutePatterns: [/(\d+)\s*min/i, /(\d+)\s*minuti?/i],
+    ratingPatterns: [/(\d+[.,]?\d*)\s*su\s*5/i],
+    releaseDatePatterns: [/Data di pubblicazione:\s*(.+)/i],
+    descriptionExcludePatterns: [
+      /\$\d+\.\d+/,
+      /\d+,\d+\s*\u20ac/,
+      /prova gratis/i,
+      /cancella quando vuoi/i,
+      /abbonamento/i,
+      /^\s*di\s+[\w\s,]+$/i,
+    ],
+    durationDetectionPattern: /\d+\s*(h|or[ae])\b\s*\d*\s*(min|minuti?)?/i,
+    ratingTextSelector: 'su 5 stelle',
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Lookup Maps
 // ---------------------------------------------------------------------------
@@ -211,6 +249,7 @@ export const LANGUAGE_CONFIGS: Record<SupportedLanguage, LanguageConfig> = {
   de: GERMAN_CONFIG,
   es: SPANISH_CONFIG,
   fr: FRENCH_CONFIG,
+  it: ITALIAN_CONFIG,
 };
 
 /**
@@ -226,6 +265,7 @@ export const REGION_LANGUAGE_MAP: Record<AudibleRegion, SupportedLanguage> = {
   de: 'de',
   es: 'es',
   fr: 'fr',
+  it: 'it',
 };
 
 // ---------------------------------------------------------------------------

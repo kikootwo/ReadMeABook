@@ -8,7 +8,7 @@
  */
 
 import * as cheerio from 'cheerio';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   parseSeriesBooks,
   parseSeriesDescription,
@@ -320,5 +320,134 @@ describe('parseSimilarSeries', () => {
 
     expect(parseSimilarSeries(modern$())).toEqual(expected);
     expect(parseSimilarSeries(legacy$())).toEqual(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Italian (audible.it) fixtures: offline copies of the labels seen on
+// audible.it ("Serie:", "Di:", "Letto da:", "Durata: 5 ore e 54 min",
+// "15 Titoli in serie", "Vol. 1"). No network access.
+// ---------------------------------------------------------------------------
+
+const IT = getLanguageForRegion('it');
+const IT_SERIES_ASIN = 'B0DXFPLXR8';
+const IT_BOOK = { asin: 'B0IT000101', title: 'Il profumo della morte' };
+
+const fakeAudible = vi.hoisted(() => ({
+  getRegion: vi.fn(() => 'it'),
+  getBaseUrl: vi.fn(() => 'https://www.audible.it'),
+  fetch: vi.fn(),
+}));
+
+vi.mock('@/lib/integrations/audible.service', () => ({
+  getAudibleService: () => fakeAudible,
+}));
+
+function italianModernPage(): string {
+  const json = JSON.stringify({
+    authors: [{ name: 'Ibon Mart\u00edn', url: '/author/Ibon-Martin/B07D5ZJ1QK' }],
+    narrators: [{ name: 'Alessandro Parise' }],
+    duration: '5 ore e 54 min',
+    language: 'Italiano',
+    releaseDate: '2025-02-11',
+  });
+  return `<html><body>
+    <adbl-metadata-group size="xl">
+      <adbl-metadata slot="title"><h1>Un'indagine dell'ispettore \u00c1lex Cort\u00e9s</h1></adbl-metadata>
+      <span slot="child"> 15 Titoli in serie </span>
+    </adbl-metadata-group>
+    <div id="series-titles">
+      <adbl-product-row variant="catalog" series-header="Vol. 1" placement="base">
+        <a href="/pd/Il-profumo-della-morte-Audiolibri/${IT_BOOK.asin}" slot="image">
+          <adbl-product-image><img src="${COVER_SRC}" /></adbl-product-image>
+        </a>
+        <h3 slot="title"><a href="/pd/Il-profumo-della-morte-Audiolibri/${IT_BOOK.asin}">${IT_BOOK.title}</a></h3>
+        <script type="application/json">${json}</script>
+      </adbl-product-row>
+    </div>
+  </body></html>`;
+}
+
+function italianLegacyPage(): string {
+  return `<html><body>
+    <h1>Un'indagine dell'ispettore \u00c1lex Cort\u00e9s</h1>
+    <ul class="bc-list">
+      <li class="bc-list-item productListItem" data-asin="${IT_BOOK.asin}">
+        <img src="${COVER_SRC}" />
+        <h3 class="bc-heading"><a href="/pd/Il-profumo-della-morte-Audiolibri/${IT_BOOK.asin}">${IT_BOOK.title}</a></h3>
+        <ul class="bc-list">
+          <li class="bc-list-item authorLabel">Di: <a href="/author/Ibon-Martin/B07D5ZJ1QK">Ibon Mart\u00edn</a></li>
+          <li class="bc-list-item narratorLabel">Letto da: Alessandro Parise</li>
+          <li class="bc-list-item runtimeLabel">Durata: 5 ore e 54 min</li>
+        </ul>
+      </li>
+    </ul>
+  </body></html>`;
+}
+
+/** One /search result row as audible.it renders it, with an Italian "Serie:" line. */
+function italianSearchPage(): string {
+  return `<html><body>
+    <div class="s-result-item">
+      <h2><a href="/pd/Il-profumo-della-morte-Audiolibri/${IT_BOOK.asin}">${IT_BOOK.title}</a></h2>
+      <ul>
+        <li><span>Di: <a href="/author/Ibon-Martin/B07D5ZJ1QK">Ibon Mart\u00edn</a></span></li>
+        <li><span>Serie: <a href="/series/Unindagine-Audiolibri/${IT_SERIES_ASIN}">Un'indagine dell'ispettore \u00c1lex Cort\u00e9s</a>, Titolo 1</span></li>
+        <li><span>Durata: 5 ore e 54 min</span></li>
+      </ul>
+    </div>
+  </body></html>`;
+}
+
+describe('Italian (audible.it) series pages', () => {
+  const expectedBook = {
+    asin: IT_BOOK.asin,
+    title: IT_BOOK.title,
+    author: 'Ibon Mart\u00edn',
+    authorAsin: 'B07D5ZJ1QK',
+    narrator: 'Alessandro Parise',
+    durationMinutes: 354,
+  };
+
+  it('parses the modern layout with an Italian duration', () => {
+    const books = parseSeriesBooks(cheerio.load(italianModernPage()), IT.scraping.authorPrefixes, IT.scraping.narratorPrefixes, IT);
+    expect(books).toHaveLength(1);
+    expect(books[0]).toMatchObject({ ...expectedBook, language: 'Italiano' });
+  });
+
+  it('parses the legacy layout, stripping "Letto da:" and reading "Durata:"', () => {
+    const books = parseSeriesBooks(cheerio.load(italianLegacyPage()), IT.scraping.authorPrefixes, IT.scraping.narratorPrefixes, IT);
+    expect(books).toHaveLength(1);
+    expect(books[0]).toMatchObject(expectedBook);
+  });
+
+  it('reads the book count from "15 Titoli in serie"', () => {
+    expect(parseSeriesPageSummary(cheerio.load(italianModernPage()), IT_SERIES_ASIN).bookCount).toBe(15);
+  });
+
+  it('scrapeSeriesPage parses Italian books through the region language config', async () => {
+    fakeAudible.fetch.mockResolvedValue({ data: { data: italianModernPage() } });
+    const { scrapeSeriesPage } = await import('@/lib/integrations/audible-series');
+
+    const detail = await scrapeSeriesPage(IT_SERIES_ASIN);
+
+    expect(detail?.books[0]).toMatchObject(expectedBook);
+    expect(detail?.audibleUrl).toBe(`https://www.audible.it/series/${IT_SERIES_ASIN}`);
+  });
+
+  it('searchForSeries finds series from the Italian "Serie:" label', async () => {
+    fakeAudible.fetch.mockImplementation(async (path: string) => ({
+      data: { data: path === '/search' ? italianSearchPage() : italianModernPage() },
+    }));
+    const { searchForSeries } = await import('@/lib/integrations/audible-series');
+
+    const results = await searchForSeries('profumo della morte');
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      asin: IT_SERIES_ASIN,
+      bookCount: 15,
+      audibleUrl: `https://www.audible.it/series/${IT_SERIES_ASIN}`,
+    });
   });
 });

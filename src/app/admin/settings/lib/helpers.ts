@@ -6,6 +6,7 @@
 import { fetchWithAuth } from '@/lib/utils/api';
 import type { Settings, SettingsTab, SavedIndexerConfig } from './types';
 import type { IndexerFlagConfig } from '@/lib/utils/ranking-algorithm';
+import type { IndexerSavePlan } from './useConfiguredIndexers';
 
 /**
  * Converts JSON array string to comma-separated string for display
@@ -44,6 +45,15 @@ export const parseCommaSeparatedToArray = (str: string): string => {
   return JSON.stringify(items);
 };
 
+export interface SaveTabOptions {
+  /**
+   * Prowlarr tab: whether to PUT the indexer list and flags, and whether an
+   * empty list is intended (see useConfiguredIndexers). Default: save, empty
+   * not allowed.
+   */
+  indexerPlan?: IndexerSavePlan;
+}
+
 /**
  * Saves settings for a specific tab
  */
@@ -51,7 +61,8 @@ export const saveTabSettings = async (
   activeTab: SettingsTab,
   settings: Settings,
   configuredIndexers: SavedIndexerConfig[],
-  flagConfigs: IndexerFlagConfig[]
+  flagConfigs: IndexerFlagConfig[],
+  options: SaveTabOptions = {}
 ): Promise<void> => {
   switch (activeTab) {
     case 'library':
@@ -128,15 +139,22 @@ export const saveTabSettings = async (
         if (!res.ok) throw new Error('Failed to save Prowlarr settings');
       });
 
-      // Save indexer configuration and flag configs
-      const indexersForSave = configuredIndexers.map(idx => ({ ...idx, enabled: true }));
-      await fetchWithAuth('/api/admin/settings/prowlarr/indexers', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ indexers: indexersForSave, flagConfigs }),
-      }).then(res => {
-        if (!res.ok) throw new Error('Failed to save indexer configuration');
-      });
+      // Save indexer configuration and flag configs only when the plan says so: never from a list
+      // that failed to load, and not at all when nothing changed
+      const indexerPlan = options.indexerPlan ?? { saveIndexers: true, allowEmpty: false, saveFlags: true };
+      if (indexerPlan.saveIndexers) {
+        const indexersForSave = configuredIndexers.map(idx => ({ ...idx, enabled: true }));
+        await fetchWithAuth('/api/admin/settings/prowlarr/indexers', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          // flagConfigs left out = the saved flag rules stay as they are
+          body: JSON.stringify({
+            indexers: indexersForSave,
+            ...(indexerPlan.saveFlags ? { flagConfigs } : {}),
+            allowEmpty: indexerPlan.allowEmpty,
+          }),
+        }).then(res => throwUnlessOk(res, 'Failed to save indexer configuration'));
+      }
 
       // Save indexer-wide options (auto-search behavior, etc.)
       await fetchWithAuth('/api/admin/settings/indexer-options', {

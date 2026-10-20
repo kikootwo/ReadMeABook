@@ -379,6 +379,35 @@ describe('Admin settings core routes', () => {
     expect(jobQueueMock.addAudibleRefreshJob).toHaveBeenCalled();
   });
 
+  it('accepts the Italy Audible region and triggers refresh', async () => {
+    const request = { json: vi.fn().mockResolvedValue({ region: 'it' }) };
+
+    const { PUT } = await import('@/app/api/admin/settings/audible/route');
+    const response = await PUT(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(configServiceMock.setMany).toHaveBeenCalledWith([
+      expect.objectContaining({ key: 'audible.region', value: 'it' }),
+    ]);
+    expect(jobQueueMock.addAudibleRefreshJob).toHaveBeenCalled();
+  });
+
+  it('rejects an unknown Audible region', async () => {
+    const request = { json: vi.fn().mockResolvedValue({ region: 'xx' }) };
+
+    const { PUT } = await import('@/app/api/admin/settings/audible/route');
+    const response = await PUT(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain('fr, it');
+    expect(configServiceMock.setMany).not.toHaveBeenCalled();
+    expect(jobQueueMock.addAudibleRefreshJob).not.toHaveBeenCalled();
+  });
+
   it('updates Audiobookshelf settings', async () => {
     const request = {
       json: vi.fn().mockResolvedValue({

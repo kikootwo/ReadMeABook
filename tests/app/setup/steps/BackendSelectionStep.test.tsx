@@ -70,4 +70,25 @@ describe('BackendSelectionStep', () => {
     expect(onBack).toHaveBeenCalled();
     expect(onNext).toHaveBeenCalled();
   });
+
+  it('offers Italy as an Audible region', async () => {
+    const onAudibleRegionChange = vi.fn();
+    const { BackendSelectionStep } = await import('@/app/setup/steps/BackendSelectionStep');
+
+    render(
+      <BackendSelectionStep
+        value="audiobookshelf"
+        onChange={vi.fn()}
+        audibleRegion="us"
+        onAudibleRegionChange={onAudibleRegionChange}
+        onNext={vi.fn()}
+        onBack={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('option', { name: /Italy/ })).toHaveValue('it');
+
+    fireEvent.change(screen.getByLabelText('Audible Region'), { target: { value: 'it' } });
+    expect(onAudibleRegionChange).toHaveBeenCalledWith('it');
+  });
 });

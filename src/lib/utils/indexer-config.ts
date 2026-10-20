@@ -72,6 +72,26 @@ export function toSavedIndexerConfig(input: IndexerConfigInput): SavedIndexerCon
   return config;
 }
 
+const LIMIT_FIELDS = ['seedingTimeMinutes', 'ratioLimit'] as const;
+
+/**
+ * Validation error for a torrent indexer's seeding limits, or null when valid.
+ * A limit may be missing (defaults to 0); when present it must be a finite
+ * number >= 0. Other protocols are not checked: their limits are discarded.
+ */
+export function invalidIndexerLimit(input: Record<string, unknown>): string | null {
+  if (!isTorrentProtocol(typeof input.protocol === 'string' ? input.protocol : undefined)) return null;
+  for (const field of LIMIT_FIELDS) {
+    const value = input[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      const name = typeof input.name === 'string' ? input.name : `indexer ${String(input.id)}`;
+      return `${name}: ${field} must be a number of 0 or more`;
+    }
+  }
+  return null;
+}
+
 /**
  * Parse the saved `prowlarr_indexers` value. Returns null when it is not a
  * JSON array: callers must then leave downloads alone rather than treat every

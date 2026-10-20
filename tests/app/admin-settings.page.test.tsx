@@ -161,7 +161,8 @@ describe('AdminSettings', () => {
         'library',
         expect.objectContaining({ audibleRegion: 'uk' }),
         [],
-        []
+        [],
+        { indexerPlan: { saveIndexers: false, allowEmpty: false, saveFlags: false } }
       );
     });
   });

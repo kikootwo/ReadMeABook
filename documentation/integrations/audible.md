@@ -94,8 +94,24 @@ Configurable Audible region for accurate metadata matching across international 
 | `de` | Germany | `https://www.audible.de` | `https://api.audible.de` | false |
 | `es` | Spain | `https://www.audible.es` | `https://api.audible.es` | false |
 | `fr` | France | `https://www.audible.fr` | `https://api.audible.fr` | false |
+| `it` | Italy | `https://www.audible.it` | `https://api.audible.it` | false |
 
 **`AudibleRegionConfig` fields:** `code`, `name`, `baseUrl`, `apiBaseUrl`, `audnexusParam`, `language`.
+
+**Language configs** (`src/lib/constants/language-config.ts`, `LANGUAGE_CONFIGS`): `en`, `de`, `es`, `fr`, `it`. Region → language via `REGION_LANGUAGE_MAP` (`Record<AudibleRegion, …>`, so tsc fails if a region lacks a mapping). Each holds stop words, `characterReplacements`, Anna's Archive/EPUB code, and `scraping` labels/patterns.
+
+| Lang | `audibleLocaleParam` | Author / narrator | Length | Series | Runtime example | `acceptedLanguageValues` |
+|---|---|---|---|---|---|---|
+| `it` | `italiano` | `Di:` / `Letto da:` | `Durata:` | `Serie:` | `5 ore e 54 min` (`1 ora`) | `italiano`, `italian` |
+
+- Italian labels (author, narrator, length, series, language `Lingua:`, release date `Data di pubblicazione:`) were read off audible.it bestsellers, new releases, category search and series pages. `ratingPatterns` / `ratingTextSelector` (`su 5`) and promo `descriptionExcludePatterns` are inferred; no current code path reads them.
+- Hour pattern `(\d+)\s*or[ae]\b` requires a word end, so `3 orecchie` is not read as hours.
+
+**Adding a region:** add it to `AudibleRegion` + `AUDIBLE_REGIONS` + `REGION_LANGUAGE_MAP` (every region); a new language also needs a `LanguageConfig` in `LANGUAGE_CONFIGS`. Dropdowns (setup wizard, Plex/ABS settings), `PUT /api/admin/settings/audible` validation, ABS provider (`audible.<code>`) and Audnexus `region=` all derive from `AUDIBLE_REGIONS`.
+
+**Changing region on an existing library:**
+- ASINs differ per marketplace, so books already in the library can look missing under the new region; watched-list auto-requests can re-request and re-download them (issue #256, not fixed).
+- Home-page category sections store marketplace-specific category node IDs (`UserHomeSection.categoryId`; e.g. audible.it "Adolescenti e Ragazzi" = `21837960031`). After a region change, users must remove their category sections and pick them again from the new region's list; the old IDs do not belong to the new store.
 
 **`isEnglish` flag:**
 - Non-English regions show amber warning in region dropdowns (setup wizard + admin settings): "Many features such as search, discovery, and metadata matching are not yet fully supported for non-English regions."

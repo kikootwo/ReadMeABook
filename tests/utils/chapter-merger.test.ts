@@ -60,6 +60,23 @@ vi.mock('fs/promises', () => ({
   ...fsMock,
 }));
 
+// Measured audio content (merge measurement and verification): chapters 60 s unless a test
+// overrides it; a merged .m4b output holds what the test's ffprobe handler reports for it
+const streamDuration = vi.hoisted(() => ({ ms: 60000 }));
+vi.mock('@/lib/utils/audio-content', () => ({
+  probeAudioContent: vi.fn(async (p: string) => {
+    let contentMs = streamDuration.ms;
+    if (p.endsWith('.m4b') && execState.state.handler) {
+      const probe = execState.state.handler(`ffprobe ${p}`, [p]);
+      if (probe.error) throw probe.error;
+      const duration = parseFloat(probe.stdout ? JSON.parse(probe.stdout).format?.duration : '');
+      if (Number.isFinite(duration)) contentMs = Math.round(duration * 1000);
+    }
+    // 1 ms frames: a codec-copy output verifies only when its content equals the chapters' total
+    return { contentMs, gapMs: 0, frameMs: 1, framedMs: contentMs, endMs: contentMs, packets: contentMs, decodedFormat: '44100/2/stereo/fltp' };
+  }),
+}));
+
 function createSpawnProcess(exitCode = 0, stderrData = '') {
   const proc = new EventEmitter() as EventEmitter & {
     stderr: EventEmitter;
@@ -86,6 +103,7 @@ describe('chapter merger', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     execState.state.handler = null;
+    streamDuration.ms = 60000;
   });
 
   it('detects when chapter merging should be skipped', async () => {
@@ -546,6 +564,7 @@ describe('chapter merger', () => {
       { path: '/tmp/one.mp3', filename: 'one.mp3', duration: 3600000, bitrate: 128, chapterTitle: 'One' },
       { path: '/tmp/two.mp3', filename: 'two.mp3', duration: 3600000, bitrate: 128, chapterTitle: 'Two' },
     ];
+    streamDuration.ms = 3600000;
     const logger = {
       info: vi.fn().mockResolvedValue(undefined),
       warn: vi.fn().mockResolvedValue(undefined),

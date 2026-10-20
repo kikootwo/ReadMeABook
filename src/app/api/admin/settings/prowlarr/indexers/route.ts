@@ -8,7 +8,7 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { getProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { getConfigService } from '@/lib/services/config.service';
 import { RMABLogger } from '@/lib/utils/logger';
-import { toSavedIndexerConfig, type IndexerConfigInput } from '@/lib/utils/indexer-config';
+import { invalidIndexerLimit, toSavedIndexerConfig, type IndexerConfigInput } from '@/lib/utils/indexer-config';
 
 const logger = RMABLogger.create('API.Admin.Settings.ProwlarrIndexers');
 
@@ -78,23 +78,53 @@ export async function GET(request: NextRequest) {
   });
 }
 
+const badRequest = (status: number, error: string) =>
+  NextResponse.json({ success: false, error }, { status });
+
 /**
  * PUT /api/admin/settings/prowlarr/indexers
- * Save indexer configuration and flag configs
+ * Save indexer configuration and flag configs.
+ * Body: { indexers, flagConfigs?, allowEmpty? }. An empty list never replaces
+ * saved indexers unless allowEmpty is true (the client loaded the list and the
+ * admin removed every indexer); a client whose list failed to load sends none.
  */
 export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { indexers, flagConfigs } = await req.json();
+        let body: any;
+        try {
+          body = await req.json();
+        } catch {
+          return badRequest(400, 'Request body must be JSON');
+        }
+        const { indexers, flagConfigs, allowEmpty } = body ?? {};
+        if (!Array.isArray(indexers)) {
+          return badRequest(400, 'indexers must be an array');
+        }
 
-        // Filter to only enabled indexers and convert to the persisted shape
-        const enabledIndexers = indexers
-          .filter((indexer: any) => indexer.enabled)
-          .map((indexer: IndexerConfigInput) => toSavedIndexerConfig(indexer));
+        const enabled = indexers.filter((indexer: any) => indexer && typeof indexer === 'object' && indexer.enabled);
+        for (const indexer of enabled) {
+          const invalid = invalidIndexerLimit(indexer);
+          if (invalid) return badRequest(400, invalid);
+        }
+
+        const configService = getConfigService();
+        if (enabled.length === 0 && allowEmpty !== true) {
+          const savedStr = await configService.get('prowlarr_indexers');
+          const saved = savedStr ? JSON.parse(savedStr) : [];
+          if (Array.isArray(saved) && saved.length > 0) {
+            return badRequest(
+              409,
+              `Refusing to remove all ${saved.length} saved indexer(s): the list sent was empty. Reload the indexers from Prowlarr and save again.`
+            );
+          }
+        }
+
+        // Convert to the persisted shape
+        const enabledIndexers = enabled.map((indexer: IndexerConfigInput) => toSavedIndexerConfig(indexer));
 
         // Save to configuration (matches wizard format)
-        const configService = getConfigService();
         const configUpdates = [
           {
             key: 'prowlarr_indexers',

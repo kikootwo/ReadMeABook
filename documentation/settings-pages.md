@@ -155,14 +155,18 @@ src/app/admin/settings/
 
 **Configuration:**
 - Key: `audible.region` (string, default: 'us')
-- Supported regions: US, Canada, UK, Australia, India
-- UI: Dropdown selector in Library tab (both Plex and Audiobookshelf settings)
+- Supported regions: any key of `AUDIBLE_REGIONS` (see [integrations/audible.md](integrations/audible.md#region-configuration))
+- UI: Dropdown selector in Library tab (both Plex and Audiobookshelf settings), built from `AUDIBLE_REGIONS`; non-English regions show ` *` + amber warning
 - No validation required (immediate save)
 
 **Why It Matters:**
 - Each Audible region uses different ASINs for the same audiobook
 - Users must match their RMAB region to their Plex/Audiobookshelf metadata engine region
 - Mismatched regions cause poor search results and failed metadata matching
+
+**Changing region on an existing library:**
+- Can re-request and re-download books already in the library: their ASINs differ in the new marketplace, so watched-list auto-requests treat them as missing (issue #256, not fixed)
+- Home-page category sections hold the old region's category IDs; users must remove them and pick categories again after the change
 
 **Help Text:**
 "Select the Audible region that matches your metadata engine (Audnexus/Audible Agent) configuration in [Plex/Audiobookshelf]. This ensures accurate book matching and metadata."
@@ -322,13 +326,16 @@ src/app/admin/settings/
 
 **PUT /api/admin/settings/audible**
 - Updates Audible region
-- Body: `{ region: string }` (one of: us, ca, uk, au, in, es, fr)
-- No validation required
+- Body: `{ region: string }` (any key of `AUDIBLE_REGIONS`, see [integrations/audible.md](integrations/audible.md#region-configuration))
+- Unknown region → 400 listing valid codes; success clears config cache, re-inits AudibleService, queues `audible_refresh` (job errors logged, not returned)
 
 **PUT /api/admin/settings/prowlarr/indexers**
 - Updates indexer configuration (enabled, priority, RSS, categories, seeding time, ratio limit, remove-after-processing)
 - No test required if URL/API key unchanged
 - Saves only enabled indexers to database, each normalized by `toSavedIndexerConfig()`
+- Body: `{ indexers: [...], flagConfigs?, allowEmpty? }`; body not JSON or `indexers` not an array → 400
+- Torrent `seedingTimeMinutes` / `ratioLimit` (usenet not checked, discarded): missing ok (→ 0), else finite number ≥ 0 → else 400 `<name>: <field> must be a number of 0 or more` (`invalidIndexerLimit()`); nothing saved
+- Empty list while indexers are saved and `allowEmpty !== true` → 409 (nothing saved, flags included). The settings page sends `allowEmpty: true` only for a confirmed connection-change clear or when the admin removed every loaded indexer
 
 **GET /api/admin/settings/indexer-options**
 - Returns `{ skipUnreleased: boolean }`
@@ -427,6 +434,17 @@ src/app/admin/settings/
 - Cause: `fetchIndexers()` in `src/app/admin/settings/page.tsx` rebuilt each indexer by hand and left out `ratioLimit`; the GET and PUT routes kept their own copies of the same field list
 - Fix: one mapping, `toSavedIndexerConfig()` (`src/lib/utils/indexer-config.ts`), used by the page, GET and PUT, and setup completion (`POST /api/setup/complete`); round trip covered by `tests/app/admin-settings-indexer-roundtrip.test.tsx`
 - Upgrade note: ratio limits already reset to `0` by this bug cannot be recovered; re-enter them per indexer (Settings → Indexers → Edit) and save
+
+**5. Indexer Settings Wiped When Prowlarr Was Unreachable**
+- Issue: GET indexers failed → Indexers tab showed an empty list → any save on that tab PUT `[]`, wiping `prowlarr_indexers` and `indexer_flag_config`
+- Fix (`useConfiguredIndexers`, `src/app/admin/settings/lib/useConfiguredIndexers.ts`):
+  - `indexersLoaded`: true after a successful GET (incl. via Test Connection or Fetch Indexers) or a confirmed connection-change clear; a later failed refresh keeps it and the edits
+  - `savePlan`: PUT indexers/flags only when loaded AND changed (or cleared); `allowEmpty` only for a clear or "removed every loaded indexer". A Prowlarr returning 200 with no indexers + an unrelated save → no PUT
+  - Not loaded: add/edit/remove and flag rules are disabled with a note (`IndexerManagement` `lockedReason`, fieldsets); save stores URL/key/options only and says so; after saving a changed connection the list is fetched again
+  - Connection-change confirm also appears when the list was not loaded (`useIndexersSettings`: `count > 0 || !indexersLoaded`). Not loaded → extra choice "Keep saved indexers" (same Prowlarr at a new address): tests without clearing; after saving, the list is loaded from the new address. "Continue" = different instance: clears indexers
+  - Flag rules are instance-independent: sent (`flagConfigs`) only when they were loaded (`savePlan.saveFlags`); a clear after a failed load leaves `indexer_flag_config` untouched (PUT without `flagConfigs` = unchanged). Flag editing stays locked until they load
+  - Saving while the list is unavailable (or still loading) reports success and says the saved indexers were left as they are
+  - PUT refuses an empty list over saved indexers without `allowEmpty` (protects older open tabs)
 
 ## Notifications
 

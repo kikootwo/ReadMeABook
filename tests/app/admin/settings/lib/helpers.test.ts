@@ -332,6 +332,36 @@ describe('admin settings helpers', () => {
       (fetchWithAuthMock.mock.calls[2][1] as RequestInit).body as string
     );
     expect(optionsBody.skipUnreleased).toBe(true);
+    expect(body.allowEmpty).toBe(false);
+  });
+
+  it('sends allowEmpty only when the plan allows an empty list', async () => {
+    fetchWithAuthMock.mockResolvedValue(makeOk());
+
+    const { saveTabSettings } = await import('@/app/admin/settings/lib/helpers');
+    await saveTabSettings('prowlarr', baseSettings, [], [], { indexerPlan: { saveIndexers: true, allowEmpty: true, saveFlags: false } });
+
+    const body = JSON.parse((fetchWithAuthMock.mock.calls[1][1] as RequestInit).body as string);
+    expect(body.allowEmpty).toBe(true);
+    expect('flagConfigs' in body).toBe(false); // flags not loaded: left out, so the saved ones stay
+  });
+
+  it('leaves saved indexers alone when the plan skips them', async () => {
+    fetchWithAuthMock.mockResolvedValue(makeOk());
+
+    const { saveTabSettings } = await import('@/app/admin/settings/lib/helpers');
+    await saveTabSettings('prowlarr', baseSettings, [], [], { indexerPlan: { saveIndexers: false, allowEmpty: false, saveFlags: false } });
+
+    const urls = fetchWithAuthMock.mock.calls.map((c) => c[0]);
+    expect(urls).toEqual(['/api/admin/settings/prowlarr', '/api/admin/settings/indexer-options']);
+  });
+
+  it('shows the route error when the indexer save is refused', async () => {
+    const refused = { ok: false, json: async () => ({ error: 'ratioLimit must be a number of 0 or more' }) };
+    fetchWithAuthMock.mockResolvedValueOnce(makeOk()).mockResolvedValueOnce(refused);
+
+    const { saveTabSettings } = await import('@/app/admin/settings/lib/helpers');
+    await expect(saveTabSettings('prowlarr', baseSettings, [], [])).rejects.toThrow('ratioLimit must be a number of 0 or more');
   });
 
   it('saves download and paths settings', async () => {
