@@ -188,6 +188,7 @@ exiftool "audiobook.m4b" | grep -i asin
 **Tech Stack:**
 - ffmpeg (system dependency - included in Docker image)
 - `src/lib/utils/metadata-tagger.ts` - Tagging utility
+- `src/lib/utils/metadata-text.ts` - text helpers: `sanitizeMetadataValue`, `sanitizeMultilineValue`, `sanitizeGenreName`, `truncateRawText`, `capUtf8Bytes`, `describeFfmpegFailure`, `MAX_DESCRIPTION_BYTES`, `MAX_RAW_DESCRIPTION_LENGTH`
 - Integrated into `src/lib/utils/file-organizer.ts`
 - `src/lib/processors/organize-tag-details.ts` - description/genres for the tags
 

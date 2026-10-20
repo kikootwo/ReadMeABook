@@ -54,6 +54,17 @@ vi.mock('@/lib/integrations/audible.service', () => ({
   getAudibleService: () => audibleServiceMock,
 }));
 
+// resolveTagDetails is real unless a test sets an override (it never rejects on its own). Plain holder: survives mock resets.
+const tagDetailsOverride = vi.hoisted(() => ({ resolve: undefined as undefined | (() => Promise<unknown>) }));
+vi.mock('@/lib/processors/organize-tag-details', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/processors/organize-tag-details')>();
+  return {
+    ...actual,
+    resolveTagDetails: (...args: Parameters<typeof actual.resolveTagDetails>) =>
+      tagDetailsOverride.resolve ? tagDetailsOverride.resolve() : actual.resolveTagDetails(...args),
+  };
+});
+
 describe('processOrganizeFiles', () => {
   // The processor's first import is slow under a loaded parallel run; pay it once here
   beforeAll(async () => {
@@ -913,10 +924,10 @@ describe('processOrganizeFiles', () => {
       expect(organizerMock.organize.mock.calls[0][1]).toMatchObject({ description: 'Full Audible summary.', genres: ['History'] });
     });
 
-    it('a setup failure while the lookup is pending leaves no unhandled rejection', async () => {
+    it('a setup failure while the tag details are pending leaves no unhandled rejection when they then reject', async () => {
       setupBook({ series: 'The Saga', seriesPart: '1' });
       let fail!: (error: Error) => void;
-      audibleServiceMock.getAudiobookDetails.mockReturnValue(new Promise((_resolve, reject) => (fail = reject)));
+      tagDetailsOverride.resolve = () => new Promise((_resolve, reject) => (fail = reject));
       prismaMock.configuration.findUnique.mockImplementation(async (args: { where?: { key?: string } }) => {
         if (args?.where?.key === 'metadata_tagging_enabled') return { value: 'true' };
         if (args?.where?.key === 'audiobook_path_template') throw new Error('db gone during setup');
@@ -931,11 +942,12 @@ describe('processOrganizeFiles', () => {
           () => undefined
         );
         expect(organizerMock.organize).not.toHaveBeenCalled();
-        fail(new Error('Audnexus down, after the setup failed'));
+        fail(new Error('tag details rejected after the setup failed'));
         await new Promise((resolve) => setTimeout(resolve, 20));
         expect(unhandled).toEqual([]);
       } finally {
         process.off('unhandledRejection', onUnhandled);
+        tagDetailsOverride.resolve = undefined;
       }
     });
 

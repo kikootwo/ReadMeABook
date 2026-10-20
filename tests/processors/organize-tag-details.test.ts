@@ -11,7 +11,7 @@ import {
   TAG_DETAILS_TIMEOUT_MS,
 } from '@/lib/processors/organize-tag-details';
 import type { RMABLogger } from '@/lib/utils/logger';
-import { MAX_RAW_DESCRIPTION_LENGTH } from '@/lib/utils/metadata-tagger';
+import { MAX_RAW_DESCRIPTION_LENGTH } from '@/lib/utils/metadata-text';
 
 const prismaMock = vi.hoisted(() => ({ configuration: { findUnique: vi.fn() } }));
 const audibleServiceMock = vi.hoisted(() => ({ getAudiobookDetails: vi.fn() }));

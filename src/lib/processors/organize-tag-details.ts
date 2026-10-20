@@ -7,7 +7,7 @@ import { prisma } from '../db';
 import type { RMABLogger } from '../utils/logger';
 import { getAudibleService, type AudibleAudiobook } from '../integrations/audible.service';
 import { stripHtml } from '../utils/strip-html';
-import { truncateRawText } from '../utils/metadata-tagger';
+import { truncateRawText } from '../utils/metadata-text';
 
 export type AudibleDetailsLoader = () => Promise<AudibleAudiobook | null>;
 
