@@ -12,6 +12,7 @@ import { RMABLogger } from '../utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 import { evaluateSeeding } from '../utils/seeding-policy';
 import { otherActiveRequestsUsingTorrent } from '../utils/shared-torrent';
+import { findIndexerConfig } from '../utils/indexer-config';
 
 const logger = RMABLogger.create('RequestDelete');
 
@@ -123,9 +124,10 @@ export async function deleteRequest(
         let seedingConfig: any = null;
         if (indexersConfigStr) {
           const indexersConfig = JSON.parse(indexersConfigStr);
-          seedingConfig = indexersConfig.find(
-            (idx: any) => idx.name === downloadHistory.indexerName
-          );
+          // By Prowlarr id first (survives renames), then by name for older downloads
+          const match = findIndexerConfig<any>(Array.isArray(indexersConfig) ? indexersConfig : [], downloadHistory);
+          seedingConfig = match.config ?? null;
+          logger.debug(`Indexer config for ${downloadHistory.indexerName}: ${match.matchedBy ? `matched by ${match.matchedBy}` : 'not configured'}`);
         }
 
         // Handle download cleanup via unified interface

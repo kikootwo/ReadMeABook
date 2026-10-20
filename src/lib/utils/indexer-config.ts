@@ -71,3 +71,50 @@ export function toSavedIndexerConfig(input: IndexerConfigInput): SavedIndexerCon
 
   return config;
 }
+
+/** What a download records about the indexer it came from. */
+export interface IndexerRef {
+  indexerId?: number | null;
+  indexerName?: string | null;
+}
+
+export interface IndexerConfigMatch<T> {
+  config: T | undefined;
+  /** How the config was found; null when it was not. */
+  matchedBy: 'id' | 'name' | null;
+}
+
+/**
+ * Lookup over the saved `prowlarr_indexers` list. Matches by Prowlarr indexer
+ * id first (stable across renames in Prowlarr), then by exact name for
+ * downloads recorded without an id, or whose id is no longer configured.
+ */
+export function createIndexerConfigLookup<T extends { id?: unknown; name?: unknown }>(
+  indexers: readonly T[]
+): (ref: IndexerRef) => IndexerConfigMatch<T> {
+  const byId = new Map<number, T>();
+  const byName = new Map<string, T>();
+  for (const indexer of indexers) {
+    if (typeof indexer.id === 'number' && !byId.has(indexer.id)) byId.set(indexer.id, indexer);
+    if (typeof indexer.name === 'string' && !byName.has(indexer.name)) byName.set(indexer.name, indexer);
+  }
+  return ({ indexerId, indexerName }) => {
+    if (typeof indexerId === 'number') {
+      const config = byId.get(indexerId);
+      if (config) return { config, matchedBy: 'id' };
+    }
+    if (indexerName) {
+      const config = byName.get(indexerName);
+      if (config) return { config, matchedBy: 'name' };
+    }
+    return { config: undefined, matchedBy: null };
+  };
+}
+
+/** One-off lookup (see createIndexerConfigLookup). */
+export function findIndexerConfig<T extends { id?: unknown; name?: unknown }>(
+  indexers: readonly T[],
+  ref: IndexerRef
+): IndexerConfigMatch<T> {
+  return createIndexerConfigLookup(indexers)(ref);
+}

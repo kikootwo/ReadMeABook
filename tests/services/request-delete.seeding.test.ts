@@ -29,9 +29,15 @@ interface Scenario {
   seedingTime: number;
   ratio?: number;
   downloadStatus?: string;
+  indexerName?: string;
+  indexerId?: number | null;
+  configured?: { id: number; name: string };
 }
 
-async function deleteWith({ seedingTimeMinutes, ratioLimit, seedingTime, ratio, downloadStatus = 'completed' }: Scenario) {
+async function deleteWith({
+  seedingTimeMinutes, ratioLimit, seedingTime, ratio, downloadStatus = 'completed',
+  indexerName = 'Tracker', indexerId = null, configured = { id: 1, name: 'Tracker' },
+}: Scenario) {
   prismaMock.request.findFirst.mockResolvedValue({
     id: 'req-1',
     audiobook: {
@@ -43,11 +49,11 @@ async function deleteWith({ seedingTimeMinutes, ratioLimit, seedingTime, ratio, 
       absItemId: null,
       filePath: path.join('/media', 'Author', 'Book'),
     },
-    downloadHistory: [{ torrentHash: 'hash-1', indexerName: 'Tracker', downloadStatus }],
+    downloadHistory: [{ torrentHash: 'hash-1', indexerName, indexerId, downloadStatus }],
   });
   configServiceMock.get.mockImplementation(async (key: string) => {
     if (key === 'prowlarr_indexers') {
-      return JSON.stringify([{ name: 'Tracker', protocol: 'torrent', seedingTimeMinutes, ratioLimit }]);
+      return JSON.stringify([{ ...configured, protocol: 'torrent', seedingTimeMinutes, ratioLimit }]);
     }
     if (key === 'media_dir') return '/media';
     return null;
@@ -147,5 +153,16 @@ describe('deleteRequest seeding rule', () => {
 
     expect(client.deleteDownload).not.toHaveBeenCalled();
     expect(result.torrentsKeptUnlimited).toBe(1);
+  });
+
+  it('applies the ratio limit of an indexer renamed in Prowlarr (matched by id)', async () => {
+    const { result, client } = await deleteWith({
+      seedingTimeMinutes: 0, ratioLimit: 2, seedingTime: 99999, ratio: 1,
+      indexerName: 'Old Name', indexerId: 7, configured: { id: 7, name: 'New Name' },
+    });
+
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+    expect(result.torrentsKeptSeeding).toBe(1);
+    expect(result.torrentsKeptUnlimited).toBe(0);
   });
 });

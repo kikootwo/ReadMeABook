@@ -11,6 +11,7 @@ import { RMABLogger } from '../utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 import { evaluateSeeding, isUnlimitedSeeding } from '../utils/seeding-policy';
 import { otherActiveRequestsUsingTorrent } from '../utils/shared-torrent';
+import { createIndexerConfigLookup } from '../utils/indexer-config';
 
 export interface CleanupSeededTorrentsPayload {
   jobId?: string;
@@ -42,13 +43,11 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
 
     const indexersConfig = JSON.parse(indexersConfigStr);
 
-    // Create a map of indexer name to config for quick lookup
-    const indexerConfigMap = new Map<string, any>();
-    for (const indexer of indexersConfig) {
-      indexerConfigMap.set(indexer.name, indexer);
-    }
+    // Look up each download's indexer by Prowlarr id (survives renames), then by name
+    const lookupIndexer = createIndexerConfigLookup<any>(Array.isArray(indexersConfig) ? indexersConfig : []);
+    const matchCounts = { id: 0, name: 0, none: 0 };
 
-    logger.info(`Loaded configuration for ${indexerConfigMap.size} indexers`);
+    logger.info(`Loaded configuration for ${Array.isArray(indexersConfig) ? indexersConfig.length : 0} indexers`);
 
     // Find all completed requests + soft-deleted requests (orphaned downloads)
     // IMPORTANT: Only cleanup requests that are truly complete and not being actively processed
@@ -129,11 +128,14 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
           continue;
         }
 
-        // Get the indexer name from download history
         const indexerName = downloadHistory.indexerName;
-
-        // Find matching indexer configuration by name
-        const seedingConfig = indexerConfigMap.get(indexerName);
+        const { config: seedingConfig, matchedBy } = lookupIndexer(downloadHistory);
+        matchCounts[matchedBy ?? 'none']++;
+        logger.debug(
+          matchedBy
+            ? `Indexer config for ${indexerName} (id ${downloadHistory.indexerId ?? 'none'}) matched by ${matchedBy}`
+            : `No indexer config for ${indexerName} (id ${downloadHistory.indexerId ?? 'none'}): treated as unlimited`
+        );
 
         // Per-indexer thresholds. 0 disables that criterion; no config or both 0 = unlimited.
         if (isUnlimitedSeeding(seedingConfig)) {
@@ -222,6 +224,7 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
       }
     }
 
+    logger.info(`Indexer config matches: ${matchCounts.id} by id, ${matchCounts.name} by name, ${matchCounts.none} not configured`);
     logger.info(`Cleanup complete: ${cleaned} downloads cleaned, ${skipped} still seeding, ${noConfig} unlimited`);
 
     return {

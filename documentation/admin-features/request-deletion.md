@@ -237,6 +237,7 @@ where: {
 - **Issue:** Deleting a request removed a torrent once its seeding time was met even when its ratio limit was not; a ratio-only indexer (`seedingTimeMinutes: 0`) was treated as unlimited and kept forever
 - **Cause:** request deletion had its own time-only check; the scheduled cleanup already used time AND ratio
 - **Fix:** both use `evaluateSeeding()` (`src/lib/utils/seeding-policy.ts`)
+- **Also (rename):** settings were found by indexer name, so a rename in Prowlarr made the torrent "unlimited"; both now match by `indexerId` first, name as fallback
 - **Also:** deletion now skips removing a torrent another active request still uses (`otherActiveRequestsUsingTorrent()`, same check as the cleanup job). Behaviour change: a ratio-only indexer's incomplete download is removed on delete (it was kept forever as "unlimited")
 
 ## File Structure
@@ -264,7 +265,7 @@ Queries Updated (deletedAt: null filters):
 ## Configuration
 
 **No new config required** - uses existing:
-- `prowlarr_indexers` (per indexer `seedingTimeMinutes` and `ratioLimit`)
+- `prowlarr_indexers` (per indexer `seedingTimeMinutes` and `ratioLimit`), matched to the download by Prowlarr indexer id, else by name (`findIndexerConfig()`)
 
 ## Security
 
