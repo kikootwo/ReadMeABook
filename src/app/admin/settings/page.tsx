@@ -55,6 +55,9 @@ export default function AdminSettings() {
   const [originalConfiguredIndexers, setOriginalConfiguredIndexers] = useState<SavedIndexerConfig[]>([]);
   const [flagConfigs, setFlagConfigs] = useState<IndexerFlagConfig[]>([]);
   const [originalFlagConfigs, setOriginalFlagConfigs] = useState<IndexerFlagConfig[]>([]);
+  // True once the indexer list came from the server (or was cleared on purpose); until then saving
+  // the Indexers tab must not replace the saved list
+  const [indexersLoaded, setIndexersLoaded] = useState(false);
 
   // Initial data fetch
   useEffect(() => {
@@ -105,13 +108,16 @@ export default function AdminSettings() {
           .map((idx: IndexerConfig) => toSavedIndexerConfig(idx));
         setConfiguredIndexers(configured);
         setOriginalConfiguredIndexers(JSON.parse(JSON.stringify(configured)));
+        setIndexersLoaded(true);
       } else {
+        setIndexersLoaded(false);
         console.error('Failed to fetch indexers:', response.status);
         if (force) {
           setMessage({ type: 'error', text: 'Failed to load indexers. Check your Prowlarr settings.' });
         }
       }
     } catch (error) {
+      setIndexersLoaded(false);
       console.error('Failed to fetch indexers:', error);
       if (force) {
         setMessage({ type: 'error', text: 'Failed to load Prowlarr indexers. Check your Prowlarr URL and API key.' });
@@ -138,9 +144,18 @@ export default function AdminSettings() {
     setMessage(null);
 
     try {
-      await saveTabSettings(activeTab, settings, configuredIndexers, flagConfigs);
-      setMessage({ type: 'success', text: 'Settings saved successfully!' });
+      await saveTabSettings(activeTab, settings, configuredIndexers, flagConfigs, { indexersLoaded });
       setOriginalSettings(JSON.parse(JSON.stringify(settings)));
+
+      if (activeTab === 'prowlarr' && !indexersLoaded) {
+        // Connection and options saved; the saved indexers were left as they are
+        setMessage({
+          type: 'error',
+          text: 'Prowlarr settings saved, but indexer settings were not: they could not be loaded from Prowlarr, so your saved indexers were left unchanged. Refresh the indexers and save again.',
+        });
+        return;
+      }
+      setMessage({ type: 'success', text: 'Settings saved successfully!' });
 
       // Also update original indexers and flag configs when saving prowlarr tab
       if (activeTab === 'prowlarr') {
@@ -283,6 +298,11 @@ export default function AdminSettings() {
               flagConfigs={flagConfigs}
               onChange={setSettings}
               onIndexersChange={setConfiguredIndexers}
+              onClearIndexers={() => {
+                // Prowlarr connection changed and confirmed: an empty list is intended
+                setConfiguredIndexers([]);
+                setIndexersLoaded(true);
+              }}
               onFlagConfigsChange={setFlagConfigs}
               onValidationChange={(isValid) => setValidated({ ...validated, prowlarr: isValid })}
               onRefreshIndexers={() => fetchIndexers(true)}

@@ -332,6 +332,25 @@ describe('admin settings helpers', () => {
       (fetchWithAuthMock.mock.calls[2][1] as RequestInit).body as string
     );
     expect(optionsBody.skipUnreleased).toBe(true);
+    expect(body.allowEmpty).toBe(true);
+  });
+
+  it('leaves saved indexers alone when the list was not loaded', async () => {
+    fetchWithAuthMock.mockResolvedValue(makeOk());
+
+    const { saveTabSettings } = await import('@/app/admin/settings/lib/helpers');
+    await saveTabSettings('prowlarr', baseSettings, [], [], { indexersLoaded: false });
+
+    const urls = fetchWithAuthMock.mock.calls.map((c) => c[0]);
+    expect(urls).toEqual(['/api/admin/settings/prowlarr', '/api/admin/settings/indexer-options']);
+  });
+
+  it('shows the route error when the indexer save is refused', async () => {
+    const refused = { ok: false, json: async () => ({ error: 'ratioLimit must be a number of 0 or more' }) };
+    fetchWithAuthMock.mockResolvedValueOnce(makeOk()).mockResolvedValueOnce(refused);
+
+    const { saveTabSettings } = await import('@/app/admin/settings/lib/helpers');
+    await expect(saveTabSettings('prowlarr', baseSettings, [], [])).rejects.toThrow('ratioLimit must be a number of 0 or more');
   });
 
   it('saves download and paths settings', async () => {

@@ -158,7 +158,8 @@ describe('AdminSettings', () => {
         'library',
         expect.objectContaining({ audibleRegion: 'uk' }),
         [],
-        []
+        [],
+        { indexersLoaded: false }
       );
     });
   });

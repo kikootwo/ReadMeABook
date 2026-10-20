@@ -47,11 +47,21 @@ export const parseCommaSeparatedToArray = (str: string): string => {
 /**
  * Saves settings for a specific tab
  */
+export interface SaveTabOptions {
+  /**
+   * Prowlarr tab: true when the indexer list was loaded from the server (or
+   * cleared on purpose), so it may replace what is saved. False skips the
+   * indexer and flag save, leaving the saved ones untouched. Default true.
+   */
+  indexersLoaded?: boolean;
+}
+
 export const saveTabSettings = async (
   activeTab: SettingsTab,
   settings: Settings,
   configuredIndexers: SavedIndexerConfig[],
-  flagConfigs: IndexerFlagConfig[]
+  flagConfigs: IndexerFlagConfig[],
+  options: SaveTabOptions = {}
 ): Promise<void> => {
   switch (activeTab) {
     case 'library':
@@ -128,15 +138,16 @@ export const saveTabSettings = async (
         if (!res.ok) throw new Error('Failed to save Prowlarr settings');
       });
 
-      // Save indexer configuration and flag configs
-      const indexersForSave = configuredIndexers.map(idx => ({ ...idx, enabled: true }));
-      await fetchWithAuth('/api/admin/settings/prowlarr/indexers', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ indexers: indexersForSave, flagConfigs }),
-      }).then(res => {
-        if (!res.ok) throw new Error('Failed to save indexer configuration');
-      });
+      // Save indexer configuration and flag configs, only from a list that was loaded:
+      // an empty list from a failed load would wipe every saved indexer
+      if (options.indexersLoaded !== false) {
+        const indexersForSave = configuredIndexers.map(idx => ({ ...idx, enabled: true }));
+        await fetchWithAuth('/api/admin/settings/prowlarr/indexers', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ indexers: indexersForSave, flagConfigs, allowEmpty: true }),
+        }).then(res => throwUnlessOk(res, 'Failed to save indexer configuration'));
+      }
 
       // Save indexer-wide options (auto-search behavior, etc.)
       await fetchWithAuth('/api/admin/settings/indexer-options', {

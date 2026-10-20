@@ -329,6 +329,9 @@ src/app/admin/settings/
 - Updates indexer configuration (enabled, priority, RSS, categories, seeding time, ratio limit, remove-after-processing)
 - No test required if URL/API key unchanged
 - Saves only enabled indexers to database, each normalized by `toSavedIndexerConfig()`
+- Body: `{ indexers: [...], flagConfigs?, allowEmpty? }`; `indexers` not an array → 400
+- `seedingTimeMinutes` / `ratioLimit`: missing ok (→ 0), else finite number ≥ 0 → else 400 `<name>: <field> must be a number of 0 or more` (`invalidIndexerLimit()`); nothing saved
+- Empty list while indexers are saved and `allowEmpty !== true` → 409 (nothing saved, flags included). The settings page sends `allowEmpty: true` only from a list it loaded (or cleared after a confirmed Prowlarr connection change)
 
 **GET /api/admin/settings/indexer-options**
 - Returns `{ skipUnreleased: boolean }`
@@ -427,6 +430,10 @@ src/app/admin/settings/
 - Cause: `fetchIndexers()` in `src/app/admin/settings/page.tsx` rebuilt each indexer by hand and left out `ratioLimit`; the GET and PUT routes kept their own copies of the same field list
 - Fix: one mapping, `toSavedIndexerConfig()` (`src/lib/utils/indexer-config.ts`), used by the page, GET and PUT, and setup completion (`POST /api/setup/complete`); round trip covered by `tests/app/admin-settings-indexer-roundtrip.test.tsx`
 - Upgrade note: ratio limits already reset to `0` by this bug cannot be recovered; re-enter them per indexer (Settings → Indexers → Edit) and save
+
+**5. Indexer Settings Wiped When Prowlarr Was Unreachable**
+- Issue: GET indexers failed → Indexers tab showed an empty list → any save on that tab PUT `[]`, wiping `prowlarr_indexers` and `indexer_flag_config`
+- Fix: page tracks `indexersLoaded` (true after a successful load or a confirmed connection-change clear); when false, `saveTabSettings(..., { indexersLoaded: false })` saves URL/key and indexer options only and shows an error that indexers were left unchanged. PUT also refuses an empty list over saved indexers without `allowEmpty` (protects older open tabs)
 
 ## Notifications
 

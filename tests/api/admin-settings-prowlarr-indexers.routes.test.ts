@@ -89,6 +89,73 @@ describe('Admin Prowlarr indexers route', () => {
     const persisted = JSON.parse(indexersEntry.value);
     expect(persisted[0]).toMatchObject({ id: 1, ratioLimit: 1.5, seedingTimeMinutes: 0 });
   });
+
+  describe('PUT guards', () => {
+    const put = async (body: unknown) => {
+      authRequest.json.mockResolvedValue(body);
+      const { PUT } = await import('@/app/api/admin/settings/prowlarr/indexers/route');
+      const response = await PUT({} as any);
+      return { status: response.status, payload: await response.json() };
+    };
+    const torrent = { id: 1, name: 'Tracker', protocol: 'torrent', enabled: true, priority: 10 };
+
+    it('refuses an empty list that would remove saved indexers', async () => {
+      configServiceMock.get.mockResolvedValueOnce(JSON.stringify([{ id: 1, name: 'Tracker' }, { id: 2, name: 'Other' }]));
+
+      const { status, payload } = await put({ indexers: [], flagConfigs: [] });
+
+      expect(status).toBe(409);
+      expect(payload.error).toMatch(/Refusing to remove all 2 saved indexer/);
+      expect(configServiceMock.setMany).not.toHaveBeenCalled();
+    });
+
+    it('saves an empty list when explicitly allowed', async () => {
+      const { status } = await put({ indexers: [], flagConfigs: [], allowEmpty: true });
+
+      expect(status).toBe(200);
+      const entry = configServiceMock.setMany.mock.calls[0][0].find((e: any) => e.key === 'prowlarr_indexers');
+      expect(entry.value).toBe('[]');
+    });
+
+    it('saves an empty list when nothing was saved before', async () => {
+      configServiceMock.get.mockResolvedValueOnce(null);
+
+      const { status } = await put({ indexers: [] });
+
+      expect(status).toBe(200);
+      expect(configServiceMock.setMany).toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a negative ratio limit', { ratioLimit: -0.5 }],
+      ['a negative seeding time', { seedingTimeMinutes: -1 }],
+      ['a string ratio limit', { ratioLimit: '1.5' }],
+      ['a NaN seeding time', { seedingTimeMinutes: Number.NaN }],
+      ['an infinite ratio limit', { ratioLimit: Number.POSITIVE_INFINITY }],
+    ])('rejects %s', async (_label, limits) => {
+      const { status, payload } = await put({ indexers: [{ ...torrent, ...limits }] });
+
+      expect(status).toBe(400);
+      expect(payload.error).toMatch(/^Tracker: (ratioLimit|seedingTimeMinutes) must be a number of 0 or more$/);
+      expect(configServiceMock.setMany).not.toHaveBeenCalled();
+    });
+
+    it('accepts 0 and decimals, and missing limits', async () => {
+      const { status } = await put({
+        indexers: [
+          { ...torrent, seedingTimeMinutes: 0, ratioLimit: 1.25 },
+          { id: 2, name: 'NZB', protocol: 'usenet', enabled: true, priority: 5 },
+        ],
+      });
+
+      expect(status).toBe(200);
+    });
+
+    it('rejects a body without an indexers array', async () => {
+      const { status } = await put({ flagConfigs: [] });
+
+      expect(status).toBe(400);
+      expect(configServiceMock.setMany).not.toHaveBeenCalled();
+    });
+  });
 });
-
-

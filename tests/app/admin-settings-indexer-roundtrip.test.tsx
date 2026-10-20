@@ -16,6 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const fetchWithAuthMock = vi.hoisted(() => vi.fn());
 const configStore = vi.hoisted(() => new Map<string, string>());
 const prowlarrMock = vi.hoisted(() => ({ getIndexers: vi.fn() }));
+const bridge = vi.hoisted(() => ({ indexersGetFails: false }));
 
 vi.mock('@/lib/utils/api', () => ({ fetchWithAuth: fetchWithAuthMock }));
 
@@ -71,6 +72,7 @@ const installFetchBridge = () => {
         const body = JSON.parse(String(init.body));
         return route.PUT({ json: async () => body } as any);
       }
+      if (bridge.indexersGetFails) return { ok: false, status: 500, json: async () => ({ success: false }) };
       return route.GET({} as any);
     }
     if (url === '/api/admin/settings') return jsonResponse(settingsFixture);
@@ -86,7 +88,7 @@ const mockTabs = () => {
   // Stands in for IndexerManagement: loads indexers on mount, shows each
   // indexer's ratio limit, and edits one setting on one indexer.
   vi.doMock(path.resolve('src/app/admin/settings/tabs/IndexersTab/IndexersTab.tsx'), () => ({
-    IndexersTab: ({ indexers, onIndexersChange, onRefreshIndexers }: any) => {
+    IndexersTab: ({ settings, onChange, indexers, onIndexersChange, onRefreshIndexers, onClearIndexers }: any) => {
       React.useEffect(() => {
         onRefreshIndexers?.();
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -103,6 +105,15 @@ const mockTabs = () => {
             }
           >
             Edit Torrent A
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange({ ...settings, indexerOptions: { skipUnreleased: !settings.indexerOptions.skipUnreleased } })}
+          >
+            Toggle option
+          </button>
+          <button type="button" onClick={() => onClearIndexers()}>
+            Clear for new connection
           </button>
         </div>
       );
@@ -122,7 +133,8 @@ describe('Admin settings indexer round trip', () => {
     fetchWithAuthMock.mockReset();
     configStore.clear();
     configStore.set('prowlarr_indexers', JSON.stringify(savedIndexers));
-    configStore.set('indexer_flag_config', '[]');
+    configStore.set('indexer_flag_config', JSON.stringify([{ name: 'freeleech', modifier: 10 }]));
+    bridge.indexersGetFails = false;
     prowlarrMock.getIndexers.mockResolvedValue(
       savedIndexers.map(({ id, name, protocol }) => ({ id, name, protocol, privacy: 'private' }))
     );
@@ -160,5 +172,38 @@ describe('Admin settings indexer round trip', () => {
       savedIndexers[1],
       savedIndexers[2],
     ]);
+  });
+
+  it('never replaces saved indexers or flags when the list failed to load', async () => {
+    bridge.indexersGetFails = true;
+    const savedIndexers = configStore.get('prowlarr_indexers');
+    const savedFlags = configStore.get('indexer_flag_config');
+    await openIndexersTab();
+    await waitFor(() => expect(fetchWithAuthMock).toHaveBeenCalledWith('/api/admin/settings/prowlarr/indexers'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle option' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
+
+    expect(await screen.findByText(/indexer settings were not: they could not be loaded/, {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(fetchWithAuthMock).toHaveBeenCalledWith('/api/admin/settings/indexer-options', expect.objectContaining({ method: 'PUT' }));
+    expect(fetchWithAuthMock).not.toHaveBeenCalledWith(
+      '/api/admin/settings/prowlarr/indexers',
+      expect.objectContaining({ method: 'PUT' })
+    );
+    expect(configStore.get('prowlarr_indexers')).toBe(savedIndexers);
+    expect(configStore.get('indexer_flag_config')).toBe(savedFlags);
+  });
+
+  it('saves an empty list when the indexers were cleared on purpose for a new Prowlarr connection', async () => {
+    bridge.indexersGetFails = true;
+    await openIndexersTab();
+    await waitFor(() => expect(fetchWithAuthMock).toHaveBeenCalledWith('/api/admin/settings/prowlarr/indexers'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear for new connection' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle option' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
+
+    await waitFor(() => expect(screen.getByText('Settings saved successfully!')).toBeInTheDocument());
+    expect(configStore.get('prowlarr_indexers')).toBe('[]');
   });
 });

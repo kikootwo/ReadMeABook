@@ -25,6 +25,8 @@ interface IndexersTabProps {
   onFlagConfigsChange: (configs: IndexerFlagConfig[]) => void;
   onValidationChange: (isValid: boolean) => void;
   onRefreshIndexers?: () => Promise<void>;
+  /** Clear the list on purpose (Prowlarr connection changed); defaults to onIndexersChange([]). */
+  onClearIndexers?: () => void;
 }
 
 export function IndexersTab({
@@ -37,6 +39,7 @@ export function IndexersTab({
   onFlagConfigsChange,
   onValidationChange,
   onRefreshIndexers,
+  onClearIndexers,
 }: IndexersTabProps) {
   const {
     testing,
@@ -54,7 +57,7 @@ export function IndexersTab({
     configuredIndexersCount: indexers.length,
     onValidationChange,
     onRefreshIndexers,
-    onClearIndexers: () => onIndexersChange([]),
+    onClearIndexers: onClearIndexers ?? (() => onIndexersChange([])),
   });
 
   // Auto-load indexers when component mounts if prowlarr is configured
