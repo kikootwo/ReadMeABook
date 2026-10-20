@@ -120,6 +120,8 @@ jobs:
 
       - name: Send Discord notification
         if: startsWith(github.ref, 'refs/tags/v') && success()
+        env:
+          REF_NAME: ${{ github.ref_name }}
         run: |
           curl -H "Content-Type: application/json" \
             -X POST \
@@ -136,7 +138,7 @@ jobs:
                   },
                   {
                     "name": "🌿 Branch",
-                    "value": "`${{ github.ref_name }}`",
+                    "value": "`'"$REF_NAME"'`",
                     "inline": true
                   },
                   {

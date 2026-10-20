@@ -20,7 +20,7 @@ Three workflows in `.github/workflows/`. No workflow builds the Docker image on 
 - **Always:** `needs: test`, `cache-from: type=gha`, `DOCKER_BUILD_RECORD_UPLOAD: false`, build args `APP_VERSION`/`GIT_COMMIT`/`BUILD_DATE`, no concurrency group.
 - **Image tags (metadata-action):** semver `{{version}}`/`{{major}}.{{minor}}`/`{{major}}`, `sha-<short>`, `latest` via flavor `latest=auto` on semver tags. `type=ref,event=branch|pr` rules remain but only label branch builds, which never push.
 - **Secrets:** `WEBHOOK_URL` passed explicitly to run-tests and used by the image Discord step; no `secrets: inherit`.
-- **Shell input:** run-tests reads `github.ref_name` through `env: REF_NAME`, never interpolated into the script.
+- **Shell input:** both Discord steps (run-tests and the image post) read `github.ref_name` through `env: REF_NAME`, never interpolated into the script.
 
 ## Action pins
 - Every external action: `uses: owner/repo@<40-hex sha> # vX.Y.Z`. Dependabot (`github-actions`, weekly, minor/patch grouped) reads the version comment and bumps SHA + comment together.
