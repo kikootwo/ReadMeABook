@@ -165,7 +165,8 @@ function checkElfArch() {
   const count = (re) => elves.filter((f) => re.test(path.basename(f))).length;
   if (count(/^schema-engine-/) !== 1) fail(`expected 1 schema-engine ELF, found ${count(/^schema-engine-/)}`);
   if (count(/^libquery_engine-.*\.so\.node$/) < 2) fail('expected the CLI and generated-client libquery_engine copies');
-  if (count(/^bcrypt_lib\.node$/) < 1) fail('bcrypt_lib.node not found');
+  // bcrypt 5: lib/binding/napi-v3/bcrypt_lib.node; bcrypt 6: prebuilds/linux-<arch>/bcrypt.{glibc,musl}.node
+  if (!elves.some((f) => f.includes('/node_modules/bcrypt/') && f.endsWith('.node'))) fail('no bcrypt native binding (.node under node_modules/bcrypt/) found');
   ok(`${elves.length} ELF files match ${process.arch}:\n  ${elves.join('\n  ')}`);
 }
 

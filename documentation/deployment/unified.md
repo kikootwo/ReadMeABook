@@ -75,7 +75,8 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 | `node_modules/{prisma,@prisma/engines,…}` + `.bin/prisma` | `prisma-cli`, ONE `COPY` merged into `node_modules` (a lone `.bin/prisma` copy flattens the symlink and the CLI can't find its wasm) |
 | `scripts/` | build context, explicit `COPY` |
 | `app-start.sh`, `redis-start.sh`, `postgres-start.sh`; `/entrypoint.sh` | `docker/unified/` |
-- Not shipped: devDependencies, untraced prod deps (`@next/swc-*`, sharp), `src/`, `tests/`, build `.next/cache`
+- Not shipped: devDependencies, untraced prod deps (`@next/swc-*`), app source outside the trace, build `.next/cache`
+- Foreign-platform prebuilds: every `node_modules/**/prebuilds/<platform>-<arch>/` except `linux-<build arch>` is deleted (bcrypt 6 ships all platforms; tracing copies the folder); a missing mapping for the arch fails the build
 
 **Prisma CLI provenance (`docker/unified/prisma-cli-lock.js`):**
 - Walks `node_modules/prisma` deps in `package-lock.json` (npm lookup order, optional peers skipped) → writes a sub `package.json` + `package-lock.json` with entries copied verbatim (version, `resolved`, sha512 `integrity`); version comes from the lockfile, never hardcoded
@@ -93,7 +94,7 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - Every bare `require("…")` in `.next/server/**/*.js` resolves from its chunk (externals today: `bcrypt`, `bull`, `keyv`, `next/dist/...`); `bcrypt` + `bull` must be seen (else the scan is blind). Only allowlisted miss: `something` in `[turbopack]_runtime.js` (a code comment)
 - Next >= 16.4 requires externals through hashed aliases (`require("bcrypt-a3fecf8c027c10c9")`) backed by relative symlinks in `.next/node_modules/` (`-> ../../node_modules/bcrypt`); an alias counts as its package and must resolve inside `/app/node_modules/<pkg>/`
 - Note: Next 16 `next build` uses Turbopack even with `TURBOPACK=0` (chunk names `[turbopack]_runtime.js`)
-- Every ELF file in `/app` + ffmpeg/ffprobe has the build arch's `e_machine`; expects 1 schema engine, ≥2 `libquery_engine` copies, `bcrypt_lib.node`
+- Every ELF file in `/app` + ffmpeg/ffprobe has the build arch's `e_machine`; expects 1 schema engine, ≥2 `libquery_engine` copies, a bcrypt `.node` binding (bcrypt 5 `bcrypt_lib.node`, bcrypt 6 `prebuilds/linux-<arch>/bcrypt.*.node`)
 
 **Guard failures:**
 - `prisma X installed, lockfile says Y` / `prisma CLI X != generated client Y` → split or stale Prisma bump (`prisma` and `@prisma/client` must move together)

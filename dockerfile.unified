@@ -183,6 +183,22 @@ COPY --from=prisma-cli /opt/prisma-cli/node_modules ./node_modules
 # Credential recovery (documentation/admin-features/credential-recovery.md)
 COPY --chown=root:root scripts ./scripts
 
+# Native prebuilds for other platforms: bcrypt 6 ships prebuilds/<platform>-<arch>/ for every
+# platform and tracing copies the whole folder. node-gyp-build only loads prebuilds/linux-<arch>/,
+# so drop the rest; the runtime guard then requires every ELF file in /app to match the build arch.
+RUN set -eu; \
+    case "$(uname -m)" in \
+        x86_64) keep=linux-x64 ;; \
+        aarch64) keep=linux-arm64 ;; \
+        *) echo "ERROR: no prebuild mapping for $(uname -m) (supported: amd64, arm64)" >&2; exit 1 ;; \
+    esac; \
+    find /app/node_modules -type d -name prebuilds -prune | while read -r dir; do \
+        for p in "$dir"/*; do \
+            [ -e "$p" ] || continue; \
+            [ "$(basename "$p")" = "$keep" ] || { rm -rf "$p"; echo "removed $p"; }; \
+        done; \
+    done
+
 # Create necessary directories
 RUN mkdir -p \
     /var/run/postgresql \
