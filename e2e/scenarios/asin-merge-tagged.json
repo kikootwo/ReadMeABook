@@ -1,0 +1,9 @@
+{
+  "name": "asin-merge-tagged",
+  "description": "One 3-file 128 kb/s mp3 release (merging needs 3+ files; the merged output passes the 0.4 MB/min size check) for book 'phm' (chapter merge then tagging).",
+  "book": "phm",
+  "indexers": [{ "id": 1, "name": "E2E Torrents", "protocol": "torrent", "priority": 25 }],
+  "releases": [
+    { "id": "good", "title": "{{author}} - {{title}} (Unabridged) [MP3]", "sizeMB": 300, "seeders": 50, "fixture": "phm-mp3-128" }
+  ]
+}

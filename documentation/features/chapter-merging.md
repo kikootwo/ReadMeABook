@@ -198,6 +198,7 @@ ffmpeg -y -f concat -safe 0 -protocol_whitelist file -i filelist.txt \
 
 **Critical Flags (v2):**
 - **`-movflags +faststart`**: Moves moov atom to file beginning → instant playback (fixes 1-min delay)
+- **ASIN:** not passed to ffmpeg (its mp4 muxer drops freeform keys) and not written by the merger: file-organizer adds it to the file it places (the merged file, or its tagged copy) with the MP4 freeform post-step ([file-organization.md](../phase3/file-organization.md#mp4-freeform-tags)), after the merge's own checks. A failed merge deletes its output only once ffmpeg has started writing it (an earlier failure leaves a file already at that path alone). Codec-copy timeout: at least `ffmpegRemuxTimeoutMs(estimated size)`. The organizer's disk check counts 1x the merged size, +1x with an ASIN (post-step copy), +1x with tagging on (tagged copy)
 - **`-fflags +genpts`**: Regenerates presentation timestamps for audio/video → fixes seeking/timing issues at concat boundaries
 - **`-avoid_negative_ts make_zero`**: Handles negative timestamps at concat boundaries
 - **`-max_muxing_queue_size 9999`**: Prevents buffer overflow on long audiobooks (16h+)

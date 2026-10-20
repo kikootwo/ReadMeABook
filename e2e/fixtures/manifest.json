@@ -12,6 +12,8 @@
     "martian-m4b": { "book": "martian", "kind": "m4b-chapters", "chapters": 2, "seconds": 4, "folder": "{{title}}" },
     "martian-mp3": { "book": "martian", "kind": "mp3-multi", "tracks": 2, "seconds": 5, "folder": "{{title}}" },
     "artemis-mp3": { "book": "artemis", "kind": "mp3-multi", "tracks": 2, "seconds": 5, "folder": "{{title}}" },
+    "artemis-mp3-128": { "book": "artemis", "kind": "mp3-multi", "tracks": 3, "seconds": 5, "bitrate": "128k", "folder": "{{title}}" },
+    "phm-mp3-128": { "book": "phm", "kind": "mp3-multi", "tracks": 3, "seconds": 5, "bitrate": "128k", "folder": "{{title}}" },
     "wrong-files": { "kind": "wrong", "folder": "Sample Pack" }
   }
 }

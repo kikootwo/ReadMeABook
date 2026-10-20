@@ -91,9 +91,13 @@ A scheduled `find_missing_ebooks` job (daily midnight, enabled by default) backs
 **How It Works:**
 - Enabled via toggle in E-book Sidecar settings (only visible when EPUB format selected)
 - Applied during `organize_files` job, before copying to final location
-- Creates temp fixed file → organizes temp file → cleans up temp file
+- Creates temp fixed file (unique `kindle-fix-*` folder) → organizes temp file → cleans up temp file
 - Original download file stays intact (important for seeding torrents)
 - Non-blocking: if fix fails, continues with original file
+- **Read-back check** (`src/lib/utils/epub-verify.ts`): after `writeZip`, the copy is re-opened; entry names must match and every entry must read back (adm-zip CRC check) with the sha256 the fixer meant to write. On failure: temp copy deleted, warn log naming the entry (never content), `verificationFailed: true` → the original EPUB is imported and the request message is `Kindle fix could not be verified; original imported` (placed before any other import message, joined with `; `; see [file-organization.md](../phase3/file-organization.md))
+  - Any read error (damaged central directory/EOCD, bad CRC, corrupt deflate) counts as a failed check, never an unhandled error
+  - Temp folder: `fs.mkdtemp(<TEMP_DIR>/kindle-fix-)` per run (no collision between concurrent organize jobs); removed on every failure path, including a write error (e.g. ENOSPC)
+  - Memory: the in-memory source zip is out of scope (collectable) before the copy is re-read; the read-back loads the written file and hashes entries one at a time. Peak use is still a small multiple of the EPUB size (accepted)
 
 **Source:** Based on [kindle-epub-fix](https://github.com/innocenat/kindle-epub-fix)
 
@@ -232,7 +236,9 @@ Search: https://annas-archive.gl/search?q=Title+Author&ext=epub&lang=en
 - `src/lib/utils/file-organizer.ts` (`organizeEbook` method)
 - `src/lib/utils/ranking-algorithm.ts` (`rankEbookTorrents` function)
 - `src/lib/utils/indexer-grouping.ts` (supports `'ebook'` type)
-- `src/lib/utils/epub-fixer.ts` (Kindle EPUB compatibility fixes)
+- `src/lib/utils/epub-fixer.ts` (Kindle EPUB fix: load, write, read-back)
+- `src/lib/utils/epub-fixes.ts` (the four content fixes)
+- `src/lib/utils/epub-verify.ts` (read-back check of the fixed copy)
 
 **UI:**
 - `src/components/requests/RequestCard.tsx` (ebook badge)

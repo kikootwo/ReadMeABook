@@ -52,7 +52,6 @@ vi.mock('@/lib/utils/audio-content', () => ({
   }),
 }));
 vi.mock('fs/promises', () => ({ default: fsMock, ...fsMock }));
-
 const HOSTILE_DIR = '/dl/My $(touch pwned) `id` "dq" \'sq\' Book';
 
 function createSpawnProcess() {
@@ -175,6 +174,48 @@ describe('chapter merge verification', () => {
     const result = await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
 
     expect(result.durationVerified).toBe(false);
+  });
+});
+
+describe('chapter merge output and timeout', () => {
+  const merge = () => mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+  const failingFfmpeg = () => {
+    const proc = new EventEmitter() as EventEmitter & { stderr: EventEmitter; kill: () => void };
+    proc.stderr = new EventEmitter();
+    proc.kill = vi.fn();
+    setImmediate(() => proc.emit('close', 1));
+    return proc;
+  };
+
+  it('never passes an ASIN to ffmpeg (its mp4 muxer drops freeform keys; the organizer adds it)', async () => {
+    await merge();
+    const args = spawnMock.mock.calls[0][1] as string[];
+    expect(args.some((a) => a.includes('ASIN'))).toBe(false);
+  });
+
+  it('a failure after ffmpeg started removes its output (no orphaned partial file)', async () => {
+    spawnMock.mockImplementation(failingFfmpeg);
+    const result = await merge();
+    expect(result.success).toBe(false);
+    expect(fsMock.unlink).toHaveBeenCalledWith('/t/out.m4b');
+  });
+
+  it('an early failure (empty source, before ffmpeg) leaves a file already at the output path alone', async () => {
+    // Another job's finished merge of a same-titled book may sit at that path
+    fsMock.stat.mockImplementation(async (filePath: string) => ({ size: filePath === '/dl/02.m4a' ? 0 : 500 * 1024 }));
+    const result = await merge();
+    expect(result).toMatchObject({ success: false, error: expect.stringContaining('empty') });
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(fsMock.unlink).not.toHaveBeenCalledWith('/t/out.m4b');
+  });
+
+  it('codec copy: the timeout is at least the size-scaled +faststart allowance', async () => {
+    fsMock.stat.mockImplementation(async (filePath: string) => ({ size: filePath.endsWith('.m4b') ? 2 * 1024 * 1024 : 1.5 * 1024 ** 3 }));
+    const info = vi.fn(async () => undefined);
+    const logger = { info, warn: vi.fn(async () => undefined), error: vi.fn(async () => undefined) };
+    await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' }, logger as never);
+    // estimate 3 GiB x 1.1 = 3.3 GiB: 120 s + 3.3 x 120 s = 516 s (9 min) > 5 min + 2 x 30 s
+    expect(info).toHaveBeenCalledWith('Executing FFmpeg merge (timeout: 9 minutes)...');
   });
 });
 

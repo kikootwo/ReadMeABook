@@ -8,6 +8,7 @@ import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
 import { METADATA_TAG_FORMATS, MP4_CONTAINER_FORMATS } from '../constants/audio-formats';
+import { addFreeformTags, type FreeformTag, type FreeformTagResult } from './mp4-freeform-tags';
 
 const execFilePromise = promisify(execFile);
 
@@ -28,6 +29,17 @@ export interface TaggingResult {
   error?: string;
 }
 
+const isMp4Container = (ext: string) => (MP4_CONTAINER_FORMATS as readonly string[]).includes(ext.toLowerCase());
+
+/**
+ * ffmpeg timeout for a codec-copy re-mux of `sizeBytes`: 120 s plus 120 s per
+ * GiB. With +faststart the file is written twice (copy, then moov moved to the
+ * front), about 4 bytes of I/O per byte, so this allows ~35 MB/s of storage I/O.
+ */
+export function ffmpegRemuxTimeoutMs(sizeBytes: number): number {
+  return 120_000 + Math.ceil((sizeBytes / 1024 ** 3) * 120_000);
+}
+
 /**
  * Sanitize a metadata value before writing.
  * Conservative — only removes characters that are clearly not intent:
@@ -44,6 +56,32 @@ function sanitizeMetadataValue(value: string): string {
 }
 
 /**
+ * iTunes freeform ('----', com.apple.iTunes) tags for MP4 containers: ffmpeg's
+ * mp4 muxer drops these keys, so they are added after ffmpeg by
+ * addMp4FreeformTags. New custom fields (e.g. PUBLISHER) are added here.
+ */
+export function buildMp4FreeformTags(metadata: Pick<MetadataTaggingOptions, 'asin'>): FreeformTag[] {
+  const tags: FreeformTag[] = [];
+  const asin = metadata.asin ? sanitizeMetadataValue(metadata.asin) : '';
+  if (asin) tags.push({ name: 'ASIN', value: asin });
+  return tags;
+}
+
+/**
+ * Add the MP4 freeform tags (ASIN) to `filePath`, an MP4 RMAB's own ffmpeg run
+ * just wrote (the tagged copy or the merged file); `sourceExt` is the format's
+ * extension. The organizer's one call, on the file about to be placed. No-op
+ * for other formats; never throws (a warning instead, the file unchanged).
+ */
+export async function addMp4FreeformTags(
+  filePath: string,
+  sourceExt: string,
+  metadata: Pick<MetadataTaggingOptions, 'asin'>
+): Promise<FreeformTagResult> {
+  return isMp4Container(sourceExt) ? addFreeformTags(filePath, buildMp4FreeformTags(metadata)) : { written: false };
+}
+
+/**
  * Tag audio file metadata using ffmpeg
  * Supports m4b/m4a/mp4, mp3, and flac files
  * Uses -codec copy for lossless operation (metadata only, no re-encoding)
@@ -56,8 +94,8 @@ export async function tagAudioFileMetadata(
   metadata: MetadataTaggingOptions
 ): Promise<TaggingResult> {
   try {
-    // Check if file exists
-    await fs.access(filePath);
+    // Check if file exists (its size scales the ffmpeg timeout)
+    const { size } = await fs.stat(filePath);
 
     const ext = path.extname(filePath).toLowerCase();
 
@@ -90,7 +128,7 @@ export async function tagAudioFileMetadata(
     ];
 
     // For m4b/m4a/mp4 files, use standard metadata tags
-    if ((MP4_CONTAINER_FORMATS as readonly string[]).includes(ext)) {
+    if (isMp4Container(ext)) {
       args.push(
         '-metadata', `title=${title}`,
         '-metadata', `album=${title}`, // Book title in Album field (Plex uses this)
@@ -106,10 +144,7 @@ export async function tagAudioFileMetadata(
         args.push('-metadata', `date=${String(metadata.year)}`);
       }
 
-      if (asin) {
-        // Use custom iTunes tag format for M4B/M4A/MP4 files
-        args.push('-metadata', `----:com.apple.iTunes:ASIN=${asin}`);
-      }
+      // ASIN: an iTunes freeform tag, added later by addMp4FreeformTags (ffmpeg drops it)
 
       if (series) {
         args.push('-metadata', `show=${series}`);
@@ -118,6 +153,9 @@ export async function tagAudioFileMetadata(
       if (seriesPart) {
         args.push('-metadata', `episode_id=${seriesPart}`);
       }
+
+      // moov first (faststart), also when the freeform post-step later refuses the file
+      args.push('-movflags', '+faststart');
 
       // Explicitly specify output format (fixes .tmp extension issue)
       args.push('-f', 'mp4');
@@ -194,7 +232,7 @@ export async function tagAudioFileMetadata(
     args.push(tempFile);
 
     try {
-      await execFilePromise('ffmpeg', args, { timeout: 120000 }); // 2 minute timeout
+      await execFilePromise('ffmpeg', args, { timeout: ffmpegRemuxTimeoutMs(size) });
     } catch (error) {
       // Clean up temp file if it exists
       try {

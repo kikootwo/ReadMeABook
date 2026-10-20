@@ -1,0 +1,9 @@
+{
+  "name": "asin-m4b",
+  "description": "One chaptered m4b release for book 'martian' (tagger path: single m4b, moov last).",
+  "book": "martian",
+  "indexers": [{ "id": 1, "name": "E2E Torrents", "protocol": "torrent", "priority": 25 }],
+  "releases": [
+    { "id": "good", "title": "{{author}} - {{title}} (Unabridged) [M4B]", "sizeMB": 300, "seeders": 50, "fixture": "martian-m4b" }
+  ]
+}

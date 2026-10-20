@@ -18,6 +18,14 @@ updates:
       # @types/node must match the runtime major (Node 24 in CI and the image); move it with Node.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # openid-client 6 replaces the Issuer/Client API the OIDC sign-in uses (5 keeps it but has
+      # its own breaking changes); a major needs a migration of that code. Upgrade by hand.
+      - dependency-name: "openid-client"
+        update-types: ["version-update:semver-major"]
+      # A TypeScript major has to be checked against `next build` first, and PR CI only runs
+      # the unit tests (no type-check, no build). Upgrade by hand.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     groups:
       # Listed first: Dependabot puts a dependency in the FIRST group that matches,
       # so prisma and @prisma/client always move together instead of splitting
@@ -26,6 +34,11 @@ updates:
         patterns:
           - "prisma"
           - "@prisma/*"
+      # vitest and its plugins (@vitest/coverage-v8) must share a major, so they move together.
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
       npm-minor-patch:
         update-types:
           - "minor"

@@ -14,6 +14,7 @@ import { probeAudioContent } from './audio-content';
 import { checkMergedOutput, measureChapterContent, sameDecodedFormat, verifyMergedContent } from './merge-verification';
 import { RMABLogger } from './logger';
 import { CHAPTER_MERGE_FORMATS } from '../constants/audio-formats';
+import { ffmpegRemuxTimeoutMs } from './metadata-tagger';
 
 // Media tools run via execFile/spawn with argv arrays (never a shell): file
 // names come from downloads and import folders and are untrusted.
@@ -64,8 +65,7 @@ export interface MergeOptions {
   author: string;
   narrator?: string;
   year?: number;
-  asin?: string;
-  outputPath: string;
+  outputPath: string; // ASIN: added by the organizer to the file it places (ffmpeg drops it)
   dirMode?: number;
 }
 
@@ -593,6 +593,7 @@ export async function mergeChapters(
   const tempDir = path.dirname(options.outputPath);
   const concatFile = path.join(tempDir, `concat_${Date.now()}.txt`);
   const metadataFile = path.join(tempDir, `chapters_${Date.now()}.txt`);
+  let ffmpegStarted = false; // before that, a file at the output path is not this merge's
 
   try {
     await logger?.info(`Starting chapter merge: "${options.title}" by ${options.author}`);
@@ -731,12 +732,6 @@ export async function mergeChapters(
       args.push('-metadata', `date=${options.year}`);
     }
 
-    if (options.asin) {
-      // Custom iTunes tag for ASIN
-      args.push('-metadata', `----:com.apple.iTunes:ASIN=${options.asin}`);
-      await logger?.info(`Embedding ASIN: ${options.asin}`);
-    }
-
     // Output format
     args.push('-f', 'mp4');
     args.push(options.outputPath);
@@ -749,7 +744,7 @@ export async function mergeChapters(
           90 * 60 * 1000, // Minimum 90 minutes for re-encoding
           Math.round((totalDurationMinutes / 5) * 60 * 1000) + (60 * 60 * 1000) // duration/5 (worst case 5x realtime) + 60min safety margin
         )
-      : (5 * 60 * 1000) + (chapters.length * 30 * 1000); // Codec copy: 5min + 30s per chapter
+      : Math.max((5 * 60 * 1000) + (chapters.length * 30 * 1000), ffmpegRemuxTimeoutMs(estimatedSize)); // Codec copy: 5min + 30s per chapter, at least the size-scaled +faststart allowance
 
     const timeoutMinutes = Math.ceil(timeout / 60000);
 
@@ -766,8 +761,9 @@ export async function mergeChapters(
     const commandPreview = command.length > 500 ? command.substring(0, 500) + '...' : command;
     await logger?.info(`FFmpeg command: ${commandPreview}`);
 
-    // Execute FFmpeg with progress logging
+    // Execute FFmpeg with progress logging (from here on the output path holds this merge's file)
     try {
+      ffmpegStarted = true;
       await executeFFmpegWithProgress(args, timeout, totalDuration, logger);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -845,6 +841,7 @@ export async function mergeChapters(
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
     await logger?.error(`Chapter merge failed: ${errorMsg}`);
+    if (ffmpegStarted) await fs.unlink(options.outputPath).catch(() => undefined); // no orphaned partial or rejected output
     return { success: false, error: errorMsg };
   } finally {
     // Clean up temp files

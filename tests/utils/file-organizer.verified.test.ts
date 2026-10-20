@@ -49,6 +49,7 @@ vi.mock('@/lib/db', () => ({
 
 vi.mock('@/lib/utils/metadata-tagger', () => ({
   checkFfmpegAvailable: vi.fn(async () => true),
+  addMp4FreeformTags: vi.fn(async () => ({ written: false })),
   tagMultipleFiles: vi.fn(async (files: string[]) => {
     const nodeFs = await import('fs');
     return files.map((filePath) => {
