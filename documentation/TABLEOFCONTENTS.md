@@ -59,6 +59,7 @@
 - **Ebook ranking algorithm (unified with audiobooks)** → [phase3/ranking-algorithm.md](phase3/ranking-algorithm.md#ebook-torrent-ranking)
 - **Direct HTTP downloads from Anna's Archive** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
 - **Ebook delete behavior (files only, torrents seed)** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#delete-behavior)
+- **Kindle EPUB fix, read-back check of the fixed copy** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#kindle-epub-fix)
 - **Ebook settings (3-section UI)** → [settings-pages.md](settings-pages.md#e-book-sidecar)
 - **Indexer categories (audiobook/ebook tabs)** → [settings-pages.md](settings-pages.md#indexer-categories-tabbed)
 - **Per-indexer settings mapping (ratio limit, seeding time, priority)** → [settings-pages.md](settings-pages.md#api-endpoints)
