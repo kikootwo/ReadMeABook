@@ -9,6 +9,7 @@
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
+import { evaluateSeeding, isUnlimitedSeeding } from '../utils/seeding-policy';
 
 export interface CleanupSeededTorrentsPayload {
   jobId?: string;
@@ -133,12 +134,8 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
         // Find matching indexer configuration by name
         const seedingConfig = indexerConfigMap.get(indexerName);
 
-        // Per-indexer thresholds. 0 disables that criterion; both 0 = unlimited.
-        const seedingMin: number = seedingConfig?.seedingTimeMinutes ?? 0;
-        const ratioMin: number = seedingConfig?.ratioLimit ?? 0;
-
-        // If no config found or both criteria are 0 (unlimited)
-        if (!seedingConfig || (seedingMin === 0 && ratioMin === 0)) {
+        // Per-indexer thresholds. 0 disables that criterion; no config or both 0 = unlimited.
+        if (isUnlimitedSeeding(seedingConfig)) {
           // For soft-deleted requests with unlimited seeding, hard delete immediately
           if (request.deletedAt) {
             await prisma.request.delete({ where: { id: request.id } });
@@ -147,8 +144,6 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
           noConfig++;
           continue;
         }
-
-        const seedingTimeSeconds = seedingMin * 60;
 
         // Skip if this torrent was already deleted earlier in this run
         if (deletedHashes.has(clientId.toLowerCase())) {
@@ -182,22 +177,8 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
           continue;
         }
 
-        // Check seeding requirements: AND-semantics across time and ratio.
-        // Each criterion is "met" when disabled (0) or when actual meets/exceeds it.
-        // Undefined ratio with ratioMin > 0 is treated as not-met (safe-deny).
-        const actualSeedingTime = downloadInfo.seedingTime ?? 0;
-        const actualRatio = downloadInfo.ratio;
-        const timeMet = seedingMin === 0 || actualSeedingTime >= seedingTimeSeconds;
-        const ratioMet = ratioMin === 0 || (typeof actualRatio === 'number' && actualRatio >= ratioMin);
-        const hasMetRequirement = timeMet && ratioMet;
-
-        const ratioPart = ratioMin === 0
-          ? '--/--'
-          : `${(typeof actualRatio === 'number' ? actualRatio : 0).toFixed(2)}/${ratioMin.toFixed(2)}`;
-        const timePart = seedingMin === 0
-          ? '--/--'
-          : `${Math.floor(actualSeedingTime / 60)}/${seedingMin}`;
-        const progress = `ratio ${ratioPart}, time ${timePart} min`;
+        // AND-semantics across time and ratio; unreported ratio with a ratio limit = not met
+        const { met: hasMetRequirement, progress } = evaluateSeeding(seedingConfig, downloadInfo);
 
         if (!hasMetRequirement) {
           logger.debug(`Download ${downloadInfo.name} (${indexerName}) still seeding: ${progress}`);

@@ -1,0 +1,122 @@
+/**
+ * Component: Request Delete Service Tests - per-indexer seeding rule
+ * Documentation: documentation/admin-features/request-deletion.md
+ *
+ * Deleting a request applies the same seeding rule as the scheduled seeding
+ * cleanup: seeding time AND ratio limit, 0 disables a criterion, both 0 = unlimited.
+ */
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import path from 'path';
+import { createPrismaMock } from '../helpers/prisma';
+
+const prismaMock = createPrismaMock();
+const fsMock = { access: vi.fn(), rm: vi.fn() };
+const configServiceMock = { get: vi.fn(), getBackendMode: vi.fn() };
+const downloadClientManagerMock = { getClientServiceForProtocol: vi.fn() };
+
+vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
+vi.mock('fs/promises', () => fsMock);
+vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => configServiceMock }));
+vi.mock('@/lib/services/download-client-manager.service', () => ({
+  getDownloadClientManager: () => downloadClientManagerMock,
+}));
+vi.mock('@/lib/services/audiobookshelf/api', () => ({ deleteABSItem: vi.fn() }));
+
+interface Scenario {
+  seedingTimeMinutes: number;
+  ratioLimit?: number;
+  seedingTime: number;
+  ratio?: number;
+}
+
+async function deleteWith({ seedingTimeMinutes, ratioLimit, seedingTime, ratio }: Scenario) {
+  prismaMock.request.findFirst.mockResolvedValue({
+    id: 'req-1',
+    audiobook: {
+      id: 'ab-1',
+      title: 'Book',
+      author: 'Author',
+      audibleAsin: null,
+      plexGuid: null,
+      absItemId: null,
+      filePath: path.join('/media', 'Author', 'Book'),
+    },
+    downloadHistory: [{ torrentHash: 'hash-1', indexerName: 'Tracker', downloadStatus: 'completed' }],
+  });
+  configServiceMock.get.mockImplementation(async (key: string) => {
+    if (key === 'prowlarr_indexers') {
+      return JSON.stringify([{ name: 'Tracker', protocol: 'torrent', seedingTimeMinutes, ratioLimit }]);
+    }
+    if (key === 'media_dir') return '/media';
+    return null;
+  });
+  configServiceMock.getBackendMode.mockResolvedValue('plex');
+  const client = {
+    clientType: 'qbittorrent',
+    protocol: 'torrent',
+    getDownload: vi.fn().mockResolvedValue({ id: 'hash-1', name: 'Book', status: 'seeding', seedingTime, ratio }),
+    deleteDownload: vi.fn().mockResolvedValue(undefined),
+  };
+  downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(client);
+
+  const { deleteRequest } = await import('@/lib/services/request-delete.service');
+  const result = await deleteRequest('req-1', 'admin-1');
+  expect(result.success).toBe(true);
+  return { result, client };
+}
+
+describe('deleteRequest seeding rule', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prismaMock.request.findMany.mockResolvedValue([]);
+    prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.request.update.mockResolvedValue({});
+    prismaMock.audiobook.update.mockResolvedValue({});
+    prismaMock.plexLibrary.findMany.mockResolvedValue([]);
+    fsMock.access.mockRejectedValue(new Error('missing'));
+  });
+
+  it('keeps a torrent whose seeding time is met but whose ratio limit is not', async () => {
+    const { result, client } = await deleteWith({ seedingTimeMinutes: 60, ratioLimit: 2, seedingTime: 7200, ratio: 1.1 });
+
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+    expect(result.torrentsKeptSeeding).toBe(1);
+  });
+
+  it('keeps a ratio-only torrent until its ratio is met (seeding time 0 is not unlimited)', async () => {
+    const { result, client } = await deleteWith({ seedingTimeMinutes: 0, ratioLimit: 1.5, seedingTime: 99999, ratio: 0.4 });
+
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+    expect(result.torrentsKeptSeeding).toBe(1);
+    expect(result.torrentsKeptUnlimited).toBe(0);
+  });
+
+  it('removes a ratio-only torrent once its ratio is met', async () => {
+    const { result, client } = await deleteWith({ seedingTimeMinutes: 0, ratioLimit: 1.5, seedingTime: 10, ratio: 1.5 });
+
+    expect(client.deleteDownload).toHaveBeenCalledWith('hash-1', true);
+    expect(result.torrentsRemoved).toBe(1);
+  });
+
+  it('removes a torrent once both seeding time and ratio are met', async () => {
+    const { result, client } = await deleteWith({ seedingTimeMinutes: 60, ratioLimit: 2, seedingTime: 3600, ratio: 2.4 });
+
+    expect(client.deleteDownload).toHaveBeenCalledWith('hash-1', true);
+    expect(result.torrentsRemoved).toBe(1);
+  });
+
+  it('keeps a torrent when the client reports no ratio and a ratio limit is set', async () => {
+    const { result, client } = await deleteWith({ seedingTimeMinutes: 0, ratioLimit: 1, seedingTime: 99999 });
+
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+    expect(result.torrentsKeptSeeding).toBe(1);
+  });
+
+  it('keeps a torrent for unlimited seeding only when both criteria are 0', async () => {
+    const { result, client } = await deleteWith({ seedingTimeMinutes: 0, ratioLimit: 0, seedingTime: 99999, ratio: 9 });
+
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+    expect(result.torrentsKeptUnlimited).toBe(1);
+  });
+});

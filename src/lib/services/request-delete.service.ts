@@ -10,6 +10,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { RMABLogger } from '../utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
+import { evaluateSeeding } from '../utils/seeding-policy';
 
 const logger = RMABLogger.create('RequestDelete');
 
@@ -140,7 +141,8 @@ export async function deleteRequest(
             }
 
             if (downloadInfo) {
-              const isUnlimitedSeeding = !seedingConfig || seedingConfig.seedingTimeMinutes === 0;
+              // Same rule as the scheduled seeding cleanup: time AND ratio; no config or both 0 = unlimited
+              const seeding = evaluateSeeding(seedingConfig, downloadInfo);
               const isCompleted = downloadHistory.downloadStatus === 'completed';
 
               if (client.protocol === 'usenet') {
@@ -152,7 +154,7 @@ export async function deleteRequest(
                 } catch (error) {
                   logger.info(`Download ${clientId} not found in ${client.clientType}, skipping`);
                 }
-              } else if (isUnlimitedSeeding) {
+              } else if (seeding.unlimited) {
                 // Unlimited seeding - keep in client, stop monitoring
                 logger.info(
                   `Keeping download ${downloadInfo.name} for unlimited seeding (indexer: ${downloadHistory.indexerName})`
@@ -164,24 +166,13 @@ export async function deleteRequest(
                 await client.deleteDownload(clientId, true);
                 torrentsRemoved++;
               } else {
-                // Check if seeding requirement is met
-                const seedingTimeSeconds = seedingConfig.seedingTimeMinutes * 60;
-                const actualSeedingTime = downloadInfo.seedingTime || 0;
-                const hasMetRequirement = actualSeedingTime >= seedingTimeSeconds;
-
-                if (hasMetRequirement) {
-                  logger.info(
-                    `Deleting download ${downloadInfo.name} (seeding complete: ${Math.floor(
-                      actualSeedingTime / 60
-                    )}/${seedingConfig.seedingTimeMinutes} minutes)`
-                  );
+                if (seeding.met) {
+                  logger.info(`Deleting download ${downloadInfo.name} (seeding complete: ${seeding.progress})`);
                   await client.deleteDownload(clientId, true);
                   torrentsRemoved++;
                 } else {
-                  const remainingMinutes = Math.ceil((seedingTimeSeconds - actualSeedingTime) / 60);
-                  logger.info(
-                    `Keeping download ${downloadInfo.name} for ${remainingMinutes} more minutes of seeding`
-                  );
+                  // The scheduled seeding cleanup removes it once the requirement is met
+                  logger.info(`Keeping download ${downloadInfo.name} to finish seeding: ${seeding.progress}`);
                   torrentsKeptSeeding++;
                 }
               }
