@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import type { Page } from '@playwright/test';
 
 /** True when run.mjs started the exec bridge (untainted runs only). */
 export const execBridgeAvailable = () => Boolean(process.env.E2E_EXEC_BRIDGE_URL && process.env.E2E_EXEC_TOKEN);
@@ -86,6 +87,24 @@ async function json<T>(res: Response, what: string): Promise<T> {
   const text = await res.text();
   if (!res.ok) throw new Error(`${what}: HTTP ${res.status} ${text.slice(0, 500)}`);
   return (text ? JSON.parse(text) : {}) as T;
+}
+
+/**
+ * Sign in through the /login page's local admin form, in either backend mode. Plex mode hides
+ * the form behind the "Admin Login" toggle (Plex OAuth can't be automated); `beforeToggle` runs
+ * just before that click (smoke screenshots the Plex-mode page there).
+ */
+export async function loginAdminUi(page: Page, { beforeToggle }: { beforeToggle?: () => Promise<void> } = {}) {
+  await page.goto('/login');
+  if (env('E2E_BACKEND') === 'plex') {
+    await beforeToggle?.();
+    await page.getByRole('button', { name: /Admin Login/ }).click();
+  }
+  await page.locator('#admin-username').fill(env('E2E_ADMIN_USER'));
+  await page.locator('#admin-password').fill(env('E2E_ADMIN_PASSWORD'));
+  // Local form submit is "Login"; the Plex-mode admin form's is "Login as Admin".
+  await page.getByRole('button', { name: /^Login( as Admin)?$/ }).click();
+  await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 30_000 });
 }
 
 /** RMAB API client authenticated with a bearer access token. */

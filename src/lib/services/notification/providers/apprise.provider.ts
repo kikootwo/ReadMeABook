@@ -5,9 +5,12 @@
 
 import { INotificationProvider, NotificationPayload, ProviderMetadata } from '../INotificationProvider';
 import { getEventMeta, getEventTitle, type NotificationSeverity } from '@/lib/constants/notification-events';
+import { liftAppriseUrlCredentials, normalizeAppriseConfig, splitUrlCredentials } from './apprise-credentials';
 
 export interface AppriseConfig {
   serverUrl: string;
+  basicAuthUser?: string;
+  basicAuthPassword?: string;
   urls?: string;
   configKey?: string;
   tag?: string;
@@ -24,7 +27,7 @@ const SEVERITY_TYPES: Record<NotificationSeverity, string> = {
 
 export class AppriseProvider implements INotificationProvider {
   type = 'apprise' as const;
-  sensitiveFields = ['urls', 'authToken'];
+  sensitiveFields = ['urls', 'authToken', 'basicAuthPassword'];
   secretBoundUrl = { field: 'serverUrl', credentialKind: 'apprise' as const };
   metadata: ProviderMetadata = {
     type: 'apprise',
@@ -33,7 +36,9 @@ export class AppriseProvider implements INotificationProvider {
     iconLabel: 'A',
     iconColor: 'bg-purple-500',
     configFields: [
-      { name: 'serverUrl', label: 'Server URL', type: 'text', required: true, placeholder: 'http://apprise:8000' },
+      { name: 'serverUrl', label: 'Server URL', type: 'text', required: true, placeholder: 'http://apprise:8000', helpText: 'Without credentials; use the Basic Auth fields below.' },
+      { name: 'basicAuthUser', label: 'Basic Auth Username', type: 'text', required: false },
+      { name: 'basicAuthPassword', label: 'Basic Auth Password', type: 'password', required: false, helpText: 'Not used when an Auth Token is set (the token takes precedence).' },
       { name: 'urls', label: 'Notification URLs', type: 'password', required: false, placeholder: 'slack://token, discord://webhook_id/token, ...' },
       { name: 'configKey', label: 'Config Key', type: 'text', required: false, placeholder: 'Persistent configuration key' },
       { name: 'tag', label: 'Tag', type: 'text', required: false, placeholder: 'Filter tag for stateful config' },
@@ -41,36 +46,43 @@ export class AppriseProvider implements INotificationProvider {
     ],
   };
 
+  normalizeSubmittedConfig(config: Record<string, any>) {
+    return normalizeAppriseConfig(config);
+  }
+
+  liftStoredSecrets(config: Record<string, any>) {
+    const lifted = liftAppriseUrlCredentials(config);
+    return lifted ? { ...lifted, passwordField: 'basicAuthPassword' } : null;
+  }
+
   async send(config: Record<string, any>, payload: NotificationPayload): Promise<void> {
     const appriseConfig = config as unknown as AppriseConfig;
     const meta = getEventMeta(payload.event);
     const { title, body } = this.formatMessage(payload);
 
-    // Parse URL to extract embedded HTTP Basic Auth credentials (e.g. https://user:pass@host/)
-    let serverUrl: string;
+    // Validate first: URL/fetch errors echo their input, which could include credentials
+    const split = splitUrlCredentials(String(appriseConfig.serverUrl ?? ''));
+    if (!split) {
+      throw new Error('The Apprise Server URL is not a valid URL');
+    }
+    const serverUrl = split.url.replace(/\/+$/, '');
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
 
-    try {
-      const parsed = new URL(appriseConfig.serverUrl);
-      if (parsed.username) {
-        const username = decodeURIComponent(parsed.username);
-        const password = decodeURIComponent(parsed.password);
-        headers['Authorization'] = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
-        parsed.username = '';
-        parsed.password = '';
-        serverUrl = parsed.toString().replace(/\/+$/, '');
-      } else {
-        serverUrl = appriseConfig.serverUrl.replace(/\/+$/, '');
-      }
-    } catch {
-      serverUrl = appriseConfig.serverUrl.replace(/\/+$/, '');
+    // Basic auth: userinfo still inside a not-yet-migrated URL wins over the fields, part by
+    // part, exactly as the startup migration and maskConfig lift it, so a send before the
+    // migration uses the same credentials that are stored after it. The request URL never
+    // carries userinfo.
+    const user = split.user || appriseConfig.basicAuthUser || '';
+    const password = split.password || appriseConfig.basicAuthPassword || '';
+    if (user || password) {
+      headers['Authorization'] = `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`;
     }
 
     const notificationType = SEVERITY_TYPES[meta.severity];
 
-    // Explicit authToken (Bearer) takes precedence over URL-embedded credentials
+    // An auth token (Bearer) takes precedence over Basic auth
     if (appriseConfig.authToken) {
       headers['Authorization'] = `Bearer ${appriseConfig.authToken}`;
     }

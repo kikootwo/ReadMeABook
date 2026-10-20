@@ -17,8 +17,10 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const readline = require('readline');
 const bcrypt = require('bcrypt');
+const { createPrompter, CANCELLED } = require('./lib/terminal-prompt');
+const { listPasswordUsers, describePasswordUser, findPasswordUser } = require('./lib/password-users');
+const { terminalProblem, installExitHandlers, passwordResetData } = require('./lib/recovery-process');
 
 const SECRETS_FILE = '/app/config/.secrets';
 const ENVIRONMENT_FILE = '/etc/environment';
@@ -228,58 +230,12 @@ function generateNewKey() {
 // ---------------------------------------------------------------------------
 // Prompt helpers
 // ---------------------------------------------------------------------------
-function ask(rl, question) {
-  return new Promise((resolve) => rl.question(question, (answer) => resolve(answer)));
-}
+// Prompts live in ./lib/terminal-prompt.js (no readline left attached while a password is typed)
+const prompter = createPrompter();
 
-function askHidden(question) {
-  return new Promise((resolve, reject) => {
-    if (!process.stdin.isTTY) {
-      reject(new Error('Interactive password input requires a TTY. Run with: docker exec -it ...'));
-      return;
-    }
-    process.stdout.write(question);
-    const stdin = process.stdin;
-    const wasRaw = stdin.isRaw;
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.setEncoding('utf8');
-
-    let buffer = '';
-    const onData = (chunk) => {
-      for (const ch of chunk) {
-        if (ch === '\u0003') {
-          // Ctrl+C
-          stdin.setRawMode(wasRaw);
-          stdin.pause();
-          stdin.removeListener('data', onData);
-          process.stdout.write('\n');
-          reject(new Error('Cancelled by user'));
-          return;
-        }
-        if (ch === '\r' || ch === '\n') {
-          stdin.setRawMode(wasRaw);
-          stdin.pause();
-          stdin.removeListener('data', onData);
-          process.stdout.write('\n');
-          resolve(buffer);
-          return;
-        }
-        if (ch === '\u007f' || ch === '\b') {
-          if (buffer.length > 0) {
-            buffer = buffer.slice(0, -1);
-            process.stdout.write('\b \b');
-          }
-          continue;
-        }
-        if (ch < ' ') continue;
-        buffer += ch;
-        process.stdout.write('*');
-      }
-    };
-    stdin.on('data', onData);
-  });
-}
+// Never leave the terminal in raw mode, whatever ends the process; hold() defers exit
+// signals while a full recovery commits and writes the new key
+const exitControl = installExitHandlers({ prompter });
 
 // ---------------------------------------------------------------------------
 // .secrets / /etc/environment file updates
@@ -322,10 +278,10 @@ function updateKeyInFile(filePath, keyName, newValue, quoted) {
 // Main
 // ---------------------------------------------------------------------------
 async function main() {
-  // Reject any CLI args by design.
-  if (process.argv.length > 2) {
-    console.error('This script does not accept CLI arguments. All input is via interactive prompts.');
-    console.error('Run: docker exec -it <container> npm run rmab:recover');
+  // No CLI args, and interactive only: without a terminal the password prompt cannot hide input
+  const problem = terminalProblem({ argv: process.argv, stdin: process.stdin, stdout: process.stdout });
+  if (problem) {
+    for (const line of problem) console.error(line);
     process.exit(2);
   }
 
@@ -383,6 +339,7 @@ async function main() {
     }
   }
   const prisma = new PrismaClient();
+  let releaseSignals = () => {};
 
   try {
     // -------------------------------------------------------------------------
@@ -415,48 +372,34 @@ async function main() {
     }
 
     // -------------------------------------------------------------------------
-    // List local users
+    // List users who log in with a password (local users and the Plex-mode admin)
     // -------------------------------------------------------------------------
     console.log('');
-    console.log('Step 2/5 — Selecting local user to reset...');
-    const localUsers = await prisma.user.findMany({
-      where: { authProvider: 'local', deletedAt: null },
-      select: {
-        id: true,
-        plexUsername: true,
-        plexId: true,
-        role: true,
-        isSetupAdmin: true,
-        authToken: true,
-      },
-      orderBy: [{ isSetupAdmin: 'desc' }, { plexUsername: 'asc' }],
-    });
+    console.log('Step 2/5 — Selecting the user to reset...');
+    const passwordUsers = await listPasswordUsers(prisma);
 
-    if (localUsers.length === 0) {
+    if (passwordUsers.length === 0) {
       console.error('');
-      console.error('ERROR: No local users exist in the database.');
-      console.error('       Use the setup wizard / registration page to create one instead.');
+      console.error('ERROR: No user in the database logs in with a username and password.');
+      console.error('       Plex and OIDC users sign in through their provider and have no password to reset.');
+      console.error('       Use the setup wizard / registration page to create a local user instead.');
       process.exit(1);
     }
 
     console.log('');
-    console.log('  Local users:');
-    for (const u of localUsers) {
-      const tag = [u.role];
-      if (u.isSetupAdmin) tag.push('setup-admin');
-      console.log(`    - ${u.plexUsername}   [${tag.join(', ')}]`);
+    console.log('  Users with a password login:');
+    for (const u of passwordUsers) {
+      console.log(`    - ${describePasswordUser(u)}`);
     }
     console.log('');
 
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-
     let chosenUser = null;
     while (!chosenUser) {
-      const typed = (await ask(rl, '  Username to reset: ')).trim().toLowerCase();
+      const typed = (await prompter.ask('  Username to reset: ')).trim().toLowerCase();
       if (!typed) continue;
-      chosenUser = localUsers.find((u) => u.plexUsername === typed);
+      chosenUser = findPasswordUser(passwordUsers, typed);
       if (!chosenUser) {
-        console.log(`  No local user named "${typed}". Try again, or Ctrl+C to abort.`);
+        console.log(`  No password-login user named "${typed}". Try again, or Ctrl+C to abort.`);
       }
     }
 
@@ -470,10 +413,8 @@ async function main() {
 
     let newPassword = null;
     while (!newPassword) {
-      rl.pause();
-      const a = await askHidden('  New password: ');
-      const b = await askHidden('  Confirm new password: ');
-      rl.resume();
+      const a = await prompter.askHidden('  New password: ');
+      const b = await prompter.askHidden('  Confirm new password: ');
       if (a !== b) {
         console.log('  Passwords did not match. Try again.');
         continue;
@@ -535,14 +476,12 @@ async function main() {
     }
 
     console.log('');
-    const confirm = (await ask(rl, "  Type 'confirm' to proceed (anything else aborts): ")).trim();
+    const confirm = (await prompter.ask("  Type 'confirm' to proceed (anything else aborts): ")).trim();
     if (confirm !== 'confirm') {
       console.log('  Aborted. No changes made.');
-      rl.close();
       await prisma.$disconnect();
       process.exit(0);
     }
-    rl.close();
 
     // -------------------------------------------------------------------------
     // Execute
@@ -555,6 +494,8 @@ async function main() {
     let newKeyBuffer = currentKey;
 
     if (fullRecovery) {
+      // From here until the new key is on disk (or printed), exit signals wait
+      releaseSignals = exitControl.hold();
       newKeyBase64 = generateNewKey();
       newKeyBuffer = deriveKey(newKeyBase64);
 
@@ -654,7 +595,7 @@ async function main() {
         }
         await tx.user.update({
           where: { id: chosenUser.id },
-          data: { authToken: encryptedHash, lastLoginAt: null },
+          data: passwordResetData(encryptedHash),
         });
         return result;
       });
@@ -665,7 +606,7 @@ async function main() {
       await prisma.$transaction(async (tx) => {
         await tx.user.update({
           where: { id: chosenUser.id },
-          data: { authToken: encryptedHash, lastLoginAt: null },
+          data: passwordResetData(encryptedHash),
         });
       });
       summary = null;
@@ -699,6 +640,7 @@ async function main() {
     console.log('================================================================');
     console.log('');
     console.log(`  User reset:   ${chosenUser.plexUsername}`);
+    console.log('  Existing sessions for this user were signed out.');
     if (fullRecovery && summary) {
       console.log(`  Configuration rows re-encrypted: ${summary.configRotated}`);
       console.log(`  Configuration rows deleted:      ${summary.configDeleted}`);
@@ -734,6 +676,12 @@ async function main() {
     }
     console.log('');
   } catch (err) {
+    if (err && err.code === CANCELLED) {
+      console.error('');
+      console.error('Cancelled. No changes made.');
+      process.exitCode = 130;
+      return;
+    }
     console.error('');
     console.error('ERROR: Recovery aborted.');
     console.error(`  ${err.message}`);
@@ -766,6 +714,7 @@ async function main() {
     } catch (_e) {
       // ignore
     }
+    releaseSignals(); // exits now if a signal arrived during the held section
   }
 }
 
