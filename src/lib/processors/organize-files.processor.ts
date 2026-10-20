@@ -14,6 +14,7 @@ import { getDownloadClientManager } from '../services/download-client-manager.se
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import { generateFilesHash } from '../utils/files-hash';
+import { audioFileFormat, splitForeignAudio } from './organize-evidence';
 import { fixEpubForKindle, cleanupFixedEpub } from '../utils/epub-fixer';
 import { cleanupDirectDownloadSource, cleanupDownloadAfterOrganize, cleanupEbookSource, cleanupSourceAfterOrganize } from './organize-cleanup';
 import { audioEvidence, deleteMayFollow, ebookEvidence as buildEbookEvidence, reportImportStatus } from './organize-evidence';
@@ -234,32 +235,40 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     });
     const coercionEnabled = coercionConfig?.value !== 'false';
 
-    if (coercionEnabled && result.audioFiles.length > 0) {
+    // Files the library already held with different content ('differs') are not
+    // this import's: coercion never renames them and the hash leaves them out
+    const { owned: ownedAudio, foreign: foreignAudio } = splitForeignAudio(result.audioFiles, result.records);
+    let importedAudio = ownedAudio;
+
+    if (coercionEnabled && importedAudio.length > 0) {
       try {
         const { coerceToPlexCompatible } = await import('../utils/format-coercion');
-        const coercion = await coerceToPlexCompatible(result.audioFiles, logger);
+        const coercion = await coerceToPlexCompatible(importedAudio, logger);
         if (coercion.renamed.length > 0) {
           logger.info(`Plex format coercion: renamed ${coercion.renamed.length} file(s)`);
-          result.audioFiles = coercion.finalAudioFiles;
+          importedAudio = coercion.finalAudioFiles;
         }
         coercion.warnings.forEach(w => logger.warn(`Plex format coercion: ${w}`));
       } catch (err) {
         logger.warn(`Plex format coercion failed (non-fatal): ${err instanceof Error ? err.message : 'unknown'}`);
       }
     }
+    result.audioFiles = [...importedAudio, ...foreignAudio];
 
-    // Generate hash from organized audio files for library matching
-    const filesHash = generateFilesHash(result.audioFiles);
+    // Hash of this import's audio, after coercion (library matching, and the
+    // evidence an admin delete checks before removing the folder)
+    const filesHash = generateFilesHash(importedAudio);
     if (filesHash) {
-      logger.info(`Generated files hash: ${filesHash.substring(0, 16)}... (${result.audioFiles.length} audio files)`);
+      logger.info(`Generated files hash: ${filesHash.substring(0, 16)}... (${importedAudio.length} audio files)`);
     }
 
-    // Update audiobook record with file path, hash, and status
+    // Update audiobook record with file path, hash, format, and status
     await prisma.audiobook.update({
       where: { id: audiobookId },
       data: {
         filePath: result.targetPath,
         filesHash: filesHash || null,
+        fileFormat: audioFileFormat(importedAudio.length > 0 ? importedAudio : result.audioFiles),
         status: 'completed',
         completedAt: new Date(),
         updatedAt: new Date(),
