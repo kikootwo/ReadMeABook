@@ -33,8 +33,10 @@ interface ScrollState {
 const EDGE_TOLERANCE_PX = 1;
 // A summary this close to the cap is shown whole rather than scrolled for a few pixels.
 const SLACK_PX = 12;
-// The chevron scrolls one box height minus one line, so the last visible line stays in view.
-const LINE_OVERLAP_PX = 24;
+// The chevron scrolls one box height minus the two fades (bottom h-6 + top h-4), so the line cut off
+// at the bottom lands clear of the top fade.
+const FADE_OVERLAP_PX = 40;
+const MIN_STEP_PX = 24;
 const SLACK_MAX_HEIGHT = `calc(var(--summary-cap) + ${SLACK_PX}px)`;
 
 const INITIAL_STATE: ScrollState = { overflowing: false, atTop: true, atBottom: true, scrollbarWidth: 0, slack: false };
@@ -112,7 +114,7 @@ export function BookSummary({ text }: BookSummaryProps) {
   const scrollForMore = () => {
     const box = boxRef.current;
     if (!box) return;
-    box.scrollBy({ top: Math.max(box.clientHeight - LINE_OVERLAP_PX, LINE_OVERLAP_PX), behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    box.scrollBy({ top: Math.max(box.clientHeight - FADE_OVERLAP_PX, MIN_STEP_PX), behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
   };
 
   const { overflowing, atTop, atBottom, scrollbarWidth, slack } = state;
@@ -171,6 +173,8 @@ export function BookSummary({ text }: BookSummaryProps) {
         )}
         {showMore && (
           // Pointer affordance only: keyboard and screen-reader users scroll the focusable region itself.
+          // -bottom-2 + h-8: the disc's top meets the bottom fade's top (box - 24px), so it only covers text
+          // the fade already marks as cut off; it hangs 8px below the box, inside the next section's mt-6.
           <button
             type="button"
             tabIndex={-1}
@@ -178,7 +182,7 @@ export function BookSummary({ text }: BookSummaryProps) {
             data-testid="book-summary-more"
             onMouseDown={(e) => e.preventDefault()}
             onClick={scrollForMore}
-            className="absolute bottom-1 w-8 h-8 flex items-center justify-center rounded-full bg-white dark:bg-gray-800 shadow-md text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors after:absolute after:-inset-1.5"
+            className="absolute -bottom-2 w-8 h-8 flex items-center justify-center rounded-full bg-white dark:bg-gray-800 shadow-md text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors after:absolute after:-inset-1.5"
             style={{ right: scrollbarWidth + 4 }}
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

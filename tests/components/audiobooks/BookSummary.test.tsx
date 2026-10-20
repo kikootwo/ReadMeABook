@@ -89,6 +89,7 @@ describe('BookSummary', () => {
     expect(more).toHaveAttribute('type', 'button');
     expect(more).toHaveAttribute('tabindex', '-1');
     expect(more).toHaveAttribute('aria-hidden', 'true');
+    expect(more).toHaveClass('-bottom-2', 'w-8', 'h-8');
 
     const paragraph = region.querySelector('p')!;
     expect(paragraph.textContent).toBe(LONG);
@@ -159,11 +160,11 @@ describe('BookSummary', () => {
     expect(screen.getByTestId('book-summary-more')).toBeInTheDocument();
   });
 
-  it('scrolls the box by one box height minus a line when the chevron is clicked', () => {
+  it('scrolls the box by one box height minus both fades (40px) when the chevron is clicked', () => {
     setLayout({ scrollHeight: 975, clientHeight: 240, capPx: 240 });
     render(<BookSummary text={LONG} />);
     fireEvent.click(screen.getByTestId('book-summary-more'));
-    expect(box().scrollBy).toHaveBeenCalledWith({ top: 216, behavior: 'smooth' });
+    expect(box().scrollBy).toHaveBeenCalledWith({ top: 200, behavior: 'smooth' });
   });
 
   it('jumps instead of animating when the reader prefers reduced motion', () => {
@@ -171,7 +172,14 @@ describe('BookSummary', () => {
     setLayout({ scrollHeight: 975, clientHeight: 240, capPx: 240 });
     render(<BookSummary text={LONG} />);
     fireEvent.click(screen.getByTestId('book-summary-more'));
-    expect(box().scrollBy).toHaveBeenCalledWith({ top: 216, behavior: 'auto' });
+    expect(box().scrollBy).toHaveBeenCalledWith({ top: 200, behavior: 'auto' });
+  });
+
+  it('never steps less than 24px, even in a very short box', () => {
+    setLayout({ scrollHeight: 975, clientHeight: 50, capPx: 240 });
+    render(<BookSummary text={LONG} />);
+    fireEvent.click(screen.getByTestId('book-summary-more'));
+    expect(box().scrollBy).toHaveBeenCalledWith({ top: 24, behavior: 'smooth' });
   });
 
   it('still hints at a few hidden pixels when the box is shrunk below the cap', () => {
@@ -181,7 +189,8 @@ describe('BookSummary', () => {
     expect(screen.getByTestId('book-summary-fade-bottom')).toBeInTheDocument();
   });
 
-  it('keeps focus on the box if it stops overflowing while focused, then drops the tab stop on blur', () => {
+  // jsdom has no focus fixup, so only the tab stop is checked here; the e2e spec checks that a real browser keeps focus.
+  it('keeps the tab stop while the box is focused even if it stops overflowing, then drops it on blur', () => {
     setLayout({ scrollHeight: 975, clientHeight: 240, capPx: 240 });
     render(<BookSummary text={LONG} />);
     act(() => box().focus());
@@ -189,7 +198,6 @@ describe('BookSummary', () => {
 
     setLayout({ scrollHeight: 240, clientHeight: 240 });
     fireEvent.scroll(box());
-    expect(document.activeElement).toBe(box());
     expect(box()).toHaveAttribute('tabindex', '0');
     expect(screen.queryByTestId('book-summary-more')).toBeNull();
 
