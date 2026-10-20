@@ -21,6 +21,8 @@ const requireAuthMock = vi.hoisted(() => vi.fn());
 const requireAdminMock = vi.hoisted(() => vi.fn());
 const notificationServiceMock = vi.hoisted(() => ({
   encryptConfig: vi.fn((type: string, config: any) => ({ ...config, encrypted: true })),
+  prepareSubmittedConfig: vi.fn((type: string, config: any) => ({ ok: true, config: { ...config, encrypted: true } })),
+  migrateStoredConfig: vi.fn(() => null),
   maskConfig: vi.fn((type: string, config: any) => ({ ...config, masked: true })),
   // URL binding rules are covered in notification-secret-binding.test.ts; here masked values keep the saved ones
   mergeMaskedSecrets: vi.fn((type: string, existing: any, updated: any) => ({
@@ -126,7 +128,7 @@ describe('Admin notifications routes', () => {
       const payload = await response.json();
 
       expect(payload.success).toBe(true);
-      expect(notificationServiceMock.encryptConfig).toHaveBeenCalledWith('discord', newBackend.config);
+      expect(notificationServiceMock.prepareSubmittedConfig).toHaveBeenCalledWith('discord', newBackend.config);
       expect(prismaMock.notificationBackend.create).toHaveBeenCalled();
     });
 

@@ -72,6 +72,15 @@ export class SchedulerService {
       });
     }
 
+    // Then (serially) move credentials out of stored server URLs (Apprise userinfo)
+    try {
+      await getNotificationService().migrateStoredSecrets();
+    } catch (error) {
+      logger.error('Failed to migrate notification backend credentials (non-fatal)', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     // Clean up deprecated scheduled jobs
     await this.cleanupDeprecatedJobs();
 

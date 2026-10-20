@@ -9,7 +9,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { env, writeEvidence, waitFor, fakeArr, snap, urls, Rmab } from '../lib/harness';
+import { env, writeEvidence, waitFor, fakeArr, snap, urls, loginAdminUi, Rmab } from '../lib/harness';
 
 const phase = process.env.E2E_PHASE;
 
@@ -61,11 +61,8 @@ test('upgrade-verify: branch image keeps requests, logins and decryptable secret
   expect(searches.length).toBeGreaterThan(0);
   expect(searches.every((r) => r.headers['x-api-key'] === env('PROWLARR_API_KEY') && r.status === 200)).toBe(true);
 
-  await page.goto('/login');
-  await page.locator('#admin-username').fill(env('E2E_ADMIN_USER'));
-  await page.locator('#admin-password').fill(env('E2E_ADMIN_PASSWORD'));
-  await page.getByRole('button', { name: /^Login( as Admin)?$/ }).click();
-  await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 30_000 });
+  // UI login in either backend mode (Plex mode: through the "Admin Login" toggle).
+  await loginAdminUi(page);
   await page.goto('/requests');
   await snap(page, 'upgrade', 'requests-after-upgrade');
 });

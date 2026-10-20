@@ -29,6 +29,7 @@ const configServiceMock = vi.hoisted(() => ({
 
 const notificationServiceMock = vi.hoisted(() => ({
   reEncryptUnprotectedBackends: vi.fn().mockResolvedValue(0),
+  migrateStoredSecrets: vi.fn().mockResolvedValue(0),
 }));
 
 vi.mock('@/lib/services/job-queue.service', () => ({
@@ -88,6 +89,23 @@ describe('SchedulerService', () => {
       '0 0 * * *',
       'scheduled-job-1'
     );
+
+    // Notification credential migration runs once, after the re-encrypt pass
+    expect(notificationServiceMock.reEncryptUnprotectedBackends).toHaveBeenCalledTimes(1);
+    expect(notificationServiceMock.migrateStoredSecrets).toHaveBeenCalledTimes(1);
+    expect(notificationServiceMock.migrateStoredSecrets.mock.invocationCallOrder[0])
+      .toBeGreaterThan(notificationServiceMock.reEncryptUnprotectedBackends.mock.invocationCallOrder[0]);
+  });
+
+  it('still migrates notification credentials when the re-encrypt pass fails', async () => {
+    prismaMock.scheduledJob.findFirst.mockResolvedValue({ id: 'existing' });
+    prismaMock.scheduledJob.findMany.mockResolvedValue([]);
+    notificationServiceMock.reEncryptUnprotectedBackends.mockRejectedValueOnce(new Error('db down'));
+
+    const { SchedulerService } = await import('@/lib/services/scheduler.service');
+    await new SchedulerService().start();
+
+    expect(notificationServiceMock.migrateStoredSecrets).toHaveBeenCalledTimes(1);
   });
 
   it('rejects invalid cron expressions', async () => {

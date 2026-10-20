@@ -13,6 +13,7 @@ interface ProviderConfigField {
   type: 'text' | 'password' | 'select' | 'number';
   required: boolean;
   placeholder?: string;
+  helpText?: string;
   defaultValue?: string | number;
   options?: { label: string; value: string | number }[];
 }
@@ -264,6 +265,9 @@ export function NotificationsTab() {
           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
           placeholder={field.placeholder}
         />
+        {field.helpText && (
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{field.helpText}</p>
+        )}
       </div>
     );
   };
