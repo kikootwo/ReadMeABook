@@ -14,10 +14,10 @@ import { test, expect, type Browser } from '@playwright/test';
 import { fakeArr, Rmab, execBridgeAvailable, writeEvidence, waitFor, type Book } from '../../lib/harness';
 import { psql, sqlStr } from './242-helpers';
 import {
-  FX, VIEWPORTS, vp, openSession, launchEngine, openFromSearch, waitForSummary, measure, parkBoxAtEnd, showBoxTop,
-  shot, shotBox, chevronWalk, wheelAtEnd, swipeAtEnd, keyboardReach, axeModal,
+  FX, VIEWPORTS, vp, openSession, launchEngine, openFromSearch, waitForSummary, measure, showBoxTop, shot, shotBox,
   type Engine, type FixtureKey, type Geometry, type Session,
 } from './summary-scroll-helpers';
+import { chevronWalk, endShot, focusRetention, wheelAtEnd, swipeAtEnd, keyboardReach, axeModal } from './summary-scroll-input';
 
 interface Row extends Geometry { engine: Engine; surface: string; cover: string; theme: string; vpName: string; text: FixtureKey }
 
@@ -45,8 +45,7 @@ test('summary-scroll: a long summary scrolls inside its own box and the modal ke
       if (v.name === '375x812') {
         await showBoxTop(s.page);
         await shot(s.page, 'long-375x812-light-boxtop');
-        await parkBoxAtEnd(s.page);
-        await shot(s.page, 'long-375x812-light-end');
+        checks['end-long-375x812-light'] = await endShot(s.page, 'long-375x812-light-end');
         checks.axe375 = await axeModal(s.page);
       }
       if (v.touch) {
@@ -62,10 +61,10 @@ test('summary-scroll: a long summary scrolls inside its own box and the modal ke
       if (v.name === '1440x900') {
         await shotBox(s.page, 'long-1440x900-light-box');
         checks.chevron1440x900 = await chevronWalk(s.page, 'chevron-1440x900-light-mid');
-        await shot(s.page, 'chevron-1440x900-light-end');
-        await shotBox(s.page, 'chevron-1440x900-light-end-box');
+        checks['end-chevron-1440x900-light'] = await endShot(s.page, 'chevron-1440x900-light-end', { park: false, box: true });
         await openFromSearch(s, book, FX.long);
         checks.keyboard1440x900 = await keyboardReach(s.page, book.author);
+        checks.focus1440x900 = await focusRetention(s.page);
         await shot(s.page, 'long-1440x900-light-focus');
         await openFromSearch(s, book, FX.long);
         checks.axe1440 = await axeModal(s.page);
@@ -96,8 +95,7 @@ test('summary-scroll: a long summary scrolls inside its own box and the modal ke
       await shot(s.page, `long-${name}-dark`);
       if (name === '1440x900') {
         await shotBox(s.page, 'long-1440x900-dark-box');
-        await parkBoxAtEnd(s.page);
-        await shot(s.page, 'long-1440x900-dark-end');
+        checks['end-long-1440x900-dark'] = await endShot(s.page, 'long-1440x900-dark-end', { box: true });
       }
       await sample(s, 'short', { vpName: name, theme: 'dark' });
       await shot(s.page, `short-${name}-dark`);
@@ -193,6 +191,14 @@ test('summary-scroll: a long summary scrolls inside its own box and the modal ke
       if (!shrinks) expect.soft(r.summaryH ?? 0, `${tag}: phone sizes keep the full 38dvh box (${capPx}px)`).toBeGreaterThanOrEqual(capPx - 1);
     }
     expect.soft(r.overscrollY, `${tag}: overscroll chains to the modal`).toBe('auto');
+    if (r.disc) {
+      // The disc's top meets the bottom fade's top, so it only covers text the fade marks as cut off.
+      expect.soft(Math.abs(r.disc.topVsFade ?? 99), `${tag}: disc top vs fade top (${r.disc.topVsFade}px)`).toBeLessThanOrEqual(1);
+      expect.soft(r.disc.gapToNext, `${tag}: disc hit area clear of the next divider (${r.disc.gapToNext}px)`).toBeGreaterThan(0);
+      expect.soft(r.disc.clippedBy, `${tag}: disc not clipped by an ancestor`).toBeNull();
+      expect.soft(r.disc.bottomEdgeHit, `${tag}: disc's bottom edge is on top where it hangs below the box`).not.toBe(false);
+      expect.soft(r.disc.inside, `${tag}: disc within the box sides, over the fade, not past the divider`).toBe(true);
+    }
   }
   for (const r of rows.filter((x) => x.text === 'short')) expect.soft(r.region, `${r.engine} short summary at ${r.vpName}: natural height`).toBeNull();
 
@@ -237,6 +243,10 @@ test('summary-scroll: a long summary scrolls inside its own box and the modal ke
   for (const name of ['chevron1440x900', 'chevron375x812', 'chevron1440x900-webkit', 'chevron1440x900-firefox']) {
     expect.soft(ok(name), `${name}: chevron inside the box; clicks scroll the box, not the modal, until it goes at the end`).toBe(true);
   }
+  for (const name of ['end-long-375x812-light', 'end-chevron-1440x900-light', 'end-long-1440x900-dark']) {
+    expect.soft(ok(name), `${name}: shot taken at the box end with the chevron and bottom fade gone`).toBe(true);
+  }
+  expect.soft(ok('focus1440x900'), 'focused region keeps focus and its tab stop when it stops overflowing (Chromium), loses the tab stop on blur').toBe(true);
   expect.soft(ok('axe375'), 'axe: no scrollable-region-focusable violation (375x812)').toBe(true);
   expect.soft(ok('axe1440'), 'axe: no scrollable-region-focusable violation (1440x900)').toBe(true);
 });

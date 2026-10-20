@@ -86,7 +86,7 @@ export async function openSession(browser: Browser, v: Vp, opts: { dark?: boolea
 export const launchEngine = (engine: Exclude<Engine, 'chromium'>): Promise<Browser> => (engine === 'webkit' ? webkit : firefox).launch();
 
 /** The details modal's scroll area (the only overscroll-contain scroller that holds an h2 title). */
-const AREA_JS = `[...document.querySelectorAll('div.overflow-y-auto.overscroll-contain')].find((el) => el.querySelector('h2'))`;
+export const AREA_JS = `[...document.querySelectorAll('div.overflow-y-auto.overscroll-contain')].find((el) => el.querySelector('h2'))`;
 
 /** Wait until the modal shows `text` (trimmed; empty = no summary section) and layout has settled. */
 export async function waitForSummary(page: Page, text: string) {
@@ -120,7 +120,62 @@ export interface Geometry {
   summaryChars: number; summaryH: number | null; boxScrollH: number | null;
   region: string | null; tabindex: string | null; label: string | null; overscrollY: string | null;
   heading: boolean; fadeTop: boolean; fadeBottom: boolean; more: boolean; lifted: boolean;
+  disc: Disc | null;
 }
+
+/** Where the "more" disc sits against the box, the bottom fade and the next section's divider. */
+export interface Disc {
+  /** disc top − bottom-fade top (0 = the disc only covers faded text). */
+  topVsFade: number | null;
+  /** disc bottom − box bottom (the disc hangs below the box by this much). */
+  belowBox: number;
+  /** next section's top (its border-t divider), or the content column's bottom − the disc's hit-area bottom. */
+  gapToNext: number;
+  nextIsSection: boolean;
+  /** An ancestor (below the scroll area) whose overflow cuts the disc off, or null. */
+  clippedBy: string | null;
+  /** elementFromPoint 3px above the disc's bottom edge is the disc (null: that point is off screen). */
+  bottomEdgeHit: boolean | null;
+  inside: boolean;
+  boxClientH: number;
+  rects: { box: number[]; disc: number[]; nextTop: number };
+}
+
+/** Browser-side: Disc for the modal scroll area `area`, or null when there is no disc. */
+export const DISC_FN = `((area) => {
+  const more = area.querySelector('[data-testid="book-summary-more"]');
+  if (!more) return null;
+  const wrapper = more.parentElement;
+  const box = wrapper.querySelector('[data-testid="book-summary-scroll"]');
+  const fade = wrapper.querySelector('[data-testid="book-summary-fade-bottom"]');
+  const m = more.getBoundingClientRect(), b = box.getBoundingClientRect(), f = fade ? fade.getBoundingClientRect() : null;
+  const hitBottom = m.bottom - (parseFloat(getComputedStyle(more, '::after').bottom) || 0);
+  const next = wrapper.nextElementSibling;
+  const nextTop = next ? next.getBoundingClientRect().top : wrapper.parentElement.getBoundingClientRect().bottom;
+  let clippedBy = null;
+  for (let el = wrapper; el && el !== area; el = el.parentElement) {
+    const cs = getComputedStyle(el);
+    if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+    const r = el.getBoundingClientRect();
+    if (m.top < r.top || m.bottom > r.bottom || m.left < r.left || m.right > r.right) { clippedBy = el.tagName + '.' + el.className.split(' ').slice(0, 3).join('.'); break; }
+  }
+  const a = area.getBoundingClientRect();
+  const probeY = m.bottom - 3, probeX = (m.left + m.right) / 2;
+  const onScreen = probeY > a.top && probeY < a.bottom && probeY < innerHeight;
+  const hit = onScreen ? document.elementFromPoint(probeX, probeY) : null;
+  const r1 = (n) => Math.round(n * 10) / 10;
+  return {
+    topVsFade: f ? r1(m.top - f.top) : null,
+    belowBox: r1(m.bottom - b.bottom),
+    gapToNext: r1(nextTop - hitBottom),
+    nextIsSection: !!next,
+    clippedBy,
+    bottomEdgeHit: onScreen ? !!(hit && more.contains(hit)) : null,
+    inside: m.left >= b.left && m.right <= b.right && m.top >= b.bottom - 25 && m.bottom <= Math.min(b.bottom + 24, nextTop),
+    boxClientH: box.clientHeight,
+    rects: { box: [b.left, b.top, b.right, b.bottom].map(r1), disc: [m.left, m.top, m.right, m.bottom].map(r1), nextTop: r1(nextTop) },
+  };
+})`;
 
 export async function measure(page: Page): Promise<Geometry> {
   return page.evaluate(`(() => {
@@ -143,6 +198,7 @@ export async function measure(page: Page): Promise<Geometry> {
       fadeBottom: !!area.querySelector('[data-testid="book-summary-fade-bottom"]'),
       more: !!area.querySelector('[data-testid="book-summary-more"]'),
       lifted: !!(box && box.parentElement.style.maxHeight),
+      disc: ${DISC_FN}(area),
     };
   })()`);
 }
@@ -171,55 +227,6 @@ export async function shotBox(page: Page, name: string) {
   await page.screenshot({ path: evidencePath('summary-scroll', `${name}.png`), clip: r });
 }
 
-/**
- * Pointer path for the "more" chevron: it must sit inside the box; each click scrolls the box (never the
- * modal) until the end, where the chevron goes away. Takes `midShot` after the first click.
- * Page-side click events are counted, and a smooth scroll that starts late (a loaded host can stall the
- * renderer for a few hundred ms) gets up to 2s more; each step records both, so a dropped click and a
- * slow animation are told apart in metrics.json.
- */
-export async function chevronWalk(page: Page, midShot?: string) {
-  const more = page.getByTestId('book-summary-more');
-  if (!(await more.count())) return { ok: false, reason: 'no chevron' };
-  await page.evaluate(`(() => { window.__summaryMoreClicks = 0;
-    document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('[data-testid="book-summary-more"]')) window.__summaryMoreClicks += 1; }, true);
-    (${AREA_JS}).querySelector('[data-testid="book-summary"]').scrollIntoView({ block: 'center' }); })()`);
-  await settle(page, 300);
-  const rects = (await page.evaluate(`(() => { const a = ${AREA_JS};
-    const r = (el) => { const b = el.getBoundingClientRect(); return { top: b.top, right: b.right, bottom: b.bottom, left: b.left }; };
-    return { box: r(a.querySelector('[data-testid="book-summary-scroll"]')), more: r(a.querySelector('[data-testid="book-summary-more"]')) }; })()`)) as Record<'box' | 'more', { top: number; right: number; bottom: number; left: number }>;
-  const inside = rects.more.top >= rects.box.top && rects.more.bottom <= rects.box.bottom && rects.more.left >= rects.box.left && rects.more.right <= rects.box.right;
-  const steps: { modalTop: number; boxTop: number | null; clickEvents: number; extraWaitMs: number }[] = [];
-  const start = await scrollState(page);
-  const clickEvents = () => page.evaluate('window.__summaryMoreClicks') as Promise<number>;
-  let clicks = 0;
-  while (clicks < 40 && (await more.count())) {
-    const before = await scrollState(page);
-    await more.click();
-    clicks += 1;
-    await settle(page, 700);
-    let after = await scrollState(page);
-    let extraWaitMs = 0;
-    while (!((after.boxTop ?? 0) > (before.boxTop ?? 0)) && extraWaitMs < 2000) {
-      await settle(page, 100);
-      extraWaitMs += 100;
-      after = await scrollState(page);
-    }
-    steps.push({ modalTop: after.modalTop, boxTop: after.boxTop, clickEvents: await clickEvents(), extraWaitMs });
-    if (!((after.boxTop ?? 0) > (before.boxTop ?? 0))) break;
-    if (clicks === 1 && midShot) await shot(page, midShot);
-  }
-  const end = await scrollState(page);
-  const gone = (await more.count()) === 0;
-  const focusMoved = await page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'book-summary-more');
-  const boxMoved = steps.length > 0 && (steps[0].boxTop ?? 0) > (start.boxTop ?? 0);
-  const modalStill = steps.every((s) => s.modalTop === start.modalTop);
-  const clicksDelivered = (await clickEvents()) === clicks;
-  const atEnd = end.boxTop !== null && end.boxMax !== null && end.boxTop >= end.boxMax - 1;
-  const late = steps.filter((s) => s.extraWaitMs > 0).length;
-  return { ok: inside && boxMoved && modalStill && gone && atEnd && !focusMoved && clicksDelivered, inside, boxMoved, modalStill, gone, atEnd, focusMoved, clicksDelivered, clicks, late, rects, start, steps, end };
-}
-
 /** Scroll the summary box to its end and centre it in the modal; returns the modal's scrollTop. */
 export async function parkBoxAtEnd(page: Page): Promise<{ modalTop: number; modalMax: number; x: number; y: number } | null> {
   return page.evaluate(`(() => {
@@ -243,79 +250,4 @@ export async function shot(page: Page, name: string) {
   await page.screenshot({ path: evidencePath('summary-scroll', `${name}.png`), fullPage: false });
 }
 
-const settle = (page: Page, ms = 700) => page.waitForTimeout(ms);
-
-/** Mouse wheel over the summary once it is at its end: the modal itself must scroll on. */
-export async function wheelAtEnd(page: Page) {
-  const park = await parkBoxAtEnd(page);
-  if (!park) return { ok: false, reason: 'no summary box' };
-  const before = await scrollState(page);
-  await page.mouse.move(park.x, park.y);
-  await page.mouse.wheel(0, 240);
-  await settle(page);
-  const after = await scrollState(page);
-  return { ok: after.modalTop > before.modalTop, park, before, after };
-}
-
-/**
- * Real touch swipe that starts inside the summary at its end: CDP touchStart/touchMove/touchEnd, which
- * runs Chromium's gesture and scroll-chaining path (Input.synthesizeScrollGesture is inert in headless).
- * Verified to tell the cases apart: overscroll auto → the sheet moves; contain → stuck.
- */
-export async function swipeAtEnd(page: Page) {
-  const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
-  const park = await parkBoxAtEnd(page);
-  if (!park) return { ok: false, coarse, reason: 'no summary box' };
-  await settle(page, 600);
-  const before = await scrollState(page);
-  const cdp = await page.context().newCDPSession(page);
-  const distance = 220;
-  const steps = 12;
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: park.x, y: park.y }] });
-  for (let i = 1; i <= steps; i++) {
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: park.x, y: park.y - (distance * i) / steps }] });
-    await page.waitForTimeout(16);
-  }
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await settle(page, 900);
-  const after = await scrollState(page);
-  await cdp.detach();
-  return { ok: coarse && after.modalTop > before.modalTop, coarse, park, before, after };
-}
-
-/** Tab from the author link (or the close button) until focus lands on the summary region, then PageDown. */
-export async function keyboardReach(page: Page, author: string) {
-  const link = page.getByRole('link', { name: author, exact: true }).last();
-  const start = (await link.count()) ? 'author link' : 'close button';
-  if (start === 'author link') await link.focus();
-  else await page.getByRole('button', { name: 'Close' }).last().focus();
-  let tabs = 0;
-  let reached = false;
-  while (tabs < 8 && !reached) {
-    await page.keyboard.press('Tab');
-    tabs += 1;
-    reached = await page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'book-summary-scroll' && document.activeElement?.getAttribute('role') === 'region');
-  }
-  const before = await scrollState(page);
-  if (reached) await page.keyboard.press('PageDown');
-  await settle(page, 400);
-  const after = await scrollState(page);
-  return { ok: reached && (after.boxTop ?? 0) > (before.boxTop ?? 0), start, tabs, reached, before, after };
-}
-
-let axeSource: string | null = null;
-
-/** axe-core (pinned e2e devDependency) over the modal, injected through CDP, so the app's CSP is untouched. */
-export async function axeModal(page: Page) {
-  try {
-    axeSource ??= fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
-    await page.evaluate(axeSource);
-    const result = await page.evaluate(`(async () => {
-      const r = await axe.run(${AREA_JS}.parentElement, { resultTypes: ['violations'] });
-      return r.violations.map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.length }));
-    })()`) as { id: string; impact: string; nodes: number }[];
-    return { ok: !result.some((v) => v.id === 'scrollable-region-focusable'), violations: result };
-  } catch (err) {
-    return { ok: false, error: String(err) };
-  }
-}
+export const settle = (page: Page, ms = 700) => page.waitForTimeout(ms);
