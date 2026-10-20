@@ -4,7 +4,7 @@
  *
  * Runs in the FINAL runtime stage under `RUN --network=none`. Fails the build when the runtime image
  * cannot apply its schema offline, cannot run credential recovery, misses a traced server dependency,
- * or carries a native binary for the wrong architecture.
+ * carries a native binary for the wrong architecture, or the postgres/redis/node account IDs moved.
  */
 
 /* eslint-disable @typescript-eslint/no-require-imports -- plain Node CommonJS build script */
@@ -62,9 +62,10 @@ function checkPreflight() {
   ok('entrypoint Prisma CLI preflight passes');
 }
 
-// System accounts as shipped by every bookworm release image (apt creates postgres/redis in the base stage,
-// node comes from the node image). Existing volumes are owned by these IDs when PUID/PGID are unset, so a
-// base-image change that shifts them must fail the build, not the user's next start.
+// System accounts as shipped by 1.2.7 and later (apt creates postgres/redis in the base stage, node comes
+// from the node image). The entrypoint re-chowns its volumes by name on every start, so a shifted ID would
+// silently re-own them; what breaks is LXC idmap passthrough of these IDs, filesystems where chown fails,
+// and host-side ownership (backups, permissions set on the host). Fail the build instead.
 const SYSTEM_USERS = { postgres: [102, 106], redis: [101, 105], node: [1000, 1000] };
 
 function checkSystemUsers() {
@@ -77,7 +78,6 @@ function checkSystemUsers() {
     else if (got[0] !== want[0] || got[1] !== want[1]) fail(`system user ${name} is ${got.join(':')}, expected ${want.join(':')} (uid:gid)`);
   }
   if (failures.length === before) ok(`system users ${Object.entries(SYSTEM_USERS).map(([n, [u, g]]) => `${n}=${u}:${g}`).join(' ')}`);
-  ok(`node ${process.version} (napi ${process.versions.napi}, openssl ${process.versions.openssl})`);
 }
 
 function checkPrisma(cli) {
@@ -237,6 +237,7 @@ function checkElfArch() {
 }
 
 try {
+  ok(`node ${process.version} (napi ${process.versions.napi}, openssl ${process.versions.openssl})`);
   checkLayout();
   checkSystemUsers();
   checkPreflight();

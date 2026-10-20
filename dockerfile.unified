@@ -250,7 +250,8 @@ RUN sed -i 's/\r$//' /app/postgres-start.sh && chmod +x /app/postgres-start.sh
 # PRISMA_CLI: CLI/client/engine versions agree, the schema engine renders the schema, credential
 # recovery loads its client, bcrypt and scripts/lib, every bare require() in .next/server
 # resolves (app externals also load), bull's Lua commands are present, no non-runtime
-# source/docs/tests are in /app, and every ELF file in /app (+ ffmpeg/ffprobe) matches the build arch. Failure meanings: unified.md.
+# source/docs/tests are in /app, the postgres/redis/node account IDs are unchanged, and every ELF
+# file in /app (+ ffmpeg/ffprobe) matches the build arch. Failure meanings: unified.md.
 RUN --network=none \
     --mount=type=bind,source=docker/unified/runtime-guard.js,target=/tmp/guard/runtime-guard.js \
     node /tmp/guard/runtime-guard.js
