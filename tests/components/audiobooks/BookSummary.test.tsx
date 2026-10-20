@@ -93,6 +93,13 @@ describe('BookSummary', () => {
     expect(screen.queryByRole('region')).toBeNull();
   });
 
+  it('still hints at a few hidden pixels (10 lines against a 15rem cap)', () => {
+    setLayout({ scrollHeight: 244, clientHeight: 240 });
+    render(<BookSummary text={LONG} />);
+    expect(screen.getByRole('region', { name: 'Summary' })).toBeInTheDocument();
+    expect(screen.getByTestId('book-summary-fade-bottom')).toBeInTheDocument();
+  });
+
   it('swaps the bottom fade for a top fade as the reader scrolls to the end', () => {
     setLayout({ scrollHeight: 975, clientHeight: 240 });
     render(<BookSummary text={LONG} />);

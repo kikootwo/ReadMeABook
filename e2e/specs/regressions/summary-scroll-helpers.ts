@@ -175,15 +175,27 @@ export async function wheelAtEnd(page: Page) {
   return { ok: after.modalTop > before.modalTop, park, before, after };
 }
 
-/** Real touch swipe (CDP synthesizeScrollGesture) that starts inside the summary at its end. */
+/**
+ * Real touch swipe that starts inside the summary at its end: CDP touchStart/touchMove/touchEnd, which
+ * runs Chromium's gesture and scroll-chaining path (Input.synthesizeScrollGesture is inert in headless).
+ * Verified to tell the cases apart: overscroll auto → the sheet moves; contain → stuck.
+ */
 export async function swipeAtEnd(page: Page) {
   const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
   const park = await parkBoxAtEnd(page);
   if (!park) return { ok: false, coarse, reason: 'no summary box' };
+  await settle(page, 600);
   const before = await scrollState(page);
   const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Input.synthesizeScrollGesture', { x: park.x, y: park.y, yDistance: -220, speed: 600, gestureSourceType: 'touch' });
-  await settle(page);
+  const distance = 220;
+  const steps = 12;
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: park.x, y: park.y }] });
+  for (let i = 1; i <= steps; i++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: park.x, y: park.y - (distance * i) / steps }] });
+    await page.waitForTimeout(16);
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await settle(page, 900);
   const after = await scrollState(page);
   await cdp.detach();
   return { ok: coarse && after.modalTop > before.modalTop, coarse, park, before, after };

@@ -25,7 +25,8 @@ interface ScrollState {
   scrollbarWidth: number;
 }
 
-const EDGE_TOLERANCE_PX = 4;
+// Absorbs fractional scrollTop at the ends; any larger hidden remainder still gets a fade.
+const EDGE_TOLERANCE_PX = 1;
 
 const INITIAL_STATE: ScrollState = { overflowing: false, atTop: true, atBottom: true, scrollbarWidth: 0 };
 
