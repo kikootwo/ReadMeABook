@@ -362,13 +362,12 @@ export class OIDCAuthProvider implements IAuthProvider {
    * (authProvider 'oidc'). Subjects in the local-account id space are never used.
    */
   private async subjectRowIsOidcAccount(oidcSubject: string): Promise<boolean> {
-    if (oidcSubject.toLowerCase().startsWith('local-')) return false;
     const existing = await prisma.user.findUnique({
       where: { plexId: oidcSubject },
       select: { authProvider: true },
     });
-    if (!existing) return true;
-    return existing.authProvider === 'oidc';
+    if (existing) return existing.authProvider === 'oidc';
+    return !oidcSubject.toLowerCase().startsWith('local-');
   }
 
   /**

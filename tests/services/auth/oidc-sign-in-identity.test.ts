@@ -127,6 +127,15 @@ describe('OIDC sign-in accounts', () => {
     expect(snapshot('sub-dan')).toBe(before);
   });
 
+  it('still signs in an existing OIDC account whatever its subject looks like', async () => {
+    seed({ ...OIDC_ROW, id: 'row-o2', plexId: 'local-erin', oidcSubject: 'local-erin' });
+
+    const result = await signIn('local-erin');
+
+    expect(result.success).toBe(true);
+    expect(users.get('local-erin')).toMatchObject({ id: 'row-o2', authProvider: 'oidc' });
+  });
+
   it.each(['local-someone', 'LOCAL-Someone'])('refuses a reserved subject (%s)', async (sub) => {
     const result = await signIn(sub);
 
