@@ -1,7 +1,7 @@
 # Release image build. Docs: documentation/deployment/ci-workflows.md
 # Publishes only from v* tags (a tag push, or a manual dispatch run on a tag).
 # A manual dispatch on a branch runs the tests and builds both arches, but
-# skips login, push, cache writes, the build summary and the Discord post.
+# skips login, push, cache writes, the build summary and both Discord posts.
 name: Build and Publish Unified Docker Image
 
 on:
@@ -21,6 +21,9 @@ jobs:
   test:
     name: Run Tests
     uses: ./.github/workflows/run-tests.yml
+    with:
+      # A manual dispatch on a branch posts nothing to Discord
+      send_notification: ${{ startsWith(github.ref, 'refs/tags/v') }}
     secrets:
       WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
 

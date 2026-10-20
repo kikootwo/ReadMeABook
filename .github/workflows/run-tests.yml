@@ -180,6 +180,7 @@ jobs:
         if: always() && (inputs.send_notification != false)
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           if [ -z "$WEBHOOK_URL" ]; then
             echo "No webhook URL provided, skipping notification"
@@ -234,7 +235,7 @@ jobs:
                   },
                   {
                     \"name\": \"🌿 Branch\",
-                    \"value\": \"\`${{ github.ref_name }}\`\",
+                    \"value\": \"\`$REF_NAME\`\",
                     \"inline\": true
                   },
                   {
