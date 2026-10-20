@@ -60,6 +60,12 @@ vi.mock('fs/promises', () => ({
   ...fsMock,
 }));
 
+// Packet-accurate durations (merge measurement and verification); 60 s per file unless a test overrides it
+const streamDuration = vi.hoisted(() => ({ ms: 60000 }));
+vi.mock('@/lib/utils/audio-duration', () => ({
+  probeStreamDurationMs: vi.fn(async () => streamDuration.ms),
+}));
+
 function createSpawnProcess(exitCode = 0, stderrData = '') {
   const proc = new EventEmitter() as EventEmitter & {
     stderr: EventEmitter;
@@ -86,6 +92,7 @@ describe('chapter merger', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     execState.state.handler = null;
+    streamDuration.ms = 60000;
   });
 
   it('detects when chapter merging should be skipped', async () => {
@@ -546,6 +553,7 @@ describe('chapter merger', () => {
       { path: '/tmp/one.mp3', filename: 'one.mp3', duration: 3600000, bitrate: 128, chapterTitle: 'One' },
       { path: '/tmp/two.mp3', filename: 'two.mp3', duration: 3600000, bitrate: 128, chapterTitle: 'Two' },
     ];
+    streamDuration.ms = 3600000;
     const logger = {
       info: vi.fn().mockResolvedValue(undefined),
       warn: vi.fn().mockResolvedValue(undefined),

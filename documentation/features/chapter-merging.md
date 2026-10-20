@@ -110,7 +110,8 @@ Detection now uses a **permissive heuristic** instead of strict filename pattern
 - Logs detection: "Detected book title in metadata: [title] (appears in X/Y files)"
 
 **Chapter Timing:**
-- Calculate from individual file durations using ffprobe
+- Each chapter measured from its audio packets (`measureChapterDurations`, `merge-verification.ts`; `format.duration` is an estimate for e.g. VBR MP3 without a Xing header). Used for the markers, the concat list (`duration <s>` per entry, so the concat demuxer does not offset the next file by an estimate and drop audio at the boundary), the 2% check and source verification
+- Any chapter unmeasurable: falls back to `format.duration` estimates, no `duration` lines, merge never verified (sources kept)
 - Format: FFMETADATA1 standard
 - Timestamps in milliseconds
 
@@ -138,7 +139,9 @@ title=Chapter 2: The Journey
 ```bash
 # 1. Create concat list
 echo "file '/path/ch01.m4a'" > filelist.txt
+echo "duration 2700.000" >> filelist.txt   # measured (packets)
 echo "file '/path/ch02.m4a'" >> filelist.txt
+echo "duration 2700.000" >> filelist.txt
 
 # 2. Generate chapter metadata
 # [Create chapters.txt with timing from durations]
@@ -469,10 +472,10 @@ timeout = 5 minutes + (chapter_count * 30 seconds)
 
 All merged files are validated before marked successful:
 
-1. **Duration Check:** Expected vs actual duration (within 2% tolerance)
+1. **Duration Check:** Expected (measured chapters) vs actual `format.duration` (within 2% tolerance); a failure discards the merge
 2. **Decode Test:** FFmpeg attempts to decode first and last 10 seconds (catches corruption/truncation)
 3. **Size Check:** File size reasonable for duration (~0.4MB/min minimum, accommodates 64kbps encoding)
-4. **Source verification (`durationVerified`):** chapter files count as imported (and may be cleaned up) only when the merged duration is within min(2%, half the shortest chapter) of the chapters' total; otherwise the merge is kept but the sources stay. See [file-organization.md](../phase3/file-organization.md#verified-import-delete-only-what-reached-the-library)
+4. **Source verification (`durationVerified`):** chapter files count as imported (and may be cleaned up) only when the merged duration is within 1 s + 50 ms per chapter of the chapters' total, every file measured from its audio packets (`verifyMergedDuration`, `src/lib/utils/merge-verification.ts`); otherwise the merge is kept but the sources stay (request message "merged file kept; sources kept"). A percentage window is not used: on long books it let a merge that lost whole chapters through (2% of 13 h is over 15 min). See [file-organization.md](../phase3/file-organization.md#verified-import-delete-only-what-reached-the-library)
 5. **No `-xerror`:** a single bad frame must not drop the whole merge (codec-copy AAC concatenation also routinely reports non-monotonic DTS at chapter boundaries); `durationVerified` decides whether the sources may be cleaned up
 
 **If validation fails:**

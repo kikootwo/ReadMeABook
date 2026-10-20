@@ -10,6 +10,7 @@ import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
+import { measureChapterDurations, verifyMergedDuration } from './merge-verification';
 import { RMABLogger } from './logger';
 import { CHAPTER_MERGE_FORMATS } from '../constants/audio-formats';
 
@@ -75,7 +76,7 @@ export interface MergeResult {
   /** Merged file's probed duration (ms). */
   actualDuration?: number;
   /**
-   * True when the merged duration is within min(2%, half the shortest chapter)
+   * True when the merged audio is within 1 s + 50 ms per chapter (packet-accurate)
    * of the chapters' total. Only then do the input files count as imported.
    */
   durationVerified?: boolean;
@@ -577,10 +578,11 @@ async function executeFFmpegWithProgress(
  * Merge chapter files into a single M4B with chapter markers
  */
 export async function mergeChapters(
-  chapters: ChapterFile[],
+  inputChapters: ChapterFile[],
   options: MergeOptions,
   logger?: RMABLogger
 ): Promise<MergeResult> {
+  let chapters = inputChapters;
   if (chapters.length === 0) {
     await logger?.error('Chapter merge failed: No chapters provided');
     return { success: false, error: 'No chapters to merge' };
@@ -593,6 +595,18 @@ export async function mergeChapters(
   try {
     await logger?.info(`Starting chapter merge: "${options.title}" by ${options.author}`);
     await logger?.info(`Output: ${path.basename(options.outputPath)}`);
+
+    // Packet-accurate chapter durations: used for the chapter markers, the merge
+    // check and the source verification (format.duration is only an estimate
+    // for some files). If any chapter can't be measured, keep the estimates and
+    // never verify the merge, so the sources are kept.
+    const measured = await measureChapterDurations(chapters.map((c) => c.path));
+    if (measured.durationsMs) {
+      const durations = measured.durationsMs;
+      chapters = chapters.map((c, i) => ({ ...c, duration: durations[i] }));
+    } else {
+      await logger?.warn(`Could not measure chapter audio (${measured.error}); using estimated durations, source files will be kept`);
+    }
 
     // Calculate total duration and estimated size
     const totalDuration = chapters.reduce((sum, c) => sum + c.duration, 0);
@@ -629,8 +643,14 @@ export async function mergeChapters(
     if (unsafeChapter) {
       throw new Error(`Cannot merge: file path contains a line break or NUL character (${JSON.stringify(unsafeChapter.path)})`);
     }
+    // With measured durations, give the concat demuxer each file's real length:
+    // it otherwise offsets the next file by format.duration, which for e.g. VBR
+    // MP3 without a Xing header is an estimate, and audio is lost at the boundary.
     const concatContent = chapters
-      .map(c => `file '${c.path.replace(/'/g, "'\\''")}'`)
+      .map(c => {
+        const entry = `file '${c.path.replace(/'/g, "'\\''")}'`;
+        return measured.durationsMs ? `${entry}\nduration ${(c.duration / 1000).toFixed(3)}` : entry;
+      })
       .join('\n');
     await fs.writeFile(concatFile, concatContent);
     await logger?.info(`Created concat list with ${chapters.length} files`);
@@ -782,12 +802,14 @@ export async function mergeChapters(
     await logger?.info(`  - Validation: Passed (duration accurate, file playable)`);
 
     const actualDuration = validation.actualDuration ?? 0;
-    const shortestChapter = Math.min(...chapters.map((c) => c.duration));
-    const verifyTolerance = Math.min(totalDuration * 0.02, shortestChapter / 2);
-    const durationVerified = actualDuration > 0 && Math.abs(actualDuration - totalDuration) <= verifyTolerance;
+    // Whether the chapter files may be cleaned up: packet-accurate totals, tight window
+    const verification = await verifyMergedDuration({ ...measured, count: chapters.length }, options.outputPath);
+    const durationVerified = verification.verified;
     if (!durationVerified) {
       await logger?.warn(
-        `Merged duration ${formatDuration(actualDuration)} is not within ${formatDuration(verifyTolerance)} of the chapters' ${formatDuration(totalDuration)}; source files will be kept`
+        verification.error
+          ? `Merged duration could not be verified (${verification.error}); source files will be kept`
+          : `Merged audio ${formatDuration(verification.actualMs ?? 0)} is not within ${verification.toleranceMs} ms of the chapters' ${formatDuration(verification.expectedMs ?? 0)}; source files will be kept`
       );
     }
 

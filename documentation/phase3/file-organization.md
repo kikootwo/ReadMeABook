@@ -281,7 +281,7 @@ When user deletes and re-requests the same audiobook:
 
 - `.mp4` / `.m4a` targets also match an existing `<name>.m4b` (Plex format coercion rename).
 - Tagged derivative (`<source>.tmp`): checked before it is placed: its audio duration must be within 1 s of the original's, both measured from the first audio stream's packets (`probeStreamDurationMs`; `format.duration` is an estimate for e.g. VBR MP3 without a Xing header). Otherwise (or on probe failure) the original is placed untagged (byte-checked). A derivative that fails or differs at placement falls back to the original. Tagging does not use `-xerror` (codec copy would turn benign timestamp warnings into lost tags).
-- Chapter merge: inputs map to the merged target; verified only if the merged duration is within min(2%, half the shortest chapter) of the chapters' total (`MergeResult.durationVerified`). Otherwise the merged file and all sources are kept. Merges do not use `-xerror` (one bad frame must not drop the merge; `durationVerified` guards deletes).
+- Chapter merge: inputs map to the merged target; verified only if the merged audio is within 1 s + 50 ms per chapter of the chapters' total, each measured from its packets (`MergeResult.durationVerified`, `merge-verification.ts`). Otherwise the merged file and all sources are kept. Merges do not use `-xerror` (one bad frame must not drop the merge; `durationVerified` guards deletes).
 - Compare cost: same-size compares run only when a delete may follow (manual `cleanupSource`, or a download that cleanup would remove); they stop at the first differing chunk.
 
 **Deletes consume the records (`ImportEvidence`):**

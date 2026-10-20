@@ -40,6 +40,11 @@ const fsMock = vi.hoisted(() => ({
 }));
 
 vi.mock('child_process', () => ({ execFile: execFileMock, spawn: spawnMock }));
+// Packet-accurate durations used to verify a merge (per file path)
+const streamDurations = vi.hoisted(() => ({ byPath: new Map<string, number>(), fallback: 60000 }));
+vi.mock('@/lib/utils/audio-duration', () => ({
+  probeStreamDurationMs: vi.fn(async (p: string) => streamDurations.byPath.get(p) ?? streamDurations.fallback),
+}));
 vi.mock('fs/promises', () => ({ default: fsMock, ...fsMock }));
 
 const HOSTILE_DIR = '/dl/My $(touch pwned) `id` "dq" \'sq\' Book';
@@ -65,6 +70,8 @@ function writtenFile(prefix: string): { file: string; content: string } | undefi
 beforeEach(() => {
   vi.clearAllMocks();
   probeState.duration = '120';
+  streamDurations.byPath.clear();
+  streamDurations.fallback = 60000;
   fsMock.access.mockResolvedValue(undefined);
   fsMock.mkdir.mockResolvedValue(undefined);
   fsMock.writeFile.mockResolvedValue(undefined);
@@ -86,20 +93,29 @@ describe('chapter merge verification', () => {
   });
 
   it('marks the duration verified when the merged file matches the chapters', async () => {
+    streamDurations.byPath.set('/t/out.m4b', 120000);
     const result = await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
 
     expect(result.success).toBe(true);
     expect(result.durationVerified).toBe(true);
   });
 
-  it('keeps the merge but does not verify it when the duration is off by more than half the shortest chapter', async () => {
-    // 62 s of chapters; 1.1 s off is inside the 2% merge check (1.24 s) but beyond half the 2 s chapter
-    probeState.duration = '63.1';
-    const chapters = [chapter('/dl/01.m4a'), { ...chapter('/dl/02.m4a'), duration: 2000 }];
+  it('keeps the merge but does not verify it when the merged audio is off by more than 1 s + 50 ms per chapter', async () => {
+    // Two 60 s chapters: the window is 1.1 s; 1.2 s short passes the 2% merge check but not the source check
+    streamDurations.byPath.set('/t/out.m4b', 118800);
 
-    const result = await mergeChapters(chapters, { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+    const result = await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
 
     expect(result.success).toBe(true);
+    expect(result.durationVerified).toBe(false);
+  });
+
+  it('does not verify when a chapter cannot be probed', async () => {
+    streamDurations.byPath.set('/dl/02.m4a', 0);
+    streamDurations.byPath.set('/t/out.m4b', 120000);
+
+    const result = await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+
     expect(result.durationVerified).toBe(false);
   });
 });
@@ -153,8 +169,19 @@ describe('chapter merger argv safety (no shell)', () => {
 
     expect(result.success).toBe(true);
     expect(writtenFile('concat_')!.content).toBe(
-      "file '/dl/O'\\''Brien'\\''s Book/01.m4a'\nfile '/dl/Tab\tBook/02.m4a'"
+      "file '/dl/O'\\''Brien'\\''s Book/01.m4a'\nduration 60.000\nfile '/dl/Tab\tBook/02.m4a'\nduration 60.000"
     );
+  });
+
+  it('gives each concat entry its measured duration, and leaves it out when a chapter cannot be measured', async () => {
+    streamDurations.byPath.set('/dl/01.m4a', 61234);
+    await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+    expect(writtenFile('concat_')!.content).toBe("file '/dl/01.m4a'\nduration 61.234\nfile '/dl/02.m4a'\nduration 60.000");
+
+    vi.clearAllMocks();
+    streamDurations.byPath.set('/dl/02.m4a', 0);
+    await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
+    expect(writtenFile('concat_')!.content).toBe("file '/dl/01.m4a'\nfile '/dl/02.m4a'");
   });
 
   it.each([
