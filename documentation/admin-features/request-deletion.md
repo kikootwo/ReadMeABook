@@ -71,21 +71,18 @@ model Request {
      → Do nothing (stop monitoring)
      → torrentsKeptUnlimited++
 
-   ELSE IF download not completed:
-     → Delete torrent + files
-     → torrentsRemoved++
-
-   ELSE:
-     → evaluateSeeding(config, {seedingTime, ratio}) (src/lib/utils/seeding-policy.ts,
-       same rule as cleanup_seeded_torrents: time AND ratio; 0 disables a criterion;
-       unreported ratio with ratioLimit > 0 = not met)
-
-     IF not met:
-       → Log: "Keeping ... to finish seeding: ratio a/b, time x/y min"
-       → torrentsKeptSeeding++ (cleanup job removes it later)
+   ELSE IF download not completed, OR evaluateSeeding(config, {seedingTime, ratio}).met:
+     (src/lib/utils/seeding-policy.ts, same rule as cleanup_seeded_torrents: every set
+      limit met; 0 turns a limit off; unreported ratio with ratioLimit > 0 = not met)
+     IF another active request uses the same torrentHash (otherActiveRequestsUsingTorrent,
+        src/lib/utils/shared-torrent.ts, shared with the cleanup job):
+       → Keep torrent → torrentsKeptShared++
      ELSE:
-       → Delete torrent + files
-       → torrentsRemoved++
+       → Delete torrent + files → torrentsRemoved++
+
+   ELSE (still seeding):
+     → Log: "Keeping ... to finish seeding: ratio a/b, time x/y min"
+     → torrentsKeptSeeding++ (cleanup job removes it later)
    ```
 
 3. **Delete Media Files**
@@ -157,7 +154,8 @@ where: {
     "filesDeleted": true,
     "torrentsRemoved": 2,
     "torrentsKeptSeeding": 1,
-    "torrentsKeptUnlimited": 0
+    "torrentsKeptUnlimited": 0,
+    "torrentsKeptShared": 0
   }
 }
 ```
@@ -239,6 +237,7 @@ where: {
 - **Issue:** Deleting a request removed a torrent once its seeding time was met even when its ratio limit was not; a ratio-only indexer (`seedingTimeMinutes: 0`) was treated as unlimited and kept forever
 - **Cause:** request deletion had its own time-only check; the scheduled cleanup already used time AND ratio
 - **Fix:** both use `evaluateSeeding()` (`src/lib/utils/seeding-policy.ts`)
+- **Also:** deletion now skips removing a torrent another active request still uses (`otherActiveRequestsUsingTorrent()`, same check as the cleanup job). Behaviour change: a ratio-only indexer's incomplete download is removed on delete (it was kept forever as "unlimited")
 
 ## File Structure
 

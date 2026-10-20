@@ -10,6 +10,7 @@ import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 import { evaluateSeeding, isUnlimitedSeeding } from '../utils/seeding-policy';
+import { otherActiveRequestsUsingTorrent } from '../utils/shared-torrent';
 
 export interface CleanupSeededTorrentsPayload {
   jobId?: string;
@@ -189,34 +190,18 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
         logger.info(`Download ${downloadInfo.name} (${indexerName}) has met seeding requirement: ${progress}`);
 
         // CRITICAL: Check if any other active (non-deleted) request is using this same download
-        const hashToCheck = downloadHistory.torrentHash;
-        if (hashToCheck) {
-          const otherActiveRequests = await prisma.request.findMany({
-            where: {
-              id: { not: request.id }, // Exclude current request
-              deletedAt: null, // Only check active requests
-              downloadHistory: {
-                some: {
-                  torrentHash: hashToCheck,
-                  selected: true,
-                },
-              },
-            },
-            select: { id: true, status: true },
-          });
+        const otherActiveRequests = await otherActiveRequestsUsingTorrent(request.id, downloadHistory.torrentHash);
+        if (otherActiveRequests.length > 0) {
+          logger.info(`Skipping download deletion - ${otherActiveRequests.length} other active request(s) still using this download (IDs: ${otherActiveRequests.map(r => r.id).join(', ')})`);
 
-          if (otherActiveRequests.length > 0) {
-            logger.info(`Skipping download deletion - ${otherActiveRequests.length} other active request(s) still using this download (IDs: ${otherActiveRequests.map(r => r.id).join(', ')})`);
-
-            // If this is a soft-deleted request, hard delete it but DON'T delete the download
-            if (request.deletedAt) {
-              await prisma.request.delete({ where: { id: request.id } });
-              logger.info(`Hard-deleted orphaned request ${request.id} (kept shared download for active requests)`);
-            }
-
-            skipped++;
-            continue;
+          // If this is a soft-deleted request, hard delete it but DON'T delete the download
+          if (request.deletedAt) {
+            await prisma.request.delete({ where: { id: request.id } });
+            logger.info(`Hard-deleted orphaned request ${request.id} (kept shared download for active requests)`);
           }
+
+          skipped++;
+          continue;
         }
 
         // Safe to delete - no other active requests using this download

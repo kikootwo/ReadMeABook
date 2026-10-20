@@ -28,9 +28,10 @@ interface Scenario {
   ratioLimit?: number;
   seedingTime: number;
   ratio?: number;
+  downloadStatus?: string;
 }
 
-async function deleteWith({ seedingTimeMinutes, ratioLimit, seedingTime, ratio }: Scenario) {
+async function deleteWith({ seedingTimeMinutes, ratioLimit, seedingTime, ratio, downloadStatus = 'completed' }: Scenario) {
   prismaMock.request.findFirst.mockResolvedValue({
     id: 'req-1',
     audiobook: {
@@ -42,7 +43,7 @@ async function deleteWith({ seedingTimeMinutes, ratioLimit, seedingTime, ratio }
       absItemId: null,
       filePath: path.join('/media', 'Author', 'Book'),
     },
-    downloadHistory: [{ torrentHash: 'hash-1', indexerName: 'Tracker', downloadStatus: 'completed' }],
+    downloadHistory: [{ torrentHash: 'hash-1', indexerName: 'Tracker', downloadStatus }],
   });
   configServiceMock.get.mockImplementation(async (key: string) => {
     if (key === 'prowlarr_indexers') {
@@ -111,6 +112,34 @@ describe('deleteRequest seeding rule', () => {
 
     expect(client.deleteDownload).not.toHaveBeenCalled();
     expect(result.torrentsKeptSeeding).toBe(1);
+  });
+
+  it('removes an incomplete download from a ratio-only indexer (it is not unlimited)', async () => {
+    const { result, client } = await deleteWith({
+      seedingTimeMinutes: 0, ratioLimit: 1.5, seedingTime: 0, ratio: 0, downloadStatus: 'downloading',
+    });
+
+    expect(client.deleteDownload).toHaveBeenCalledWith('hash-1', true);
+    expect(result.torrentsRemoved).toBe(1);
+    expect(result.torrentsKeptUnlimited).toBe(0);
+  });
+
+  it.each([
+    ['done seeding', 'completed'],
+    ['incomplete', 'downloading'],
+  ])('never removes a torrent (%s) that another active request still uses', async (_label, downloadStatus) => {
+    prismaMock.request.findMany.mockImplementation(async (args: any) =>
+      args?.where?.downloadHistory?.some?.torrentHash === 'hash-1' ? [{ id: 'req-2', status: 'downloaded' }] : []
+    );
+
+    const { result, client } = await deleteWith({ seedingTimeMinutes: 60, ratioLimit: 1, seedingTime: 3600, ratio: 2, downloadStatus });
+
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+    expect(result.torrentsKeptShared).toBe(1);
+    expect(result.torrentsRemoved).toBe(0);
+    expect(prismaMock.request.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: { not: 'req-1' }, deletedAt: null }),
+    }));
   });
 
   it('keeps a torrent for unlimited seeding only when both criteria are 0', async () => {

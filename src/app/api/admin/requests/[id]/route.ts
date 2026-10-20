@@ -19,9 +19,10 @@ const logger = RMABLogger.create('API.Admin.Requests');
  * 2. Soft deletes the request (sets deletedAt timestamp)
  * 3. Deletes media files from the title folder
  * 4. Handles torrents based on seeding configuration:
- *    - Unlimited seeding (0): Keeps torrent, stops monitoring
- *    - Seeding complete: Deletes torrent + files
- *    - Still seeding: Keeps torrent for cleanup job
+ *    - Seeding time and ratio limit both 0: keeps torrent, stops monitoring
+ *    - Every set limit met (or download incomplete): deletes torrent + files,
+ *      unless another active request still uses it
+ *    - Still seeding: keeps torrent for the cleanup job
  * 5. Allows re-requesting the same audiobook after deletion
  */
 export async function DELETE(
@@ -62,6 +63,7 @@ export async function DELETE(
             torrentsRemoved: result.torrentsRemoved,
             torrentsKeptSeeding: result.torrentsKeptSeeding,
             torrentsKeptUnlimited: result.torrentsKeptUnlimited,
+            torrentsKeptShared: result.torrentsKeptShared,
           },
         });
       } catch (error) {
