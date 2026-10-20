@@ -260,6 +260,25 @@ describe('Admin requests routes', () => {
     expect(deleteRequestMock).toHaveBeenCalledWith('req-1', 'admin-1');
   });
 
+  it('returns why the files were kept', async () => {
+    deleteRequestMock.mockResolvedValueOnce({
+      success: true,
+      message: 'Request deleted; files kept: folder contents changed since import',
+      filesDeleted: false,
+      torrentsRemoved: 0,
+      torrentsKeptSeeding: 0,
+      torrentsKeptUnlimited: 0,
+      filesKeptReason: 'folder contents changed since import',
+    });
+
+    const { DELETE } = await import('@/app/api/admin/requests/[id]/route');
+    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-1' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.details).toMatchObject({ filesDeleted: false, filesKeptReason: 'folder contents changed since import' });
+  });
+
   it('returns 401 when admin user is missing', async () => {
     authRequest.user = null;
 
