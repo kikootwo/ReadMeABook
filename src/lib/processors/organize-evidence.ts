@@ -9,6 +9,7 @@ import { getConfigService } from '../services/config.service';
 import { planDownloadCleanup } from './organize-cleanup-guard';
 import { ebookInventory, type ImportEvidence, type ImportInventory, type PlacementRecord } from '../utils/import-inventory';
 import type { EbookOrganizationResult, OrganizationResult } from '../utils/file-organizer';
+import { summarizePermissionWarnings } from '../utils/organize-copy';
 
 /**
  * True when this job may delete source files after organizing (manual
@@ -42,6 +43,7 @@ export function audioEvidence(result: OrganizationResult): ImportEvidence {
     records: result.records ?? [],
     coverRecord: result.coverRecord,
     inventory: result.inventory ?? MISSING_INVENTORY,
+    permissionWarnings: result.permissionWarnings,
   };
 }
 
@@ -54,6 +56,7 @@ export async function ebookEvidence(
   return {
     records: result.record && importedFile ? [{ ...result.record, source: importedFile }] : [],
     inventory: await ebookInventory(downloadPath),
+    permissionWarnings: result.permissionWarnings,
   };
 }
 
@@ -61,9 +64,18 @@ export async function ebookEvidence(
  * Short message for the request when the import was not complete, or null.
  * Examples: "1 of 3 files not imported; source files kept",
  * "already in the library with different content; source kept",
- * "merged file kept; sources kept".
+ * "merged file kept; sources kept". A note is appended when file permissions
+ * could not be applied ("permissions could not be applied to 2 files").
  */
 export function importStatusMessage(evidence: ImportEvidence): string | null {
+  const message = placementStatusMessage(evidence);
+  const refused = evidence.permissionWarnings?.length ?? 0;
+  if (refused === 0) return message;
+  const note = `permissions could not be applied to ${refused} file${refused === 1 ? '' : 's'}`;
+  return message ? `${message}; ${note}` : note;
+}
+
+function placementStatusMessage(evidence: ImportEvidence): string | null {
   const total = evidence.records.length;
   const failed = evidence.records.filter((r) => r.status === 'failed');
   const differs = evidence.records.filter((r) => r.status === 'differs');
@@ -96,8 +108,12 @@ export function describeUnverified(records: PlacementRecord[]): string {
 /** The request message for this import (or null), logged with the files behind it. */
 export function reportImportStatus(evidence: ImportEvidence, logger: RMABLogger): string | null {
   const message = importStatusMessage(evidence);
-  if (message) {
-    logger.warn(`${message}: ${describeUnverified(evidence.records)}`);
+  const placement = placementStatusMessage(evidence);
+  if (placement) {
+    logger.warn(`${placement}: ${describeUnverified(evidence.records)}`);
   }
+  // One line per job, however many files were affected
+  const permissions = summarizePermissionWarnings(evidence.permissionWarnings);
+  if (permissions) logger.warn(permissions);
   return message;
 }

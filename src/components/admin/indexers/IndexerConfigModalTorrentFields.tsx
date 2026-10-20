@@ -42,7 +42,7 @@ export function TorrentSeedingFields({
           className={errors.seedingTimeMinutes ? 'border-red-500' : ''}
         />
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          0 = unlimited seeding (files remain seeded indefinitely)
+          Minimum time seeding before cleanup. 0 = no time limit.
         </p>
         {errors.seedingTimeMinutes && (
           <p className="text-sm text-red-600 dark:text-red-400 mt-1">
@@ -65,7 +65,7 @@ export function TorrentSeedingFields({
           className={errors.ratioLimit ? 'border-red-500' : ''}
         />
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          Minimum upload/download ratio before files are cleaned up. 0 = no ratio requirement.
+          Minimum upload/download ratio before cleanup. 0 = no ratio limit.
         </p>
         {errors.ratioLimit && (
           <p className="text-sm text-red-600 dark:text-red-400 mt-1">
@@ -73,6 +73,10 @@ export function TorrentSeedingFields({
           </p>
         )}
       </div>
+
+      <p className="text-sm text-gray-500 dark:text-gray-400">
+        Torrents are cleaned up once every limit you set is met. With both at 0, they seed forever.
+      </p>
     </>
   );
 }

@@ -307,7 +307,8 @@ src/app/admin/settings/
 
 **GET /api/admin/settings/prowlarr/indexers**
 - Returns current indexer configuration merged with available Prowlarr indexers
-- Loads saved settings (enabled, priority, seeding time, RSS) from database
+- Loads saved settings (enabled, priority, RSS, categories, seeding time, ratio limit, remove-after-processing) from database
+- Per-indexer fields mapped by `toSavedIndexerConfig()` (`src/lib/utils/indexer-config.ts`); identity (name, protocol) from Prowlarr
 - Merges with live indexer list from Prowlarr
 - Admin auth required
 
@@ -325,9 +326,9 @@ src/app/admin/settings/
 - No validation required
 
 **PUT /api/admin/settings/prowlarr/indexers**
-- Updates indexer configuration (enabled, priority, seeding time, RSS)
+- Updates indexer configuration (enabled, priority, RSS, categories, seeding time, ratio limit, remove-after-processing)
 - No test required if URL/API key unchanged
-- Saves only enabled indexers to database
+- Saves only enabled indexers to database, each normalized by `toSavedIndexerConfig()`
 
 **GET /api/admin/settings/indexer-options**
 - Returns `{ skipUnreleased: boolean }`
@@ -420,6 +421,12 @@ src/app/admin/settings/
   - Allow saving indexer config changes without re-testing connection
   - Button text adapts: "Test Connection" vs "Refresh Indexers"
 - Behavior: Natural workflow - see current settings, modify indexers, save immediately
+
+**4. Indexer Ratio Limit Reset on Save (#319, #282)**
+- Issue: torrent indexer Ratio Limit showed `0` after a page reload; saving anything on the Indexers tab wrote `ratioLimit: 0` for every torrent indexer, so seeding cleanup removed torrents on seeding time alone
+- Cause: `fetchIndexers()` in `src/app/admin/settings/page.tsx` rebuilt each indexer by hand and left out `ratioLimit`; the GET and PUT routes kept their own copies of the same field list
+- Fix: one mapping, `toSavedIndexerConfig()` (`src/lib/utils/indexer-config.ts`), used by the page, GET and PUT, and setup completion (`POST /api/setup/complete`); round trip covered by `tests/app/admin-settings-indexer-roundtrip.test.tsx`
+- Upgrade note: ratio limits already reset to `0` by this bug cannot be recovered; re-enter them per indexer (Settings → Indexers → Edit) and save
 
 ## Notifications
 

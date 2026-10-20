@@ -66,25 +66,23 @@ model Request {
    IF torrent not in qBittorrent:
      → Skip (already removed)
 
-   ELSE IF unlimited seeding (0):
+   ELSE IF unlimited seeding (no indexer config, or seedingTimeMinutes AND ratioLimit both 0):
      → Log: "Keeping for unlimited seeding"
      → Do nothing (stop monitoring)
      → torrentsKeptUnlimited++
 
-   ELSE IF download not completed:
-     → Delete torrent + files
-     → torrentsRemoved++
-
-   ELSE:
-     → Query actual seeding time
-     → Calculate remaining = (target - actual)
-
-     IF remaining > 0:
-       → Log: "Keeping for X more minutes"
-       → torrentsKeptSeeding++
+   ELSE IF download not completed, OR evaluateSeeding(config, {seedingTime, ratio}).met:
+     (src/lib/utils/seeding-policy.ts, same rule as cleanup_seeded_torrents: every set
+      limit met; 0 turns a limit off; unreported ratio with ratioLimit > 0 = not met)
+     IF another active request uses the same torrentHash (otherActiveRequestsUsingTorrent,
+        src/lib/utils/shared-torrent.ts, shared with the cleanup job):
+       → Keep torrent → torrentsKeptShared++
      ELSE:
-       → Delete torrent + files
-       → torrentsRemoved++
+       → Delete torrent + files → torrentsRemoved++
+
+   ELSE (still seeding):
+     → Log: "Keeping ... to finish seeding: ratio a/b, time x/y min"
+     → torrentsKeptSeeding++ (cleanup job removes it later)
    ```
 
 3. **Delete Media Files**
@@ -156,7 +154,8 @@ where: {
     "filesDeleted": true,
     "torrentsRemoved": 2,
     "torrentsKeptSeeding": 1,
-    "torrentsKeptUnlimited": 0
+    "torrentsKeptUnlimited": 0,
+    "torrentsKeptShared": 0
   }
 }
 ```
@@ -202,7 +201,7 @@ where: {
 ## Edge Cases Handled
 
 1. ✅ **Torrent not in qBittorrent** - Skip deletion, continue with files
-2. ✅ **Unlimited seeding (0)** - Keep in qBittorrent, hard-delete orphaned request
+2. ✅ **Unlimited seeding (time and ratio both 0, or no config)** - Keep in qBittorrent, hard-delete orphaned request
 3. ✅ **Incomplete download** - Delete torrent + files immediately
 4. ✅ **Seeding requirement met** - Delete torrent + files
 5. ✅ **Still seeding** - Keep torrent, soft-delete request, cleanup job handles later
@@ -234,6 +233,12 @@ where: {
 - **Fix:** Delete only the persisted path; legacy rows without one skip file cleanup
 - **Result:** Configuration changes cannot redirect deletion to a newly rendered directory
 
+**3. Deletion Ignored the Indexer Ratio Limit**
+- **Issue:** Deleting a request removed a torrent once its seeding time was met even when its ratio limit was not; a ratio-only indexer (`seedingTimeMinutes: 0`) was treated as unlimited and kept forever
+- **Cause:** request deletion had its own time-only check; the scheduled cleanup already used time AND ratio
+- **Fix:** both use `evaluateSeeding()` (`src/lib/utils/seeding-policy.ts`)
+- **Also:** deletion now skips removing a torrent another active request still uses (`otherActiveRequestsUsingTorrent()`, same check as the cleanup job). Behaviour change: a ratio-only indexer's incomplete download is removed on delete (it was kept forever as "unlimited")
+
 ## File Structure
 
 ```
@@ -259,7 +264,7 @@ Queries Updated (deletedAt: null filters):
 ## Configuration
 
 **No new config required** - uses existing:
-- `prowlarr_indexers` (seeding time per indexer)
+- `prowlarr_indexers` (per indexer `seedingTimeMinutes` and `ratioLimit`)
 
 ## Security
 

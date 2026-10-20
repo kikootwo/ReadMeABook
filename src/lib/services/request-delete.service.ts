@@ -10,6 +10,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { RMABLogger } from '../utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
+import { evaluateSeeding } from '../utils/seeding-policy';
+import { otherActiveRequestsUsingTorrent } from '../utils/shared-torrent';
 
 const logger = RMABLogger.create('RequestDelete');
 
@@ -20,6 +22,8 @@ export interface DeleteRequestResult {
   torrentsRemoved: number;
   torrentsKeptSeeding: number;
   torrentsKeptUnlimited: number;
+  /** Torrents left in the client because another active request still uses them. */
+  torrentsKeptShared: number;
   error?: string;
 }
 
@@ -29,10 +33,12 @@ export interface DeleteRequestResult {
  * Logic (audiobook requests):
  * 1. Check if request exists and is not already deleted
  * 2. For each download:
- *    - If unlimited seeding (0): Log and keep seeding, no monitoring
- *    - If incomplete download: Delete torrent + files
- *    - If seeding requirement met: Delete torrent + files
- *    - If still seeding: Keep in qBittorrent for cleanup job
+ *    - Seeding rule (evaluateSeeding, same as the seeding cleanup job): every limit
+ *      that is set (seeding time, ratio) must be met; 0 turns a limit off
+ *    - If both limits are 0 (or no indexer config): keep seeding forever, no monitoring
+ *    - If incomplete download, or every set limit met: delete torrent + files,
+ *      unless another active request still uses the torrent
+ *    - Otherwise: keep in the client for the cleanup job
  * 3. Delete media files (title folder only)
  * 4. Delete from backend library (Plex/ABS)
  * 5. Clear audiobook availability linkage
@@ -93,6 +99,7 @@ export async function deleteRequest(
         torrentsRemoved: 0,
         torrentsKeptSeeding: 0,
         torrentsKeptUnlimited: 0,
+        torrentsKeptShared: 0,
         error: 'NotFound',
       };
     }
@@ -100,6 +107,7 @@ export async function deleteRequest(
     let torrentsRemoved = 0;
     let torrentsKeptSeeding = 0;
     let torrentsKeptUnlimited = 0;
+    let torrentsKeptShared = 0;
 
     // 2. Handle downloads & seeding (skip for ebooks - they use direct HTTP downloads)
     const downloadHistory = request.downloadHistory[0];
@@ -140,7 +148,8 @@ export async function deleteRequest(
             }
 
             if (downloadInfo) {
-              const isUnlimitedSeeding = !seedingConfig || seedingConfig.seedingTimeMinutes === 0;
+              // Same rule as the scheduled seeding cleanup: time AND ratio; no config or both 0 = unlimited
+              const seeding = evaluateSeeding(seedingConfig, downloadInfo);
               const isCompleted = downloadHistory.downloadStatus === 'completed';
 
               if (client.protocol === 'usenet') {
@@ -152,38 +161,33 @@ export async function deleteRequest(
                 } catch (error) {
                   logger.info(`Download ${clientId} not found in ${client.clientType}, skipping`);
                 }
-              } else if (isUnlimitedSeeding) {
+              } else if (seeding.unlimited) {
                 // Unlimited seeding - keep in client, stop monitoring
                 logger.info(
                   `Keeping download ${downloadInfo.name} for unlimited seeding (indexer: ${downloadHistory.indexerName})`
                 );
                 torrentsKeptUnlimited++;
-              } else if (!isCompleted) {
-                // Download not completed - delete immediately
-                logger.info(`Deleting incomplete download: ${downloadInfo.name}`);
-                await client.deleteDownload(clientId, true);
-                torrentsRemoved++;
-              } else {
-                // Check if seeding requirement is met
-                const seedingTimeSeconds = seedingConfig.seedingTimeMinutes * 60;
-                const actualSeedingTime = downloadInfo.seedingTime || 0;
-                const hasMetRequirement = actualSeedingTime >= seedingTimeSeconds;
-
-                if (hasMetRequirement) {
+              } else if (!isCompleted || seeding.met) {
+                // Incomplete, or done seeding: remove it, unless another active request still uses it
+                const others = await otherActiveRequestsUsingTorrent(requestId, downloadHistory.torrentHash);
+                if (others.length > 0) {
                   logger.info(
-                    `Deleting download ${downloadInfo.name} (seeding complete: ${Math.floor(
-                      actualSeedingTime / 60
-                    )}/${seedingConfig.seedingTimeMinutes} minutes)`
+                    `Keeping download ${downloadInfo.name}: ${others.length} other active request(s) still use it (IDs: ${others.map((r) => r.id).join(', ')})`
+                  );
+                  torrentsKeptShared++;
+                } else {
+                  logger.info(
+                    isCompleted
+                      ? `Deleting download ${downloadInfo.name} (seeding complete: ${seeding.progress})`
+                      : `Deleting incomplete download: ${downloadInfo.name}`
                   );
                   await client.deleteDownload(clientId, true);
                   torrentsRemoved++;
-                } else {
-                  const remainingMinutes = Math.ceil((seedingTimeSeconds - actualSeedingTime) / 60);
-                  logger.info(
-                    `Keeping download ${downloadInfo.name} for ${remainingMinutes} more minutes of seeding`
-                  );
-                  torrentsKeptSeeding++;
                 }
+              } else {
+                // The scheduled seeding cleanup removes it once the requirement is met
+                logger.info(`Keeping download ${downloadInfo.name} to finish seeding: ${seeding.progress}`);
+                torrentsKeptSeeding++;
               }
             }
           }
@@ -473,6 +477,7 @@ export async function deleteRequest(
       torrentsRemoved,
       torrentsKeptSeeding,
       torrentsKeptUnlimited,
+      torrentsKeptShared,
     };
   } catch (error) {
     logger.error(
@@ -487,6 +492,7 @@ export async function deleteRequest(
       torrentsRemoved: 0,
       torrentsKeptSeeding: 0,
       torrentsKeptUnlimited: 0,
+      torrentsKeptShared: 0,
       error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
