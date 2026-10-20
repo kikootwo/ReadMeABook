@@ -1,3 +1,7 @@
+# Release image build. Docs: documentation/deployment/ci-workflows.md
+# Publishes only from v* tags (a tag push, or a manual dispatch run on a tag).
+# A manual dispatch on a branch runs the tests and builds both arches, but
+# skips login, push, cache writes, the build summary and both Discord posts.
 name: Build and Publish Unified Docker Image
 
 on:
@@ -5,6 +9,9 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
   REGISTRY: ghcr.io
@@ -14,6 +21,9 @@ jobs:
   test:
     name: Run Tests
     uses: ./.github/workflows/run-tests.yml
+    with:
+      # A manual dispatch on a branch posts nothing to Discord
+      send_notification: ${{ startsWith(github.ref, 'refs/tags/v') }}
     secrets:
       WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
 
@@ -26,14 +36,16 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -41,7 +53,7 @@ jobs:
 
       - name: Extract metadata (tags, labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -51,7 +63,6 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
           labels: |
             org.opencontainers.image.title=ReadMeABook Unified
             org.opencontainers.image.description=All-in-one audiobook request and automation system (PostgreSQL + Redis + App)
@@ -65,23 +76,28 @@ jobs:
           echo "build_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
 
       - name: Build and push unified Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          # build-push v6+ adds a job summary and a build-record artifact:
+          # summary on tag runs only, record upload never.
+          DOCKER_BUILD_SUMMARY: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           file: ./dockerfile.unified
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: ${{ startsWith(github.ref, 'refs/tags/v') && 'type=gha,mode=max' || '' }}
           build-args: |
             APP_VERSION=${{ steps.version.outputs.app_version }}
             GIT_COMMIT=${{ steps.version.outputs.git_commit }}
             BUILD_DATE=${{ steps.version.outputs.build_date }}
 
       - name: Generate deployment instructions
-        if: github.event_name != 'pull_request'
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           echo "## 🎉 Docker image published successfully!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -103,7 +119,9 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Send Discord notification
-        if: github.event_name != 'pull_request' && success()
+        if: startsWith(github.ref, 'refs/tags/v') && success()
+        env:
+          REF_NAME: ${{ github.ref_name }}
         run: |
           curl -H "Content-Type: application/json" \
             -X POST \
@@ -120,7 +138,7 @@ jobs:
                   },
                   {
                     "name": "🌿 Branch",
-                    "value": "`${{ github.ref_name }}`",
+                    "value": "`'"$REF_NAME"'`",
                     "inline": true
                   },
                   {

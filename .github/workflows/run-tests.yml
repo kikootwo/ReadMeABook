@@ -47,10 +47,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '20'
           cache: 'npm'
@@ -178,6 +180,7 @@ jobs:
         if: always() && (inputs.send_notification != false)
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           if [ -z "$WEBHOOK_URL" ]; then
             echo "No webhook URL provided, skipping notification"
@@ -232,7 +235,7 @@ jobs:
                   },
                   {
                     \"name\": \"🌿 Branch\",
-                    \"value\": \"\`${{ github.ref_name }}\`\",
+                    \"value\": \"\`$REF_NAME\`\",
                     \"inline\": true
                   },
                   {
