@@ -5,33 +5,39 @@
  * ffmpeg's mp4 muxer drops `----:com.apple.iTunes:ASIN`, so on main no m4b RMAB writes carries
  * the ASIN and Audiobookshelf's file tag `tagASIN` stays empty (the default `{title} {asin}`
  * folder has no `[ASIN]` brackets either). Three real import paths, each ending in a real
- * Audiobookshelf scan:
- *   1. single chaptered m4b, metadata tagging on (the tagger writes the ASIN)
- *   2. multi-file mp3, chapter merging on, tagging off (the merger writes it)
- *   3. multi-file mp3, chapter merging on, tagging on (merge, then the tagger writes it)
+ * Audiobookshelf scan (each sets both settings and restores them; the organizer's one ASIN step
+ * writes the ASIN to the file it places):
+ *   1. single chaptered m4b, chapter merging off, tagging on (on the tagged copy)
+ *   2. multi-file mp3, chapter merging on, tagging off (on the merged file)
+ *   3. multi-file mp3, chapter merging on, tagging on (on the tagged copy of the merge)
  * Each also checks the placed file is moov first (faststart) through Audiobookshelf's container.
  * Requests all three fixture books (phm too, like smoke): run with --isolate-specs next to other specs.
  */
 
 import { test, expect } from '@playwright/test';
 import { Abs, authState, execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, stackExecSync, waitFor, writeEvidence, Rmab, type Book } from '../../lib/harness';
-import { psql, sqlStr } from './242-helpers';
+import { psql, setConfig, sqlStr } from './library-delete-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
 test.describe.configure({ mode: 'default' });
 
 type Settings = Partial<Record<'chapter_merging_enabled' | 'metadata_tagging_enabled', 'true' | 'false'>>;
 
-function setConfig(key: string, value: string) {
-  const stored = psql(`update configuration set value = ${sqlStr(value)} where key = ${sqlStr(key)} returning value`);
-  if (stored !== value) throw new Error(`setting ${key} is not in the configuration table`);
+/** The stored value, or null when the row is absent (a fresh stack has no chapter_merging_enabled row). */
+function getConfig(key: string): string | null {
+  return psql(`select count(*) from configuration where key = ${sqlStr(key)}`) === '0'
+    ? null
+    : psql(`select value from configuration where key = ${sqlStr(key)}`);
 }
 
-/** Run `fn` with these settings (each test states all it relies on), then restore what was there. */
+/** Run `fn` with these settings (each test states all it relies on), then restore what was there (or no row). */
 async function withSettings<T>(settings: Settings, fn: () => Promise<T>): Promise<T> {
-  const saved = Object.keys(settings).map((key) => [key, psql(`select value from configuration where key = ${sqlStr(key)}`)] as const);
+  const saved = Object.keys(settings).map((key) => [key, getConfig(key)] as const);
   try {
-    for (const [key, value] of Object.entries(settings)) setConfig(key, value as string);
+    for (const [key, value] of Object.entries(settings)) {
+      setConfig(key, value as string);
+      if (getConfig(key) !== value) throw new Error(`setting ${key} was not stored`);
+    }
     return await fn();
   } finally {
     for (const [key, value] of saved) setConfig(key, value);
