@@ -7,6 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
+import { isPollCancelled, useJobPoller } from '../lib/job-poller';
 
 interface FinalizeStepProps {
   hasAdminTokens: boolean; // True if admin was created and tokens exist
@@ -40,6 +41,8 @@ export function FinalizeStep({ hasAdminTokens, onComplete, onBack }: FinalizeSte
 
   const [isComplete, setIsComplete] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
+  // Polling and waits stop when this step unmounts
+  const poller = useJobPoller();
 
   // Auto-start jobs based on setup mode
   useEffect(() => {
@@ -51,53 +54,16 @@ export function FinalizeStep({ hasAdminTokens, onComplete, onBack }: FinalizeSte
       // Normal mode - admin user created, run jobs
       console.log('[Setup] Normal mode detected - running initial jobs');
       setHasStarted(true);
-      runJobs();
+      runJobs().catch((error) => {
+        if (!isPollCancelled(error)) console.error('[Setup] Job monitoring stopped:', error);
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasAdminTokens, hasStarted]);
 
-  const pollJobStatus = async (jobId: string, accessToken: string): Promise<'completed' | 'failed'> => {
-    console.log(`[Setup] Starting to poll job status for jobId: ${jobId}`);
-
-    return new Promise((resolve) => {
-      const pollInterval = setInterval(async () => {
-        try {
-          const response = await fetch(`/api/admin/job-status/${jobId}`, {
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-            },
-          });
-
-          if (!response.ok) {
-            console.error(`[Setup] Failed to fetch job status: ${response.status} ${response.statusText}`);
-            throw new Error('Failed to fetch job status');
-          }
-
-          const data = await response.json();
-          const jobStatus = data.job.status;
-
-          console.log(`[Setup] Job ${jobId} status: ${jobStatus}`);
-
-          if (jobStatus === 'completed') {
-            console.log(`[Setup] Job ${jobId} completed successfully`);
-            clearInterval(pollInterval);
-            resolve('completed');
-          } else if (jobStatus === 'failed') {
-            console.log(`[Setup] Job ${jobId} failed`);
-            clearInterval(pollInterval);
-            resolve('failed');
-          }
-          // Otherwise keep polling (pending, active, stuck)
-        } catch (error) {
-          console.error('[Setup] Error polling job status:', error);
-          clearInterval(pollInterval);
-          resolve('failed');
-        }
-      }, 2000); // Poll every 2 seconds
-    });
-  };
-
   const runJobs = async () => {
+    // One poller for the whole run: requests are aborted and waits rejected when the page unmounts
+    const session = poller.session();
     const accessToken = localStorage.getItem('accessToken');
 
     if (!accessToken) {
@@ -113,7 +79,7 @@ export function FinalizeStep({ hasAdminTokens, onComplete, onBack }: FinalizeSte
     // Get all scheduled jobs to find the IDs
     let scheduledJobs: any[] = [];
     try {
-      const response = await fetch('/api/admin/jobs', {
+      const response = await session.fetch('/api/admin/jobs', {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
         },
@@ -126,6 +92,8 @@ export function FinalizeStep({ hasAdminTokens, onComplete, onBack }: FinalizeSte
       const data = await response.json();
       scheduledJobs = data.jobs;
     } catch (error) {
+      if (isPollCancelled(error)) throw error;
+      session.throwIfCancelled();
       console.error('Failed to fetch scheduled jobs:', error);
       setJobs(prev => prev.map(job => ({
         ...job,
@@ -137,6 +105,7 @@ export function FinalizeStep({ hasAdminTokens, onComplete, onBack }: FinalizeSte
 
     // Run each job sequentially
     for (let i = 0; i < jobs.length; i++) {
+      session.throwIfCancelled();
       const job = jobs[i];
 
       // Update status to running
@@ -157,7 +126,7 @@ export function FinalizeStep({ hasAdminTokens, onComplete, onBack }: FinalizeSte
 
       try {
         // Trigger the job
-        const response = await fetch(`/api/admin/jobs/${scheduledJob.id}/trigger`, {
+        const response = await session.fetch(`/api/admin/jobs/${scheduledJob.id}/trigger`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -180,7 +149,7 @@ export function FinalizeStep({ hasAdminTokens, onComplete, onBack }: FinalizeSte
         }
 
         // Poll job status until completed or failed
-        const finalStatus = await pollJobStatus(jobId, accessToken);
+        const finalStatus = await session.pollJobStatus(jobId, accessToken, { logPrefix: '[Setup]' });
 
         console.log(`[Setup] Job ${job.name} finished with status: ${finalStatus}`);
 
@@ -197,9 +166,11 @@ export function FinalizeStep({ hasAdminTokens, onComplete, onBack }: FinalizeSte
 
         // Add a small delay between jobs
         if (i < jobs.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await session.delay(1000);
         }
       } catch (error) {
+        if (isPollCancelled(error)) throw error; // left the page: stop, no state updates
+        session.throwIfCancelled();
         console.error(`Failed to run job ${job.name}:`, error);
         setJobs(prev => prev.map((j, idx) =>
           idx === i ? {

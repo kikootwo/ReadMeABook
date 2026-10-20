@@ -143,10 +143,11 @@ async function copyInto(
     : { status: 'copied', target };
 }
 
-// Placements into the same target (any extension: .mp4 and its coerced .m4b) run one at a time
+// Placements into the same target (any extension: .mp4 and its coerced .m4b) run one at a time,
+// and so does the coercion rename between those names (format-coercion.ts)
 const targetLocks = new Map<string, Promise<void>>();
 
-async function withTargetLock<T>(target: string, fn: () => Promise<T>): Promise<T> {
+export async function withTargetLock<T>(target: string, fn: () => Promise<T>): Promise<T> {
   const key = path.join(path.resolve(path.dirname(target)), path.basename(target, path.extname(target))).toLowerCase();
   const previous = targetLocks.get(key) ?? Promise.resolve();
   let release!: () => void;
@@ -272,16 +273,35 @@ export interface AudioPlacement extends PlaceResult {
   verified: boolean;
   /** True when the library holds the tagged derivative rather than the original bytes. */
   usedDerivative: boolean;
+  /** Short reason this import placed the untagged original instead of the tagged derivative. */
+  tagsDropped?: string;
 }
 
-async function durationsMatch(original: string, derivative: string, probe: (p: string) => Promise<number>): Promise<boolean> {
+/** Why the derivative must not be used, or null when its duration matches the original's. */
+async function derivativeMismatch(
+  original: string,
+  derivative: string,
+  probe: (p: string) => Promise<number>
+): Promise<{ short: string; detail: string } | null> {
+  let a: number;
+  let b: number;
   try {
-    const a = await probe(original);
-    const b = await probe(derivative);
-    return a > 0 && b > 0 && Math.abs(a - b) <= TAGGED_DURATION_TOLERANCE_MS;
-  } catch {
-    return false;
+    a = await probe(original);
+    b = await probe(derivative);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { short: 'the length could not be checked', detail: `audio duration could not be measured (${message})` };
   }
+  if (!(a > 0 && b > 0)) {
+    return { short: 'the length could not be checked', detail: 'audio duration could not be measured (no audio packets)' };
+  }
+  if (Math.abs(a - b) > TAGGED_DURATION_TOLERANCE_MS) {
+    return {
+      short: 'the tagged version had a different length',
+      detail: `tagged copy duration did not match the original (${b} ms vs ${a} ms)`,
+    };
+  }
+  return null;
 }
 
 async function placeOriginal(original: string, target: string, options: PlaceOptions): Promise<AudioPlacement> {
@@ -290,12 +310,13 @@ async function placeOriginal(original: string, target: string, options: PlaceOpt
 }
 
 /**
- * Place one audio source. The tagged derivative is checked first, where it was
- * written: its audio duration (from the stream's packets) must match the
- * original's within TAGGED_DURATION_TOLERANCE_MS. Otherwise the original is
- * placed untagged (byte-checked by the copy). A derivative that cannot be
- * placed, or an existing target that differs from it, falls back to the
- * original too. A fallback after a failed derivative copy never replaces an
+ * Place one audio source. The tagged derivative is checked first, where it
+ * was written: its audio duration (from the
+ * stream's packets) must match the original's within
+ * TAGGED_DURATION_TOLERANCE_MS. Otherwise the original is placed untagged
+ * (byte-checked by the copy) and `tagsDropped` says why. A derivative that
+ * cannot be placed, or an existing target that differs from it, falls back to
+ * the original too. A fallback after a failed derivative copy never replaces an
  * existing target: the failed copy may have landed there.
  */
 export async function placeAudio(
@@ -314,11 +335,13 @@ export async function placeAudio(
     return placeOriginal(original, target, options);
   }
 
-  if (!(await durationsMatch(original, derivative, options.probeDuration))) {
+  const mismatch = await derivativeMismatch(original, derivative, options.probeDuration);
+  if (mismatch) {
     const untagged = await placeOriginal(original, target, options);
     return {
       ...untagged,
-      reason: untagged.reason ?? 'tagged copy duration did not match the original; original placed without metadata tags',
+      reason: untagged.reason ?? `${mismatch.detail}; original placed without metadata tags`,
+      tagsDropped: untagged.status === 'copied' ? mismatch.short : undefined,
     };
   }
 
@@ -329,7 +352,11 @@ export async function placeAudio(
     const fallbackOptions = taggedFailed ? { ...options, resumeInterrupted: false } : options;
     const fallback = await placeOriginal(original, target, fallbackOptions);
     if (fallback.status === 'copied') {
-      return { ...fallback, reason: `Tagged copy failed (${tagged.reason}); original placed without metadata tags` };
+      return {
+        ...fallback,
+        reason: `Tagged copy failed (${tagged.reason}); original placed without metadata tags`,
+        tagsDropped: 'the tagged version could not be saved to the library',
+      };
     }
     const fallbackReason = fallback.reason ?? fallback.status;
     // One reason when both attempts were refused for the same thing

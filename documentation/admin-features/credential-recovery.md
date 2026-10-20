@@ -17,6 +17,7 @@ docker exec -it <container-name> npm run rmab:recover
 ```
 - `-it` is required: without a terminal on stdin and stdout the script exits (code 2) before doing anything (`terminalProblem`, `scripts/lib/recovery-process.js`)
 - Or directly: `docker exec -it <container-name> node /app/scripts/recover-credentials.js`
+- Image dependencies (copied explicitly by `dockerfile.unified`, checked by its runtime guard): `/app/scripts/`, `/app/package.json`, `/app/src/generated/prisma/`, `bcrypt` in `/app/node_modules`
 
 ## What It Does
 1. Loads `DATABASE_URL` and `CONFIG_ENCRYPTION_KEY` from env (falls back to `/etc/environment`)

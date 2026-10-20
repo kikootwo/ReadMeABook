@@ -78,7 +78,10 @@ vi.mock('@/lib/utils/file-organizer', () => ({
 vi.mock('@/lib/services/library', () => ({ getLibraryService: () => libraryServiceMock }));
 vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => configMock }));
 vi.mock('@/lib/services/job-queue.service', () => ({ getJobQueueService: () => jobQueueMock }));
-vi.mock('@/lib/utils/format-coercion', () => formatCoercionMock);
+vi.mock('@/lib/utils/format-coercion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/utils/format-coercion')>()),
+  ...formatCoercionMock,
+}));
 vi.mock('@/lib/services/download-client-manager.service', () => ({
   getDownloadClientManager: () => ({
     getAllClients: async () => clientState.clients,

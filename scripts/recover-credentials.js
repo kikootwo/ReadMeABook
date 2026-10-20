@@ -55,10 +55,10 @@ const WANTED_ENV_KEYS = [
 
 const envSource = {}; // key -> short label of where it came from
 
-// The dockerfile bakes ENV DATABASE_URL=<this> at build time so prisma generate
-// has a valid URL; the entrypoint overrides at runtime. But if the override
-// didn't propagate to the child process inheriting via docker exec, we see
-// this exact dummy value. Never trust it.
+// The dockerfile's builder stage sets ENV DATABASE_URL=<this> so prisma generate
+// and next build have a valid URL; the runtime image no longer carries it, but
+// images built before the multi-stage split (1.2.x) baked it into the image env,
+// where a docker exec child could still see it. Never trust it.
 const DUMMY_DB_URL = 'postgresql://dummy:dummy@localhost:5432/dummy?schema=public';
 
 function isUsableValue(key, value) {

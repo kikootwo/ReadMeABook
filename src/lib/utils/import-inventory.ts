@@ -82,6 +82,8 @@ export interface PlacementRecord {
   status: PlacementStatus;
   /** True only when the source's content is proven to be in the library. */
   verified: boolean;
+  /** Short reason the library got the untagged original instead of the tagged copy (shown on the request). */
+  tagsDropped?: string;
   reason?: string;
 }
 

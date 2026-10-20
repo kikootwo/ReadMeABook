@@ -236,7 +236,9 @@ describe('placeAudio (tagged derivative)', () => {
       probeDuration: probeWith({ original: 60000, placed: 30000 }),
     });
 
-    expect(result).toMatchObject({ status: 'copied', verified: true, usedDerivative: false });
+    expect(result).toMatchObject({
+      status: 'copied', verified: true, usedDerivative: false, tagsDropped: 'the tagged version had a different length',
+    });
     expect(fs.readFileSync(target).equals(SOURCE)).toBe(true);
   });
 
@@ -246,10 +248,21 @@ describe('placeAudio (tagged derivative)', () => {
       probeDuration: async () => { throw new Error('ffprobe missing'); },
     });
 
-    expect(result).toMatchObject({ verified: true, usedDerivative: false });
+    expect(result).toMatchObject({ verified: true, usedDerivative: false, tagsDropped: 'the length could not be checked' });
+    expect(result.reason).toContain('ffprobe missing');
     expect(fs.readFileSync(target).equals(SOURCE)).toBe(true);
   });
 
+  it('checks the tagged copy even when no delete depends on the import (a seeding torrent is removed later)', async () => {
+    const result = await placeAudio(original, tagged, target, {
+      ...OPTS,
+      compareExisting: false,
+      probeDuration: probeWith({ original: 10000, placed: 4049 }),
+    });
+
+    expect(result).toMatchObject({ status: 'copied', verified: true, usedDerivative: false });
+    expect(fs.readFileSync(target).equals(SOURCE)).toBe(true);
+  });
   it('verifies against the original when the library already holds the untagged bytes', async () => {
     fs.writeFileSync(target, SOURCE);
 

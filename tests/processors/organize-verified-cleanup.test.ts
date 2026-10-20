@@ -24,7 +24,8 @@ vi.mock('@/lib/utils/file-organizer', () => ({ getFileOrganizer: () => organizer
 vi.mock('@/lib/services/library', () => ({ getLibraryService: () => ({ triggerLibraryScan: vi.fn() }) }));
 vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => configMock }));
 vi.mock('@/lib/services/job-queue.service', () => ({ getJobQueueService: () => jobQueueMock }));
-vi.mock('@/lib/utils/format-coercion', () => ({
+vi.mock('@/lib/utils/format-coercion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/utils/format-coercion')>()),
   coerceToPlexCompatible: vi.fn(async (paths: string[]) => ({ renamed: [], warnings: [], errors: [], finalAudioFiles: paths })),
 }));
 vi.mock('@/lib/services/download-client-manager.service', () => ({
@@ -236,6 +237,19 @@ describe('verified-import cleanup', () => {
       expect(requestUpdateData()?.errorMessage).toBe('source folder could not be fully read; source files kept');
       expect(fs.existsSync(download)).toBe(true);
     });
+
+    it('says when files went into the library without metadata tags, and why', async () => {
+      organizeWith(target(), { [parts[0]]: 'copied', [parts[1]]: 'copied' });
+      const placed = await organizerMock.organize();
+      placed.records[1] = { ...placed.records[1], tagsDropped: 'the length could not be checked' };
+      organizerMock.organize.mockResolvedValue(placed);
+
+      await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
+
+      expect(requestUpdateData()?.errorMessage).toBe('1 file imported without metadata tags (the length could not be checked)');
+      // The untagged originals are verified copies: the download still goes
+      expect(fs.existsSync(download)).toBe(false);
+    });
   });
 
   describe('manual import source cleanup', () => {
@@ -286,6 +300,39 @@ describe('verified-import cleanup', () => {
       expect(fs.existsSync(imported)).toBe(true);
       expect(fs.existsSync(other)).toBe(true);
       expect(postProcess).not.toHaveBeenCalled();
+      expect(requestUpdateData()).toMatchObject({ status: 'downloaded', errorMessage: 'download kept: it holds several ebook files and only one was imported; remove it from the download client once you no longer need the others' });
+    });
+
+    it('says why a release with several ebook formats is kept', async () => {
+      const download = path.join(downloads, 'Ebook.Formats');
+      const imported = mkfile(path.join(download, 'Book.epub'), 'epub');
+      const pdf = mkfile(path.join(download, 'Book.pdf'), 'pdf');
+      useCompletedDownload(download);
+      organizerMock.organizeEbook.mockResolvedValue({
+        success: true, targetPath: path.join(media, 'Author', 'Book'), format: 'epub', errors: [], sourceFile: imported,
+        record: { source: imported, target: path.join(media, 'Author', 'Book', 'Book.epub'), status: 'copied', verified: true },
+      });
+
+      await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
+
+      expect(requestUpdateData()).toMatchObject({ status: 'downloaded', errorMessage: 'download kept: it holds several ebook formats and only one was imported; remove it from the download client once you no longer need the others' });
+      expect(fs.existsSync(pdf)).toBe(true);
+    });
+
+    it('adds no message for several ebook formats when the download is not removed anyway (torrent)', async () => {
+      indexers = [{ id: 7, protocol: 'torrent', removeAfterProcessing: true }];
+      const download = path.join(downloads, 'Ebook.Torrent');
+      const imported = mkfile(path.join(download, 'Book.epub'), 'epub');
+      mkfile(path.join(download, 'Book.pdf'), 'pdf');
+      useCompletedDownload(download);
+      organizerMock.organizeEbook.mockResolvedValue({
+        success: true, targetPath: path.join(media, 'Author', 'Book'), format: 'epub', errors: [], sourceFile: imported,
+        record: { source: imported, target: path.join(media, 'Author', 'Book', 'Book.epub'), status: 'copied', verified: true },
+      });
+
+      await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
+
+      expect(requestUpdateData()).toMatchObject({ status: 'downloaded', errorMessage: null });
     });
 
     it('clears a stale request message on a complete ebook import', async () => {

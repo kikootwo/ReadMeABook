@@ -3,6 +3,25 @@ set -e
 
 echo "🚀 ReadMeABook Unified Container Starting..."
 
+# >>> prisma-cli-preflight (dockerfile.unified's build guard runs this exact block)
+# The schema can only be applied with the Prisma CLI baked into the image. Fail before touching
+# any volume when it is missing; never fall back to `npx prisma`, which silently installs the
+# LATEST prisma from the npm registry when no local CLI exists.
+PRISMA_CLI=/app/node_modules/.bin/prisma
+prisma_cli_fatal() {
+    echo "❌ FATAL: $1" >&2
+    echo "   ReadMeABook cannot apply its database schema without the Prisma CLI bundled in the image," >&2
+    echo "   so it will not start. The image is broken: pull it again (or rebuild it) and report it if this persists." >&2
+    exit 1
+}
+[ -x "$PRISMA_CLI" ] || prisma_cli_fatal "Prisma CLI not found or not executable at $PRISMA_CLI"
+PRISMA_SCHEMA_ENGINES=(/app/node_modules/@prisma/engines/schema-engine-*)
+if [ "${#PRISMA_SCHEMA_ENGINES[@]}" -ne 1 ] || [ ! -e "${PRISMA_SCHEMA_ENGINES[0]}" ]; then
+    prisma_cli_fatal "expected exactly one Prisma schema engine in /app/node_modules/@prisma/engines, found: ${PRISMA_SCHEMA_ENGINES[*]}"
+fi
+[ -x "${PRISMA_SCHEMA_ENGINES[0]}" ] || prisma_cli_fatal "Prisma schema engine is not executable: ${PRISMA_SCHEMA_ENGINES[0]}"
+# <<< prisma-cli-preflight
+
 # ============================================================================
 # PUID/PGID USER REMAPPING (Hybrid approach with gosu)
 # ============================================================================
@@ -402,7 +421,9 @@ if [ "$USE_EXTERNAL_POSTGRES" = "true" ]; then
 fi
 echo "🔄 Running Prisma migrations..."
 cd /app
-su - node -c "cd /app && DATABASE_URL='$DATABASE_URL' npx prisma db push --skip-generate --accept-data-loss" || echo "⚠️  Migrations may have failed, continuing..."
+# A failed db push does NOT stop the container (long-standing behavior, see unified.md); only a
+# missing CLI does (preflight above).
+su - node -c "cd /app && DATABASE_URL='$DATABASE_URL' $PRISMA_CLI db push --skip-generate --accept-data-loss" || echo "⚠️  Migrations may have failed, continuing..."
 
 # Run data migrations (run-once SQL scripts tracked in _data_migrations table)
 echo "🔄 Running data migrations..."
@@ -418,7 +439,7 @@ for sql_file in /app/prisma/data-migrations/*.sql; do
         fi
 
         echo "   Running $migration_name..."
-        if su - node -c "cd /app && DATABASE_URL='$DATABASE_URL' npx prisma db execute --schema prisma/schema.prisma --file '$sql_file'"; then
+        if su - node -c "cd /app && DATABASE_URL='$DATABASE_URL' $PRISMA_CLI db execute --schema prisma/schema.prisma --file '$sql_file'"; then
             psql "$DATABASE_URL" -c "INSERT INTO _data_migrations (name) VALUES ('$migration_name');"
             echo "   ✅ $migration_name completed"
         else

@@ -122,6 +122,7 @@
 ## Deployment
 - **Docker Compose setup (multi-container)** → [deployment/docker.md](deployment/docker.md)
 - **Unified container (all-in-one)** → [deployment/unified.md](deployment/unified.md)
+- **Image build stages, runtime image contents, Prisma CLI in the image, build guards** → [deployment/unified.md](deployment/unified.md#dockerfile-structure)
 - **Environment variables, volumes** → [deployment/docker.md](deployment/docker.md)
 - **Volume mapping (download clients)** → [deployment/volume-mapping.md](deployment/volume-mapping.md)
 - **Database setup (Prisma), migrations** → [deployment/docker.md](deployment/docker.md)

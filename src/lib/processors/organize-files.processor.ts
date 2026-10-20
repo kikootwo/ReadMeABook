@@ -17,7 +17,14 @@ import { generateFilesHash } from '../utils/files-hash';
 import { audioFileFormat, splitForeignAudio } from './organize-evidence';
 import { fixEpubForKindle, cleanupFixedEpub } from '../utils/epub-fixer';
 import { cleanupDirectDownloadSource, cleanupDownloadAfterOrganize, cleanupEbookSource, cleanupSourceAfterOrganize } from './organize-cleanup';
-import { audioEvidence, deleteMayFollow, ebookEvidence as buildEbookEvidence, reportImportStatus } from './organize-evidence';
+import {
+  audioEvidence,
+  deleteMayFollow,
+  deleteMayFollowFor,
+  downloadCleanupKind,
+  ebookEvidence as buildEbookEvidence,
+  reportImportStatus,
+} from './organize-evidence';
 import { getAudibleService } from '../integrations/audible.service';
 import { addAutoBlock } from '../services/blocklist.service';
 
@@ -242,11 +249,18 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
 
     if (coercionEnabled && importedAudio.length > 0) {
       try {
-        const { coerceToPlexCompatible } = await import('../utils/format-coercion');
-        const coercion = await coerceToPlexCompatible(importedAudio, logger);
+        const { coerceToPlexCompatible, coercibleTargets } = await import('../utils/format-coercion');
+        // Only files holding this import's content are renamed; other library files are never
+        // touched. Every organized file still counts as an .m4a sibling.
+        const records = result.records ?? [];
+        const coercion = await coerceToPlexCompatible(result.audioFiles, coercibleTargets(records), logger);
         if (coercion.renamed.length > 0) {
           logger.info(`Plex format coercion: renamed ${coercion.renamed.length} file(s)`);
-          importedAudio = coercion.finalAudioFiles;
+          const renamedTo = new Map(coercion.renamed.map((r) => [r.from, r.to]));
+          importedAudio = importedAudio.map((file) => renamedTo.get(file) ?? file);
+          for (const record of records) {
+            record.target = renamedTo.get(record.target) ?? record.target;
+          }
         }
         coercion.warnings.forEach(w => logger.warn(`Plex format coercion: ${w}`));
       } catch (err) {
@@ -851,6 +865,9 @@ async function processEbookOrganization(
     template: fileRenameTemplateConfig?.value || '{title}',
   };
 
+  // What download cleanup would do decides both the compare cost and the request message
+  const cleanupKind = await downloadCleanupKind(requestId, downloadPath, downloadHistoryId);
+
   // Organize ebook files (organizer will detect ebook type and skip audio-specific processing)
   // Pass all metadata that could be used in path templates (same as audiobooks)
   const result = await organizer.organizeEbook(
@@ -868,7 +885,7 @@ async function processEbookOrganization(
     jobId ? { jobId, context: 'FileOrganizer.Ebook' } : undefined,
     isIndexerDownload,
     ebookRenameConfig,
-    { compareExisting: await deleteMayFollow(requestId, downloadPath, downloadHistoryId, cleanupSource) }
+    { compareExisting: deleteMayFollowFor(cleanupKind, cleanupSource) }
   );
 
   // Clean up fixed EPUB temp file after organization (regardless of success)
@@ -886,7 +903,7 @@ async function processEbookOrganization(
   // The organizer reads a temp copy when the Kindle fix ran; the original is epubFilePath
   const importedFile = fixedEpubPath ? epubFilePath : result.sourceFile;
   const ebookEvidence = await buildEbookEvidence(result, importedFile ?? undefined, downloadPath);
-  const ebookMessage = reportImportStatus(ebookEvidence, logger);
+  const ebookMessage = reportImportStatus(ebookEvidence, logger, { folderRemovalPlanned: cleanupKind === 'indexer' });
 
   // Update book record with file path
   await prisma.audiobook.update({

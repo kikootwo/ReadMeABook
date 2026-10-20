@@ -88,6 +88,13 @@ export const PLEX_COMPATIBLE_EXTENSIONS = [
  * Unambiguous rename targets for Plex format coercion.
  * `.mp4` → `.m4b` always. `.m4a` → `.m4b` is conditional (single-file only) and handled in coercion logic.
  */
+/**
+ * Extensions Plex format coercion may rename (.m4a only as a single file). The
+ * organizer byte-compares same-size existing targets with these extensions, so
+ * a retry knows whether the file there is this import's copy (`identical`).
+ */
+export const COERCION_CANDIDATE_EXTENSIONS: readonly string[] = ['.mp4', '.m4a'];
+
 export const COERCION_RENAME_MAP: Record<string, string> = {
   '.mp4': '.m4b',
 };

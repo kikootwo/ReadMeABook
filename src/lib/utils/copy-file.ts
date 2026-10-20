@@ -87,7 +87,7 @@ export interface CopyOptions {
 }
 
 /** Codes meaning the filesystem cannot hard-link here; 'create' then falls back to a checked rename. */
-const LINK_UNSUPPORTED = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV', 'EMLINK', 'EINVAL']);
+export const LINK_UNSUPPORTED: ReadonlySet<string> = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV', 'EMLINK', 'EINVAL']);
 
 function existsError(destination: string): NodeJS.ErrnoException {
   return Object.assign(new Error(`EEXIST: ${path.basename(destination)} already exists`), { code: 'EEXIST' });
@@ -169,40 +169,29 @@ async function publishCreate(partial: string, destination: string): Promise<void
 }
 
 /**
- * Copy `source` to `destination` atomically.
+ * Write a hidden partial next to `destination` with `fill` and publish it.
  *
- * Write, fsync and close of the partial file are all fatal. The partial must
- * hold exactly the source's size before it is published; afterwards the
- * destination must have that size and the partial's identity (or, if the
- * identity changed or the folder fsync failed, the source's exact bytes). A
- * failed rename or link (EXDEV, EBUSY, EACCES, ...) throws and never falls back
- * to writing the destination in place. With mode 'create' an existing
- * destination is never overwritten (EEXIST). When source and destination are
- * the same file this is a no-op: opening the destination for writing would
- * truncate the source.
+ * Write, fsync and close of the partial are all fatal. The partial must hold
+ * exactly `expectedBytes` before it is published; afterwards the destination
+ * must have that size and the partial's identity (or, if the identity changed
+ * or the folder fsync failed, `sameBytes()` must confirm its content). A failed
+ * rename or link throws and never falls back to writing the destination in
+ * place. With mode 'create' an existing destination is never overwritten (EEXIST).
  */
-export async function copyFile(source: string, destination: string, options: CopyOptions = {}): Promise<CopyResult> {
-  if (await isSameFile(source, destination)) {
-    const stat = await fsp.stat(source);
-    return { bytes: stat.size, sameFile: true };
-  }
-
-  const sourceStat = await fsp.stat(source);
+async function writeAtomically(
+  destination: string,
+  expectedBytes: number,
+  fill: (handle: fsp.FileHandle) => Promise<number>,
+  sameBytes: () => Promise<boolean>,
+  mode: CopyOptions['mode']
+): Promise<number> {
   const dir = path.dirname(destination);
   const partial = path.join(dir, partialNameFor(path.basename(destination)));
 
-  let bytes = 0;
+  let bytes: number;
   const handle = await fsp.open(partial, 'wx');
   try {
-    for await (const chunk of createReadStream(source)) {
-      const buffer = chunk as Buffer;
-      let offset = 0;
-      while (offset < buffer.length) {
-        const { bytesWritten } = await handle.write(buffer, offset, buffer.length - offset);
-        offset += bytesWritten;
-      }
-      bytes += buffer.length;
-    }
+    bytes = await fill(handle);
     await handle.sync();
   } catch (error) {
     await handle.close().catch(() => undefined);
@@ -218,12 +207,12 @@ export async function copyFile(source: string, destination: string, options: Cop
   }
 
   const partialStat = await fsp.stat(partial, { bigint: true });
-  if (bytes !== sourceStat.size || partialStat.size !== BigInt(sourceStat.size)) {
+  if (bytes !== expectedBytes || partialStat.size !== BigInt(expectedBytes)) {
     await unlinkQuietly(partial);
-    throw new Error(`Copy incomplete: wrote ${bytes} of ${sourceStat.size} bytes for ${path.basename(destination)}`);
+    throw new Error(`Copy incomplete: wrote ${bytes} of ${expectedBytes} bytes for ${path.basename(destination)}`);
   }
 
-  if (options.mode === 'create') {
+  if (mode === 'create') {
     await publishCreate(partial, destination);
   } else {
     try {
@@ -239,7 +228,7 @@ export async function copyFile(source: string, destination: string, options: Cop
     partialStat.ino !== BigInt(0) && (finalStat.ino !== partialStat.ino || finalStat.dev !== partialStat.dev);
   if (finalStat.size !== partialStat.size || identityChanged) {
     // Some filesystems report a new inode after rename; trust only the exact bytes
-    if (!(await filesEqual(source, destination))) {
+    if (!(await sameBytes())) {
       throw new Error(`Copy verification failed after publishing ${path.basename(destination)}`);
     }
   }
@@ -247,9 +236,60 @@ export async function copyFile(source: string, destination: string, options: Cop
   try {
     await syncDirectory(dir);
   } catch (error) {
-    if (!(await filesEqual(source, destination))) throw error;
+    if (!(await sameBytes())) throw error;
   }
+  return bytes;
+}
+
+async function writeAll(handle: fsp.FileHandle, buffer: Buffer): Promise<void> {
+  let offset = 0;
+  while (offset < buffer.length) {
+    const { bytesWritten } = await handle.write(buffer, offset, buffer.length - offset);
+    offset += bytesWritten;
+  }
+}
+
+/**
+ * Copy `source` to `destination` atomically (see writeAtomically). When source
+ * and destination are the same file this is a no-op: opening the destination
+ * for writing would truncate the source.
+ */
+export async function copyFile(source: string, destination: string, options: CopyOptions = {}): Promise<CopyResult> {
+  if (await isSameFile(source, destination)) {
+    const stat = await fsp.stat(source);
+    return { bytes: stat.size, sameFile: true };
+  }
+
+  const sourceStat = await fsp.stat(source);
+  const bytes = await writeAtomically(
+    destination,
+    sourceStat.size,
+    async (handle) => {
+      let written = 0;
+      for await (const chunk of createReadStream(source)) {
+        await writeAll(handle, chunk as Buffer);
+        written += (chunk as Buffer).length;
+      }
+      return written;
+    },
+    () => filesEqual(source, destination),
+    options.mode
+  );
   return { bytes, sameFile: false };
+}
+
+/** Write `data` to `destination` atomically (see writeAtomically): a crash leaves only a hidden partial. */
+export async function writeFileAtomic(destination: string, data: Buffer, options: CopyOptions = {}): Promise<void> {
+  await writeAtomically(
+    destination,
+    data.length,
+    async (handle) => {
+      await writeAll(handle, data);
+      return data.length;
+    },
+    async () => (await fsp.readFile(destination)).equals(data),
+    options.mode
+  );
 }
 
 // =========================================================================

@@ -100,7 +100,9 @@ vi.mock('@/lib/utils/chapter-merger', async (importOriginal) => {
   };
 });
 
+import { probeStreamDurationMs } from '@/lib/utils/audio-duration';
 import { FileOrganizer } from '@/lib/utils/file-organizer';
+import { coerceToPlexCompatible, coercibleTargets } from '@/lib/utils/format-coercion';
 
 let root: string;
 let media: string;
@@ -179,7 +181,9 @@ describe('FileOrganizer placement records', () => {
 
     const placed = path.join(media, 'Author', 'Book', 'Book.m4b');
     expect(fs.readFileSync(placed, 'utf8')).toBe('original-bytes');
-    expect(result.records![0]).toMatchObject({ status: 'copied', verified: true });
+    expect(result.records![0]).toMatchObject({
+      status: 'copied', verified: true, tagsDropped: 'the tagged version had a different length',
+    });
     expect(fs.existsSync(path.join(source, 'Book.m4b.tmp'))).toBe(false);
   });
 
@@ -200,6 +204,56 @@ describe('FileOrganizer placement records', () => {
     // Collected for one summary per job, not logged per file
     expect(result.permissionWarnings).toHaveLength(2);
     expect(result.permissionWarnings!.every((w) => w.includes(code))).toBe(true);
+  });
+
+  it('never places a short tagged copy for a torrent import (no delete now, seeding cleanup removes the download later)', async () => {
+    configState.values.set('metadata_tagging_enabled', 'true');
+    write(path.join(source, 'Book.mp3'), 'original-bytes');
+    probeState.sourceDuration = 10000;
+    probeState.taggedDuration = 4049;
+
+    const organizer = new FileOrganizer(media, path.join(root, 'tmp'));
+    const result = await organizer.organize(source, { title: 'Book', author: 'Author' }, '{author}/{title}', undefined, undefined, undefined, {
+      compareExisting: false,
+    });
+
+    expect(fs.readFileSync(path.join(media, 'Author', 'Book', 'Book.mp3'), 'utf8')).toBe('original-bytes');
+    expect(result.records![0]).toMatchObject({ status: 'copied', verified: true });
+    expect(result.records![0].tagsDropped).toBeDefined();
+  });
+  it('renames the .mp4 an earlier attempt placed, on the retry after a crash before coercion (torrent import)', async () => {
+    write(path.join(source, 'Book.mp4'), 'audio-bytes');
+    const organizer = new FileOrganizer(media, path.join(root, 'tmp'));
+    const run = () => organizer.organize(source, { title: 'Book', author: 'Author' }, '{author}/{title}', undefined, undefined, undefined, {
+      compareExisting: false,
+    });
+    const first = await run();
+    expect(first.records![0]).toMatchObject({ status: 'copied' });
+    // Crash here: coercion never ran, the library holds Book.mp4
+
+    const retry = await run();
+    const coercion = await coerceToPlexCompatible(retry.audioFiles, coercibleTargets(retry.records!));
+
+    const lib = path.join(media, 'Author', 'Book');
+    expect(retry.records![0]).toMatchObject({ status: 'identical' });
+    expect(coercion.renamed).toHaveLength(1);
+    expect(fs.readdirSync(lib)).toEqual(['Book.m4b']);
+  });
+
+  it('never renames a same-size library .mp4 with different content on a torrent import', async () => {
+    write(path.join(source, 'Book.mp4'), 'audio-bytes');
+    const lib = path.join(media, 'Author', 'Book');
+    write(path.join(lib, 'Book.mp4'), 'other-bytes');
+    const organizer = new FileOrganizer(media, path.join(root, 'tmp'));
+
+    const result = await organizer.organize(source, { title: 'Book', author: 'Author' }, '{author}/{title}', undefined, undefined, undefined, {
+      compareExisting: false,
+    });
+    await coerceToPlexCompatible(result.audioFiles, coercibleTargets(result.records!));
+
+    expect(result.records![0]).toMatchObject({ status: 'differs' });
+    expect(fs.readdirSync(lib)).toEqual(['Book.mp4']);
+    expect(fs.readFileSync(path.join(lib, 'Book.mp4'), 'utf8')).toBe('other-bytes');
   });
 
   it('re-copies a truncated library file and keeps a different one untouched', async () => {

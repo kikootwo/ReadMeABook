@@ -8,6 +8,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/Button';
+import { isPollCancelled, useJobPoller } from '../lib/job-poller';
+
+const JOB_TIMEOUT_MS = 10 * 60 * 1000;
 
 interface JobStatus {
   id: string;
@@ -37,6 +40,8 @@ export default function InitializingPage() {
   const [isComplete, setIsComplete] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
   const [authProcessed, setAuthProcessed] = useState(false);
+  // Polling and waits stop when the page unmounts
+  const poller = useJobPoller();
 
   // Process auth data from URL hash and start monitoring jobs
   useEffect(() => {
@@ -72,61 +77,20 @@ export default function InitializingPage() {
       setAuthProcessed(true);
 
       // Start monitoring jobs after a brief delay to ensure jobs have been triggered
-      setTimeout(() => {
-        runJobs(authData.accessToken);
-      }, 2000);
+      poller.delay(2000)
+        .then(() => runJobs(authData.accessToken))
+        .catch((error) => {
+          if (!isPollCancelled(error)) console.error('[Initializing] Job monitoring stopped:', error);
+        });
     } catch (error) {
       console.error('[Initializing] Failed to process auth data:', error);
       router.push('/login?error=' + encodeURIComponent('Failed to process authentication'));
     }
-  }, [authProcessed, router]);
-
-  const pollJobStatus = async (jobId: string, accessToken: string): Promise<'completed' | 'failed'> => {
-    console.log(`[Initializing] Polling job status for: ${jobId}`);
-
-    return new Promise((resolve) => {
-      const pollInterval = setInterval(async () => {
-        try {
-          const response = await fetch(`/api/admin/job-status/${jobId}`, {
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-            },
-          });
-
-          if (!response.ok) {
-            console.error(`[Initializing] Failed to fetch job status: ${response.status}`);
-            throw new Error('Failed to fetch job status');
-          }
-
-          const data = await response.json();
-          const jobStatus = data.job.status;
-
-          console.log(`[Initializing] Job ${jobId} status: ${jobStatus}`);
-
-          if (jobStatus === 'completed') {
-            clearInterval(pollInterval);
-            resolve('completed');
-          } else if (jobStatus === 'failed') {
-            clearInterval(pollInterval);
-            resolve('failed');
-          }
-          // Otherwise keep polling
-        } catch (error) {
-          console.error('[Initializing] Error polling job status:', error);
-          clearInterval(pollInterval);
-          resolve('failed');
-        }
-      }, 2000); // Poll every 2 seconds
-
-      // Timeout after 10 minutes
-      setTimeout(() => {
-        clearInterval(pollInterval);
-        resolve('failed');
-      }, 10 * 60 * 1000);
-    });
-  };
+  }, [authProcessed, router, poller]);
 
   const runJobs = async (accessToken: string) => {
+    // One poller for the whole run: requests are aborted and waits rejected when the page unmounts
+    const session = poller.session();
     if (hasStarted) return;
     setHasStarted(true);
 
@@ -135,7 +99,7 @@ export default function InitializingPage() {
     // Get all scheduled jobs to find the IDs
     let scheduledJobs: any[] = [];
     try {
-      const response = await fetch('/api/admin/jobs', {
+      const response = await session.fetch('/api/admin/jobs', {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
         },
@@ -148,6 +112,8 @@ export default function InitializingPage() {
       const data = await response.json();
       scheduledJobs = data.jobs;
     } catch (error) {
+      if (isPollCancelled(error)) throw error;
+      session.throwIfCancelled();
       console.error('[Initializing] Failed to fetch scheduled jobs:', error);
       setJobs(prev => prev.map(job => ({
         ...job,
@@ -160,6 +126,7 @@ export default function InitializingPage() {
 
     // Monitor each job
     for (let i = 0; i < jobs.length; i++) {
+      session.throwIfCancelled();
       const job = jobs[i];
 
       // Update status to running
@@ -181,7 +148,7 @@ export default function InitializingPage() {
       try {
         // Look for the most recent job execution
         // Jobs should already be triggered by OIDCAuthProvider
-        const response = await fetch('/api/admin/jobs', {
+        const response = await session.fetch('/api/admin/jobs', {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
           },
@@ -201,9 +168,9 @@ export default function InitializingPage() {
           console.warn(`[Initializing] No recent job found for ${job.name}, may still be starting`);
 
           // Wait a bit and check again
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          await session.delay(3000);
 
-          const retryResponse = await fetch('/api/admin/jobs', {
+          const retryResponse = await session.fetch('/api/admin/jobs', {
             headers: {
               'Authorization': `Bearer ${accessToken}`,
             },
@@ -214,7 +181,10 @@ export default function InitializingPage() {
             const retryJobData = retryData.jobs?.find((j: any) => j.type === job.id);
 
             if (retryJobData?.lastRunJobId) {
-              const finalStatus = await pollJobStatus(retryJobData.lastRunJobId, accessToken);
+              const finalStatus = await session.pollJobStatus(retryJobData.lastRunJobId, accessToken, {
+                logPrefix: '[Initializing]',
+                timeoutMs: JOB_TIMEOUT_MS,
+              });
 
               setJobs(prev => prev.map((j, idx) =>
                 idx === i ? {
@@ -232,7 +202,10 @@ export default function InitializingPage() {
           }
         } else {
           // Poll the existing job
-          const finalStatus = await pollJobStatus(recentJob.lastRunJobId, accessToken);
+          const finalStatus = await session.pollJobStatus(recentJob.lastRunJobId, accessToken, {
+            logPrefix: '[Initializing]',
+            timeoutMs: JOB_TIMEOUT_MS,
+          });
 
           setJobs(prev => prev.map((j, idx) =>
             idx === i ? {
@@ -245,9 +218,11 @@ export default function InitializingPage() {
 
         // Small delay between jobs
         if (i < jobs.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await session.delay(1000);
         }
       } catch (error) {
+        if (isPollCancelled(error)) throw error; // left the page: stop, no state updates
+        session.throwIfCancelled();
         console.error(`[Initializing] Failed to monitor job ${job.name}:`, error);
         setJobs(prev => prev.map((j, idx) =>
           idx === i ? {

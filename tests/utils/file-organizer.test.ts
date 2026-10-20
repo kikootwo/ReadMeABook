@@ -148,6 +148,20 @@ vi.mock('@/lib/utils/organize-copy', async (importOriginal) => {
   return placementMock;
 });
 
+// Cover publishing is covered on the real filesystem in file-organizer.cover.test.ts;
+// here an existing cover (fs.access) is kept, otherwise it is copied or written and its mode applied.
+const coverMock = vi.hoisted(() => ({
+  hasCover: vi.fn(async (target: string) => fsMock.access(target).then(() => true, () => false)),
+  publishCover: vi.fn(async (target: string, content: { file?: string; data?: Buffer }, fileMode: number) => {
+    if (content.file) await copyFileMock.copyFile(content.file, target);
+    else await fsMock.writeFile(target, content.data);
+    const mode = await placementMock.applyFileMode(target, fileMode);
+    if (mode.kind === 'missing') throw new Error(mode.reason);
+    return mode.kind === 'refused' ? { outcome: 'written', warning: mode.warning } : { outcome: 'written' };
+  }),
+}));
+vi.mock('@/lib/utils/cover-placement', () => coverMock);
+
 vi.mock('axios', () => ({
   default: axiosMock,
   ...axiosMock,

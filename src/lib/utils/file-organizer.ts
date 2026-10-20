@@ -9,8 +9,8 @@ import axios from 'axios';
 import { RMAB_USER_AGENT } from './user-agent';
 import { tagMultipleFiles, checkFfmpegAvailable } from './metadata-tagger';
 import { RMABLogger } from './logger';
-import { copyFile } from './copy-file';
-import { applyFileMode, placeAudio, placeFile, isVerifiedStatus, type AudioPlacement } from './organize-copy';
+import { hasCover, publishCover, type CoverPlacement } from './cover-placement';
+import { placeAudio, placeFile, isVerifiedStatus, type AudioPlacement } from './organize-copy';
 import { walkFiles, ORGANIZER_EBOOK_FORMATS, type ImportInventory, type PlacementRecord } from './import-inventory';
 import { getMediaDir } from './media-dir';
 import { probeStreamDurationMs } from './audio-duration';
@@ -27,7 +27,7 @@ import {
 } from './chapter-merger';
 import { prisma } from '../db';
 import { substituteTemplate, buildRenamedFilename, type TemplateVariables } from './path-template.util';
-import { AUDIO_EXTENSIONS } from '../constants/audio-formats';
+import { AUDIO_EXTENSIONS, COERCION_CANDIDATE_EXTENSIONS } from '../constants/audio-formats';
 
 export interface AudiobookMetadata {
   title: string;
@@ -413,7 +413,11 @@ export class FileOrganizer {
 
         const placed: AudioPlacement = await placeAudio(originalSourcePath, taggedFilePath, targetFilePath, {
           fileMode: this.fileMode,
-          compareExisting: placement?.compareExisting === true,
+          // Coercion renames only this import's content, so a retry must know whether a same-size
+          // .mp4/.m4a already there is ours (identical) rather than just present
+          compareExisting:
+            placement?.compareExisting === true ||
+            COERCION_CANDIDATE_EXTENSIONS.includes(path.extname(targetFilePath).toLowerCase()),
           probeDuration: probeStreamDurationMs,
         });
 
@@ -425,6 +429,7 @@ export class FileOrganizer {
             target: placed.target,
             status: placed.status,
             verified: placed.verified && (sources === mergedInputs ? mergeDurationVerified : true),
+            tagsDropped: placed.tagsDropped,
             reason: placed.reason,
           });
         }
@@ -519,10 +524,16 @@ export class FileOrganizer {
       } else if (audiobook.coverArtUrl) {
         // Download cover art from Audible if not in torrent
         try {
-          const coverWarning = await this.downloadCoverArt(audiobook.coverArtUrl, targetPath);
-          if (coverWarning) (result.permissionWarnings ??= []).push(coverWarning);
+          const cover = await this.downloadCoverArt(audiobook.coverArtUrl, targetPath);
+          if (cover.warning) (result.permissionWarnings ??= []).push(cover.warning);
           result.coverArtFile = path.join(targetPath, 'cover.jpg');
-          await logger?.info(`Downloaded cover art from Audible`);
+          if (cover.outcome === 'kept') {
+            // The library's own cover stays (a re-import with the same cover lands here too)
+            if (logger) await logger.debug('cover.jpg already exists; keeping it');
+            else moduleLogger.debug('cover.jpg already exists; keeping it');
+          } else {
+            await logger?.info(`Downloaded cover art from Audible`);
+          }
         } catch (error) {
           await logger?.warn(`Failed to download cover art: ${error instanceof Error ? error.message : 'Unknown error'}`);
           result.errors.push('Failed to download cover art');
@@ -734,18 +745,23 @@ export class FileOrganizer {
   }
 
   /**
-   * Download cover art from URL or copy from local cache.
-   * Returns a warning when the file was written but its permissions could not be set.
+   * Download cover art from URL or copy from local cache. An existing cover.jpg
+   * is never replaced ('kept') and is not fetched for; an empty one is replaced. A warning is returned
+   * when the cover was written but its permissions could not be set.
    */
-  private async downloadCoverArt(url: string, targetDir: string): Promise<string | undefined> {
+  private async downloadCoverArt(url: string, targetDir: string): Promise<CoverPlacement> {
     const targetPath = path.join(targetDir, 'cover.jpg');
 
     try {
+      if (await hasCover(targetPath)) {
+        return { outcome: 'kept' };
+      }
       // Cached thumbnail (plain file name inside the cache dir only)
       const cachedPath = cachedThumbnailPath(url);
       if (cachedPath) {
-        await copyFile(cachedPath, targetPath);
-        moduleLogger.debug(`Copied cover art from cache: ${path.basename(cachedPath)}`);
+        const cover = await publishCover(targetPath, { file: cachedPath }, this.fileMode);
+        moduleLogger.debug(`Cover art from cache ${path.basename(cachedPath)}: ${cover.outcome}`);
+        return cover;
       } else if (isAllowedRemoteCoverUrl(url)) {
         // Known Audible/Amazon image host over https; every redirect hop must be one too
         const response = await axios.get(url, {
@@ -762,8 +778,10 @@ export class FileOrganizer {
           headers: { 'User-Agent': RMAB_USER_AGENT },
         });
 
-        await fs.writeFile(targetPath, response.data);
-        moduleLogger.debug(`Downloaded cover art from URL`);
+        const data = Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data);
+        const cover = await publishCover(targetPath, { data }, this.fileMode);
+        moduleLogger.debug(`Cover art from URL: ${cover.outcome}`);
+        return cover;
       } else {
         throw new Error('Cover art URL is not a cached thumbnail or a known cover image host');
       }
@@ -771,10 +789,6 @@ export class FileOrganizer {
       moduleLogger.error('Failed to download cover art', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
-    // Written; permissions are best-effort, but a file that is not there is a failure
-    const mode = await applyFileMode(targetPath, this.fileMode);
-    if (mode.kind === 'missing') throw new Error(mode.reason);
-    return mode.kind === 'refused' ? mode.warning : undefined;
   }
 
   /**
