@@ -105,6 +105,14 @@ describe('findIndexerConfig', () => {
     });
   });
 
+  it('uses the id to pick between saved entries that share the recorded name', () => {
+    const duplicates = [
+      { id: 2, name: 'Tracker', seedingTimeMinutes: 30, ratioLimit: 0 },
+      { id: 7, name: 'Tracker', ratioLimit: 2 },
+    ];
+    expect(findIndexerConfig(duplicates, { indexerId: 7, indexerName: 'Tracker' })).toEqual({ config: duplicates[1], matchedBy: 'id' });
+  });
+
   it('uses the id when the recorded name is the same indexer', () => {
     expect(findIndexerConfig(configs, { indexerId: 7, indexerName: 'New Name' })).toEqual({ config: configs[0], matchedBy: 'id' });
   });

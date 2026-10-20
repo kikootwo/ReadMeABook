@@ -148,4 +148,18 @@ describe('processCleanupSeededTorrents indexer lookup', () => {
     expect(prismaMock.request.delete).not.toHaveBeenCalled();
     expect(client.deleteDownload).not.toHaveBeenCalled();
   });
+
+  it('uses the id to pick between two saved indexers with the same name', async () => {
+    const duplicates = [
+      { id: 2, name: 'Tracker', protocol: 'torrent', seedingTimeMinutes: 30, ratioLimit: 0 },
+      { id: 7, name: 'Tracker', protocol: 'torrent', seedingTimeMinutes: 0, ratioLimit: 2 },
+    ];
+    const client = setup({ indexerName: 'Tracker', indexerId: 7 }, { seedingTime: 31 * 60, ratio: 0.5 }, duplicates);
+
+    const { processCleanupSeededTorrents } = await import('@/lib/processors/cleanup-seeded-torrents.processor');
+    const result = await processCleanupSeededTorrents({ jobId: 'job-8' });
+
+    expect(result).toMatchObject({ skipped: 1, cleaned: 0 });
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+  });
 });

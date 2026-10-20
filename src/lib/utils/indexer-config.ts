@@ -143,7 +143,9 @@ export function createIndexerConfigLookup<T extends IndexerLike>(
     if (byIdMatch) {
       if (!sameProtocol(byIdMatch, protocol)) {
         idIgnored = 'protocol-mismatch';
-      } else if (byNameMatch && byNameMatch !== byIdMatch) {
+      } else if (byNameMatch && byNameMatch !== byIdMatch && byIdMatch.name !== indexerName) {
+        // The id's indexer has another name and the recorded name is a different indexer: a reused id.
+        // (Two saved entries sharing the recorded name are not a conflict: the id picks between them.)
         idIgnored = 'name-conflict';
       } else {
         return { config: byIdMatch, matchedBy: 'id' };
