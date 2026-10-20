@@ -3,8 +3,9 @@
  * Documentation: documentation/setup-wizard.md
  *
  * Polls /api/admin/job-status/:id for the setup finalize step and the first-
- * login initializing page. Every timer it starts is tracked, so leaving the
- * page (cancel) stops polling: nothing keeps fetching or fires after unmount.
+ * login initializing page. Every timer and request it starts is tracked, so
+ * leaving the page (cancel) stops everything: pending waits reject, in-flight
+ * requests are aborted, and nothing fires or fetches after unmount.
  */
 
 'use client';
@@ -12,6 +13,8 @@
 import { useEffect, useRef } from 'react';
 
 export const JOB_POLL_INTERVAL_MS = 2000;
+/** Longest a single status request may take before it is abandoned (polling then continues). */
+export const JOB_STATUS_REQUEST_TIMEOUT_MS = 30_000;
 
 export type JobOutcome = 'completed' | 'failed';
 
@@ -26,7 +29,7 @@ export class PollCancelledError extends Error {
 export const isPollCancelled = (error: unknown): boolean => error instanceof PollCancelledError;
 
 export interface PollOptions {
-  /** Give up with 'failed' after this long (default: no limit). */
+  /** Give up with 'failed' after this long, including a request that never answers (default: no limit). */
   timeoutMs?: number;
   /** Console log prefix, e.g. "[Setup]". */
   logPrefix?: string;
@@ -37,12 +40,19 @@ export interface JobPoller {
   pollJobStatus(jobId: string, accessToken: string, options?: PollOptions): Promise<JobOutcome>;
   /** Wait `ms`. Rejects with PollCancelledError once cancelled. */
   delay(ms: number): Promise<void>;
+  /** fetch() that is aborted on cancel (rejecting with PollCancelledError). */
+  fetch(input: string, init?: RequestInit): Promise<Response>;
+  /** Throws PollCancelledError once cancelled: check before acting on a result. */
+  throwIfCancelled(): void;
   cancel(): void;
   readonly cancelled: boolean;
 }
 
+class RequestTimeoutError extends Error {}
+
 export function createJobPoller(): JobPoller {
   let cancelled = false;
+  const controller = new AbortController();
   const timers = new Set<ReturnType<typeof setTimeout>>();
   const onCancel = new Set<() => void>();
 
@@ -52,6 +62,15 @@ export function createJobPoller(): JobPoller {
       fn();
     }, ms);
     timers.add(timer);
+    return timer;
+  };
+  const clearLater = (timer: ReturnType<typeof setTimeout>) => {
+    clearTimeout(timer);
+    timers.delete(timer);
+  };
+
+  const throwIfCancelled = () => {
+    if (cancelled) throw new PollCancelledError();
   };
 
   const delay = (ms: number) =>
@@ -65,6 +84,32 @@ export function createJobPoller(): JobPoller {
       }, ms);
     });
 
+  /** fetch bound to the poller's lifetime and, optionally, a per-request time limit. */
+  const boundFetch = async (input: string, init: RequestInit = {}, timeoutMs?: number): Promise<Response> => {
+    throwIfCancelled();
+    const request = new AbortController();
+    const abortRequest = () => request.abort();
+    controller.signal.addEventListener('abort', abortRequest);
+    let timedOut = false;
+    const timer = timeoutMs !== undefined
+      ? later(() => { timedOut = true; request.abort(); }, Math.max(0, timeoutMs))
+      : undefined;
+    // Settle on abort even if a fetch implementation ignores the signal
+    const aborted = new Promise<never>((_, reject) => {
+      request.signal.addEventListener('abort', () => reject(new Error('Request aborted')), { once: true });
+    });
+    try {
+      return await Promise.race([fetch(input, { ...init, signal: request.signal }), aborted]);
+    } catch (error) {
+      if (cancelled) throw new PollCancelledError();
+      if (timedOut) throw new RequestTimeoutError(`Request timed out after ${timeoutMs} ms`);
+      throw error;
+    } finally {
+      if (timer !== undefined) clearLater(timer);
+      controller.signal.removeEventListener('abort', abortRequest);
+    }
+  };
+
   const pollJobStatus = async (jobId: string, accessToken: string, options: PollOptions = {}): Promise<JobOutcome> => {
     const prefix = options.logPrefix ?? '[Setup]';
     const deadline = options.timeoutMs !== undefined ? Date.now() + options.timeoutMs : Infinity;
@@ -72,17 +117,20 @@ export function createJobPoller(): JobPoller {
 
     for (;;) {
       await delay(JOB_POLL_INTERVAL_MS);
-      if (Date.now() >= deadline) return 'failed';
+      const timeLeft = deadline - Date.now();
+      if (timeLeft <= 0) return 'failed';
       try {
-        const response = await fetch(`/api/admin/job-status/${jobId}`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        if (cancelled) throw new PollCancelledError();
+        const response = await boundFetch(
+          `/api/admin/job-status/${jobId}`,
+          { headers: { Authorization: `Bearer ${accessToken}` } },
+          Math.min(timeLeft, JOB_STATUS_REQUEST_TIMEOUT_MS)
+        );
         if (!response.ok) {
           console.error(`${prefix} Failed to fetch job status: ${response.status}`);
           return 'failed';
         }
         const data = await response.json();
+        throwIfCancelled();
         const jobStatus = data.job.status;
         console.log(`${prefix} Job ${jobId} status: ${jobStatus}`);
         if (jobStatus === 'completed') return 'completed';
@@ -90,6 +138,11 @@ export function createJobPoller(): JobPoller {
         // Otherwise keep polling (pending, active, stuck)
       } catch (error) {
         if (isPollCancelled(error)) throw error;
+        if (error instanceof RequestTimeoutError) {
+          // One unanswered request: try again until the overall deadline (checked above)
+          console.warn(`${prefix} Job status request timed out; retrying`);
+          continue;
+        }
         console.error(`${prefix} Error polling job status:`, error);
         return 'failed';
       }
@@ -99,8 +152,12 @@ export function createJobPoller(): JobPoller {
   return {
     pollJobStatus,
     delay,
+    fetch: (input, init) => boundFetch(input, init),
+    throwIfCancelled,
     cancel() {
+      if (cancelled) return;
       cancelled = true;
+      controller.abort();
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
       for (const abort of onCancel) abort();
@@ -112,16 +169,25 @@ export function createJobPoller(): JobPoller {
   };
 }
 
+export interface JobPollerHandle extends Pick<JobPoller, 'pollJobStatus' | 'delay'> {
+  /**
+   * The poller for the current mount. Take it once when a run starts and use it for the whole
+   * run, so a run begun before a StrictMode remount stops with that mount's poller.
+   */
+  session(): JobPoller;
+}
+
 /**
- * A poller cancelled when the component unmounts. The returned object is
+ * A poller cancelled when the component unmounts. The returned handle is
  * stable; under StrictMode's simulated unmount a fresh poller takes over.
  */
-export function useJobPoller(): Pick<JobPoller, 'pollJobStatus' | 'delay'> {
+export function useJobPoller(): JobPollerHandle {
   const pollerRef = useRef<JobPoller | null>(null);
-  const facadeRef = useRef<Pick<JobPoller, 'pollJobStatus' | 'delay'> | null>(null);
+  const handleRef = useRef<JobPollerHandle | null>(null);
   if (!pollerRef.current) pollerRef.current = createJobPoller();
-  if (!facadeRef.current) {
-    facadeRef.current = {
+  if (!handleRef.current) {
+    handleRef.current = {
+      session: () => pollerRef.current!,
       pollJobStatus: (...args) => pollerRef.current!.pollJobStatus(...args),
       delay: (ms) => pollerRef.current!.delay(ms),
     };
@@ -133,5 +199,5 @@ export function useJobPoller(): Pick<JobPoller, 'pollJobStatus' | 'delay'> {
     return () => poller.cancel();
   }, []);
 
-  return facadeRef.current;
+  return handleRef.current;
 }

@@ -89,6 +89,8 @@ export default function InitializingPage() {
   }, [authProcessed, router, poller]);
 
   const runJobs = async (accessToken: string) => {
+    // One poller for the whole run: requests are aborted and waits rejected when the page unmounts
+    const session = poller.session();
     if (hasStarted) return;
     setHasStarted(true);
 
@@ -97,7 +99,7 @@ export default function InitializingPage() {
     // Get all scheduled jobs to find the IDs
     let scheduledJobs: any[] = [];
     try {
-      const response = await fetch('/api/admin/jobs', {
+      const response = await session.fetch('/api/admin/jobs', {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
         },
@@ -110,6 +112,8 @@ export default function InitializingPage() {
       const data = await response.json();
       scheduledJobs = data.jobs;
     } catch (error) {
+      if (isPollCancelled(error)) throw error;
+      session.throwIfCancelled();
       console.error('[Initializing] Failed to fetch scheduled jobs:', error);
       setJobs(prev => prev.map(job => ({
         ...job,
@@ -122,6 +126,7 @@ export default function InitializingPage() {
 
     // Monitor each job
     for (let i = 0; i < jobs.length; i++) {
+      session.throwIfCancelled();
       const job = jobs[i];
 
       // Update status to running
@@ -143,7 +148,7 @@ export default function InitializingPage() {
       try {
         // Look for the most recent job execution
         // Jobs should already be triggered by OIDCAuthProvider
-        const response = await fetch('/api/admin/jobs', {
+        const response = await session.fetch('/api/admin/jobs', {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
           },
@@ -163,9 +168,9 @@ export default function InitializingPage() {
           console.warn(`[Initializing] No recent job found for ${job.name}, may still be starting`);
 
           // Wait a bit and check again
-          await poller.delay(3000);
+          await session.delay(3000);
 
-          const retryResponse = await fetch('/api/admin/jobs', {
+          const retryResponse = await session.fetch('/api/admin/jobs', {
             headers: {
               'Authorization': `Bearer ${accessToken}`,
             },
@@ -176,7 +181,7 @@ export default function InitializingPage() {
             const retryJobData = retryData.jobs?.find((j: any) => j.type === job.id);
 
             if (retryJobData?.lastRunJobId) {
-              const finalStatus = await poller.pollJobStatus(retryJobData.lastRunJobId, accessToken, {
+              const finalStatus = await session.pollJobStatus(retryJobData.lastRunJobId, accessToken, {
                 logPrefix: '[Initializing]',
                 timeoutMs: JOB_TIMEOUT_MS,
               });
@@ -197,7 +202,7 @@ export default function InitializingPage() {
           }
         } else {
           // Poll the existing job
-          const finalStatus = await poller.pollJobStatus(recentJob.lastRunJobId, accessToken, {
+          const finalStatus = await session.pollJobStatus(recentJob.lastRunJobId, accessToken, {
             logPrefix: '[Initializing]',
             timeoutMs: JOB_TIMEOUT_MS,
           });
@@ -213,10 +218,11 @@ export default function InitializingPage() {
 
         // Small delay between jobs
         if (i < jobs.length - 1) {
-          await poller.delay(1000);
+          await session.delay(1000);
         }
       } catch (error) {
         if (isPollCancelled(error)) throw error; // left the page: stop, no state updates
+        session.throwIfCancelled();
         console.error(`[Initializing] Failed to monitor job ${job.name}:`, error);
         setJobs(prev => prev.map((j, idx) =>
           idx === i ? {

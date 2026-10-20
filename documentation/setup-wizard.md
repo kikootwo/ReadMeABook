@@ -107,7 +107,10 @@ interface SetupState {
   - Shows real-time progress
   - Auto-enables "Go to Homepage" when complete
 - `system.initial_jobs_run` config flag prevents duplicate runs
-- Job polling (FinalizeStep + initializing page): `useJobPoller()` (`src/app/setup/lib/job-poller.ts`); one poll at a time every 2s; on unmount all its timers are cleared and waiting callers get `PollCancelledError` (they stop without state updates)
+- Job polling (FinalizeStep + initializing page): `useJobPoller()` (`src/app/setup/lib/job-poller.ts`)
+  - One status request at a time every 2s; each request is abandoned after min(time left, 30s) and retried, so a hung request cannot outlast the job's time limit
+  - `runJobs` takes one poller (`session()`) for the whole run and sends every request through `session.fetch` (aborted on unmount); it checks `throwIfCancelled()` at the top of each job and before reporting an error
+  - On unmount: timers cleared, in-flight requests aborted, waiting callers get `PollCancelledError` and stop with no further requests (no next trigger POST) or state updates
 
 ## Fixed Issues ✅
 
