@@ -14,7 +14,7 @@ export const CREDENTIAL_HELP = {
   prowlarr: 'Prowlarr API key (in Prowlarr: Settings → General → Security → API Key)',
   downloadClient: 'download client password or API key (SABnzbd: Config → General → API Key; qBittorrent/Transmission/Deluge/NZBGet: the Web UI password)',
   oidc: "OIDC client secret (in your identity provider's application/client settings)",
-  apprise: 'Apprise notification URLs and auth token (the target-service URLs you configured in Apprise, and the Apprise API token if it requires one)',
+  apprise: 'Apprise notification URLs, auth token and Basic Auth password (the target-service URLs you configured in Apprise, and the API token or the username/password your Apprise server or its reverse proxy requires)',
   ntfy: 'ntfy access token (in ntfy: Account → Access tokens)',
   bookdate: "AI provider API key (in your AI provider's account or API settings)",
 } as const;

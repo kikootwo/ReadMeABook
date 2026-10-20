@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import { test, expect } from '@playwright/test';
 import { evidencePath, waitFor, fakeArr, ctl, execBridgeAvailable, EXEC_BRIDGE_SKIP, Rmab } from '../../lib/harness';
-import { dbNow, exists, setRemoveAfterProcessing } from './242-helpers';
+import { markJobs, newJobsWhere, exists, setRemoveAfterProcessing } from './242-helpers';
 import {
   MEDIA, sh, asApp, q, psql, sqlStr, eventsSince, fmtEvents, sabHistoryDeletes, requestState,
   Evidence, has, fixtureFiles, stageFixture, sha, isSymlink, partialsIn, setTagging, appPid, startDetached,
@@ -53,7 +53,7 @@ test('seed: usenet download of phm into the library', async () => {
   const book = (await fakeArr.books()).phm;
   const rmab = await Rmab.loginAdmin();
   e.save('indexer-config.json', await setRemoveAfterProcessing(rmab, 2, true));
-  const since = dbNow();
+  const since = markJobs();
   const created = await rmab.requestBook(book);
   const requestId = created.request.id;
   await waitRequestDone(requestId);
@@ -82,7 +82,7 @@ test('4 truncated library file from an older version is re-copied, then the sour
   asApp(`size=$(stat -c %s ${q(`${s.L}/${s.file}`)})\nhead -c $((size / 2)) ${q(`${s.L}/${s.file}`)} > /tmp/rmab-e2e-half\ncat /tmp/rmab-e2e-half > ${q(`${s.L}/${s.file}`)}\nrm -f /tmp/rmab-e2e-half`);
   e.save('scenario.txt', `Case 4. L/${s.file} truncated to half its size in place (a prefix of the source). Staged full copy at ${src}/${s.file}. Tagging off (so the placed bytes are the source bytes).\nTrigger: manual import ${src}, cleanupSource on, selectedFiles [${s.file}].\nExpect: L/${s.file} re-copied (sha equal to the source), source removed afterwards.\nOn main 6d23138: the truncated file counts as "already exists", is kept, and the source is deleted.\n`);
   saveState(e, 'before', [s.L, src]);
-  const since = dbNow();
+  const since = markJobs();
   const { events } = await manualImport(e, rmab, since, { audiobookId: s.audiobookId, folderPath: src, cleanupSource: true, selectedFiles: [s.file] });
   saveState(e, 'after', [s.L, '/downloads/manual']);
   e.check(`L/${s.file} sha equals the full source`, sha(`${s.L}/${s.file}`) === full, 'safety');
@@ -113,14 +113,14 @@ test('5 same-named library file with different bytes is never overwritten and ke
   e.save('scenario.txt', `Case 5. L/${s.file} exists. A: ${diff}/${s.file} is a different generated tone with the same name. B: ${same}/${s.file} is a byte copy of the library file. Tagging off.\nTriggers: manual import A, then B; cleanupSource on, selectedFiles [${s.file}].\nExpect A: library file untouched, source kept, "Not imported, left untouched". Expect B: library file untouched, source removed.\nOn main 6d23138: A's copy is skipped by name and the source is deleted anyway.\n`);
   saveState(e, 'before', [s.L, '/downloads/manual']);
 
-  const sinceA = dbNow();
+  const sinceA = markJobs();
   const a = await manualImport(e, rmab, sinceA, { audiobookId: s.audiobookId, folderPath: diff, cleanupSource: true, selectedFiles: [s.file] });
   e.save('rmab-job-events-A.log', `${fmtEvents(a.events)}\n`);
   e.check('A: library file unchanged', sha(`${s.L}/${s.file}`) === libSha, 'safety');
   e.check('A: different-content source kept', exists(`${diff}/${s.file}`) && sha(`${diff}/${s.file}`) === diffSha, 'safety');
   e.check(`log A: Not imported, left untouched: ${s.file}`, has(a.events, `Not imported, left untouched: ${s.file}`), 'log');
 
-  const sinceB = dbNow();
+  const sinceB = markJobs();
   const b = await manualImport(e, rmab, sinceB, { audiobookId: s.audiobookId, folderPath: same, cleanupSource: true, selectedFiles: [s.file] });
   e.save('rmab-job-events-B.log', `${fmtEvents(b.events)}\n`);
   saveState(e, 'after', [s.L, '/downloads/manual']);
@@ -140,7 +140,7 @@ test('6 library entry that is a symlink to a seeding file is left alone by an in
   const seedSha = sha(`${seedDir}/${s.file}`);
   e.save('scenario.txt', `Case 6. L/${s.file} is a symlink to ${seedDir}/${s.file} (a seeding copy).\nTrigger: manual import folderPath L (in place), cleanupSource on, selectedFiles [${s.file}].\nExpect: L/${s.file} still a symlink to the seeding file; the seeding file unchanged.\nOn v1.2.4 / main 6d23138: the link is unlinked (the guard checked only the link's target).\n`);
   saveState(e, 'before', [s.L, seedDir]);
-  const since = dbNow();
+  const since = markJobs();
   const { events } = await manualImport(e, rmab, since, { audiobookId: s.audiobookId, folderPath: s.L, cleanupSource: true, selectedFiles: [s.file] });
   saveState(e, 'after', [s.L, seedDir]);
   e.check(`L/${s.file} is still a symlink`, isSymlink(`${s.L}/${s.file}`), 'safety');
@@ -162,7 +162,7 @@ test('2 manual import with selected files removes only the files verified in the
   sh(`chmod 000 ${q(`${src}/${blocked}`)}`);
   e.save('scenario.txt', `Case 2. Staged fixture phm-mp3 (${files.join(', ')}) at ${src}; ${blocked} made unreadable for the app user (chmod 000 as root).\nTrigger: manual import ${src}, cleanupSource on, selectedFiles = all ${files.length}.\nExpect: the readable files removed after their copies are verified; ${blocked} kept; warning lists it; request shows "1 of ${files.length} files not imported".\nOn main 6d23138: every selected file is unlinked, including the one never imported.\n`);
   saveState(e, 'before', [src]);
-  const since = dbNow();
+  const since = markJobs();
   const { events, requestId } = await manualImport(e, rmab, since, { audiobookId: s.audiobookId, folderPath: src, cleanupSource: true, selectedFiles: files });
   saveState(e, 'after', [s.L, '/downloads/manual']);
   for (const f of files.filter((n) => n !== blocked)) e.check(`${f} removed`, !exists(`${src}/${f}`), 'control');
@@ -210,7 +210,7 @@ test('3 interrupted copy: never a truncated file under the final name; the re-ru
     out
   );
   e.save('scenario.txt', `Case 3. Generated ${srcSize}-byte FLAC at ${src}/${name}; tagging off. A watcher inside rmab SIGSTOPs the app (pid ${pid}) the moment a partial appears in L, then the spec checks the frozen state and SIGKILLs it; supervisord restarts the app and Bull re-runs the stalled organize job.\nExpect while frozen: a partial in L, no ${name} under the final name, source present. Expect after the re-run: L/${name} sha equal to the source, no partial left, source removed only then.\nFAIL (not skip) if the final file appears before any partial.\nOn main 6d23138: the copy writes the final name directly, so the watcher sees the final file first.\n`);
-  const since = dbNow();
+  const since = markJobs();
   const res = await rmab.raw('POST', '/api/admin/manual-import', { audiobookId: s.audiobookId, folderPath: src, cleanupSource: true, selectedFiles: [name] });
   e.check(`manual import accepted (HTTP ${res.status})`, res.ok, 'control');
   const watch = await waitFor('watcher verdict', async () => readOut(out) || null, { timeoutMs: 300_000, intervalMs: 500 }).catch(() => 'no verdict');
@@ -241,7 +241,7 @@ test('3 interrupted copy: never a truncated file under the final name; the re-ru
     ).catch((error) => e.check('re-run finished in time', false, 'control', String(error)));
     await new Promise((r) => setTimeout(r, 2_000));
     e.save('rmab-job-events.log', `${fmtEvents(eventsSince(since))}\n`);
-    e.save('jobs.tsv', psql(`select id, status, attempts, coalesce(error_message,'') from jobs where type = 'organize_files' and created_at at time zone 'UTC' > ${sqlStr(since)}::timestamp`));
+    e.save('jobs.tsv', psql(`select id, status, attempts, coalesce(error_message,'') from jobs where type = 'organize_files' and ${newJobsWhere(since)}`));
     saveState(e, 'after', [s.L]);
     e.check(`after re-run: L/${name} sha equals the source`, exists(finalPath) && sha(finalPath) === srcSha, 'safety');
     e.check('after re-run: no partial file left in L', partialsIn(s.L).length === 0, 'safety');
@@ -288,7 +288,7 @@ test('1 usenet download with one unreadable file: download and client history ke
     out
   );
   e.save('scenario.txt', `Case 1. Inline scenario: usenet release of ${book.title} (fixture martian-mp3: ${files.join(', ')}) via fake SABnzbd, remove after processing on. A watcher makes ${blocked} unreadable (chmod 000 as root) the moment it lands in ${download}.\nTrigger: POST /api/requests; search, grab, download and organize run for real.\nExpect: the other files imported; ${download} kept with every file; no SABnzbd history delete; request downloaded with "1 of ${files.length} files not imported; source files kept"; WARN "Download cleanup skipped".\nOn main 6d23138: the download folder is removed although ${blocked} was never imported.\n`);
-  const since = dbNow();
+  const since = markJobs();
   const created = await rmab.requestBook(book);
   const requestId = created.request.id;
   await waitRequestDone(requestId);

@@ -17,6 +17,7 @@ const requireAuthMock = vi.hoisted(() => vi.fn());
 const requireAdminMock = vi.hoisted(() => vi.fn());
 const notificationServiceMock = vi.hoisted(() => ({
   encryptConfig: vi.fn((type: string, config: any) => ({ ...config, encrypted: true })),
+  prepareSubmittedConfig: vi.fn((type: string, config: any) => ({ ok: true, config: { ...config, encrypted: true } })),
   sendNotification: vi.fn(),
   sendToBackend: vi.fn(),
 }));
@@ -59,7 +60,7 @@ describe('Admin notifications test route', () => {
 
       expect(payload.success).toBe(true);
       expect(payload.message).toContain('successfully');
-      expect(notificationServiceMock.encryptConfig).toHaveBeenCalledWith('discord', testConfig.config);
+      expect(notificationServiceMock.prepareSubmittedConfig).toHaveBeenCalledWith('discord', testConfig.config);
       expect(notificationServiceMock.sendToBackend).toHaveBeenCalled();
     });
 
@@ -136,7 +137,7 @@ describe('Admin notifications test route', () => {
       const payload = await response.json();
 
       expect(payload.success).toBe(true);
-      expect(notificationServiceMock.encryptConfig).toHaveBeenCalledWith('pushover', testConfig.config);
+      expect(notificationServiceMock.prepareSubmittedConfig).toHaveBeenCalledWith('pushover', testConfig.config);
     });
 
     it('tests existing backend using backend ID', async () => {
@@ -164,7 +165,7 @@ describe('Admin notifications test route', () => {
         where: { id: 'backend-1' },
       });
       // Should use stored config directly, not encrypt again
-      expect(notificationServiceMock.encryptConfig).not.toHaveBeenCalled();
+      expect(notificationServiceMock.prepareSubmittedConfig).not.toHaveBeenCalled();
       expect(notificationServiceMock.sendToBackend).toHaveBeenCalledWith(
         'discord',
         existingBackend.config,
