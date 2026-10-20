@@ -22,6 +22,13 @@ vi.mock('@/lib/services/download-client-manager.service', () => ({
   getDownloadClientManager: () => downloadClientManagerMock,
 }));
 vi.mock('@/lib/services/audiobookshelf/api', () => ({ deleteABSItem: vi.fn() }));
+// Library files are covered by request-delete.library-guard.test.ts; here only the torrent rule matters
+vi.mock('@/lib/services/request-delete-files', () => ({
+  removeAudiobookFolder: vi.fn(async () => ({ kind: 'none' })),
+  removeEbookFiles: vi.fn(async () => ({ deleted: 0 })),
+  deleteBackendItem: vi.fn(async () => undefined),
+  deleteLibraryRecords: vi.fn(async () => undefined),
+}));
 
 interface Scenario {
   seedingTimeMinutes: number;
