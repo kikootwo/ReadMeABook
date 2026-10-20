@@ -11,6 +11,7 @@ import { RMABLogger } from '../utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 import { evaluateSeeding, isUnlimitedSeeding } from '../utils/seeding-policy';
 import { otherActiveRequestsUsingTorrent } from '../utils/shared-torrent';
+import { createIndexerConfigLookup, describeIgnoredIndexerId, parseSavedIndexers } from '../utils/indexer-config';
 
 export interface CleanupSeededTorrentsPayload {
   jobId?: string;
@@ -31,24 +32,24 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
     const manager = getDownloadClientManager(configService);
     const indexersConfigStr = await configService.get('prowlarr_indexers');
 
-    if (!indexersConfigStr) {
-      logger.warn('No indexer configuration found, skipping');
+    const indexersConfig = parseSavedIndexers(indexersConfigStr);
+    if (!indexersConfig) {
+      // Missing or unreadable: change nothing (treating every indexer as unconfigured would mean
+      // "seed forever" and hard-delete soft-deleted requests whose torrents are still in the client)
+      logger.warn(indexersConfigStr ? 'Indexer configuration is not a JSON list, skipping' : 'No indexer configuration found, skipping');
       return {
         success: false,
-        message: 'No indexer configuration',
+        message: indexersConfigStr ? 'Invalid indexer configuration' : 'No indexer configuration',
         skipped: true,
       };
     }
 
-    const indexersConfig = JSON.parse(indexersConfigStr);
+    // Look up each download's indexer by Prowlarr id (survives renames) unless it now means another
+    // indexer, else by name
+    const lookupIndexer = createIndexerConfigLookup<any>(indexersConfig as any[]);
+    const matchCounts = { id: 0, name: 0, none: 0, idIgnored: 0 };
 
-    // Create a map of indexer name to config for quick lookup
-    const indexerConfigMap = new Map<string, any>();
-    for (const indexer of indexersConfig) {
-      indexerConfigMap.set(indexer.name, indexer);
-    }
-
-    logger.info(`Loaded configuration for ${indexerConfigMap.size} indexers`);
+    logger.info(`Loaded configuration for ${indexersConfig.length} indexers`);
 
     // Find all completed requests + soft-deleted requests (orphaned downloads)
     // IMPORTANT: Only cleanup requests that are truly complete and not being actively processed
@@ -129,11 +130,21 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
           continue;
         }
 
-        // Get the indexer name from download history
         const indexerName = downloadHistory.indexerName;
-
-        // Find matching indexer configuration by name
-        const seedingConfig = indexerConfigMap.get(indexerName);
+        const indexerRef = { indexerId: downloadHistory.indexerId, indexerName, protocol };
+        const match = lookupIndexer(indexerRef);
+        const { config: seedingConfig, matchedBy } = match;
+        matchCounts[matchedBy ?? 'none']++;
+        const ignoredId = describeIgnoredIndexerId(indexerRef, match);
+        if (ignoredId) {
+          matchCounts.idIgnored++;
+          logger.debug(ignoredId);
+        }
+        logger.debug(
+          matchedBy
+            ? `Indexer config for ${indexerName} (id ${downloadHistory.indexerId ?? 'none'}) matched by ${matchedBy}`
+            : `No indexer config for ${indexerName} (id ${downloadHistory.indexerId ?? 'none'}): treated as unlimited`
+        );
 
         // Per-indexer thresholds. 0 disables that criterion; no config or both 0 = unlimited.
         if (isUnlimitedSeeding(seedingConfig)) {
@@ -222,6 +233,13 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
       }
     }
 
+    logger.info(`Indexer config matches: ${matchCounts.id} by id, ${matchCounts.name} by name, ${matchCounts.none} not configured`);
+    if (matchCounts.idIgnored > 0) {
+      logger.warn(
+        `${matchCounts.idIgnored} download(s) recorded a Prowlarr indexer id that now belongs to another indexer `
+        + '(Prowlarr ids are reused after a rebuild); their settings were looked up by name instead (details at debug level)'
+      );
+    }
     logger.info(`Cleanup complete: ${cleaned} downloads cleaned, ${skipped} still seeding, ${noConfig} unlimited`);
 
     return {

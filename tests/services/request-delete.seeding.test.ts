@@ -36,9 +36,17 @@ interface Scenario {
   seedingTime: number;
   ratio?: number;
   downloadStatus?: string;
+  indexerName?: string;
+  indexerId?: number | null;
+  configured?: { id: number; name: string };
+  /** Raw prowlarr_indexers value instead of the generated one. */
+  rawConfig?: string;
 }
 
-async function deleteWith({ seedingTimeMinutes, ratioLimit, seedingTime, ratio, downloadStatus = 'completed' }: Scenario) {
+async function deleteWith({
+  seedingTimeMinutes, ratioLimit, seedingTime, ratio, downloadStatus = 'completed',
+  indexerName = 'Tracker', indexerId = null, configured = { id: 1, name: 'Tracker' }, rawConfig,
+}: Scenario) {
   prismaMock.request.findFirst.mockResolvedValue({
     id: 'req-1',
     audiobook: {
@@ -50,11 +58,12 @@ async function deleteWith({ seedingTimeMinutes, ratioLimit, seedingTime, ratio, 
       absItemId: null,
       filePath: path.join('/media', 'Author', 'Book'),
     },
-    downloadHistory: [{ torrentHash: 'hash-1', indexerName: 'Tracker', downloadStatus }],
+    downloadHistory: [{ torrentHash: 'hash-1', indexerName, indexerId, downloadStatus }],
   });
   configServiceMock.get.mockImplementation(async (key: string) => {
     if (key === 'prowlarr_indexers') {
-      return JSON.stringify([{ name: 'Tracker', protocol: 'torrent', seedingTimeMinutes, ratioLimit }]);
+      if (rawConfig !== undefined) return rawConfig;
+      return JSON.stringify([{ ...configured, protocol: 'torrent', seedingTimeMinutes, ratioLimit }]);
     }
     if (key === 'media_dir') return '/media';
     return null;
@@ -154,5 +163,40 @@ describe('deleteRequest seeding rule', () => {
 
     expect(client.deleteDownload).not.toHaveBeenCalled();
     expect(result.torrentsKeptUnlimited).toBe(1);
+  });
+
+  it('applies the ratio limit of an indexer renamed in Prowlarr (matched by id)', async () => {
+    const { result, client } = await deleteWith({
+      seedingTimeMinutes: 0, ratioLimit: 2, seedingTime: 99999, ratio: 1,
+      indexerName: 'Old Name', indexerId: 7, configured: { id: 7, name: 'New Name' },
+    });
+
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+    expect(result.torrentsKeptSeeding).toBe(1);
+    expect(result.torrentsKeptUnlimited).toBe(0);
+  });
+
+  it('leaves the download in the client when the saved indexer configuration is not a list', async () => {
+    const { result, client } = await deleteWith({
+      seedingTimeMinutes: 0, ratioLimit: 0, seedingTime: 99999, ratio: 9, rawConfig: '{"id":1}',
+    });
+
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ torrentsRemoved: 0, torrentsKeptUnlimited: 0, torrentsKeptSeeding: 0 });
+  });
+
+  it("uses the recorded name's settings when the id now belongs to a different indexer", async () => {
+    // Id 9 is now another tracker (1 min, no ratio): by id it would be removed; its recorded name needs ratio 2
+    const rawConfig = JSON.stringify([
+      { id: 9, name: 'OtherTracker', protocol: 'torrent', seedingTimeMinutes: 1, ratioLimit: 0 },
+      { id: 1, name: 'Tracker', protocol: 'torrent', seedingTimeMinutes: 0, ratioLimit: 2 },
+    ]);
+    const { result, client } = await deleteWith({
+      seedingTimeMinutes: 0, ratioLimit: 0, seedingTime: 99999, ratio: 0.5,
+      indexerName: 'Tracker', indexerId: 9, rawConfig,
+    });
+
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+    expect(result.torrentsKeptSeeding).toBe(1);
   });
 });

@@ -17,6 +17,7 @@ import {
 } from './request-delete-files';
 import { evaluateSeeding } from '../utils/seeding-policy';
 import { otherActiveRequestsUsingTorrent } from '../utils/shared-torrent';
+import { describeIgnoredIndexerId, findIndexerConfig, parseSavedIndexers } from '../utils/indexer-config';
 
 const logger = RMABLogger.create('RequestDelete');
 
@@ -130,17 +131,29 @@ export async function deleteRequest(
         const configService = getConfigService();
         const indexersConfigStr = await configService.get('prowlarr_indexers');
 
-        let seedingConfig: any = null;
-        if (indexersConfigStr) {
-          const indexersConfig = JSON.parse(indexersConfigStr);
-          seedingConfig = indexersConfig.find(
-            (idx: any) => idx.name === downloadHistory.indexerName
-          );
-        }
-
         // Handle download cleanup via unified interface
         const clientId = downloadHistory.downloadClientId || downloadHistory.torrentHash || downloadHistory.nzbId;
         const clientType = downloadHistory.downloadClient || 'qbittorrent';
+
+        let seedingConfig: any = null;
+        if (indexersConfigStr) {
+          const indexersConfig = parseSavedIndexers(indexersConfigStr);
+          if (!indexersConfig) {
+            // Unreadable settings: leave the download alone (handled by the catch below)
+            throw new Error('Saved indexer configuration is not a list; the download was left in the client');
+          }
+          // By Prowlarr id (survives renames) unless it now means another indexer; else by name
+          const ref = {
+            indexerId: downloadHistory.indexerId,
+            indexerName: downloadHistory.indexerName,
+            protocol: CLIENT_PROTOCOL_MAP[clientType as DownloadClientType] || 'torrent',
+          };
+          const match = findIndexerConfig<any>(indexersConfig as any[], ref);
+          seedingConfig = match.config ?? null;
+          const ignored = describeIgnoredIndexerId(ref, match);
+          if (ignored) logger.warn(ignored);
+          logger.debug(`Indexer config for ${downloadHistory.indexerName}: ${match.matchedBy ? `matched by ${match.matchedBy}` : 'not configured'}`);
+        }
 
         if (clientId && clientType !== 'direct') {
           const { getDownloadClientManager } = await import('./download-client-manager.service');

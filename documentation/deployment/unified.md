@@ -53,16 +53,69 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - Bump: change tag + digest on the `FROM` line AND `ARG FFMPEG_VERSION` together
 - **Fixed (#230):** previously an unpinned amd64-only tarball from johnvansickle.com (host outages broke builds; arm64 got amd64 binaries)
 
+**Stages (multi-stage, from PR #279 by ChaoticSciuridae):**
+| Stage | From | Does | Shipped |
+|---|---|---|---|
+| `ffmpeg` | `mwader/static-ffmpeg@sha256:…` | pinned ffmpeg/ffprobe | copied |
+| `base` | `node:20-bookworm` | apt (postgres, redis, supervisor, gosu, locales), ffmpeg + guard, purge imagemagick | yes (OS layer) |
+| `builder` | `node:20-bookworm` | `npm ci` (all deps) → `COPY . .` → `prisma generate` → `next build` (standalone) | no |
+| `prisma-cli` | `node:20-bookworm` | Prisma CLI closure from `package-lock.json` → `/opt/prisma-cli` | no |
+| `runtime` | `base` | app artifacts below + guard | yes |
+- Requires BuildKit (`RUN --network=none`, `RUN --mount=type=bind`): the legacy builder (`DOCKER_BUILDKIT=0`, the default before Docker 23, e.g. on 20.10) can't build it; use Docker 23+ or `docker buildx build`
+- `builder`/`prisma-cli` must stay on bookworm and build for TARGETPLATFORM (never `--platform=$BUILDPLATFORM`): Prisma engines + bcrypt are native
+- `builder` WORKDIR must stay `/app` (generated client records absolute paths)
+- Version vars: `builder` sets `APP_VERSION`/`GIT_COMMIT`/`BUILD_DATE` + `NEXT_PUBLIC_*` before `next build` (inlined into VersionBadge); `runtime` re-declares the ARGs + ENVs (`/api/version`)
+- Dummy `DATABASE_URL` exists only in `builder`; the runtime image has no baked `DATABASE_URL`
+
+**Runtime `/app` contents:**
+| Path | Source |
+|---|---|
+| `server.js`, `.next/server`, `node_modules/` (traced) | `builder` `.next/standalone` |
+| `.next/static`, `public/`, `package.json`, `prisma/` | `builder` |
+| `src/generated/prisma/` (whole client) | `builder` (credential recovery `require`s it; bundled app finds its engine via `cwd/src/generated/prisma`) |
+| `node_modules/{prisma,@prisma/engines,…}` + `.bin/prisma` | `prisma-cli`, ONE `COPY` merged into `node_modules` (a lone `.bin/prisma` copy flattens the symlink and the CLI can't find its wasm) |
+| `scripts/` | build context, explicit `COPY` |
+| `app-start.sh`, `redis-start.sh`, `postgres-start.sh`; `/entrypoint.sh` | `docker/unified/` |
+- Not shipped: devDependencies, untraced prod deps (`@next/swc-*`; msgpackr's native `@msgpackr-extract/*` binary, so bull's msgpackr uses its JS fallback), app source (`src/` except `src/generated/prisma`), `tests/`, `e2e/`, `screenshots/`, `documentation/`, `docker/`, root config/docs files, build `.next/cache`
+- Whole-project trace: routes that open admin-configured paths (`fs` on download/media dirs) make Turbopack trace the whole project root ("Dynamic filesystem access causes tracing of the whole project" build warnings). `next.config.ts` `outputFileTracingExcludes['*']` keeps the non-runtime paths above out of `.next/standalone`; the runtime guard fails the build if any of them reappears in `/app`
+- Foreign-platform prebuilds: every `node_modules/**/prebuilds/<platform>-<arch>/` except `linux-<build arch>` is deleted (bcrypt 6 ships all platforms; tracing copies the folder); a missing mapping for the arch fails the build
+
+**Prisma CLI provenance (`docker/unified/prisma-cli-lock.js`):**
+- Walks `node_modules/prisma` deps in `package-lock.json` (npm lookup order, optional peers skipped) → writes a sub `package.json` + `package-lock.json` with entries copied verbatim (version, `resolved`, sha512 `integrity`); version comes from the lockfile, never hardcoded
+- Hard errors: prisma absent, unresolved edge, non-sha512 integrity, non-`registry.npmjs.org` `resolved`, link entries
+- `npm ci --ignore-scripts` (tarball integrity checked against the lockfile) → `npm rebuild prisma @prisma/engines` (only install scripts allowed) → delete `@prisma/engines/node_modules/.cache`
+- Engines (`schema-engine-*`, `libquery_engine-*`) are NOT lockfile-verified: `@prisma/engines` downloads them from `binaries.prisma.sh` and checks a sha256 served by that host. Never set `PRISMA_ENGINES_MIRROR`, `PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING` or `PRISMA_*_BINARY`
+- Stage guard: installed prisma == lockfile version; exactly one executable `schema-engine-*`
+- Dependency bumps: when the Prisma CLI closure changes (a `prisma` bump, or any of its deps moving in the lockfile), update `EXPECTED_PATHS` in `tests/docker/prisma-cli-lock.test.ts` in the same PR (`npm test` fails until it matches)
+
+**Runtime guard (`RUN --network=none`, `docker/unified/runtime-guard.js`, bind-mounted, never in a layer):**
+- Runs the entrypoint's `prisma-cli-preflight` block verbatim, then the entrypoint's exact `PRISMA_CLI`
+- `.bin/prisma` is a symlink to `prisma/build/index.js`
+- CLI version == `Prisma.prismaVersion.client`; `@prisma/engines-version` == CLI engines hash == `Prisma.prismaVersion.engine` (catches a split prisma/@prisma/client bump)
+- `prisma migrate diff --from-empty --to-schema-datamodel /app/prisma/schema.prisma --script` renders the schema offline (dummy URL on that command only)
+- Recovery: generated client + bcrypt load from `/app/scripts`; `package.json` has `rmab:recover`
+- Every bare `require("…")` in `.next/server/**/*.js` resolves from its chunk (externals today: `bcrypt`, `bull`, `keyv`, `next/dist/...`); `bcrypt` + `bull` must be seen (else the scan is blind). Only allowlisted miss: `something` in `[turbopack]_runtime.js` (a code comment)
+- Next >= 16.4 requires externals through hashed aliases (`require("bcrypt-a3fecf8c027c10c9")`) backed by relative symlinks in `.next/node_modules/` (`-> ../../node_modules/bcrypt`); an alias counts as its package and must resolve inside `/app/node_modules/<pkg>/`
+- Each resolved app external (not `next/…`) is also `require`d once, so a missing transitive dependency fails the build
+- bull: `lib/scripts/index.js` exports ≥20 commands, each with Lua `content` (bull 4 loads the precompiled `lib/scripts/<name>-<keys>.js`, not the `.lua` files). When `lib/commands/*.lua` is shipped (it arrives only via a broad route trace), each must have its `lib/scripts` entry; when absent the cross-check is skipped
+- Recovery also requires every `/app/scripts/lib/*.js`; `terminal-prompt.js` and `password-users.js` must exist
+- Layout: required runtime paths exist; none of the non-runtime paths (`src/{app,components,contexts,hooks,lib}`, `tests`, `e2e`, `screenshots`, `documentation`, `docker`, `dockerfile.unified`, `package-lock.json`, `tsconfig.json`) is in `/app`
+- Note: Next 16 `next build` uses Turbopack even with `TURBOPACK=0` (chunk names `[turbopack]_runtime.js`)
+- Every ELF file in `/app` + ffmpeg/ffprobe has the build arch's `e_machine`; expects 1 schema engine, ≥2 `libquery_engine` copies, a bcrypt `.node` binding (bcrypt 5 `bcrypt_lib.node`, bcrypt 6 `prebuilds/linux-<arch>/bcrypt.*.node`)
+
+**Guard failures:**
+- `prisma X installed, lockfile says Y` / `prisma CLI X != generated client Y` → split or stale Prisma bump (`prisma` and `@prisma/client` must move together)
+- `… is not a symlink` → CLI tree copied piecemeal; copy `/opt/prisma-cli/node_modules` whole
+- `unresolvable require("x") in .next/server/…` → standalone tracing missed a server external; fix tracing or add an explicit `COPY`
+- `require("x") … resolves but does not load` → a traced external is missing one of its own dependencies (tracing gap); same fix
+- `non-runtime files in /app` → one of the guard's listed paths (`NOT_SHIPPED` in `runtime-guard.js`) is back in the whole-project trace; restore its `outputFileTracingExcludes` entry in `next.config.ts`. The guard checks only that list, not every new path: keep `NOT_SHIPPED` and the excludes in sync, and add a new top-level dir or `src/` folder to both
+- `e_machine 0x.., expected 0x..` → wrong-arch native file (e.g. a `--platform=$BUILDPLATFORM` stage); never ship it
+
 **Build process:**
 1. `ffmpeg` stage: pinned `mwader/static-ffmpeg` index digest (platform variant auto-selected)
-2. apt install (postgres, redis, supervisor, ...)
-3. `COPY --from=ffmpeg` ffmpeg/ffprobe → `/usr/local/bin`, versions.json → `/usr/local/share/ffmpeg/`
-4. Guard RUN: arch + version check (failure meanings below)
-5. Install dependencies (production only)
-6. Generate Prisma client
-7. Build Next.js app
-8. Create directories (postgres, redis, app)
-9. Copy supervisord.conf and entrypoint.sh
+2. `base`: apt install (postgres, redis, supervisor, ...), `COPY --from=ffmpeg` ffmpeg/ffprobe → `/usr/local/bin`, versions.json → `/usr/local/share/ffmpeg/`, ffmpeg guard (failure meanings below)
+3. `builder`: install all dependencies, generate Prisma client, build Next.js (standalone); `prisma-cli` builds in parallel
+4. `runtime`: copy artifacts (table above), create directories, copy supervisord.conf + scripts, runtime guard
 
 **ffmpeg guard failures:**
 - `ERROR: <bin> e_machine 0x.., expected 0x.. for <arch>` → wrong-arch binary copied (platform selection broken, e.g. a `--platform` added to the ffmpeg `FROM`); never ship it
@@ -72,19 +125,23 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 
 **Files:**
 - `dockerfile.unified` - Main Dockerfile
+- `docker/unified/prisma-cli-lock.js` - Build-time Prisma CLI sub-lockfile generator (tests: `tests/docker/prisma-cli-lock.test.ts`)
+- `docker/unified/runtime-guard.js` - Build-time runtime-stage guard
 - `docker/unified/supervisord.conf` - Process manager config
 - `docker/unified/entrypoint.sh` - Startup script
 
 ## Startup Sequence
 
 **Entrypoint script (`entrypoint.sh`):**
+0. Prisma CLI preflight (`prisma-cli-preflight` block): `PRISMA_CLI=/app/node_modules/.bin/prisma` (entrypoint variable, not an image ENV) must be executable and exactly one executable `@prisma/engines/schema-engine-*` must exist, else `❌ FATAL: …` and `exit 1` before any volume is touched
 1. Load secrets from `/app/config/.secrets` if exists
 2. Generate secrets if not provided (from env or file)
 3. Persist secrets to `/app/config/.secrets` for future restarts
 4. Initialize PostgreSQL if first run
 5. Start PostgreSQL temporarily
 6. Create database user and database
-7. Run Prisma migrations
+7. Run Prisma schema sync (`$PRISMA_CLI db push --skip-generate --accept-data-loss`) + run-once data migrations (`$PRISMA_CLI db execute`, tracked in `_data_migrations`). Never `npx prisma`: with no local CLI, npx silently installs the latest prisma from the registry
+   - A failed `db push` still does NOT stop the container (logs `⚠️  Migrations may have failed, continuing...`); a failed data migration is retried on the next start. Only a missing CLI is fatal
 8. Stop PostgreSQL
 9. Export environment variables
 10. Start supervisord (postgres → redis → app)
@@ -485,10 +542,13 @@ docker exec readmeabook-unified redis-cli ping
 # Should return: PONG
 ```
 
-**Check migrations:**
+**Check schema drift (read-only):**
 ```bash
-docker exec readmeabook-unified \
-  su - node -c "cd /app && npx prisma migrate status"
+docker exec readmeabook-unified bash -c 'set -a; . /etc/environment; set +a; cd /app && \
+  gosu node /app/node_modules/.bin/prisma migrate diff --from-schema-datasource prisma/schema.prisma \
+  --to-schema-datamodel prisma/schema.prisma --exit-code'
+# exit 0 = database matches the schema; 2 = drift (diff printed). The schema is applied with db push
+# at every start, not migrations. Never use npx prisma in the container (it can fetch another version).
 ```
 
 **Reset database:**
@@ -620,7 +680,7 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
 **7. Missing server.js in standalone build**
 - Issue: App fails with "Cannot find module '/app/server.js'"
 - Cause: Next.js standalone output creates server.js in `.next/standalone/`, needs to be copied to `/app/`
-- Fix: Dockerfile copies standalone output to root: `cp -r .next/standalone/* .`
+- Fix: runtime stage copies standalone output to `/app` (`COPY --from=builder /app/.next/standalone ./`)
 
 **8. DATABASE_URL with special characters**
 - Issue: Prisma fails with "invalid port number in database URL" when password has special chars
@@ -709,6 +769,11 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
   - PUID/PGID are passed via /etc/environment to the wrapper scripts
 - Verification: After fix, `ps ax -o user,pid,group,gid,comm` will show correct GID for app and redis processes
 - Note: This primarily affects users with complex setups (NFS mounts, AD/SSSD groups, PUID=65534)
+
+**20. Oversized image; Prisma CLI kept only by accident (#279)**
+- Issue: single-stage build shipped the full `npm ci` layer (devDependencies survive `npm prune` in earlier layers), `src/`, tests, the build cache and a duplicate standalone tree
+- Latent: CLI present only because prune keeps `devOptional` prisma; recovery worked only because `COPY . .` shipped `scripts/` + `src/generated/prisma`; a missing CLI made `npx prisma` fetch the latest prisma at start, then `|| echo` hid any failure
+- Fix: multi-stage build (idea + first version: PR #279, ChaoticSciuridae); CLI from the lockfile (`prisma-cli` stage); explicit copies for `scripts/`, the generated client, `prisma/`; entrypoint preflight + absolute `PRISMA_CLI`; offline runtime guard
 
 ## Related
 

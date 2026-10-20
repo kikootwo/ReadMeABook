@@ -9,13 +9,16 @@
 # from PR #241 (TaylorMcGinnis). Bump: update tag + digest here AND FFMPEG_VERSION below.
 FROM mwader/static-ffmpeg:9.0.2-1@sha256:f5d100184884eb3e82b0eb14bb5ebf98da99826ac824989720297fb9ef21c822 AS ffmpeg
 
-# Start from debian base with node preinstalled
-FROM node:20-bookworm AS base
+# Stages (multi-stage layout from PR #279, ChaoticSciuridae):
+#   base       node:20-bookworm + PostgreSQL/Redis/supervisord + pinned ffmpeg (runtime OS layer)
+#   builder    node:20-bookworm + full npm ci, prisma generate, next build (never shipped)
+#   prisma-cli node:20-bookworm + the Prisma CLI closure installed from package-lock.json (never shipped)
+#   runtime    base + standalone app, generated client, CLI tree, scripts/, docker/unified/*
+# builder and prisma-cli MUST stay on the same distro as base and build for TARGETPLATFORM
+# (never --platform=$BUILDPLATFORM): Prisma engines and bcrypt are native and arch-specific.
 
-# Re-declare build arguments after FROM (ARGs before FROM are not available after)
-ARG APP_VERSION=unknown
-ARG GIT_COMMIT=unknown
-ARG BUILD_DATE=unknown
+# Runtime OS layer: debian with node preinstalled
+FROM node:20-bookworm AS base
 
 # Install PostgreSQL 16 repository key
 RUN apt-get update && apt-get install -y curl gnupg && \
@@ -71,6 +74,17 @@ RUN apt-get purge -y imagemagick imagemagick-6-common 'imagemagick-6*' \
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
+# ============================================================================
+# builder: full dependency tree + Next.js standalone build (never shipped)
+# ============================================================================
+FROM node:20-bookworm AS builder
+
+# Re-declare build arguments after FROM (ARGs before FROM are not available after)
+ARG APP_VERSION=unknown
+ARG GIT_COMMIT=unknown
+ARG BUILD_DATE=unknown
+
+# Must stay /app: the generated Prisma client records absolute paths from generate time.
 WORKDIR /app
 
 # Copy package files
@@ -83,11 +97,12 @@ RUN npm ci && npm cache clean --force
 # Copy application code (before generating Prisma to avoid overwriting)
 COPY . .
 
-# Generate Prisma client AFTER copying code (prevents stale generated files from overwriting)
+# Generate Prisma client AFTER copying code (prevents stale generated files from overwriting).
+# The dummy URL exists only in this stage; the runtime image never carries it.
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy?schema=public"
-RUN npx prisma generate
+RUN ./node_modules/.bin/prisma generate
 
-# Set version environment variables for build and runtime
+# Version variables: NEXT_PUBLIC_* are inlined into the client bundle by next build (VersionBadge)
 ENV NEXT_PUBLIC_APP_VERSION=${APP_VERSION}
 ENV NEXT_PUBLIC_GIT_COMMIT=${GIT_COMMIT}
 ENV NEXT_PUBLIC_BUILD_DATE=${BUILD_DATE}
@@ -95,21 +110,95 @@ ENV APP_VERSION=${APP_VERSION}
 ENV GIT_COMMIT=${GIT_COMMIT}
 ENV BUILD_DATE=${BUILD_DATE}
 
-# Build Next.js application
+# Build Next.js application (output: 'standalone' → .next/standalone/server.js + traced node_modules)
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 ENV TURBOPACK=0
 RUN npm run build
 
-# Reorganize for standalone output
-# Next.js standalone mode creates .next/standalone/ with server.js
-# We need to move files to root for supervisord to find server.js
-RUN cp -r .next/standalone/* . && \
-    cp -r .next/static ./.next/static && \
-    cp -r public ./public 2>/dev/null || true
+# ============================================================================
+# prisma-cli: the Prisma CLI closure, installed from package-lock.json (never shipped)
+# ============================================================================
+# The CLI is a devDependency, so standalone output omits it; the entrypoint needs it for
+# `db push` / `db execute`. prisma-cli-lock.js copies prisma's transitive entries (version,
+# resolved, sha512 integrity) out of the app lockfile, so npm ci installs exactly the locked
+# tarballs. Only prisma + @prisma/engines may run install scripts; @prisma/engines downloads
+# its schema/query engines from binaries.prisma.sh, checked against that host's sha256.
+FROM node:20-bookworm AS prisma-cli
+WORKDIR /opt/prisma-cli
+RUN --mount=type=bind,source=package-lock.json,target=/tmp/app/package-lock.json \
+    --mount=type=bind,source=docker/unified/prisma-cli-lock.js,target=/tmp/app/prisma-cli-lock.js \
+    node /tmp/app/prisma-cli-lock.js /tmp/app/package-lock.json /opt/prisma-cli
+RUN npm ci --ignore-scripts --no-audit --no-fund && \
+    npm rebuild prisma @prisma/engines && \
+    rm -rf node_modules/.package-lock.json node_modules/@prisma/engines/node_modules/.cache && \
+    npm cache clean --force
+# Guard: installed CLI is the lockfile version and exactly one executable schema engine exists.
+RUN set -eu; \
+    want="$(node -p "require('./package.json').dependencies.prisma")"; \
+    got="$(node -p "require('./node_modules/prisma/package.json').version")"; \
+    [ "$got" = "$want" ] || { echo "ERROR: prisma $got installed, lockfile says $want" >&2; exit 1; }; \
+    set -- node_modules/@prisma/engines/schema-engine-*; \
+    [ "$#" -eq 1 ] && [ -x "$1" ] || { echo "ERROR: expected one executable schema engine, got: $*" >&2; exit 1; }; \
+    echo "OK: prisma $got with $1"
 
-# Remove dev dependencies to reduce image size
-RUN npm prune --production
+# ============================================================================
+# runtime: the shipped image
+# ============================================================================
+FROM base AS runtime
+
+# Re-declare build arguments after FROM (ARGs before FROM are not available after)
+ARG APP_VERSION=unknown
+ARG GIT_COMMIT=unknown
+ARG BUILD_DATE=unknown
+
+# Set version environment variables for runtime
+ENV NEXT_PUBLIC_APP_VERSION=${APP_VERSION}
+ENV NEXT_PUBLIC_GIT_COMMIT=${GIT_COMMIT}
+ENV NEXT_PUBLIC_BUILD_DATE=${BUILD_DATE}
+ENV APP_VERSION=${APP_VERSION}
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV BUILD_DATE=${BUILD_DATE}
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
+ENV TURBOPACK=0
+
+WORKDIR /app
+
+# Next.js standalone output: server.js, .next/server, traced node_modules (bcrypt, bull, ...).
+# next.config.ts outputFileTracingExcludes keeps the whole-project trace's source/tests/docs out.
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+# npm run rmab:recover needs the full package.json
+COPY --from=builder /app/package.json ./package.json
+# Schema + run-once data migrations applied by the entrypoint
+COPY --from=builder /app/prisma ./prisma
+# Whole generated client: credential recovery requires src/generated/prisma/client, and the
+# bundled app finds its query engine via process.cwd()/src/generated/prisma
+COPY --from=builder /app/src/generated/prisma ./src/generated/prisma
+# Prisma CLI tree in ONE copy (keeps the .bin/prisma symlink; a lone copy of .bin/prisma becomes
+# a regular file and the CLI can no longer find its wasm). Overlaps with the standalone tree are
+# the same lockfile entries, so the merge cannot mix versions.
+COPY --from=prisma-cli /opt/prisma-cli/node_modules ./node_modules
+# Credential recovery (documentation/admin-features/credential-recovery.md)
+COPY --chown=root:root scripts ./scripts
+
+# Native prebuilds for other platforms: bcrypt 6 ships prebuilds/<platform>-<arch>/ for every
+# platform and tracing copies the whole folder. node-gyp-build only loads prebuilds/linux-<arch>/,
+# so drop the rest; the runtime guard then requires every ELF file in /app to match the build arch.
+RUN set -eu; \
+    case "$(uname -m)" in \
+        x86_64) keep=linux-x64 ;; \
+        aarch64) keep=linux-arm64 ;; \
+        *) echo "ERROR: no prebuild mapping for $(uname -m) (supported: amd64, arm64)" >&2; exit 1 ;; \
+    esac; \
+    find /app/node_modules -type d -name prebuilds -prune | while read -r dir; do \
+        for p in "$dir"/*; do \
+            [ -e "$p" ] || continue; \
+            [ "$(basename "$p")" = "$keep" ] || { rm -rf "$p"; echo "removed $p"; }; \
+        done; \
+    done
 
 # Create necessary directories
 RUN mkdir -p \
@@ -155,6 +244,16 @@ RUN sed -i 's/\r$//' /app/redis-start.sh && chmod +x /app/redis-start.sh
 COPY --chown=root:root docker/unified/postgres-start.sh /app/postgres-start.sh
 # Convert line endings and make executable
 RUN sed -i 's/\r$//' /app/postgres-start.sh && chmod +x /app/postgres-start.sh
+
+# Guard (offline, final stage): runs the entrypoint's own Prisma CLI preflight block, then
+# docker/unified/runtime-guard.js (bind-mounted, never in a layer) with the entrypoint's exact
+# PRISMA_CLI: CLI/client/engine versions agree, the schema engine renders the schema, credential
+# recovery loads its client, bcrypt and scripts/lib, every bare require() in .next/server
+# resolves (app externals also load), bull's Lua commands are present, no non-runtime
+# source/docs/tests are in /app, and every ELF file in /app (+ ffmpeg/ffprobe) matches the build arch. Failure meanings: unified.md.
+RUN --network=none \
+    --mount=type=bind,source=docker/unified/runtime-guard.js,target=/tmp/guard/runtime-guard.js \
+    node /tmp/guard/runtime-guard.js
 
 # Expose app port
 EXPOSE 3030
