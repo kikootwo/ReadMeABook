@@ -20,6 +20,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const { createPrompter, CANCELLED } = require('./lib/terminal-prompt');
 const { listPasswordUsers, describePasswordUser, findPasswordUser } = require('./lib/password-users');
+const { terminalProblem, installExitHandlers, passwordResetData } = require('./lib/recovery-process');
 
 const SECRETS_FILE = '/app/config/.secrets';
 const ENVIRONMENT_FILE = '/etc/environment';
@@ -232,14 +233,9 @@ function generateNewKey() {
 // Prompts live in ./lib/terminal-prompt.js (no readline left attached while a password is typed)
 const prompter = createPrompter();
 
-// Never leave the terminal in raw mode, whatever ends the process
-process.on('exit', () => prompter.close());
-for (const [signal, code] of [['SIGTERM', 143], ['SIGHUP', 129]]) {
-  process.once(signal, () => {
-    prompter.close();
-    process.exit(code);
-  });
-}
+// Never leave the terminal in raw mode, whatever ends the process; hold() defers exit
+// signals while a full recovery commits and writes the new key
+const exitControl = installExitHandlers({ prompter });
 
 // ---------------------------------------------------------------------------
 // .secrets / /etc/environment file updates
@@ -282,17 +278,10 @@ function updateKeyInFile(filePath, keyName, newValue, quoted) {
 // Main
 // ---------------------------------------------------------------------------
 async function main() {
-  // Reject any CLI args by design.
-  if (process.argv.length > 2) {
-    console.error('This script does not accept CLI arguments. All input is via interactive prompts.');
-    console.error('Run: docker exec -it <container> npm run rmab:recover');
-    process.exit(2);
-  }
-
-  // Interactive only: without a terminal the password prompt cannot hide input
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    console.error('This script is interactive and needs a terminal (stdin and stdout).');
-    console.error('Run: docker exec -it <container> npm run rmab:recover');
+  // No CLI args, and interactive only: without a terminal the password prompt cannot hide input
+  const problem = terminalProblem({ argv: process.argv, stdin: process.stdin, stdout: process.stdout });
+  if (problem) {
+    for (const line of problem) console.error(line);
     process.exit(2);
   }
 
@@ -350,6 +339,7 @@ async function main() {
     }
   }
   const prisma = new PrismaClient();
+  let releaseSignals = () => {};
 
   try {
     // -------------------------------------------------------------------------
@@ -504,6 +494,8 @@ async function main() {
     let newKeyBuffer = currentKey;
 
     if (fullRecovery) {
+      // From here until the new key is on disk (or printed), exit signals wait
+      releaseSignals = exitControl.hold();
       newKeyBase64 = generateNewKey();
       newKeyBuffer = deriveKey(newKeyBase64);
 
@@ -603,7 +595,7 @@ async function main() {
         }
         await tx.user.update({
           where: { id: chosenUser.id },
-          data: { authToken: encryptedHash, lastLoginAt: null },
+          data: passwordResetData(encryptedHash),
         });
         return result;
       });
@@ -614,7 +606,7 @@ async function main() {
       await prisma.$transaction(async (tx) => {
         await tx.user.update({
           where: { id: chosenUser.id },
-          data: { authToken: encryptedHash, lastLoginAt: null },
+          data: passwordResetData(encryptedHash),
         });
       });
       summary = null;
@@ -648,6 +640,7 @@ async function main() {
     console.log('================================================================');
     console.log('');
     console.log(`  User reset:   ${chosenUser.plexUsername}`);
+    console.log('  Existing sessions for this user were signed out.');
     if (fullRecovery && summary) {
       console.log(`  Configuration rows re-encrypted: ${summary.configRotated}`);
       console.log(`  Configuration rows deleted:      ${summary.configDeleted}`);
@@ -721,6 +714,7 @@ async function main() {
     } catch (_e) {
       // ignore
     }
+    releaseSignals(); // exits now if a signal arrived during the held section
   }
 }
 

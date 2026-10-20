@@ -2,12 +2,14 @@
  * Component: Password-Login Users for the Credential Recovery Script
  * Documentation: documentation/admin-features/credential-recovery.md
  *
- * A user can log in with a password when their row was created with one: plexId
- * `local-<username>` and authToken holding the encrypted bcrypt hash. That covers
+ * A user can log in with a password when their row was created with one: plexId exactly
+ * `local-<plexUsername>` (what /api/auth/admin/login looks up) and authToken holding the
+ * encrypted bcrypt hash. That covers
  * - local users (authProvider 'local': setup admin in Audiobookshelf mode, registered users)
  * - the Plex-mode setup admin (authProvider 'plex', logs in through /api/auth/admin/login)
- * Plex and OIDC users never have a password (their authToken is a provider token); an OIDC
- * subject that happens to start with "local-" is excluded by provider.
+ * Plex users (authProvider null, plexId a Plex account id or Home uuid) and OIDC users never
+ * have a password: their authToken is a provider token. Rows with any other provider, or
+ * whose plexId is not exactly local-<plexUsername>, are never offered.
  */
 
 'use strict';
@@ -15,20 +17,22 @@
 const LOCAL_ID_PREFIX = 'local-';
 const PASSWORD_PROVIDERS = ['local', 'plex'];
 
-/** Prisma filter; authProvider null is a legacy row and kept (the admin login ignores it). */
+/** Prisma filter; the exact local-<plexUsername> match is checked in isPasswordLoginUser. */
 const PASSWORD_LOGIN_WHERE = {
   deletedAt: null,
   plexId: { startsWith: LOCAL_ID_PREFIX },
-  OR: [{ authProvider: { in: PASSWORD_PROVIDERS } }, { authProvider: null }],
+  authProvider: { in: PASSWORD_PROVIDERS },
 };
 
 function isPasswordLoginUser(user) {
   return (
     Boolean(user) &&
     !user.deletedAt &&
+    PASSWORD_PROVIDERS.includes(user.authProvider) &&
     typeof user.plexId === 'string' &&
-    user.plexId.startsWith(LOCAL_ID_PREFIX) &&
-    (user.authProvider === null || user.authProvider === undefined || PASSWORD_PROVIDERS.includes(user.authProvider))
+    typeof user.plexUsername === 'string' &&
+    user.plexUsername.length > 0 &&
+    user.plexId.toLowerCase() === `${LOCAL_ID_PREFIX}${user.plexUsername}`.toLowerCase()
   );
 }
 
@@ -47,7 +51,7 @@ async function listPasswordUsers(prisma) {
     },
     orderBy: [{ isSetupAdmin: 'desc' }, { plexUsername: 'asc' }],
   });
-  // Checked again in JS so the rule holds whatever the query layer does with NULLs
+  // The exact plexId = local-<plexUsername> rule can't be expressed in the query
   return users.filter(isPasswordLoginUser);
 }
 
