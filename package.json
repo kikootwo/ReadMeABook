@@ -54,7 +54,7 @@
     "@types/bcrypt": "^6.0.0",
     "@types/bull": "^4.10.0",
     "@types/jsonwebtoken": "^9.0.6",
-    "@types/node": "^20",
+    "@types/node": "^24",
     "@types/parse-torrent": "^11.0.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",

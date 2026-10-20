@@ -26,7 +26,7 @@ fi
 # PUID/PGID USER REMAPPING (Hybrid approach with gosu)
 # ============================================================================
 # Hybrid approach to support user file ownership while maintaining PostgreSQL compatibility:
-# - postgres user: Keep UID 103 (required by PostgreSQL), remap GID → PGID
+# - postgres user: Keep its UID (102 as shipped by 1.2.7 and later; required by PostgreSQL), remap GID → PGID
 # - redis user:    Remap UID → PUID, GID → PGID (also uses gosu at runtime)
 # - node user:     Remap UID → PUID, GID → PGID (also uses gosu at runtime)
 #
@@ -35,7 +35,7 @@ fi
 # with existing system users (e.g., PUID=65534 collides with 'nobody').
 #
 # Result:
-# - PostgreSQL data (103:PGID) - postgres user with shared group
+# - PostgreSQL data (postgres UID:PGID, i.e. 102:PGID) - postgres user with shared group
 # - Redis/App/Downloads/Media (PUID:PGID) - your user owns everything else
 # - All files accessible via PGID group permissions
 
@@ -60,7 +60,7 @@ if [ -n "$PUID" ] && [ -n "$PGID" ]; then
     echo "   - node:     Remap to $PUID:$PGID (full user ownership)"
     echo ""
 
-    # Step 1: Remap postgres group to PGID (keep UID 103 for PostgreSQL compatibility)
+    # Step 1: Remap postgres group to PGID (keep its UID for PostgreSQL compatibility)
     echo "   [1/3] Remapping postgres group to $PGID..."
     groupmod -o -g "$PGID" postgres 2>/dev/null || true
     # Postgres user keeps its UID but gets the new GID
@@ -99,16 +99,16 @@ if [ -n "$PUID" ] && [ -n "$PGID" ]; then
         echo "   lxc.idmap: g 0 100000 $POSTGRES_UID"
         echo "   lxc.idmap: u $POSTGRES_UID $POSTGRES_UID 1    # Passthrough postgres UID"
         echo "   lxc.idmap: g $POSTGRES_UID 100$POSTGRES_UID 1"
-        echo "   lxc.idmap: u $((POSTGRES_UID + 1)) 100$((POSTGRES_UID + 1)) 65432"
-        echo "   lxc.idmap: g $((POSTGRES_UID + 1)) 100$((POSTGRES_UID + 1)) 65432"
+        echo "   lxc.idmap: u $((POSTGRES_UID + 1)) 100$((POSTGRES_UID + 1)) $((65535 - POSTGRES_UID))"
+        echo "   lxc.idmap: g $((POSTGRES_UID + 1)) 100$((POSTGRES_UID + 1)) $((65535 - POSTGRES_UID))"
         echo ""
     fi
 else
     echo "ℹ️  PUID/PGID not set - using default system user IDs"
     echo "   Default ownership:"
-    echo "   - PostgreSQL data: postgres (UID 103)"
-    echo "   - Redis data:      redis (UID 102)"
-    echo "   - App/Downloads:   node (UID 1000)"
+    echo "   - PostgreSQL data: postgres (UID $(id -u postgres))"
+    echo "   - Redis data:      redis (UID $(id -u redis))"
+    echo "   - App/Downloads:   node (UID $(id -u node))"
     echo ""
     echo "   To customize ownership, set PUID and PGID environment variables"
     echo "   Example: PUID=1000 PGID=1000"
@@ -476,7 +476,7 @@ else
     echo "   - PostgreSQL (external - local instance disabled)"
 fi
 if [ "$USE_EXTERNAL_REDIS" = "false" ]; then
-    echo "   - Redis (internal, 127.0.0.1:6379, UID:GID=${PUID:-102}:${PGID:-102})"
+    echo "   - Redis (internal, 127.0.0.1:6379, UID:GID=${PUID:-$(id -u redis)}:${PGID:-$(id -g redis)})"
 else
     echo "   - Redis (external - local instance disabled)"
 fi

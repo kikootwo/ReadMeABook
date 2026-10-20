@@ -962,7 +962,7 @@ describe('BookDate helpers', () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: vi.fn().mockResolvedValue({
-        content: [{ text: '```json\n{\"recommendations\":[]}\n```' }],
+        content: [{ type: 'text', text: '```json\n{\"recommendations\":[]}\n```' }],
       }),
       text: vi.fn().mockResolvedValue('ok'),
     });

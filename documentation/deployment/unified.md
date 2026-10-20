@@ -36,7 +36,7 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 
 ## Dockerfile Structure
 
-**Base:** `node:20-bookworm` (debian with node)
+**Base:** `node:24-bookworm` (debian bookworm with Node.js 24 LTS; floating tag, so release builds pick up Node 24 patch releases)
 
 **Installed packages:**
 - postgresql-16
@@ -57,11 +57,12 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 | Stage | From | Does | Shipped |
 |---|---|---|---|
 | `ffmpeg` | `mwader/static-ffmpeg@sha256:…` | pinned ffmpeg/ffprobe | copied |
-| `base` | `node:20-bookworm` | apt (postgres, redis, supervisor, gosu, locales), ffmpeg + guard, purge imagemagick | yes (OS layer) |
-| `builder` | `node:20-bookworm` | `npm ci` (all deps) → `COPY . .` → `prisma generate` → `next build` (standalone) | no |
-| `prisma-cli` | `node:20-bookworm` | Prisma CLI closure from `package-lock.json` → `/opt/prisma-cli` | no |
+| `base` | `node:24-bookworm` | apt (postgres, redis, supervisor, gosu, locales), ffmpeg + guard, purge imagemagick | yes (OS layer) |
+| `builder` | `node:24-bookworm` | `npm ci` (all deps) → `COPY . .` → `prisma generate` → `next build` (standalone) | no |
+| `prisma-cli` | `node:24-bookworm` | Prisma CLI closure from `package-lock.json` → `/opt/prisma-cli` | no |
 | `runtime` | `base` | app artifacts below + guard | yes |
 - Requires BuildKit (`RUN --network=none`, `RUN --mount=type=bind`): the legacy builder (`DOCKER_BUILDKIT=0`, the default before Docker 23, e.g. on 20.10) can't build it; use Docker 23+ or `docker buildx build`
+- Node major: all three `node:` stages share one tag, and `e2e/Dockerfile.test`, `e2e/fake-arr/Dockerfile` and both CI workflows (`node-version`) use the same major; `tests/docker/node-version-pins.test.ts` fails on a partial bump (any `FROM [--platform=…] [docker.io/library/]node:` spelling, full pins such as `node:24.11.1-bookworm`; failures name file:line). `@types/node` must have the same major (same test; Dependabot ignores its majors); code the host `npm test` runs must still work on Node 22.12+
 - `builder`/`prisma-cli` must stay on bookworm and build for TARGETPLATFORM (never `--platform=$BUILDPLATFORM`): Prisma engines + bcrypt are native
 - `builder` WORKDIR must stay `/app` (generated client records absolute paths)
 - Version vars: `builder` sets `APP_VERSION`/`GIT_COMMIT`/`BUILD_DATE` + `NEXT_PUBLIC_*` before `next build` (inlined into VersionBadge); `runtime` re-declares the ARGs + ENVs (`/api/version`)
@@ -101,6 +102,9 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - Recovery also requires every `/app/scripts/lib/*.js`; `terminal-prompt.js` and `password-users.js` must exist
 - Layout: required runtime paths exist; none of the non-runtime paths (`src/{app,components,contexts,hooks,lib}`, `tests`, `e2e`, `screenshots`, `documentation`, `docker`, `dockerfile.unified`, `package-lock.json`, `tsconfig.json`) is in `/app`
 - Note: Next 16 `next build` uses Turbopack even with `TURBOPACK=0` (chunk names `[turbopack]_runtime.js`)
+- System users (uid:gid) are exactly `postgres=102:106`, `redis=101:105`, `node=1000:1000` (as shipped by 1.2.7 and later; the PUID/LXC sections below and host-side ownership rely on them)
+- Prints `node <version> (napi, openssl)` for the build log
+- Builtins are skipped with `module.isBuiltin` (Node 24's `builtinModules` lists prefix-only modules such as `node:sqlite` only with the prefix)
 - Every ELF file in `/app` + ffmpeg/ffprobe has the build arch's `e_machine`; expects 1 schema engine, ≥2 `libquery_engine` copies, a bcrypt `.node` binding (bcrypt 5 `bcrypt_lib.node`, bcrypt 6 `prebuilds/linux-<arch>/bcrypt.*.node`)
 
 **Guard failures:**
@@ -109,6 +113,7 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - `unresolvable require("x") in .next/server/…` → standalone tracing missed a server external; fix tracing or add an explicit `COPY`
 - `require("x") … resolves but does not load` → a traced external is missing one of its own dependencies (tracing gap); same fix
 - `non-runtime files in /app` → one of the guard's listed paths (`NOT_SHIPPED` in `runtime-guard.js`) is back in the whole-project trace; restore its `outputFileTracingExcludes` entry in `next.config.ts`. The guard checks only that list, not every new path: keep `NOT_SHIPPED` and the excludes in sync, and add a new top-level dir or `src/` folder to both
+- `system user X is a:b, expected c:d` → the base image or the apt install order changed the account IDs. The entrypoint re-chowns its volumes by name, but LXC idmaps, filesystems where chown fails and host-side ownership would break. Never ship it: diff `/etc/passwd` against the last release, then pre-create the account with the old IDs before `apt-get install`
 - `e_machine 0x.., expected 0x..` → wrong-arch native file (e.g. a `--platform=$BUILDPLATFORM` stage); never ship it
 
 **Build process:**
@@ -173,7 +178,7 @@ services:
       - ./redis:/var/lib/redis
     environment:
       # RECOMMENDED: Set to your user/group IDs (run 'id' to find yours)
-      # Hybrid approach: postgres keeps UID 103, everything else uses PUID:PGID
+      # Hybrid approach: postgres keeps its UID (102), everything else uses PUID:PGID
       PUID: 1000
       PGID: 1000
 
@@ -266,12 +271,12 @@ docker run -d \
 PostgreSQL requires that the database cluster owner have a specific username ("postgres"), which prevents full user remapping. The hybrid approach solves this:
 
 **User Remapping Strategy:**
-- `postgres` user: **Keeps UID 103** (PostgreSQL requirement), **remaps GID → PGID**
+- `postgres` user: **Keeps UID 102** (PostgreSQL requirement), **remaps GID → PGID**
 - `redis` user: **Fully remapped to PUID:PGID**
 - `node` user: **Fully remapped to PUID:PGID**
 
 **File Ownership Result:**
-- PostgreSQL data (`/var/lib/postgresql/data`): **103:PGID**
+- PostgreSQL data (`/var/lib/postgresql/data`): **102:PGID**
 - Redis data (`/var/lib/redis`): **PUID:PGID** ✅ Your user owns it
 - App config (`/app/config`): **PUID:PGID** ✅ Your user owns it
 - Downloads (`/downloads`): **PUID:PGID** ✅ Your user owns it
@@ -281,7 +286,7 @@ PostgreSQL requires that the database cluster owner have a specific username ("p
 - ✅ You fully own downloads, media, and config directories
 - ✅ PostgreSQL works correctly (no username conflicts)
 - ✅ All files accessible via shared PGID group
-- ✅ Minimal LXC mapping needed (only UID 103)
+- ✅ Minimal LXC mapping needed (only UID 102)
 
 ### Usage
 
@@ -310,33 +315,33 @@ id
 
 ### LXC Configuration
 
-For LXC with user namespace mapping, you only need to passthrough container UID 103 (postgres):
+For LXC with user namespace mapping, you only need to passthrough container UID 102 (postgres). IDs below are as shipped by 1.2.7 and later (`postgres=102:106`, `redis=101:105`, `node=1000:1000`); confirm yours with `docker exec <container> id postgres` or the entrypoint's `Current UIDs:` line:
 
 **Example LXC Config:**
 ```bash
 # File: /etc/pve/lxc/<CTID>.conf
-# Map most UIDs normally (0-102 → 100000-100102)
-lxc.idmap: u 0 100000 103
-lxc.idmap: g 0 100000 103
+# Map most UIDs normally (0-101 → 100000-100101)
+lxc.idmap: u 0 100000 102
+lxc.idmap: g 0 100000 102
 
-# Passthrough postgres UID 103 to host UID 103
-lxc.idmap: u 103 103 1
-lxc.idmap: g 103 100103 1
+# Passthrough postgres UID 102 to host UID 102
+lxc.idmap: u 102 102 1
+lxc.idmap: g 102 100102 1
 
-# Map remaining UIDs (104-65536 → 100104-165536)
-lxc.idmap: u 104 100104 65432
-lxc.idmap: g 104 100104 65432
+# Map remaining UIDs (103-65535 → 100103-165535)
+lxc.idmap: u 103 100103 65433
+lxc.idmap: g 103 100103 65433
 ```
 
 **Alternative: Map to your user:**
 ```bash
 # If you want PostgreSQL files accessible as your host user (UID 1000):
-lxc.idmap: u 0 100000 103
-lxc.idmap: g 0 100000 103
-lxc.idmap: u 103 1000 1      # Map container 103 → host 1000
-lxc.idmap: g 103 1000 1
-lxc.idmap: u 104 100104 65432
-lxc.idmap: g 104 100104 65432
+lxc.idmap: u 0 100000 102
+lxc.idmap: g 0 100000 102
+lxc.idmap: u 102 1000 1      # Map container 102 → host 1000
+lxc.idmap: g 102 1000 1
+lxc.idmap: u 103 100103 65433
+lxc.idmap: g 103 100103 65433
 
 # Then set in docker-compose.yml:
 environment:
@@ -351,24 +356,24 @@ When PUID/PGID are set, you'll see:
 ```
 🔧 PUID/PGID detected - Configuring hybrid user mapping for 1000:1000
 
-   Current UIDs: postgres=103 redis=102 node=1000
+   Current UIDs: postgres=102 redis=101 node=1000
 
    Applying hybrid mapping strategy:
-   - postgres: Keep UID 103, remap GID → 1000 (PostgreSQL compatibility)
+   - postgres: Keep UID 102, remap GID → 1000 (PostgreSQL compatibility)
    - redis:    Remap to 1000:1000 (full user ownership)
    - node:     Remap to 1000:1000 (full user ownership)
 
 ✅ User mapping complete!
 
    File ownership will be:
-   - PostgreSQL data (/var/lib/postgresql/data): 103:1000
+   - PostgreSQL data (/var/lib/postgresql/data): 102:1000
    - Redis data      (/var/lib/redis):           1000:1000
    - App config      (/app/config):              1000:1000
    - Downloads       (/downloads):               1000:1000
    - Media           (/media):                   1000:1000
 
    On your host, these will appear as:
-   - PostgreSQL: UID 103, GID 1000 (readable via group)
+   - PostgreSQL: UID 102, GID 1000 (readable via group)
    - Everything else: Your user (1000:1000)
 ```
 
@@ -378,7 +383,7 @@ The container uses group-friendly permissions:
 
 | Directory | Ownership | Permissions | Description |
 |-----------|-----------|-------------|-------------|
-| `/var/lib/postgresql/data` | 103:PGID | 750 (rwxr-x---) | PostgreSQL data, group-readable |
+| `/var/lib/postgresql/data` | 102:PGID | 750 (rwxr-x---) | PostgreSQL data, group-readable |
 | `/var/lib/redis` | PUID:PGID | 770 (rwxrwx---) | Redis data, group-writable |
 | `/app/config` | PUID:PGID | 775 (rwxrwxr-x) | App config, group-writable |
 | `/app/cache` | PUID:PGID | 775 (rwxrwxr-x) | Thumbnail cache, group-writable |
@@ -395,8 +400,8 @@ If you don't set PUID/PGID, the container uses default system users:
 
 ```
    Default ownership:
-   - PostgreSQL data: postgres (UID 103)
-   - Redis data:      redis (UID 102)
+   - PostgreSQL data: postgres (UID 102)
+   - Redis data:      redis (UID 101)
    - App/Downloads:   node (UID 1000)
 ```
 
@@ -459,18 +464,18 @@ docker compose up -d
 
 **LXC Permission Issues:**
 
-*Symptom:* Files owned by UID 103 on host are not accessible
+*Symptom:* Files owned by UID 102 on host are not accessible
 
-*Solution:* Configure LXC idmap to passthrough UID 103
+*Solution:* Configure LXC idmap to passthrough UID 102 (postgres, as shipped by 1.2.7 and later)
 
 ```bash
 # Edit /etc/pve/lxc/<CTID>.conf and add:
-lxc.idmap: u 0 100000 103
-lxc.idmap: g 0 100000 103
-lxc.idmap: u 103 103 1          # Passthrough postgres UID
-lxc.idmap: g 103 100103 1
-lxc.idmap: u 104 100104 65432
-lxc.idmap: g 104 100104 65432
+lxc.idmap: u 0 100000 102
+lxc.idmap: g 0 100000 102
+lxc.idmap: u 102 102 1          # Passthrough postgres UID
+lxc.idmap: g 102 100102 1
+lxc.idmap: u 103 100103 65433
+lxc.idmap: g 103 100103 65433
 
 # Then restart LXC container
 pct stop <CTID>
@@ -558,6 +563,31 @@ docker compose -f docker-compose.unified.yml down
 rm -rf ./pgdata
 docker compose -f docker-compose.unified.yml up -d
 ```
+
+### TLS errors after upgrading to Node 24
+
+*Cause:* the image runs Node 24 (OpenSSL 3.5, security level 2); Node 20 images used level 1. Two limits, for every outbound HTTPS connection the app makes (download clients, Audiobookshelf, Plex, Prowlarr/indexers, Apprise/ntfy/webhooks, BookDate, OIDC issuers, an external `REDIS_URL` over TLS):
+- **RSA certificate key < 2048 bits:** refused only when the certificate is verified (an old public cert, or a private CA trusted via `NODE_EXTRA_CA_CERTS`)
+- **DH parameters < 2048 bits** (TLS 1.2 server that picks DHE): refused whether verification is on or off
+
+*What you see:*
+
+| Where | Message |
+|---|---|
+| OIDC: Test button in setup/admin settings | `Issuer.discover() failed.` (the TLS cause is not shown or logged; OIDC login fails too) |
+| SABnzbd, NZBGet: Test | `SSL/TLS certificate error. Enable "Disable SSL verification" if using self-signed certificates.` Enabling it fixes only the RSA-key case; it does **not** fix `dh key too small` |
+| qBittorrent, Transmission, Deluge: Test | A generic connection error with no SSL hint, e.g. `Failed to connect to qBittorrent at https://…: <raw text below>` |
+| Raw error text (in the qBittorrent/Transmission/Deluge messages and in container logs where the error is logged) | `EE certificate key too weak` (error code `UNSPECIFIED`) or `…SSL routines:tls_process_ske_dhe:dh key too small` (code `EPROTO`) |
+
+*Fix (preferred):* give the server a ≥ 2048-bit RSA (or an ECDSA) certificate and ≥ 2048-bit DH parameters, or allow only ECDHE key exchange.
+
+*Stopgap (lowers TLS security for every connection the app makes; remove it once the server is fixed):*
+```yaml
+environment:
+  NODE_OPTIONS: "--tls-cipher-list=DEFAULT@SECLEVEL=1"
+```
+- Reaches the app (`node server.js`) and `npm run rmab:recover` through the container env; the image itself keeps level 2
+- Not needed for servers with a ≥ 2048-bit key (TLS 1.2 or 1.3), or when verification is off and the server uses ECDHE
 
 ## Backup/Restore
 
@@ -730,20 +760,20 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
 - Recovery: If already experiencing this issue, either (1) recreate admin account after updating to fixed version, or (2) if you know the old CONFIG_ENCRYPTION_KEY, set it as environment variable in docker-compose.yml
 
 **17. Permission errors with bind mounts and LXC user namespace mapping (Hybrid PUID/PGID)**
-- Issue: Container fails with "Operation not permitted" when using bind mounts (`./pgdata`, `./redis`). LXC user namespace mapping (container UID 103 → host UID 100103) makes file access complex.
+- Issue: Container fails with "Operation not permitted" when using bind mounts (`./pgdata`, `./redis`). LXC user namespace mapping (container UID 102 → host UID 100102) makes file access complex.
 - Root cause analysis:
-  - PostgreSQL requires database cluster owner to be username "postgres" (UID 103)
+  - PostgreSQL requires database cluster owner to be username "postgres" (UID 102 as shipped by 1.2.7 and later)
   - Cannot remap postgres UID without breaking PostgreSQL initialization
   - Users need ownership of downloads, media, config directories
 - Solution: Hybrid PUID/PGID approach:
-  - postgres user: Keep UID 103 (PostgreSQL compatibility), remap GID → PGID
+  - postgres user: Keep UID 102 (PostgreSQL compatibility), remap GID → PGID
   - redis/node users: Fully remap to PUID:PGID
-  - Result: Downloads/media/config owned by PUID:PGID, PostgreSQL uses 103:PGID with group-readable permissions
+  - Result: Downloads/media/config owned by PUID:PGID, PostgreSQL uses 102:PGID with group-readable permissions
 - Usage: Set `PUID=1000` and `PGID=1000` in docker-compose.yml
 - File ownership:
-  - PostgreSQL data: 103:PGID (readable via group)
+  - PostgreSQL data: 102:PGID (readable via group)
   - Downloads/media/config: PUID:PGID (full user ownership)
-- LXC configuration: Only need to passthrough UID 103 (much simpler than before)
+- LXC configuration: Only need to passthrough UID 102 (much simpler than before)
 - Backwards compatible: If PUID/PGID not set, uses default system user IDs
 
 **18. WSL2 Windows filesystem incompatibility**
@@ -774,6 +804,13 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
 - Issue: single-stage build shipped the full `npm ci` layer (devDependencies survive `npm prune` in earlier layers), `src/`, tests, the build cache and a duplicate standalone tree
 - Latent: CLI present only because prune keeps `devOptional` prisma; recovery worked only because `COPY . .` shipped `scripts/` + `src/generated/prisma`; a missing CLI made `npx prisma` fetch the latest prisma at start, then `|| echo` hid any failure
 - Fix: multi-stage build (idea + first version: PR #279, ChaoticSciuridae); CLI from the lockfile (`prisma-cli` stage); explicit copies for `scripts/`, the generated client, `prisma/`; entrypoint preflight + absolute `PRISMA_CLI`; offline runtime guard
+
+**21. Node.js 20 end of life → Node.js 24**
+- Change: all image stages, `e2e/Dockerfile.test`, `e2e/fake-arr/Dockerfile` and CI moved to Node 24 together; `@types/node` ^24
+- Native modules unchanged: bcrypt 6 and the Prisma engines are Node-API, the same binaries as on Node 20
+- Behaviour change: OpenSSL security level 2, see [TLS errors after upgrading to Node 24](#tls-errors-after-upgrading-to-node-24)
+- Expected log line: one `[DEP0169] DeprecationWarning: url.parse()` per process. Harmless: it comes from dependencies bundled into the server build (openid-client, follow-redirects), so Node treats them as app code; not suppressed on purpose
+- Guards added: system user IDs, Node/OpenSSL version line, `isBuiltin` for builtins
 
 ## Related
 

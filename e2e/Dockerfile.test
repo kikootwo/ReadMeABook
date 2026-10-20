@@ -10,7 +10,7 @@
 # Same pinned static ffmpeg/ffprobe as dockerfile.unified, so ffmpeg-backed integration tests run (not skip).
 FROM mwader/static-ffmpeg:9.0.2-1@sha256:f5d100184884eb3e82b0eb14bb5ebf98da99826ac824989720297fb9ef21c822 AS ffmpeg
 
-FROM node:20-bookworm@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5
+FROM node:24-bookworm@sha256:14078204b6bb268c107ceff6d3c43f45a888105e5c2b18b14c32b3409d93a1b0
 COPY --from=ffmpeg /ffmpeg /ffprobe /usr/local/bin/
 ENV CI=true NEXT_TELEMETRY_DISABLED=1 NPM_CONFIG_UPDATE_NOTIFIER=false NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false \
     PRISMA_SCHEMA_ENGINE_BINARY=/opt/prisma-engines/schema-engine \

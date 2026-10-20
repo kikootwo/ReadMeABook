@@ -25,9 +25,10 @@
   </Maintainer>
   <Requires/>
   <Screenshots>
-    <Screenshot>https://raw.githubusercontent.com/kikootwo/ReadMeABook/main/screenshots/HOMEPAGE.png</Screenshot>
-    <Screenshot>https://raw.githubusercontent.com/kikootwo/ReadMeABook/main/screenshots/ADMIN.png</Screenshot>
-    <Screenshot>https://raw.githubusercontent.com/kikootwo/ReadMeABook/main/screenshots/BOOKDATE.png</Screenshot>
+    <Screenshot>https://raw.githubusercontent.com/kikootwo/ReadMeABook/main/screenshots/home.png</Screenshot>
+    <Screenshot>https://raw.githubusercontent.com/kikootwo/ReadMeABook/main/screenshots/search.png</Screenshot>
+    <Screenshot>https://raw.githubusercontent.com/kikootwo/ReadMeABook/main/screenshots/book-details.png</Screenshot>
+    <Screenshot>https://raw.githubusercontent.com/kikootwo/ReadMeABook/main/screenshots/admin-dashboard.png</Screenshot>
   </Screenshots>
   <Network>bridge</Network>
   <Config Name="Web UI Host Port" Target="3030" Default="3030" Mode="tcp" Description="Port for ReadMeABook's web interface." Type="Port" Display="always" Required="true" Mask="false">3030</Config>
