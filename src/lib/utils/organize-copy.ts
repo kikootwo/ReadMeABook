@@ -232,6 +232,11 @@ export async function placeAudio(
   target: string,
   options: AudioPlaceOptions
 ): Promise<AudioPlacement> {
+  // The target already is the original (same path, hard link or symlink): nothing to place,
+  // and no probe or compare of the derivative (which is a different file of the same size)
+  if (await isSameFile(original, target)) {
+    return { status: 'identical', target, verified: true, usedDerivative: false };
+  }
   if (!derivative) {
     return placeOriginal(original, target, options);
   }

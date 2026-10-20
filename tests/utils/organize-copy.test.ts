@@ -6,7 +6,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { partialNameFor } from '@/lib/utils/copy-file';
 import { placeAudio, placeFile, removeStalePartials } from '@/lib/utils/organize-copy';
 
@@ -259,6 +259,23 @@ describe('placeAudio (tagged derivative)', () => {
     });
 
     expect(result).toMatchObject({ status: 'identical', verified: true, usedDerivative: false });
+    expect(fs.readFileSync(target).equals(SOURCE)).toBe(true);
+  });
+
+  it('reports identical, without probing or comparing, when the target is the original itself', async () => {
+    // A same-size tagged copy and no byte compare used to make this 'present' (logged only at debug)
+    const sameSize = Buffer.from(SOURCE);
+    sameSize.write('TAGS');
+    fs.writeFileSync(tagged, sameSize);
+    fs.linkSync(original, target);
+    const probe = vi.fn(async () => 60000);
+
+    const viaLink = await placeAudio(original, tagged, target, { fileMode: 0o664, compareExisting: false, probeDuration: probe });
+    const samePath = await placeAudio(original, tagged, original, { fileMode: 0o664, compareExisting: false, probeDuration: probe });
+
+    expect(viaLink).toEqual({ status: 'identical', target, verified: true, usedDerivative: false });
+    expect(samePath).toEqual({ status: 'identical', target: original, verified: true, usedDerivative: false });
+    expect(probe).not.toHaveBeenCalled();
     expect(fs.readFileSync(target).equals(SOURCE)).toBe(true);
   });
 });
