@@ -82,7 +82,7 @@
 - `grab`: `statuses` (per attempt, last repeats, e.g. `[503]`), `redirects` (`other-port`\|`tracker`\|`relative`\|`magnet`, one per hop), `direct: true`, `body: "magnet-text"`.
 - `download`: `completeMs`, `stallAtPct` (0 B/s, `stalledDL`), `failAtPct` (`error` / SAB `Failed`), `dropFixture` (e.g. `wrong-files`).
 - Scenario-level `search.statuses` (transient search failures), `search.ignoreLimit` (indexer over-returns). Search matches releases containing every query word (≥3 chars).
-- Shipped: `smoke`, `transient-grab-503`, `usenet-smoke`, `stall`, `slow`, `wrong-files`, `failed-download`, `key-scope`, `preview`.
+- Shipped: `smoke`, `transient-grab-503`, `usenet-smoke`, `stall`, `slow`, `wrong-files`, `failed-download`, `key-scope`, `preview`, `asin-m4b`, `asin-merge`, `asin-merge-tagged`.
 
 ## Fixtures (`e2e/fixtures/`)
 - `manifest.json` references books by ASIN only; title/author/narrator come from Audnexus at fake-arr image build (`--offline-fixtures` / `--metadata` for offline).
@@ -108,6 +108,7 @@
 | `regressions/library-delete-guard.spec.ts` | Admin request delete removes only what the request put there (ABS backend): default template with the ebook after/before the audio, flat `Ebooks` shared by two books, foreign audio, symlinked title folder, all-`differs` import, replace stopped with 409, UI "files kept" toast, ABS second copy survives, coerced `.m4a`, re-run organize, flat folder with foreign ebooks, removal failure (EACCES), media volume not mounted (empty `media_dir`), replace after a kept delete; sha256 of `/media`, ABS items, book rows; exec bridge required |
 | `regressions/library-delete-plex.spec.ts` | Same guard in Plex mode (`--backend plex`): no `DELETE /library/metadata` when files are kept, the album lies outside the removed folder, or `media_dir` is empty (unmounted); one when it lived inside |
 | `regressions/312-blocklist-rerequest.spec.ts` | #312: after an auto-blocked failed download (`failed-download`), a re-request via `POST /api/requests` keeps the blocklist: the dead release is not grabbed again, the new request settles at `awaiting_search` ("all blocked"), the old request is gone; plus a concurrent re-request smoke check (one request left); exec bridge required |
+| `regressions/208-asin-tag.spec.ts` | #208: Audiobookshelf reads `tagASIN` = the book ASIN from the placed m4b, moov first: single m4b + tagging (`asin-m4b`), chapter merge with tagging off (`asin-merge`), merge then tagging (`asin-merge-tagged`); exec bridge required |
 | `regressions/sec-shell-exec.spec.ts` | #351: a release folder named with `$(...)`, backticks and a quote goes through download + chapter merge; no sentinel file, no shell `touch` signature, ffprobe reads the literal path; exec bridge required |
 | `harness/exec-bridge.spec.ts` | Bridge works untainted (psql, `-u 1000:1000`, non-zero exit throws); absent when tainted |
 - Helpers: `e2e/lib/harness.ts` (`Rmab`, `Abs`, `fakeArr`, `keyLeaks`, `waitFor`, `snap`, `loginAdminUi`: /login admin form in either backend mode, clicking the Plex-mode "Admin Login" toggle). Host-side: `e2e/lib/runner.mjs` (runner container, recorder, canary, isolation probes, row counts).
