@@ -27,6 +27,7 @@ import {
 } from './organize-evidence';
 import { getAudibleService } from '../integrations/audible.service';
 import { addAutoBlock } from '../services/blocklist.service';
+import { createAudibleDetailsLoader, readMetadataTaggingEnabled, resolveTagDetails } from './organize-tag-details';
 
 /**
  * Process organize files job
@@ -134,11 +135,13 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     let series = audiobook.series || undefined;
     let seriesPart = audiobook.seriesPart || undefined;
 
+    // At most one Audible details lookup per import, shared with the metadata tags below
+    const loadAudibleDetails = createAudibleDetailsLoader(audiobook.audibleAsin);
+
     if (audiobook.audibleAsin && !series) {
       try {
         logger.info(`Missing series data, fetching from Audnexus for ASIN: ${audiobook.audibleAsin}`);
-        const audibleService = getAudibleService();
-        const audnexusData = await audibleService.getAudiobookDetails(audiobook.audibleAsin);
+        const audnexusData = await loadAudibleDetails();
 
         if (audnexusData) {
           const updates: Record<string, any> = {};
@@ -187,6 +190,10 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
 
     logger.info(`Final metadata for path organization: year=${year || 'null'}, narrator=${narrator || 'null'}, series=${series || 'null'}, seriesPart=${seriesPart || 'null'}`);
 
+    // One read of the tagging switch: the tag details lookup and the organizer both use it
+    const metadataTaggingEnabled = await readMetadataTaggingEnabled(logger);
+    const tagDetails = await resolveTagDetails(audiobook.description, loadAudibleDetails, metadataTaggingEnabled, logger);
+
     // Get file organizer (reads media_dir from database config)
     const organizer = await getFileOrganizer();
 
@@ -223,12 +230,13 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
         year,
         series,
         seriesPart,
+        ...tagDetails,
       },
       template,
       jobId ? { jobId, context: 'FileOrganizer' } : undefined,
       renameConfig,
       selectedFiles,
-      { compareExisting }
+      { compareExisting, metadataTaggingEnabled }
     );
 
     if (!result.success) {

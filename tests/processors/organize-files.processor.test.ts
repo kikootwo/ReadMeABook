@@ -783,6 +783,127 @@ describe('processOrganizeFiles', () => {
       })
     );
   });
+
+  describe('metadata tag details', () => {
+    function setupBook(overrides: Record<string, unknown> = {}) {
+      prismaMock.request.update.mockResolvedValue({});
+      prismaMock.audiobook.findUnique.mockResolvedValue({
+        id: 'a-tags',
+        title: 'Book',
+        author: 'Author',
+        narrator: 'Narrator',
+        coverArtUrl: null,
+        audibleAsin: 'ASIN-TAGS',
+        year: 2020,
+        description: 'Stored short blurb.',
+        series: null,
+        seriesPart: null,
+        ...overrides,
+      });
+      organizerMock.organize.mockResolvedValue({
+        success: true,
+        targetPath: '/media/Author/Book',
+        filesMovedCount: 1,
+        errors: [],
+        audioFiles: ['/media/Author/Book/Book.m4b'],
+      });
+      prismaMock.audiobook.update.mockResolvedValue({});
+      configMock.getBackendMode.mockResolvedValue('audiobookshelf');
+      configMock.get.mockResolvedValue(null);
+    }
+
+    function taggingEnabled(enabled: boolean) {
+      prismaMock.configuration.findUnique.mockImplementation(async (args: { where?: { key?: string } }) =>
+        args?.where?.key === 'metadata_tagging_enabled' ? { value: String(enabled) } : null
+      );
+    }
+
+    async function runOrganize() {
+      const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+      const result = await processOrganizeFiles({
+        requestId: 'req-tags',
+        audiobookId: 'a-tags',
+        downloadPath: '/downloads/book',
+        jobId: 'job-tags',
+      });
+      expect(result.success).toBe(true);
+      const call = organizerMock.organize.mock.calls[0];
+      return { metadata: call[1], placement: call[6] };
+    }
+
+    const taggingReads = () =>
+      prismaMock.configuration.findUnique.mock.calls.filter((c: unknown[]) => (c[0] as { where?: { key?: string } } | undefined)?.where?.key === 'metadata_tagging_enabled');
+
+    it('passes the Audible summary and top-level genres, looked up once for series and tags', async () => {
+      setupBook();
+      taggingEnabled(true);
+      audibleServiceMock.getAudiobookDetails.mockResolvedValue({
+        asin: 'ASIN-TAGS',
+        title: 'Book',
+        author: 'Author',
+        description: 'Full Audible summary.',
+        primaryGenres: ['Science Fiction & Fantasy'],
+        series: 'The Saga',
+        seriesPart: '1',
+      });
+
+      const { metadata } = await runOrganize();
+
+      expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledTimes(1);
+      expect(metadata).toMatchObject({
+        series: 'The Saga',
+        seriesPart: '1',
+        description: 'Full Audible summary.',
+        genres: ['Science Fiction & Fantasy'],
+      });
+    });
+
+    it('series already known: the lookup serves only the tags (one call)', async () => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      taggingEnabled(true);
+      audibleServiceMock.getAudiobookDetails.mockResolvedValue({ description: 'Full Audible summary.', primaryGenres: ['History'] });
+
+      const { metadata } = await runOrganize();
+
+      expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledTimes(1);
+      expect(metadata).toMatchObject({ description: 'Full Audible summary.', genres: ['History'] });
+    });
+
+    it('falls back to the stored description when the lookup finds nothing', async () => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      taggingEnabled(true);
+      audibleServiceMock.getAudiobookDetails.mockResolvedValue(null);
+
+      const { metadata } = await runOrganize();
+
+      expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledWith('ASIN-TAGS');
+      expect(metadata.description).toBe('Stored short blurb.');
+      expect(metadata.genres).toBeUndefined();
+    });
+
+    it('does not look anything up for tags when metadata tagging is off', async () => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      taggingEnabled(false);
+
+      const { metadata, placement } = await runOrganize();
+
+      expect(audibleServiceMock.getAudiobookDetails).not.toHaveBeenCalled();
+      expect(metadata.description).toBeUndefined();
+      expect(metadata.genres).toBeUndefined();
+      expect(placement).toMatchObject({ metadataTaggingEnabled: false });
+    });
+
+    it.each([true, false])('reads the tagging switch once (tagging %s) and hands that read to the organizer', async (enabled) => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      taggingEnabled(enabled);
+
+      const { placement } = await runOrganize();
+
+      expect(taggingReads()).toHaveLength(1);
+      expect(configMock.get).not.toHaveBeenCalledWith('metadata_tagging_enabled');
+      expect(placement).toMatchObject({ metadataTaggingEnabled: enabled });
+    });
+  });
 });
 
 

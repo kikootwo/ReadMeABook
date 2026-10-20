@@ -20,7 +20,22 @@ export interface MetadataTaggingOptions {
   asin?: string;
   series?: string;
   seriesPart?: string;
+  description?: string; // Publisher summary (plain text, may contain paragraphs)
+  genres?: string[]; // Top-level genres, joined into one tag
 }
+
+/**
+ * Joins genres into one tag. Audiobookshelf splits genre tags on '/', '//' or ';'
+ * (first match wins), so a '/' inside a genre name becomes ' & '.
+ */
+const GENRE_SEPARATOR = '; ';
+
+/**
+ * Longest description written, in UTF-8 bytes. Each `-metadata` value is one argv
+ * string and the OS caps those (~128 KiB on Linux, "Argument list too long");
+ * MP4 passes the description twice (description + synopsis).
+ */
+export const MAX_DESCRIPTION_BYTES = 16 * 1024;
 
 export interface TaggingResult {
   success: boolean;
@@ -53,6 +68,36 @@ function sanitizeMetadataValue(value: string): string {
     .replace(/^[﻿ ​‌‍]+/, '') // leading BOM / NBSP / ZWSP / ZWNJ / ZWJ
     .replace(/[\x00\r\n]/g, '') // null bytes and line breaks anywhere
     .trim();
+}
+
+/**
+ * Sanitize a multi-paragraph value: line breaks (CR, LF, U+2028, U+2029) and tabs
+ * become single spaces first, so paragraphs never run together; other C0 control
+ * characters are dropped.
+ */
+function sanitizeMultilineValue(value: string): string {
+  return sanitizeMetadataValue(
+    value
+      .replace(/[ \t]*[\r\n\u2028\u2029]+[ \t]*/g, ' ')
+      .replace(/\t/g, ' ')
+      .replace(/[\x00-\x1f]/g, '')
+  );
+}
+
+/**
+ * Cap `value` at `maxBytes` UTF-8 bytes. A longer value is cut at its last word
+ * boundary that fits (never inside a code point) and ends with an ellipsis.
+ */
+export function capUtf8Bytes(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value, 'utf8') <= maxBytes) return value;
+  const ellipsis = '\u2026';
+  const bytes = Buffer.from(value, 'utf8');
+  let end = maxBytes - Buffer.byteLength(ellipsis, 'utf8');
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--; // back to the start of a code point
+  let head = bytes.subarray(0, end).toString('utf8');
+  const lastSpace = head.lastIndexOf(' ');
+  if (lastSpace >= head.length / 2) head = head.slice(0, lastSpace); // a word boundary, unless it drops half
+  return `${head.trimEnd()}${ellipsis}`;
 }
 
 /**
@@ -115,6 +160,13 @@ export async function tagAudioFileMetadata(
     const asin = metadata.asin ? sanitizeMetadataValue(metadata.asin) : undefined;
     const series = metadata.series ? sanitizeMetadataValue(metadata.series) : undefined;
     const seriesPart = metadata.seriesPart ? sanitizeMetadataValue(metadata.seriesPart) : undefined;
+    const description = metadata.description
+      ? capUtf8Bytes(sanitizeMultilineValue(metadata.description), MAX_DESCRIPTION_BYTES) || undefined
+      : undefined;
+    const genre = metadata.genres
+      ?.map((name) => sanitizeMetadataValue(name.replace(/\s*\/\s*/g, ' & ')))
+      .filter((name) => name.length > 0)
+      .join(GENRE_SEPARATOR);
 
     // Create temporary file path
     const tempFile = `${filePath}.tmp`;
@@ -154,6 +206,23 @@ export async function tagAudioFileMetadata(
         args.push('-metadata', `episode_id=${seriesPart}`);
       }
 
+      if (description) {
+        args.push(
+          '-metadata', `description=${description}`, // desc atom (read by Audiobookshelf)
+          '-metadata', `synopsis=${description}` // ldes atom (long description)
+        );
+      }
+
+      if (genre) {
+        args.push('-metadata', `genre=${genre}`);
+      }
+
+      // Mark the file as an audiobook (stik=2) with gapless playback (pgap=1)
+      args.push(
+        '-metadata', 'media_type=2',
+        '-metadata', 'gapless_playback=1'
+      );
+
       // moov first (faststart), also when the freeform post-step later refuses the file
       args.push('-movflags', '+faststart');
 
@@ -190,6 +259,16 @@ export async function tagAudioFileMetadata(
         args.push('-metadata', `SERIES-PART=${seriesPart}`);
       }
 
+      if (description) {
+        // ffmpeg's `comment` is the Vorbis DESCRIPTION field; it replaces the source's
+        // (a `description` key would be a second DESCRIPTION, read as "old;new")
+        args.push('-metadata', `comment=${description}`);
+      }
+
+      if (genre) {
+        args.push('-metadata', `genre=${genre}`);
+      }
+
       // Explicitly specify output format
       args.push('-f', 'flac');
     }
@@ -222,6 +301,15 @@ export async function tagAudioFileMetadata(
 
       if (seriesPart) {
         args.push('-metadata', `SERIES-PART=${seriesPart}`);
+      }
+
+      if (description) {
+        // TXXX frame, read back as `description` (Audiobookshelf reads this)
+        args.push('-metadata', `description=${description}`);
+      }
+
+      if (genre) {
+        args.push('-metadata', `genre=${genre}`); // TCON frame
       }
 
       // Explicitly specify output format (fixes .tmp extension issue)
