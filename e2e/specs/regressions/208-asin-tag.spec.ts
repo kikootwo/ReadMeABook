@@ -92,7 +92,7 @@ test('#208: chapter merge, tagging off: the merged m4b carries the ASIN', async 
   setConfig('metadata_tagging_enabled', 'false');
   try {
     const { book, evidence } = await importAndScan('asin-merge', 'artemis', 'merge, tagging off');
-    expectAsinInFile(book, evidence, 2);
+    expectAsinInFile(book, evidence, 3);
   } finally {
     setConfig('chapter_merging_enabled', 'false');
     setConfig('metadata_tagging_enabled', 'true');
@@ -103,7 +103,7 @@ test('#208: chapter merge, tagging on: the merged and tagged m4b carries the ASI
   setConfig('chapter_merging_enabled', 'true');
   try {
     const { book, evidence } = await importAndScan('asin-merge-tagged', 'phm', 'merge, tagging on');
-    expectAsinInFile(book, evidence, 2);
+    expectAsinInFile(book, evidence, 3);
   } finally {
     setConfig('chapter_merging_enabled', 'false');
   }

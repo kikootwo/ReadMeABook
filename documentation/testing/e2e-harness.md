@@ -86,7 +86,7 @@
 
 ## Fixtures (`e2e/fixtures/`)
 - `manifest.json` references books by ASIN only; title/author/narrator come from Audnexus at fake-arr image build (`--offline-fixtures` / `--metadata` for offline).
-- ffmpeg only in the builder stage: multi-file tagged mp3s (album/album_artist/composer/track; 32 kb/s, `bitrate` overrides: the `-128` fixtures are 128 kb/s so a merged file passes the merge size check of 0.4 MB/min), m4b with chapters, `Title [B0…]` folder, `wrong-files`. ~570 KB total.
+- ffmpeg only in the builder stage: multi-file tagged mp3s (album/album_artist/composer/track; 32 kb/s, `bitrate` overrides: the `-128` fixtures are 3 tracks (merging needs 3+ files) at 128 kb/s so a merged file passes the merge size check of 0.4 MB/min), m4b with chapters, `Title [B0…]` folder, `wrong-files`. ~730 KB total.
 
 ## Bootstrap (`e2e/bootstrap.ts`, Playwright globalSetup in the runner, idempotent)
 1. ABS: `/init` root user → `/login` → library `/media/audiobooks` → API key (`/api/api-keys`, legacy token fallback).
