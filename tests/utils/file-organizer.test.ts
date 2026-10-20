@@ -101,13 +101,22 @@ const placementMock = vi.hoisted(() => {
     }
     try {
       await copyFileMock.copyFile(source, target);
-      await fsMock.chmod(target, fileMode);
-      return { status: 'copied' as const, target };
     } catch (error) {
       return { status: 'failed' as const, target, reason: error instanceof Error ? error.message : String(error) };
     }
+    const permissions = await applyFileMode(target, fileMode);
+    if (permissions.kind === 'missing') return { status: 'failed' as const, target, reason: permissions.reason };
+    return permissions.kind === 'refused'
+      ? { status: 'copied' as const, target, warning: permissions.warning }
+      : { status: 'copied' as const, target };
   };
+  // The real applyFileMode (over the mocked fs/promises) is installed by the vi.mock factory below;
+  // a plain holder, so mock resets between tests leave it in place
+  const real: { applyFileMode?: (target: string, fileMode: number) => Promise<any> } = {};
+  const applyFileMode = (target: string, fileMode: number) => real.applyFileMode!(target, fileMode);
   return {
+    real,
+    applyFileMode,
     isVerifiedStatus: (status: string) => status === 'copied' || status === 'identical',
     placeFile: vi.fn(async (source: string, target: string, options: { fileMode: number }) =>
       place(source, target, options.fileMode)
@@ -133,7 +142,11 @@ const placementMock = vi.hoisted(() => {
     }),
   };
 });
-vi.mock('@/lib/utils/organize-copy', () => placementMock);
+vi.mock('@/lib/utils/organize-copy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/utils/organize-copy')>();
+  placementMock.real.applyFileMode = actual.applyFileMode;
+  return placementMock;
+});
 
 vi.mock('axios', () => ({
   default: axiosMock,
@@ -332,6 +345,65 @@ describe('file organizer', () => {
     expect(result.errors).toContain('Metadata tagging skipped: ffmpeg not available');
     expect(metadataMock.tagMultipleFiles).not.toHaveBeenCalled();
     expect(copyFileMock.copyFile).toHaveBeenCalledWith(sourcePath, targetFile);
+  });
+
+  it.each([
+    ['a cached thumbnail', '/api/cache/thumbnails/cover.jpg'],
+    ['a remote cover', 'https://m.media-amazon.com/images/I/cover.jpg'],
+  ])('keeps %s with a permission warning when chmod is refused', async (_label, coverArtUrl) => {
+    configState.values.set('metadata_tagging_enabled', 'false');
+    const organizer = new FileOrganizer('/media', '/tmp');
+    (organizer as any).findAudiobookFiles = vi.fn().mockResolvedValue({ audioFiles: ['book.m4b'], coverFile: undefined, isFile: false });
+    const sourcePath = path.join('/downloads', 'book', 'book.m4b');
+    const coverPath = path.join('/media', 'Author', 'Book', 'cover.jpg');
+    fsMock.access.mockImplementation(async (filePath: string) => {
+      if (path.normalize(filePath) === path.normalize(sourcePath)) return undefined;
+      throw new Error('missing');
+    });
+    fsMock.mkdir.mockResolvedValue(undefined);
+    copyFileMock.copyFile.mockResolvedValue(undefined);
+    fsMock.writeFile.mockResolvedValue(undefined);
+    axiosMock.get.mockResolvedValue({ data: Buffer.from('cover') });
+    fsMock.chmod.mockImplementation(async (filePath: string) => {
+      if (filePath === coverPath) throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' });
+    });
+
+    const result = await organizer.organize('/downloads/book', { title: 'Book', author: 'Author', coverArtUrl }, '{author}/{title}');
+
+    expect(result.success).toBe(true);
+    expect(result.coverArtFile).toBe(coverPath);
+    expect(result.errors).toEqual([]);
+    expect(result.permissionWarnings).toHaveLength(1);
+    expect(result.permissionWarnings![0]).toContain(coverPath);
+    expect(result.permissionWarnings![0]).toContain('EPERM');
+  });
+
+  it('records a cover as failed when it is not there after writing (chmod ENOENT)', async () => {
+    configState.values.set('metadata_tagging_enabled', 'false');
+    const organizer = new FileOrganizer('/media', '/tmp');
+    (organizer as any).findAudiobookFiles = vi.fn().mockResolvedValue({ audioFiles: ['book.m4b'], coverFile: undefined, isFile: false });
+    const sourcePath = path.join('/downloads', 'book', 'book.m4b');
+    const coverPath = path.join('/media', 'Author', 'Book', 'cover.jpg');
+    fsMock.access.mockImplementation(async (filePath: string) => {
+      if (path.normalize(filePath) === path.normalize(sourcePath)) return undefined;
+      throw new Error('missing');
+    });
+    fsMock.mkdir.mockResolvedValue(undefined);
+    copyFileMock.copyFile.mockResolvedValue(undefined);
+    fsMock.writeFile.mockResolvedValue(undefined);
+    axiosMock.get.mockResolvedValue({ data: Buffer.from('cover') });
+    fsMock.chmod.mockImplementation(async (filePath: string) => {
+      if (filePath === coverPath) throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' });
+    });
+
+    const result = await organizer.organize('/downloads/book', {
+      title: 'Book', author: 'Author', coverArtUrl: 'https://m.media-amazon.com/images/I/cover.jpg',
+    }, '{author}/{title}');
+
+    expect(result.success).toBe(true);
+    expect(result.coverArtFile).toBeUndefined();
+    expect(result.errors).toContain('Failed to download cover art');
+    expect(result.permissionWarnings).toBeUndefined();
   });
 
   it('downloads remote cover art when no local cover exists', async () => {
