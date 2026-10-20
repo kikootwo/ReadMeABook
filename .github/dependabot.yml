@@ -18,8 +18,8 @@ updates:
       # @types/node must match the runtime major (Node 24 in CI and the image); move it with Node.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
-      # openid-client 5+ replaces the Issuer/Client API the OIDC sign-in uses; it needs a
-      # migration of that code, not a version bump. Upgrade by hand.
+      # openid-client 6 replaces the Issuer/Client API the OIDC sign-in uses (5 keeps it but has
+      # its own breaking changes); a major needs a migration of that code. Upgrade by hand.
       - dependency-name: "openid-client"
         update-types: ["version-update:semver-major"]
       # A TypeScript major has to be checked against `next build` first, and PR CI only runs
