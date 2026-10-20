@@ -124,6 +124,7 @@ export function AudiobookDetailsModal({
 
   const effectiveStatus = localRequestStatus;
   const status = getStatusInfo(isAvailable, effectiveStatus, requestedByUsername);
+  const summaryText = audiobook?.description?.trim() ?? '';
   const canShowEbookButtons = isAvailable && ebookStatus?.ebookSourcesEnabled && !ebookStatus?.hasActiveEbookRequest;
 
   // Advance the existing request via select-torrent (instead of creating a new one)
@@ -503,7 +504,7 @@ export function AudiobookDetailsModal({
               )}
 
               {/* Summary: own capped scroll box (direct flex items of this column) */}
-              {audiobook.description?.trim() && <BookSummary text={audiobook.description.trim()} />}
+              {summaryText && <BookSummary text={summaryText} />}
 
               {/* AI Recommendation Reasoning */}
               {aiReason && (
