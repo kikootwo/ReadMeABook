@@ -147,24 +147,28 @@ export async function measure(page: Page): Promise<Geometry> {
   })()`);
 }
 
+/** The "Summary" h3 in the modal (on main too, where there is no box): `${HEADING_JS}` is an expression. */
+const HEADING_JS = `[...(${AREA_JS}).querySelectorAll('h3')].find((h) => h.textContent.trim().toLowerCase() === 'summary')`;
+
 /** The summary heading at the top of the viewport, box scrolled to its start (phone evidence). */
 export async function showBoxTop(page: Page) {
   await page.evaluate(`(() => {
-    const area = ${AREA_JS};
-    const box = area.querySelector('[data-testid="book-summary-scroll"]');
-    if (!box) return;
-    box.scrollTop = 0;
-    box.parentElement.previousElementSibling.scrollIntoView({ block: 'start' });
+    const box = (${AREA_JS}).querySelector('[data-testid="book-summary-scroll"]');
+    if (box) box.scrollTop = 0;
+    const h = ${HEADING_JS};
+    if (h) h.scrollIntoView({ block: 'start' });
   })()`);
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 }
 
-/** Screenshot of the summary heading + box only (padded), for a close look at the fade and chevron. */
+/** Screenshot of the summary heading + box (padded, clipped to the viewport) for a close look at the fade and chevron. */
 export async function shotBox(page: Page, name: string) {
-  const r = (await page.evaluate(`(() => { const a = ${AREA_JS}; const w = a.querySelector('[data-testid="book-summary"]');
-    const h = w.previousElementSibling.getBoundingClientRect(), b = w.getBoundingClientRect();
-    return { x: b.left - 16, y: h.top - 8, width: b.width + 32, height: b.bottom - h.top + 24 }; })()`)) as { x: number; y: number; width: number; height: number };
-  await page.screenshot({ path: evidencePath('summary-scroll', `${name}.png`), clip: { x: Math.max(0, r.x), y: Math.max(0, r.y), width: r.width, height: r.height } });
+  const r = (await page.evaluate(`(() => { const h = ${HEADING_JS}; if (!h || !h.nextElementSibling) return null;
+    const t = h.getBoundingClientRect(), b = h.nextElementSibling.getBoundingClientRect();
+    const y = Math.max(0, t.top - 8), bottom = Math.min(innerHeight, b.bottom + 24);
+    return { x: Math.max(0, b.left - 16), y, width: Math.min(innerWidth, b.width + 32), height: bottom - y }; })()`)) as { x: number; y: number; width: number; height: number } | null;
+  if (!r || r.height <= 0) return;
+  await page.screenshot({ path: evidencePath('summary-scroll', `${name}.png`), clip: r });
 }
 
 /**
@@ -172,10 +176,10 @@ export async function shotBox(page: Page, name: string) {
  * modal) until the end, where the chevron goes away. Takes `midShot` after the first click.
  */
 export async function chevronWalk(page: Page, midShot?: string) {
-  await page.evaluate(`${AREA_JS}.querySelector('[data-testid="book-summary"]').scrollIntoView({ block: 'center' })`);
-  await settle(page, 300);
   const more = page.getByTestId('book-summary-more');
   if (!(await more.count())) return { ok: false, reason: 'no chevron' };
+  await page.evaluate(`(${AREA_JS}).querySelector('[data-testid="book-summary"]').scrollIntoView({ block: 'center' })`);
+  await settle(page, 300);
   const rects = (await page.evaluate(`(() => { const a = ${AREA_JS};
     const r = (el) => { const b = el.getBoundingClientRect(); return { top: b.top, right: b.right, bottom: b.bottom, left: b.left }; };
     return { box: r(a.querySelector('[data-testid="book-summary-scroll"]')), more: r(a.querySelector('[data-testid="book-summary-more"]')) }; })()`)) as Record<'box' | 'more', { top: number; right: number; bottom: number; left: number }>;
