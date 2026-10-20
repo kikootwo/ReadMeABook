@@ -36,10 +36,10 @@ export default function AdminSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<Message | null>(null);
-  // Success banners clear themselves after 3 s. One timer, keyed on the message, so a newer
-  // message or leaving the page cancels it (tabs only report messages, they keep no timers)
+  // Save confirmations (autoClear) clear themselves after 3 s. One timer, keyed on the message, so a
+  // newer message or leaving the page cancels it (tabs only report messages, they keep no timers)
   useEffect(() => {
-    if (message?.type !== 'success') return;
+    if (!message?.autoClear) return;
     const timer = setTimeout(() => setMessage(null), 3000);
     return () => clearTimeout(timer);
   }, [message]);
@@ -164,7 +164,7 @@ export default function AdminSettings() {
 
     try {
       await saveTabSettings(activeTab, settings, configuredIndexers, flagConfigs);
-      setMessage({ type: 'success', text: 'Settings saved successfully!' });
+      setMessage({ type: 'success', text: 'Settings saved successfully!', autoClear: true });
       setOriginalSettings(JSON.parse(JSON.stringify(settings)));
 
       // Also update original indexers and flag configs when saving prowlarr tab
@@ -335,7 +335,8 @@ export default function AdminSettings() {
             <EbookTab
               ebook={settings.ebook}
               onChange={(ebook) => setSettings({ ...settings, ebook })}
-              onSuccess={(msg) => setMessage({ type: 'success', text: msg })}
+              // The e-book tab only reports its save confirmation
+              onSuccess={(msg) => setMessage({ type: 'success', text: msg, autoClear: true })}
               onError={(msg) => setMessage({ type: 'error', text: msg })}
               markAsSaved={() => setOriginalSettings(JSON.parse(JSON.stringify(settings)))}
             />

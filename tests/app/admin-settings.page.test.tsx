@@ -30,11 +30,14 @@ const mockAdminSettingsModules = () => {
   }));
 
   vi.doMock(path.resolve('src/app/admin/settings/tabs/LibraryTab/LibraryTab.tsx'), () => ({
-    LibraryTab: ({ settings, onChange }: { settings: any; onChange: (next: any) => void }) => (
+    LibraryTab: ({ settings, onChange, onSuccess }: { settings: any; onChange: (next: any) => void; onSuccess: (msg: string) => void }) => (
       <div>
         <div>Library Tab</div>
         <button type="button" onClick={() => onChange({ ...settings, audibleRegion: 'uk' })}>
           Change Settings
+        </button>
+        <button type="button" onClick={() => onSuccess('Connected to Plex. You can now save.')}>
+          Test Connection
         </button>
       </div>
     ),
@@ -192,6 +195,25 @@ describe('AdminSettings', () => {
 
     expect(clearSpy).toHaveBeenCalled();
     clearSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('keeps a test-connection success on screen (it says what to do next)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchWithAuthMock.mockResolvedValue({ ok: true, json: async () => settingsFixture });
+    getTabValidationMock.mockReturnValue(true);
+    getTabsMock.mockReturnValue([{ id: 'library', label: 'Library', icon: 'L' }]);
+
+    const { default: AdminSettings } = await import('@/app/admin/settings/page');
+    render(<AdminSettings />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Test Connection' }));
+    expect(await screen.findByText('Connected to Plex. You can now save.')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    expect(screen.getByText('Connected to Plex. You can now save.')).toBeInTheDocument();
     vi.useRealTimers();
   });
 });
