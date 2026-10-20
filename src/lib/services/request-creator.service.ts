@@ -1,6 +1,6 @@
 /**
  * Component: Request Creator Service
- * Documentation: documentation/backend/services/requests.md
+ * Documentation: documentation/backend/services/goodreads-sync.md
  *
  * Shared request-creation logic used by both the API route and Goodreads sync.
  * Encapsulates: duplicate detection, library check, Audnexus enrichment,
