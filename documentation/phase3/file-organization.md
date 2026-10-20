@@ -262,8 +262,10 @@ When user deletes and re-requests the same audiobook:
 **Code:** `src/lib/utils/copy-file.ts`, `src/lib/utils/organize-copy.ts`, `src/lib/utils/import-inventory.ts`, `src/lib/utils/audio-duration.ts`, `src/lib/processors/organize-evidence.ts`
 
 **Atomic copy (`copyFile`):** writes `<target dir>/.rmab-partial-<sha256(name)[:12]>-<rand>.part` through one FileHandle (write, fsync, close all fatal) → size must equal the source → publish → final path must have that size and the partial's dev/ino (when ino ≠ 0) → best-effort directory fsync (EINVAL/ENOTSUP/EISDIR/EBADF/EPERM/EACCES ignored). An inode change after publish or a failed folder fsync is accepted only if the final file holds the source's exact bytes. Failed rename/link (EXDEV, EBUSY, EACCES, …) = failed; never falls back to writing the final name. A crash leaves only a hidden `.part` file.
-- Publish modes: `replace` (rename over; used to repair an interrupted copy or replace a bad tagged copy) and `create` (new targets: `link(partial, dest)` then unlink the partial; `EEXIST` if the target appeared → `placeFile` re-runs the existing-target rules on it). Filesystems without hard links fall back to lstat + rename, serialized in-process.
+- Publish modes: `replace` (rename over; used only to repair an interrupted copy) and `create` (new targets: `link(partial, dest)` then unlink the partial; `EEXIST` if the target appeared → `placeFile` re-runs the existing-target rules on it). Filesystems without hard links fall back to lstat + rename, serialized in-process.
 - `placeFile` also serializes placements per target name (any extension) in-process: two organize jobs (queue concurrency 2) placing the same generic file name never overwrite each other; the second gets `identical`/`differs`.
+- Permissions (`applyFileMode` → `applied` / `refused` / `missing`): after a copy is published, `chmod(file_chmod)` is best-effort. mergerfs/NFS/FUSE/SMB often refuse it (EPERM, ENOTSUP, EACCES, …) though the write succeeded → placement stays `copied` with `PlaceResult.warning` (path, octal mode, code). ENOENT/ENOTDIR mean no file at the path → `failed`, never verified. Same for downloaded/cached cover art (missing = cover failed). No `chown` is done
+- Warnings collect in `OrganizationResult.permissionWarnings` / `EbookOrganizationResult.permissionWarnings` (never in `errors`); `reportImportStatus` logs one summary per job (`summarizePermissionWarnings`) and the request message gets `permissions could not be applied to <n> file(s)`
 
 **Stale partials:** before placing, regular files in that one target folder matching the exact pattern are removed when they belong to this target name or are older than 24 h.
 
@@ -280,7 +282,7 @@ When user deletes and re-requests the same audiobook:
 | larger | `differs` |
 
 - `.mp4` / `.m4a` targets also match an existing `<name>.m4b` (Plex format coercion rename).
-- Tagged derivative (`<source>.tmp`): checked before it is placed: its audio duration must be within 1 s of the original's, both measured from the first audio stream's packets (`probeStreamDurationMs`; `format.duration` is an estimate for e.g. VBR MP3 without a Xing header). Otherwise (or on probe failure) the original is placed untagged (byte-checked). A derivative that fails or differs at placement falls back to the original. Tagging does not use `-xerror` (codec copy would turn benign timestamp warnings into lost tags).
+- Tagged derivative (`<source>.tmp`): checked before it is placed: its audio duration must be within 1 s of the original's, both measured from the first audio stream's packets (`probeStreamDurationMs`; `format.duration` is an estimate for e.g. VBR MP3 without a Xing header). Otherwise (or on probe failure) the original is placed untagged (byte-checked). A derivative that fails or differs at placement falls back to the original. After a failed derivative copy the fallback runs with `resumeInterrupted: false`: an existing target (the failed copy may have landed) is never replaced. If the target was not there before the tagged attempt, what is there now is RMAB's own unverified copy → `failed` (not `differs`); the reason keeps both parts (`Tagged copy failed (…); original not placed (…)`). Tagging does not use `-xerror` (codec copy would turn benign timestamp warnings into lost tags).
 - Chapter merge: inputs map to the merged target; verified only if the merged duration is within min(2%, half the shortest chapter) of the chapters' total (`MergeResult.durationVerified`). Otherwise the merged file and all sources are kept. Merges do not use `-xerror` (one bad frame must not drop the merge; `durationVerified` guards deletes).
 - Compare cost: same-size compares run only when a delete may follow (manual `cleanupSource`, or a download that cleanup would remove); they stop at the first differing chunk.
 
@@ -296,6 +298,7 @@ When user deletes and re-requests the same audiobook:
 | some files failed | `<n> of <m> files not imported; source files kept` |
 | every file already in the library with different content | `already in the library with different content; source kept` (not a failure; no failure notification) |
 | merge kept outside the strict duration window | `merged file kept; sources kept` |
+| file permissions refused (appended to any of the above, or alone) | `permissions could not be applied to <n> file(s)` |
 | source folder not fully readable | `... source folder could not be fully read; source files kept` |
 
 - Kindle-fixed EPUB: the library gets the fixed copy; the original EPUB counts as imported once that copy is placed (`copied`/`identical`).
@@ -349,6 +352,7 @@ async function organize(
 **7. Manual import deleted library folders (#242)** - Download cleanup used the request's newest download row regardless of origin and `rm -rf`'d the import folder (even the media root); `cleanupSource` with source == target unlinked the library files; in-place re-import truncated `cover.jpg` to 0 bytes. Fixed by provenance gate + delete guard + same-file copy skip (see Post-Organize Cleanup Safety)
    - Upgrade note: organize jobs queued before this change carry no `downloadHistoryId`, so they skip download cleanup once (files stay on disk, client history entry is not archived). Their import retry on transient errors is unchanged; only manual/bulk imports fail without retry
 **8. Cleanup after partial or interrupted imports** - A download was removed when at least one file copied, an interrupted copy left a truncated file under the final name that later counted as done, and a same-named existing file skipped the copy while the source was still deleted. Fixed by atomic copies, per-file placement records and verified-only deletes (see Verified Import)
+**9. chmod refused after a successful copy (#233)** - Before verified import, a post-copy `chmod` EPERM on mergerfs/NFS/FUSE failed the import (`awaiting_import`) and the fallback copied the untagged original over the tagged copy. Verified import already made audio chmod non-fatal; on top of it: permission warnings (one per job, plus a request note), best-effort chmod for downloaded/cached cover art, chmod ENOENT/ENOTDIR = failed, and a fallback that never replaces a landed copy
 
 ## Tech Stack
 
