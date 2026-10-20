@@ -19,6 +19,7 @@ import { usePreferences } from '@/contexts/PreferencesContext';
 import { InteractiveTorrentSearchModal } from '@/components/requests/InteractiveTorrentSearchModal';
 import { ReportIssueModal } from '@/components/audiobooks/ReportIssueModal';
 import { ManualImportBrowser } from '@/components/audiobooks/ManualImportBrowser';
+import { BookSummary } from '@/components/audiobooks/BookSummary';
 import { FolderArrowDownIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
 import { EyeSlashIcon as EyeSlashSolidIcon } from '@heroicons/react/24/solid';
 import { fetchWithAuth } from '@/lib/utils/api';
@@ -123,6 +124,7 @@ export function AudiobookDetailsModal({
 
   const effectiveStatus = localRequestStatus;
   const status = getStatusInfo(isAvailable, effectiveStatus, requestedByUsername);
+  const summaryText = audiobook?.description?.trim() ?? '';
   const canShowEbookButtons = isAvailable && ebookStatus?.ebookSourcesEnabled && !ebookStatus?.hasActiveEbookRequest;
 
   // Advance the existing request via select-torrent (instead of creating a new one)
@@ -306,8 +308,8 @@ export function AudiobookDetailsModal({
           </svg>
         </button>
 
-        {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto overscroll-contain">
+        {/* Scrollable Content (flex column so the summary box can absorb the leftover height) */}
+        <div className="flex-1 overflow-y-auto overscroll-contain flex flex-col">
           {/* Loading State */}
           {isLoading && (
             <div className="flex items-center justify-center min-h-[400px]">
@@ -330,7 +332,7 @@ export function AudiobookDetailsModal({
 
           {/* Content */}
           {audiobook && !isLoading && (
-            <div className="p-4 sm:p-6 lg:p-8">
+            <div className="px-4 pt-4 sm:px-6 sm:pt-6 lg:px-8 lg:pt-8 flex flex-col min-h-0 after:block after:shrink-0 after:h-4 sm:after:h-6 lg:after:h-8">
               {/* Hero Section - Cover + Title/Author */}
               <div className="flex flex-col sm:flex-row gap-5 sm:gap-6">
                 {/* Cover Art */}
@@ -501,17 +503,8 @@ export function AudiobookDetailsModal({
                 </div>
               )}
 
-              {/* Description */}
-              {audiobook.description && (
-                <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700/50">
-                  <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
-                    Summary
-                  </h3>
-                  <p className="text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap text-[15px]">
-                    {audiobook.description}
-                  </p>
-                </div>
-              )}
+              {/* Summary: own capped scroll box (direct flex items of this column) */}
+              {summaryText && <BookSummary text={summaryText} />}
 
               {/* AI Recommendation Reasoning */}
               {aiReason && (

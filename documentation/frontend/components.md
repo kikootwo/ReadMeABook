@@ -30,7 +30,8 @@ src/components/
 **Audiobooks**
 - **AudiobookCard** ✅ - Cover, title, author, narrator, duration, request button, clickable to open details modal. Shows "Requested by [username]" when someone else has requested the book, "Requested" when current user has requested it
 - **AudiobookGrid** - Responsive grid (1/2/3/4 cols)
-- **AudiobookDetailsModal** ✅ - Full-screen modal with comprehensive metadata (description, genres, rating, release date, narrator, language, format, publisher, request functionality). Shows requesting user's name when applicable
+- **AudiobookDetailsModal** ✅ - Full-screen modal with comprehensive metadata (description, genres, rating, release date, narrator, language, format, publisher, request functionality). Shows requesting user's name when applicable. Scroll area (`flex flex-col`) holds a `flex flex-col min-h-0` content column; bottom padding is an `after:` spacer so it survives when the column is shrunk. Summary rendered by **BookSummary**
+- **BookSummary** ✅ - `src/components/audiobooks/BookSummary.tsx`. Summary h3 + capped scroll box, returned as a fragment (both are flex items of the modal content column). Wrapper owns the cap via `--summary-cap`: 38dvh by default, 15rem at `[@media(min-width:640px)_and_(min-height:500px)]`; `max-h-(--summary-cap)`. Phones and landscape phones (below that query): `shrink-0`, fixed 38dvh box, sheet scrolls. At/above it: box absorbs leftover height: wrapper `shrink basis-[content] h-24` → height between min(6rem, natural) and 15rem (CSS only: auto min size = min(content, specified h-24)); 1440x900 default modal has 0 outer overflow. Text over the cap by ≤12px: inline `maxHeight: calc(var(--summary-cap) + 12px)` (shown whole; decided against the cap, not the current height, so no flip-flop). Overflowing only: `overflow-y-auto` (else `overflow-y-hidden`), `role=region`, `aria-labelledby` heading ("Summary"), `tabIndex=0`, bottom fade `h-6` + "more" chevron button while more text below, top fade `h-4` once scrolled; fades and chevron inset by scrollbar width. Chevron: `type=button tabIndex=-1 aria-hidden` (pointer only; keyboard/SR use the region), `absolute -bottom-2` (disc top = bottom fade top, so it only covers faded text; hangs 8px below the box, inside the next section mt-6), `right: scrollbarWidth + 4`, click → `scrollBy(max(clientHeight - 40, 24))` (40 = both fades, so the cut-off line lands clear of the top fade), smooth unless reduced motion; mousedown does not take focus. Focused box that stops overflowing keeps region/tab stop until blur (focus never drops to body). Focus ring `focus-visible:outline-offset-4`. Short text: natural height, no region/tab stop/fades/chevron. `overscroll-y-auto` on every pointer (swipe/wheel at the end chains to the modal; modal scroll area is `overscroll-contain` + body lock, so the page never moves). `<p>` is `whitespace-pre-wrap break-words`, box `overflow-x-hidden`. Modal passes `description.trim()` (computed once); whitespace-only → no section
 
 **Requests**
 - **RequestCard** ✅ - Cover, title, author, status badge, progress bar, timestamps, action buttons (cancel, manual search, interactive search). When status=`awaiting_release` and `releaseDate` is set, shows "Releases &lt;Mon DD, YYYY&gt;" next to the status badge (UTC-formatted)
@@ -123,6 +124,10 @@ interface AudiobookDetailsModalProps {
   hasReportedIssue?: boolean;
   aiReason?: string | null;
   adminActions?: React.ReactNode; // Optional admin buttons (Approve/Search/Deny) rendered as second row in action bar
+}
+
+interface BookSummaryProps {
+  text: string; // already trimmed; paragraphs kept via whitespace-pre-wrap
 }
 
 interface RequestCardProps {

@@ -26,6 +26,18 @@ updates:
       # the unit tests (no type-check, no build). Upgrade by hand.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
+      # zod 4 changes the schema API the request validation in src/ is written against (the unit
+      # tests fail on it); a major needs a migration of that code. Upgrade by hand.
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      # ioredis backs the startup Redis readiness check (Bull brings its own copy for the queue).
+      # PR CI mocks it and has no Redis, so a major can't be checked there. Upgrade by hand.
+      - dependency-name: "ioredis"
+        update-types: ["version-update:semver-major"]
+      # An eslint major has to be checked against eslint-config-next, and PR CI doesn't run the
+      # linter. Upgrade by hand.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
     groups:
       # Listed first: Dependabot puts a dependency in the FIRST group that matches,
       # so prisma and @prisma/client always move together instead of splitting
