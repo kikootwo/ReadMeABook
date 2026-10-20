@@ -333,6 +333,12 @@ export class QBittorrentService implements IDownloadClient {
     );
   }
 
+  /** A rejected /torrents/add body as log text: strings as is, JSON receipts serialized (capped). */
+  private describeAddResponse(data: unknown): string {
+    if (typeof data === 'string') return data;
+    return (JSON.stringify(data) ?? String(data)).slice(0, 500);
+  }
+
   /**
    * Add magnet link - hash is extractable from URI (deterministic)
    */
@@ -389,7 +395,7 @@ export class QBittorrentService implements IDownloadClient {
     });
 
     if (!this.isAddAccepted(response.data, infoHash)) {
-      throw new Error(`qBittorrent rejected magnet link: ${response.data}`);
+      throw new Error(`qBittorrent rejected magnet link: ${this.describeAddResponse(response.data)}`);
     }
 
     logger.info(` Successfully added magnet link: ${infoHash}`);
@@ -483,7 +489,7 @@ export class QBittorrentService implements IDownloadClient {
     });
 
     if (!this.isAddAccepted(response.data, infoHash)) {
-      throw new Error(`qBittorrent rejected .torrent file: ${response.data}`);
+      throw new Error(`qBittorrent rejected .torrent file: ${this.describeAddResponse(response.data)}`);
     }
 
     logger.info(` Successfully added torrent: ${infoHash}`);

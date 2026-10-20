@@ -8,9 +8,23 @@ import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QBittorrentService } from '@/lib/integrations/qbittorrent.service';
 
-vi.mock('@/lib/utils/logger', () => ({
-  RMABLogger: { create: () => ({ info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
+const loggerMock = vi.hoisted(() => ({
+  info: vi.fn(),
+  debug: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
 }));
+
+vi.mock('@/lib/utils/logger', () => ({
+  RMABLogger: { create: () => loggerMock },
+}));
+
+/** The error text addTorrent logged before throwing its generic failure. */
+const loggedAddError = () =>
+  loggerMock.error.mock.calls
+    .filter(([message]) => message === 'Failed to add torrent')
+    .map(([, meta]) => String((meta as { error?: unknown })?.error ?? ''))
+    .join('\n');
 
 // A minimal trackerless torrent, so the real parser and the real multipart upload both run.
 const info = Buffer.from(`d6:lengthi1e4:name8:Book.txt12:piece lengthi16384e6:pieces20:${'x'.repeat(20)}e`);
@@ -124,15 +138,25 @@ describe('qBittorrent add responses over real HTTP', () => {
       expect(uploads).toHaveLength(1);
     });
 
+    it('logs the returned ID when it rejects a receipt for another hash', async () => {
+      addBody = { ...receipt, added_torrent_ids: [otherHash] };
+      await expect(add()).rejects.toThrow('Failed to add torrent to qBittorrent');
+      const logged = loggedAddError();
+      expect(logged).toContain(otherHash);
+      expect(logged).not.toContain('[object Object]');
+    });
+
     it('rejects an asynchronous receipt that confirms no hash', async () => {
       addStatus = 202;
       addBody = { success_count: 0, failure_count: 0, pending_count: 1, added_torrent_ids: [] };
       await expect(add()).rejects.toThrow('Failed to add torrent to qBittorrent');
+      expect(uploads).toHaveLength(1);
     });
 
     it('rejects an HTTP error even with a success-shaped body', async () => {
       addStatus = 409;
       await expect(add()).rejects.toThrow('Failed to add torrent to qBittorrent');
+      expect(uploads).toHaveLength(1);
     });
 
     it('returns an existing download without submitting it again', async () => {
