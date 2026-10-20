@@ -248,4 +248,41 @@ describe('RequestCard', () => {
     expect(props.asin).toBe('ASIN123');
     expect(props.hideRequestActions).toBeUndefined();
   });
+
+  it('forwards the request id and owner to AudiobookDetailsModal', async () => {
+    const { RequestCard } = await import('@/components/requests/RequestCard');
+
+    render(
+      <RequestCard
+        request={{
+          ...baseRequest,
+          user: { id: 'user-1', plexUsername: 'owner' },
+          audiobook: { ...baseRequest.audiobook, audibleAsin: 'ASIN123' },
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: baseRequest.audiobook.title }));
+
+    const props = detailsModalSpy.mock.calls.at(-1)?.[0];
+    expect(props.requestId).toBe('req-1');
+    expect(props.requestedByUserId).toBe('user-1');
+  });
+
+  it('forwards a null owner when the request has no user relation', async () => {
+    const { RequestCard } = await import('@/components/requests/RequestCard');
+
+    render(
+      <RequestCard
+        request={{
+          ...baseRequest,
+          audiobook: { ...baseRequest.audiobook, audibleAsin: 'ASIN123' },
+        }}
+      />
+    );
+
+    const props = detailsModalSpy.mock.calls.at(-1)?.[0];
+    expect(props.requestId).toBe('req-1');
+    expect(props.requestedByUserId).toBeNull();
+  });
 });
