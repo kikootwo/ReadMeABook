@@ -380,7 +380,7 @@ describe('SABnzbdService', () => {
     expect(extracting.state).toBe('extracting');
   });
 
-  it('maps completed status when percentage is 100', () => {
+  it('maps a 100 percent queue item to extracting, not completed', () => {
     const service = new SABnzbdService('http://sab', 'key');
     const progress = service.getDownloadProgress({
       nzbId: 'nzb-7',
@@ -394,8 +394,66 @@ describe('SABnzbdService', () => {
       priority: 'Normal',
     });
 
-    expect(progress.state).toBe('completed');
+    expect(progress.state).toBe('extracting');
     expect(progress.percent).toBe(1);
+  });
+
+  it('reports completed only once the item reaches history with its storage path', async () => {
+    // SAB keeps a finished download in the queue at 100% while post-processing runs;
+    // the final path only exists once the item moves to history.
+    let inHistory = false;
+    clientMock.get.mockImplementation(async (_url: string, config: { params: { mode: string } }) => {
+      if (config.params.mode === 'queue') {
+        return {
+          data: {
+            queue: {
+              slots: inHistory ? [] : [{
+                nzo_id: 'nzb-pp',
+                filename: 'Post Processing Book',
+                mb: '100',
+                mbleft: '0',
+                percentage: '100',
+                status: 'Downloading',
+                timeleft: '0:00:00',
+                cat: 'readmeabook',
+              }],
+            },
+          },
+        };
+      }
+      if (config.params.mode === 'history') {
+        return {
+          data: {
+            history: {
+              slots: inHistory ? [{
+                nzo_id: 'nzb-pp',
+                name: 'Post Processing Book',
+                category: 'readmeabook',
+                status: 'Completed',
+                bytes: '104857600',
+                storage: '/downloads/readmeabook/Post Processing Book',
+                completed: '1700000000',
+              }] : [],
+            },
+          },
+        };
+      }
+      throw new Error(`Unexpected SABnzbd mode: ${config.params.mode}`);
+    });
+
+    const service = new SABnzbdService('http://sab', 'key');
+
+    // Still in the queue: keep monitoring, there is no path to organize yet.
+    const postProcessing = await service.getDownload('nzb-pp');
+    expect(postProcessing).toMatchObject({ status: 'processing', progress: 1 });
+    expect(postProcessing?.downloadPath).toBeUndefined();
+
+    inHistory = true;
+    const done = await service.getDownload('nzb-pp');
+    expect(done).toMatchObject({
+      status: 'completed',
+      downloadPath: '/downloads/readmeabook/Post Processing Book',
+    });
   });
 
   it('creates the default category when missing', async () => {

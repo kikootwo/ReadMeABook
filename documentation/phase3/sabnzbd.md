@@ -181,7 +181,8 @@ interface SABnzbdConfig {
 - `Paused` → Manually paused
 - `Extracting/Unpacking` → Post-processing extraction
 - `Repairing/Verifying` → Post-processing par2 repair
-- `Completed` → Successfully downloaded and extracted
+- Queue item at 100% (any other status) → `extracting` (unified `processing`); not completed until it reaches history
+- `Completed` (history) → Successfully downloaded and extracted; `storage` gives the download path
 - `Failed` → Download or post-processing failed
 
 ## Remote Path Mapping
@@ -241,6 +242,7 @@ organizePath = PathMapper.transform(sabPath, config)
    - Applying `reverseTransform()` when setting category path (outgoing)
    - Applying `transform()` when processing completed downloads (incoming)
    - Using same `PathMapper` utility as qBittorrent for consistency
+**8. Requests failed at 100% during post-processing** - A queue item at 100% mapped to `completed` before SABnzbd had a storage path, so the monitor failed the request with "Download path not available". Fixed by mapping it to `extracting` in `getDownloadProgress()`; completion comes from history only.
 
 ## Automatic Cleanup
 
