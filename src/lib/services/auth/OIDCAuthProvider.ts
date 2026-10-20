@@ -203,6 +203,15 @@ export class OIDCAuthProvider implements IAuthProvider {
         };
       }
 
+      // The user row is keyed on the subject; it may only be an OIDC account's row
+      if (!(await this.subjectRowIsOidcAccount(userinfo.sub))) {
+        logger.warn('OIDC sign-in refused: existing account is not an OIDC account');
+        return {
+          success: false,
+          error: 'This account cannot sign in with single sign-on. Please contact the administrator.',
+        };
+      }
+
       // Map OIDC claims to UserInfo
       const username = (userinfo.preferred_username || userinfo.email || userinfo.sub) as string;
       const email = userinfo.email as string | undefined;
@@ -349,6 +358,19 @@ export class OIDCAuthProvider implements IAuthProvider {
   }
 
   /**
+   * True when no row uses this subject as its plexId, or that row is an OIDC account
+   * (authProvider 'oidc'). Subjects in the local-account id space are never used.
+   */
+  private async subjectRowIsOidcAccount(oidcSubject: string): Promise<boolean> {
+    const existing = await prisma.user.findUnique({
+      where: { plexId: oidcSubject },
+      select: { authProvider: true },
+    });
+    if (existing) return existing.authProvider === 'oidc';
+    return !oidcSubject.toLowerCase().startsWith('local-');
+  }
+
+  /**
    * Find user by OIDC subject
    */
   private async findUserByOIDCSubject(oidcSubject: string) {
@@ -425,6 +447,7 @@ export class OIDCAuthProvider implements IAuthProvider {
         plexUsername: username,
         plexEmail: email || null,
         avatarUrl: avatarUrl || null,
+        authProvider: 'oidc',
         oidcProvider: providerName || 'unknown',
         registrationStatus: 'approved',
         lastLoginAt: new Date(),

@@ -116,6 +116,18 @@ describe('metadata tagger', () => {
     expect(argv[fIdx + 1]).toBe('mp4');
   });
 
+  it.each(['/tmp/book.m4b', '/tmp/book.mp3', '/tmp/book.flac'])(
+    'does not use -xerror when tagging %s (codec copy would turn benign timestamp warnings into lost tags)',
+    async (file) => {
+      fsMock.access.mockResolvedValue(undefined);
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata(file, { title: 'Book', author: 'Author' });
+
+      expect(lastCallArgv()).not.toContain('-xerror');
+    }
+  );
+
   it('tags an mp3 file with mp3 output format', async () => {
     fsMock.access.mockResolvedValue(undefined);
     mockExecFileSuccess('done');

@@ -78,7 +78,7 @@
 - Downloads: progress from wall clock; non-zero `dlspeed` while moving; files copied into `<save_path>/<name>/` and chowned on the first poll at 100%, before reporting complete; a finished torrent that is paused reports `pausedUP` at 100%.
 
 ## Scenarios (`e2e/scenarios/*.json`)
-- Release fields: `id`, `book`, `title` (`{{title}}`, `{{author}}`, `{{asin}}`, `{{narrator}}`), `protocol` torrent\|usenet, `indexerId`, `categories` (default `[3030]`), `sizeMB` (keep ≥20: ranking drops <20 MB), `seeders`, `fixture`, `link: "magnet"`.
+- Release fields: `id`, `book`, `title` (`{{title}}`, `{{author}}`, `{{asin}}`, `{{narrator}}`), `protocol` torrent\|usenet, `indexerId`, `categories` (default `[3030]`), `sizeMB` (keep ≥20: ranking drops <20 MB), `seeders`, `fixture`, `link: "magnet"`, `sabStorageDir` (usenet: fake SABnzbd stores the job under `<complete_dir>/<dir>` (or an absolute dir) regardless of category, like SABnzbd sorting).
 - `grab`: `statuses` (per attempt, last repeats, e.g. `[503]`), `redirects` (`other-port`\|`tracker`\|`relative`\|`magnet`, one per hop), `direct: true`, `body: "magnet-text"`.
 - `download`: `completeMs`, `stallAtPct` (0 B/s, `stalledDL`), `failAtPct` (`error` / SAB `Failed`), `dropFixture` (e.g. `wrong-files`).
 - Scenario-level `search.statuses` (transient search failures), `search.ignoreLimit` (indexer over-returns). Search matches releases containing every query word (≥3 chars).
@@ -99,13 +99,15 @@
 |---|---|
 | `smoke.spec.ts` | UI login (ABS form, or Plex-mode Admin Login toggle) → search → card Request → qBit add → downloaded → ABS item / fake Plex album → `available` (scan + recently-added jobs) → "In Your Library"; Prowlarr key never off the Prowlarr origin |
 | `regressions/275-transient-grab.spec.ts` | A's grab answered 503, then B fetched after it (fails here on pre-fix code), qBit got only B, request completes |
-| `upgrade.spec.ts` | Seed (available/downloading/failed) on the release image; after upgrade: health, admin login, statuses kept, stored Prowlarr key decrypts. `run.mjs` adds exact host-side row counts: users/audiobooks/requests/download_history/api_tokens/blocked_releases unchanged (snapshot after counts settle), no table shrinks |
+| `upgrade.spec.ts` | Seed (available/downloading/failed) on the release image; after upgrade: health, admin login (API, then UI via `loginAdminUi` in either backend mode), statuses kept, stored Prowlarr key decrypts. `run.mjs` adds exact host-side row counts: users/audiobooks/requests/download_history/api_tokens/blocked_releases unchanged (snapshot after counts settle), no table shrinks |
 | `preview-seed.spec.ts` | Preview has `available`, `downloading`, `failed` requests and one library book |
 | `regressions/242-delete-guard.spec.ts` | #242: post-import cleanup never deletes library content (sha256 snapshots of `/media`+`/downloads`, symlinks, Bull enqueue; `--overrides media-bind` for case 1E); exec bridge required |
 | `regressions/242-torrent-seeding.spec.ts`, `242-usenet-mapped.spec.ts` | #242 torrent keeps seeding; usenet with remote path mapping (`--overrides sab-remote`); exec bridge required |
+| `regressions/verified-import.spec.ts` | Verified-import cleanup cases 1-6: partial usenet import keeps the download, selected-file manual cleanup, interrupted copy (app SIGSTOPped at the first partial, SIGKILLed, Bull re-run), truncated target re-copied, same-name file kept, symlinked library entry kept; exec bridge required |
+| `regressions/verified-import-mapped.spec.ts` | Verified-import case 7: a broad mapped client path never bounds the empty-folder sweep (`--overrides sab-remote`, `sabStorageDir`); exec bridge required |
 | `regressions/sec-shell-exec.spec.ts` | #351: a release folder named with `$(...)`, backticks and a quote goes through download + chapter merge; no sentinel file, no shell `touch` signature, ffprobe reads the literal path; exec bridge required |
 | `harness/exec-bridge.spec.ts` | Bridge works untainted (psql, `-u 1000:1000`, non-zero exit throws); absent when tainted |
-- Helpers: `e2e/lib/harness.ts` (`Rmab`, `Abs`, `fakeArr`, `keyLeaks`, `waitFor`, `snap`). Host-side: `e2e/lib/runner.mjs` (runner container, recorder, canary, isolation probes, row counts).
+- Helpers: `e2e/lib/harness.ts` (`Rmab`, `Abs`, `fakeArr`, `keyLeaks`, `waitFor`, `snap`, `loginAdminUi`: /login admin form in either backend mode, clicking the Plex-mode "Admin Login" toggle). Host-side: `e2e/lib/runner.mjs` (runner container, recorder, canary, isolation probes, row counts).
 
 ## Cleanup (every stack/unit run, in `finally`, incl. failures)
 - Before: `down -v` the project. Disk ceiling: `docker system df` images+cache+volumes > 50 GB → prune `rmab-e2e-*` stacks with no running container (never the preview), images labelled with this run's slug, our dangling images, and the build cache (cap 15 GB). Pool-safe: other slots' stacks and images are never touched.

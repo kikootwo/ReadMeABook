@@ -51,6 +51,26 @@ describe('Admin Prowlarr indexers route', () => {
     expect(payload.indexers[0].enabled).toBe(true);
   });
 
+  it('returns every saved per-indexer field, including ratioLimit', async () => {
+    prowlarrMock.getIndexers.mockResolvedValueOnce([
+      { id: 1, name: 'Torrent', protocol: 'torrent', privacy: 'private' },
+      { id: 2, name: 'Usenet', protocol: 'usenet', privacy: 'public' },
+      { id: 3, name: 'Not added', protocol: 'torrent', privacy: 'public' },
+    ]);
+    configServiceMock.get.mockResolvedValueOnce(JSON.stringify([
+      { id: 1, name: 'Torrent', protocol: 'torrent', priority: 4, rssEnabled: true, audiobookCategories: [3030], ebookCategories: [7020], seedingTimeMinutes: 30, ratioLimit: 1.5 },
+      { id: 2, name: 'Usenet', protocol: 'usenet', priority: 6, rssEnabled: false, audiobookCategories: [3030], ebookCategories: [7020], removeAfterProcessing: false },
+    ]));
+    configServiceMock.get.mockResolvedValueOnce('[]');
+
+    const { GET } = await import('@/app/api/admin/settings/prowlarr/indexers/route');
+    const payload = await (await GET({} as any)).json();
+
+    expect(payload.indexers[0]).toMatchObject({ id: 1, enabled: true, priority: 4, rssEnabled: true, seedingTimeMinutes: 30, ratioLimit: 1.5 });
+    expect(payload.indexers[1]).toMatchObject({ id: 2, enabled: true, priority: 6, removeAfterProcessing: false });
+    expect(payload.indexers[2]).toMatchObject({ id: 3, enabled: false, priority: 10, seedingTimeMinutes: 0, ratioLimit: 0 });
+  });
+
   it('saves indexer configuration', async () => {
     authRequest.json.mockResolvedValue({
       indexers: [{ id: 1, name: 'Indexer', protocol: 'torrent', enabled: true, priority: 10, seedingTimeMinutes: 0, ratioLimit: 1.5 }],

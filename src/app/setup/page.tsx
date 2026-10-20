@@ -30,6 +30,7 @@ interface SelectedIndexer {
   protocol: string;
   priority: number;
   seedingTimeMinutes?: number;
+  ratioLimit?: number; // Torrents only (0 = no ratio requirement)
   removeAfterProcessing?: boolean;
   rssEnabled: boolean;
   audiobookCategories: number[];

@@ -15,7 +15,8 @@ import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import { generateFilesHash } from '../utils/files-hash';
 import { fixEpubForKindle, cleanupFixedEpub } from '../utils/epub-fixer';
-import { cleanupDirectDownloadSource, cleanupDownloadAfterOrganize, cleanupSourceAfterOrganize } from './organize-cleanup';
+import { cleanupDirectDownloadSource, cleanupDownloadAfterOrganize, cleanupEbookSource, cleanupSourceAfterOrganize } from './organize-cleanup';
+import { audioEvidence, deleteMayFollow, ebookEvidence as buildEbookEvidence, reportImportStatus } from './organize-evidence';
 import { getAudibleService } from '../integrations/audible.service';
 import { addAutoBlock } from '../services/blocklist.service';
 
@@ -181,6 +182,9 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     // Get file organizer (reads media_dir from database config)
     const organizer = await getFileOrganizer();
 
+    // Byte-compare existing library files only when a delete will depend on it
+    const compareExisting = await deleteMayFollow(requestId, downloadPath, downloadHistoryId, cleanupSource);
+
     // Read path template from configuration
     const templateConfig = await prisma.configuration.findUnique({
       where: { key: 'audiobook_path_template' },
@@ -215,7 +219,8 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       template,
       jobId ? { jobId, context: 'FileOrganizer' } : undefined,
       renameConfig,
-      selectedFiles
+      selectedFiles,
+      { compareExisting }
     );
 
     if (!result.success) {
@@ -261,12 +266,16 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       },
     });
 
+    const evidence = audioEvidence(result);
+    const partialMessage = reportImportStatus(evidence, logger);
+
     // Update request to downloaded (green status, waiting for Plex scan)
     await prisma.request.update({
       where: { id: requestId },
       data: {
         status: 'downloaded',
         progress: 100,
+        errorMessage: partialMessage,
         completedAt: new Date(),
         updatedAt: new Date(),
       },
@@ -345,6 +354,7 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       downloadPath,
       downloadHistoryId,
       targetPath: result.targetPath,
+      evidence,
       configService,
       jobId,
       logger,
@@ -352,7 +362,7 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
 
     // Cleanup source files if requested (manual import feature)
     if (cleanupSource) {
-      await cleanupSourceAfterOrganize(downloadPath, result.targetPath, configService, jobId, logger, selectedFiles);
+      await cleanupSourceAfterOrganize(downloadPath, result.targetPath, configService, jobId, logger, evidence, selectedFiles);
     }
 
     return {
@@ -848,7 +858,8 @@ async function processEbookOrganization(
     template,
     jobId ? { jobId, context: 'FileOrganizer.Ebook' } : undefined,
     isIndexerDownload,
-    ebookRenameConfig
+    ebookRenameConfig,
+    { compareExisting: await deleteMayFollow(requestId, downloadPath, downloadHistoryId, cleanupSource) }
   );
 
   // Clean up fixed EPUB temp file after organization (regardless of success)
@@ -862,6 +873,11 @@ async function processEbookOrganization(
   }
 
   logger.info(`Successfully moved ebook to ${result.targetPath}`);
+
+  // The organizer reads a temp copy when the Kindle fix ran; the original is epubFilePath
+  const importedFile = fixedEpubPath ? epubFilePath : result.sourceFile;
+  const ebookEvidence = await buildEbookEvidence(result, importedFile ?? undefined, downloadPath);
+  const ebookMessage = reportImportStatus(ebookEvidence, logger);
 
   // Update book record with file path
   await prisma.audiobook.update({
@@ -881,6 +897,7 @@ async function processEbookOrganization(
     data: {
       status: 'downloaded',
       progress: 100,
+      errorMessage: ebookMessage,
       completedAt: new Date(),
       updatedAt: new Date(),
     },
@@ -943,6 +960,7 @@ async function processEbookOrganization(
       downloadPath,
       downloadHistoryId,
       targetPath: result.targetPath,
+      evidence: ebookEvidence,
       configService,
       jobId,
       logger,
@@ -955,6 +973,7 @@ async function processEbookOrganization(
     downloadPath,
     downloadHistoryId,
     targetPath: result.targetPath,
+    evidence: ebookEvidence,
     configService,
     jobId,
     logger,
@@ -964,22 +983,7 @@ async function processEbookOrganization(
   // file that was imported is removed, never the folder around it: an import
   // folder can also hold an audiobook or other library content.
   if (cleanupSource) {
-    // The organizer reads a temp copy when the Kindle fix ran; the original is epubFilePath
-    const importedFile = fixedEpubPath ? epubFilePath : result.sourceFile;
-    if (!importedFile) {
-      logger.warn('Imported ebook file unknown, skipping source cleanup');
-    } else if (path.resolve(importedFile) === path.resolve(downloadPath)) {
-      await cleanupSourceAfterOrganize(downloadPath, result.targetPath, configService, jobId, logger);
-    } else {
-      await cleanupSourceAfterOrganize(
-        downloadPath,
-        result.targetPath,
-        configService,
-        jobId,
-        logger,
-        [path.relative(downloadPath, importedFile)]
-      );
-    }
+    await cleanupEbookSource(downloadPath, importedFile ?? undefined, result.targetPath, configService, jobId, logger, ebookEvidence);
   }
 
   return {

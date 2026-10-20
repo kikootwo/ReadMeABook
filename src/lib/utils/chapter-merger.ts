@@ -72,6 +72,13 @@ export interface MergeResult {
   outputPath?: string;
   chapterCount?: number;
   totalDuration?: number;     // milliseconds
+  /** Merged file's probed duration (ms). */
+  actualDuration?: number;
+  /**
+   * True when the merged duration is within min(2%, half the shortest chapter)
+   * of the chapters' total. Only then do the input files count as imported.
+   */
+  durationVerified?: boolean;
   error?: string;
 }
 
@@ -774,11 +781,23 @@ export async function mergeChapters(
     await logger?.info(`  - Format: M4B with embedded chapter markers`);
     await logger?.info(`  - Validation: Passed (duration accurate, file playable)`);
 
+    const actualDuration = validation.actualDuration ?? 0;
+    const shortestChapter = Math.min(...chapters.map((c) => c.duration));
+    const verifyTolerance = Math.min(totalDuration * 0.02, shortestChapter / 2);
+    const durationVerified = actualDuration > 0 && Math.abs(actualDuration - totalDuration) <= verifyTolerance;
+    if (!durationVerified) {
+      await logger?.warn(
+        `Merged duration ${formatDuration(actualDuration)} is not within ${formatDuration(verifyTolerance)} of the chapters' ${formatDuration(totalDuration)}; source files will be kept`
+      );
+    }
+
     return {
       success: true,
       outputPath: options.outputPath,
       chapterCount: chapters.length,
       totalDuration,
+      actualDuration,
+      durationVerified,
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';

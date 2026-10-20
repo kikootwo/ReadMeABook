@@ -119,6 +119,32 @@ describe('assertSafeToDelete', () => {
   });
 
   describe('links and identity', () => {
+    it('refuses a library entry that is a link to a seeding folder (the link location is checked)', async () => {
+      const seeding = dir('downloads', 'seed', 'Disc 1');
+      const target = dir('media', 'Author', 'Book');
+      const entry = path.join(target, 'Disc 1');
+      linkDir(seeding, entry);
+      const ctx = { targetPath: target, mediaDir: dir('media'), downloadRoots: [dir('downloads')], allowMediaSources: true };
+
+      await expectRefused(entry, ctx, /the link: it is inside the organize target/);
+    });
+
+    it('refuses a library file that is a symlink to a seeding file', async (testCtx) => {
+      const seeding = path.join(dir('downloads', 'seed'), 'Book.m4b');
+      fs.writeFileSync(seeding, 'audio');
+      const target = dir('media', 'Author', 'Book');
+      const entry = path.join(target, 'Book.m4b');
+      try {
+        fs.symlinkSync(seeding, entry, 'file');
+      } catch (error) {
+        if (process.platform === 'win32' && (error as NodeJS.ErrnoException).code === 'EPERM') return testCtx.skip();
+        throw error;
+      }
+      const ctx = { targetPath: target, mediaDir: dir('media'), downloadRoots: [dir('downloads')], allowMediaSources: true };
+
+      await expectRefused(entry, ctx, /the link: it is inside the organize target/);
+    });
+
     it('refuses a real library path when the media dir is configured through a link', async () => {
       const realMedia = dir('real-media');
       const linkedMedia = path.join(root, 'linked-media');

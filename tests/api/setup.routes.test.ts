@@ -92,6 +92,35 @@ describe('Setup routes', () => {
     expect(prismaMock.configuration.upsert).toHaveBeenCalled();
   });
 
+  it('saves the wizard indexers in the same shape as the settings tab', async () => {
+    bcryptMock.hash.mockResolvedValue('hashed');
+    prismaMock.user.create.mockResolvedValue({
+      id: 'admin-1', plexId: 'local-admin', plexUsername: 'admin', plexEmail: null, role: 'admin', avatarUrl: null,
+    });
+    prismaMock.configuration.upsert.mockResolvedValue({});
+    prismaMock.scheduledJob.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.bookDateConfig.findFirst.mockResolvedValue(null);
+    const torrent = {
+      id: 1, name: 'Torrent', protocol: 'torrent', priority: 4, rssEnabled: true,
+      audiobookCategories: [3030], ebookCategories: [7020], seedingTimeMinutes: 30, ratioLimit: 1.5,
+    };
+
+    const { POST } = await import('@/app/api/setup/complete/route');
+    await POST({
+      json: vi.fn().mockResolvedValue({
+        backendMode: 'plex',
+        admin: { username: 'admin', password: 'pass' },
+        plex: { url: 'http://plex', token: 'token', audiobook_library_id: 'lib', machine_identifier: 'machine' },
+        prowlarr: { url: 'http://prowlarr', api_key: 'key', indexers: [{ ...torrent, supportsRss: true }] },
+        downloadClient: { type: 'qbittorrent', url: 'http://qbt', username: 'u', password: 'p' },
+        paths: { download_dir: '/downloads', media_dir: '/media' },
+      }),
+    } as any);
+
+    const call = prismaMock.configuration.upsert.mock.calls.find(([arg]: any[]) => arg.where.key === 'prowlarr_indexers');
+    expect(JSON.parse(call![0].create.value)).toEqual([torrent]);
+  });
+
   it('completes setup for Audiobookshelf with both auth methods', async () => {
     bcryptMock.hash.mockResolvedValue('hashed');
     prismaMock.user.create.mockResolvedValue({

@@ -173,6 +173,7 @@ interface ScheduledJob {
 - ✅ Files deleted immediately → kept until seeding requirements met
 - ✅ No seeding time config → added `seeding_time_minutes`
 - ✅ No ratio-based seeding policy → added per-indexer `ratioLimit` (AND-semantics with `seedingTimeMinutes`; `0` disables; undefined client ratio = safe-deny)
+- ✅ Torrents cleaned up on seeding time alone despite a ratio limit → saving the Indexers settings tab had reset every `ratioLimit` to `0` (#319); fixed in settings-pages.md Fixed Issues #4. Limits already reset must be re-entered
 - ✅ Scheduled jobs not running on schedule → implemented Bull repeatable jobs with cron scheduling
 - ✅ MaxListenersExceededWarning → increased maxListeners to 20 on both Redis client and Bull queue
 - ✅ Cron expressions not user-friendly → added human-readable descriptions and visual schedule builder

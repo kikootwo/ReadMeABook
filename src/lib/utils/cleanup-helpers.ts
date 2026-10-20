@@ -20,8 +20,6 @@ export interface RemoveEmptyParentOptions {
   boundaryPath: string;
   /** Optional logger context for job-aware logging */
   logContext?: { jobId: string; context: string };
-  /** Directories that are never removed even when empty (e.g. configured roots); the sweep stops there */
-  protectedPaths?: string[];
 }
 
 /**
@@ -74,7 +72,6 @@ export async function removeEmptyParentDirectories(
   try {
     // Normalize paths for consistent comparison
     const normalizedBoundary = normalizePath(options.boundaryPath);
-    const protectedPaths = new Set((options.protectedPaths || []).map(normalizePath));
     let currentPath = normalizePath(path.dirname(deletedPath));
 
     log.debug('Starting empty parent directory cleanup', {
@@ -104,17 +101,6 @@ export async function removeEmptyParentDirectories(
           currentPath,
           boundaryPath: normalizedBoundary,
         });
-        return {
-          success: true,
-          removedDirectories,
-          stoppedAt: currentPath,
-          stoppedReason: 'boundary_reached',
-        };
-      }
-
-      // Safety check: never remove a protected directory
-      if (protectedPaths.has(currentPath)) {
-        log.debug('Reached protected directory, stopping cleanup', { currentPath });
         return {
           success: true,
           removedDirectories,
@@ -283,6 +269,15 @@ export function normalizePath(filePath: string): string {
   // Remove trailing slash (except for root '/')
   if (normalized.length > 1 && normalized.endsWith('/')) {
     normalized = normalized.slice(0, -1);
+  }
+
+  // Windows drive letters: upper-case the letter, and keep a drive root as 'C:/'
+  // (path.normalize('C:') is 'C:.', the drive's current directory)
+  if (/^[A-Za-z]:/.test(normalized)) {
+    normalized = normalized[0].toUpperCase() + normalized.slice(1);
+    if (/^[A-Z]:\.?$/.test(normalized)) {
+      normalized = `${normalized.slice(0, 2)}/`;
+    }
   }
 
   return normalized;

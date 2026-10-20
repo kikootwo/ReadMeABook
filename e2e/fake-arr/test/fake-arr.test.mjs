@@ -289,6 +289,22 @@ test('sab: config, set_config category, addfile, queue then history with storage
   assert.equal((await api({ mode: 'history' })).history.slots.length, 0);
 });
 
+test('sab: a release with sabStorageDir lands there regardless of its category', async () => {
+  await loadDef({ name: 'unit-sab-dir', book: 'phm', indexers: [{ id: 2, name: 'U', protocol: 'usenet' }], releases: [{ id: 'n', protocol: 'usenet', indexerId: 2, title: '{{title}} nzb', fixture: 'phm-m4b', sabStorageDir: 'sorted/deeper', download: { completeMs: 300 } }] });
+  const api = (q) => fetch(`${base('sab')}/api?${new URLSearchParams({ output: 'json', apikey: 'sabkey', ...q })}`).then((r) => r.json());
+  await api({ mode: 'set_config', section: 'categories', keyword: 'readmeabook', dir: 'readmeabook' });
+  const [rel] = await search('Fixture');
+  const nzb = Buffer.from(await (await fetch(rel.downloadUrl)).arrayBuffer());
+  const fd = new FormData();
+  fd.append('nzbfile', new Blob([nzb], { type: 'application/x-nzb' }), 'x.nzb');
+  for (const [k, v] of Object.entries({ mode: 'addfile', cat: 'readmeabook', output: 'json', apikey: 'sabkey' })) fd.append(k, v);
+  const id = (await fetch(`${base('sab')}/api`, { method: 'POST', body: fd }).then((r) => r.json())).nzo_ids[0];
+  const slot = await waitFor(async () => (await api({ mode: 'history' })).history.slots.find((s) => s.nzo_id === id));
+  assert.equal(slot.storage, `${cfg.downloadsDir}/sorted/deeper/Fixture Book One`);
+  assert.ok(fs.existsSync(path.join(slot.storage, 'Fixture Book One.m4b')));
+  await api({ mode: 'history', name: 'delete', value: id });
+});
+
 test('plex: identity, sections, library listing from the media volume, refresh counter', async () => {
   const hdr = { 'X-Plex-Token': 'plextoken', Accept: 'application/json' };
   assert.equal((await fetch(`${base('plex')}/identity`)).status, 401);

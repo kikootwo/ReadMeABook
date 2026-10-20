@@ -27,9 +27,19 @@ function categoryDir(state, cat) {
   return dir.startsWith('/') ? dir : path.posix.join(complete, dir);
 }
 
+/**
+ * Where a job lands: its category folder, unless the release sets `sabStorageDir` (absolute, or
+ * relative to complete_dir), which places it there regardless of category, like SABnzbd sorting.
+ */
+function jobDir(state, release, cat) {
+  const override = release?.sabStorageDir;
+  if (!override) return categoryDir(state, cat);
+  return override.startsWith('/') ? override : path.posix.join(state.config.downloadsDir, override);
+}
+
 function addJob(state, release, cat, name) {
   const nzoId = `SABnzbd_nzo_${randomBytes(6).toString('hex')}`;
-  const savePath = categoryDir(state, cat);
+  const savePath = jobDir(state, release, cat);
   const job = release ? startDownload(state, release, { savePath, name }) : null;
   if (job && state.sabPaused) pauseJob(job);
   state.nzbs.set(nzoId, { nzoId, name, cat, releaseId: release?.id, job, completedAt: 0, archived: false });
