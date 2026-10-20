@@ -193,13 +193,84 @@ export class NotificationService {
       return { ...config };
     }
 
-    const masked = { ...config };
+    // A stored row not yet migrated is shown in its migrated form (credentials lifted out
+    // of the URL), so the mask never ends up inside a URL that is later saved back
+    const lifted = provider.liftStoredSecrets?.(config ?? {});
+    const masked = { ...(lifted ? lifted.config : config) };
+    if (lifted?.password) masked[lifted.passwordField] = MASKED_CONFIG_VALUE;
     for (const field of provider.sensitiveFields) {
       if (masked[field]) {
         masked[field] = MASKED_CONFIG_VALUE;
       }
     }
     return masked;
+  }
+
+  /**
+   * Prepare a config submitted by the admin (create, update, test): provider
+   * normalisation (e.g. credentials out of the Apprise URL), then every non-empty,
+   * non-masked sensitive value is encrypted, even one already in the encrypted format.
+   * A client-supplied ciphertext is therefore stored as text and never decrypted.
+   * Masked values are left for mergeMaskedSecrets.
+   */
+  prepareSubmittedConfig(type: string, config: Record<string, any>): MaskedSecretMerge {
+    const provider = getProvider(type);
+    if (!provider) return { ok: true, config: { ...config } };
+
+    const normalized = provider.normalizeSubmittedConfig ? provider.normalizeSubmittedConfig(config) : { ok: true as const, config: { ...config } };
+    if (!normalized.ok) return normalized;
+
+    const prepared = { ...normalized.config };
+    for (const field of provider.sensitiveFields) {
+      const value = prepared[field];
+      if (typeof value === 'string' && value !== '' && value !== MASKED_CONFIG_VALUE) {
+        prepared[field] = this.encryptionService.encrypt(value);
+      }
+    }
+    return { ok: true, config: prepared };
+  }
+
+  /**
+   * Migrated form of a stored config (credentials lifted out of a URL, the password
+   * encrypted), or null when it is already current. An empty password is never stored.
+   */
+  migrateStoredConfig(type: string, config: any): Record<string, any> | null {
+    const provider = getProvider(type);
+    const lifted = provider?.liftStoredSecrets?.(config ?? {});
+    if (!provider || !lifted) return null;
+
+    const migrated = { ...lifted.config };
+    if (lifted.password) migrated[lifted.passwordField] = this.encryptionService.encrypt(lifted.password);
+    return this.encryptConfig(type, migrated);
+  }
+
+  /**
+   * Startup migration: move credentials out of stored URLs (Apprise serverUrl userinfo).
+   * Compare-and-swap on updatedAt so a concurrent admin save wins; one row's failure
+   * does not stop the others. Safe to run repeatedly.
+   */
+  async migrateStoredSecrets(): Promise<number> {
+    let migrated = 0;
+    const backends = await prisma.notificationBackend.findMany();
+    for (const backend of backends) {
+      try {
+        const next = this.migrateStoredConfig(backend.type, backend.config);
+        if (!next) continue;
+        const { count } = await prisma.notificationBackend.updateMany({
+          where: { id: backend.id, updatedAt: backend.updatedAt },
+          data: { config: next },
+        });
+        if (count > 0) {
+          migrated++;
+          logger.info(`Moved credentials out of the server URL for backend: ${backend.name}`);
+        }
+      } catch (error) {
+        logger.error(`Failed to migrate stored credentials for backend: ${backend.name}`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return migrated;
   }
 
   /**

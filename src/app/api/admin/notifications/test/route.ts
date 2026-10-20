@@ -51,9 +51,15 @@ export async function POST(request: NextRequest) {
           type = backend.type;
           encryptedConfig = backend.config; // Already encrypted in DB
         } else if (parsed.type && parsed.config) {
-          // Test new config before saving
+          // Test new config before saving. Prepared like a save: credentials moved out of the
+          // URL, and every supplied secret encrypted as text, so a value that looks like our
+          // ciphertext is never decrypted and sent to the given server
           type = parsed.type;
-          encryptedConfig = notificationService.encryptConfig(type, parsed.config);
+          const prepared = notificationService.prepareSubmittedConfig(type, parsed.config);
+          if (!prepared.ok) {
+            return NextResponse.json({ error: 'ValidationError', message: prepared.error }, { status: 400 });
+          }
+          encryptedConfig = prepared.config;
         } else {
           return NextResponse.json(
             { error: 'ValidationError', message: 'Must provide either backendId or type+config' },

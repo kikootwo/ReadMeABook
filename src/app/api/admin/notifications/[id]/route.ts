@@ -102,9 +102,16 @@ export async function PUT(
 
         // Handle config updates: masked values keep the saved (encrypted) value, but only
         // while the server URL those secrets belong to is unchanged; new values are encrypted
+        // Order: the saved config in its migrated form (as GET showed it), the submitted
+        // config normalised and encrypted, then masked values merged from the saved one
         let finalConfig = existing.config;
         if (updates.config) {
-          const merge = notificationService.mergeMaskedSecrets(existing.type, existing.config, updates.config);
+          const saved = notificationService.migrateStoredConfig(existing.type, existing.config) ?? existing.config;
+          const prepared = notificationService.prepareSubmittedConfig(existing.type, updates.config);
+          if (!prepared.ok) {
+            return NextResponse.json({ error: 'ValidationError', message: prepared.error }, { status: 400 });
+          }
+          const merge = notificationService.mergeMaskedSecrets(existing.type, saved, prepared.config);
           if (!merge.ok) {
             return NextResponse.json({ error: 'ValidationError', message: merge.error }, { status: 400 });
           }

@@ -93,7 +93,7 @@ model NotificationBackend {
 ## Configuration Encryption
 
 **Encrypted Values:**
-- Apprise: `urls`, `authToken`
+- Apprise: `urls`, `authToken`, `basicAuthPassword`
 - Discord: `webhookUrl`
 - ntfy: `accessToken`
 - Pushover: `userKey`, `appToken`
@@ -107,13 +107,23 @@ model NotificationBackend {
 - Apprise: an empty or scheme-less `serverUrl` with masked secrets → 400 asking for the full `http(s)://` URL
 - Discord, Pushover: no server URL binding
 
+**Apprise Basic auth (credentials never in `serverUrl`):** `src/lib/services/notification/providers/apprise-credentials.ts`
+- Fields: `serverUrl` (plain, shown), `basicAuthUser` (plain), `basicAuthPassword` (sensitive)
+- On every admin write (POST, PUT, test with `type+config`): `prepareSubmittedConfig()` → provider `normalizeSubmittedConfig()` moves `user:pass@` out of `serverUrl` (lenient `%`-decoding: invalid escapes kept raw); the URL's password fills `basicAuthPassword` when that field is empty/missing/mask, a typed value wins. Then every non-empty, non-mask sensitive value is encrypted (even if it looks like ciphertext: a client-supplied ciphertext is stored as text, never decrypted)
+- `serverUrl` that is not an http(s) URL and contains `@` → 400 (credentials could not be removed). Note `alice:pw@host` parses with scheme `alice:`, so it counts as not http(s)
+- PUT order: saved config in migrated form (`migrateStoredConfig`) → submitted prepared → `mergeMaskedSecrets` (password is URL-bound like the other secrets) → `encryptConfig`
+- Display: `maskConfig()` shows a not-yet-migrated row in migrated form (URL without credentials, `basicAuthUser`, `basicAuthPassword: ••••••••`); the mask is never placed inside a URL
+- Startup migration `migrateStoredSecrets()` (scheduler init, after `reEncryptUnprotectedBackends()`, serially): rows whose `serverUrl` has userinfo → URL stripped, userinfo wins over existing fields, password encrypted (an empty password is never stored); compare-and-swap on `updatedAt`; per-row errors logged and skipped; idempotent
+- `send()`: validates `serverUrl` first (invalid → generic "The Apprise Server URL is not a valid URL", never echoing it); request URL never carries userinfo; Basic from the fields, else legacy URL userinfo; `authToken` (Bearer) wins over Basic
+- Rollback: older versions read Basic auth only from `serverUrl`, so after a downgrade Apprise Basic auth fails until the credentials are re-entered in the URL. Change the Apprise password if DB backups or logs from before the upgrade are kept (they hold it in plaintext)
+
 ## Message Formatting
 
 **Apprise (JSON via Apprise API):**
 - Type: info (pending), success (approved/available), failure (error)
 - Modes: Stateless (send URLs directly) or Stateful (use persistent configKey, optional tag filter)
 - Endpoint: `{serverUrl}/notify/` (stateless) or `{serverUrl}/notify/{configKey}` (stateful)
-- Auth: Optional Bearer token via `authToken` config field
+- Auth: optional Bearer token (`authToken`), else optional Basic auth (`basicAuthUser` / `basicAuthPassword`)
 - Format: Event title + book details + user + error (if applicable)
 
 **Discord (Rich Embeds):**
@@ -155,7 +165,7 @@ model NotificationBackend {
 
 **POST /api/admin/notifications/test**
 - Test notification (synchronous, not via job queue)
-- Body: `{type, config}` (plaintext for testing)
+- Body: `{backendId}` (stored config) or `{type, config}` (prepared like a save: normalised, secrets encrypted as text)
 - Sends test payload: "The Hitchhiker's Guide to the Galaxy" by Douglas Adams
 
 ## UI Components
@@ -209,6 +219,7 @@ src/lib/services/notification/
   index.ts                          # Re-exports
   providers/
     apprise.provider.ts             # Apprise API (100+ services)
+    apprise-credentials.ts          # Credentials out of serverUrl (normalise, lift, split)
     discord.provider.ts             # Discord webhook
     ntfy.provider.ts                # ntfy API
     pushover.provider.ts            # Pushover API
@@ -220,11 +231,13 @@ src/lib/services/notification/
 - `type: string` — provider identifier (registry key)
 - `sensitiveFields: string[]` — fields needing encryption/masking
 - `secretBoundUrl?: { field, defaultUrl?, credentialKind }` — config field holding the server URL the sensitive fields are sent to (Apprise, ntfy)
+- `normalizeSubmittedConfig?(config)` — normalise an admin-submitted config before merge/encrypt (Apprise: credentials out of the URL); may refuse with an error
+- `liftStoredSecrets?(config)` — migrated form of a stored config + plaintext password to encrypt (Apprise legacy URL userinfo), or null
 - `metadata: ProviderMetadata` — self-describing UI/validation metadata
 - `send(config, payload): Promise<void>` — receives decrypted config
 
 **ProviderMetadata:** `{ type, displayName, description, iconLabel, iconColor, configFields[] }`
-**ProviderConfigField:** `{ name, label, type, required, placeholder?, defaultValue?, options? }`
+**ProviderConfigField:** `{ name, label, type, required, placeholder?, helpText?, defaultValue?, options? }` (`helpText` shown under the field)
 
 **Helper functions (notification.service.ts):**
 - `getRegisteredProviderTypes(): string[]` — all registered type keys
@@ -259,6 +272,12 @@ No UI changes, no API route changes, no Zod schema changes needed — the UI ren
 - Node.js crypto (AES-256-GCM encryption)
 - Apprise API, Discord webhooks, ntfy API, Pushover API
 - React (UI), Tailwind CSS (styling)
+
+## Fixed Issues
+
+**Apprise server URL credentials stored and shown in plaintext**
+- **Cause:** Basic auth for an Apprise server behind auth was only possible as `https://user:pass@host` in `serverUrl`, a plain (unencrypted, unmasked) field
+- **Fix:** separate `basicAuthUser` / `basicAuthPassword` (encrypted) fields; credentials typed into the URL are moved on save; existing rows migrated at startup; API never returns them
 
 ## Related
 - [Job Queue System](jobs.md)
