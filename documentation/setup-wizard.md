@@ -103,10 +103,11 @@ interface SetupState {
   - Normal redirect for subsequent logins
 - `setup/initializing/page.tsx`:
   - Reads auth data from URL hash
-  - Polls job status every 2s
+  - Polls job status every 2s (10 min limit per job)
   - Shows real-time progress
   - Auto-enables "Go to Homepage" when complete
 - `system.initial_jobs_run` config flag prevents duplicate runs
+- Job polling (FinalizeStep + initializing page): `useJobPoller()` (`src/app/setup/lib/job-poller.ts`); one poll at a time every 2s; on unmount all its timers are cleared and waiting callers get `PollCancelledError` (they stop without state updates)
 
 ## Fixed Issues ✅
 
