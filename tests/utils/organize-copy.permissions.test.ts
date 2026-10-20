@@ -117,7 +117,22 @@ describe('placement when the filesystem refuses chmod', () => {
     expect(fs.readFileSync(target).equals(ORIGINAL.subarray(0, 4096))).toBe(true);
   });
 
-  it('placeAudio: a library file that was already there stays differs, with both reasons', async () => {
+  it('placeAudio: a library file refused for different reasons stays differs, with both reasons', async () => {
+    // Smaller than the tagged copy (and not its prefix), larger than the original
+    const libraryFile = Buffer.concat([ORIGINAL, Buffer.from('other')]);
+    fs.writeFileSync(target, libraryFile);
+    const probeDuration = vi.fn(async () => 60_000);
+
+    const result = await placeAudio(original, tagged, target, { ...OPTS, probeDuration });
+
+    expect(result).toMatchObject({ status: 'differs', verified: false });
+    expect(result.reason).toBe(
+      'Tagged copy not placed (existing target is smaller and not a prefix of the source); original not placed (existing target is larger than the source)'
+    );
+    expect(fs.readFileSync(target).equals(libraryFile)).toBe(true);
+  });
+
+  it('placeAudio: a library file refused for the same reason both times gives that reason once', async () => {
     const libraryFile = Buffer.concat([ORIGINAL, Buffer.from('a longer, different library file')]);
     fs.writeFileSync(target, libraryFile);
     const probeDuration = vi.fn(async () => 60_000);
@@ -125,7 +140,7 @@ describe('placement when the filesystem refuses chmod', () => {
     const result = await placeAudio(original, tagged, target, { ...OPTS, probeDuration });
 
     expect(result).toMatchObject({ status: 'differs', verified: false });
-    expect(result.reason).toMatch(/^Tagged copy not placed \(existing target .+\); original not placed \(existing target .+\)$/);
+    expect(result.reason).toBe('existing target is larger than the source');
     expect(fs.readFileSync(target).equals(libraryFile)).toBe(true);
   });
 

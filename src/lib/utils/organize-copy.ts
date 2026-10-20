@@ -331,7 +331,11 @@ export async function placeAudio(
     if (fallback.status === 'copied') {
       return { ...fallback, reason: `Tagged copy failed (${tagged.reason}); original placed without metadata tags` };
     }
-    const reason = `Tagged copy ${taggedFailed ? 'failed' : 'not placed'} (${tagged.reason}); original not placed (${fallback.reason ?? fallback.status})`;
+    const fallbackReason = fallback.reason ?? fallback.status;
+    // One reason when both attempts were refused for the same thing
+    const reason = fallbackReason === tagged.reason
+      ? fallbackReason
+      : `Tagged copy ${taggedFailed ? 'failed' : 'not placed'} (${tagged.reason}); original not placed (${fallbackReason})`;
     if (taggedFailed && !hadTarget && fallback.status !== 'identical') {
       // What is at the target now is our own unverified tagged copy, not someone else's file
       return { ...fallback, status: 'failed', verified: false, reason };
