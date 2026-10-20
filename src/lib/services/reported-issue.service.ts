@@ -343,7 +343,8 @@ async function deleteFromLibrary(audiobook: {
     if (itemId) {
       try {
         const { deleteABSItem } = await import('./audiobookshelf/api');
-        await deleteABSItem(itemId);
+        // No RMAB request, so no import record to check: the replacement removes the ABS content
+        await deleteABSItem(itemId, { hard: true });
         logger.info(`Deleted ABS item ${itemId} for "${audiobook.title}"`);
       } catch (error) {
         logger.error(`Failed to delete ABS item ${itemId}`, {

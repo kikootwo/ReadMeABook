@@ -172,12 +172,13 @@ export async function triggerABSItemMatch(itemId: string, asin?: string) {
 }
 
 /**
- * Delete a library item from Audiobookshelf
- * Note: This only removes the item from Audiobookshelf's database, not the actual files
+ * Delete a library item from Audiobookshelf.
+ * hard: true also deletes the item's files on disk (ABS `?hard=1`); hard: false
+ * removes only the item from the ABS database and leaves the files alone.
  *
  * @param itemId - The Audiobookshelf item ID to delete
  */
-export async function deleteABSItem(itemId: string): Promise<void> {
+export async function deleteABSItem(itemId: string, options: { hard: boolean }): Promise<void> {
   const configService = getConfigService();
   const serverUrl = await configService.get('audiobookshelf.server_url');
   const apiToken = await configService.get('audiobookshelf.api_token');
@@ -186,7 +187,7 @@ export async function deleteABSItem(itemId: string): Promise<void> {
     throw new Error('Audiobookshelf not configured');
   }
 
-  const url = `${serverUrl.replace(/\/$/, '')}/api/items/${itemId}?hard=1`;
+  const url = `${serverUrl.replace(/\/$/, '')}/api/items/${itemId}?hard=${options.hard ? 1 : 0}`;
 
   const response = await fetch(url, {
     method: 'DELETE',
@@ -199,5 +200,5 @@ export async function deleteABSItem(itemId: string): Promise<void> {
     throw new Error(`ABS API error: ${response.status} ${response.statusText}`);
   }
 
-  logger.info(`Deleted library item ${itemId} from Audiobookshelf`);
+  logger.info(`Deleted library item ${itemId} from Audiobookshelf (${options.hard ? 'with' : 'without'} its files)`);
 }
