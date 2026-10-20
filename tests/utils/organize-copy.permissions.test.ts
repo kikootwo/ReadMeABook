@@ -110,9 +110,33 @@ describe('placement when the filesystem refuses chmod', () => {
 
     const result = await placeAudio(original, prefixDerivative, target, { ...OPTS, probeDuration });
 
+    // Our own unverified copy is at the target: failed, never "different content"
     expect(result.verified).toBe(false);
-    expect(result.status).toBe('differs');
+    expect(result.status).toBe('failed');
+    expect(result.reason).toMatch(/^Tagged copy failed \(.*EIO.*\); original not placed \(.+\)$/);
     expect(fs.readFileSync(target).equals(ORIGINAL.subarray(0, 4096))).toBe(true);
+  });
+
+  it('placeAudio: a library file that was already there stays differs, with both reasons', async () => {
+    const libraryFile = Buffer.concat([ORIGINAL, Buffer.from('a longer, different library file')]);
+    fs.writeFileSync(target, libraryFile);
+    const probeDuration = vi.fn(async () => 60_000);
+
+    const result = await placeAudio(original, tagged, target, { ...OPTS, probeDuration });
+
+    expect(result).toMatchObject({ status: 'differs', verified: false });
+    expect(result.reason).toMatch(/^Tagged copy not placed \(existing target .+\); original not placed \(existing target .+\)$/);
+    expect(fs.readFileSync(target).equals(libraryFile)).toBe(true);
+  });
+
+  it.each(['ENOENT', 'ENOTDIR'])('placeFile: %s from chmod means the file is not there: failed, never verified', async (code) => {
+    fsHooks.chmodError = code;
+
+    const result = await placeFile(original, target, OPTS);
+
+    expect(result.status).toBe('failed');
+    expect(result.reason).toContain(code);
+    expect(result.warning).toBeUndefined();
   });
 
   it('placeAudio: a derivative that fails before landing still falls back to the original', async () => {
@@ -136,21 +160,31 @@ describe('applyFileMode', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('never throws; reports the path, octal mode and error code', async () => {
+  it('never throws on a refused chmod; the warning names the path, octal mode and error code', async () => {
     const file = write('cover.jpg', Buffer.from('jpg'));
     fsHooks.chmodError = 'EPERM';
 
-    const warning = await applyFileMode(file, 0o664);
+    const outcome = await applyFileMode(file, 0o664);
 
+    expect(outcome.kind).toBe('refused');
+    const warning = outcome.kind === 'refused' ? outcome.warning : '';
     expect(warning).toContain(file);
     expect(warning).toContain('664');
     expect(warning).toContain('EPERM');
     expect(fs.existsSync(file)).toBe(true);
   });
 
-  it('returns undefined when the mode is applied', async () => {
+  it.each(['ENOENT', 'ENOTDIR'])('reports %s as missing, not as a permission warning', async (code) => {
+    fsHooks.chmodError = code;
+
+    const outcome = await applyFileMode(path.join(root, 'cover.jpg'), 0o664);
+
+    expect(outcome).toMatchObject({ kind: 'missing' });
+  });
+
+  it('reports applied when the mode is set', async () => {
     const file = write('cover.jpg', Buffer.from('jpg'));
 
-    await expect(applyFileMode(file, 0o664)).resolves.toBeUndefined();
+    await expect(applyFileMode(file, 0o664)).resolves.toEqual({ kind: 'applied' });
   });
 });

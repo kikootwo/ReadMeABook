@@ -52,6 +52,8 @@ export interface OrganizationResult {
   coverRecord?: PlacementRecord;
   /** Every audio file found in the source (before file selection). */
   inventory?: ImportInventory;
+  /** Files placed whose permissions could not be set (logged once per job by the caller). */
+  permissionWarnings?: string[];
 }
 
 export interface PlacementOptions {
@@ -70,6 +72,8 @@ export interface EbookOrganizationResult {
   record?: PlacementRecord;
   /** Every ebook file found in the source. */
   inventory?: ImportInventory;
+  /** Files placed whose permissions could not be set (logged once per job by the caller). */
+  permissionWarnings?: string[];
 }
 
 export interface ValidationResult {
@@ -434,7 +438,7 @@ export class FileOrganizer {
           }
         }
 
-        if (placed.warning) (logger ?? moduleLogger).warn(placed.warning);
+        if (placed.warning) (result.permissionWarnings ??= []).push(placed.warning);
 
         switch (placed.status) {
           case 'copied':
@@ -487,7 +491,7 @@ export class FileOrganizer {
           fileMode: this.fileMode,
           compareExisting: placement?.compareExisting === true,
         });
-        if (placedCover.warning) (logger ?? moduleLogger).warn(placedCover.warning);
+        if (placedCover.warning) (result.permissionWarnings ??= []).push(placedCover.warning);
         result.coverRecord = {
           source: sourcePath,
           target: placedCover.target,
@@ -516,7 +520,7 @@ export class FileOrganizer {
         // Download cover art from Audible if not in torrent
         try {
           const coverWarning = await this.downloadCoverArt(audiobook.coverArtUrl, targetPath);
-          if (coverWarning) (logger ?? moduleLogger).warn(coverWarning);
+          if (coverWarning) (result.permissionWarnings ??= []).push(coverWarning);
           result.coverArtFile = path.join(targetPath, 'cover.jpg');
           await logger?.info(`Downloaded cover art from Audible`);
         } catch (error) {
@@ -767,8 +771,10 @@ export class FileOrganizer {
       moduleLogger.error('Failed to download cover art', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
-    // Written; permissions are best-effort
-    return applyFileMode(targetPath, this.fileMode);
+    // Written; permissions are best-effort, but a file that is not there is a failure
+    const mode = await applyFileMode(targetPath, this.fileMode);
+    if (mode.kind === 'missing') throw new Error(mode.reason);
+    return mode.kind === 'refused' ? mode.warning : undefined;
   }
 
   /**
@@ -901,7 +907,7 @@ export class FileOrganizer {
         fileMode: this.fileMode,
         compareExisting: placement?.compareExisting === true,
       });
-      if (placed.warning) (logger ?? moduleLogger).warn(placed.warning);
+      if (placed.warning) (result.permissionWarnings ??= []).push(placed.warning);
       result.record = {
         source: sourceFilePath,
         target: placed.target,

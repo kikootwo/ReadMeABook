@@ -197,6 +197,9 @@ describe('FileOrganizer placement records', () => {
     expect(fs.readFileSync(placed, 'utf8')).toBe('TAGSoriginal-bytes');
     expect(result.records![0]).toMatchObject({ status: 'copied', verified: true });
     expect(result.coverRecord).toMatchObject({ status: 'copied', verified: true });
+    // Collected for one summary per job, not logged per file
+    expect(result.permissionWarnings).toHaveLength(2);
+    expect(result.permissionWarnings!.every((w) => w.includes(code))).toBe(true);
   });
 
   it('re-copies a truncated library file and keeps a different one untouched', async () => {

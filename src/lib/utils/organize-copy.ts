@@ -34,20 +34,43 @@ export interface PlaceResult {
   warning?: string;
 }
 
+/** chmod codes meaning there is no file at the path: the placement did not land. */
+const FILE_MISSING_CODES = new Set(['ENOENT', 'ENOTDIR']);
+
+export type FileModeOutcome =
+  | { kind: 'applied' }
+  /** The file is there; the filesystem refused the mode. */
+  | { kind: 'refused'; warning: string }
+  /** No file at the path (ENOENT/ENOTDIR): whatever was placed is not there. */
+  | { kind: 'missing'; reason: string };
+
 /**
- * Set `fileMode` on a file that is already in place. Best-effort: mergerfs,
- * NFS, FUSE and SMB mounts often refuse chmod (EPERM, ENOTSUP, EACCES) even
- * though the write succeeded. Never throws; returns a warning naming the path
- * and error code when the mode could not be set.
+ * Set `fileMode` on a file that was just placed. Never throws. mergerfs, NFS,
+ * FUSE and SMB mounts often refuse chmod (EPERM, ENOTSUP, EACCES) though the
+ * write succeeded: that is `refused`, a warning naming the path, mode and
+ * code. ENOENT/ENOTDIR mean the file is not at that path: `missing`.
  */
-export async function applyFileMode(filePath: string, fileMode: number): Promise<string | undefined> {
+export async function applyFileMode(filePath: string, fileMode: number): Promise<FileModeOutcome> {
   try {
     await fs.chmod(filePath, fileMode);
-    return undefined;
+    return { kind: 'applied' };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code || 'unknown error';
-    return `Could not set permissions ${fileMode.toString(8)} on ${filePath} (${code}); the file was placed and keeps the permissions the filesystem gave it`;
+    if (FILE_MISSING_CODES.has(code)) {
+      return { kind: 'missing', reason: `${filePath} is not there after the copy (${code})` };
+    }
+    return {
+      kind: 'refused',
+      warning: `Could not set permissions ${fileMode.toString(8)} on ${filePath} (${code}); the file keeps the permissions the filesystem gave it`,
+    };
   }
+}
+
+/** One log line for a job's permission warnings (null when there are none). */
+export function summarizePermissionWarnings(warnings: string[] | undefined): string | null {
+  if (!warnings || warnings.length === 0) return null;
+  const more = warnings.length > 1 ? ` (and ${warnings.length - 1} more)` : '';
+  return `Permissions could not be applied to ${warnings.length} file(s): ${warnings[0]}${more}`;
 }
 
 /**
@@ -112,9 +135,12 @@ async function copyInto(
     }
     return { status: 'failed', target, reason: error instanceof Error ? error.message : String(error) };
   }
-  // The copy is published and verified; permissions never undo that
-  const warning = await applyFileMode(target, fileMode);
-  return warning ? { status: 'copied', target, warning } : { status: 'copied', target };
+  // The copy is published and verified; a refused chmod never undoes that
+  const permissions = await applyFileMode(target, fileMode);
+  if (permissions.kind === 'missing') return { status: 'failed', target, reason: permissions.reason };
+  return permissions.kind === 'refused'
+    ? { status: 'copied', target, warning: permissions.warning }
+    : { status: 'copied', target };
 }
 
 // Placements into the same target (any extension: .mp4 and its coerced .m4b) run one at a time
@@ -296,16 +322,21 @@ export async function placeAudio(
     };
   }
 
+  const hadTarget = (await findExistingTarget(target)) !== null;
   const tagged = await placeFile(derivative, target, options);
   if (tagged.status === 'failed' || tagged.status === 'differs') {
-    const fallbackOptions = tagged.status === 'failed' ? { ...options, resumeInterrupted: false } : options;
+    const taggedFailed = tagged.status === 'failed';
+    const fallbackOptions = taggedFailed ? { ...options, resumeInterrupted: false } : options;
     const fallback = await placeOriginal(original, target, fallbackOptions);
-    return {
-      ...fallback,
-      reason: fallback.status === 'copied'
-        ? `Tagged copy failed (${tagged.reason}); original placed without metadata tags`
-        : fallback.reason ?? tagged.reason,
-    };
+    if (fallback.status === 'copied') {
+      return { ...fallback, reason: `Tagged copy failed (${tagged.reason}); original placed without metadata tags` };
+    }
+    const reason = `Tagged copy ${taggedFailed ? 'failed' : 'not placed'} (${tagged.reason}); original not placed (${fallback.reason ?? fallback.status})`;
+    if (taggedFailed && !hadTarget && fallback.status !== 'identical') {
+      // What is at the target now is our own unverified tagged copy, not someone else's file
+      return { ...fallback, status: 'failed', verified: false, reason };
+    }
+    return { ...fallback, reason: fallback.status === 'identical' ? fallback.reason : reason };
   }
   return { ...tagged, verified: isVerifiedStatus(tagged.status), usedDerivative: true };
 }
