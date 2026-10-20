@@ -43,7 +43,7 @@ import { placeAudio, placeFile, applyFileMode } from '@/lib/utils/organize-copy'
 let root: string;
 const ORIGINAL = Buffer.from('original-audio-'.repeat(50000));
 const TAGGED = Buffer.concat([Buffer.from('TAGGED-HEADER:'), ORIGINAL]);
-const OPTS = { fileMode: 0o664, compareExisting: true };
+const OPTS = { fileMode: 0o664, compareExisting: true, verifyDerivative: true };
 
 function write(rel: string, data: Buffer): string {
   const p = path.join(root, rel);

@@ -16,7 +16,14 @@ import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import { generateFilesHash } from '../utils/files-hash';
 import { fixEpubForKindle, cleanupFixedEpub } from '../utils/epub-fixer';
 import { cleanupDirectDownloadSource, cleanupDownloadAfterOrganize, cleanupEbookSource, cleanupSourceAfterOrganize } from './organize-cleanup';
-import { audioEvidence, deleteMayFollow, ebookEvidence as buildEbookEvidence, reportImportStatus } from './organize-evidence';
+import {
+  audioEvidence,
+  deleteMayFollow,
+  deleteMayFollowFor,
+  downloadCleanupKind,
+  ebookEvidence as buildEbookEvidence,
+  reportImportStatus,
+} from './organize-evidence';
 import { getAudibleService } from '../integrations/audible.service';
 import { addAutoBlock } from '../services/blocklist.service';
 
@@ -849,6 +856,9 @@ async function processEbookOrganization(
     template: fileRenameTemplateConfig?.value || '{title}',
   };
 
+  // What download cleanup would do decides both the compare cost and the request message
+  const cleanupKind = await downloadCleanupKind(requestId, downloadPath, downloadHistoryId);
+
   // Organize ebook files (organizer will detect ebook type and skip audio-specific processing)
   // Pass all metadata that could be used in path templates (same as audiobooks)
   const result = await organizer.organizeEbook(
@@ -866,7 +876,7 @@ async function processEbookOrganization(
     jobId ? { jobId, context: 'FileOrganizer.Ebook' } : undefined,
     isIndexerDownload,
     ebookRenameConfig,
-    { compareExisting: await deleteMayFollow(requestId, downloadPath, downloadHistoryId, cleanupSource) }
+    { compareExisting: deleteMayFollowFor(cleanupKind, cleanupSource) }
   );
 
   // Clean up fixed EPUB temp file after organization (regardless of success)
@@ -884,7 +894,7 @@ async function processEbookOrganization(
   // The organizer reads a temp copy when the Kindle fix ran; the original is epubFilePath
   const importedFile = fixedEpubPath ? epubFilePath : result.sourceFile;
   const ebookEvidence = await buildEbookEvidence(result, importedFile ?? undefined, downloadPath);
-  const ebookMessage = reportImportStatus(ebookEvidence, logger);
+  const ebookMessage = reportImportStatus(ebookEvidence, logger, { folderRemovalPlanned: cleanupKind === 'indexer' });
 
   // Update book record with file path
   await prisma.audiobook.update({

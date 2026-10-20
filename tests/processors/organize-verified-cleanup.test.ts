@@ -236,6 +236,31 @@ describe('verified-import cleanup', () => {
       expect(requestUpdateData()?.errorMessage).toBe('source folder could not be fully read; source files kept');
       expect(fs.existsSync(download)).toBe(true);
     });
+
+    it('says when files went into the library without metadata tags, and why', async () => {
+      organizeWith(target(), { [parts[0]]: 'copied', [parts[1]]: 'copied' });
+      const placed = await organizerMock.organize();
+      placed.records[1] = { ...placed.records[1], tagsDropped: 'audio duration could not be measured' };
+      organizerMock.organize.mockResolvedValue(placed);
+
+      await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
+
+      expect(requestUpdateData()?.errorMessage).toBe('1 of 2 files imported without metadata tags (audio duration could not be measured)');
+      // The untagged originals are verified copies: the download still goes
+      expect(fs.existsSync(download)).toBe(false);
+    });
+
+    it('an unprobed tagged copy (no delete depended on it) is not reported as a kept merge, and keeps the download', async () => {
+      organizeWith(target(), { [parts[0]]: 'copied', [parts[1]]: 'copied' });
+      const placed = await organizerMock.organize();
+      placed.records = placed.records.map((r: Record<string, unknown>) => ({ ...r, verified: false, unchecked: true }));
+      organizerMock.organize.mockResolvedValue(placed);
+
+      await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
+
+      expect(requestUpdateData()?.errorMessage).toBeNull();
+      expect(parts.every((p) => fs.existsSync(p))).toBe(true);
+    });
   });
 
   describe('manual import source cleanup', () => {
@@ -286,6 +311,39 @@ describe('verified-import cleanup', () => {
       expect(fs.existsSync(imported)).toBe(true);
       expect(fs.existsSync(other)).toBe(true);
       expect(postProcess).not.toHaveBeenCalled();
+      expect(requestUpdateData()).toMatchObject({ status: 'downloaded', errorMessage: 'download kept: it holds several ebook files' });
+    });
+
+    it('says why a release with several ebook formats is kept', async () => {
+      const download = path.join(downloads, 'Ebook.Formats');
+      const imported = mkfile(path.join(download, 'Book.epub'), 'epub');
+      const pdf = mkfile(path.join(download, 'Book.pdf'), 'pdf');
+      useCompletedDownload(download);
+      organizerMock.organizeEbook.mockResolvedValue({
+        success: true, targetPath: path.join(media, 'Author', 'Book'), format: 'epub', errors: [], sourceFile: imported,
+        record: { source: imported, target: path.join(media, 'Author', 'Book', 'Book.epub'), status: 'copied', verified: true },
+      });
+
+      await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
+
+      expect(requestUpdateData()).toMatchObject({ status: 'downloaded', errorMessage: 'download kept: it holds several ebook formats' });
+      expect(fs.existsSync(pdf)).toBe(true);
+    });
+
+    it('adds no message for several ebook formats when the download is not removed anyway (torrent)', async () => {
+      indexers = [{ id: 7, protocol: 'torrent', removeAfterProcessing: true }];
+      const download = path.join(downloads, 'Ebook.Torrent');
+      const imported = mkfile(path.join(download, 'Book.epub'), 'epub');
+      mkfile(path.join(download, 'Book.pdf'), 'pdf');
+      useCompletedDownload(download);
+      organizerMock.organizeEbook.mockResolvedValue({
+        success: true, targetPath: path.join(media, 'Author', 'Book'), format: 'epub', errors: [], sourceFile: imported,
+        record: { source: imported, target: path.join(media, 'Author', 'Book', 'Book.epub'), status: 'copied', verified: true },
+      });
+
+      await runOrganize({ downloadPath: download, downloadHistoryId: 'dh-1' });
+
+      expect(requestUpdateData()).toMatchObject({ status: 'downloaded', errorMessage: null });
     });
 
     it('clears a stale request message on a complete ebook import', async () => {

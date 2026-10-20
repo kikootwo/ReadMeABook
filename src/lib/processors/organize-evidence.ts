@@ -7,14 +7,39 @@ import * as path from 'path';
 import type { RMABLogger } from '../utils/logger';
 import { getConfigService } from '../services/config.service';
 import { planDownloadCleanup } from './organize-cleanup-guard';
-import { ebookInventory, type ImportEvidence, type ImportInventory, type PlacementRecord } from '../utils/import-inventory';
+import { ebookInventory, isUncheckedRecord, type ImportEvidence, type ImportInventory, type PlacementRecord } from '../utils/import-inventory';
 import type { EbookOrganizationResult, OrganizationResult } from '../utils/file-organizer';
 import { summarizePermissionWarnings } from '../utils/organize-copy';
+
+/** What download cleanup would do for this job: remove an indexer download, a direct download file, nothing, or unknown (lookup failed). */
+export type DownloadCleanupKind = 'indexer' | 'direct' | 'none' | 'unknown';
+
+export async function downloadCleanupKind(
+  requestId: string,
+  downloadPath: string,
+  downloadHistoryId: string | undefined
+): Promise<DownloadCleanupKind> {
+  try {
+    const plan = await planDownloadCleanup(requestId, downloadPath, downloadHistoryId, () =>
+      getConfigService().get('prowlarr_indexers')
+    );
+    return plan?.kind ?? 'none';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** deleteMayFollow for an already-looked-up cleanup kind. */
+export function deleteMayFollowFor(kind: DownloadCleanupKind, cleanupSource: boolean | undefined): boolean {
+  // Unknown: compare, so a later delete is never based on an unchecked file
+  return cleanupSource === true || kind !== 'none';
+}
 
 /**
  * True when this job may delete source files after organizing (manual
  * cleanupSource, or a download that cleanup would remove). Only then are
- * same-size existing library files compared byte-for-byte.
+ * same-size existing library files compared byte-for-byte and tagged copies
+ * probed against their originals.
  */
 export async function deleteMayFollow(
   requestId: string,
@@ -25,15 +50,7 @@ export async function deleteMayFollow(
   if (cleanupSource === true) {
     return true;
   }
-  try {
-    const plan = await planDownloadCleanup(requestId, downloadPath, downloadHistoryId, () =>
-      getConfigService().get('prowlarr_indexers')
-    );
-    return plan !== null;
-  } catch {
-    // Unknown: compare, so a later delete is never based on an unchecked file
-    return true;
-  }
+  return deleteMayFollowFor(await downloadCleanupKind(requestId, downloadPath, downloadHistoryId), cleanupSource);
 }
 
 const MISSING_INVENTORY: ImportInventory = { kind: 'audio', files: [], complete: false };
@@ -60,26 +77,42 @@ export async function ebookEvidence(
   };
 }
 
+export interface ImportStatusContext {
+  /** Download cleanup would remove the whole download folder (an indexer download with cleanup on). */
+  folderRemovalPlanned?: boolean;
+}
+
 /**
  * Short message for the request when the import was not complete, or null.
  * Examples: "1 of 3 files not imported; source files kept",
  * "already in the library with different content; source kept",
- * "merged file kept; sources kept". A note is appended when file permissions
- * could not be applied ("permissions could not be applied to 2 files").
+ * "merged file kept; sources kept",
+ * "1 of 2 files imported without metadata tags (audio duration could not be measured)",
+ * "download kept: it holds several ebook formats". A note is appended when file
+ * permissions could not be applied ("permissions could not be applied to 2 files").
  */
-export function importStatusMessage(evidence: ImportEvidence): string | null {
-  const message = placementStatusMessage(evidence);
+export function importStatusMessage(evidence: ImportEvidence, context: ImportStatusContext = {}): string | null {
+  const message = outcomeMessage(evidence, context);
   const refused = evidence.permissionWarnings?.length ?? 0;
   if (refused === 0) return message;
   const note = `permissions could not be applied to ${refused} file${refused === 1 ? '' : 's'}`;
   return message ? `${message}; ${note}` : note;
 }
 
+/** Placement, tagging and kept-download message, without the permissions note. */
+function outcomeMessage(evidence: ImportEvidence, context: ImportStatusContext): string | null {
+  const parts = [placementStatusMessage(evidence), tagsMessage(evidence)].filter((p): p is string => p !== null);
+  if (parts.length > 0) {
+    return parts.join('; ');
+  }
+  return severalEbooksMessage(evidence, context);
+}
+
 function placementStatusMessage(evidence: ImportEvidence): string | null {
   const total = evidence.records.length;
   const failed = evidence.records.filter((r) => r.status === 'failed');
   const differs = evidence.records.filter((r) => r.status === 'differs');
-  const unverifiedCopies = evidence.records.filter((r) => r.status === 'copied' && !r.verified);
+  const unverifiedCopies = evidence.records.filter((r) => r.status === 'copied' && !r.verified && !r.unchecked);
   const incomplete = !evidence.inventory.complete && evidence.inventory.files.length > 0;
 
   if (total > 0 && differs.length === total) {
@@ -97,20 +130,42 @@ function placementStatusMessage(evidence: ImportEvidence): string | null {
   return parts.length > 0 ? `${parts.join('; ')}; source files kept` : null;
 }
 
+/** The library got the untagged original for some files (the tagged copy failed its check or could not be placed). */
+function tagsMessage(evidence: ImportEvidence): string | null {
+  const untagged = evidence.records.filter((r) => r.tagsDropped);
+  if (untagged.length === 0) return null;
+  return `${untagged.length} of ${evidence.records.length} files imported without metadata tags (${untagged[0].tagsDropped})`;
+}
+
+/**
+ * An ebook import that is complete in itself, from a download that cleanup
+ * would remove, but whose folder holds more ebook files than were imported:
+ * the folder is kept (rewalkBlocker), and the request says why.
+ */
+function severalEbooksMessage(evidence: ImportEvidence, context: ImportStatusContext): string | null {
+  const { inventory } = evidence;
+  if (!context.folderRemovalPlanned || inventory.kind !== 'ebook' || !inventory.complete) return null;
+  const imported = evidence.records.filter((r) => r.verified).length;
+  if (imported === 0 || inventory.files.length <= imported) return null;
+  const formats = new Set(inventory.files.map((f) => path.extname(f).toLowerCase()));
+  return formats.size > 1 ? 'download kept: it holds several ebook formats' : 'download kept: it holds several ebook files';
+}
+
 /** Log detail for the records behind importStatusMessage. */
 export function describeUnverified(records: PlacementRecord[]): string {
   return records
-    .filter((r) => !r.verified && r.status !== 'present')
+    .filter((r) => (!r.verified && !isUncheckedRecord(r)) || r.tagsDropped)
     .map((r) => `${path.basename(r.source)} (${r.status}${r.reason ? `: ${r.reason}` : ''})`)
     .join(', ');
 }
 
 /** The request message for this import (or null), logged with the files behind it. */
-export function reportImportStatus(evidence: ImportEvidence, logger: RMABLogger): string | null {
-  const message = importStatusMessage(evidence);
-  const placement = placementStatusMessage(evidence);
-  if (placement) {
-    logger.warn(`${placement}: ${describeUnverified(evidence.records)}`);
+export function reportImportStatus(evidence: ImportEvidence, logger: RMABLogger, context: ImportStatusContext = {}): string | null {
+  const message = importStatusMessage(evidence, context);
+  const outcome = outcomeMessage(evidence, context);
+  if (outcome) {
+    const detail = describeUnverified(evidence.records);
+    logger.warn(detail ? `${outcome}: ${detail}` : outcome);
   }
   // One line per job, however many files were affected
   const permissions = summarizePermissionWarnings(evidence.permissionWarnings);

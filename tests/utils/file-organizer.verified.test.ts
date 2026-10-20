@@ -100,6 +100,7 @@ vi.mock('@/lib/utils/chapter-merger', async (importOriginal) => {
   };
 });
 
+import { probeStreamDurationMs } from '@/lib/utils/audio-duration';
 import { FileOrganizer } from '@/lib/utils/file-organizer';
 
 let root: string;
@@ -179,7 +180,9 @@ describe('FileOrganizer placement records', () => {
 
     const placed = path.join(media, 'Author', 'Book', 'Book.m4b');
     expect(fs.readFileSync(placed, 'utf8')).toBe('original-bytes');
-    expect(result.records![0]).toMatchObject({ status: 'copied', verified: true });
+    expect(result.records![0]).toMatchObject({
+      status: 'copied', verified: true, tagsDropped: 'tagged copy duration did not match the original',
+    });
     expect(fs.existsSync(path.join(source, 'Book.m4b.tmp'))).toBe(false);
   });
 
@@ -200,6 +203,25 @@ describe('FileOrganizer placement records', () => {
     // Collected for one summary per job, not logged per file
     expect(result.permissionWarnings).toHaveLength(2);
     expect(result.permissionWarnings!.every((w) => w.includes(code))).toBe(true);
+  });
+
+  it('places tagged copies without probing when no delete depends on the import (e.g. a seeding torrent)', async () => {
+    configState.values.set('metadata_tagging_enabled', 'true');
+    write(path.join(source, 'Part 1.mp3'), 'one');
+    write(path.join(source, 'Part 2.mp3'), 'two');
+    vi.mocked(probeStreamDurationMs).mockClear();
+
+    const organizer = new FileOrganizer(media, path.join(root, 'tmp'));
+    const result = await organizer.organize(source, { title: 'Book', author: 'Author' }, '{author}/{title}', undefined, undefined, undefined, {
+      compareExisting: false,
+    });
+
+    expect(probeStreamDurationMs).not.toHaveBeenCalled();
+    expect(fs.readFileSync(path.join(media, 'Author', 'Book', 'Part 1.mp3'), 'utf8')).toBe('TAGSone');
+    // Not proven, so never evidence for a delete, but nothing to report either
+    for (const record of result.records!) {
+      expect(record).toMatchObject({ status: 'copied', verified: false, unchecked: true });
+    }
   });
 
   it('re-copies a truncated library file and keeps a different one untouched', async () => {

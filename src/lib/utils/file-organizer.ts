@@ -415,16 +415,22 @@ export class FileOrganizer {
           fileMode: this.fileMode,
           compareExisting: placement?.compareExisting === true,
           probeDuration: probeStreamDurationMs,
+          // Two probes per tagged file are only worth it when a source delete depends on the result
+          verifyDerivative: placement?.compareExisting === true,
         });
 
         // Records are keyed on the original source; a merged file stands for all its chapters
         const sources = tempMergedFile && originalSourcePath === tempMergedFile ? mergedInputs : [originalSourcePath];
+        const mergeOk = sources === mergedInputs ? mergeDurationVerified : true;
         for (const source of sources) {
           result.records!.push({
             source,
             target: placed.target,
             status: placed.status,
-            verified: placed.verified && (sources === mergedInputs ? mergeDurationVerified : true),
+            verified: placed.verified && mergeOk,
+            // An unverified merge stays reported; only the skipped tag check is excused
+            unchecked: placed.unchecked && mergeOk ? true : undefined,
+            tagsDropped: placed.tagsDropped,
             reason: placed.reason,
           });
         }
