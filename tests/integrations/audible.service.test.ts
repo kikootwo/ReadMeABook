@@ -328,6 +328,120 @@ describe('AudibleService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Italy region (audible.it): offline fixtures only, labels as seen on audible.it
+  // -------------------------------------------------------------------------
+
+  describe('Italy region (it)', () => {
+    beforeEach(() => {
+      configServiceMock.getAudibleRegion.mockResolvedValue('it');
+    });
+
+    it('creates htmlClient on www.audible.it with the italiano locale param', async () => {
+      apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse([])));
+
+      const service = new AudibleService();
+      await service.search('test', 1);
+
+      const htmlConfig = axiosMock.create.mock.calls[0][0];
+      expect(htmlConfig.baseURL).toBe('https://www.audible.it');
+      expect(htmlConfig.params).toEqual({ ipRedirectOverride: 'true', language: 'italiano' });
+      expect(service.getRegion()).toBe('it');
+    });
+
+    it('creates apiClient on api.audible.it', async () => {
+      apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse([])));
+
+      const service = new AudibleService();
+      await service.search('test', 1);
+
+      expect(axiosMock.create.mock.calls[1][0].baseURL).toBe('https://api.audible.it');
+    });
+
+    it('keeps Italian author books and drops English ones', async () => {
+      const authorAsin = 'B001H6UJO8';
+      const products = [
+        makeProduct({ asin: 'B0IT000001', authors: [{ asin: authorAsin, name: 'Elena Ferrante' }], language: 'italian' }),
+        makeProduct({ asin: 'B0IT000002', authors: [{ asin: authorAsin, name: 'Elena Ferrante' }], language: 'english' }),
+        makeProduct({ asin: 'B0IT000003', authors: [{ asin: authorAsin, name: 'Elena Ferrante' }], language: 'Italiano' }),
+      ];
+      apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(products, 3)));
+
+      const service = new AudibleService();
+      const result = await service.searchByAuthorAsin('Elena Ferrante', authorAsin, 1);
+
+      expect(result.books.map((b) => b.asin)).toEqual(['B0IT000001', 'B0IT000003']);
+    });
+
+    it('asks Audnexus for the it region', async () => {
+      axiosMock.get.mockResolvedValueOnce({
+        data: { title: 'Il nome della rosa', authors: [{ name: 'Umberto Eco' }], language: 'italian' },
+      });
+
+      const service = new AudibleService();
+      const details = await service.getAudiobookDetails('B0IT000004');
+
+      expect(details?.title).toBe('Il nome della rosa');
+      expect(axiosMock.get.mock.calls[0][0]).toBe('https://api.audnex.us/books/B0IT000004');
+      expect(axiosMock.get.mock.calls[0][1].params).toEqual({ region: 'it' });
+    });
+
+    it('strips Italian author and narrator labels from bestseller rows', async () => {
+      const item = `
+        <div class="productListItem">
+          <ul>
+            <li data-asin="B0IT000005">
+              <img src="https://images.example.com/cover._SL175_.jpg" />
+              <h3><a href="/pd/Dracula-Audiolibri/B0IT000005">Dracula</a></h3>
+              <span class="authorLabel">Di: <a href="/author/Bram-Stoker/B000APZOQA">Bram Stoker</a></span>
+              <span class="narratorLabel">Letto da: Anna Bonaiuto</span>
+              <span class="runtimeLabel">Durata: 5 ore e 54 min</span>
+            </li>
+          </ul>
+        </div>`;
+      htmlClientMock.get.mockResolvedValue(htmlResponse(makeHtmlPage([item])));
+
+      const service = new AudibleService();
+      const books = await service.getPopularAudiobooks(1);
+
+      expect(books[0]).toMatchObject({
+        asin: 'B0IT000005',
+        title: 'Dracula',
+        author: 'Bram Stoker',
+        authorAsin: 'B000APZOQA',
+        narrator: 'Anna Bonaiuto',
+      });
+    });
+
+    it('parses Italian durations from /search?node= category rows', async () => {
+      const item = `
+        <div class="s-result-item">
+          <ul>
+            <li data-asin="B0IT000006">
+              <img src="https://images.example.com/cover._SL175_.jpg" />
+              <h2><a href="/pd/Keeping-13-Audiolibri/B0IT000006">Keeping 13 - Mettiti in gioco</a></h2>
+              <span>Di: <a href="/author/Chloe-Walsh/B07CQ8R4ZS">Chloe Walsh</a></span>
+              <span>Letto da: <a href="/search?searchNarrator=Giada+Capo">Giada Capo</a>,
+                <a href="/search?searchNarrator=Federico+Vellani">Federico Vellani</a></span>
+              <span class="runtimeLabel">Durata: 26 ore e 4 min</span>
+            </li>
+          </ul>
+        </div>`;
+      htmlClientMock.get.mockResolvedValue(htmlResponse(makeHtmlPage([item])));
+
+      const service = new AudibleService();
+      const books = await service.getCategoryBooks('21837960031', 1);
+
+      expect(books[0]).toMatchObject({
+        asin: 'B0IT000006',
+        title: 'Keeping 13 - Mettiti in gioco',
+        author: 'Chloe Walsh',
+        narrator: 'Giada Capo, Federico Vellani',
+        durationMinutes: 1564,
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // search()
   // -------------------------------------------------------------------------
 
