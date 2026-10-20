@@ -11,10 +11,13 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@prisma/*"
         update-types: ["version-update:semver-major"]
-      # jsdom 30+ drops Node 20 (engines: ^22.22.2 || ^24.15.0 || >=26); CI and the image run Node 20.
-      # Remove this ignore together with the Node 24 move.
+      # jsdom 30+ needs Node ^22.22.2 || ^24.15.0 || >=26. CI and the image run Node 24, but the
+      # required host `npm test` (CLAUDE.md) still runs on Node 22.20 hosts. Remove once hosts are >= 22.22.2.
       - dependency-name: "jsdom"
         versions: [">=30"]
+      # @types/node must match the runtime major (Node 24 in CI and the image); move it with Node.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       # Listed first: Dependabot puts a dependency in the FIRST group that matches,
       # so prisma and @prisma/client always move together instead of splitting
@@ -50,7 +53,8 @@ updates:
       # The static-ffmpeg tag, its digest and FFMPEG_VERSION in dockerfile.unified
       # must move together (the build's version guard fails otherwise), so bump it by hand.
       - dependency-name: "mwader/static-ffmpeg"
-      # CI tests on Node 20; a new Node major needs CI and the image moved together.
+      # CI tests on Node 24; a new Node major needs CI, the image and the e2e Dockerfiles moved
+      # together (tests/docker/node-version-pins.test.ts fails on a partial bump).
       - dependency-name: "node"
         update-types: ["version-update:semver-major"]
     groups:

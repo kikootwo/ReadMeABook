@@ -10,7 +10,7 @@ Security problems should be reported privately. See [SECURITY.md](SECURITY.md).
 
 ## Development Setup
 
-Requirements: Node.js 20 and npm. Installing `ffmpeg` and `ffprobe` is optional, but without them the real-ffmpeg integration tests are skipped.
+Requirements: Node.js 24 (22.12+ still runs the test suite) and npm. Installing `ffmpeg` and `ffprobe` is optional, but without them the real-ffmpeg integration tests are skipped.
 
 ```bash
 npm ci

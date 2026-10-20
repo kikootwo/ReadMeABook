@@ -10,15 +10,15 @@
 FROM mwader/static-ffmpeg:9.0.2-1@sha256:f5d100184884eb3e82b0eb14bb5ebf98da99826ac824989720297fb9ef21c822 AS ffmpeg
 
 # Stages (multi-stage layout from PR #279, ChaoticSciuridae):
-#   base       node:20-bookworm + PostgreSQL/Redis/supervisord + pinned ffmpeg (runtime OS layer)
-#   builder    node:20-bookworm + full npm ci, prisma generate, next build (never shipped)
-#   prisma-cli node:20-bookworm + the Prisma CLI closure installed from package-lock.json (never shipped)
+#   base       node:24-bookworm + PostgreSQL/Redis/supervisord + pinned ffmpeg (runtime OS layer)
+#   builder    node:24-bookworm + full npm ci, prisma generate, next build (never shipped)
+#   prisma-cli node:24-bookworm + the Prisma CLI closure installed from package-lock.json (never shipped)
 #   runtime    base + standalone app, generated client, CLI tree, scripts/, docker/unified/*
 # builder and prisma-cli MUST stay on the same distro as base and build for TARGETPLATFORM
 # (never --platform=$BUILDPLATFORM): Prisma engines and bcrypt are native and arch-specific.
 
 # Runtime OS layer: debian with node preinstalled
-FROM node:20-bookworm AS base
+FROM node:24-bookworm AS base
 
 # Install PostgreSQL 16 repository key
 RUN apt-get update && apt-get install -y curl gnupg && \
@@ -65,7 +65,7 @@ RUN set -eu; \
         esac; \
     done
 
-# Remove imagemagick (pre-installed in node:20-bookworm base image, not needed)
+# Remove imagemagick (pre-installed in node:24-bookworm base image, not needed)
 RUN apt-get purge -y imagemagick imagemagick-6-common 'imagemagick-6*' \
     'libmagickcore*' 'libmagickwand*' && \
     apt-get autoremove -y --purge && \
@@ -77,7 +77,7 @@ ENV LC_ALL=en_US.UTF-8
 # ============================================================================
 # builder: full dependency tree + Next.js standalone build (never shipped)
 # ============================================================================
-FROM node:20-bookworm AS builder
+FROM node:24-bookworm AS builder
 
 # Re-declare build arguments after FROM (ARGs before FROM are not available after)
 ARG APP_VERSION=unknown
@@ -124,7 +124,7 @@ RUN npm run build
 # resolved, sha512 integrity) out of the app lockfile, so npm ci installs exactly the locked
 # tarballs. Only prisma + @prisma/engines may run install scripts; @prisma/engines downloads
 # its schema/query engines from binaries.prisma.sh, checked against that host's sha256.
-FROM node:20-bookworm AS prisma-cli
+FROM node:24-bookworm AS prisma-cli
 WORKDIR /opt/prisma-cli
 RUN --mount=type=bind,source=package-lock.json,target=/tmp/app/package-lock.json \
     --mount=type=bind,source=docker/unified/prisma-cli-lock.js,target=/tmp/app/prisma-cli-lock.js \
@@ -250,7 +250,8 @@ RUN sed -i 's/\r$//' /app/postgres-start.sh && chmod +x /app/postgres-start.sh
 # PRISMA_CLI: CLI/client/engine versions agree, the schema engine renders the schema, credential
 # recovery loads its client, bcrypt and scripts/lib, every bare require() in .next/server
 # resolves (app externals also load), bull's Lua commands are present, no non-runtime
-# source/docs/tests are in /app, and every ELF file in /app (+ ffmpeg/ffprobe) matches the build arch. Failure meanings: unified.md.
+# source/docs/tests are in /app, the postgres/redis/node account IDs are unchanged, and every ELF
+# file in /app (+ ffmpeg/ffprobe) matches the build arch. Failure meanings: unified.md.
 RUN --network=none \
     --mount=type=bind,source=docker/unified/runtime-guard.js,target=/tmp/guard/runtime-guard.js \
     node /tmp/guard/runtime-guard.js

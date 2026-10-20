@@ -68,7 +68,7 @@ environment:
 - `PGID` - Default: 1000 (your host group ID)
 
 **How It Works:**
-- PostgreSQL: UID 103, GID={PGID}
+- PostgreSQL: UID 102 (as shipped by 1.2.7 and later), GID={PGID}
 - Node/Redis: Fully remapped to PUID:PGID
 - See: documentation/deployment/unified.md
 

@@ -4,7 +4,7 @@
  *
  * Runs in the FINAL runtime stage under `RUN --network=none`. Fails the build when the runtime image
  * cannot apply its schema offline, cannot run credential recovery, misses a traced server dependency,
- * or carries a native binary for the wrong architecture.
+ * carries a native binary for the wrong architecture, or the postgres/redis/node account IDs moved.
  */
 
 /* eslint-disable @typescript-eslint/no-require-imports -- plain Node CommonJS build script */
@@ -13,7 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { builtinModules, createRequire } = require('module');
+const { isBuiltin, createRequire } = require('module');
 
 const APP = '/app';
 const ENTRYPOINT = '/entrypoint.sh';
@@ -60,6 +60,24 @@ function checkPreflight() {
   }
   execFileSync('bash', ['-c', `set -eu\n${block}`], { stdio: 'inherit' });
   ok('entrypoint Prisma CLI preflight passes');
+}
+
+// System accounts as shipped by 1.2.7 and later (apt creates postgres/redis in the base stage, node comes
+// from the node image). The entrypoint re-chowns its volumes by name on every start, so a shifted ID would
+// silently re-own them; what breaks is LXC idmap passthrough of these IDs, filesystems where chown fails,
+// and host-side ownership (backups, permissions set on the host). Fail the build instead.
+const SYSTEM_USERS = { postgres: [102, 106], redis: [101, 105], node: [1000, 1000] };
+
+function checkSystemUsers() {
+  const passwd = new Map(fs.readFileSync('/etc/passwd', 'utf8').split('\n').filter(Boolean)
+    .map((line) => line.split(':')).map(([name, , uid, gid]) => [name, [Number(uid), Number(gid)]]));
+  const before = failures.length;
+  for (const [name, want] of Object.entries(SYSTEM_USERS)) {
+    const got = passwd.get(name);
+    if (!got) fail(`system user ${name} missing`);
+    else if (got[0] !== want[0] || got[1] !== want[1]) fail(`system user ${name} is ${got.join(':')}, expected ${want.join(':')} (uid:gid)`);
+  }
+  if (failures.length === before) ok(`system users ${Object.entries(SYSTEM_USERS).map(([n, [u, g]]) => `${n}=${u}:${g}`).join(' ')}`);
 }
 
 function checkPrisma(cli) {
@@ -150,7 +168,6 @@ function checkBullScripts() {
 }
 
 function checkServerRequires() {
-  const builtins = new Set(builtinModules);
   const missing = new Map();
   const seen = new Set();
   const toLoad = new Map();
@@ -159,8 +176,8 @@ function checkServerRequires() {
     if (!file.endsWith('.js')) return;
     const req = createRequire(file);
     for (const [, spec] of fs.readFileSync(file, 'utf8').matchAll(/\brequire\(\s*["']([^"'./][^"']*)["']\s*\)/g)) {
-      const bare = spec.replace(/^node:/, '');
-      if (builtins.has(bare) || builtins.has(bare.split('/')[0])) continue;
+      // isBuiltin, not builtinModules: Node 24 lists prefix-only modules (node:sqlite, node:test) only with the prefix.
+      if (isBuiltin(spec) || isBuiltin(spec.split('/')[0])) continue;
       checked++;
       let resolved = null;
       try {
@@ -220,7 +237,9 @@ function checkElfArch() {
 }
 
 try {
+  ok(`node ${process.version} (napi ${process.versions.napi}, openssl ${process.versions.openssl})`);
   checkLayout();
+  checkSystemUsers();
   checkPreflight();
   checkPrisma(prismaCliFromEntrypoint());
   checkRecovery();

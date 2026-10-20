@@ -8,8 +8,8 @@ Three workflows in `.github/workflows/`. No workflow builds the Docker image on 
 ## Workflows
 | File | Triggers | Does | Token |
 |---|---|---|---|
-| `pr-ci.yml` (PR Tests) | every `pull_request` | `npm ci`, `prisma generate`, ffmpeg, `npm test` | `contents: read` |
-| `run-tests.yml` (Backend Tests) | `workflow_dispatch`, `workflow_call` | `npm test`, parses results, optional Discord post (skipped when `WEBHOOK_URL` is empty) | `contents: read` |
+| `pr-ci.yml` (PR Tests) | every `pull_request` | Node 24 (`node-version`), `npm ci`, `prisma generate`, ffmpeg, `npm test` | `contents: read` |
+| `run-tests.yml` (Backend Tests) | `workflow_dispatch`, `workflow_call` | Node 24, `npm test`, parses results, optional Discord post (skipped when `WEBHOOK_URL` is empty) | `contents: read` |
 | `build-unified-image.yml` | `v*` tag push, `workflow_dispatch` | `test` (run-tests) → `build-and-push` | top `contents: read`; `build-and-push` adds `packages: write` |
 
 ## build-unified-image.yml

@@ -2,18 +2,18 @@
 # Documentation: documentation/testing/e2e-harness.md
 #
 # Build context: e2e/ (needs fake-arr/, fixtures/, scenarios/). ffmpeg lives only in the
-# throwaway "fixtures" stage; the runtime image is node:20-alpine + ~250 KB of fixtures.
+# throwaway "fixtures" stage; the runtime image is node:24-alpine3.23 + ~250 KB of fixtures.
 # Fixture metadata (title/author) is resolved from Audnexus by ASIN at build time; pass
 # --build-arg FIXTURE_METADATA=test/offline-metadata.json to build offline.
 
-FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS fixtures
+FROM node:24-alpine3.23@sha256:e44c87c7dd212720eb00469aeac89504ca2be77b8f0d6dbffb30665d5fcc59e1 AS fixtures
 RUN apk add --no-cache ffmpeg
 WORKDIR /build
 COPY fixtures/ ./fixtures/
 ARG FIXTURE_METADATA=
 RUN node fixtures/generate.mjs --out /fixtures ${FIXTURE_METADATA:+--metadata fixtures/${FIXTURE_METADATA}}
 
-FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
+FROM node:24-alpine3.23@sha256:e44c87c7dd212720eb00469aeac89504ca2be77b8f0d6dbffb30665d5fcc59e1
 LABEL org.opencontainers.image.title="rmab-e2e-fake-arr" rmab-e2e="true"
 WORKDIR /app
 COPY fake-arr/package.json ./
