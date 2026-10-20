@@ -72,7 +72,7 @@ function genMp3Multi(bin, dir, def, book) {
     const file = `${String(n).padStart(2, '0')} - Chapter ${n}.mp3`;
     ffmpeg(bin, [
       '-f', 'lavfi', '-i', `${tone(n)}:duration=${def.seconds}`,
-      '-ac', '1', '-c:a', 'libmp3lame', '-b:a', '32k', '-id3v2_version', '3',
+      '-ac', '1', '-c:a', 'libmp3lame', '-b:a', def.bitrate ?? '32k', '-id3v2_version', '3',
       '-metadata', `title=Chapter ${n}`,
       '-metadata', `album=${book.title}`,
       '-metadata', `album_artist=${book.author}`,
