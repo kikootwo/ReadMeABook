@@ -286,7 +286,8 @@ interface AudibleAudiobook {
   durationMinutes?: number;
   releaseDate?: string;
   rating?: number;
-  genres?: string[];
+  genres?: string[]; // display: genres + sub-genre tags, max 5
+  primaryGenres?: string[]; // top-level genres only (Audnexus type 'genre' / top of each catalog ladder); metadata tags
   series?: string;
   seriesPart?: string;
   seriesAsin?: string;
