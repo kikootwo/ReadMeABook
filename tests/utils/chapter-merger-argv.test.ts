@@ -11,6 +11,7 @@ import { EventEmitter } from 'events';
 import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mergeChapters, probeAudioFile, type ChapterFile } from '@/lib/utils/chapter-merger';
+import { probeAudioContent } from '@/lib/utils/audio-content';
 
 const probeState = vi.hoisted(() => ({ duration: '120' }));
 const execFileMock = vi.hoisted(() => {
@@ -52,6 +53,19 @@ vi.mock('@/lib/utils/audio-content', () => ({
   }),
 }));
 vi.mock('fs/promises', () => ({ default: fsMock, ...fsMock }));
+// The freeform-tag post-step (plain holder: mockReset clears vi.fn implementations).
+// Records how often the merged file had been probed when it ran.
+const freeform = vi.hoisted(() => ({
+  calls: [] as Array<{ file: string; tags: Array<{ name: string; value: string }>; probedBefore: number }>,
+  result: { written: true } as { written: boolean; warning?: string },
+}));
+vi.mock('@/lib/utils/mp4-freeform-tags', () => ({
+  addFreeformTags: async (file: string, tags: Array<{ name: string; value: string }>) => {
+    const probedBefore = vi.mocked(probeAudioContent).mock.calls.filter(([f]) => f === file).length;
+    freeform.calls.push({ file, tags, probedBefore });
+    return tags.length ? freeform.result : { written: false };
+  },
+}));
 
 const HOSTILE_DIR = '/dl/My $(touch pwned) `id` "dq" \'sq\' Book';
 
@@ -75,6 +89,8 @@ function writtenFile(prefix: string): { file: string; content: string } | undefi
 
 beforeEach(() => {
   vi.clearAllMocks();
+  freeform.calls = [];
+  freeform.result = { written: true };
   probeState.duration = '120';
   streamDurations.byPath.clear();
   streamDurations.gaps.clear();
@@ -175,6 +191,53 @@ describe('chapter merge verification', () => {
     const result = await mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b' });
 
     expect(result.durationVerified).toBe(false);
+  });
+});
+
+describe('chapter merge ASIN tag', () => {
+  const merge = (options: Record<string, unknown>) =>
+    mergeChapters([chapter('/dl/01.m4a'), chapter('/dl/02.m4a')], { title: 'B', author: 'A', outputPath: '/t/out.m4b', ...options });
+
+  it('never passes the ASIN to ffmpeg (its mp4 muxer drops freeform keys)', async () => {
+    await merge({ asin: 'B0TESTASIN', writeFreeformTags: true });
+    const args = spawnMock.mock.calls[0][1] as string[];
+    expect(args.some((a) => a.includes('ASIN'))).toBe(false);
+  });
+
+  it('no tagging pass follows: the post-step adds the ASIN before the merged file is checked', async () => {
+    streamDurations.byPath.set('/t/out.m4b', 120000);
+    const result = await merge({ asin: 'B0TESTASIN', writeFreeformTags: true });
+    expect(result.success).toBe(true);
+    expect(freeform.calls).toEqual([{ file: '/t/out.m4b', tags: [{ name: 'ASIN', value: 'B0TESTASIN' }], probedBefore: 0 }]);
+    expect(vi.mocked(probeAudioContent)).toHaveBeenCalledWith('/t/out.m4b');
+  });
+
+  it('a tagging pass follows (or the flag is unset): no tags from the merger', async () => {
+    await merge({ asin: 'B0TESTASIN', writeFreeformTags: false });
+    await merge({ asin: 'B0TESTASIN' });
+    expect(freeform.calls.map((c) => c.tags)).toEqual([[], []]);
+  });
+
+  it('a tag that cannot be written leaves the merge successful', async () => {
+    streamDurations.byPath.set('/t/out.m4b', 120000);
+    freeform.result = { written: false, warning: 'ASIN tag not written (x)' };
+    const result = await merge({ asin: 'B0TESTASIN', writeFreeformTags: true });
+    expect(result.success).toBe(true);
+    expect(fsMock.unlink).not.toHaveBeenCalledWith('/t/out.m4b');
+  });
+
+  it('a failed merge removes its output (no orphaned partial file)', async () => {
+    spawnMock.mockImplementation(() => {
+      const proc = new EventEmitter() as EventEmitter & { stderr: EventEmitter; kill: () => void };
+      proc.stderr = new EventEmitter();
+      proc.kill = vi.fn();
+      setImmediate(() => proc.emit('close', 1));
+      return proc;
+    });
+    const result = await merge({ asin: 'B0TESTASIN', writeFreeformTags: true });
+    expect(result.success).toBe(false);
+    expect(fsMock.unlink).toHaveBeenCalledWith('/t/out.m4b');
+    expect(freeform.calls).toEqual([]);
   });
 });
 

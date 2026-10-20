@@ -14,6 +14,8 @@ import { probeAudioContent } from './audio-content';
 import { checkMergedOutput, measureChapterContent, sameDecodedFormat, verifyMergedContent } from './merge-verification';
 import { RMABLogger } from './logger';
 import { CHAPTER_MERGE_FORMATS } from '../constants/audio-formats';
+import { buildMp4FreeformTags } from './metadata-tagger';
+import { addFreeformTags } from './mp4-freeform-tags';
 
 // Media tools run via execFile/spawn with argv arrays (never a shell): file
 // names come from downloads and import folders and are untrusted.
@@ -67,6 +69,11 @@ export interface MergeOptions {
   asin?: string;
   outputPath: string;
   dirMode?: number;
+  /**
+   * Add freeform tags (ASIN) to the merged file. Only when no metadata tagging
+   * pass follows: that pass re-muxes the file and writes them itself.
+   */
+  writeFreeformTags?: boolean;
 }
 
 export interface MergeResult {
@@ -731,12 +738,6 @@ export async function mergeChapters(
       args.push('-metadata', `date=${options.year}`);
     }
 
-    if (options.asin) {
-      // Custom iTunes tag for ASIN
-      args.push('-metadata', `----:com.apple.iTunes:ASIN=${options.asin}`);
-      await logger?.info(`Embedding ASIN: ${options.asin}`);
-    }
-
     // Output format
     args.push('-f', 'mp4');
     args.push(options.outputPath);
@@ -782,6 +783,13 @@ export async function mergeChapters(
       await logger?.error('Merge failed: Output file not created');
       throw new Error('Merged file not created');
     }
+
+    // ASIN as an iTunes freeform tag (ffmpeg drops it), before the checks below
+    // so they check the final file. A failure keeps ffmpeg's output as it is.
+    const freeformTags = options.writeFreeformTags ? buildMp4FreeformTags({ asin: options.asin }) : [];
+    const freeform = await addFreeformTags(options.outputPath, freeformTags);
+    if (freeform.written) await logger?.info(`Embedded ASIN: ${options.asin}`);
+    if (freeform.warning) await logger?.warn(freeform.warning);
 
     // The merged file's audio compared with the measured chapters (codec copy:
     // every packet must arrive; re-encode: content within the window). Its end
@@ -845,6 +853,7 @@ export async function mergeChapters(
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
     await logger?.error(`Chapter merge failed: ${errorMsg}`);
+    await fs.unlink(options.outputPath).catch(() => undefined); // no orphaned partial or rejected output
     return { success: false, error: errorMsg };
   } finally {
     // Clean up temp files

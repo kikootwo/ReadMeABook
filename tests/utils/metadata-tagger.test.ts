@@ -4,7 +4,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { checkFfmpegAvailable, tagAudioFileMetadata, tagMultipleFiles } from '@/lib/utils/metadata-tagger';
+import { buildMp4FreeformTags, checkFfmpegAvailable, tagAudioFileMetadata, tagMultipleFiles } from '@/lib/utils/metadata-tagger';
 
 const execFileMock = vi.hoisted(() => vi.fn());
 const fsMock = vi.hoisted(() => ({
@@ -20,6 +20,20 @@ vi.mock('fs/promises', () => ({
   default: fsMock,
   ...fsMock,
 }));
+
+// The freeform-tag post-step (real-file behaviour: mp4-freeform-tags tests). Plain holder: survives mock resets.
+const freeform = vi.hoisted(() => ({
+  calls: [] as Array<[string, Array<{ name: string; value: string }>]>,
+  result: { written: true } as { written: boolean; warning?: string },
+}));
+vi.mock('@/lib/utils/mp4-freeform-tags', () => ({
+  addFreeformTags: async (file: string, tags: Array<{ name: string; value: string }>) => {
+    freeform.calls.push([file, tags]);
+    return tags.length ? freeform.result : { written: false };
+  },
+}));
+
+const hasFreeformArg = (argv: string[]) => argv.some((a) => a.startsWith('----:'));
 
 function mockExecFileSuccess(stdout = 'ok') {
   execFileMock.mockImplementation((file: string, args: string[], options: any, callback?: any) => {
@@ -67,6 +81,8 @@ function expectMetadataArg(argv: string[], key: string, value: string): void {
 describe('metadata tagger', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    freeform.calls = [];
+    freeform.result = { written: true };
   });
 
   it('returns an error for unsupported file formats', async () => {
@@ -106,7 +122,11 @@ describe('metadata tagger', () => {
     expectMetadataArg(argv, 'artist', 'Author');
     expectMetadataArg(argv, 'composer', 'Narrator');
     expectMetadataArg(argv, 'date', '2020');
-    expectMetadataArg(argv, '----:com.apple.iTunes:ASIN', 'ASIN123');
+    // ffmpeg drops freeform keys: the ASIN goes to the post-step, which also writes moov first
+    expect(hasFreeformArg(argv)).toBe(false);
+    expect(argv).not.toContain('-movflags');
+    expect(freeform.calls).toEqual([['/tmp/book.m4b.tmp', [{ name: 'ASIN', value: 'ASIN123' }]]]);
+    expect(result.warnings).toBeUndefined();
 
     expect(argv).toContain('/tmp/book.m4b');
     expect(argv).toContain('/tmp/book.m4b.tmp');
@@ -175,6 +195,59 @@ describe('metadata tagger', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('ffmpeg failed');
     expect(fsMock.unlink).toHaveBeenCalledWith('/tmp/book.mp3.tmp');
+  });
+
+  it('m4b without an ASIN: no post-step tags, ffmpeg writes moov first (+faststart)', async () => {
+    fsMock.access.mockResolvedValue(undefined);
+    mockExecFileSuccess('done');
+
+    const result = await tagAudioFileMetadata('/tmp/book.m4b', { title: 'Book', author: 'Author' });
+
+    expect(result.success).toBe(true);
+    const argv = lastCallArgv();
+    expect(argv[argv.indexOf('-movflags') + 1]).toBe('+faststart');
+    expect(freeform.calls).toEqual([['/tmp/book.m4b.tmp', []]]);
+  });
+
+  it('a freeform tag that cannot be written is a warning: the file is still tagged', async () => {
+    fsMock.access.mockResolvedValue(undefined);
+    mockExecFileSuccess('done');
+    freeform.result = { written: false, warning: 'ASIN tag not written (meta handler is not mdir)' };
+
+    const result = await tagAudioFileMetadata('/tmp/book.m4a', { title: 'Book', author: 'Author', asin: 'B0TESTASIN' });
+
+    expect(result).toEqual({
+      success: true,
+      filePath: '/tmp/book.m4a',
+      taggedFilePath: '/tmp/book.m4a.tmp',
+      warnings: ['ASIN tag not written (meta handler is not mdir)'],
+    });
+  });
+
+  it('mp3/flac keep the ASIN in argv; the MP4 post-step gets nothing', async () => {
+    fsMock.access.mockResolvedValue(undefined);
+    for (const file of ['/tmp/book.mp3', '/tmp/book.flac']) {
+      mockExecFileSuccess('done');
+      await tagAudioFileMetadata(file, { title: 'Book', author: 'Author', asin: 'B0TESTASIN' });
+      expectMetadataArg(lastCallArgv(), 'ASIN', 'B0TESTASIN');
+      expect(freeform.calls.at(-1)).toEqual([`${file}.tmp`, []]);
+    }
+  });
+
+  it('ffmpeg failure: the post-step never runs', async () => {
+    fsMock.access.mockResolvedValue(undefined);
+    fsMock.unlink.mockResolvedValue(undefined);
+    mockExecFileFailure('exec failed');
+
+    await tagAudioFileMetadata('/tmp/book.m4b', { title: 'Book', author: 'Author', asin: 'B0TESTASIN' });
+
+    expect(freeform.calls).toEqual([]);
+  });
+
+  it('buildMp4FreeformTags: sanitized ASIN, nothing when absent or blank', () => {
+    expect(buildMp4FreeformTags({ asin: ' B0TEST\nASIN ' })).toEqual([{ name: 'ASIN', value: 'B0TESTASIN' }]);
+    expect(buildMp4FreeformTags({ asin: '\u00a0 ' })).toEqual([]);
+    expect(buildMp4FreeformTags({})).toEqual([]);
   });
 
   it('tags multiple files in sequence', async () => {
@@ -474,7 +547,8 @@ describe('metadata tagger', () => {
       expectMetadataArg(argv, 'title', 'Perfectly Clean Title');
       expectMetadataArg(argv, 'album_artist', 'Clean Author');
       expectMetadataArg(argv, 'composer', 'Clean Narrator');
-      expectMetadataArg(argv, '----:com.apple.iTunes:ASIN', 'B0009JKV9W');
+      expect(hasFreeformArg(argv)).toBe(false);
+      expect(freeform.calls.at(-1)).toEqual(['/tmp/book.m4b.tmp', [{ name: 'ASIN', value: 'B0009JKV9W' }]]);
       expectMetadataArg(argv, 'show', 'Clean Series');
       expectMetadataArg(argv, 'episode_id', '1');
     });

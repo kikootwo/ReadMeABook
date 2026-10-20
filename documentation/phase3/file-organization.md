@@ -106,8 +106,9 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 - `composer` - Narrator (standard audiobook field)
 - `date` - Year
 - `ASIN` - Audible ASIN (custom tag)
-  - M4B/M4A/MP4: `----:com.apple.iTunes:ASIN`
-  - MP3: Custom ID3v2 tag
+  - M4B/M4A/MP4: iTunes freeform item `----` (mean `com.apple.iTunes`, name `ASIN`), written after ffmpeg (see MP4 Freeform Tags)
+  - MP3: ID3v2 `TXXX:ASIN`; FLAC: Vorbis comment `ASIN`
+- Read back as ffprobe format tag `ASIN`; Audiobookshelf maps it (`asin`, case-insensitive) to `tagASIN` → book `asin`
 
 **Note:** ASIN is a custom metadata tag and may not appear in standard file properties viewers (Windows/macOS/Linux). Use specialized tools to verify:
 ```bash
@@ -118,13 +119,37 @@ ffprobe -v quiet -print_format json -show_format "audiobook.m4b" | grep -i asin
 exiftool "audiobook.m4b" | grep -i asin
 ```
 
+**MP4 layout:** every tagged MP4 is written moov first (faststart): by the freeform post-step when there are freeform tags, else by ffmpeg `-movflags +faststart`. A post-step that refuses or fails leaves ffmpeg's output (moov last, no freeform tags) and logs a warning.
+
+### MP4 Freeform Tags
+
+**Code:** `src/lib/utils/mp4-boxes.ts` (pure: parse, plan, verify), `src/lib/utils/mp4-freeform-tags.ts` (I/O)
+
+**Why a post-step:** ffmpeg's mp4 muxer writes only the iTunes atoms it knows and drops `-metadata ----:com.apple.iTunes:ASIN=…` (9.0.2's only freeform writer is `disc_subtitle` → `DISCSUBTITLE`). `-movflags use_metadata_tags` is not used: it replaces the iTunes `mdir` tag list with QuickTime `mdta` keys, so the cover (`covr`) is lost and iTunes-atom readers lose title/artist/album.
+
+**API:**
+- `buildMp4FreeformTags(metadata)` (`metadata-tagger.ts`) → `FreeformTag[]` (`{ name, value }`); the one place new freeform fields are mapped
+- `addFreeformTags(file, tags)` → `{ written, warning? }`, never throws; writes `<file>.tags-<rand>.tmp`, verifies, renames it over `file`; no-op for `[]`
+- `writeFreeformTaggedCopy(input, output, tags)`: output must differ from input and not exist (`wx`); input is only read
+
+**Rewrite:** output = `ftyp` + new `moov` + every other top-level box in input order; existing `----` items with the same name (case-insensitive) replaced, all other ilst items byte-identical; each `stco`/`co64` entry shifted by the move of the `mdat` holding its chunk.
+
+**Refused (file unchanged, warning):** top-level box other than `ftyp/free/skip/wide/mdat/moov`; not exactly one `ftyp` (first) and `moov`; no `mdat`; `mvex`; missing `udta`/`meta`/`ilst` (never created); meta handler ≠ `mdir`; a `trak` without exactly one `stco|co64`, `stsc`, `stsz` (or with `stz2`); non-self-contained `dref`; a chunk not wholly inside an `mdat` payload; `stco`/`co64` code count in moov (outside `udta`) ≠ tables read; a shifted `stco` entry > 0xFFFFFFFF; moov > 128 MiB.
+
+**Verification before rename:** output size and top-level layout as planned; new moov's chunk offsets = offsets computed from the input; each tag present exactly once; chunk bytes equal input's (every chunk of non-audio tracks up to 1 MiB each, 64 spread audio chunks × 4 KiB); ffprobe reads every tag. All handles closed before rename (Windows).
+
+**Call sites:** tagger after ffmpeg (`${file}.tmp`); merger (`writeFreeformTags`, set by file-organizer only when `metadata_tagging_enabled` is off, since the tagging pass re-muxes the merged file and writes the tags itself).
+
+**Adding a field (#208):** push `{ name: 'PUBLISHER' | 'SUBTITLE' | 'LANGUAGE', value }` in `buildMp4FreeformTags`; Audiobookshelf 2.37.1 reads `publisher`, `subtitle`, `language` from these names.
+
 **Configuration:**
 - Key: `metadata_tagging_enabled` (Configuration table)
 - Default: `true`
 - Configurable in: Setup wizard (Paths step), Admin settings (Paths tab)
 
 **Implementation:**
-- Uses ffmpeg with `-codec copy` (no re-encoding, metadata only)
+- Uses ffmpeg with `-codec copy` (no re-encoding, metadata only), then the MP4 freeform post-step
+- Warnings (`TaggingResult.warnings`, e.g. ASIN not written) are logged; they do not fail the import
 - Fast (no audio transcoding)
 - Lossless (original audio preserved)
 - Runs after file copy, before cover art download
@@ -362,6 +387,7 @@ async function organize(
 **11. Cover art replaced the library cover** - A cached thumbnail was copied in replace mode and a downloaded cover was written with a plain `fs.writeFile`, so an existing `cover.jpg` was overwritten and an interrupted download left a truncated one. Fixed: covers are published without replacing (see Process step 7); an empty `cover.jpg` an older version left behind is replaced. Known limit: replacing an empty cover is check-then-rename; all RMAB writers share the per-target lock, but an outside writer (e.g. Audiobookshelf storing covers with the item) landing a cover in that window would be replaced
 **12. Silent keeps** - A usenet ebook release with several formats was kept with no request message, and a tagged copy that failed its duration check only showed in job errors. Fixed: both now get a request message (see Verified Import)
 **13. Chapter merge verified a merge that lost audio** - Codec-copy AAC merges count each later chapter's priming + trimmed last packet as full frames (~69 ms/boundary at 22.05 kHz, ~35 ms at 44.1 kHz). The symmetric 1 s + 50 ms/chapter content window let that surplus cancel real loss (80 chapters, last one read short → verified) and failed correct merges past ~56 chapters (and short-chapter merges at the 2% check). Fixed: copy verified by exact packet count (same frame); re-encode shortfall capped at 1 s. VBR MP3 without a Xing header placed later chapters at ffprobe's estimate (holes, markers off) yet the merge succeeded: a timeline with gaps or an end far from the audio now fails the merge. Re-encodes of chapters with one decoded format get `asetpts=N/SR/TB` (ADTS `.aac`, Xing-less VBR MP3 verify instead of failing on estimate drift that grows with chapter length); mixed formats keep container timestamps (a filter-graph rebuild restarts the count). A re-encode over 1 s short fails the merge (rebuilt timestamps leave no gap to catch a short read)
+**14. ASIN never written into .m4b/.m4a; tagging dropped faststart (#208)** - ffmpeg's mp4 muxer silently dropped `-metadata ----:com.apple.iTunes:ASIN=…` (tagger and merger), so Audiobookshelf got no ASIN from RMAB imports (the default `{title} {asin}` folder has no `[ASIN]` brackets). The tagger also had no `+faststart`, so every tagged MP4 (merged ones included) ended moov last, undoing the merger's playback-delay fix. Fixed: MP4 Freeform Tags post-step (moov first, verified), `+faststart` when there are no freeform tags
 
 ## Tech Stack
 

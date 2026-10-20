@@ -211,6 +211,12 @@ export class FileOrganizer {
                   const outputFilename = `${this.sanitizePath(audiobook.title)}.m4b`;
                   const outputPath = path.join(this.tempDir, outputFilename);
 
+                  // A tagging pass after the merge re-muxes the file and writes the
+                  // freeform tags itself; without one the merger writes them
+                  const taggingConfig = await prisma.configuration.findUnique({
+                    where: { key: 'metadata_tagging_enabled' },
+                  });
+
                   // Perform merge
                   const mergeResult = await mergeChapters(
                     chapters,
@@ -222,6 +228,7 @@ export class FileOrganizer {
                       asin: audiobook.asin,
                       outputPath,
                       dirMode: this.dirMode,
+                      writeFreeformTags: taggingConfig?.value !== 'true',
                     },
                     logger ?? undefined
                   );
@@ -316,6 +323,12 @@ export class FileOrganizer {
                   .join(', ')
               }`);
               result.errors.push(`Failed to tag ${failCount} file(s) with metadata`);
+            }
+
+            for (const tagResult of taggingResults) {
+              for (const warning of tagResult.warnings ?? []) {
+                await logger?.warn(`${path.basename(tagResult.filePath)}: ${warning}`);
+              }
             }
 
             // Build map of successfully tagged files

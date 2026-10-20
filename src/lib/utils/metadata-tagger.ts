@@ -8,6 +8,7 @@ import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
 import { METADATA_TAG_FORMATS, MP4_CONTAINER_FORMATS } from '../constants/audio-formats';
+import { addFreeformTags, type FreeformTag } from './mp4-freeform-tags';
 
 const execFilePromise = promisify(execFile);
 
@@ -26,6 +27,8 @@ export interface TaggingResult {
   filePath: string; // Original file path
   taggedFilePath?: string; // Path to tagged file (if successful)
   error?: string;
+  /** Non-fatal problems (e.g. a freeform tag that could not be written; the file is still tagged). */
+  warnings?: string[];
 }
 
 /**
@@ -41,6 +44,18 @@ function sanitizeMetadataValue(value: string): string {
     .replace(/^[﻿ ​‌‍]+/, '') // leading BOM / NBSP / ZWSP / ZWNJ / ZWJ
     .replace(/[\x00\r\n]/g, '') // null bytes and line breaks anywhere
     .trim();
+}
+
+/**
+ * iTunes freeform ('----', com.apple.iTunes) tags for MP4 containers: ffmpeg's
+ * mp4 muxer drops these keys, so they are added after ffmpeg by
+ * addFreeformTags. New custom fields (e.g. PUBLISHER) are added here.
+ */
+export function buildMp4FreeformTags(metadata: Pick<MetadataTaggingOptions, 'asin'>): FreeformTag[] {
+  const tags: FreeformTag[] = [];
+  const asin = metadata.asin ? sanitizeMetadataValue(metadata.asin) : '';
+  if (asin) tags.push({ name: 'ASIN', value: asin });
+  return tags;
 }
 
 /**
@@ -90,7 +105,9 @@ export async function tagAudioFileMetadata(
     ];
 
     // For m4b/m4a/mp4 files, use standard metadata tags
-    if ((MP4_CONTAINER_FORMATS as readonly string[]).includes(ext)) {
+    const isMp4 = (MP4_CONTAINER_FORMATS as readonly string[]).includes(ext);
+    const freeformTags = isMp4 ? buildMp4FreeformTags({ asin }) : [];
+    if (isMp4) {
       args.push(
         '-metadata', `title=${title}`,
         '-metadata', `album=${title}`, // Book title in Album field (Plex uses this)
@@ -106,10 +123,7 @@ export async function tagAudioFileMetadata(
         args.push('-metadata', `date=${String(metadata.year)}`);
       }
 
-      if (asin) {
-        // Use custom iTunes tag format for M4B/M4A/MP4 files
-        args.push('-metadata', `----:com.apple.iTunes:ASIN=${asin}`);
-      }
+      // ASIN: an iTunes freeform tag, added after ffmpeg (buildMp4FreeformTags)
 
       if (series) {
         args.push('-metadata', `show=${series}`);
@@ -117,6 +131,12 @@ export async function tagAudioFileMetadata(
 
       if (seriesPart) {
         args.push('-metadata', `episode_id=${seriesPart}`);
+      }
+
+      // moov first (faststart). With freeform tags the post-step writes the
+      // file moov first anyway, so ffmpeg's own extra rewrite is skipped.
+      if (freeformTags.length === 0) {
+        args.push('-movflags', '+faststart');
       }
 
       // Explicitly specify output format (fixes .tmp extension issue)
@@ -206,12 +226,16 @@ export async function tagAudioFileMetadata(
       throw new Error(`ffmpeg failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 
+    // Freeform tags: a verified copy replaces ffmpeg's output, or it stays as is
+    const freeform = await addFreeformTags(tempFile, freeformTags);
+
     // DO NOT replace original file - return temp file path instead
     // This preserves the original file for seeding
     return {
       success: true,
       filePath,
       taggedFilePath: tempFile,
+      ...(freeform.warning && { warnings: [freeform.warning] }),
     };
   } catch (error) {
     return {

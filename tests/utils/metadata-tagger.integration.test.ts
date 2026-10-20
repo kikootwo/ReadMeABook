@@ -18,6 +18,7 @@ import os from 'os';
 import path from 'path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { tagAudioFileMetadata } from '@/lib/utils/metadata-tagger';
+import { audioMd5, countFreeform, makeM4b, probe, topLevelTypes } from './mp4-tags.helpers';
 
 const execFileP = promisify(execFile);
 
@@ -149,4 +150,45 @@ describe('metadata-tagger integration (real ffmpeg)', () => {
     },
     60_000
   );
+});
+
+describe.skipIf(skipReal)('m4b ASIN and layout (real ffmpeg)', () => {
+  it('the ASIN is written: ffprobe (the reader Audiobookshelf uses) reads format tag ASIN', async () => {
+    const src = await makeM4b(workDir, 'asin-src.m4b', { faststart: false });
+    const result = await tagAudioFileMetadata(src, { title: 'Book', author: 'Author', asin: 'B0TESTASIN' });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
+    const { tags } = await probe(result.taggedFilePath!);
+    expect(tags.ASIN).toBe('B0TESTASIN');
+    expect(tags.title).toBe('Book');
+    expect(countFreeform(result.taggedFilePath!, 'ASIN')).toBe(1);
+  }, 60_000);
+
+  it.each([
+    ['with an ASIN (post-step)', 'B0TESTASIN'],
+    ['without an ASIN (ffmpeg +faststart)', undefined],
+  ])('the tagged copy is moov first (faststart) %s, cover and text-track chapters intact', async (_name, asin) => {
+    const src = await makeM4b(workDir, `layout-${asin ?? 'none'}.m4b`, { faststart: true });
+    const before = await probe(src);
+    const md5 = await audioMd5(src);
+    const result = await tagAudioFileMetadata(src, { title: 'Book', author: 'Author', asin });
+    const tagged = result.taggedFilePath!;
+    expect(topLevelTypes(tagged).slice(0, 2)).toEqual(['ftyp', 'moov']);
+    const after = await probe(tagged);
+    expect(after.streams).toEqual(before.streams);
+    expect(after.chapters).toEqual(before.chapters);
+    expect(await audioMd5(tagged)).toBe(md5);
+  }, 60_000);
+
+  it('re-tagging a tagged copy that already holds an ASIN: exactly one ASIN item (the new one), moov first', async () => {
+    const src = await makeM4b(workDir, 'retag.m4b', { faststart: true });
+    const first = await tagAudioFileMetadata(src, { title: 'Book', author: 'Author', asin: 'B0FIRST000' });
+    expect(countFreeform(first.taggedFilePath!, 'ASIN')).toBe(1);
+    const tagged = path.join(workDir, 'retag-tagged.m4b');
+    await fs.rename(first.taggedFilePath!, tagged);
+    const result = await tagAudioFileMetadata(tagged, { title: 'Book', author: 'Author', asin: 'B0TESTASIN' });
+    expect(countFreeform(result.taggedFilePath!, 'ASIN')).toBe(1);
+    expect((await probe(result.taggedFilePath!)).tags.ASIN).toBe('B0TESTASIN');
+    expect(topLevelTypes(result.taggedFilePath!).slice(0, 2)).toEqual(['ftyp', 'moov']);
+  }, 60_000);
 });
