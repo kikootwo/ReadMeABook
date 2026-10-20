@@ -154,6 +154,11 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 6. Profile's auth token is stored (encrypted)
 7. User record created with profile's details
 
+**Profile Identity (`POST /api/auth/plex/switch-profile`):**
+- The chosen profile must be one of the account's Plex Home users (`getHomeUsers` with the cached account token) → else 403 `AccessDenied`
+- Identity fields (plexId, name, email, avatar) come from Plex: the Home user entry's `uuid`, or `getUserInfo(<profile token>)` when the client sends no profile details or the entry has no uuid
+- Plex sign-ins (switch-profile and the single-profile callback) set `authProvider: 'plex'` and never change `role`; `src/lib/services/auth/plex-identity.ts` checks the row before it is written
+
 **Profile Data Storage:**
 - `plexId`: Profile's unique ID (not main account ID)
 - `plexUsername`: Profile's friendlyName
@@ -293,6 +298,7 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 
 ## Fixed Issues
 
+- **Plex profile identity:** profile sign-in takes the profile's identity from Plex and requires a profile from the account's Home list.
 - **#297 Hardcoded JWT fallback secrets:** `jwt.ts` fell back to built-in default strings when `JWT_SECRET`/`JWT_REFRESH_SECRET` were unset (installs that bypass the unified entrypoint). Fix: fallbacks removed; secrets derived from `CONFIG_ENCRYPTION_KEY` via HKDF. Affected installs: all sessions + download links invalidated on upgrade (re-login required).
 
 ## Tech Stack
