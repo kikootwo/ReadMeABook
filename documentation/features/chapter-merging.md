@@ -173,6 +173,7 @@ ffmpeg -y -f concat -safe 0 -protocol_whitelist file -i filelist.txt \
   -i chapters.txt \
   -map_metadata 1 \
   -map 0:a \
+  -af asetpts=N/SR/TB \              # Timestamps from the sample count (only when all chapters decode alike)
   -c:a libfdk_aac -vbr 4 \          # High quality AAC (or: -c:a aac -q:a <quality> -profile:a aac_low)
   -movflags +faststart \             # CRITICAL: Instant playback
   -fflags +genpts \                  # Fix timestamps (regenerates presentation timestamps)
@@ -200,6 +201,7 @@ ffmpeg -y -f concat -safe 0 -protocol_whitelist file -i filelist.txt \
 - **`-fflags +genpts`**: Regenerates presentation timestamps for audio/video → fixes seeking/timing issues at concat boundaries
 - **`-avoid_negative_ts make_zero`**: Handles negative timestamps at concat boundaries
 - **`-max_muxing_queue_size 9999`**: Prevents buffer overflow on long audiobooks (16h+)
+- **`-af asetpts=N/SR/TB`** (re-encode only): timestamps rebuilt from the decoded sample count. The concat demuxer starts each chapter at the previous one's container duration, an estimate for ADTS `.aac` (always) and VBR MP3 without a Xing/VBRI header (error grows with chapter length; a quiet intro makes it ~3x). Only when every chapter decodes to the same sample rate, channels, layout and sample format (`sameDecodedFormat`, from the measurement probe): a format change rebuilds ffmpeg's filter graph and restarts the count (output broken). Mixed-format sets and unmeasured chapters keep container timestamps (then the timeline check catches far-off estimates). Not for codec copy
 
 ### File Naming
 
@@ -471,13 +473,13 @@ timeout = 5 minutes + (chapter_count * 30 seconds)
 
 All merged files are validated before marked successful:
 
-1. **Timeline Check (`checkMergedTimeline`):** the merged file's timeline must match its audio: no gap, and its end within 1 s + 50 ms/chapter of its audio. Otherwise the merge is discarded (files organized individually): e.g. VBR MP3 without a Xing header and a quiet intro, where the concat demuxer places each next chapter at ffprobe's (over)estimate, leaving holes the chapter markers don't know about. Only gaps are checked when the audio could not be compared
+1. **Output Check (`checkMergedOutput`):** the merge is discarded (files organized individually) when its timeline does not match its audio (any gap, or its end more than 1 s + 50 ms/chapter from its audio: e.g. mixed-format VBR MP3 without a Xing header, placed at ffprobe's estimates, leaving holes the chapter markers don't know about), or when a re-encode is more than 1 s short of the chapters' content (a chapter read short: with rebuilt timestamps that leaves no gap, only less audio). Only gaps are checked when the audio could not be compared. A short codec copy is not discarded here (source verification keeps the sources)
 2. **Duration Check:** the chapters' measured content vs the merged file's audio as `verifyMergedContent` measures it (within 2% tolerance; container `format.duration` only when chapters or output could not be measured); a failure discards the merge
 3. **Decode Test:** FFmpeg attempts to decode first and last 10 seconds (catches corruption/truncation)
 4. **Size Check:** File size reasonable for duration (~0.4MB/min minimum, accommodates 64kbps encoding)
 5. **Source verification (`durationVerified`):** chapter files count as imported (and may be cleaned up) only when the merged file holds all the audio the chapters held when measured just before the merge (`verifyMergedContent`, `src/lib/utils/merge-verification.ts`), and has no timeline gap:
    - Codec copy (`.m4a`/`.m4b`/`.mp4`): output packet count == sum of the chapters' packet counts, and packets × frame equal (same frame/sample rate). Exact, no window: in the merged file each later chapter's priming packet and trimmed last packet count as full frames (~69 ms/boundary at 22.05 kHz, ~35 ms at 44.1 kHz), a surplus that would cancel real loss inside any window. Reported `actualDuration` = chapters' content minus the missing packets
-   - Re-encode (MP3/FLAC/AAC → AAC): content at most 1 s short, at most 1 s + 50 ms/chapter long (measured re-encodes: 0-50 ms long at 3-80 chapters). A shortfall is lost audio, so it gets no per-chapter allowance
+   - Re-encode (MP3/FLAC/AAC → AAC): content at most 1 s short (more fails the merge, see 1), at most 1 s + 50 ms/chapter long (measured re-encodes: 0-50 ms long at 3-80 chapters, also ADTS and Xing-less MP3 with rebuilt timestamps). A shortfall is lost audio, so it gets no per-chapter allowance
    - Otherwise the merge is kept but the sources stay (request message "merged file kept; sources kept"; log `Merged audio not verified: <reason>`)
    - Not the end timestamp: when a chapter reads short during the merge, ffmpeg bridges the hole with one stretched packet and the output still ends at full length; a gap is a packet over 2 frames or a forward timestamp jump (over 0.25 s), and a gap fails the merge (timeline check). A percentage window is not used: on long books it let a merge that lost whole chapters through (2% of 13 h is over 15 min). It checks the amount of audio, not its bytes. See [file-organization.md](../phase3/file-organization.md#verified-import-delete-only-what-reached-the-library)
 6. **No `-xerror`:** a single bad frame must not drop the whole merge (codec-copy AAC concatenation also routinely reports non-monotonic DTS at chapter boundaries); `durationVerified` decides whether the sources may be cleaned up
