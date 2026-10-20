@@ -38,6 +38,12 @@ updates:
       # linter. Upgrade by hand.
       - dependency-name: "eslint"
         update-types: ["version-update:semver-major"]
+      # vitest 5 fails this test suite. Closing a grouped PR doesn't stop Dependabot reopening
+      # it, so vitest majors are ignored here and moved by hand when there is a reason to.
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitest/*"
+        update-types: ["version-update:semver-major"]
     groups:
       # Listed first: Dependabot puts a dependency in the FIRST group that matches,
       # so prisma and @prisma/client always move together instead of splitting
