@@ -70,12 +70,12 @@ export class AppriseProvider implements INotificationProvider {
       'Content-Type': 'application/json',
     };
 
-    // Basic auth from the fields; credentials still inside a legacy URL are used only when
-    // both fields are empty (as the migration and maskConfig treat them). The request URL
-    // never carries userinfo.
-    const fromFields = Boolean(appriseConfig.basicAuthUser || appriseConfig.basicAuthPassword);
-    const user = fromFields ? appriseConfig.basicAuthUser || '' : split.user;
-    const password = fromFields ? appriseConfig.basicAuthPassword || '' : split.password;
+    // Basic auth: userinfo still inside a not-yet-migrated URL wins over the fields, part by
+    // part, exactly as the startup migration and maskConfig lift it, so a send before the
+    // migration uses the same credentials that are stored after it. The request URL never
+    // carries userinfo.
+    const user = split.user || appriseConfig.basicAuthUser || '';
+    const password = split.password || appriseConfig.basicAuthPassword || '';
     if (user || password) {
       headers['Authorization'] = `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`;
     }

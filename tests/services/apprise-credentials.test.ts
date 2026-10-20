@@ -38,6 +38,8 @@ describe('splitUrlCredentials', () => {
     ['a % that is not valid percent-encoding (kept raw)', 'https://alice:100%zz@host.example/', 'https://host.example/', 'alice', '100%zz'],
     ['a stray % next to a character the parser encodes', 'https://alice:Ab^c%9@host.example/', 'https://host.example/', 'alice', 'Ab^c%9'],
     ['an escape run that is not valid UTF-8 (kept as-is)', 'https://alice:x%E2%82y%41@host.example/', 'https://host.example/', 'alice', 'x%E2%82yA'],
+    ['a parser-encoded character next to an invalid typed escape', 'https://alice:^%E2@host.example/', 'https://host.example/', 'alice', '^%E2'],
+    ['a parser-encoded multi-byte character next to an invalid typed escape', 'https://alice:é%E2@host.example/', 'https://host.example/', 'alice', 'é%E2'],
     ['an IPv6 host', 'http://u:pw@[::1]:8000/api', 'http://[::1]:8000/api', 'u', 'pw'],
     ['a username only', 'https://bob@host.example/', 'https://host.example/', 'bob', ''],
     ['path, query and fragment', 'https://u:p@h.example/a/b?c=1&d=2#e', 'https://h.example/a/b?c=1&d=2#e', 'u', 'p'],
@@ -344,10 +346,19 @@ describe('AppriseProvider.send', () => {
     expect(sent().auth.Authorization).toBe(basic('alice', 'p@ss:word'));
   });
 
-  it('ignores URL credentials when either Basic Auth field is set', async () => {
-    await provider.send({ serverUrl: LEGACY_URL, basicAuthUser: 'svc', urls: 'x://y' }, payload);
+  it('lets URL credentials win over the Basic Auth fields, matching what the migration stores', async () => {
+    const row = { serverUrl: LEGACY_URL, basicAuthUser: 'svc', basicAuthPassword: 'old-pw', urls: 'x://y' };
+    await provider.send(row, payload);
 
-    expect(sent().auth.Authorization).toBe(basic('svc', ''));
+    expect(sent().auth.Authorization).toBe(basic('alice', 'p@ss:word'));
+    const migrated = liftAppriseUrlCredentials(row)!;
+    expect(sent().auth.Authorization).toBe(basic(migrated.config.basicAuthUser, migrated.password!));
+  });
+
+  it('takes each part from the URL when present and from the field otherwise', async () => {
+    await provider.send({ serverUrl: 'https://bob@host.example/', basicAuthUser: 'svc', basicAuthPassword: 'pw', urls: 'x://y' }, payload);
+
+    expect(sent().auth.Authorization).toBe(basic('bob', 'pw'));
   });
 
   it('keeps a malformed % in a legacy password as typed', async () => {

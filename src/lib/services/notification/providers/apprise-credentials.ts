@@ -20,19 +20,44 @@ export interface UrlCredentials {
 }
 
 /**
- * Undo the URL parser's percent-encoding of userinfo. Each run of valid %XX escapes is
- * decoded on its own, so one stray '%' (e.g. "Ab^c%9", which the parser stores as
- * "Ab%5Ec%9") does not stop the other escapes from decoding. A run that is not valid
- * UTF-8 is kept as-is.
+ * Undo the URL parser's percent-encoding of userinfo. Each run of %XX escapes is decoded
+ * on its own, so one stray '%' (e.g. "Ab^c%9", which the parser stores as "Ab%5Ec%9")
+ * does not stop the other escapes from decoding. A run that is not valid UTF-8 as a
+ * whole (e.g. "^%E2", stored as "%5E%E2") is decoded escape by escape: the longest valid
+ * UTF-8 sequence (up to 4 bytes) is taken each time, and an escape that starts no valid
+ * sequence is kept as typed.
  */
 export function decodeUserinfo(value: string): string {
   return value.replace(/(?:%[0-9a-fA-F]{2})+/g, (run) => {
     try {
       return decodeURIComponent(run);
     } catch {
-      return run;
+      return decodeEscapeRun(run);
     }
   });
+}
+
+function decodeEscapeRun(run: string): string {
+  const escapes = run.match(/%[0-9a-fA-F]{2}/g) ?? [];
+  let out = '';
+  let i = 0;
+  while (i < escapes.length) {
+    let taken = 0;
+    for (let len = Math.min(4, escapes.length - i); len > 0 && !taken; len--) {
+      try {
+        out += decodeURIComponent(escapes.slice(i, i + len).join(''));
+        taken = len;
+      } catch {
+        // not a complete UTF-8 sequence; try a shorter one
+      }
+    }
+    if (!taken) {
+      out += escapes[i];
+      taken = 1;
+    }
+    i += taken;
+  }
+  return out;
 }
 
 /**
@@ -67,8 +92,9 @@ export type AppriseNormalizeResult =
  * credentials typed into serverUrl move into the fields and are stripped from the URL.
  * The URL's password fills basicAuthPassword when that field is empty, missing or the
  * mask (and then the URL's username replaces basicAuthUser, so the pair stays together);
- * a non-empty typed password wins, and the username is only filled when blank. A URL that does not parse but contains '@' is
- * refused, since its credentials cannot be removed safely.
+ * a non-empty typed password wins, and the username is only filled when blank. A URL
+ * that does not parse but contains '@' is refused, since its credentials cannot be
+ * removed safely.
  */
 export function normalizeAppriseConfig(config: Record<string, any>): AppriseNormalizeResult {
   const serverUrl = typeof config.serverUrl === 'string' ? config.serverUrl : '';
