@@ -7,14 +7,15 @@
  * deletes a request through DELETE /api/admin/requests/<id> (or the admin table, E-h) and checks
  * /media by sha256, the ABS item, the book row and the API's filesKeptReason.
  * Cases: E-a..E-h (plan), R1 ABS second copy, R3 coerced .m4a, R4 re-run organize, R5 flat ebook
- * folder with foreign ebooks, R6 removal failure (EACCES). Plex mode: library-delete-plex.spec.ts.
+ * folder with foreign ebooks, R6 removal failure (EACCES), R7 media volume not mounted (emptied),
+ * E-g2 replace after a refused delete. Plex mode: library-delete-plex.spec.ts.
  */
 
 import { test, expect } from '@playwright/test';
 import { env, execBridgeAvailable, EXEC_BRIDGE_SKIP, Rmab, snap } from '../../lib/harness';
 import {
   MEDIA, PUID, PGID, sh, asApp, q, psql, sqlStr, Case, exists, setConfig, newBook, bookRow, genAudio, genEbook, importAudio, importEbook,
-  linkAbs, absItemExists, absItemFor, deleteRequest, mediaShas, sameShas,
+  linkAbs, absItemExists, absItemFor, deleteRequest, mediaShas, sameShas, emptyMediaDir, restoreMediaDir,
 } from './library-delete-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
@@ -290,11 +291,61 @@ test('R6 the folder cannot be removed (EACCES): no backend delete, row fields st
   sh(`mkdir -p ${q(`${b.folder}/locked`)}\necho note > ${q(`${b.folder}/locked/note.txt`)}\nchown -R 0:0 ${q(`${b.folder}/locked`)}\nchmod 0555 ${q(`${b.folder}/locked`)}`);
 
   const res = await deleteRequest(c, rmab, b.requestId, 'delete');
-  expectKept(c, 'delete', res, 'could not be removed (EACCES)');
+  expectKept(c, 'delete', res, 'partly removed (permission denied); remove the rest manually');
   c.check('ABS item still there', await absItemExists(abs), 'safety');
   const row = bookRow(b.audiobookId);
   c.check('row keeps file_path, files_hash and linkage', row.filePath === b.folder && !!row.filesHash && row.absItemId === abs, 'safety', JSON.stringify(row));
   c.check('locked subfolder still there', exists(`${b.folder}/locked/note.txt`), 'control');
   sh(`chmod 0755 ${q(`${b.folder}/locked`)}`);
+  finish(c);
+});
+
+test('R7 media volume not mounted (media_dir emptied): delete keeps everything; row, linkage and ABS item stay', async () => {
+  const c = new Case('R7-media-not-mounted');
+  const rmab = await Rmab.loginAdmin();
+  const b = await importedBook(c, rmab, 'r7', 'Guard Book November', 'Guard Author November', 'B0LDGTRN01');
+  const abs = await linkAbs(b.audiobookId, b.folder);
+  // What the app sees when the share is not mounted yet: an empty media_dir
+  emptyMediaDir();
+  let res;
+  try {
+    c.check('media_dir is empty', sh(`ls -A ${q(MEDIA)} | wc -l`).trim() === '0', 'control');
+    res = await deleteRequest(c, rmab, b.requestId, 'delete');
+  } finally {
+    restoreMediaDir();
+  }
+  expectKept(c, 'delete', res, 'is the media volume mounted?');
+  c.check('folder back and intact', exists(`${b.folder}/Book.m4b`), 'safety');
+  const row = bookRow(b.audiobookId);
+  c.check('row keeps file_path, files_hash and linkage', row.filePath === b.folder && !!row.filesHash && row.absItemId === abs, 'safety', JSON.stringify(row));
+  c.check('ABS item still there', await absItemExists(abs), 'safety');
+  finish(c);
+});
+
+test('E-g2 replace after a refused delete (no active request, folder stored): 409, no ABS hard delete, files intact', async () => {
+  const c = new Case('E-g2-replace-after-refused-delete');
+  const rmab = await Rmab.loginAdmin();
+  const b = await importedBook(c, rmab, 'eg2', 'Guard Book Oscar', 'Guard Author Oscar', 'B0LDGTEG02');
+  const abs = await linkAbs(b.audiobookId, b.folder);
+  genAudio(b.folder, ['Bonus Track.m4a'], 3, 880);
+  const del = await deleteRequest(c, rmab, b.requestId, 'delete');
+  expectKept(c, 'delete', del, 'folder contents changed since import');
+  const issueId = psql(
+    `insert into reported_issues (id, audiobook_id, reporter_id, reason, status, created_at, updated_at)
+     values (gen_random_uuid(), ${sqlStr(b.audiobookId)}, ${sqlStr(psql(`select id from users where role = 'admin' order by created_at limit 1`))}, 'e2e: wrong edition', 'open', now(), now()) returning id`
+  ).split('\n')[0];
+  const before = mediaShas();
+
+  const res = await rmab.raw('POST', `/api/admin/reported-issues/${issueId}/replace`, {
+    torrent: { guid: 'e2e-replace-2', title: 'Guard Book Oscar', size: 50_000_000, indexer: 'E2E', downloadUrl: 'magnet:?xt=urn:btih:89abcdef0123456789abcdef0123456789abcdef&dn=oscar', publishDate: new Date().toISOString() },
+  });
+  const body = await res.json().catch(() => ({}));
+  c.save('replace-response.json', { status: res.status, body });
+  c.check(`replace answered 409 (HTTP ${res.status})`, res.status === 409, 'safety', JSON.stringify(body));
+  c.check(`message: nothing was changed (${body.message})`, String(body.message || '').includes('Nothing was changed'), 'control');
+  c.check('/media unchanged (no ABS hard delete)', sameShas(before, mediaShas()), 'safety');
+  c.check('ABS item still there', await absItemExists(abs), 'safety');
+  c.check('no new request', psql(`select count(*) from requests where audiobook_id = ${sqlStr(b.audiobookId)} and deleted_at is null`) === '0', 'safety');
+  c.check('issue still open', psql(`select status from reported_issues where id = ${sqlStr(issueId)}`) === 'open', 'control');
   finish(c);
 });

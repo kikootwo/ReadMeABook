@@ -12,7 +12,7 @@
 import { test, expect } from '@playwright/test';
 import { env, execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, waitFor, Rmab } from '../../lib/harness';
 import {
-  MEDIA, PUID, PGID, sh, q, psql, sqlStr, Case, exists, newBook, bookRow, genAudio, importAudio, deleteRequest, mediaShas, sameShas,
+  MEDIA, PUID, PGID, sh, q, psql, sqlStr, Case, exists, newBook, bookRow, genAudio, importAudio, deleteRequest, mediaShas, sameShas, emptyMediaDir, restoreMediaDir,
 } from './library-delete-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
@@ -112,5 +112,28 @@ test('P3 the linked album is a copy outside the removed folder: no Plex DELETE, 
   c.save('plex-deletes.json', deletes);
   c.check('no DELETE for the copy album', !deletes.some((d) => d.path === `/library/metadata/${copyAlbum.ratingKey}`), 'safety');
   c.check('copy files unchanged', exists(copy) && sh(`cd ${q(copy)} && sha256sum * | sort`) === copyBefore, 'safety');
+  finish(c);
+});
+
+test('P4 media volume not mounted (media_dir emptied): no Plex DELETE, row and plex_guid stay', async () => {
+  const c = new Case('P4-plex-media-not-mounted');
+  const rmab = await Rmab.loginAdmin();
+  const b = await plexBook(c, rmab, 'p4', 'Plex Guard Four', 'Plex Guard Author Four', 'B0LDGTP401');
+  const album = await scannedAlbum(rmab, 'B0LDGTP401');
+  psql(`update audiobooks set plex_guid = ${sqlStr(album.guid)} where id = ${sqlStr(b.audiobookId)}`);
+  emptyMediaDir();
+  const seq = await lastSeq();
+  let res;
+  try {
+    res = await deleteRequest(c, rmab, b.requestId, 'delete');
+  } finally {
+    restoreMediaDir();
+  }
+  c.check(`files kept (${res.details.filesKeptReason})`, (res.details.filesKeptReason || '').includes('is the media volume mounted?'), 'safety');
+  const deletes = await plexDeletes(seq);
+  c.save('plex-deletes.json', deletes);
+  c.check('no DELETE /library/metadata sent to Plex', deletes.length === 0, 'safety');
+  c.check('folder back and intact', exists(`${b.folder}/Book.m4b`), 'safety');
+  c.check('plex_guid and file_path kept', bookRow(b.audiobookId).plexGuid === album.guid && bookRow(b.audiobookId).filePath === b.folder, 'safety');
   finish(c);
 });

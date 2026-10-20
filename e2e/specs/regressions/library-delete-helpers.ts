@@ -177,6 +177,18 @@ export function mediaShas(exclude: string[] = []): Record<string, string> {
   return Object.fromEntries(Object.entries(all).filter(([p]) => !exclude.some((x) => p === x || p.startsWith(`${x}/`))));
 }
 
+const AWAY = '/media/.libdel-away';
+
+/** Move everything out of media_dir (what the app sees before a network share is mounted). */
+export function emptyMediaDir() {
+  sh(`rm -rf ${q(AWAY)}\nmkdir -p ${q(AWAY)}\nfind ${q(MEDIA)} -mindepth 1 -maxdepth 1 -exec mv {} ${q(AWAY)}/ \\;`);
+}
+
+/** Put media_dir's contents back after emptyMediaDir. */
+export function restoreMediaDir() {
+  sh(`find ${q(AWAY)} -mindepth 1 -maxdepth 1 -exec mv {} ${q(MEDIA)}/ \\;\nrmdir ${q(AWAY)}`);
+}
+
 export function sameShas(a: Record<string, string>, b: Record<string, string>): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
