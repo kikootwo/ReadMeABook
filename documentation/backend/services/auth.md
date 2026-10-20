@@ -189,6 +189,11 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 - **Required Scopes**: `openid`, `profile`, `email`, `groups`
 - **Redirect URI**: `{BASE_URL}/api/auth/oidc/callback`
 
+### OIDC Accounts
+- The user row is keyed on the IdP subject (`plexId` = `oidcSubject`); OIDC sign-in only uses an OIDC account's row (`authProvider: 'oidc'`, or an older row with no provider and the same `oidcSubject`) → otherwise sign-in is refused with a generic message
+- Create and update set `authProvider: 'oidc'`
+- `PlexAuthProvider.handleCallback` is not used (Plex sign-in completes in `/api/auth/plex/callback` and `/api/auth/plex/switch-profile`) and always refuses
+
 ### Access Control Methods
 Controls who can log in to the application (separate from admin role assignment):
 
@@ -293,6 +298,7 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 
 ## Fixed Issues
 
+- **OIDC accounts:** OIDC sign-in is kept to OIDC accounts.
 - **#297 Hardcoded JWT fallback secrets:** `jwt.ts` fell back to built-in default strings when `JWT_SECRET`/`JWT_REFRESH_SECRET` were unset (installs that bypass the unified entrypoint). Fix: fallbacks removed; secrets derived from `CONFIG_ENCRYPTION_KEY` via HKDF. Affected installs: all sessions + download links invalidated on upgrade (re-login required).
 
 ## Tech Stack
