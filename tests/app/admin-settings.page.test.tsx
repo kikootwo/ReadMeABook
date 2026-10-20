@@ -159,7 +159,7 @@ describe('AdminSettings', () => {
         expect.objectContaining({ audibleRegion: 'uk' }),
         [],
         [],
-        { indexerPlan: { saveIndexers: false, allowEmpty: false } }
+        { indexerPlan: { saveIndexers: false, allowEmpty: false, saveFlags: false } }
       );
     });
   });

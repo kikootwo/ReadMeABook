@@ -339,16 +339,18 @@ describe('admin settings helpers', () => {
     fetchWithAuthMock.mockResolvedValue(makeOk());
 
     const { saveTabSettings } = await import('@/app/admin/settings/lib/helpers');
-    await saveTabSettings('prowlarr', baseSettings, [], [], { indexerPlan: { saveIndexers: true, allowEmpty: true } });
+    await saveTabSettings('prowlarr', baseSettings, [], [], { indexerPlan: { saveIndexers: true, allowEmpty: true, saveFlags: false } });
 
-    expect(JSON.parse((fetchWithAuthMock.mock.calls[1][1] as RequestInit).body as string).allowEmpty).toBe(true);
+    const body = JSON.parse((fetchWithAuthMock.mock.calls[1][1] as RequestInit).body as string);
+    expect(body.allowEmpty).toBe(true);
+    expect('flagConfigs' in body).toBe(false); // flags not loaded: left out, so the saved ones stay
   });
 
   it('leaves saved indexers alone when the plan skips them', async () => {
     fetchWithAuthMock.mockResolvedValue(makeOk());
 
     const { saveTabSettings } = await import('@/app/admin/settings/lib/helpers');
-    await saveTabSettings('prowlarr', baseSettings, [], [], { indexerPlan: { saveIndexers: false, allowEmpty: false } });
+    await saveTabSettings('prowlarr', baseSettings, [], [], { indexerPlan: { saveIndexers: false, allowEmpty: false, saveFlags: false } });
 
     const urls = fetchWithAuthMock.mock.calls.map((c) => c[0]);
     expect(urls).toEqual(['/api/admin/settings/prowlarr', '/api/admin/settings/indexer-options']);

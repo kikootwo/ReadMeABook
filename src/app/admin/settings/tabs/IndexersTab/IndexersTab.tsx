@@ -29,6 +29,8 @@ interface IndexersTabProps {
   onClearIndexers?: () => void;
   /** False when the saved list could not be loaded: editing is locked until it loads. Default true. */
   indexersLoaded?: boolean;
+  /** False until the saved flag rules loaded (a connection-change clear does not load them). Default true. */
+  flagsLoaded?: boolean;
 }
 
 const LOCKED_NOTE =
@@ -47,6 +49,7 @@ export function IndexersTab({
   onRefreshIndexers,
   onClearIndexers,
   indexersLoaded = true,
+  flagsLoaded = true,
 }: IndexersTabProps) {
   const {
     testing,
@@ -54,6 +57,7 @@ export function IndexersTab({
     testConnection,
     showConnectionChangeConfirm,
     confirmConnectionChange,
+    keepIndexersOnConnectionChange,
     cancelConnectionChange,
     configuredIndexersCount,
   } = useIndexersSettings({
@@ -216,7 +220,7 @@ export function IndexersTab({
           </p>
         </div>
 
-        <fieldset disabled={!indexersLoaded} className="m-0 min-w-0 border-0 p-0">
+        <fieldset disabled={!indexersLoaded || !flagsLoaded} className="m-0 min-w-0 border-0 p-0">
         {flagConfigs.length > 0 && (
           <div className="space-y-3 mb-4">
             {flagConfigs.map((config, index) => (
@@ -260,9 +264,15 @@ export function IndexersTab({
         onClose={cancelConnectionChange}
         onConfirm={confirmConnectionChange}
         title="Prowlarr Connection Change"
-        message={`Changing your Prowlarr connection will remove ${indexersLoaded
-          ? `your ${configuredIndexersCount} configured indexer${configuredIndexersCount === 1 ? '' : 's'}`
-          : 'your saved indexer configuration (it could not be loaded, so it is not shown)'}. Indexer IDs are specific to each Prowlarr instance, so existing configurations cannot be preserved. You will need to re-add indexers from the new instance after saving.`}
+        // The list could not be loaded: most often Prowlarr just moved, so offer to keep it
+        secondaryText={indexersLoaded ? undefined : 'Keep saved indexers'}
+        onSecondary={indexersLoaded ? undefined : keepIndexersOnConnectionChange}
+        message={indexersLoaded
+          ? `Changing your Prowlarr connection will remove your ${configuredIndexersCount} configured indexer${configuredIndexersCount === 1 ? '' : 's'}. Indexer IDs are specific to each Prowlarr instance, so existing configurations cannot be preserved. You will need to re-add indexers from the new instance after saving.`
+          : 'Your saved indexers could not be loaded, so they are not shown. If this is the same Prowlarr at a new address, '
+            + 'choose "Keep saved indexers": they are loaded from the new address after you save. If it is a different '
+            + 'Prowlarr instance, choose "Continue" to remove them (indexer IDs are specific to each instance) and re-add '
+            + 'indexers from the new instance. Flag rules are kept either way.'}
         confirmText="Continue"
         cancelText="Cancel"
         variant="danger"

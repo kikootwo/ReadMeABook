@@ -130,6 +130,15 @@ export function useIndexersSettings({
   /**
    * User cancelled the credential change confirmation
    */
+  /**
+   * Same Prowlarr at a new address: test it without clearing the saved indexers.
+   * After saving, the page loads the list from the new address.
+   */
+  const keepIndexersOnConnectionChange = async () => {
+    setShowConnectionChangeConfirm(false);
+    await executeTest(false);
+  };
+
   const cancelConnectionChange = () => {
     setShowConnectionChangeConfirm(false);
   };
@@ -140,6 +149,7 @@ export function useIndexersSettings({
     testConnection,
     showConnectionChangeConfirm,
     confirmConnectionChange,
+    keepIndexersOnConnectionChange,
     cancelConnectionChange,
     configuredIndexersCount,
   };

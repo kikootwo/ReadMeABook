@@ -437,7 +437,9 @@ src/app/admin/settings/
   - `indexersLoaded`: true after a successful GET (incl. via Test Connection or Fetch Indexers) or a confirmed connection-change clear; a later failed refresh keeps it and the edits
   - `savePlan`: PUT indexers/flags only when loaded AND changed (or cleared); `allowEmpty` only for a clear or "removed every loaded indexer". A Prowlarr returning 200 with no indexers + an unrelated save → no PUT
   - Not loaded: add/edit/remove and flag rules are disabled with a note (`IndexerManagement` `lockedReason`, fieldsets); save stores URL/key/options only and says so; after saving a changed connection the list is fetched again
-  - Connection-change confirm also appears when the list was not loaded (`useIndexersSettings`: `count > 0 || !indexersLoaded`)
+  - Connection-change confirm also appears when the list was not loaded (`useIndexersSettings`: `count > 0 || !indexersLoaded`). Not loaded → extra choice "Keep saved indexers" (same Prowlarr at a new address): tests without clearing; after saving, the list is loaded from the new address. "Continue" = different instance: clears indexers
+  - Flag rules are instance-independent: sent (`flagConfigs`) only when they were loaded (`savePlan.saveFlags`); a clear after a failed load leaves `indexer_flag_config` untouched (PUT without `flagConfigs` = unchanged). Flag editing stays locked until they load
+  - Saving while the list is unavailable (or still loading) reports success and says the saved indexers were left as they are
   - PUT refuses an empty list over saved indexers without `allowEmpty` (protects older open tabs)
 
 ## Notifications

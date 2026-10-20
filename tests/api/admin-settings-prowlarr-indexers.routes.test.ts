@@ -117,6 +117,14 @@ describe('Admin Prowlarr indexers route', () => {
       expect(entry.value).toBe('[]');
     });
 
+    it('leaves the saved flag rules alone when flagConfigs is not sent', async () => {
+      const { status } = await put({ indexers: [], allowEmpty: true });
+
+      expect(status).toBe(200);
+      const keys = configServiceMock.setMany.mock.calls[0][0].map((e: any) => e.key);
+      expect(keys).toEqual(['prowlarr_indexers']);
+    });
+
     it('saves an empty list when nothing was saved before', async () => {
       configServiceMock.get.mockResolvedValueOnce(null);
 

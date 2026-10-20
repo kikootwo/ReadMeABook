@@ -28,10 +28,13 @@ import { ApiTab } from './tabs/ApiTab/ApiTab';
 import type { Settings, SettingsTab, Message } from './lib/types';
 import { useConfiguredIndexers } from './lib/useConfiguredIndexers';
 
-const INDEXERS_NOT_SAVED_MESSAGE =
-  'Prowlarr settings saved. Your indexer settings were not changed, because they could not be loaded from Prowlarr. ' +
-  'Click "Test Connection" on this tab once Prowlarr is reachable; editing unlocks when the list loads.';
 import { parseArrayToCommaSeparated, saveTabSettings, validateAuthSettings, getTabValidation, getTabs } from './lib/helpers';
+
+// Saved while the indexer list was not loaded: nothing the admin could edit was lost (editing is locked)
+const INDEXERS_NOT_LOADED_MESSAGE =
+  'Settings saved. Your saved indexers could not be loaded from Prowlarr, so they were left as they are. ' +
+  'Click "Test Connection" on this tab once Prowlarr is reachable to edit them.';
+const INDEXERS_STILL_LOADING_MESSAGE = 'Settings saved. The indexer list was still loading, so the saved indexers were left as they are.';
 
 export default function AdminSettings() {
   // Core state
@@ -60,6 +63,8 @@ export default function AdminSettings() {
     flagConfigs,
     setFlagConfigs,
     indexersLoaded,
+    flagsLoaded,
+    loadAttempted,
     hasIndexerChanges,
     savePlan,
     fetchIndexers,
@@ -130,7 +135,7 @@ export default function AdminSettings() {
           setMessage({ type: 'success', text: 'Settings saved. Indexers loaded from Prowlarr.' });
           return;
         }
-        setMessage({ type: 'error', text: INDEXERS_NOT_SAVED_MESSAGE });
+        setMessage({ type: 'success', text: loadAttempted ? INDEXERS_NOT_LOADED_MESSAGE : INDEXERS_STILL_LOADING_MESSAGE });
         return;
       }
       setMessage({ type: 'success', text: 'Settings saved successfully!' });
@@ -270,6 +275,7 @@ export default function AdminSettings() {
               onIndexersChange={setConfiguredIndexers}
               onClearIndexers={clearIndexers}
               indexersLoaded={indexersLoaded}
+              flagsLoaded={flagsLoaded}
               onFlagConfigsChange={setFlagConfigs}
               onValidationChange={(isValid) => setValidated({ ...validated, prowlarr: isValid })}
               onRefreshIndexers={async () => { await fetchIndexers(true); }}

@@ -190,7 +190,7 @@ describe('Admin settings indexer round trip', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Toggle option' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
 
-    expect(await screen.findByText(/indexer settings were not changed, because they could not be loaded/, {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByText(/saved indexers could not be loaded from Prowlarr, so they were left as they are/, {}, { timeout: 5000 })).toBeInTheDocument();
     expect(fetchWithAuthMock).toHaveBeenCalledWith('/api/admin/settings/indexer-options', expect.objectContaining({ method: 'PUT' }));
     expect(fetchWithAuthMock).not.toHaveBeenCalledWith(
       '/api/admin/settings/prowlarr/indexers',

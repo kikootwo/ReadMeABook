@@ -141,13 +141,18 @@ export const saveTabSettings = async (
 
       // Save indexer configuration and flag configs only when the plan says so: never from a list
       // that failed to load, and not at all when nothing changed
-      const indexerPlan = options.indexerPlan ?? { saveIndexers: true, allowEmpty: false };
+      const indexerPlan = options.indexerPlan ?? { saveIndexers: true, allowEmpty: false, saveFlags: true };
       if (indexerPlan.saveIndexers) {
         const indexersForSave = configuredIndexers.map(idx => ({ ...idx, enabled: true }));
         await fetchWithAuth('/api/admin/settings/prowlarr/indexers', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ indexers: indexersForSave, flagConfigs, allowEmpty: indexerPlan.allowEmpty }),
+          // flagConfigs left out = the saved flag rules stay as they are
+          body: JSON.stringify({
+            indexers: indexersForSave,
+            ...(indexerPlan.saveFlags ? { flagConfigs } : {}),
+            allowEmpty: indexerPlan.allowEmpty,
+          }),
         }).then(res => throwUnlessOk(res, 'Failed to save indexer configuration'));
       }
 

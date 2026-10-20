@@ -22,6 +22,8 @@ export interface IndexerSavePlan {
   saveIndexers: boolean;
   /** The list may be empty on purpose (explicit clear, or the admin removed every indexer). */
   allowEmpty: boolean;
+  /** Include the flag rules: only when they were loaded (they are not tied to a Prowlarr instance). */
+  saveFlags: boolean;
 }
 
 const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
@@ -34,12 +36,17 @@ export function useConfiguredIndexers(setMessage: (message: Message) => void) {
   // Once true it stays true: a later failed refresh keeps the loaded list and its edits
   const [indexersLoaded, setIndexersLoaded] = useState(false);
   const [indexersCleared, setIndexersCleared] = useState(false);
+  // Flag rules come from the same GET; a clear after a failed load must not replace them
+  const [flagsLoaded, setFlagsLoaded] = useState(false);
+  // The first load has finished (either way)
+  const [loadAttempted, setLoadAttempted] = useState(false);
 
   /** Load the saved list from the server. Returns true when it loaded. */
   const fetchIndexers = useCallback(async (force = false): Promise<boolean> => {
     try {
       const response = await fetchWithAuth('/api/admin/settings/prowlarr/indexers');
       if (!response.ok) {
+        setLoadAttempted(true);
         console.error('Failed to fetch indexers:', response.status);
         if (force) setMessage({ type: 'error', text: 'Failed to load indexers. Check your Prowlarr settings.' });
         return false;
@@ -55,9 +62,12 @@ export function useConfiguredIndexers(setMessage: (message: Message) => void) {
       setConfiguredIndexers(configured);
       setOriginalConfiguredIndexers(copy(configured));
       setIndexersLoaded(true);
+      setFlagsLoaded(true);
       setIndexersCleared(false);
+      setLoadAttempted(true);
       return true;
     } catch (error) {
+      setLoadAttempted(true);
       console.error('Failed to fetch indexers:', error);
       if (force) {
         setMessage({ type: 'error', text: 'Failed to load Prowlarr indexers. Check your Prowlarr URL and API key.' });
@@ -79,6 +89,7 @@ export function useConfiguredIndexers(setMessage: (message: Message) => void) {
   const savePlan: IndexerSavePlan = {
     saveIndexers: indexersLoaded && (indexersCleared || indexersChanged || flagConfigsChanged),
     allowEmpty: indexersCleared || (originalConfiguredIndexers.length > 0 && configuredIndexers.length === 0),
+    saveFlags: flagsLoaded,
   };
 
   /** After a successful save of the plan: what is shown is now what is stored. */
@@ -94,6 +105,8 @@ export function useConfiguredIndexers(setMessage: (message: Message) => void) {
     flagConfigs,
     setFlagConfigs,
     indexersLoaded,
+    flagsLoaded,
+    loadAttempted,
     hasIndexerChanges: indexersChanged || flagConfigsChanged,
     savePlan,
     fetchIndexers,

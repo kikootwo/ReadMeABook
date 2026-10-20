@@ -73,6 +73,7 @@ async function openIndexersTab() {
   fireEvent.click(await screen.findByRole('button', { name: /Indexers/ }, { timeout: 5000 }));
 }
 
+const FLAG_RULES = JSON.stringify([{ name: 'freeleech', modifier: 10 }]);
 const lockedNote = () => screen.queryByText(/could not be loaded from Prowlarr, so they cannot be edited yet/);
 
 describe('Indexers tab while the saved list is not loaded', () => {
@@ -81,7 +82,7 @@ describe('Indexers tab while the saved list is not loaded', () => {
     fetchWithAuthMock.mockReset();
     configStore.clear();
     configStore.set('prowlarr_indexers', JSON.stringify(savedIndexers));
-    configStore.set('indexer_flag_config', '[]');
+    configStore.set('indexer_flag_config', FLAG_RULES);
     prowlarrMock.getIndexers.mockResolvedValue(prowlarrIndexers);
     bridge.savedListFails = true;
     installBridge();
@@ -109,12 +110,51 @@ describe('Indexers tab while the saved list is not loaded', () => {
     fireEvent.change(screen.getByPlaceholderText('http://localhost:9696'), { target: { value: 'http://new-prowlarr:9696' } });
     fireEvent.click(screen.getByRole('button', { name: 'Test Connection' }));
 
-    expect(await screen.findByText(/remove your saved indexer configuration \(it could not be loaded/)).toBeInTheDocument();
+    expect(await screen.findByText(/Your saved indexers could not be loaded, so they are not shown/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => expect(lockedNote()).not.toBeInTheDocument(), { timeout: 5000 });
+    // Flag rules were never loaded: still locked, and not part of the save
+    expect(screen.getByRole('button', { name: '+ Add Flag Rule' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
 
     await waitFor(() => expect(configStore.get('prowlarr_indexers')).toBe('[]'), { timeout: 5000 });
+    expect(configStore.get('indexer_flag_config')).toBe(FLAG_RULES);
+  });
+
+  it('keeps the saved indexers when Prowlarr moved, and loads them from the new address after saving', async () => {
+    await openIndexersTab();
+    await waitFor(() => expect(lockedNote()).toBeInTheDocument(), { timeout: 5000 });
+    const saved = configStore.get('prowlarr_indexers');
+
+    fireEvent.change(screen.getByPlaceholderText('http://localhost:9696'), { target: { value: 'http://moved-prowlarr:9696' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Test Connection' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep saved indexers' }));
+
+    // Tested without clearing: still not loaded, nothing removed
+    expect(await screen.findByText(/Connected to Prowlarr/, {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(lockedNote()).toBeInTheDocument();
+
+    // The new address answers once it is saved
+    bridge.savedListFails = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
+
+    expect(await screen.findByText('Settings saved. Indexers loaded from Prowlarr.', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByText('Configured Indexers (1)', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(lockedNote()).not.toBeInTheDocument();
+    expect(configStore.get('prowlarr_indexers')).toBe(saved);
+    expect(configStore.get('indexer_flag_config')).toBe(FLAG_RULES);
+  });
+
+  it('a save while the list is unavailable reports success and changes neither indexers nor flags', async () => {
+    await openIndexersTab();
+    await waitFor(() => expect(lockedNote()).toBeInTheDocument(), { timeout: 5000 });
+
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }));
+
+    expect(await screen.findByText(/Settings saved\. Your saved indexers could not be loaded/, {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(configStore.get('prowlarr_indexers')).toBe(JSON.stringify(savedIndexers));
+    expect(configStore.get('indexer_flag_config')).toBe(FLAG_RULES);
   });
 });
