@@ -101,13 +101,23 @@ const placementMock = vi.hoisted(() => {
     }
     try {
       await copyFileMock.copyFile(source, target);
-      await fsMock.chmod(target, fileMode);
-      return { status: 'copied' as const, target };
     } catch (error) {
       return { status: 'failed' as const, target, reason: error instanceof Error ? error.message : String(error) };
     }
+    const warning = await applyFileMode(target, fileMode);
+    return warning ? { status: 'copied' as const, target, warning } : { status: 'copied' as const, target };
   };
+  // Best-effort, like the real one: a refused chmod is a warning, never a failure
+  const applyFileMode = vi.fn(async (target: string, fileMode: number) => {
+    try {
+      await fsMock.chmod(target, fileMode);
+      return undefined;
+    } catch (error) {
+      return `Could not set permissions on ${target} (${(error as NodeJS.ErrnoException).code})`;
+    }
+  });
   return {
+    applyFileMode,
     isVerifiedStatus: (status: string) => status === 'copied' || status === 'identical',
     placeFile: vi.fn(async (source: string, target: string, options: { fileMode: number }) =>
       place(source, target, options.fileMode)

@@ -10,7 +10,7 @@ import { RMAB_USER_AGENT } from './user-agent';
 import { tagMultipleFiles, checkFfmpegAvailable } from './metadata-tagger';
 import { RMABLogger } from './logger';
 import { copyFile } from './copy-file';
-import { placeAudio, placeFile, isVerifiedStatus, type AudioPlacement } from './organize-copy';
+import { applyFileMode, placeAudio, placeFile, isVerifiedStatus, type AudioPlacement } from './organize-copy';
 import { walkFiles, ORGANIZER_EBOOK_FORMATS, type ImportInventory, type PlacementRecord } from './import-inventory';
 import { getMediaDir } from './media-dir';
 import { probeStreamDurationMs } from './audio-duration';
@@ -434,6 +434,8 @@ export class FileOrganizer {
           }
         }
 
+        if (placed.warning) (logger ?? moduleLogger).warn(placed.warning);
+
         switch (placed.status) {
           case 'copied':
             result.audioFiles.push(placed.target);
@@ -485,6 +487,7 @@ export class FileOrganizer {
           fileMode: this.fileMode,
           compareExisting: placement?.compareExisting === true,
         });
+        if (placedCover.warning) (logger ?? moduleLogger).warn(placedCover.warning);
         result.coverRecord = {
           source: sourcePath,
           target: placedCover.target,
@@ -512,7 +515,8 @@ export class FileOrganizer {
       } else if (audiobook.coverArtUrl) {
         // Download cover art from Audible if not in torrent
         try {
-          await this.downloadCoverArt(audiobook.coverArtUrl, targetPath);
+          const coverWarning = await this.downloadCoverArt(audiobook.coverArtUrl, targetPath);
+          if (coverWarning) (logger ?? moduleLogger).warn(coverWarning);
           result.coverArtFile = path.join(targetPath, 'cover.jpg');
           await logger?.info(`Downloaded cover art from Audible`);
         } catch (error) {
@@ -726,9 +730,10 @@ export class FileOrganizer {
   }
 
   /**
-   * Download cover art from URL or copy from local cache
+   * Download cover art from URL or copy from local cache.
+   * Returns a warning when the file was written but its permissions could not be set.
    */
-  private async downloadCoverArt(url: string, targetDir: string): Promise<void> {
+  private async downloadCoverArt(url: string, targetDir: string): Promise<string | undefined> {
     const targetPath = path.join(targetDir, 'cover.jpg');
 
     try {
@@ -736,7 +741,6 @@ export class FileOrganizer {
       const cachedPath = cachedThumbnailPath(url);
       if (cachedPath) {
         await copyFile(cachedPath, targetPath);
-        await fs.chmod(targetPath, this.fileMode);
         moduleLogger.debug(`Copied cover art from cache: ${path.basename(cachedPath)}`);
       } else if (isAllowedRemoteCoverUrl(url)) {
         // Known Audible/Amazon image host over https; every redirect hop must be one too
@@ -755,7 +759,6 @@ export class FileOrganizer {
         });
 
         await fs.writeFile(targetPath, response.data);
-        await fs.chmod(targetPath, this.fileMode);
         moduleLogger.debug(`Downloaded cover art from URL`);
       } else {
         throw new Error('Cover art URL is not a cached thumbnail or a known cover image host');
@@ -764,6 +767,8 @@ export class FileOrganizer {
       moduleLogger.error('Failed to download cover art', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
+    // Written; permissions are best-effort
+    return applyFileMode(targetPath, this.fileMode);
   }
 
   /**
@@ -896,6 +901,7 @@ export class FileOrganizer {
         fileMode: this.fileMode,
         compareExisting: placement?.compareExisting === true,
       });
+      if (placed.warning) (logger ?? moduleLogger).warn(placed.warning);
       result.record = {
         source: sourceFilePath,
         target: placed.target,

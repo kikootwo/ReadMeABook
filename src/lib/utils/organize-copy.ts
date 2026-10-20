@@ -17,6 +17,12 @@ export interface PlaceOptions {
   fileMode: number;
   /** Compare same-size existing targets byte-for-byte (only worth it when a delete depends on the answer). */
   compareExisting: boolean;
+  /**
+   * Re-copy over an existing target that is a byte-prefix of the source (an
+   * interrupted copy). Default true. False means an existing target is never
+   * replaced, whatever it holds.
+   */
+  resumeInterrupted?: boolean;
 }
 
 export interface PlaceResult {
@@ -24,6 +30,24 @@ export interface PlaceResult {
   /** Path the content lives at (an existing Plex-coerced .m4b counts as the target). */
   target: string;
   reason?: string;
+  /** Non-fatal problem with a placed file (e.g. permissions could not be set). */
+  warning?: string;
+}
+
+/**
+ * Set `fileMode` on a file that is already in place. Best-effort: mergerfs,
+ * NFS, FUSE and SMB mounts often refuse chmod (EPERM, ENOTSUP, EACCES) even
+ * though the write succeeded. Never throws; returns a warning naming the path
+ * and error code when the mode could not be set.
+ */
+export async function applyFileMode(filePath: string, fileMode: number): Promise<string | undefined> {
+  try {
+    await fs.chmod(filePath, fileMode);
+    return undefined;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code || 'unknown error';
+    return `Could not set permissions ${fileMode.toString(8)} on ${filePath} (${code}); the file was placed and keeps the permissions the filesystem gave it`;
+  }
 }
 
 /**
@@ -82,14 +106,15 @@ async function copyInto(
 ): Promise<PlaceResult & { exists?: boolean }> {
   try {
     await copyFile(source, target, { mode });
-    await fs.chmod(target, fileMode).catch(() => undefined);
-    return { status: 'copied', target };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
       return { status: 'failed', target, reason: 'target appeared during the copy', exists: true };
     }
     return { status: 'failed', target, reason: error instanceof Error ? error.message : String(error) };
   }
+  // The copy is published and verified; permissions never undo that
+  const warning = await applyFileMode(target, fileMode);
+  return warning ? { status: 'copied', target, warning } : { status: 'copied', target };
 }
 
 // Placements into the same target (any extension: .mp4 and its coerced .m4b) run one at a time
@@ -161,13 +186,19 @@ async function placeUnlocked(source: string, target: string, options: PlaceOptio
 
   try {
     if (targetStat.size < sourceStat.size) {
-      if (await sameLeadingBytes(existing, source, targetStat.size)) {
+      if (options.resumeInterrupted !== false && await sameLeadingBytes(existing, source, targetStat.size)) {
         // Only an interrupted copy of this exact source leaves a byte-prefix behind
         const { exists: _exists, ...result } = await copyInto(source, existing, options.fileMode, 'replace');
         void _exists;
         return result;
       }
-      return { status: 'differs', target: existing, reason: 'existing target is smaller and not a prefix of the source' };
+      return {
+        status: 'differs',
+        target: existing,
+        reason: options.resumeInterrupted === false
+          ? 'existing target is smaller than the source and is not replaced'
+          : 'existing target is smaller and not a prefix of the source',
+      };
     }
     if (targetStat.size === sourceStat.size) {
       if (!options.compareExisting) {
@@ -238,7 +269,8 @@ async function placeOriginal(original: string, target: string, options: PlaceOpt
  * original's within TAGGED_DURATION_TOLERANCE_MS. Otherwise the original is
  * placed untagged (byte-checked by the copy). A derivative that cannot be
  * placed, or an existing target that differs from it, falls back to the
- * original too.
+ * original too. A fallback after a failed derivative copy never replaces an
+ * existing target: the failed copy may have landed there.
  */
 export async function placeAudio(
   original: string,
@@ -266,7 +298,8 @@ export async function placeAudio(
 
   const tagged = await placeFile(derivative, target, options);
   if (tagged.status === 'failed' || tagged.status === 'differs') {
-    const fallback = await placeOriginal(original, target, options);
+    const fallbackOptions = tagged.status === 'failed' ? { ...options, resumeInterrupted: false } : options;
+    const fallback = await placeOriginal(original, target, fallbackOptions);
     return {
       ...fallback,
       reason: fallback.status === 'copied'
