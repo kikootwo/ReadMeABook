@@ -9,7 +9,7 @@
 
 import fs from 'node:fs';
 import { evidencePath, Rmab, waitFor } from '../../lib/harness';
-import { MEDIA, PUID, PGID, sh, asApp, q, psql, sqlStr, shas, listing, eventsSince, fmtEvents, waitOrganized, sabHistoryDeletes, requestState, fmtShas, type JobEventRow } from './242-helpers';
+import { MEDIA, PUID, PGID, sh, asApp, q, psql, sqlStr, shas, listing, eventsSince, fmtEvents, waitOrganized, sabHistoryDeletes, requestState, fmtShas, type JobEventRow, type JobMark } from './242-helpers';
 
 export { MEDIA, PUID, PGID, sh, asApp, q, psql, sqlStr, shas, listing, eventsSince, fmtEvents, waitOrganized, sabHistoryDeletes, requestState, fmtShas };
 export type { JobEventRow };
@@ -106,7 +106,7 @@ export function saveState(e: Evidence, phase: string, dirs: string[]) {
 }
 
 /** Manual import over HTTP (as the UI does) and wait for its organize job. */
-export async function manualImport(e: Evidence, rmab: Rmab, since: string, body: Record<string, unknown>) {
+export async function manualImport(e: Evidence, rmab: Rmab, since: JobMark, body: Record<string, unknown>) {
   e.save('trigger.json', { method: 'POST', path: '/api/admin/manual-import', body });
   const res = await rmab.raw('POST', '/api/admin/manual-import', body);
   const response = await res.json().catch(() => ({}));

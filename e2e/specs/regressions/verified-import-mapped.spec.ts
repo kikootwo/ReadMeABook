@@ -10,7 +10,7 @@
 
 import { test, expect } from '@playwright/test';
 import { ctl, fakeArr, execBridgeAvailable, EXEC_BRIDGE_SKIP, Rmab } from '../../lib/harness';
-import { dbNow, exists, setRemoveAfterProcessing } from './242-helpers';
+import { markJobs, exists, setRemoveAfterProcessing } from './242-helpers';
 import { MEDIA, asApp, q, eventsSince, fmtEvents, sabHistoryDeletes, requestState, Evidence, has, saveState, waitRequestDone, waitOrganized } from './verified-import-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
@@ -50,7 +50,7 @@ test('7 broad mapped path: the download is removed, but no folder above it insid
   const name = book.title;
   const download = `/downloads/x/y/${name}`;
   e.save('scenario.txt', `Case 7. download_dir /downloads/rmab; SABnzbd client maps /sab-remote -> /downloads (broad); fake SABnzbd stores the release under /sab-remote/x/y.\nTrigger: POST /api/requests for ${name}; remove after processing on.\nExpect: ${download} removed and archived in SABnzbd; /downloads/x/y and /downloads/x kept (the nearest root above is only the mapped path); log "Nearest root above ... is a mapped download path".\nOn main 6d23138: the sweep is bounded by /downloads and removes /downloads/x/y and /downloads/x.\n`);
-  const since = dbNow();
+  const since = markJobs();
   const created = await rmab.requestBook(book);
   const requestId = created.request.id;
   await waitRequestDone(requestId);
