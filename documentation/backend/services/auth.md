@@ -126,6 +126,7 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 - Created during setup wizard (step 2)
 - Username/password authentication (separate from Plex OAuth)
 - Password hashed with bcrypt (10 rounds) and stored in `authToken` field
+- `bcrypt` 6.x: prebuilt native binaries ship in the package (linux x64/arm64, glibc + musl), no install-time download or compile. `$2a$`/`$2b$` hashes made by bcrypt 5 verify unchanged (`tests/services/auth/bcrypt-compat.test.ts`)
 - Login: POST `/api/auth/admin/login` with username/password
 - Identified by: `isSetupAdmin=true` AND `plexId` starts with `local-`
 
