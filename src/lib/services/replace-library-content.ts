@@ -32,12 +32,14 @@ export interface ReplaceBook {
  */
 export async function removeLibraryContentForReplace(audiobook: ReplaceBook): Promise<string | null> {
   if (!audiobook.filePath) {
-    await deleteFromLibrary(audiobook);
-    return null;
+    return deleteFromLibrary(audiobook);
   }
   const outcome = await removeAudiobookFolder(audiobook);
   if (outcome.kind === 'kept') return outcome.reason;
-  if (outcome.kind !== 'none') {
+  // Stale record (folder gone, outside the current media_dir): nothing to remove; the
+  // replace resets the stored path
+  if (outcome.kind === 'stale') return null;
+  if (outcome.kind === 'removed' || outcome.kind === 'gone') {
     const configService = getConfigService();
     await deleteBackendItem(audiobook, outcome, await configService.getBackendMode(), configService);
   }
@@ -49,7 +51,7 @@ export async function removeLibraryContentForReplace(audiobook: ReplaceBook): Pr
  * Delete audiobook content from library backend directly (no RMAB request, no stored folder).
  * Used when a book was added to Plex/ABS outside of RMAB.
  */
-async function deleteFromLibrary(audiobook: ReplaceBook) {
+async function deleteFromLibrary(audiobook: ReplaceBook): Promise<string | null> {
   const configService = getConfigService();
   const backendMode = await configService.getBackendMode();
 
@@ -60,7 +62,7 @@ async function deleteFromLibrary(audiobook: ReplaceBook) {
     // (plexGuid stores the ABS item ID when using ABS backend).
     let itemId = audiobook.absItemId;
     if (!itemId && audiobook.audibleAsin) {
-      const libraryRecord = await prisma.plexLibrary.findFirst({
+      const libraryRecords = await prisma.plexLibrary.findMany({
         where: {
           OR: [
             { asin: audiobook.audibleAsin },
@@ -68,8 +70,13 @@ async function deleteFromLibrary(audiobook: ReplaceBook) {
           ],
         },
         select: { plexGuid: true },
+        take: 2,
       });
-      itemId = libraryRecord?.plexGuid ?? null;
+      if (libraryRecords.length > 1) {
+        // Several library items share the ASIN: a hard delete could remove the wrong copy
+        return `several library items match ASIN ${audiobook.audibleAsin}, so none was deleted`;
+      }
+      itemId = libraryRecords[0]?.plexGuid ?? null;
     }
 
     if (itemId) {
@@ -132,4 +139,5 @@ async function deleteFromLibrary(audiobook: ReplaceBook) {
       });
     }
   }
+  return null;
 }

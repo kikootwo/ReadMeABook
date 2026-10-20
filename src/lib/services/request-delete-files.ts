@@ -14,7 +14,7 @@ import * as path from 'path';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { canonicalPath, UnsafeDeleteError } from '../utils/delete-guard';
-import { assertSafeLibraryDelete, planEbookDelete, type LibraryBook } from '../utils/library-delete-guard';
+import { assertSafeLibraryDelete, isStaleStoredFolder, planEbookDelete, type LibraryBook } from '../utils/library-delete-guard';
 import { sweepEmptyParents } from '../processors/organize-cleanup-guard';
 import { isPathBelowBoundary, normalizePath } from '../utils/cleanup-helpers';
 
@@ -33,6 +33,8 @@ export type LibraryFilesOutcome =
   | { kind: 'removed' | 'gone'; folder: string; mediaDir: string }
   /** No stored folder and no library linkage: nothing in the library belongs to this request. */
   | { kind: 'none' }
+  /** The stored folder no longer exists and lies outside media_dir (e.g. the library moved): a stale record. */
+  | { kind: 'stale'; folder: string }
   /** Nothing was removed; the library (files, backend item, linkage) stays as it is. */
   | { kind: 'kept'; reason: string };
 
@@ -48,6 +50,11 @@ export async function removeAudiobookFolder(book: DeleteBook): Promise<LibraryFi
       return { kind: 'kept', reason: NO_FOLDER_REASON };
     }
     return { kind: 'none' };
+  }
+
+  if (await isStaleStoredFolder(book.filePath)) {
+    logger.warn(`Stored folder ${book.filePath} for "${book.title}" no longer exists and is outside the media library; treating it as a stale record`);
+    return { kind: 'stale', folder: book.filePath };
   }
 
   let safe;
@@ -246,6 +253,7 @@ export async function audiobookFolderKeptReason(book: DeleteBook): Promise<strin
   if (!book.filePath) {
     return book.absItemId || book.plexGuid ? NO_FOLDER_REASON : null;
   }
+  if (await isStaleStoredFolder(book.filePath)) return null;
   try {
     await assertSafeLibraryDelete(book.filePath, book);
     return null;

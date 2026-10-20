@@ -13,6 +13,9 @@ import { sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 
 const logger = RMABLogger.create('ReportedIssue');
 
+/** The way out when a replace keeps the current files (the guard keeps refusing until they are gone). */
+const REPLACE_EXIT = 'Remove those files manually, then re-request the book after the next library scan.';
+
 /**
  * Report an issue with an available audiobook
  */
@@ -187,7 +190,7 @@ export async function replaceAudiobook(
     const keptReason = await audiobookFolderKeptReason(audiobook);
     if (keptReason) {
       logger.warn(`Replace for "${audiobook.title}" stopped: files kept: ${keptReason}`);
-      throw new ReportedIssueError(`Replace stopped: the current files were kept (${keptReason}). Nothing was changed; remove or fix those files, then replace again.`, 409);
+      throw new ReportedIssueError(`Replace stopped: the current files were kept (${keptReason}). Nothing was changed. ${REPLACE_EXIT}`, 409);
     }
 
     // Has an RMAB request — use deleteRequest which handles torrent cleanup, files, library backend
@@ -196,7 +199,7 @@ export async function replaceAudiobook(
     if (deleteResult.filesKeptReason) {
       // Changed since the check above (or the removal failed): no reset, no new request
       logger.warn(`Replace for "${audiobook.title}" stopped after delete: files kept: ${deleteResult.filesKeptReason}`);
-      throw new ReportedIssueError(`Replace stopped: the old request was deleted but its files were kept (${deleteResult.filesKeptReason}). The book was not reset and no download started; remove or fix those files, then replace again.`, 409);
+      throw new ReportedIssueError(`Replace stopped: the old request was deleted but its files were kept (${deleteResult.filesKeptReason}). The book was not reset and no download started. ${REPLACE_EXIT}`, 409);
     }
     if (!deleteResult.success) {
       logger.warn(`deleteRequest partial failure for ${existingRequest.id}: ${deleteResult.error}`);
@@ -211,7 +214,7 @@ export async function replaceAudiobook(
     const keptReason = await removeLibraryContentForReplace(audiobook);
     if (keptReason) {
       logger.warn(`Replace for "${audiobook.title}" stopped: files kept: ${keptReason}`);
-      throw new ReportedIssueError(`Replace stopped: the current files were kept (${keptReason}). Nothing was changed; remove or fix those files, then replace again.`, 409);
+      throw new ReportedIssueError(`Replace stopped: the current files were kept (${keptReason}). Nothing was changed. ${REPLACE_EXIT}`, 409);
     }
     logger.info(`Deleted library content for "${audiobook.title}" (no active request)`);
   }

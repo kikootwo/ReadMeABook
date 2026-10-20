@@ -228,13 +228,20 @@ export async function deleteRequest(
     // 4. Backend item, plex_library records and availability (audiobooks only).
     // When files were kept, the library stays exactly as it is: no backend
     // delete, no record cleanup, no status reset, linkage and paths kept.
-    if (outcome && outcome.kind !== 'kept') {
+    if (outcome?.kind === 'stale') {
+      // Stale record (e.g. the library moved): nothing to remove or protect here.
+      // Only the stored path is cleared; backend item, records and status stay.
+      await prisma.audiobook.update({
+        where: { id: book.id },
+        data: { filePath: null, filesHash: null, fileFormat: null, updatedAt: new Date() },
+      });
+    } else if (outcome && outcome.kind !== 'kept') {
       try {
         const { getConfigService } = await import('./config.service');
         const configService = getConfigService();
         const backendMode = await configService.getBackendMode();
 
-        if (outcome.kind !== 'none') {
+        if (outcome.kind === 'removed' || outcome.kind === 'gone') {
           await deleteBackendItem(book, outcome, backendMode, configService);
         }
         await deleteLibraryRecords(book);
@@ -313,7 +320,11 @@ export async function deleteRequest(
 
     return {
       success: true,
-      message: filesKeptReason ? `Request deleted; files kept: ${filesKeptReason}` : 'Request deleted successfully',
+      message: filesKeptReason
+        ? `Request deleted; files kept: ${filesKeptReason}`
+        : outcome?.kind === 'stale'
+          ? 'Request deleted; its stored folder no longer exists outside the current media library, nothing was removed'
+          : 'Request deleted successfully',
       filesDeleted,
       ...(filesKeptReason && { filesKeptReason }),
       torrentsRemoved,

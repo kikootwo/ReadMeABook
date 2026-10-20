@@ -13,7 +13,7 @@ import { generateFilesHash } from '@/lib/utils/files-hash';
 const prismaMock = createPrismaMock();
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 
-const { assertSafeLibraryDelete, planEbookDelete } = await import('@/lib/utils/library-delete-guard');
+const { assertSafeLibraryDelete, isStaleStoredFolder, planEbookDelete } = await import('@/lib/utils/library-delete-guard');
 
 let root: string;
 let media: string;
@@ -230,5 +230,21 @@ describe('planEbookDelete', () => {
     write(path.join(media, 'Other', 'x.epub'));
     const dir = path.join(media, 'Author', 'Gone');
     await expect(planEbookDelete(dir, { id: 'b', filePath: dir, filesHash: null })).resolves.toEqual([]);
+  });
+});
+
+describe('isStaleStoredFolder', () => {
+  it('is true only for a folder that is gone AND outside the current media_dir (library moved)', async () => {
+    expect(await isStaleStoredFolder(path.join(root, 'old-library', 'Author', 'Book'))).toBe(true);
+    expect(await isStaleStoredFolder(path.join(media, 'Author', 'Gone'))).toBe(false);
+    const outsideButThere = path.join(root, 'elsewhere', 'Book');
+    write(path.join(outsideButThere, 'Book.m4b'));
+    expect(await isStaleStoredFolder(outsideButThere)).toBe(false);
+    expect(await isStaleStoredFolder(null)).toBe(false);
+  });
+
+  it('is false when the roots cannot be read (fail closed)', async () => {
+    prismaMock.configuration.findUnique.mockRejectedValue(new Error('db down'));
+    expect(await isStaleStoredFolder(path.join(root, 'old-library', 'Author', 'Book'))).toBe(false);
   });
 });

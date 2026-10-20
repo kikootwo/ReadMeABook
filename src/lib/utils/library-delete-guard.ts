@@ -139,6 +139,28 @@ function checkLocation(
 }
 
 /**
+ * True when the stored folder no longer exists AND lies outside the current
+ * media_dir: a stale record (e.g. the library moved), not something to delete
+ * or protect. False when unsure (roots unreadable, path still there).
+ */
+export async function isStaleStoredFolder(filePath: string | null): Promise<boolean> {
+  if (!filePath || !filePath.trim()) return false;
+  const linkPath = filePath.replace(/[\\/]+$/, '') || filePath;
+  const missing = await fs.lstat(linkPath).then(
+    () => false,
+    (error: NodeJS.ErrnoException) => error.code === 'ENOENT' || error.code === 'ENOTDIR'
+  );
+  if (!missing) return false;
+  try {
+    const media = await canonicalize((await collectGuardRoots()).mediaDir);
+    const c = await canonicalize(filePath);
+    return !isSameEntry(c, media) && !isStrictlyInside(c, media);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Throw UnsafeDeleteError unless `filePath` may be removed for `book`.
  * `evidence: false` runs rules a-c only (the ebook delete applies its own file rule).
  * A failure to read the configured roots also refuses (fail closed).

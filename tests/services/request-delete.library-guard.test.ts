@@ -34,6 +34,7 @@ vi.mock('fs/promises', async (importOriginal) => {
 });
 
 const { deleteRequest } = await import('@/lib/services/request-delete.service');
+const { audiobookFolderKeptReason } = await import('@/lib/services/request-delete-files');
 
 let root: string;
 let media: string;
@@ -259,6 +260,34 @@ describe('deleteRequest (audiobook): stored folder behind the guard', () => {
     expect(result.filesKeptReason).toContain('is the media volume mounted?');
     expect(absMock.getABSItem).not.toHaveBeenCalled();
     expectLibraryUntouched();
+  });
+
+  it('a stored folder that is gone and outside the current media_dir (library moved) is a stale record: path cleared, nothing else', async () => {
+    const old = path.join(root, 'old-library', 'Author', 'Book');
+    request(book(old));
+
+    const result = await deleteRequest('req-1', 'admin-1');
+
+    expect(result.filesKeptReason).toBeUndefined();
+    expect(result.message).toContain('no longer exists outside the current media library');
+    expect(absMock.getABSItem).not.toHaveBeenCalled();
+    expect(absMock.deleteABSItem).not.toHaveBeenCalled();
+    expect(prismaMock.plexLibrary.deleteMany).not.toHaveBeenCalled();
+    expect(prismaMock.audiobook.update).toHaveBeenCalledTimes(1);
+    expect(prismaMock.audiobook.update).toHaveBeenCalledWith({
+      where: { id: 'book-1' },
+      data: expect.objectContaining({ filePath: null, filesHash: null, fileFormat: null }),
+    });
+    expect(prismaMock.audiobook.update.mock.calls[0][0].data.status).toBeUndefined();
+  });
+
+  it('replace pre-check: a library move lets the replace go on; a shared stored folder still refuses', async () => {
+    expect(await audiobookFolderKeptReason(book(path.join(root, 'old-library', 'Author', 'Book')))).toBeNull();
+
+    const shared = path.join(media, 'Ebooks');
+    write(path.join(shared, 'Book.epub'));
+    otherBooks = [{ id: 'book-2', title: 'Second', filePath: shared }];
+    expect(await audiobookFolderKeptReason(book(shared))).toBe('it is also the folder of "Second"');
   });
 
   describe('Plex', () => {

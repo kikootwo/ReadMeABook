@@ -62,6 +62,7 @@ describe('replaceAudiobook with the library delete guard', () => {
 
     expect(error).toMatchObject({ statusCode: 409 });
     expect(error.message).toContain('folder contents changed since import');
+    expect(error.message).toContain('Remove those files manually, then re-request the book after the next library scan.');
     expect(keptReasonMock).toHaveBeenCalledWith(expect.objectContaining({ id: 'book-1', filePath: '/media/Author/Book', filesHash: 'hash' }));
     expect(deleteRequestMock).not.toHaveBeenCalled();
     expectStoppedCleanly();
@@ -86,6 +87,7 @@ describe('replaceAudiobook with the library delete guard', () => {
 
     expect(error).toMatchObject({ statusCode: 409 });
     expect(error.message).toContain('Nothing was changed');
+    expect(error.message).toContain('re-request the book after the next library scan');
     expect(replaceContentMock).toHaveBeenCalledWith(expect.objectContaining({ filePath: '/media/Author/Book', filesHash: 'hash' }));
     expect(deleteRequestMock).not.toHaveBeenCalled();
     expectStoppedCleanly();

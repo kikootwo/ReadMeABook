@@ -59,6 +59,39 @@ describe('removeLibraryContentForReplace', () => {
     expect(absMock.deleteABSItem).not.toHaveBeenCalled();
   });
 
+  it('a stale stored folder (library moved) is not removed or protected: nothing touched, the replace goes on', async () => {
+    filesMock.removeAudiobookFolder.mockResolvedValue({ kind: 'stale', folder: '/old/Author/Book' });
+
+    expect(await removeLibraryContentForReplace(book)).toBeNull();
+    expect(filesMock.deleteBackendItem).not.toHaveBeenCalled();
+    expect(filesMock.deleteLibraryRecords).not.toHaveBeenCalled();
+    expect(absMock.deleteABSItem).not.toHaveBeenCalled();
+  });
+
+  it('a row cleared by an earlier "already gone" delete (no path, no item): no ABS delete when no library row matches', async () => {
+    prismaMock.plexLibrary.findMany.mockResolvedValue([]);
+    const cleared = { ...book, filePath: null, filesHash: null, absItemId: null };
+
+    expect(await removeLibraryContentForReplace(cleared)).toBeNull();
+    expect(absMock.deleteABSItem).not.toHaveBeenCalled();
+  });
+
+  it('refuses the ABS hard delete when several library items share the ASIN', async () => {
+    prismaMock.plexLibrary.findMany.mockResolvedValue([{ plexGuid: 'abs-a' }, { plexGuid: 'abs-b' }]);
+    const cleared = { ...book, filePath: null, filesHash: null, absItemId: null };
+
+    expect(await removeLibraryContentForReplace(cleared)).toBe('several library items match ASIN B0TEST0001, so none was deleted');
+    expect(absMock.deleteABSItem).not.toHaveBeenCalled();
+    expect(prismaMock.plexLibrary.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('hard-deletes the one library item matching the ASIN of a book added outside RMAB', async () => {
+    prismaMock.plexLibrary.findMany.mockResolvedValue([{ plexGuid: 'abs-only' }]);
+
+    expect(await removeLibraryContentForReplace({ ...book, filePath: null, filesHash: null, absItemId: null })).toBeNull();
+    expect(absMock.deleteABSItem).toHaveBeenCalledWith('abs-only', { hard: true });
+  });
+
   it('a book added outside RMAB (no stored folder) is removed by the backend, as before', async () => {
     expect(await removeLibraryContentForReplace({ ...book, filePath: null, filesHash: null })).toBeNull();
     expect(filesMock.removeAudiobookFolder).not.toHaveBeenCalled();

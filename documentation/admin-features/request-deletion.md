@@ -101,6 +101,8 @@ model Request {
    - Symlinked title folder: rules a-c on the target AND the link location; only the link is removed
    - No stored path but a library item (`absItemId`/`plexGuid`): kept (`RMAB has no stored folder ...`); no path and no item: nothing to remove
    - Missing folder: "already gone" only when the library looks mounted (`media_dir` readable and not empty, and some other stored book folder exists when other rows have one); otherwise kept (`the folder is missing and ... is the media volume mounted?`): no backend call, row untouched (protects against a media volume not mounted yet)
+   - Mount-check limit: a mount point that received new imports while the share was unmounted is not empty, so it passes; a missing folder there then counts as gone (no Plex delete; ABS `hard=0` only for an item inside that path; row cleared)
+   - Stale record: the stored folder is gone AND outside the current `media_dir` (library moved): nothing removed or protected; the delete clears only `filePath`/`filesHash`/`fileFormat` (no backend call, records and status kept; message says so), a replace goes on
    - `rm` failure: kept (`the folder was partly removed (permission denied); remove the rest manually`); `fs.rm` stops at the first error, so earlier files are gone; backend and row untouched
    - After removal: empty parents swept up to the nearest root (`sweepEmptyParents`)
    - **Ebook requests (D2):** rules a-c on `filePath`, then unlink every ebook file directly in it if the folder passes the evidence rule, or the only one if it holds exactly one; otherwise kept (`it holds N ebook files and is not provably this book's folder (...)`). A shared `{author}` or flat `Ebooks` folder fails rule c when another book points at it. Never a sweep of other books' ebooks
@@ -229,6 +231,9 @@ where: {
 18. ✅ **Folder shared with other books, foreign files, symlinks, roots** - Library delete guard keeps the files and says why
 19. ✅ **Reported-issue replace when files would be kept** - `replaceAudiobook` stops with HTTP 409 and the reason before deleting anything (and again if `deleteRequest` kept files); no record reset, no new request, issue stays open
 20. ✅ **Replace with no active request but a stored folder** (an earlier delete kept the files) - `removeLibraryContentForReplace`: the folder goes through the guard (409 when kept), backend item as in step 5; never an ABS hard delete
+21. ✅ **Replace after a library move** - stale stored folder (gone, outside `media_dir`): no backend call, the replace resets the stored path and continues
+22. ✅ **Replace that keeps refusing** (e.g. a legacy row whose stored folder is shared with other books): every 409 names the way out: "Remove those files manually, then re-request the book after the next library scan."
+23. ✅ **ABS hard delete for a book added outside RMAB** (no stored folder, item looked up by ASIN in plex_library): refused when more than one library item matches the ASIN
 
 ## Fixed Issues ✅
 
