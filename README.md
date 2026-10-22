@@ -139,6 +139,10 @@ services:
 
 An Unraid template is in [`unraid.xml`](unraid.xml).
 
+### One-click deploy
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/ReadMeABook/)
+
 ### First-run setup
 
 The wizard walks you through it, testing each connection as you go:
