@@ -15,6 +15,12 @@ const configServiceMock = vi.hoisted(() => ({
 
 const jobQueueMock = vi.hoisted(() => ({
   addStartDirectDownloadJob: vi.fn(() => Promise.resolve()),
+  addDownloadJob: vi.fn(() => Promise.resolve()),
+}));
+
+const prowlarrMock = vi.hoisted(() => ({
+  search: vi.fn(),
+  searchWithVariations: vi.fn(),
 }));
 
 const ebookScraperMock = vi.hoisted(() => ({
@@ -36,6 +42,10 @@ vi.mock('@/lib/services/job-queue.service', () => ({
 }));
 
 vi.mock('@/lib/services/ebook-scraper', () => ebookScraperMock);
+
+vi.mock('@/lib/integrations/prowlarr.service', () => ({
+  getProwlarrService: () => prowlarrMock,
+}));
 
 describe('processSearchEbook', () => {
   beforeEach(() => {
@@ -335,5 +345,61 @@ describe('processSearchEbook', () => {
         ]),
       },
     });
+  });
+
+  it('searches indexers with title + author variations', async () => {
+    configServiceMock.get.mockImplementation(async (key: string) => {
+      if (key === 'ebook_sidecar_preferred_format') return 'epub';
+      if (key === 'ebook_annas_archive_enabled') return 'false';
+      if (key === 'ebook_indexer_search_enabled') return 'true';
+      if (key === 'prowlarr_indexers') {
+        return JSON.stringify([{ id: 1, name: 'Indexer', protocol: 'torrent', priority: 10, ebookCategories: [7020] }]);
+      }
+      if (key === 'indexer_flag_config') return JSON.stringify([]);
+      return null;
+    });
+    prismaMock.request.update.mockResolvedValue({});
+    prismaMock.request.findUnique.mockResolvedValue({ id: 'req-9', parentRequest: { id: 'parent-9' } });
+    prismaMock.blockedRelease.findMany.mockResolvedValue([]);
+
+    prowlarrMock.searchWithVariations.mockResolvedValue([
+      {
+        indexer: 'Indexer',
+        indexerId: 1,
+        title: 'Indexer Author - Indexer Book (epub)',
+        size: 2 * 1024 * 1024,
+        seeders: 5,
+        publishDate: new Date(),
+        downloadUrl: 'magnet:?xt=urn:btih:ebook',
+        guid: 'guid-ebook',
+        format: 'EPUB',
+      },
+    ]);
+
+    const { processSearchEbook } = await import('@/lib/processors/search-ebook.processor');
+
+    const result = await processSearchEbook({
+      requestId: 'req-9',
+      audiobook: {
+        id: 'ab-9',
+        title: 'Indexer Book',
+        author: 'Indexer Author',
+      },
+      jobId: 'job-9',
+    });
+
+    expect(result.success).toBe(true);
+    expect(prowlarrMock.search).not.toHaveBeenCalled();
+    expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith('Indexer Book', 'Indexer Author', {
+      categories: [7020],
+      indexerIds: [1],
+      minSeeders: 0,
+      maxResults: 100,
+    });
+    expect(jobQueueMock.addDownloadJob).toHaveBeenCalledWith(
+      'req-9',
+      { id: 'parent-9', title: 'Indexer Book', author: 'Indexer Author' },
+      expect.objectContaining({ title: 'Indexer Author - Indexer Book (epub)' })
+    );
   });
 });

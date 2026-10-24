@@ -363,7 +363,7 @@ async function searchIndexersForInteractive(
 
   for (const group of groups) {
     try {
-      const groupResults = await prowlarr.search(title, {
+      const groupResults = await prowlarr.searchWithVariations(title, author, {
         categories: group.categories,
         indexerIds: group.indexerIds,
         minSeeders: 0,
