@@ -1,7 +1,7 @@
 # Intelligent Ranking Algorithm
 
 **Status:** ✅ Implemented | Comprehensive edge case test coverage
-**Tests:** tests/utils/ranking-algorithm.test.ts (80+ test cases)
+**Tests:** tests/utils/ranking-algorithm.test.ts (80+ test cases), ranking-non-latin.test.ts, match-normalize.test.ts
 
 Evaluates and scores torrents to automatically select best audiobook download.
 
@@ -20,6 +20,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - ✅ **Context-aware filtering (3 tests)**
 - ✅ **API compatibility (2 tests)**
 - ✅ **CamelCase and punctuation separator handling (7 tests)**
+- ✅ **Non-Latin scripts and empty normalization** (tests/utils/ranking-non-latin.test.ts, tests/utils/match-normalize.test.ts)
 
 **Tested edge cases prevent regressions from previous tweaks:**
 - "We Are Legion (We Are Bob)" matching with/without subtitle
@@ -42,6 +43,11 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - **Punctuation to spaces:** `"Twelve.Months-Jim"` → `"twelve months jim"`
 - **Preserves apostrophes:** `"O'Brien"` remains `"o'brien"`
 - Handles common indexer naming patterns (NZB, torrent scene releases)
+- **Every script kept** (`src/lib/utils/match-normalize.ts`): letters, marks and digits of any script survive (`\p{L}\p{M}\p{N}`); everything else becomes a space
+- **Folds:** accents (NFD, drop U+0300–036F, NFC; Greek tonos and Cyrillic ё/й fold too), Greek ς→σ, fullwidth ASCII → ASCII, `ø→o æ→ae œ→oe ß→ss ł→l đ ð→d þ→th ı→i ħ→h`; emoji presentation selectors (U+FE00–FE0F, U+E0100–E01EF, keycap U+20E3) dropped
+- **CJK/Thai next to ASCII** gets a space: `哈利波特与魔法石Harry` → `哈利波特与魔法石 harry`, `三体2` → `三体 2`
+- **Accepted changes vs. before #424 (Latin):** ø now behaves like ö, so `Bjørn` no longer matches `Bjoern` (`Björn`/`Bjoern` never did); non-ASCII letters or digits in a Latin title (π, µ, α, ², º, ʻ) are now part of it, so `The Joy of π` no longer matches `The Joy of Pi`
+- **Known limits (fail closed):** a space inside a CJK author name (`村上 春樹` vs `村上春樹`); Simplified vs Traditional characters (`刘`/`劉`); halfwidth katakana not folded; authors of 1-2 characters (`鲁迅`) are dropped, as before
 
 **Examples of normalization:**
 - `"VirginaEvans TheCorrespondent"` → `"virgina evans the correspondent"`
@@ -58,6 +64,8 @@ Evaluates and scores torrents to automatically select best audiobook download.
   - "Book Title {Extra Info}" → Required: ["book", "title"], Optional: ["extra", "info"]
 - Calculates coverage: % of **required** words found in torrent title
 - **Hard requirement: 80%+ coverage of required words or automatic 0 score**
+- **Scripts without spaces** (Han, kana, Thai, Lao, Khmer, Myanmar): a required word of 2+ characters counts if it appears anywhere in the release name (`刘慈欣三体全集` covers `三体`); a 1-character word must be a whole word; all other words need an exact word
+- **Fail closed:** a title that normalizes to nothing scores 0; a required part that normalizes to nothing (`★ (Star Stories)`) uses the whole title's words
 
 **Stage 1.5: Author Presence Check (CONTEXT-AWARE)**
 - **Automatic mode (requireAuthor: true - default):** At least ONE author must be present with high confidence
@@ -78,6 +86,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
   - Multiple authors: Only ONE needs to match (OR logic)
   - Filters roles: "translator", "narrator" ignored
 - **If check fails in automatic mode → automatic 0 score**
+- An author that normalizes to nothing (emoji, punctuation) is ignored; none left → rejected in automatic mode
 - **Prevents wrong-author matches**: Stops "Project Hail Mary" (no author) from matching request for Andy Weir
 
 **Edge Cases - Coverage Examples:**
