@@ -40,8 +40,11 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - `download_torrent` immediately tries the next ranked release; the successful candidate is the only one written to download history.
 - If every ranked grab is temporarily unavailable, the job remains retryable under Bull's exponential backoff. The global failed handler marks the request failed only after all job attempts are exhausted.
 - Manual selections carry no alternates and retain their explicit-release behavior.
+- The history row records `addedByRmab` (false when the torrent was already in the client: never removed; [download-clients.md](../../phase3/download-clients.md#torrent-ownership-423)). A Bull retry after an add that succeeded finds RMAB's own torrent and records `false` (kept, a known leak).
 
 ## Special Behaviors
+
+**cleanup_seeded_torrents:** pages through every candidate, strict probe, ownership check before any remove; see [scheduler.md](scheduler.md).
 
 **monitor_download:**
 - 3s initial delay before first check (avoids race condition with qBittorrent processing)

@@ -78,7 +78,8 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - `id` (UUID PK), `request_id` (FK), `indexer_name`, `torrent_name`, `torrent_hash`
 - `torrent_size_bytes`, `magnet_link`, `torrent_url`, `seeders`, `leechers`
 - `quality_score`, `selected` (bool), `download_client`, `download_client_id`
-- `download_status` ('queued'|'downloading'|'completed'|'failed'|'stalled')
+- `download_status` ('queued'|'downloading'|'completed'|'failed'|'stalled'|'removed'); `removed` = gone from the client (RMAB removed it, or the seeding cleanup's strict probe got a well-formed "not there"): no longer a cleanup candidate, never written back to `completed`
+- `added_by_rmab` (bool, nullable, no default, #423): `true` RMAB added the torrent; `false` it was already in the client (taken over: never removed or re-categorized); `NULL` row from before the column (judged by the client's added time, `resolveOwnership()` in `src/lib/utils/torrent-ownership.ts`). Usenet rows: `true`. Never filtered with a nullable-boolean WHERE (`<> false` drops NULLs in SQL)
 - `download_error`, `started_at`, `completed_at`, `created_at`
 - Indexes: `request_id`, `selected`, `created_at DESC`
 

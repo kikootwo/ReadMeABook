@@ -12,6 +12,8 @@ Free, open-source BitTorrent client with comprehensive Web API.
 - JSON must confirm exactly the submitted hash (case-insensitive): `success_count: 1`, `failure_count: 0`, `pending_count: 0`, one matching `added_torrent_ids` entry.
 - Pending, malformed, mismatched and rejected bodies stay errors; HTTP 200 alone does not confirm the add.
 - Hash extraction and the duplicate check are unchanged (`isAddAccepted()` in `qbittorrent.service.ts`).
+- Already in qBittorrent (pre-check `GET torrents/info?hashes=` hit) → `{ id, alreadyInClient: true }`, no add. A rejected add (`Fails.`, a rejected JSON receipt, or HTTP 409 from 5.2) re-checks the hash once: present → taken over (`alreadyInClient: true`, warn); absent → error as before ([download-clients.md](./download-clients.md#torrent-ownership-423)).
+- `probeDownload(hash)`: strict one-shot lookup for the seeding cleanup (`qbittorrentProbeMatch()`); `added_on` → `DownloadInfo.addedAt`.
 
 **Solution (Professional):**
 
@@ -205,7 +207,7 @@ type TorrentState =
 
 **1. Naive torrent identification** - Fixed with deterministic hash extraction
 **2. Docker networking issues** - Fixed by downloading .torrent ourselves
-**3. Duplicate detection** - Check if hash exists before adding
+**3. Duplicate detection** - Check if hash exists before adding; a torrent found there is recorded as not RMAB's and never removed (#423)
 **4. Config fallbacks to env** - Removed, database only
 **5. Unclear error messages** - List missing fields explicitly
 **6. Race condition on torrent availability** - Fixed with 3s initial delay + exponential backoff retry (500ms, 1s, 2s)

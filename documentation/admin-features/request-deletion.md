@@ -50,7 +50,7 @@ model Request {
 
 ### Deletion Logic Flow
 
-**Service:** `src/lib/services/request-delete.service.ts`
+**Service:** `src/lib/services/request-delete.service.ts`; download handling in `src/lib/services/request-delete-download.ts` (`cleanUpRequestDownload()`, never throws)
 
 **Steps:**
 
@@ -63,8 +63,21 @@ model Request {
    For each selected download:
 
    ```
-   IF torrent not in qBittorrent:
+   IF row is 'removed' (gone from the client) or addedByRmab = false (taken over, #423):
+     → No client call at all; taken over → torrentsKeptNotOwned++ ('removed' only logs)
+
+   IF recorded client type != configured client type:
+     → Leave it (warn): the id means nothing in the new client
+
+   IF torrent not in the client:
      → Skip (already removed)
+
+   (usenet: delete the job + files, always RMAB's)
+
+   IF resolveOwnership(row, client added time) says not RMAB's
+      (src/lib/utils/torrent-ownership.ts; see download-clients.md#torrent-ownership-423):
+     → Keep it exactly as it is → torrentsKeptNotOwned++
+       (legacy NULL row added ≥ 24 h before the request: also write addedByRmab = false)
 
    ELSE IF unlimited seeding (no indexer config, or seedingTimeMinutes AND ratioLimit both 0):
      → Log: "Keeping for unlimited seeding"
@@ -81,7 +94,7 @@ model Request {
         src/lib/utils/shared-torrent.ts, shared with the cleanup job):
        → Keep torrent → torrentsKeptShared++
      ELSE:
-       → Delete torrent + files → torrentsRemoved++
+       → Delete torrent + files → torrentsRemoved++ → row downloadStatus = 'removed'
 
    ELSE (still seeding):
      → Log: "Keeping ... to finish seeding: ratio a/b, time x/y min"
@@ -144,9 +157,10 @@ where: {
 ```
 
 **Behavior:**
-- **Active requests:** Delete torrent when seeding complete
+- **Active requests:** Delete torrent when seeding complete (row → `removed`)
 - **Soft-deleted requests:** Delete torrent + hard-delete request when seeding complete
 - **Unlimited seeding:** Hard-delete orphaned request immediately (no monitoring)
+- **Not RMAB's torrent:** never removed; a soft-deleted request is hard-deleted, the torrent stays. Details: [scheduler.md](../backend/services/scheduler.md) (cleanup_seeded_torrents)
 
 ### API Endpoint
 
@@ -167,11 +181,13 @@ where: {
     "torrentsKeptSeeding": 1,
     "torrentsKeptUnlimited": 0,
     "torrentsKeptShared": 0,
+    "torrentsKeptNotOwned": 0,
     "filesKeptReason": "folder contents changed since import"
   }
 }
 ```
 - `filesKeptReason` present only when library files were kept; the request is still deleted (HTTP 200)
+- `torrentsKeptNotOwned`: torrents left in the client because RMAB did not add them (or can't tell that it did)
 
 **Errors:**
 - 401: Unauthorized (not logged in)
@@ -215,6 +231,8 @@ where: {
 ## Edge Cases Handled
 
 1. ✅ **Torrent not in qBittorrent** - Skip deletion, continue with files
+1a. ✅ **Torrent RMAB did not add** (already in the client at grab time, #423) - Kept, never removed or re-categorized; `torrentsKeptNotOwned`
+1b. ✅ **Row already `removed`** - No client call, never written back to `completed`
 2. ✅ **Unlimited seeding (time and ratio both 0, or no config)** - Keep in qBittorrent, hard-delete orphaned request
 3. ✅ **Incomplete download** - Delete torrent + files immediately
 4. ✅ **Seeding requirement met** - Delete torrent + files
@@ -265,12 +283,18 @@ where: {
 - **Also (rename):** settings were found by indexer name, so a rename in Prowlarr made the torrent "unlimited"; both now match by `indexerId` first, name as fallback
 - **Also:** deletion now skips removing a torrent another active request still uses (`otherActiveRequestsUsingTorrent()`, same check as the cleanup job). Behaviour change: a ratio-only indexer's incomplete download is removed on delete (it was kept forever as "unlimited")
 
+**5. Deleting a Request Removed a Torrent RMAB Did Not Add (#423)**
+- **Issue:** a release already in the client (added by hand or another app) was grabbed by its existing hash; deleting the request (or the seeding cleanup) then removed it with its files
+- **Fix:** `DownloadHistory.addedByRmab` recorded at the grab; delete and cleanup act only on RMAB's torrents (`resolveOwnership()`); rows from before the fix are judged by the client's added time
+
 ## File Structure
 
 ```
 Backend:
 - prisma/schema.prisma (deletedAt, deletedBy fields)
 - src/lib/services/request-delete.service.ts (deletion logic)
+- src/lib/services/request-delete-download.ts (download in the client: remove / keep seeding / leave alone)
+- src/lib/utils/torrent-ownership.ts (whether RMAB added the torrent)
 - src/lib/services/request-delete-files.ts (library files, backend items, plex_library records)
 - src/lib/utils/library-delete-guard.ts (assertSafeLibraryDelete, planEbookDelete)
 - src/lib/services/replace-library-content.ts (replace with no active request)

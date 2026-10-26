@@ -144,6 +144,36 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 3. Route to correct service (qBittorrent, Transmission, or SABnzbd)
 4. Create download history record
 
+### Torrent Ownership (#423)
+**Files:** `src/lib/utils/torrent-ownership.ts` (rule), `src/lib/integrations/torrent-probe.ts` (strict probe parsers)
+- RMAB removes or changes only torrents it added. `addDownload()` → `AddDownloadResult { id, alreadyInClient }`; `download-torrent.processor.ts` writes `DownloadHistory.addedByRmab = !alreadyInClient` (`added_by_rmab`, nullable, see [database.md](../backend/database.md))
+- "Already in client" (taken over): qBittorrent pre-check hit, or a rejected add (`Fails.` ≤5.1, HTTP 409 5.2) whose one re-check finds the hash; Transmission pre-check hit or `torrent-duplicate`; Deluge pre-check hit, or a rejected add (`Torrent already in session`) whose re-check finds it. Logged at warn: `"<title>" is already in <client> (<id>); RMAB will never remove it or its files`. A rejected add with the hash still absent stays an error. SABnzbd/NZBGet: always `false` (every add is a new job)
+- `resolveOwnership(row, addedAt)` (decided in code, never by a nullable-boolean WHERE):
+
+| Row | Client added time (vs `createdAt`) | Verdict |
+|---|---|---|
+| `downloadStatus: 'removed'` | (no client call) | not owned: no remove, never written back to `completed` |
+| `addedByRmab: false` | (no client call) | not owned (taken over) |
+| `true` | > 1 h after | kept, nothing written, info log (re-added by someone) |
+| `true` | otherwise / unknown | owned |
+| `null` (before the fix) | within [−15 min, +5 min] | owned (never written `true`) |
+| `null` | ≥ 24 h before | not owned: written `false` (soft-deleted request: hard-deleted, torrent kept) |
+| `null` | anything else / unknown | kept, nothing written, re-checked next run, info log |
+- Recorded client type ≠ configured client type: no probe, no mark, no delete (warn)
+- Not owned → no remove call at all; no post-import `setCategory` (`applyPostImportCategory()`, `src/lib/processors/post-import-category.ts`, reads the same row as organize-files: `requestId`, newest `createdAt`; `null` skips too); no Transmission seed-limit rewrite on `torrent-duplicate`
+- Deluge `setCategory` replaces the torrent's label (one label per torrent); now only on RMAB's own torrents
+- **Strict probe** `probeDownload(id)` (seeding cleanup only; one request, no not-found retries, unlike `getDownload()`): `{found:true, info}` | `{found:false}` | throws
+
+| Client | `found:false` only for | Throws |
+|---|---|---|
+| qBittorrent | HTTP 200 + JSON array without the hash (filter ignored = other torrents) | other status, non-array body (login page, empty, `{}`), 5xx, timeout; 403 → one re-login, second 403 throws |
+| Transmission | `result: success` + `arguments.torrents` array without it | RPC error result, missing `arguments`/`torrents`, empty body |
+| Deluge | `core.get_torrent_status` → `{}` (KeyError swallowed upstream, 2.1.1) | daemon error, `null`, non-object |
+- `addedAt` in `DownloadInfo`: qBittorrent `added_on`, Transmission `addedDate`, Deluge `time_added` (0/absent → undefined → legacy rows kept)
+- **Known limits (all keep a torrent, none delete one):** Bull retry after an add that succeeded (lost response, history insert/enqueue failed, worker died) or two download jobs for one request → RMAB's own torrent recorded `false`; admin retry-download (`src/app/api/admin/requests/[id]/retry-download/route.ts`) re-adding a stored link while RMAB's torrent is still there → recorded `false`; re-request/replace/series pack of a hash whose owner row was hard-deleted; client migrated (added times reset) or without added time; clock drift between client and DB > 5 min; Deluge loads torrents asynchronously at startup (`load_state` → `add_async`), so a probe during startup can miss a torrent → row marked `removed` (never cleaned, never lost); Transmission 4.0.6 loads all torrents in one session-thread task before RPC answers (no partial list), 3.x not verified; qBittorrent-compatible clients (RDTClient etc.) not covered: if they accept duplicate adds while the pre-check fails, a takeover is recorded `true`
+- Residual risk: legacy rows only, when someone else added the same hash within ~15 min before RMAB's grab
+- The library-folder delete of a request is separate (files-hash guard, [request-deletion.md](../admin-features/request-deletion.md))
+
 ### Source Fetch & Prowlarr Key Scoping
 **File:** `src/lib/integrations/download-source.ts` (`fetchDownloadSource`), rules in `src/lib/utils/prowlarr-url.ts`, constants in `src/lib/constants/download-source.ts`
 - RMAB fetches every .torrent/.nzb itself (all 5 clients), then hands the file or magnet to the client
@@ -239,7 +269,8 @@ Accepts both legacy single client and new array format:
 **Custom path blank:** Uses base `download_dir` (backward-compatible default)
 **Custom path with slashes:** Leading/trailing slashes stripped automatically
 **Custom path with `..`:** Rejected by frontend validation and API validation
-**Switching torrent clients:** Must delete existing torrent client before adding Transmission (or vice versa)
+**Switching torrent clients:** Must delete existing torrent client before adding Transmission (or vice versa). Rows recorded for the old client are then left alone (no probe, mark or delete)
+**Torrent already in the client:** recorded as taken over, never removed or re-categorized (see Torrent Ownership)
 
 ## Verification Steps
 
@@ -265,7 +296,9 @@ Accepts both legacy single client and new array format:
 | `src/lib/integrations/transmission.service.ts` | Transmission RPC implementation |
 | `src/lib/services/download-client-manager.service.ts` | Core multi-client service, protocol-based routing |
 | `src/lib/integrations/prowlarr.service.ts:379` | Protocol filtering logic (both clients = all results) |
-| `src/lib/processors/download-torrent.processor.ts:44` | Download routing (detect protocol → route), builds `sourceAuth` |
+| `src/lib/processors/download-torrent.processor.ts:44` | Download routing (detect protocol → route), builds `sourceAuth`, writes `addedByRmab` |
+| `src/lib/utils/torrent-ownership.ts` | Ownership rule (`resolveOwnership`, `knownNotOwned`) |
+| `src/lib/integrations/torrent-probe.ts` | Strict probe answer parsers (qBittorrent, Transmission, Deluge) |
 | `src/lib/integrations/download-source.ts` | Shared .torrent/.nzb fetch, redirect hops, key scoping |
 | `src/lib/services/download-selection-guard.ts` | Pick validation, Anna's Archive link rebuild, key stripping |
 | `src/app/api/admin/settings/download-clients/*` | CRUD API routes, protocol-level duplicate check |

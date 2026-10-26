@@ -124,10 +124,11 @@ describe('deleteRequest torrent ownership', () => {
     expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith({ where: { id: 'dh-1' }, data: { addedByRmab: false } });
   });
 
-  it('leaves an unclear legacy torrent alone and writes nothing', async () => {
-    const { client } = await deleteWith({ row: { addedByRmab: null }, addedOffsetMs: -2 * HOUR, seedingTime: 10 });
+  it('leaves an unclear legacy torrent alone (seeding met) and writes nothing', async () => {
+    const { result, client } = await deleteWith({ row: { addedByRmab: null }, addedOffsetMs: -2 * HOUR });
 
     expect(client.deleteDownload).not.toHaveBeenCalled();
+    expect(result.torrentsKeptNotOwned).toBe(1);
     expect(prismaMock.downloadHistory.update).not.toHaveBeenCalled();
   });
 

@@ -140,6 +140,7 @@
 ## Feature-Specific Lookups
 **"How do I add a new audiobook?"** → [integrations/audible.md](integrations/audible.md) (scraping), [phase3/README.md](phase3/README.md) (automation)
 **"How do I configure multiple download clients?"** → [phase3/download-clients.md](phase3/download-clients.md)
+**"A torrent already in my client was deleted" / "Does RMAB remove torrents it didn't add?"** → [phase3/download-clients.md](phase3/download-clients.md#torrent-ownership-423) (ownership rule, probe, known limits), [backend/services/scheduler.md](backend/services/scheduler.md) (cleanup_seeded_torrents), [admin-features/request-deletion.md](admin-features/request-deletion.md)
 **"How do torrent downloads work?"** → [phase3/qbittorrent.md](phase3/qbittorrent.md), [backend/services/jobs.md](backend/services/jobs.md)
 **"How do Usenet/NZB downloads work?"** → [phase3/sabnzbd.md](phase3/sabnzbd.md), [phase3/download-clients.md](phase3/download-clients.md), [backend/services/jobs.md](backend/services/jobs.md)
 **"Can I use both qBittorrent and SABnzbd?"** → [phase3/download-clients.md](phase3/download-clients.md)
