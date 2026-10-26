@@ -146,7 +146,7 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 
 ### Torrent Ownership (#423)
 **Files:** `src/lib/utils/torrent-ownership.ts` (rule), `src/lib/integrations/torrent-probe.ts` (strict probe parsers)
-- RMAB removes or changes only torrents it added. `addDownload()` → `AddDownloadResult { id, alreadyInClient }`; `download-torrent.processor.ts` writes `DownloadHistory.addedByRmab = !alreadyInClient` (`added_by_rmab`, nullable, see [database.md](../backend/database.md))
+- RMAB removes or changes only torrents it added. `addDownload()` → `AddDownloadResult { id, alreadyInClient }`; `download-torrent.processor.ts` writes `DownloadHistory.addedByRmab = (alreadyInClient === false)` (fails closed: only an explicit "newly added" is RMAB's; `added_by_rmab`, nullable, see [database.md](../backend/database.md))
 - "Already in client" (taken over): qBittorrent pre-check hit, or a rejected add (`Fails.` ≤5.1, HTTP 409 5.2) whose one re-check finds the hash; Transmission pre-check hit or `torrent-duplicate`; Deluge pre-check hit, or a rejected add (`Torrent already in session`) whose re-check finds it. Logged at warn: `"<title>" is already in <client> (<id>); RMAB will never remove it or its files`. A rejected add with the hash still absent stays an error. SABnzbd/NZBGet: always `false` (every add is a new job)
 - `resolveOwnership(row, addedAt)` (decided in code, never by a nullable-boolean WHERE):
 
@@ -155,12 +155,14 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 | `downloadStatus: 'removed'` | (no client call) | not owned: no remove, never written back to `completed` |
 | `addedByRmab: false` | (no client call) | not owned (taken over) |
 | `true` | > 1 h after | kept, nothing written, info log (re-added by someone) |
-| `true` | otherwise / unknown | owned |
+| `true` | ≥ 24 h before | kept, nothing written, info log (an older copy, e.g. another client instance of the same type) |
+| `true` | otherwise / unknown (missing or 0) | owned |
 | `null` (before the fix) | within [−15 min, +5 min] | owned (never written `true`) |
 | `null` | ≥ 24 h before | not owned: written `false` (soft-deleted request: hard-deleted, torrent kept) |
 | `null` | anything else / unknown | kept, nothing written, re-checked next run, info log |
-- Recorded client type ≠ configured client type: no probe, no mark, no delete (warn)
-- Not owned → no remove call at all; no post-import `setCategory` (`applyPostImportCategory()`, `src/lib/processors/post-import-category.ts`, reads the same row as organize-files: `requestId`, newest `createdAt`; `null` skips too); no Transmission seed-limit rewrite on `torrent-duplicate`
+- Recorded client type ≠ configured client type: no probe, no mark, no delete. Cleanup checks this before its same-run duplicate branch; logs debug per row + one warn per run with the count. Request delete: warn per row (usenet too: a usenet delete skips when the configured usenet client is a different type)
+- Not owned → no remove call at all; no post-import `setCategory`; no Transmission seed-limit rewrite on `torrent-duplicate`
+- Post-import category (`applyPostImportCategory()`, `src/lib/processors/post-import-category.ts`, reads the same row as organize-files: `requestId`, newest `createdAt`): `null`/`false` skip; `true` → one strict probe (error / not found → skip) → `resolveOwnership()` (removed, re-added, older copy → skip). Info log on every skip. Downloads in flight at upgrade (`null`) never get the post-import category
 - Deluge `setCategory` replaces the torrent's label (one label per torrent); now only on RMAB's own torrents
 - **Strict probe** `probeDownload(id)` (seeding cleanup only; one request, no not-found retries, unlike `getDownload()`): `{found:true, info}` | `{found:false}` | throws
 
@@ -170,8 +172,19 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 | Transmission | `result: success` + `arguments.torrents` array without it | RPC error result, missing `arguments`/`torrents`, empty body |
 | Deluge | `core.get_torrent_status` → `{}` (KeyError swallowed upstream, 2.1.1) | daemon error, `null`, non-object |
 - `addedAt` in `DownloadInfo`: qBittorrent `added_on`, Transmission `addedDate`, Deluge `time_added` (0/absent → undefined → legacy rows kept)
-- **Known limits (all keep a torrent, none delete one):** Bull retry after an add that succeeded (lost response, history insert/enqueue failed, worker died) or two download jobs for one request → RMAB's own torrent recorded `false`; admin retry-download (`src/app/api/admin/requests/[id]/retry-download/route.ts`) re-adding a stored link while RMAB's torrent is still there → recorded `false`; re-request/replace/series pack of a hash whose owner row was hard-deleted; client migrated (added times reset) or without added time; clock drift between client and DB > 5 min; Deluge loads torrents asynchronously at startup (`load_state` → `add_async`), so a probe during startup can miss a torrent → row marked `removed` (never cleaned, never lost); Transmission 4.0.6 loads all torrents in one session-thread task before RPC answers (no partial list), 3.x not verified; qBittorrent-compatible clients (RDTClient etc.) not covered: if they accept duplicate adds while the pre-check fails, a takeover is recorded `true`
-- Residual risk: legacy rows only, when someone else added the same hash within ~15 min before RMAB's grab
+- **Known limits that keep a torrent (RMAB's own torrent is left in the client, never cleaned):**
+  - Bull retry after an add that succeeded (lost response, history insert/enqueue failed, worker died) or two download jobs for one request → RMAB's own torrent recorded `false`
+  - Admin retry-download (`src/app/api/admin/requests/[id]/retry-download/route.ts`) re-adding a stored link while RMAB's torrent is still there → recorded `false`
+  - Re-request/replace/series pack of a hash whose owner row was hard-deleted
+  - A `false` re-request row counts as sharing the torrent (`otherActiveRequestsUsingTorrent`), so cleanup hard-deletes the soft-deleted owner row and keeps the torrent; the `false` row is never cleaned (same "owner row hard-deleted" leak, caused by RMAB's own cleanup)
+  - Switching to a new client instance of the same type: its well-formed "not here" answers mark those rows `removed` for good (nothing clears the mark), so RMAB never cleans them after the torrents are migrated
+  - Client migrated (added times reset) or without added time (legacy rows); clock drift between client and DB > 5 min
+  - Deluge loads torrents asynchronously at startup (`load_state` → `add_async`), so a probe during startup can miss a torrent → row marked `removed` (never cleaned, never lost); Transmission 4.0.6 loads all torrents in one session-thread task before RPC answers (no partial list), 3.x not verified
+- **Residual risk (a torrent RMAB did not add can be removed with its files):**
+  - qBittorrent-compatible clients (RDTClient etc.) not covered: if they accept a duplicate add while the pre-check misses it, the takeover is recorded `true`
+  - Deluge startup: the add pre-check can miss a torrent that is still loading, RMAB's add wins and the row is recorded `true`; with the same save path, the user's files go when it is cleaned
+  - Legacy (`null`) rows: someone else added the same hash within ~15 min before RMAB's grab
+- **Behaviour changes in #423/#258:** once a request's newest completed row is `removed`, an older selected completed row of the same request becomes the cleanup candidate (removed only if RMAB added it); downloads in flight at upgrade skip the post-import category; a usenet request delete skips when the configured usenet client is a different type
 - The library-folder delete of a request is separate (files-hash guard, [request-deletion.md](../admin-features/request-deletion.md))
 
 ### Source Fetch & Prowlarr Key Scoping

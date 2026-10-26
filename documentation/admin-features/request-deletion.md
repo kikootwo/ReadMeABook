@@ -68,6 +68,7 @@ model Request {
 
    IF recorded client type != configured client type:
      → Leave it (warn): the id means nothing in the new client
+       (torrent and usenet: a usenet delete also skips when another usenet client type is configured)
 
    IF torrent not in the client:
      → Skip (already removed)
