@@ -2,9 +2,9 @@
  * Component: BookDate Swipe Library Check Tests (#287)
  * Documentation: documentation/features/bookdate-prd.md
  *
- * A right swipe runs the same checks as POST /api/requests (createRequestForUser) before it creates a
- * request: any user's downloaded/available request for the ASIN, then the library (real findPlexMatch
- * over plex_library). The response says whether a request was created and, if not, why.
+ * A right swipe runs the two ownership checks of POST /api/requests (createRequestForUser) before it
+ * creates a request: any user's downloaded/available request for the ASIN, then the library (real
+ * findPlexMatch over plex_library). The response says whether a request was created and, if not, why.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
