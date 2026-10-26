@@ -9,6 +9,7 @@ import { Suspense, useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Header } from '@/components/layout/Header';
 import { SeriesGrid } from '@/components/series/SeriesGrid';
+import { SeriesSearchError } from '@/components/series/SeriesSearchError';
 import { useSeriesSearch } from '@/lib/hooks/useSeries';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { CardSizeControls } from '@/components/ui/CardSizeControls';
@@ -40,7 +41,16 @@ function SeriesPageContent() {
     return () => clearTimeout(timer);
   }, [query, router]);
 
-  const { series, isLoading } = useSeriesSearch(debouncedQuery);
+  const searchedQuery = debouncedQuery.trim();
+  const { series, isLoading, error, hasData, retry } = useSeriesSearch(searchedQuery);
+  // The query whose Try again the user pressed: focus returns to the button if it fails again
+  const [retriedQuery, setRetriedQuery] = useState<string | null>(null);
+  const showError = !!error && !isLoading && !hasData;
+
+  const handleRetry = useCallback(() => {
+    setRetriedQuery(searchedQuery);
+    retry();
+  }, [searchedQuery, retry]);
 
   const handleSearch = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -108,7 +118,7 @@ function SeriesPageContent() {
           </form>
 
           {/* Results */}
-          {debouncedQuery ? (
+          {searchedQuery ? (
             <div className="space-y-6">
               {/* Sticky Results Header */}
               <div className="sticky top-14 sm:top-16 z-30 mb-4 sm:mb-6">
@@ -131,14 +141,22 @@ function SeriesPageContent() {
                 </div>
               </div>
 
-              {/* Series Grid */}
-              <SeriesGrid
-                series={series}
-                isLoading={!!isLoading}
-                emptyMessage={`No series found for "${debouncedQuery}"`}
-                cardSize={cardSize}
-                squareCovers={squareCovers}
-              />
+              {/* Series Grid, or why the search failed */}
+              {showError ? (
+                <SeriesSearchError
+                  audibleUnavailable={error?.status === 502}
+                  onRetry={handleRetry}
+                  focusRetry={retriedQuery === searchedQuery}
+                />
+              ) : (
+                <SeriesGrid
+                  series={series}
+                  isLoading={!!isLoading}
+                  emptyMessage={`No series found for "${searchedQuery}"`}
+                  cardSize={cardSize}
+                  squareCovers={squareCovers}
+                />
+              )}
             </div>
           ) : (
             /* Empty State */
