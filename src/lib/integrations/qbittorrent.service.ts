@@ -15,7 +15,7 @@ import { DownloadSourceTimeoutError, fetchDownloadSource, type SourceAuth } from
 import { urlForLog } from '../utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import { qbittorrentProbeList } from './torrent-probe';
-import { acceptedAddId, candidateIds, findTorrent, lookupTorrent, magnetHashes, normalizeTorrentId, SharedRequest, TorrentHashes, TorrentIdMap, torrentFileHashes, validTorrentId } from './qbittorrent-ids';
+import { acceptedAddId, candidateIds, findTorrent, lookupTorrent, magnetHashes, normalizeTorrentId, SharedRequest, TorrentHashes, TorrentIdMap, torrentFileHashes, TorrentListUnavailableError, validTorrentId } from './qbittorrent-ids';
 import {
   IDownloadClient,
   DownloadClientType,
@@ -299,7 +299,8 @@ export class QBittorrentService implements IDownloadClient {
       if (
         error instanceof DownloadSourceError ||
         error instanceof UnusableDownloadSourceError ||
-        error instanceof DownloadSourceTimeoutError
+        error instanceof DownloadSourceTimeoutError ||
+        error instanceof TorrentListUnavailableError // a client error: the request retries, no other release
       ) {
         throw error;
       }
@@ -362,17 +363,21 @@ export class QBittorrentService implements IDownloadClient {
 
   /**
    * Shared by magnet and .torrent adds: the pre-add check, the add, and the ID to record.
-   * `scanFirst`: a btih-only magnet may be a hybrid the client lists under its v2 ID (and
-   * qBittorrent 4.4 answers "Ok." to that duplicate), so its pre-add check includes the full list.
+   * With a v1 hash, the pre-add check ends with the full list: a torrent with this v1 may be listed
+   * under another ID (a hybrid under its v2 ID, or a different btmh), and qBittorrent up to 5.1 can
+   * answer "Ok." to that duplicate. If that list can't be read, nothing is added (fail closed).
    */
   private async addOnce(
     hashes: TorrentHashes,
     kind: string,
-    scanFirst: boolean,
     post: () => Promise<{ data: unknown; conflict: boolean }>
   ): Promise<AddDownloadResult> {
     // Already in the client: taken over, never added (or later removed) by RMAB
-    const present = await this.presentId(hashes, scanFirst);
+    const present = await this.presentId(hashes, !!hashes.v1).catch((error: unknown) => {
+      if (axios.isAxiosError(error) && error.response?.status === 403) throw error; // re-login, then retry
+      logger.error(`Nothing added: couldn't read the torrent list to check for an existing copy (${error instanceof Error ? error.message : String(error)})`);
+      throw new TorrentListUnavailableError();
+    });
     if (present) {
       logger.info(` Torrent ${present} is already in qBittorrent (not added by RMAB)`);
       return { id: present, alreadyInClient: true, infoHash: hashes.v1 };
@@ -429,7 +434,7 @@ export class QBittorrentService implements IDownloadClient {
       form.append('tags', options.tags.join(','));
     }
 
-    return this.addOnce(hashes, 'magnet link', !hashes.v2, () => this.postAdd(form, {
+    return this.addOnce(hashes, 'magnet link', () => this.postAdd(form, {
       headers: {
         ...this.authHeaders(),
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -504,7 +509,7 @@ export class QBittorrentService implements IDownloadClient {
       formData.append('tags', options.tags.join(','));
     }
 
-    return this.addOnce(hashes, '.torrent file', false, () => this.postAdd(formData, {
+    return this.addOnce(hashes, '.torrent file', () => this.postAdd(formData, {
       headers: {
         ...this.authHeaders(),
         ...formData.getHeaders(),

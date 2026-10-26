@@ -51,10 +51,26 @@ export function base32ToHex(value: string): string | null {
   return hex;
 }
 
-/** v1 (`btih`, hex or base32) and v2 (`btmh` SHA-256 multihash) hashes of a magnet link */
+/** RFC 4648 base32 (upper case) of 40 hex characters */
+export function hexToBase32(hex: string): string {
+  let bits = 0;
+  let acc = 0;
+  let out = '';
+  for (const byte of Buffer.from(hex, 'hex')) {
+    acc = ((acc << 8) | byte) & 0xffff;
+    bits += 8;
+    while (bits >= 5) {
+      bits -= 5;
+      out += BASE32_ALPHABET[(acc >>> bits) & 31];
+    }
+  }
+  return out;
+}
+
+/** v1 (`btih`, hex or base32) and v2 (`btmh` SHA-256 multihash) hashes of a magnet link (`&amp;` read as `&`) */
 export function magnetHashes(magnetUrl: string): TorrentHashes | null {
   const hashes: TorrentHashes = {};
-  for (const [, kind, value] of magnetUrl.matchAll(/[?&]xt(?:\.\d+)?=urn:(btih|btmh):([0-9a-z]+)/gi)) {
+  for (const [, kind, value] of magnetUrl.replace(/&amp;/gi, '&').matchAll(/[?&]xt(?:\.\d+)?=urn:(btih|btmh):([0-9a-z]+)/gi)) {
     if (kind.toLowerCase() === 'btmh') {
       if (/^1220[0-9a-f]{64}/i.test(value)) hashes.v2 ??= value.slice(4, 68).toLowerCase();
     } else if (/^[0-9a-f]{40}/i.test(value)) {
@@ -93,6 +109,20 @@ export function candidateIds(hashes: TorrentHashes): string[] {
 /** A stored base32 hash (any case) as hex; any other value unchanged */
 export function normalizeTorrentId(id: string): string {
   return base32ToHex(id) ?? id;
+}
+
+/** A stored torrent hash in every form a row may hold it: as given, hex, and lower-case base32 */
+export function torrentHashForms(hash: string): string[] {
+  const hex = validTorrentId(normalizeTorrentId(hash));
+  return [...new Set([hash, ...(hex ? [hex, hexToBase32(hex).toLowerCase()] : [])])];
+}
+
+/** The pre-add check could not read the client's torrent list, so nothing was added */
+export class TorrentListUnavailableError extends Error {
+  constructor() {
+    super("Couldn't read qBittorrent's torrent list to check for an existing copy");
+    this.name = 'TorrentListUnavailableError';
+  }
 }
 
 /** Whether a /torrents/info entry is the torrent with one of these IDs (its `hash` or `infohash_v1`) */
