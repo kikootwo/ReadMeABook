@@ -167,6 +167,8 @@ export async function cleanUpRequestDownload(
         );
         await client.deleteDownload(clientId, true);
         counts.torrentsRemoved++;
+        // Gone now: the seeding cleanup never checks (or removes by) this row again
+        await prisma.downloadHistory.update({ where: { id: downloadHistory.id }, data: { downloadStatus: 'removed' } });
       }
     } else {
       // The scheduled seeding cleanup removes it once the requirement is met.

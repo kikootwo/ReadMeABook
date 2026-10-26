@@ -11,6 +11,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
 
 const prismaMock = createPrismaMock();
+// Cleanup uses the strict probe: the torrent is there, with this info
+const probeFound = (info: Record<string, unknown>) => vi.fn().mockResolvedValue({ found: true, info });
 const configMock = vi.hoisted(() => ({ get: vi.fn() }));
 const downloadClientManagerMock = vi.hoisted(() => ({ getClientServiceForProtocol: vi.fn() }));
 
@@ -32,7 +34,7 @@ function setup(
   const client = {
     clientType: 'qbittorrent',
     protocol: 'torrent',
-    getDownload: vi.fn().mockResolvedValue({ id: 'hash-1', name: 'Torrent', status: 'seeding', ...download }),
+    probeDownload: probeFound({ id: 'hash-1', name: 'Torrent', status: 'seeding', ...download }),
     deleteDownload: vi.fn().mockResolvedValue(undefined),
   };
   downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(client);

@@ -13,13 +13,16 @@ import { RMABLogger } from '../utils/logger';
 import { fetchDownloadSource } from './download-source';
 import { urlForLog } from '../utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
+import { delugeProbeStatus } from './torrent-probe';
 import {
   IDownloadClient, DownloadClientType, ProtocolType,
-  DownloadInfo, DownloadStatus, AddDownloadOptions, AddDownloadResult, ConnectionTestResult,
+  DownloadInfo, DownloadStatus, AddDownloadOptions, AddDownloadResult, DownloadProbe, ConnectionTestResult,
 } from '../interfaces/download-client.interface';
 
 const parseTorrent = (parseTorrentModule as any).default || parseTorrentModule;
 const logger = RMABLogger.create('Deluge');
+const STATUS_FIELDS = ['name', 'total_size', 'total_done', 'progress', 'state', 'download_payload_rate', 'eta', 'label',
+  'save_path', 'time_added', 'is_finished', 'seeding_time', 'ratio', 'message'];
 
 export class DelugeService implements IDownloadClient {
   readonly clientType: DownloadClientType = 'deluge';
@@ -222,12 +225,8 @@ export class DelugeService implements IDownloadClient {
   }
 
   async getDownload(id: string): Promise<DownloadInfo | null> {
-    const fields = ['name', 'total_size', 'total_done', 'progress', 'state',
-      'download_payload_rate', 'eta', 'label', 'save_path',
-      'time_added', 'is_finished', 'seeding_time', 'ratio', 'message'];
-
     for (let attempt = 0; attempt <= 3; attempt++) {
-      const { result } = await this.rpc('core.get_torrent_status', [id, fields]);
+      const { result } = await this.rpc('core.get_torrent_status', [id, STATUS_FIELDS]);
       if (result && Object.keys(result).length > 0) return this.mapToDownloadInfo(id, result);
       if (attempt === 3) return null;
       const delay = 500 * Math.pow(2, attempt);
@@ -235,6 +234,12 @@ export class DelugeService implements IDownloadClient {
       await new Promise(r => setTimeout(r, delay));
     }
     return null;
+  }
+
+  /** Strict probe for the seeding cleanup: one status call, no retries; a daemon error throws */
+  async probeDownload(id: string): Promise<DownloadProbe> {
+    const status = delugeProbeStatus(await this.rpc('core.get_torrent_status', [id, STATUS_FIELDS]), id);
+    return status ? { found: true, info: this.mapToDownloadInfo(id, status) } : { found: false };
   }
 
   async pauseDownload(id: string): Promise<void> {

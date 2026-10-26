@@ -109,6 +109,12 @@ export interface AddDownloadResult {
   alreadyInClient: boolean;
 }
 
+/**
+ * Answer of the strict probe (seeding cleanup). `found: false` only on a well-formed
+ * answer without the torrent; anything unclear throws.
+ */
+export type DownloadProbe = { found: true; info: DownloadInfo } | { found: false };
+
 /** Options for adding a new download */
 export interface AddDownloadOptions {
   /** Category/label to assign */
@@ -207,6 +213,13 @@ export interface IDownloadClient {
    * @returns Download info, or null if not found
    */
   getDownload(id: string): Promise<DownloadInfo | null>;
+
+  /**
+   * Strict "is it still there" check for the seeding cleanup: one request, no retries.
+   * Torrent clients only. Missing only on a well-formed answer without the torrent
+   * (contract per client: documentation/phase3/download-clients.md); anything else throws.
+   */
+  probeDownload?(id: string): Promise<DownloadProbe>;
 
   /**
    * Pause a download.

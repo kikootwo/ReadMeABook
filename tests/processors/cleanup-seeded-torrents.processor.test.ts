@@ -7,6 +7,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
 
 const prismaMock = createPrismaMock();
+// Cleanup uses the strict probe: the torrent is there, with this info
+const probeFound = (info: Record<string, unknown>) => vi.fn().mockResolvedValue({ found: true, info });
 const configMock = vi.hoisted(() => ({ get: vi.fn() }));
 
 const downloadClientManagerMock = vi.hoisted(() => ({
@@ -76,7 +78,7 @@ describe('processCleanupSeededTorrents', () => {
     const qbtClientMock = {
       clientType: 'qbittorrent',
       protocol: 'torrent',
-      getDownload: vi.fn().mockResolvedValue({
+      probeDownload: probeFound({
         id: 'hash-1',
         name: 'Torrent',
         size: 0,
@@ -125,7 +127,7 @@ describe('processCleanupSeededTorrents', () => {
     const qbtClientMock = {
       clientType: 'qbittorrent',
       protocol: 'torrent',
-      getDownload: vi.fn().mockResolvedValue({
+      probeDownload: probeFound({
         id: 'hash-2',
         name: 'Torrent',
         size: 0,
@@ -177,7 +179,7 @@ describe('processCleanupSeededTorrents', () => {
     const qbtClientMock = {
       clientType: 'qbittorrent',
       protocol: 'torrent',
-      getDownload: vi.fn().mockResolvedValue({
+      probeDownload: probeFound({
         id: 'hash-ebook-1',
         name: 'Equal Rites - Terry Pratchett (epub)',
         size: 0,
@@ -227,7 +229,7 @@ describe('processCleanupSeededTorrents', () => {
     const qbtClientMock = {
       clientType: 'qbittorrent',
       protocol: 'torrent',
-      getDownload: vi.fn().mockResolvedValue({
+      probeDownload: probeFound({
         id: 'hash-ratio-1',
         name: 'Ratio Torrent',
         size: 0,
@@ -277,7 +279,7 @@ describe('processCleanupSeededTorrents', () => {
     const qbtClientMock = {
       clientType: 'qbittorrent',
       protocol: 'torrent',
-      getDownload: vi.fn().mockResolvedValue({
+      probeDownload: probeFound({
         id: 'hash-both-1',
         name: 'Both Torrent',
         size: 0,
@@ -327,7 +329,7 @@ describe('processCleanupSeededTorrents', () => {
     const qbtClientMock = {
       clientType: 'qbittorrent',
       protocol: 'torrent',
-      getDownload: vi.fn().mockResolvedValue({
+      probeDownload: probeFound({
         id: 'hash-both-2',
         name: 'Both Torrent',
         size: 0,
@@ -377,7 +379,7 @@ describe('processCleanupSeededTorrents', () => {
     const qbtClientMock = {
       clientType: 'qbittorrent',
       protocol: 'torrent',
-      getDownload: vi.fn().mockResolvedValue({
+      probeDownload: probeFound({
         id: 'hash-both-3',
         name: 'Both Torrent',
         size: 0,
@@ -427,7 +429,7 @@ describe('processCleanupSeededTorrents', () => {
     const qbtClientMock = {
       clientType: 'qbittorrent',
       protocol: 'torrent',
-      getDownload: vi.fn().mockResolvedValue({
+      probeDownload: probeFound({
         id: 'hash-noratio-1',
         name: 'No-Ratio Torrent',
         size: 0,
@@ -477,7 +479,7 @@ describe('processCleanupSeededTorrents', () => {
     const qbtClientMock = {
       clientType: 'qbittorrent',
       protocol: 'torrent',
-      getDownload: vi.fn().mockResolvedValue({
+      probeDownload: probeFound({
         id: 'hash-shared',
         name: 'Shared Torrent',
         size: 0,

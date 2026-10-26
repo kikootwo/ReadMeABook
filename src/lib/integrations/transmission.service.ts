@@ -13,6 +13,7 @@ import { RMABLogger } from '../utils/logger';
 import { fetchDownloadSource } from './download-source';
 import { urlForLog } from '../utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
+import { transmissionProbeMatch } from './torrent-probe';
 import {
   IDownloadClient,
   DownloadClientType,
@@ -21,6 +22,7 @@ import {
   DownloadStatus,
   AddDownloadOptions,
   AddDownloadResult,
+  DownloadProbe,
   ConnectionTestResult,
 } from '../interfaces/download-client.interface';
 
@@ -370,6 +372,13 @@ export class TransmissionService implements IDownloadClient {
     }
 
     return null;
+  }
+
+  /** Strict probe for the seeding cleanup: one torrent-get, no not-found retries */
+  async probeDownload(id: string): Promise<DownloadProbe> {
+    const data = await this.rpc('torrent-get', { ids: [id], fields: TORRENT_FIELDS });
+    const torrent = transmissionProbeMatch(data, id);
+    return torrent ? { found: true, info: this.mapToDownloadInfo(torrent as unknown as TransmissionTorrent) } : { found: false };
   }
 
   async pauseDownload(id: string): Promise<void> {

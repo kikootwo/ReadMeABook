@@ -14,6 +14,7 @@ import { RMABLogger } from '../utils/logger';
 import { DownloadSourceTimeoutError, fetchDownloadSource, type SourceAuth } from './download-source';
 import { urlForLog } from '../utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
+import { qbittorrentProbeMatch } from './torrent-probe';
 import {
   IDownloadClient,
   DownloadClientType,
@@ -22,6 +23,7 @@ import {
   DownloadStatus,
   AddDownloadOptions,
   AddDownloadResult,
+  DownloadProbe,
   ConnectionTestResult,
   DownloadSourceError,
   UnusableDownloadSourceError,
@@ -1130,6 +1132,24 @@ export class QBittorrentService implements IDownloadClient {
     }
 
     return null;
+  }
+
+  /** Strict probe for the seeding cleanup: one lookup, no not-found retries; a 403 re-logs in once */
+  async probeDownload(id: string, retried = false): Promise<DownloadProbe> {
+    if (!this.cookie && !this.authOptional) {
+      await this.login();
+    }
+    try {
+      const response = await this.client.get('/torrents/info', { headers: this.authHeaders(), params: { hashes: id } });
+      const torrent = qbittorrentProbeMatch(response.status, response.data, id);
+      return torrent ? { found: true, info: this.mapTorrentToDownloadInfo(torrent as unknown as TorrentInfo) } : { found: false };
+    } catch (error) {
+      if (!retried && !this.authOptional && axios.isAxiosError(error) && error.response?.status === 403) {
+        await this.login();
+        return this.probeDownload(id, true);
+      }
+      throw error;
+    }
   }
 
   /** Pause a download via the unified interface */
