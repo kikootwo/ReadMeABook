@@ -244,7 +244,7 @@ model Audiobook {
 - Fallback to fuzzy matching
 
 ## Fixed Issues
-- ✅ #287 window: ASIN from the ABS match was discarded until the next full scan → read back in the same scan (`match-missing-asins.ts`); BookDate right swipe now runs the same checks as `POST /api/requests` (any user's downloaded/available request, then library) and returns `requestCreated` + `reason`
+- ✅ #287 window: ASIN from the ABS match was discarded until the next full scan → read back in the same scan (`match-missing-asins.ts`); BookDate right swipe now runs the two ownership checks of `POST /api/requests` (any user's downloaded/available request, then library; not the in-flight check) and returns `requestCreated` + `reason`
 
 ## Related
 - [Audiobookshelf Integration](../integrations/audiobookshelf.md) - Backend mode

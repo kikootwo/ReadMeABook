@@ -66,9 +66,10 @@ async function handler(req: AuthenticatedRequest) {
     // This allows undo to work properly by keeping all the original data.
     // The recommendations endpoint filters out swiped cards.
 
-    // The two checks POST /api/requests (createRequestForUser) runs before creating a request (#287):
+    // The two ownership checks POST /api/requests (createRequestForUser) runs first (#287):
     // 1. any user's request for this ASIN is already downloaded/available (no duplicate download),
-    // 2. the book is already in the library. Either check failing creates no request (fail closed).
+    // 2. the book is already in the library. Either hit, or either check failing, creates no request
+    // (fail closed). Not run here: createRequestForUser's check for another user's in-flight request.
     const wantsRequest = action === 'right' && !markedAsKnown && Boolean(recommendation.audnexusAsin);
     let skipReason: SwipeSkipReason | null = null;
     let requestCreated = false;
