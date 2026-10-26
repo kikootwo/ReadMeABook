@@ -35,7 +35,7 @@ function lastCallArgv(): string[] {
 /** The `-metadata` payloads of an argv for the given keys, in argv order (each a single element). */
 const payloads = (argv: string[], keys: RegExp) =>
   argv.flatMap((a, i) => (argv[i - 1] === '-metadata' && keys.test(a.split('=')[0]) ? [a] : []));
-const POSITION_KEYS = /^(disc|track|TRACKTOTAL|TOTALTRACKS|DISCTOTAL|TOTALDISCS)$/;
+const POSITION_KEYS = /^(disc|track|DISCNUMBER|TRACKTOTAL|TOTALTRACKS|DISCTOTAL|TOTALDISCS)$/;
 
 describe('disc and track of a multi-disc book', () => {
   const position = { disc: '2/3', track: '12/20' };
@@ -61,11 +61,13 @@ describe('disc and track of a multi-disc book', () => {
     expect(argv.at(-1)).toBe('/tmp/book.flac.tmp');
   });
 
-  it('a position without a disc writes the track only', async () => {
+  it('a position without a disc clears the source disc (empty values) and writes the track', async () => {
     await tagAudioFileMetadata('/tmp/book.flac', BOOK, { track: '3/20' });
-    expect(payloads(lastCallArgv(), POSITION_KEYS)).toEqual(['track=3/20', 'TRACKTOTAL=20', 'TOTALTRACKS=20']);
+    expect(payloads(lastCallArgv(), POSITION_KEYS)).toEqual([
+      'disc=', 'DISCNUMBER=', 'DISCTOTAL=', 'TOTALDISCS=', 'track=3/20', 'TRACKTOTAL=20', 'TOTALTRACKS=20',
+    ]);
     await tagAudioFileMetadata('/tmp/book.m4b', BOOK, { track: '3/20' });
-    expect(payloads(lastCallArgv(), POSITION_KEYS)).toEqual(['track=3/20']);
+    expect(payloads(lastCallArgv(), POSITION_KEYS)).toEqual(['disc=', 'track=3/20']);
   });
 
   it('without a position the argv is exactly as before', async () => {

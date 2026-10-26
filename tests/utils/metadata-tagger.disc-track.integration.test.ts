@@ -70,6 +70,17 @@ describe.skipIf(!available)('disc and track tags (real ffmpeg)', () => {
     expect(await tagEntries(result.taggedFilePath!, 'disc')).toEqual([['disc', '2/3']]);
   }, 60_000);
 
+  it.each(FORMATS)('%s: a track position without a disc clears the source disc', async (ext, codec) => {
+    const discTags = ext === 'flac' ? ['-metadata', 'disc=2', '-metadata', 'DISCTOTAL=3'] : ['-metadata', 'disc=2/3'];
+    const src = await makeSource(ext, codec, discTags);
+    expect(await tagEntries(src, 'disc')).toHaveLength(1);
+    const result = await tagAudioFileMetadata(src, BOOK, { track: '3/20' });
+    expect(result.success, result.error).toBe(true);
+    const { tags } = await probe(result.taggedFilePath!);
+    expect(Object.keys(tags).filter((k) => /^(disc|discnumber|disctotal|totaldiscs)$/i.test(k))).toEqual([]);
+    expect(await tagEntries(result.taggedFilePath!, 'track')).toEqual([['track', '3/20']]);
+  }, 60_000);
+
   it.each(FORMATS)('%s: without a position the source track number is left as it is (as before)', async (ext, codec) => {
     const src = await makeSource(ext, codec);
     const result = await tagAudioFileMetadata(src, BOOK);

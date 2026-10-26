@@ -29,6 +29,7 @@ import {
   resolveDiscBook,
   resolveManualSelection,
 } from '@/lib/utils/disc-layout-fs';
+import type { RMABLogger } from '@/lib/utils/logger';
 
 let root: string;
 
@@ -228,6 +229,18 @@ describe('orderDiscImport', () => {
     expect(probeState.calls).toHaveLength(5);
     expect(ordered?.order).toEqual(native(Object.keys(tracks)));
     expect(ordered?.tags.get(native(['CD1/The Shire.mp3'])[0])).toEqual({ disc: '1/2', track: '2/5' });
+  });
+
+  it('logs a whole-book tag order as such: no disc-by-disc line, no shared-number warning', async () => {
+    const src = path.join(root, 'src');
+    probeState.base = src;
+    ['CD1/b.mp3', 'Disc 1/a.mp3', 'CD2/c.mp3'].forEach((k, i) => probeState.tracks.set(k, i + 1));
+    const logger = { info: vi.fn(async () => undefined), warn: vi.fn(async () => undefined) };
+    await orderDiscImport(src, native(['CD2/c.mp3', 'Disc 1/a.mp3', 'CD1/b.mp3']), {
+      targetPath: path.join(root, 'media'), logger: logger as unknown as RMABLogger,
+    });
+    expect(logger.info.mock.calls.map((c) => c[0])).toEqual(['Multi-disc layout: 3 disc folders, 3 files ordered by their track tags across the whole book']);
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 
   it('gives each file its disc (d/D) and its track across the book (n/N), root files on the first disc', async () => {

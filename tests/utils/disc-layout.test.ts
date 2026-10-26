@@ -86,6 +86,20 @@ describe('disc folder names', () => {
     expect(stripDiscSuffix('Abcd 2', 2)).toBe('Abcd 2');
     expect(stripDiscSuffix('The Hobbit Disc 1')).toBe('The Hobbit Disc 1');
   });
+
+  it('handles very long album titles quickly; whitespace runs collapse, titles over 500 characters stay as they are', () => {
+    const spaces = ' \t'.repeat(1 << 19); // 1 MB of whitespace
+    const dashes = `${'- '.repeat(1 << 19)}x Disc 1`;
+    const started = performance.now();
+    expect(stripDiscSuffix(`Book${spaces}(Disc 2)`)).toBe('Book');
+    expect(stripDiscSuffix(`Book${spaces}Disc 2`, 2)).toBe('Book');
+    expect(stripDiscSuffix(`a${spaces}b`)).toBe('a b');
+    expect(stripDiscSuffix(dashes, 1)).toBe(dashes);
+    expect(performance.now() - started).toBeLessThan(100);
+    const long = `${'x'.repeat(600)} (Disc 2)`;
+    expect(stripDiscSuffix(`  ${long}  `)).toBe(long);
+    expect(stripDiscSuffix('The  Long\tBook (Disc 2)')).toBe('The Long Book');
+  });
 });
 
 describe('resolveDiscLayout', () => {

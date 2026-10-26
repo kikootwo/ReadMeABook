@@ -217,8 +217,10 @@ export async function orderDiscImport(
     await options.logger?.warn(`Several disc folders are numbered ${number}; ordering them by name`);
   }
   await options.logger?.info(
-    `Multi-disc layout: ${layout.discs.length} disc folders, ${order.length} files ordered disc by disc` +
-      (notes.byTracks.length > 0 ? ` (track tags used in ${notes.byTracks.join(', ')})` : '')
+    `Multi-disc layout: ${layout.discs.length} disc folders, ${order.length} files ` +
+      (notes.wholeBook
+        ? 'ordered by their track tags across the whole book'
+        : 'ordered disc by disc' + (notes.byTracks.length > 0 ? ` (track tags used in ${notes.byTracks.join(', ')})` : ''))
   );
   const tags = discTrackTags(layout, order);
   return {

@@ -24,6 +24,8 @@ const GENERIC_NAME_RE = /^(?:cd|disc|disk|part|vol(?:ume)?\.?)\s*\d+$/i;
 const DISC_SUFFIX_RE = /(?:^|\s*[-–—:,]\s*[([]?|\s*[([])\s*(?:cd|disc|disk)[\s._-]*\d{1,3}(?:\s*(?:of|\/)\s*\d{1,3})?\s*[)\]]?\s*$/i;
 /** A disc suffix after a plain space, the keyword starting a word (`Book Disc 2`, `Book CD2`, never `OCD 1`). */
 const SPACED_DISC_SUFFIX_RE = /\s(?:cd|disc|disk)[\s._-]*(\d{1,3})(?:\s*(?:of|\/)\s*\d{1,3})?\s*$/i;
+/** Album titles longer than this keep any suffix. */
+const MAX_SUFFIX_TITLE_LENGTH = 500;
 
 /** Classify a folder name (trimmed, case-insensitive, the whole name). Null when it is not a disc. */
 export function parseDiscFolderName(rawName: string): DiscFolderName | null {
@@ -44,12 +46,15 @@ export function isGenericFolderName(rawName: string): boolean {
  * Album title without a trailing disc suffix (`Book (Disc 2)`, `Book - CD 2`, `Book [Disc 1 of 3]`). Never `Part N`.
  * With `discNumber` (the disc folder's own number), a suffix after a plain space
  * (`Book Disc 2`, `Book CD2`) is stripped too, only when its number is that one.
+ * Whitespace runs collapse to one space first; titles over 500 characters are left as they are (trimmed).
  */
 export function stripDiscSuffix(album: string, discNumber?: number): string {
-  let stem = album.replace(DISC_SUFFIX_RE, '');
-  const spaced = stem === album && discNumber !== undefined ? SPACED_DISC_SUFFIX_RE.exec(album) : null;
-  if (spaced && parseInt(spaced[1], 10) === discNumber) stem = album.slice(0, spaced.index);
-  return stem.trim() || album.trim();
+  const title = album.replace(/\s{2,}|[^\S ]/g, ' ').trim(); // every whitespace run becomes one space
+  if (title.length > MAX_SUFFIX_TITLE_LENGTH) return title;
+  let stem = title.replace(DISC_SUFFIX_RE, '');
+  const spaced = stem === title && discNumber !== undefined ? SPACED_DISC_SUFFIX_RE.exec(title) : null;
+  if (spaced && parseInt(spaced[1], 10) === discNumber) stem = title.slice(0, spaced.index);
+  return stem.trim() || title;
 }
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -164,6 +169,8 @@ export interface OrderNotes {
   tiedNumbers: number[];
   /** Disc folders ordered by their track tags. */
   byTracks: string[];
+  /** Every file tagged 1..N: the whole book is in tag order. */
+  wholeBook: boolean;
 }
 
 /** Disc folders by number, ties by name. */
@@ -182,18 +189,18 @@ export function orderDiscLayout(
   layout: DiscLayout,
   trackOf: (key: string) => number | undefined = () => undefined
 ): { order: string[]; notes: OrderNotes } {
-  const notes: OrderNotes = { tiedNumbers: [], byTracks: [] };
+  const notes: OrderNotes = { tiedNumbers: [], byTracks: [], wholeBook: false };
   const discs = sortDiscs(layout.discs);
+  const wholeBook = trackOrder([...layout.rootFiles, ...discs.flatMap((d) => d.files), ...layout.otherFiles], trackOf);
+  if (wholeBook) {
+    notes.byTracks.push(...discs.map((d) => d.name));
+    return { order: wholeBook, notes: { ...notes, wholeBook: true } };
+  }
   discs.forEach((disc, i) => {
     if (i > 0 && discs[i - 1].number === disc.number && !notes.tiedNumbers.includes(disc.number)) {
       notes.tiedNumbers.push(disc.number);
     }
   });
-  const wholeBook = trackOrder([...layout.rootFiles, ...discs.flatMap((d) => d.files), ...layout.otherFiles], trackOf);
-  if (wholeBook) {
-    notes.byTracks.push(...discs.map((d) => d.name));
-    return { order: wholeBook, notes };
-  }
   const natural = (files: string[]) => [...files].sort(naturalCompare);
   const order = [...natural(layout.rootFiles)];
   const acrossBook = bookTrackOrder(discs, trackOf);

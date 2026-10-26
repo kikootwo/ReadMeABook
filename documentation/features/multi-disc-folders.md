@@ -34,7 +34,7 @@ Every file is probed for its track tag (ffprobe, 4 at a time, root files include
 
 ## Disc and track tags (tagging on, not merged)
 - Each file of a multi-disc import: `disc` = its folder's number of the highest (`d/D`), `track` = its position across the book in the order above (`n/N`). A file outside the disc folders takes the disc of the file before it (the first disc's at the start).
-- No `disc` values at all when a disc folder is numbered 0 or the numbers would go down along the order; `track` alone then carries the order.
+- No `disc` values at all when a disc folder is numbered 0 or the numbers would go down along the order: the source's disc is cleared (empty `disc`; FLAC also `DISCNUMBER`/`DISCTOTAL`/`TOTALDISCS`), so `track` alone carries the order.
 - Replace any track/disc numbers the source carries (FLAC: `TRACKTOTAL`/`TOTALTRACKS` = N and `DISCTOTAL`/`TOTALDISCS` = D too); read back by ffprobe as `track`/`disc` for m4a/m4b, mp3 and flac, the keys Audiobookshelf orders by. Details: [file-organization.md](../phase3/file-organization.md) (Metadata Written).
 - Not written: single-folder and non-disc imports, a merged m4b, tagging off (all exactly as before).
 
@@ -51,6 +51,7 @@ Every file is probed for its track tag (ffprobe, 4 at a time, root files include
 - `cd/disc/disk` folders fold when all untagged, or all tagged with keys (title\|author\|narrator) that agree:
   - as they are (every disc's album the same): compared and searched unchanged, so `Hard Disk 3` on every disc stays `Hard Disk 3`;
   - else once a disc suffix is stripped from each album: after a `-`/`:`/`,` separator or a bracket (`(Disc 2)`, `- CD 2`, `: Disc 2`, `[Disc 1 of 3]`), or after a plain space when the keyword starts a word and the number is that folder's own (`The Hobbit Disc 1` in `Disc 1`, `The Hobbit CD2` in `CD2`, `Book Disc 1 of 3`; never `OCD 1`). The stripped stem is the search term.
+  - Before the suffix match, whitespace runs in the album collapse to one space; an album over 500 characters keeps any suffix.
   - An album that strips to nothing (`' '`) keeps the scanner's own key (author and narrator kept).
 - `Part N` folders fold only when tagged and their keys agree (the suffix strip never touches `Part N`). Untagged `Part N` stay separate.
 - A mix of tagged and untagged discs does not fold. R's own audio joins when untagged or its key agrees.
