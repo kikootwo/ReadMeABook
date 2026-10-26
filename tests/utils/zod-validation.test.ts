@@ -180,24 +180,24 @@ describe('zodIssueDetails', () => {
 
   // Every issue code the request schemas can raise, each with a 10,000-character input
   const long = 'Q'.repeat(10_000);
-  const cases: Array<[string, string, z.ZodType, unknown]> = [
-    ['invalid_type', 'string input', z.object({ n: z.number() }), { n: long }],
-    ['invalid_type', 'object input', z.object({ n: z.string() }), { n: { big: long } }],
-    ['too_big', 'string', z.object({ s: z.string().max(100) }), { s: long }],
-    ['too_small', 'string', z.object({ s: z.string().min(20_000) }), { s: long }],
-    ['too_big', 'array', z.object({ list: boundedArray(z.string(), 2) }), { list: [long, long, long] }],
-    ['too_small', 'array', z.object({ list: boundedArray(z.string(), 5, { min: 2 }) }), { list: [long] }],
-    ['invalid_value', 'enum', z.object({ e: z.enum(['a', 'b']) }), { e: long }],
-    ['invalid_format', 'url', z.object({ u: z.string().url() }), { u: long }],
-    ['invalid_format', 'regex', z.object({ asin: z.string().regex(/^[A-Z0-9]{10}$/, 'Invalid author ASIN') }), { asin: long }],
-    ['invalid_format', 'datetime', z.object({ d: z.string().datetime() }), { d: long }],
-    ['invalid_format', 'guid', z.object({ id: z.string().guid() }), { id: long }],
-    ['custom', '.refine', z.object({ t: z.string().refine((v) => v.length < 5, { message: 'Unsupported type' }) }), { t: long }],
-    ['custom', 'Goodreads transform', z.object({ rssUrl: goodreadsRssUrlSchema }), { rssUrl: long }],
+  const cases: Array<[string, string, () => z.ZodType, unknown]> = [
+    ['invalid_type', 'string input', () => z.object({ n: z.number() }), { n: long }],
+    ['invalid_type', 'object input', () => z.object({ n: z.string() }), { n: { big: long } }],
+    ['too_big', 'string', () => z.object({ s: z.string().max(100) }), { s: long }],
+    ['too_small', 'string', () => z.object({ s: z.string().min(20_000) }), { s: long }],
+    ['too_big', 'array', () => z.object({ list: boundedArray(z.string(), 2) }), { list: [long, long, long] }],
+    ['too_small', 'array', () => z.object({ list: boundedArray(z.string(), 5, { min: 2 }) }), { list: [long] }],
+    ['invalid_value', 'enum', () => z.object({ e: z.enum(['a', 'b']) }), { e: long }],
+    ['invalid_format', 'url', () => z.object({ u: z.string().url() }), { u: long }],
+    ['invalid_format', 'regex', () => z.object({ asin: z.string().regex(/^[A-Z0-9]{10}$/, 'Invalid author ASIN') }), { asin: long }],
+    ['invalid_format', 'datetime', () => z.object({ d: z.string().datetime() }), { d: long }],
+    ['invalid_format', 'guid', () => z.object({ id: z.string().guid() }), { id: long }],
+    ['custom', '.refine', () => z.object({ t: z.string().refine((v) => v.length < 5, { message: 'Unsupported type' }) }), { t: long }],
+    ['custom', 'Goodreads transform', () => z.object({ rssUrl: goodreadsRssUrlSchema }), { rssUrl: long }],
   ];
 
   it.each(cases)('returns no part of the input for %s (%s)', (code, _label, schema, value) => {
-    const details = detailsOf(schema, value);
+    const details = detailsOf(schema(), value);
     expect(details).toHaveLength(1);
     expect(details[0].code).toBe(code);
     for (const key of Object.keys(details[0])) expect(DETAIL_KEYS).toContain(key);
