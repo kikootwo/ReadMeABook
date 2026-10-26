@@ -162,6 +162,48 @@ describe('processCleanupSeededTorrents paging and marker', () => {
     expect(removedMarks()).toEqual(['dh-1', 'dh-2']);
   });
 
+  it('never marks a row of another client type, even when its hash was removed earlier in the run', async () => {
+    const twin = request(2);
+    twin.downloadHistory[0].torrentHash = 'hash-1';
+    twin.downloadHistory[0].downloadClientId = 'hash-1';
+    twin.downloadHistory[0].downloadClient = 'transmission';
+    prismaMock.request.findMany.mockResolvedValueOnce([request(1), twin]);
+    prismaMock.request.findMany.mockResolvedValue([]);
+    const c = client(async (id) => ({ found: true, info: info(id, 99999) }));
+
+    const result = await run();
+
+    expect(c.deleteDownload).toHaveBeenCalledTimes(1);
+    expect(removedMarks()).toEqual(['dh-1']);
+    expect(result.otherClient).toBe(1);
+  });
+
+  it('stops the run after 3 probe errors in a row, changing nothing (the next run tries again)', async () => {
+    prismaMock.request.findMany.mockResolvedValueOnce(Array.from({ length: 6 }, (_, i) => request(i + 1)));
+    const c = client(async () => { throw Object.assign(new Error('timeout of 60000ms exceeded'), { code: 'ECONNABORTED' }); });
+
+    const result = await run();
+
+    expect(c.probeDownload).toHaveBeenCalledTimes(3);
+    expect(result).toMatchObject({ errors: 3, stoppedEarly: true });
+    expect(prismaMock.downloadHistory.update).not.toHaveBeenCalled();
+    expect(prismaMock.request.findMany.mock.calls.filter(([arg]) => arg?.orderBy?.id === 'asc')).toHaveLength(1);
+  });
+
+  it('control: an answer between probe errors resets the count', async () => {
+    prismaMock.request.findMany.mockResolvedValueOnce(Array.from({ length: 6 }, (_, i) => request(i + 1)));
+    const c = client(async (id) => {
+      // errors on 1, 2, 4, 5: never 3 in a row
+      if (id === 'hash-3' || id === 'hash-6') return { found: true, info: info(id, 10) };
+      throw new Error('Request failed with status code 502');
+    });
+
+    const result = await run();
+
+    expect(c.probeDownload).toHaveBeenCalledTimes(6);
+    expect(result).toMatchObject({ errors: 4, stoppedEarly: false });
+  });
+
   it('uses the strict probe only (no getDownload with its 3.5 s of not-found retries)', async () => {
     prismaMock.request.findMany.mockResolvedValueOnce([request(1)]);
     const c = client(async () => ({ found: false }));

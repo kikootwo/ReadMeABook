@@ -136,6 +136,8 @@ describe('processDownloadTorrent', () => {
   it.each([
     [false, true],
     [true, false],
+    // Fail closed: a result without an explicit false is not counted as RMAB's add
+    [undefined, false],
   ])('records alreadyInClient=%s from the add result as addedByRmab=%s', async (alreadyInClient, addedByRmab) => {
     downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue({
       clientType: 'qbittorrent',

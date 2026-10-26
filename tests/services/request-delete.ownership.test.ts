@@ -140,9 +140,10 @@ describe('deleteRequest torrent ownership', () => {
   });
 
   it('never removes for a row recorded as removed, and never writes it back to completed', async () => {
-    for (const progress of [0.5, 1]) {
+    // progress 0.5 + downloading = the incomplete-delete branch; progress 1 = the keep-seeding write-back
+    for (const [progress, status] of [[0.5, 'downloading'], [1, 'seeding']] as const) {
       vi.clearAllMocks();
-      const { client } = await deleteWith({ row: { downloadStatus: 'removed' }, progress, seedingTime: 10 });
+      const { client } = await deleteWith({ row: { downloadStatus: 'removed' }, progress, status, seedingTime: 10 });
 
       expect(client.deleteDownload).not.toHaveBeenCalled();
       expect(statusWrites()).toHaveLength(0);

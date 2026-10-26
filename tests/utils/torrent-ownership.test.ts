@@ -15,7 +15,9 @@ describe('resolveOwnership', () => {
   it.each([
     // [addedByRmab, client added time offset (ms, undefined = none), owned, reason, recordNotOwned]
     [true, undefined, true, undefined, undefined],
-    [true, -3 * 24 * HOUR, true, undefined, undefined],
+    [true, -24 * HOUR + 1000, true, undefined, undefined],
+    [true, -24 * HOUR, false, 'older-copy', false],
+    [true, -3 * 24 * HOUR, false, 'older-copy', false],
     [true, 10 * 1000, true, undefined, undefined],
     [true, HOUR, true, undefined, undefined],
     [true, HOUR + 1000, false, 'readded', false],

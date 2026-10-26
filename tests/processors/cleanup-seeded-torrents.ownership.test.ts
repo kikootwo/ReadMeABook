@@ -168,6 +168,16 @@ describe('processCleanupSeededTorrents torrent ownership', () => {
     expect(prismaMock.downloadHistory.update).not.toHaveBeenCalled();
   });
 
+  it('keeps a torrent recorded as RMAB\'s when the client copy is older than the grab (another instance), writing nothing', async () => {
+    const client = setup({ row: { addedByRmab: true }, addedOffsetMs: -2 * 24 * HOUR });
+
+    const result = await run();
+
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+    expect(prismaMock.downloadHistory.update).not.toHaveBeenCalled();
+    expect(result.notOwned).toBe(1);
+  });
+
   it('control: removes a torrent RMAB added once seeding is met', async () => {
     const client = setup();
 

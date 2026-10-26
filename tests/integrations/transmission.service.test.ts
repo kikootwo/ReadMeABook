@@ -293,6 +293,22 @@ describe('TransmissionService', () => {
       // The body should be the RPC call with metainfo
     });
 
+    it('throws when a .torrent add answer has neither torrent-added nor torrent-duplicate', async () => {
+      const service = new TransmissionService('http://transmission', 'user', 'pass');
+
+      axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent-data') });
+      parseTorrentMock.mockResolvedValueOnce({ infoHash: 'parsed-hash', name: 'Book' });
+      clientMock.post
+        .mockResolvedValueOnce({ data: { result: 'success', arguments: { torrents: [] } } })
+        .mockResolvedValueOnce({ data: { result: 'success', arguments: {} } });
+
+      await expect(service.addDownload('http://example.com/file.torrent')).rejects.toThrow(
+        'Transmission did not return torrent info after adding'
+      );
+      // torrent-get + torrent-add only: no torrent-set on a torrent RMAB can't prove it added
+      expect(clientMock.post).toHaveBeenCalledTimes(2);
+    });
+
     it('follows redirect to magnet link', async () => {
       const service = new TransmissionService('http://transmission', 'user', 'pass');
 

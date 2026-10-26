@@ -18,6 +18,8 @@ export const LEGACY_ADDED_AFTER_MS = 5 * MINUTE_MS;
 export const LEGACY_CLEARLY_OLDER_MS = 24 * HOUR_MS;
 /** Rows RMAB added: a client added time this long after the row = re-added by someone else */
 export const READDED_AFTER_MS = HOUR_MS;
+/** Rows RMAB added: a client added time at least this long before the row = an older copy (another client instance) */
+export const OLDER_COPY_BEFORE_MS = LEGACY_CLEARLY_OLDER_MS;
 
 export interface OwnershipRow {
   addedByRmab: boolean | null;
@@ -29,7 +31,7 @@ export type OwnershipVerdict =
   | { owned: true }
   | {
       owned: false;
-      reason: 'removed' | 'taken-over' | 'readded' | 'legacy-taken-over' | 'legacy-unclear';
+      reason: 'removed' | 'taken-over' | 'readded' | 'older-copy' | 'legacy-taken-over' | 'legacy-unclear';
       /** Clear verdict on a legacy row: record false (or hard-delete a soft-deleted request's row) */
       recordNotOwned: boolean;
       /** Why the torrent is kept, for the log */
@@ -64,7 +66,8 @@ function describeGap(addedAt: Date, createdAt: Date): string {
 
 /**
  * Full rule, given the client's added time for the torrent (undefined when it reports none).
- * - addedByRmab true: ours, unless the client added it more than 1 h after the row (re-added)
+ * - addedByRmab true: ours, unless the client added it more than 1 h after the row (re-added) or at
+ *   least 24 h before it (an older copy, e.g. another client instance of the same type); no added time = ours
  * - addedByRmab false or row removed: never ours
  * - null (recorded before the column existed): ours inside [createdAt - 15 min, createdAt + 5 min];
  *   clearly not ours when added at least 24 h before createdAt; anything else is unclear (kept)
@@ -73,7 +76,7 @@ export function resolveOwnership(row: OwnershipRow, addedAt: Date | undefined): 
   const known = knownNotOwned(row);
   if (known) return known;
 
-  // A missing createdAt (NaN) fails every comparison below: true rows stay owned, legacy rows unclear
+  // createdAt is non-null in the schema; a missing one (NaN) fails every comparison below (true rows stay owned)
   const created = row.createdAt instanceof Date ? row.createdAt.getTime() : NaN;
   const added = addedAt && addedAt.getTime() > 0 ? addedAt.getTime() : undefined;
 
@@ -86,11 +89,19 @@ export function resolveOwnership(row: OwnershipRow, addedAt: Date | undefined): 
         detail: `it was added again after RMAB's grab (${describeGap(addedAt!, row.createdAt)})`,
       };
     }
+    if (added !== undefined && created - added >= OLDER_COPY_BEFORE_MS) {
+      return {
+        owned: false,
+        reason: 'older-copy',
+        recordNotOwned: false,
+        detail: `the torrent in the client is older than RMAB's grab (${describeGap(addedAt!, row.createdAt)}): another copy`,
+      };
+    }
     return { owned: true };
   }
 
   // Legacy row (null)
-  if (added === undefined) {
+  if (added === undefined || Number.isNaN(created)) {
     return {
       owned: false,
       reason: 'legacy-unclear',

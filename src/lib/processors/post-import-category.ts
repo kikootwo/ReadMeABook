@@ -11,6 +11,7 @@ import { RMABLogger } from '../utils/logger';
 import { getConfigService } from '../services/config.service';
 import { getDownloadClientManager } from '../services/download-client-manager.service';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
+import { resolveOwnership } from '../utils/torrent-ownership';
 
 /**
  * Apply post-import category to the download client after successful import.
@@ -51,16 +52,26 @@ export async function applyPostImportCategory(
     }
 
     // Only a torrent RMAB added: a category change can move files (qBittorrent automatic
-    // management) or replace labels (Transmission, Deluge). Unknown (null) counts as not RMAB's.
+    // management) or replace labels (Transmission, Deluge). Unknown (null: grabbed before RMAB
+    // recorded ownership) counts as not RMAB's here.
+    const id = downloadHistory.downloadClientId;
+    const skip = (why: string) => logger.info(`Post-import category not applied to ${id}: ${why}`);
     if (downloadHistory.addedByRmab !== true) {
-      logger.info(`Post-import category not applied to ${downloadHistory.downloadClientId}: RMAB did not add this torrent (or can't tell)`);
-      return;
+      return skip(downloadHistory.addedByRmab === false ? 'it was already there when RMAB grabbed it' : 'RMAB can\'t tell whether it added this torrent');
     }
-
-    logger.info(`Applying post-import category "${clientConfig.postImportCategory}" to download ${downloadHistory.downloadClientId}`);
-
     const service = await manager.createClientFromConfig(clientConfig);
-    await service.setCategory(downloadHistory.downloadClientId, clientConfig.postImportCategory);
+    // Same rule as the seeding cleanup and request delete (removed rows, re-added or older copies)
+    let addedAt: Date | undefined;
+    if (downloadHistory.downloadStatus !== 'removed') {
+      const probe = service.probeDownload ? await service.probeDownload(id).catch(() => null) : null;
+      if (!probe?.found) return skip('the client did not confirm the torrent');
+      addedAt = probe.info.addedAt;
+    }
+    const ownership = resolveOwnership(downloadHistory, addedAt);
+    if (!ownership.owned) return skip(ownership.detail);
+
+    logger.info(`Applying post-import category "${clientConfig.postImportCategory}" to download ${id}`);
+    await service.setCategory(id, clientConfig.postImportCategory);
 
     logger.info(`Post-import category applied successfully`);
   } catch (error) {

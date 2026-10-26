@@ -174,8 +174,8 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
           seeders: candidate.seeders || 0,
           leechers: candidate.leechers || 0,
           downloadStatus: 'downloading',
-          // From the client's own add result: false = already there (taken over)
-          addedByRmab: !alreadyInClient,
+          // From the client's own add result: only an explicit "newly added" counts as RMAB's
+          addedByRmab: alreadyInClient === false,
           selected: true,
           startedAt: new Date(),
         },

@@ -24,6 +24,7 @@ export interface CleanupSeededTorrentsPayload {
 
 /** Requests per page. Keyset paging (id > last), never Prisma `cursor:`: this loop hard-deletes rows */
 export const CLEANUP_PAGE_SIZE = 100;
+const MAX_PROBE_ERRORS_IN_A_ROW = 3;
 
 // Completed requests + soft-deleted requests (orphaned downloads), each with a finished selected download.
 // IMPORTANT: Only cleanup requests that are truly complete and not being actively processed.
@@ -87,6 +88,9 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
     let pages = 0;
     let checked = 0;
     let lastId: string | undefined;
+    // A client that does not answer costs a timeout per candidate: stop after a few in a row
+    let probeErrorsInARow = 0;
+    let stoppedEarly = false;
 
     const markRemoved = (downloadHistoryId: string) =>
       prisma.downloadHistory.update({ where: { id: downloadHistoryId }, data: { downloadStatus: 'removed' } });
@@ -160,7 +164,22 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
         return 'unlimited';
       }
 
-      // Skip if this torrent was already deleted earlier in this run
+      // Get download info from the appropriate client via the interface
+      const client: IDownloadClient | null = await manager.getClientServiceForProtocol(protocol as 'torrent' | 'usenet');
+
+      if (!client) {
+        logger.warn(`No ${clientType} client configured, skipping request ${request.id}`);
+        return 'seeding';
+      }
+
+      if (client.clientType !== clientType) {
+        // Another client is configured now: don't ask it about (or remove, or mark) this id.
+        // One warn per run with the count (below); per download at debug
+        logger.debug(`Download ${clientId} was recorded for ${clientType}, but ${client.clientType} is configured: skipped`);
+        return 'otherClient';
+      }
+
+      // Skip if this torrent was already deleted earlier in this run (same client type)
       if (deletedHashes.has(clientId.toLowerCase())) {
         if (request.deletedAt) {
           await prisma.request.delete({ where: { id: request.id } });
@@ -171,26 +190,14 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
         return 'cleaned';
       }
 
-      // Get download info from the appropriate client via the interface
-      const client: IDownloadClient | null = await manager.getClientServiceForProtocol(protocol as 'torrent' | 'usenet');
-
-      if (!client) {
-        logger.warn(`No ${clientType} client configured, skipping request ${request.id}`);
-        return 'seeding';
-      }
-
-      if (client.clientType !== clientType) {
-        // Another client is configured now: don't ask it about (or remove, or mark) this id
-        logger.debug(`Download ${clientId} was recorded for ${clientType}, but ${client.clientType} is configured: skipped`);
-        return 'otherClient';
-      }
-
       // Strict probe: one request, no retries. Only a well-formed answer without the torrent is "gone"
       let probe;
       try {
         if (!client.probeDownload) throw new Error(`${client.clientType} has no strict lookup`);
         probe = await client.probeDownload(clientId);
+        probeErrorsInARow = 0;
       } catch (error) {
+        probeErrorsInARow++;
         logger.warn(`Could not check ${clientId} in ${clientType}, nothing changed: ${error instanceof Error ? error.message : String(error)}`);
         return 'errors';
       }
@@ -285,13 +292,27 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
           counts.errors++;
           logger.error(`Failed to cleanup request ${request.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
+        if (probeErrorsInARow >= MAX_PROBE_ERRORS_IN_A_ROW) {
+          stoppedEarly = true;
+          break;
+        }
       }
 
+      if (stoppedEarly) {
+        logger.warn(
+          `Stopped after ${probeErrorsInARow} downloads in a row could not be checked in the download client `
+          + `(${checked} candidate(s) read so far); nothing was changed for them. The next scheduled run tries again`
+        );
+        break;
+      }
       if (page.length < CLEANUP_PAGE_SIZE) break;
       lastId = page[page.length - 1].id;
     }
 
     logger.info(`Indexer config matches: ${matchCounts.id} by id, ${matchCounts.name} by name, ${matchCounts.none} not configured`);
+    if (counts.otherClient > 0) {
+      logger.warn(`${counts.otherClient} download(s) were recorded for another client type than the one configured now: left as they are`);
+    }
     if (matchCounts.idIgnored > 0) {
       logger.warn(
         `${matchCounts.idIgnored} download(s) recorded a Prowlarr indexer id that now belongs to another indexer `
@@ -316,6 +337,7 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
       missing: counts.missing,
       errors: counts.errors,
       otherClient: counts.otherClient,
+      stoppedEarly,
     };
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);

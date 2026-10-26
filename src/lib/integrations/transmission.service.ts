@@ -340,10 +340,13 @@ export class TransmissionService implements IDownloadClient {
 
     // torrent-add returns torrent-added or torrent-duplicate
     const added = data.arguments?.['torrent-added'] || data.arguments?.['torrent-duplicate'];
+    if (!added) {
+      throw new Error('Transmission did not return torrent info after adding');
+    }
     if (this.isDuplicateAnswer(data, infoHash)) return { id: infoHash, alreadyInClient: true };
 
     // Override Transmission's global seeding rules — RMAB manages torrent lifecycle
-    await this.disableSeedLimits(added?.hashString || infoHash);
+    await this.disableSeedLimits(added.hashString || infoHash);
 
     logger.info(`Successfully added torrent: ${infoHash}`);
     return { id: infoHash, alreadyInClient: false };
