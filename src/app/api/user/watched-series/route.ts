@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { nextNewReleasesSince, watchModeFields } from '@/lib/utils/watch-mode';
 
 const logger = RMABLogger.create('API.WatchedSeries');
 
@@ -18,6 +19,8 @@ const AddWatchedSeriesSchema = z.object({
   seriesAsin: z.string().regex(/^[A-Z0-9]{10}$/, 'Invalid series ASIN'),
   seriesTitle: z.string().min(1).max(500),
   coverArtUrl: z.string().url().optional(),
+  /** true = request only books released from today on; default entire catalog */
+  newReleasesOnly: z.boolean().optional(),
 });
 
 /**
@@ -44,6 +47,7 @@ export async function GET(request: NextRequest) {
           seriesTitle: s.seriesTitle,
           coverArtUrl: s.coverArtUrl,
           lastCheckedAt: s.lastCheckedAt,
+          ...watchModeFields(s),
           createdAt: s.createdAt,
         })),
       });
@@ -68,7 +72,7 @@ export async function POST(request: NextRequest) {
       const bodyResult = await readJsonBody(req);
       if (!bodyResult.ok) return bodyResult.response;
       const body = bodyResult.data;
-      const { seriesAsin, seriesTitle, coverArtUrl } = AddWatchedSeriesSchema.parse(body);
+      const { seriesAsin, seriesTitle, coverArtUrl, newReleasesOnly } = AddWatchedSeriesSchema.parse(body);
 
       // Check for duplicate
       const existing = await prisma.watchedSeries.findUnique({
@@ -88,6 +92,7 @@ export async function POST(request: NextRequest) {
           seriesAsin,
           seriesTitle,
           coverArtUrl: coverArtUrl || null,
+          newReleasesSince: nextNewReleasesSince(null, newReleasesOnly === true),
         },
       });
 
@@ -110,6 +115,7 @@ export async function POST(request: NextRequest) {
           seriesTitle: watched.seriesTitle,
           coverArtUrl: watched.coverArtUrl,
           lastCheckedAt: watched.lastCheckedAt,
+          ...watchModeFields(watched),
           createdAt: watched.createdAt,
         },
       }, { status: 201 });
