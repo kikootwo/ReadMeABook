@@ -3,7 +3,7 @@
 **Status:** ✅ Implemented | Request size limits for API route bodies; shared input-bounds helpers for zod schemas and validation errors
 
 ## Overview
-API routes read JSON bodies through `readJsonBody` (`src/lib/utils/request-body.ts`), which applies a size limit, then validate them with zod (v3) schemas. `src/lib/utils/zod-validation.ts` holds the shared helpers for array bounds, the `details` returned on a validation error, and the log line.
+API routes read JSON bodies through `readJsonBody` (`src/lib/utils/request-body.ts`), which applies a size limit, then validate them with zod (v4, `^4.6.7`) schemas. `src/lib/utils/zod-validation.ts` holds the shared helpers for array bounds, the `details` returned on a validation error, and the log line.
 
 ## Request Size Limits
 | Tier | Constant | Limit | Routes |
@@ -29,12 +29,26 @@ const { name } = bodyResult.data;
 - **Reverse proxies:** a proxy's own limit applies first (nginx default `client_max_body_size 1m`: raise it for bulk imports over 1 MB).
 
 ## Key Details
-- **Arrays:** use `boundedArray(element, max, { min?, unique? })`, not `z.array(element).max(n)`. A pre-check reads only the array's `length` before any element is visited: out-of-bounds gives one `too_big`/`too_small` issue at the array's path (same fields and default message as `z.array().max()`/`.min()` once returned via `zodIssueDetails`); in-bounds arrays and non-arrays parse exactly like `z.array(element)` (same issue paths/messages). Every array in a request schema needs a max.
-  - The length issue is fatal: parsing stops, so a parent `.refine`/`.superRefine` never sees the out-of-bounds list. The raw issue carries `fatal: true`; `zodIssueDetails` drops it.
+- **Arrays:** use `boundedArray(element, max, { min?, unique? })`, not `z.array(element).max(n)`. A pre-check reads only the array's `length` before any element is visited: out-of-bounds gives one `too_big`/`too_small` issue at the array's path (`origin: 'array'`, `maximum`/`minimum`, `inclusive: true`; same fields and default message as `z.array().max()`/`.min()`); in-bounds arrays and non-arrays parse exactly like `z.array(element)` (same issue paths/messages). Every array in a request schema needs a max.
+  - The length issue aborts (`continue: false`, stripped by zod from the returned issue): parsing stops, so a parent `.refine`/`.superRefine` never sees the out-of-bounds list.
+  - zod >=4.6.6 also stops at a *leading* `.max()` before reading elements, but not for arrays without a max or after another check (`.refine().max()`), and not for records/objects. `boundedArray` stays required.
+  - **Convention test:** `tests/api/zod-schema-convention.test.ts` fails on `z.array`/`z.set`/`z.map`/`z.tuple` or `.array()` in `src/` outside `zod-validation.ts`, on any zod import other than `import { z } from 'zod'`, and on any `zod/*` subpath (`zod/v3`, `zod/v4`, `zod/compile`, ...).
+  - **Dependency check:** `tests/utils/zod-validation.test.ts` asserts `z.array(z.string()).max(10)` (alone and inside `z.object`) rejects a 10^6-element array with 1 issue and 0 element reads; it fails if zod resolves below 4.6.6.
   - `unique: true` removes duplicates after the length check (notification `events`).
-- **Response:** `details: zodIssueDetails(error)` — first `MAX_VALIDATION_ISSUES` (20) issues, no `fatal` flag, string `received` over 100 chars cut to 100 + `...` (also inside the enum message that repeats it), object/array `received` replaced by its type name (`'object'`, `'array'`), `message` over 500 chars cut to 500 + `...` (schema-built text; the notification events enum message is ~207 chars and stays whole). Don't return `error.errors`/`error.issues` directly. No request schema uses `.strict()` or unions (`keys`/`unionErrors` are not shortened).
+- **Response:** `details: zodIssueDetails(error)` → `ValidationIssueDetail[]`: first `MAX_VALIDATION_ISSUES` (20) issues, each an **allowlist** of `code`, `path`, `message` (over 500 chars cut to 500 + `...`) and the constraint fields `origin`, `minimum`, `maximum`, `inclusive`, `expected`, `format`, `values` (copied only when a string, finite number, boolean or array of those). Never `input` or any other field. zod 4 messages name schema values only (the notification events enum message lists every key and stays whole). Don't return `error.issues` directly.
+  - Codes seen: `invalid_type` (`expected`), `too_big`/`too_small` (`origin`), `invalid_value` (enums; `values`), `invalid_format` (`format`: `url`, `regex`, `datetime`, `guid`), `custom`.
 - **Logging:** `logger.error(msg, { error: errorForLog(error) })` — ZodError → `Validation failed: <n> issue(s) at <path>, <path>, <path>, ...` (paths truncated to 100 chars); other errors → `error.message`. Never log a ZodError's `message`.
-- **Short message field:** `message: error.issues[0]?.message` where a route surfaces one line (Goodreads shelves).
+- **Short message field:** `message: details[0]?.message` (from `zodIssueDetails`, so capped) where a route surfaces one line (Goodreads shelves).
+
+## zod 4 Schema Behaviour (request schemas)
+| Check | Behaviour |
+|---|---|
+| `.datetime()` (API token `expiresAt`) | RFC 3339 with `Z` and seconds: `toISOString()` passes; `T10:20Z`, offsets and date-only → 400 |
+| `.guid()` (admin token `userId`) | any 8-4-4-4-12 hex id (`.uuid()` would require RFC 9562 version/variant digits) |
+| `.url()` (watched author/series `coverArtUrl`) | parseable URL; the stored value is trimmed (tab/LF removed) |
+| string `.min()`/`.max()` | counts code points (an emoji is 1, not 2) |
+| `z.record(z.string(), z.any())` (notification `config`) | key schema required; `[]`, `null`, strings → 400 |
+| `z.number()` | rejects ±Infinity; `.int()` rejects ints above 2^53 |
 
 ## Example
 ```ts
