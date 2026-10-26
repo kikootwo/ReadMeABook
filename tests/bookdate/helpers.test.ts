@@ -840,9 +840,7 @@ describe('BookDate helpers', () => {
 
   it('returns Audnexus details for successful Audible matches', async () => {
     prismaMock.audibleCache.findFirst.mockResolvedValue(null);
-    audibleState.instance.search.mockResolvedValue({
-      results: [{ asin: 'ASIN3', title: 'Title', author: 'Author' }],
-    });
+    audibleState.instance.search.mockResolvedValue({ results: [{ asin: 'ASIN3', title: 'Title', author: 'Author' }] });
     audibleState.instance.getAudiobookDetails.mockResolvedValue({
       asin: 'ASIN3',
       title: 'Title',
@@ -856,6 +854,8 @@ describe('BookDate helpers', () => {
     const { matchToAudnexus } = await import('@/lib/bookdate/helpers');
     const result = await matchToAudnexus('Title', 'Author');
 
+    // Matching never reads the series, so it skips the catalog series fill
+    expect(audibleState.instance.getAudiobookDetails).toHaveBeenCalledWith('ASIN3', { fillSeries: false });
     expect(result).toEqual({
       asin: 'ASIN3',
       title: 'Title',

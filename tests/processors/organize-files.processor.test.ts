@@ -130,7 +130,7 @@ describe('processOrganizeFiles', () => {
     expect(result.success).toBe(true);
     expect(libraryServiceMock.triggerLibraryScan).toHaveBeenCalledWith('lib-1');
     // Missing series data goes to the (mocked) Audnexus lookup, never the real network.
-    expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledWith('ASIN1');
+    expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledWith('ASIN1', { fillSeries: true });
   });
 
   it('skips filesystem scan when disabled', async () => {
@@ -904,7 +904,7 @@ describe('processOrganizeFiles', () => {
 
       const { metadata } = await runOrganize();
 
-      expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledWith('ASIN-TAGS');
+      expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledWith('ASIN-TAGS', { fillSeries: false });
       expect(metadata.description).toBe('Stored short blurb.');
       expect(metadata.genres).toBeUndefined();
     });

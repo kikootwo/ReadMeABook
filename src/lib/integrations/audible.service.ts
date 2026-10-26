@@ -26,6 +26,15 @@ import {
 import { parseRuntime as parseRuntimeUtil } from '../utils/parse-runtime';
 import { extractAllNarrators } from '../utils/extract-narrator';
 import { stripHtml } from '../utils/strip-html';
+import {
+  SeriesFill,
+  catalogDeadline,
+  pickCatalogSeries,
+  DETAILS_FALLBACK_PROFILE,
+  SERIES_FILL_PROFILE,
+  type CatalogFetchProfile,
+  type CatalogSeriesEntry,
+} from './audible-series-fill';
 
 const logger = RMABLogger.create('Audible');
 
@@ -88,12 +97,6 @@ interface CatalogProductNarrator {
   name: string;
 }
 
-interface CatalogProductSeries {
-  asin?: string;
-  title?: string;
-  sequence?: string;
-}
-
 interface CatalogProductLadderNode {
   name: string;
 }
@@ -122,7 +125,7 @@ interface CatalogProduct {
     };
   };
   category_ladders?: CatalogProductLadder[];
-  series?: CatalogProductSeries[];
+  series?: CatalogSeriesEntry[];
 }
 
 interface CatalogProductsResponse {
@@ -168,23 +171,7 @@ function mapCatalogProduct(product: CatalogProduct): AudibleAudiobook {
   const primaryGenres =
     primaryGenreNames.length > 0 ? [...new Set(primaryGenreNames)] : undefined;
 
-  let series: string | undefined;
-  let seriesPart: string | undefined;
-  let seriesAsin: string | undefined;
-
-  if (product.series && product.series.length > 0) {
-    const preferred =
-      product.series.find((s) => s.sequence && s.sequence.trim() !== '') ??
-      product.series[0];
-
-    series = preferred.title ?? undefined;
-    seriesAsin = preferred.asin ?? undefined;
-
-    if (preferred.sequence && preferred.sequence.trim() !== '') {
-      const digitMatch = preferred.sequence.match(/\d+(?:\.\d+)?/);
-      seriesPart = digitMatch ? digitMatch[0] : preferred.sequence;
-    }
-  }
+  const { series, seriesPart, seriesAsin } = pickCatalogSeries(product.series);
 
   return {
     asin: product.asin,
@@ -229,6 +216,7 @@ export class AudibleService {
   private initialized: boolean = false;
   private sessionUserAgent: string = '';
   private pacer: AdaptivePacer = new AdaptivePacer();
+  private seriesFill = new SeriesFill(logger);
 
   public getBaseUrl(): string {
     return this.baseUrl;
@@ -658,7 +646,8 @@ export class AudibleService {
     }
   }
 
-  async getAudiobookDetails(asin: string): Promise<AudibleAudiobook | null> {
+  /** `fillSeries: false` for callers that never read the series (skips the catalog series fill). */
+  async getAudiobookDetails(asin: string, { fillSeries = true }: { fillSeries?: boolean } = {}): Promise<AudibleAudiobook | null> {
     await this.initialize();
 
     try {
@@ -667,7 +656,8 @@ export class AudibleService {
       const audnexusData = await this.fetchFromAudnexus(asin);
       if (audnexusData) {
         logger.info(` Successfully fetched from Audnexus for "${audnexusData.title}"`);
-        return audnexusData;
+        if (!fillSeries) return audnexusData;
+        return await this.seriesFill.fill(audnexusData, this.region, () => this.fetchAudibleDetailsFromApi(asin, SERIES_FILL_PROFILE));
       }
 
       logger.info(` Audnexus failed, falling back to Audible catalog API...`);
@@ -750,12 +740,15 @@ export class AudibleService {
     }
   }
 
-  private async fetchAudibleDetailsFromApi(asin: string): Promise<AudibleAudiobook | null> {
+  private async fetchAudibleDetailsFromApi(
+    asin: string,
+    profile: CatalogFetchProfile = DETAILS_FALLBACK_PROFILE,
+  ): Promise<AudibleAudiobook | null> {
     try {
       const { data: response } = await this.fetchWithRetry(
         `/1.0/catalog/products/${asin}`,
-        { params: { response_groups: CATALOG_RESPONSE_GROUPS } },
-        5,
+        { params: { response_groups: CATALOG_RESPONSE_GROUPS }, ...catalogDeadline(profile) },
+        profile.maxRetries,
         this.apiClient,
       );
 
@@ -771,6 +764,7 @@ export class AudibleService {
 
       return mapCatalogProduct(product);
     } catch (error) {
+      if (profile.onFailure === 'throw') throw error;
       logger.error(`Catalog API details fetch failed for ${asin}`, {
         error: error instanceof Error ? error.message : String(error),
       });

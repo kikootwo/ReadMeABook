@@ -44,6 +44,17 @@ describe('organize tag details', () => {
       expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledTimes(1);
     });
 
+    it.each([
+      ['fills the series by default', undefined, { fillSeries: true }],
+      ['skips the series fill when the series is known', { fillSeries: false }, { fillSeries: false }],
+    ])('%s', async (_label, options, expected) => {
+      audibleServiceMock.getAudiobookDetails.mockResolvedValue(null);
+
+      await createAudibleDetailsLoader('B01', options)();
+
+      expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledWith('B01', expected);
+    });
+
     it('resolves to null without an ASIN and never calls Audible', async () => {
       await expect(createAudibleDetailsLoader(null)()).resolves.toBeNull();
       expect(audibleServiceMock.getAudiobookDetails).not.toHaveBeenCalled();

@@ -135,7 +135,7 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     let seriesPart = audiobook.seriesPart || undefined;
 
     // At most one Audible details lookup per import, shared with the metadata tags below
-    const loadAudibleDetails = createAudibleDetailsLoader(audiobook.audibleAsin);
+    const loadAudibleDetails = createAudibleDetailsLoader(audiobook.audibleAsin, { fillSeries: !series });
 
     if (audiobook.audibleAsin && !series) {
       try {
@@ -148,12 +148,12 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
           if (audnexusData.series) {
             series = audnexusData.series;
             updates.series = series;
-            logger.info(`Got series "${series}" from Audnexus`);
+            logger.info(`Got series "${series}" from Audible`);
           }
           if (audnexusData.seriesPart) {
             seriesPart = audnexusData.seriesPart;
             updates.seriesPart = seriesPart;
-            logger.info(`Got seriesPart "${seriesPart}" from Audnexus`);
+            logger.info(`Got seriesPart "${seriesPart}" from Audible`);
           }
           if (audnexusData.seriesAsin) {
             updates.seriesAsin = audnexusData.seriesAsin;
@@ -756,12 +756,12 @@ async function processEbookOrganization(
         if (audnexusData.series) {
           series = audnexusData.series;
           updates.series = series;
-          logger.info(`Got series "${series}" from Audnexus`);
+          logger.info(`Got series "${series}" from Audible`);
         }
         if (audnexusData.seriesPart) {
           seriesPart = audnexusData.seriesPart;
           updates.seriesPart = seriesPart;
-          logger.info(`Got seriesPart "${seriesPart}" from Audnexus`);
+          logger.info(`Got seriesPart "${seriesPart}" from Audible`);
         }
         if (audnexusData.seriesAsin) {
           updates.seriesAsin = audnexusData.seriesAsin;
