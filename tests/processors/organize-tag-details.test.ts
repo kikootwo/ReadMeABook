@@ -120,7 +120,7 @@ describe('organize tag details', () => {
       expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('publisher=none, subtitle=none, language=none'));
     });
 
-    it('shows at most 100 characters of a value in the job log', async () => {
+    it('shortens a long value to 100 characters plus "…" in the job log', async () => {
       const load = vi.fn().mockResolvedValue({ subtitle: 's'.repeat(5000) });
 
       await resolveTagDetails(null, load, true, logger);

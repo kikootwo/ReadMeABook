@@ -128,7 +128,7 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 - Description: Audible summary (Audnexus `summary`) → stored `Audiobook.description` fallback (client text: bounded by `truncateRawText`, then `stripHtml` like the lookup)
 - Started right after the switch read, awaited just before `organize()` (setup reads run meanwhile; a no-op handler keeps a rejection handled if setup throws first)
 - A failed ffmpeg run reports `describeFfmpegFailure` (stderr tail, never the argv, so no description in job logs)
-- Job log "Metadata tag details: description=<n> chars, genres=…, publisher=…, subtitle=…, language=…": the sanitized values as written ("English"), at most 100 characters each
+- Job log "Metadata tag details: description=<n> chars, genres=…, publisher=…, subtitle=…, language=…": publisher, subtitle and language sanitized as written ("English"), a value over 100 characters shortened to 100 plus "…"; genres as looked up
 - Lookup failure or timeout is non-fatal (warning): stored description, no genres/publisher/subtitle/language (an MP4's remux then also drops the source's freeform tags; MP3/FLAC keep theirs)
 - Genres/description/publisher/subtitle/language are tags only (not path template variables); ebooks unchanged
 

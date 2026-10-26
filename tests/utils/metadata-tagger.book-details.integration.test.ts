@@ -107,6 +107,9 @@ describe.skipIf(!available)('publisher, subtitle, language (real ffmpeg)', () =>
     const result = await tagAudioFileMetadata(src, { ...BOOK, asin: 'B0TESTASIN' });
     expect(result.success).toBe(true);
     const tagged = result.taggedFilePath!;
+    // Before the ASIN step: the remux carried none of the source's three over
+    for (const key of ['publisher', 'subtitle', 'language']) expect(await valuesOf(tagged, key), `${key} before the ASIN step`).toEqual([]);
+    for (const name of ['PUBLISHER', 'subtitle', 'LANGUAGE']) expect(countFreeform(tagged, name), `${name} item before the ASIN step`).toBe(0);
     expect(await addMp4FreeformTags(tagged, '.m4b', { asin: 'B0TESTASIN', ...DETAILS })).toEqual({ written: true });
 
     expect(await valuesOf(tagged, 'asin')).toEqual(['B0TESTASIN']);
