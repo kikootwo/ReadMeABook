@@ -4,7 +4,7 @@
  *
  * Input-bounds helpers shared by API route schemas and their error handling:
  * - boundedArray: checks an array's length before any element is parsed (optionally removes duplicates)
- * - zodIssueDetails: the capped issue list returned to the client as `details` (long values shortened)
+ * - zodIssueDetails: the capped issue list returned to the client as `details` (allowlisted fields only)
  * - errorForLog: a short log string (ZodError: issue count + first paths)
  */
 
@@ -19,14 +19,21 @@ const LOGGED_ISSUE_PATHS = 3;
 /** Max characters of one issue path in a log line. */
 const MAX_LOGGED_PATH_LENGTH = 100;
 
-/** Max characters of an issue's `received` string in `details`. */
-const MAX_DETAIL_RECEIVED_LENGTH = 100;
+/** Max characters of an issue's `message` in `details` (messages are schema-built text). */
+const MAX_DETAIL_MESSAGE_LENGTH = 500;
 
 /**
- * Max characters of an issue's `message` in `details`. A shortened `received` is also shortened
- * where the message repeats it (enum messages), so this only bounds schema-built text.
+ * Issue fields copied into `details` besides code/path/message. They describe the schema's
+ * constraint, never the request value; any other field (e.g. `input`) is left out.
  */
-const MAX_DETAIL_MESSAGE_LENGTH = 500;
+const DETAIL_CONSTRAINT_KEYS = ['origin', 'minimum', 'maximum', 'inclusive', 'expected', 'format', 'values'] as const;
+
+/** One issue as returned to the client in `details`. */
+export type ValidationIssueDetail = {
+  code: string;
+  path: PropertyKey[];
+  message: string;
+} & Partial<Record<(typeof DETAIL_CONSTRAINT_KEYS)[number], unknown>>;
 
 export interface BoundedArrayOptions {
   /** Minimum length, checked together with the maximum before element parsing. */
@@ -37,25 +44,25 @@ export interface BoundedArrayOptions {
 
 /**
  * Array schema whose length bounds are checked before any element is visited.
- * An out-of-bounds array yields one length issue (same code, shape and default
+ * An out-of-bounds array yields one length issue (same code, fields and default
  * message as `z.array().max()` / `.min()`) and no element issues; an in-bounds
  * array or a non-array parses exactly like `z.array(element)`.
- * The length issue is fatal, so refinements on a parent schema don't run on the
- * out-of-bounds input; zodIssueDetails drops the `fatal` flag from the returned issue.
+ * The length issue aborts parsing, so refinements on a parent schema don't run on
+ * the out-of-bounds input.
  */
-export function boundedArray<T extends z.ZodTypeAny>(
+export function boundedArray<T extends z.ZodType>(
   element: T,
   max: number,
   options: BoundedArrayOptions = {}
 ) {
   const { min, unique } = options;
-  // Reads only `length`; an aborted result stops the pipe before z.array runs
+  // Reads only `length`; an aborting issue stops the pipe before z.array runs
   const lengthCheck = z.unknown().superRefine((value, ctx) => {
     if (!Array.isArray(value)) return;
     if (min !== undefined && value.length < min) {
-      ctx.addIssue({ code: z.ZodIssueCode.too_small, minimum: min, type: 'array', inclusive: true, exact: false, fatal: true });
+      ctx.addIssue({ code: 'too_small', origin: 'array', minimum: min, inclusive: true, continue: false });
     } else if (value.length > max) {
-      ctx.addIssue({ code: z.ZodIssueCode.too_big, maximum: max, type: 'array', inclusive: true, exact: false, fatal: true });
+      ctx.addIssue({ code: 'too_big', origin: 'array', maximum: max, inclusive: true, continue: false });
     }
   });
   const list = z.array(element);
@@ -66,30 +73,32 @@ function shorten(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
-/** One issue as returned to the client: no `fatal` flag, long `received` (and its echo in `message`) shortened. */
-function detailOf(issue: z.ZodIssue): z.ZodIssue {
-  const detail = { ...issue } as z.ZodIssue & { fatal?: boolean; received?: unknown };
-  delete detail.fatal;
-  if ('received' in detail) {
-    const received = detail.received;
-    if (typeof received === 'string') {
-      const short = shorten(received, MAX_DETAIL_RECEIVED_LENGTH);
-      if (short !== received) detail.message = detail.message.split(received).join(short);
-      detail.received = short;
-    } else if (received !== null && typeof received === 'object') {
-      detail.received = z.getParsedType(received);
-    }
+/** A value that JSON can carry as-is: a string, finite number or boolean (or an array of them). */
+function isPlainValue(value: unknown): boolean {
+  if (Array.isArray(value)) return value.every(isPlainValue);
+  return typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value));
+}
+
+/** One issue as returned to the client: code, path, capped message and the constraint fields only. */
+function detailOf(issue: z.core.$ZodIssue): ValidationIssueDetail {
+  const detail: ValidationIssueDetail = {
+    code: String(issue.code),
+    path: [...issue.path],
+    message: shorten(String(issue.message), MAX_DETAIL_MESSAGE_LENGTH),
+  };
+  const source = issue as unknown as Record<string, unknown>;
+  for (const key of DETAIL_CONSTRAINT_KEYS) {
+    if (key in source && isPlainValue(source[key])) detail[key] = source[key];
   }
-  detail.message = shorten(detail.message, MAX_DETAIL_MESSAGE_LENGTH);
   return detail;
 }
 
 /**
- * The issues returned to the client as `details`: the first MAX_VALIDATION_ISSUES, without the
- * internal `fatal` flag, with long `received` strings (also where the message repeats them) and
- * very long messages shortened, and object/array `received` values replaced by their type name.
+ * The issues returned to the client as `details`: the first MAX_VALIDATION_ISSUES, each with its
+ * code, path, message (very long messages shortened) and the schema-constraint fields listed in
+ * DETAIL_CONSTRAINT_KEYS. Fields that could carry request data (e.g. `input`) are never included.
  */
-export function zodIssueDetails(error: z.ZodError): z.ZodIssue[] {
+export function zodIssueDetails(error: z.ZodError): ValidationIssueDetail[] {
   return error.issues.slice(0, MAX_VALIDATION_ISSUES).map(detailOf);
 }
 

@@ -19,7 +19,7 @@ const logger = RMABLogger.create('API.Admin.ApiTokens');
 const CreateTokenSchema = z.object({
   name: z.string().min(1).max(100),
   expiresAt: z.string().datetime().nullable().optional(),
-  userId: z.string().uuid().optional(), // Admin can specify which user the token acts as
+  userId: z.string().guid().optional(), // Admin can specify which user the token acts as
   role: z.enum(['admin', 'user']).optional(), // Accepted for compatibility, but cannot differ from target user role
 });
 

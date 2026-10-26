@@ -10,7 +10,7 @@ import { GOODREADS_RSS_URL_ERROR, toGoodreadsRssUrl } from './goodreads-rss-url'
 export const goodreadsRssUrlSchema = z.string().transform((value, ctx) => {
   const feedUrl = toGoodreadsRssUrl(value);
   if (!feedUrl) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: GOODREADS_RSS_URL_ERROR });
+    ctx.addIssue({ code: 'custom', message: GOODREADS_RSS_URL_ERROR });
     return z.NEVER;
   }
   return feedUrl;

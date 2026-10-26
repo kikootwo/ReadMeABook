@@ -18,7 +18,7 @@ const logger = RMABLogger.create('API.Admin.Notifications.Test');
 const TestNotificationSchema = z.object({
   backendId: z.string().optional(),
   type: z.string().refine((val) => getRegisteredProviderTypes().includes(val), { message: 'Unsupported notification provider type' }).optional(),
-  config: z.record(z.any()).optional(),
+  config: z.record(z.string(), z.any()).optional(),
 });
 
 /**

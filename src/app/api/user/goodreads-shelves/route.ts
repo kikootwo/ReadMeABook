@@ -165,8 +165,9 @@ export async function POST(request: NextRequest) {
       logger.error('Failed to add shelf', { error: errorForLog(error) });
 
       if (error instanceof z.ZodError) {
+        const details = zodIssueDetails(error);
         return NextResponse.json(
-          { error: 'ValidationError', message: error.issues[0]?.message, details: zodIssueDetails(error) },
+          { error: 'ValidationError', message: details[0]?.message, details },
           { status: 400 }
         );
       }

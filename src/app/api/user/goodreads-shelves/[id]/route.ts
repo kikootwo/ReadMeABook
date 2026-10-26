@@ -128,8 +128,9 @@ export async function PATCH(
       return NextResponse.json({ success: true, shelf: updated });
     } catch (error) {
       if (error instanceof z.ZodError) {
+        const details = zodIssueDetails(error);
         return NextResponse.json(
-          { error: 'ValidationError', message: error.issues[0]?.message, details: zodIssueDetails(error) },
+          { error: 'ValidationError', message: details[0]?.message, details },
           { status: 400 }
         );
       }

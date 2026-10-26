@@ -18,7 +18,7 @@ const logger = RMABLogger.create('API.Admin.Notifications');
 const CreateBackendSchema = z.object({
   type: z.string().refine((val) => getRegisteredProviderTypes().includes(val), { message: 'Unsupported notification provider type' }),
   name: z.string().min(1),
-  config: z.record(z.any()),
+  config: z.record(z.string(), z.any()),
   // At most one entry per event type; duplicates are removed
   events: boundedArray(z.enum(NOTIFICATION_EVENT_KEYS), NOTIFICATION_EVENT_KEYS.length, { min: 1, unique: true }),
   enabled: z.boolean().default(true),

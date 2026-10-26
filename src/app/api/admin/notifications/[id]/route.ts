@@ -17,7 +17,7 @@ const logger = RMABLogger.create('API.Admin.Notifications.Id');
 
 const UpdateBackendSchema = z.object({
   name: z.string().min(1).optional(),
-  config: z.record(z.any()).optional(),
+  config: z.record(z.string(), z.any()).optional(),
   // At most one entry per event type; duplicates are removed
   events: boundedArray(z.enum(NOTIFICATION_EVENT_KEYS), NOTIFICATION_EVENT_KEYS.length, { min: 1, unique: true }).optional(),
   enabled: z.boolean().optional(),
