@@ -79,6 +79,10 @@ export function BrowsePhase({
   onRetry,
 }: BrowsePhaseProps) {
   const hasSelection = checkedFiles.size > 0;
+  // A multi-disc book folder lists its disc folders' files as `Disc 1/01.m4a`
+  const discCount = new Set(
+    currentAudioFiles.filter((f) => f.name.includes('/')).map((f) => f.name.split('/')[0])
+  ).size;
   const totalSize = currentAudioFiles.reduce((sum, f) => sum + f.size, 0);
   const checkedSize = hasSelection
     ? currentAudioFiles.filter((f) => checkedFiles.has(f.name)).reduce((sum, f) => sum + f.size, 0)
@@ -268,7 +272,8 @@ export function BrowsePhase({
             ) : (
               <>
                 <span className="font-medium text-gray-900 dark:text-gray-100">{currentAudioFiles.length}</span>
-                {' '}audio file{currentAudioFiles.length !== 1 ? 's' : ''} in this folder
+                {' '}audio file{currentAudioFiles.length !== 1 ? 's' : ''}
+                {discCount > 1 ? ` in ${discCount} discs` : ' in this folder'}
               </>
             )}
             {checkedSize > 0 && (

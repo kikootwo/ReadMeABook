@@ -11,9 +11,9 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
-import { AUDIO_EXTENSIONS } from '@/lib/constants/audio-formats';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { resolveManualSelection } from '@/lib/utils/disc-layout-fs';
 
 const logger = RMABLogger.create('API.Admin.ManualImport');
 
@@ -22,31 +22,6 @@ const ACTIVE_STATUSES = ['searching', 'downloading', 'processing', 'awaiting_imp
 
 /** Statuses that can be recycled for a new manual import. */
 const RECYCLABLE_STATUSES = ['failed', 'warn', 'cancelled', 'denied', 'pending', 'awaiting_search', 'awaiting_approval'];
-
-/**
- * Check if a directory contains at least one audio file (immediate children only).
- */
-async function hasAudioFiles(dirPath: string): Promise<{ found: boolean; count: number }> {
-  const fs = await import('fs/promises');
-  const pathModule = await import('path');
-
-  let count = 0;
-  try {
-    const children = await fs.readdir(dirPath, { withFileTypes: true });
-    for (const child of children) {
-      if (child.isFile()) {
-        const ext = pathModule.extname(child.name).toLowerCase();
-        if ((AUDIO_EXTENSIONS as readonly string[]).includes(ext)) {
-          count++;
-        }
-      }
-    }
-  } catch {
-    /* directory not readable */
-  }
-
-  return { found: count > 0, count };
-}
 
 export async function POST(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
@@ -139,53 +114,13 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // Verify selected files exist and are audio files, or fall back to folder scan
-        let audioFileCount: number;
-        const validatedFiles: string[] = [];
-
-        if (selectedFiles && selectedFiles.length > 0) {
-          for (const fileName of selectedFiles as string[]) {
-            // Prevent path traversal
-            if (fileName.includes('/') || fileName.includes('\\') || fileName === '..' || fileName === '.') {
-              return NextResponse.json(
-                { error: `Invalid file name: ${fileName}` },
-                { status: 400 }
-              );
-            }
-            const ext = pathModule.extname(fileName).toLowerCase();
-            if (!(AUDIO_EXTENSIONS as readonly string[]).includes(ext)) {
-              return NextResponse.json(
-                { error: `Not an audio file: ${fileName}` },
-                { status: 400 }
-              );
-            }
-            try {
-              const fileStat = await fs.stat(pathModule.join(normalizedPath, fileName));
-              if (!fileStat.isFile()) {
-                return NextResponse.json(
-                  { error: `Not a file: ${fileName}` },
-                  { status: 400 }
-                );
-              }
-              validatedFiles.push(fileName);
-            } catch {
-              return NextResponse.json(
-                { error: `File not found: ${fileName}` },
-                { status: 404 }
-              );
-            }
-          }
-          audioFileCount = validatedFiles.length;
-        } else {
-          const audioCheck = await hasAudioFiles(normalizedPath);
-          if (!audioCheck.found) {
-            return NextResponse.json(
-              { error: 'No audio files found in the selected directory' },
-              { status: 400 }
-            );
-          }
-          audioFileCount = audioCheck.count;
+        // Verify the selected files (single files, or disc-folder files of a multi-disc
+        // book), else the folder's own audio, else its disc folders' audio
+        const selection = await resolveManualSelection(normalizedPath, selectedFiles, allowedRoots);
+        if (!selection.ok) {
+          return NextResponse.json({ error: selection.error }, { status: selection.status });
         }
+        const { files: validatedFiles, audioFileCount } = selection;
 
         // Resolve audiobook by ASIN if audiobookId not provided
         if (!audiobookId && asin) {

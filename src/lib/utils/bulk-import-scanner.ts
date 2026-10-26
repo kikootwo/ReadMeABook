@@ -12,6 +12,8 @@ import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
 import { AUDIO_EXTENSIONS } from '../constants/audio-formats';
+import { isGenericFolderName } from './disc-layout';
+import { foldDiscFolders } from './disc-fold';
 
 // ffprobe runs via execFile with an argv array (never a shell): paths are untrusted.
 const execFilePromise = promisify(execFile);
@@ -21,12 +23,6 @@ export const MAX_SCAN_DEPTH = 10;
 
 /** Maximum concurrent ffprobe calls for metadata reads. */
 const METADATA_CONCURRENCY = 10;
-
-/**
- * Folder names matching this pattern are considered generic and should not be
- * used as Audible search terms (e.g. "CD1", "Disc 2", "Part 3", "Volume 1").
- */
-const GENERIC_FOLDER_NAME_RE = /^(cd|disc|disk|part|vol(ume)?)\s*\d+$/i;
 
 /** Metadata extracted from an audio file via ffprobe. */
 export interface AudioFileMetadata {
@@ -207,7 +203,7 @@ export function buildSearchTerm(
   }
 
   // Fallback 1: folder name (if provided and not generic)
-  if (folderName && !GENERIC_FOLDER_NAME_RE.test(folderName.trim())) {
+  if (folderName && !isGenericFolderName(folderName)) {
     const cleaned = cleanSearchString(folderName);
     if (cleaned) {
       return { searchTerm: cleaned, source: 'folder_name' };
@@ -511,18 +507,20 @@ function findCommonParent(paths: string[]): string {
  * Scanning ALWAYS recurses into subfolders regardless of whether the current
  * folder has audio files.
  *
- * After the full walk, discoveries sharing the same grouping key across
- * different folders (e.g., CD1/ and CD2/) are merged.
+ * After the full walk, disc folders of one book folder (CD1/, CD2/) fold into
+ * it, then discoveries sharing a grouping key across folders are merged.
  *
  * @param rootPath - The root directory to scan
  * @param onProgress - Optional callback for progress updates
  * @param abortSignal - Optional AbortSignal to cancel the scan
+ * @param protectedRoots - Configured roots that disc folders never fold into
  * @returns Array of discovered audiobook folders with metadata
  */
 export async function discoverAudiobooks(
   rootPath: string,
   onProgress?: (progress: ScanProgress) => void,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  protectedRoots: readonly string[] = []
 ): Promise<DiscoveredAudiobook[]> {
   const results: DiscoveredAudiobook[] = [];
   let foldersScanned = 0;
@@ -619,6 +617,7 @@ export async function discoverAudiobooks(
 
   await walk(rootPath, 0);
 
-  // Post-scan: merge discoveries with the same grouping key across folders
-  return deduplicateDiscoveries(results);
+  // Post-scan: fold disc folders into their book folder, then merge same-key discoveries
+  const fold = { rootPath: rootPath.replace(/\\/g, '/'), protectedRoots, buildSearchTerm, extractAsin: extractAsinFromString };
+  return deduplicateDiscoveries(await foldDiscFolders(results, fold));
 }

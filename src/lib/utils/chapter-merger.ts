@@ -294,13 +294,10 @@ function detectBookTitle(files: { titleMetadata?: string }[]): string | null {
 }
 
 /**
- * Analyze and order chapter files
+ * Analyze and order chapter files; `keepOrder` uses the given order (a multi-disc import's)
  * Returns files in correct order with metadata populated
  */
-export async function analyzeChapterFiles(
-  filePaths: string[],
-  logger?: RMABLogger
-): Promise<ChapterFile[]> {
+export async function analyzeChapterFiles(filePaths: string[], logger?: RMABLogger, keepOrder = false): Promise<ChapterFile[]> {
   await logger?.info(`Analyzing ${filePaths.length} chapter files...`);
 
   // Probe all files in parallel
@@ -384,11 +381,9 @@ export async function analyzeChapterFiles(
     await logger?.info(`Chapter ordering: ${missingCount} file(s) missing track numbers - using filename order`);
   }
 
-  // Use the determined order
-  const orderedFiles = useMetadataOrder ? metadataOrder : filenameOrder;
-
-  // Log ordering decision summary
-  await logger?.info(`Using ${useMetadataOrder ? 'metadata' : 'filename'}-based ordering for ${orderedFiles.length} chapters`);
+  // Use the determined order (or the caller's, unchanged)
+  const orderedFiles = keepOrder ? files : useMetadataOrder ? metadataOrder : filenameOrder;
+  await logger?.info(`Using ${keepOrder ? 'disc-by-disc' : useMetadataOrder ? 'metadata' : 'filename'}-based ordering for ${orderedFiles.length} chapters`);
 
   // Compute chapter titles
   for (let i = 0; i < orderedFiles.length; i++) {

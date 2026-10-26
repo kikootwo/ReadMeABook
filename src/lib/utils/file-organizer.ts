@@ -13,6 +13,7 @@ import { hasCover, publishCover, type CoverPlacement } from './cover-placement';
 import { placeAudio, placeFile, isVerifiedStatus, type AudioPlacement } from './organize-copy';
 import { walkFiles, ORGANIZER_EBOOK_FORMATS, type ImportInventory, type PlacementRecord } from './import-inventory';
 import { getMediaDir } from './media-dir';
+import { orderDiscImport } from './disc-layout-fs';
 import { probeStreamDurationMs } from './audio-duration';
 import { MAX_COVER_ART_BYTES, MAX_COVER_ART_REDIRECTS, cachedThumbnailPath, isAllowedRemoteCoverUrl, isLibraryCoverSource } from './cover-art-url';
 
@@ -66,6 +67,8 @@ export interface PlacementOptions {
   compareExisting?: boolean;
   /** The caller's read of `metadata_tagging_enabled`; read here when omitted. */
   metadataTaggingEnabled?: boolean;
+  /** Manual/Bulk Import: stop a multi-disc import whose source is its own target folder. */
+  stopInPlaceDiscLayout?: boolean;
 }
 
 export interface EbookOrganizationResult {
@@ -149,10 +152,10 @@ export class FileOrganizer {
         await logger?.warn('Some folders in the source could not be read; the source will not be removed');
       }
 
-      // Filter to only selected files if specified
+      // Filter to only selected files if specified (callers name them with '/' separators)
       if (selectedFiles && selectedFiles.length > 0) {
         const selectedSet = new Set(selectedFiles);
-        audioFiles = audioFiles.filter((f) => selectedSet.has(f));
+        audioFiles = audioFiles.filter((f) => selectedSet.has(f.split(path.sep).join('/')));
         await logger?.info(`Filtered to ${audioFiles.length} selected files`);
       }
 
@@ -161,6 +164,13 @@ export class FileOrganizer {
       }
 
       await logger?.info(`Found ${audioFiles.length} audio files`);
+
+      const targetPath = this.buildTargetPath(this.mediaDir, template, audiobook.author, audiobook.title,
+        audiobook.narrator, audiobook.asin, audiobook.year, audiobook.series, audiobook.seriesPart);
+      // Multi-disc sources import disc by disc (merge, copy and rename numbering); checked before anything is written
+      const discOrder = isFile ? null : await orderDiscImport(downloadPath, audioFiles, {
+        targetPath, stopInPlace: placement?.stopInPlaceDiscLayout, logger: logger ?? undefined });
+      if (discOrder) audioFiles = discOrder;
 
       // Determine base path for source files
       const baseSourcePath = isFile ? path.dirname(downloadPath) : downloadPath;
@@ -222,7 +232,7 @@ export class FileOrganizer {
                 }
 
                 // Analyze and order chapter files
-                const chapters = await analyzeChapterFiles(sourceFilePaths, logger ?? undefined);
+                const chapters = await analyzeChapterFiles(sourceFilePaths, logger ?? undefined, discOrder !== null);
 
                 // Validate that we have valid ordering
                 if (chapters.length === 0) {
@@ -355,19 +365,6 @@ export class FileOrganizer {
         result.errors.push(`Metadata tagging failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
         // Don't fail the whole operation if metadata tagging fails - continue with copying files
       }
-
-      // Build target directory
-      const targetPath = this.buildTargetPath(
-        this.mediaDir,
-        template,
-        audiobook.author,
-        audiobook.title,
-        audiobook.narrator,
-        audiobook.asin,
-        audiobook.year,
-        audiobook.series,
-        audiobook.seriesPart
-      );
 
       await logger?.info(`Target path: ${targetPath}`);
 
