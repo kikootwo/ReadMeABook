@@ -38,7 +38,7 @@ import {
 
 const logger = RMABLogger.create('Audible');
 
-const AUDIBLE_PAGE_SIZE = 50;
+export const AUDIBLE_PAGE_SIZE = 50;
 
 const CATALOG_RESPONSE_GROUPS =
   'contributors,product_desc,product_attrs,product_extended_attrs,media,rating,series,category_ladders,product_details';

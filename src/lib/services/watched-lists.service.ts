@@ -13,7 +13,7 @@ import { AudibleAudiobook } from '@/lib/integrations/audible.service';
 import { scrapeSeriesPage } from '@/lib/integrations/audible-series';
 import { createRequestForUser } from '@/lib/services/request-creator.service';
 import { getSiblingAsins } from '@/lib/services/works.service';
-import { booksForWatch, dedupeAndPersist, scanAuthorLegs } from '@/lib/services/watched-lists-releases';
+import { booksForWatch, dedupeAndPersist, delay, scanAuthorLegs } from '@/lib/services/watched-lists-releases';
 import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('WatchedLists');
@@ -164,9 +164,12 @@ async function processSeriesForUsers(
   }
 
   stats.booksFound += allBooks.length;
+  if (hasMore && allBooks.length >= MAX_BOOKS_PER_SERIES && subscriptions.some((s) => s.newReleasesSince != null)) {
+    log.warn(`Series "${title}" has more than ${MAX_BOOKS_PER_SERIES} books; only the first ${MAX_BOOKS_PER_SERIES} in series order are checked, so new-only watches may miss its newest books`);
+  }
 
   // Deduplicate (dedup groups are persisted fire-and-forget)
-  const dedupedBooks = dedupeAndPersist(allBooks);
+  const dedupedBooks = dedupeAndPersist(allBooks).books;
 
   // For each user watching this series, create requests (new-only watches: released since their cutoff)
   for (const subscription of subscriptions) {
@@ -372,8 +375,4 @@ async function getOwnedAsins(asins: string[]): Promise<Set<string>> {
   }
 
   return owned;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }

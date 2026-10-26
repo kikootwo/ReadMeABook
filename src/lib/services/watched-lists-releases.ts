@@ -9,7 +9,7 @@
  * - scanAuthorLegs(): runs the scans an author's watchers need and feeds each watcher its own.
  */
 
-import { getAudibleService, AudibleAudiobook, AuthorBooksResult } from '@/lib/integrations/audible.service';
+import { getAudibleService, AudibleAudiobook, AuthorBooksResult, AUDIBLE_PAGE_SIZE } from '@/lib/integrations/audible.service';
 import { deduplicateAndCollectGroups } from '@/lib/utils/deduplicate-audiobooks';
 import { persistDedupGroups } from '@/lib/services/works.service';
 import { toReleaseDay } from '@/lib/utils/release-date';
@@ -19,9 +19,6 @@ import type { RMABLogger } from '@/lib/utils/logger';
 /** Max author catalog pages per scan */
 export const MAX_AUTHOR_PAGES = 4;
 
-/** Catalog API page size used by searchByAuthorAsin */
-const AUTHOR_PAGE_SIZE = 50;
-
 /** Delay between author catalog pages (ms) */
 const PAGE_DELAY_MS = 1000;
 
@@ -29,14 +26,20 @@ interface Watch {
   newReleasesSince?: Date | null;
 }
 
-/** Dedupe a scraped list and persist its dedup groups (fire-and-forget). */
-export function dedupeAndPersist(books: AudibleAudiobook[]): AudibleAudiobook[] {
-  if (books.length === 0) return [];
+/**
+ * Dedupe a scraped list. Its dedup groups are persisted in the background once `after` settles,
+ * so two lists of the same author never write the same works at the same time.
+ */
+export function dedupeAndPersist(
+  books: AudibleAudiobook[],
+  after: Promise<void> = Promise.resolve()
+): { books: AudibleAudiobook[]; persisted: Promise<void> } {
+  if (books.length === 0) return { books: [], persisted: after };
   const { books: deduped, groups } = deduplicateAndCollectGroups(books);
-  if (groups.length > 0) {
-    persistDedupGroups(groups).catch(() => {});
-  }
-  return deduped;
+  const persisted = groups.length > 0
+    ? after.then(() => persistDedupGroups(groups)).catch(() => {})
+    : after;
+  return { books: deduped, persisted };
 }
 
 /**
@@ -68,6 +71,7 @@ export function booksForWatch(
 /**
  * Scan an author's catalog.
  * - No `since`: relevance order, stops at a page with no matching books or when Audible has no more.
+ *   `complete` = Audible reported no further pages within the page cap (the whole catalog was read).
  * - With `since`: newest first; stops after the first page holding a book released before the
  *   cutoff's floor day. A page with no matching books (other languages or namesakes) doesn't end it.
  */
@@ -76,7 +80,7 @@ export async function scanAuthorBooks(
   authorAsin: string,
   log: RMABLogger,
   { since }: { since?: Date | null } = {}
-): Promise<AudibleAudiobook[]> {
+): Promise<{ books: AudibleAudiobook[]; complete: boolean }> {
   const audible = getAudibleService();
   const floorDay = since ? newReleaseFloorDay(since) : null;
   const books: AudibleAudiobook[] = [];
@@ -101,22 +105,25 @@ export async function scanAuthorBooks(
         const day = toReleaseDay(b.releaseDate);
         return day !== null && day < floorDay;
       });
-      const more = result.totalResults > 0 ? result.totalResults > page * AUTHOR_PAGE_SIZE : result.hasMore;
+      const more = result.totalResults > 0 ? result.totalResults > page * AUDIBLE_PAGE_SIZE : result.hasMore;
       if (pastCutoff || !more) break;
-    } else if (result.books.length === 0 || !result.hasMore) {
+    } else if (!result.hasMore) {
+      return { books, complete: true };
+    } else if (result.books.length === 0) {
       break;
     }
 
     if (page < MAX_AUTHOR_PAGES) await delay(PAGE_DELAY_MS);
   }
 
-  return books;
+  return { books, complete: false };
 }
 
 /**
  * Scan an author for all of its watchers. Entire-catalog watchers get the relevance scan;
- * new-only watchers get a newest-first scan stopping at the earliest new-only cutoff.
- * An author with only entire-catalog watchers gets exactly one relevance scan.
+ * new-only watchers get a newest-first scan stopping at the earliest new-only cutoff, unless the
+ * relevance scan already read the whole catalog (then they are fed from it; booksForWatch applies
+ * each cutoff). An author with only entire-catalog watchers gets exactly one relevance scan.
  */
 export async function scanAuthorLegs(
   authorName: string,
@@ -128,18 +135,23 @@ export async function scanAuthorLegs(
   const needEntire = cutoffs.length < watches.length;
   const earliest = cutoffs.length > 0 ? new Date(Math.min(...cutoffs.map((d) => d.getTime()))) : null;
 
-  const entireRaw = needEntire ? await scanAuthorBooks(authorName, authorAsin, log) : [];
-  if (needEntire && earliest) await delay(PAGE_DELAY_MS);
-  const newRaw = earliest ? await scanAuthorBooks(authorName, authorAsin, log, { since: earliest }) : [];
+  const entireScan = needEntire ? await scanAuthorBooks(authorName, authorAsin, log) : { books: [], complete: false };
+  const entireRaw = entireScan.books;
+  let newRaw: AudibleAudiobook[] = [];
+  if (earliest && !entireScan.complete) {
+    if (needEntire) await delay(PAGE_DELAY_MS);
+    newRaw = (await scanAuthorBooks(authorName, authorAsin, log, { since: earliest })).books;
+  }
 
   const entireAsins = new Set(entireRaw.map((b) => b.asin));
   const found = entireRaw.length + newRaw.filter((b) => !entireAsins.has(b.asin)).length;
 
   const entire = dedupeAndPersist(entireRaw);
-  const newOnly = dedupeAndPersist(newRaw);
-  return { found, booksFor: (watch) => (watch.newReleasesSince != null ? newOnly : entire) };
+  const newOnly = entireScan.complete ? entire : dedupeAndPersist(newRaw, entire.persisted);
+  return { found, booksFor: (watch) => (watch.newReleasesSince != null ? newOnly.books : entire.books) };
 }
 
-function delay(ms: number): Promise<void> {
+/** Wait between Audible requests */
+export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

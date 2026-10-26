@@ -11,14 +11,15 @@ const scrapeSeriesPage = vi.hoisted(() => vi.fn());
 const searchByAuthorAsin = vi.hoisted(() => vi.fn());
 const dedup = vi.hoisted(() => vi.fn());
 const createRequestForUser = vi.hoisted(() => vi.fn());
+const warnings = vi.hoisted(() => [] as string[]);
 
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/utils/logger', () => {
-  const log = () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() });
+  const log = () => ({ debug: vi.fn(), info: vi.fn(), warn: (m: string) => { warnings.push(m); }, error: vi.fn() });
   return { RMABLogger: { create: log, forJob: log } };
 });
 vi.mock('@/lib/integrations/audible-series', () => ({ scrapeSeriesPage }));
-vi.mock('@/lib/integrations/audible.service', () => ({ getAudibleService: () => ({ searchByAuthorAsin }) }));
+vi.mock('@/lib/integrations/audible.service', () => ({ AUDIBLE_PAGE_SIZE: 50, getAudibleService: () => ({ searchByAuthorAsin }) }));
 vi.mock('@/lib/utils/deduplicate-audiobooks', () => ({ deduplicateAndCollectGroups: dedup }));
 vi.mock('@/lib/services/works.service', () => ({
   persistDedupGroups: async () => undefined,
@@ -59,6 +60,7 @@ async function run(options = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  warnings.length = 0;
   vi.useFakeTimers({ toFake: ['setTimeout'] });
   prismaMock.watchedSeries.findMany.mockResolvedValue([]);
   prismaMock.watchedAuthor.findMany.mockResolvedValue([]);
@@ -114,6 +116,30 @@ describe('watched series, new releases only', () => {
   });
 });
 
+describe('watched series over the 200-book scan limit', () => {
+  const fifty = (p: number) => Array.from({ length: 50 }, (_, i) => book(`B0P${p}${String(i).padStart(6, '0')}`, '2001-01-01'));
+  const longSeries = async (_asin: string, p: number) => ({ asin: 'B0SERIES01', title: 'Series', bookCount: 260, books: fifty(p), hasMore: true, page: p });
+  const capWarnings = () => warnings.filter((w) => w.includes('more than 200 books'));
+
+  it('logs one warning when the series has a new-only watcher', async () => {
+    prismaMock.watchedSeries.findMany.mockResolvedValue([seriesWatch('ws-1', 'u1', null), seriesWatch('ws-2', 'u2', CUTOFF)]);
+    scrapeSeriesPage.mockImplementation(longSeries);
+    await run();
+    expect(scrapeSeriesPage).toHaveBeenCalledTimes(4);
+    expect(capWarnings()).toHaveLength(1);
+  });
+
+  it('does not warn for entire-catalog watchers only, or for a new-only series under the limit', async () => {
+    prismaMock.watchedSeries.findMany.mockResolvedValue([seriesWatch('ws-1', 'u1', null)]);
+    scrapeSeriesPage.mockImplementation(longSeries);
+    await run();
+    prismaMock.watchedSeries.findMany.mockResolvedValue([seriesWatch('ws-2', 'u2', CUTOFF)]);
+    scrapeSeriesPage.mockResolvedValue({ asin: 'B0SERIES01', title: 'Series', bookCount: 4, books: SERIES_BOOKS, hasMore: false, page: 1 });
+    await run();
+    expect(capWarnings()).toHaveLength(0);
+  });
+});
+
 describe('watched authors, new releases only', () => {
   it('scans an entire-catalog-only author exactly as before: relevance order, page 2 read despite an old book', async () => {
     prismaMock.watchedAuthor.findMany.mockResolvedValue([authorWatch('wa-1', 'u1', null)]);
@@ -141,14 +167,14 @@ describe('watched authors, new releases only', () => {
 
   it('gives a mixed author group both scans and feeds each watcher from its own', async () => {
     prismaMock.watchedAuthor.findMany.mockResolvedValue([authorWatch('wa-1', 'entire', null), authorWatch('wa-2', 'fresh', CUTOFF)]);
-    searchByAuthorAsin.mockImplementation(async (_n: string, _a: string, _p: number, opts?: { newestFirst?: boolean }) =>
+    searchByAuthorAsin.mockImplementation(async (_n: string, _a: string, p: number, opts?: { newestFirst?: boolean }) =>
       opts?.newestFirst
         ? authorPage([book('B0NEW00001', '2026-12-01'), book('B0OLD00009', '2019-01-01')], 300, true)
-        : authorPage([book('B0BACK0001', '1998-01-01'), book('B0BACK0002', '2001-01-01')], 2, false));
+        : authorPage(p === 1 ? [book('B0BACK0001', '1998-01-01'), book('B0BACK0002', '2001-01-01')] : [], 300, true));
 
     const stats = await run();
 
-    expect(searchByAuthorAsin.mock.calls.map((c) => c[3]?.newestFirst ?? false)).toEqual([false, true]);
+    expect(searchByAuthorAsin.mock.calls.map((c) => c[3]?.newestFirst ?? false)).toEqual([false, false, true]);
     expect(requested()).toEqual({ entire: ['B0BACK0001', 'B0BACK0002'], fresh: ['B0NEW00001'] });
     expect(stats.booksFound).toBe(4);
   });
