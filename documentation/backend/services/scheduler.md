@@ -174,7 +174,7 @@ interface ScheduledJob {
 - ✅ Requests failing permanently (no torrents) → retry system with 'awaiting_search'
 - ✅ Requests failing permanently (no files) → retry system with max 5 retries + 'warn' status
 - ✅ Failed requests blocking re-requests → allow re-requesting failed/warn/cancelled
-- ✅ Shelf sync re-grabbing the same dead release every 6 h (#312) → a re-request replaces the failed request atomically and keeps its blocklist ([release-blocklist.md](../../admin-features/release-blocklist.md)); only auto-blocked failures stop looping, failed requests without a block are still recreated each sync
+- ✅ Shelf sync re-grabbing the same dead release every 6 h (#312, #409) → a re-request replaces the failed request atomically and keeps its blocklist; failures with no new block follow the 1/3/7/14/30-day backoff, and cancelled requests are never re-requested automatically ([release-blocklist.md](../../admin-features/release-blocklist.md#automatic-re-requests-409))
 - ✅ Files deleted immediately → kept until seeding requirements met
 - ✅ Torrents RMAB did not add (already in the client at grab time) removed with their files by the cleanup and request delete (#423) → `added_by_rmab` recorded at the grab, ownership checked before every remove
 - ✅ Only the first 100 candidates ever checked; torrents removed outside RMAB kept their rows in the candidates forever (#258) → keyset paging over all candidates, gone torrents marked `removed`

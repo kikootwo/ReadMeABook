@@ -52,9 +52,9 @@ Delete behavior:
 
 - **Wait** (`AUTO_REREQUEST_WAIT_DAYS`): count 0 → 1 day, 1 → 3, 2 → 7, 3 → 14, 4+ → every 30 days. No cap.
 - **Count:** `Request.autoRerequestCount` (`auto_rerequest_count`, Int, default 0). Carried only by automatic replacements.
-- **Reset to 0 by every user action:** a new user request (`POST /api/requests`, `request-with-torrent`) and every in-place retry: `select-torrent`, `manual-search`, PATCH `retry` (search and import), admin `retry-download`, admin `search-terms` with a new search.
+- **Reset to 0 by every user or admin action:** a new user request (`POST /api/requests`, `request-with-torrent`) and every in-place retry: `select-torrent` (also when it waits for approval), `manual-search`, PATCH `retry` (search and import), admin `retry-download`, admin `search-terms` with a new search, admin `manual-import` and `bulk-import/execute` recycling the request.
 - **User paths unchanged:** they replace `failed`/`warn`/`cancelled` at once. Deleted requests (`deletedAt`) are invisible, so the book is requested again. The ignore list (`Ignore from Auto-Requests`) runs before this rule, unchanged.
-- **Visibility:** the request stays `failed`/`warn` with its `errorMessage`. Logs (`AutoReRequest`): skips at debug with the due date; an automatic re-request after a wait at info (book, retry number, next wait).
+- **Visibility:** the request stays `failed`/`warn` with its `errorMessage`. Logs: skips and due decisions at debug (`AutoReRequest`, with the due date); each automatic re-request that is actually created logs one info line (`RequestCreator`: book, retry number or "a release was blocked", next wait if it fails again, new request id). A run that stops at `being_processed`, a missing user or a lost race logs nothing at info.
 - **Known limits:** after an in-place retry, `createdAt` predates that retry, so a pre-retry block counts as new (one extra immediate re-request, no loop). A sync landing between the failure write and the block write sees no block and waits (delay to the next sync only). A later write to the failed row (admin search-terms edit) restarts the wait.
 
 ## Service API
