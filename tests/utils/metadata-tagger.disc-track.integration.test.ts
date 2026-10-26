@@ -28,10 +28,10 @@ const FORMATS: Array<[string, string[]]> = [
 ];
 
 /** A one-second file carrying a per-disc track number, as a ripper writes it. */
-async function makeSource(ext: string, codec: string[]): Promise<string> {
-  const out = path.join(workDir(), `src.${ext}`);
+async function makeSource(ext: string, codec: string[], extra: string[] = []): Promise<string> {
+  const out = path.join(workDir(), `src${extra.length ? '-extra' : ''}.${ext}`);
   await ffmpeg(['-y', '-f', 'lavfi', '-i', 'anullsrc=channel_layout=mono:sample_rate=22050', '-t', '1', ...codec,
-    '-metadata', 'track=2/10', '-metadata', 'title=Chapter Two', out]);
+    '-metadata', 'track=2/10', '-metadata', 'title=Chapter Two', ...extra, out]);
   return out;
 }
 
@@ -54,6 +54,20 @@ describe.skipIf(!available)('disc and track tags (real ffmpeg)', () => {
     expect(await tagEntries(tagged, 'track')).toEqual([['track', '12/20']]);
     expect(await tagEntries(tagged, 'disc')).toEqual([['disc', '2/3']]);
     expect((await probe(tagged)).tags.title).toBe('Book');
+  }, 60_000);
+
+  it('flac: the source TRACKTOTAL/DISCTOTAL are replaced with the book totals', async () => {
+    const src = await makeSource('flac', FORMATS[2][1], ['-metadata', 'TRACKTOTAL=10', '-metadata', 'DISCTOTAL=2', '-metadata', 'disc=1']);
+    expect(await tagEntries(src, 'tracktotal')).toEqual([['TRACKTOTAL', '10']]);
+    const result = await tagAudioFileMetadata(src, BOOK, { disc: '2/3', track: '12/20' });
+    expect(result.success, result.error).toBe(true);
+    const { tags } = await probe(result.taggedFilePath!);
+    const totals = Object.entries(tags).filter(([k]) => /^(track|disc)total$|^total(track|disc)s$/i.test(k));
+    expect(Object.fromEntries(totals.map(([k, v]) => [k.toUpperCase(), v]))).toEqual({
+      TRACKTOTAL: '20', TOTALTRACKS: '20', DISCTOTAL: '3', TOTALDISCS: '3',
+    });
+    expect(await tagEntries(result.taggedFilePath!, 'track')).toEqual([['track', '12/20']]);
+    expect(await tagEntries(result.taggedFilePath!, 'disc')).toEqual([['disc', '2/3']]);
   }, 60_000);
 
   it.each(FORMATS)('%s: without a position the source track number is left as it is (as before)', async (ext, codec) => {

@@ -165,7 +165,7 @@ describe('Bulk Import keeps separate entries', () => {
   });
 
   it('the book folder\'s own audio with a different key stays its own entry', async () => {
-    files(path.join(tmp, 'Book'), ['Sample.mp3', 'CD1/01.mp3', 'CD2/01.mp3'], (rel) => ({ album: rel === 'Sample.mp3' ? 'Another Title' : 'Book (CD 1)' }));
+    files(path.join(tmp, 'Book'), ['Sample.mp3', 'CD1/01.mp3', 'CD2/01.mp3'], (rel) => ({ album: rel === 'Sample.mp3' ? 'Another Title' : `Book (CD ${rel[2]})` }));
     const results = await discoverAudiobooks(tmp);
     expect(results).toHaveLength(2);
     expect(results.find((r) => r.metadata.title === 'Book')?.audioFiles).toEqual(['CD1/01.mp3', 'CD2/01.mp3']);
@@ -182,5 +182,50 @@ describe('Bulk Import keeps separate entries', () => {
   it('disc folders with audio only deeper inside (Book/CD1/Unabridged)', async () => {
     files(path.join(tmp, 'Book'), ['CD1/Unabridged/01.mp3', 'CD2/Unabridged/01.mp3']);
     expect(await discoverAudiobooks(tmp)).toHaveLength(2);
+  });
+});
+
+describe('disc suffixes in per-disc album tags', () => {
+  const albums = (byDisc: Record<string, Record<string, string>>) => (rel: string) => byDisc[rel.split('/')[0]];
+  const single = async () => {
+    const results = await discoverAudiobooks(tmp);
+    expect(results).toHaveLength(1);
+    return results[0];
+  };
+
+  it.each([
+    ['Disc 1', 'Disc 2', 'The Hobbit Disc 1', 'The Hobbit Disc 2', 'The Hobbit'],
+    ['CD1', 'CD2', 'The Hobbit CD1', 'The Hobbit CD2', 'The Hobbit'],
+    ['Disc 1', 'Disc 2', 'Book Disc 1 of 3', 'Book Disc 2 of 3', 'Book'],
+  ])('%s/%s tagged "%s"/"%s" fold, searched as "%s"', async (d1, d2, a1, a2, stem) => {
+    files(path.join(tmp, 'Rip'), [`${d1}/01.mp3`, `${d2}/01.mp3`], albums({ [d1]: { album: a1 }, [d2]: { album: a2 } }));
+    const folded = await single();
+    expect(folded.audioFiles).toEqual([`${d1}/01.mp3`, `${d2}/01.mp3`]);
+    expect(folded.searchTerm).toBe(stem);
+  });
+
+  it('the same album on every disc folds unchanged: "Hard Disk 3" stays the search term', async () => {
+    files(path.join(tmp, 'Rip'), ['CD1/01.mp3', 'CD2/01.mp3'], () => ({ album: 'Hard Disk 3' }));
+    const folded = await single();
+    expect(folded.metadata.title).toBe('Hard Disk 3');
+    expect(folded.searchTerm).toBe('Hard Disk 3');
+  });
+
+  it('"OCD 1"/"OCD 2" in CD1/CD2 stay separate, as before', async () => {
+    files(path.join(tmp, 'Rip'), ['CD1/01.mp3', 'CD2/01.mp3'], albums({ CD1: { album: 'OCD 1' }, CD2: { album: 'OCD 2' } }));
+    expect(await discoverAudiobooks(tmp)).toHaveLength(2);
+  });
+
+  it('a suffix number that is not its folder\'s own is not stripped', async () => {
+    files(path.join(tmp, 'Rip'), ['CD1/01.mp3', 'CD2/01.mp3'],
+      albums({ CD1: { album: 'The Hobbit Disc 2' }, CD2: { album: 'The Hobbit Disc 1' } }));
+    expect(await discoverAudiobooks(tmp)).toHaveLength(2);
+  });
+
+  it('a blank album keeps author and narrator in the key: two books by different authors stay 2 entries', async () => {
+    files(path.join(tmp, 'Book A'), ['CD1/01.mp3', 'CD2/01.mp3'], () => ({ album: ' ', album_artist: 'Author A' }));
+    files(path.join(tmp, 'Book B'), ['CD1/01.mp3', 'CD2/01.mp3'], () => ({ album: ' ', album_artist: 'Author B' }));
+    const results = await discoverAudiobooks(tmp);
+    expect(results.map((r) => r.folderName).sort()).toEqual(['Book A', 'Book B']);
   });
 });

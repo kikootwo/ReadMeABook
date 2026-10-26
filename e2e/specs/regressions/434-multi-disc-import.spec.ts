@@ -171,6 +171,7 @@ test('434 A2: control, tagging off: Audiobookshelf orders the same flat names by
     obs.abs = await absOrder(obs.libraryFolder);
     obs.absOrderMatchesImport = JSON.stringify(obs.abs.order) === JSON.stringify(A_NAMES);
   }
+  expect.soft(sorted(obs.abs?.order ?? []), 'the Audiobookshelf order was read, all 7 files').toEqual(sorted(A_NAMES));
   expect.soft(obs.absOrderMatchesImport, 'without the tags the names alone do not give the import order').toBe(false);
   saveJson('A2-control-tagging-off', obs);
 });

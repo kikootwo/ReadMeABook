@@ -217,6 +217,19 @@ describe('orderDiscImport', () => {
     expect(ordered?.order).toEqual(native(Object.keys(tracks)));
   });
 
+  it('probes the root files too: a root intro tagged 1 with the discs continuing orders and tags by the source tags', async () => {
+    const src = path.join(root, 'src');
+    probeState.base = src;
+    const tracks: Record<string, number> = {
+      'Opening.mp3': 1, 'CD1/The Shire.mp3': 2, 'CD1/A Party.mp3': 3, 'CD2/Bree.mp3': 4, 'CD2/Amon Hen.mp3': 5,
+    };
+    Object.entries(tracks).forEach(([k, t]) => probeState.tracks.set(k, t));
+    const ordered = await orderDiscImport(src, native(Object.keys(tracks).sort()), { targetPath: path.join(root, 'media') });
+    expect(probeState.calls).toHaveLength(5);
+    expect(ordered?.order).toEqual(native(Object.keys(tracks)));
+    expect(ordered?.tags.get(native(['CD1/The Shire.mp3'])[0])).toEqual({ disc: '1/2', track: '2/5' });
+  });
+
   it('gives each file its disc (d/D) and its track across the book (n/N), root files on the first disc', async () => {
     const src = path.join(root, 'src');
     const ordered = await orderDiscImport(src, native(['CD2/01.mp3', 'Intro.mp3', 'CD1/02.mp3', 'CD1/01.mp3']), {

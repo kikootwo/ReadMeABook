@@ -166,6 +166,19 @@ describe('multi-disc order', () => {
     const chapters = vi.mocked(mergeChapters).mock.calls[0][0] as Array<{ path: string }>;
     expect(rel(source, chapters.map((c) => c.path))).toEqual(playOrder);
   });
+
+  it('a root intro tagged 1 with chapter-title discs tagged 2..N: the merge follows the source tags', async () => {
+    configState.values.set('chapter_merging_enabled', 'true');
+    const source = path.join(root, 'downloads', 'Book');
+    const playOrder = ['Opening.mp3', 'CD1/The Shire.mp3', 'CD1/A Party.mp3', 'CD2/Bree.mp3', 'CD2/Amon Hen.mp3'];
+    playOrder.forEach((f, i) => {
+      write(path.join(source, f));
+      tracks.set(path.basename(f), i + 1);
+    });
+    expect((await organize(source)).success).toBe(true);
+    const chapters = vi.mocked(mergeChapters).mock.calls[0][0] as Array<{ path: string }>;
+    expect(rel(source, chapters.map((c) => c.path))).toEqual(playOrder);
+  });
 });
 
 describe('disc and track tags (tagging on)', () => {
@@ -181,6 +194,22 @@ describe('disc and track tags (tagging on)', () => {
     expect(rel(source, files)).toEqual(['Intro.mp3', 'Disc 1/01.mp3', 'Disc 1/02.mp3', 'Disc 2/01.mp3']);
     expect(positions).toEqual([
       { disc: '1/2', track: '1/4' }, { disc: '1/2', track: '2/4' }, { disc: '1/2', track: '3/4' }, { disc: '2/2', track: '4/4' },
+    ]);
+  });
+
+  it('the written tags follow the source tags: a root intro tagged 1, a root outro tagged N plays last', async () => {
+    const source = path.join(root, 'downloads', 'Book');
+    const playOrder = ['Opening.mp3', 'CD1/The Shire.mp3', 'CD1/A Party.mp3', 'CD2/Bree.mp3', 'CD2/Amon Hen.mp3', 'Afterword.mp3'];
+    playOrder.forEach((f, i) => {
+      write(path.join(source, f));
+      tracks.set(path.basename(f), i + 1);
+    });
+    expect((await organize(source)).success).toBe(true);
+    const [files, , positions] = vi.mocked(tagMultipleFiles).mock.calls[0];
+    expect(rel(source, files)).toEqual(playOrder);
+    expect(positions).toEqual([
+      { disc: '1/2', track: '1/6' }, { disc: '1/2', track: '2/6' }, { disc: '1/2', track: '3/6' },
+      { disc: '2/2', track: '4/6' }, { disc: '2/2', track: '5/6' }, { disc: '2/2', track: '6/6' },
     ]);
   });
 
