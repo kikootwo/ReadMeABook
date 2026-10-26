@@ -14,6 +14,9 @@ import { psql, sqlStr } from './regressions/242-helpers';
 
 const phase = process.env.E2E_PHASE;
 
+// #302: watches made on the release image must read as entire catalog after the upgrade
+const WATCH = { authorAsin: 'B0E2EUPGAU', authorName: 'Pellam Ostrowyne', seriesAsin: 'B0E2EUPGSE', seriesTitle: 'The Lanternwick Papers (E2E)' };
+
 test.skip(phase !== 'upgrade-seed' && phase !== 'upgrade-verify', 'upgrade spec only runs via run.mjs --upgrade-from');
 
 test('upgrade-seed: seed requests on the release image', async () => {
@@ -28,6 +31,8 @@ test('upgrade-seed: seed requests on the release image', async () => {
   await waitFor('artemis failed', async () => (await status('artemis')) === 'failed', { timeoutMs: 300_000, intervalMs: 3_000 });
   const requests = await rmab.get<{ requests: any[] }>('/api/requests?limit=100');
   expect(requests.requests.length).toBe(3);
+  await rmab.post('/api/user/watched-authors', { authorAsin: WATCH.authorAsin, authorName: WATCH.authorName });
+  await rmab.post('/api/user/watched-series', { seriesAsin: WATCH.seriesAsin, seriesTitle: WATCH.seriesTitle });
   writeEvidence('upgrade/before.json', {
     statuses: Object.fromEntries(requests.requests.map((r) => [r.audiobook?.audibleAsin, r.status])),
     health: await (await fetch(`${urls.rmab()}/api/health`)).json().catch(() => null),
@@ -68,6 +73,25 @@ test('upgrade-verify: branch image keeps requests, logins and decryptable secret
   } else {
     test.info().annotations.push({ type: 'skipped-check', description: `auto_rerequest_count: ${EXEC_BRIDGE_SKIP}` });
   }
+  // #302: startup schema sync added new_releases_since (nullable) to both watch tables; the
+  // watches seeded on the release image read null = entire catalog
+  type Watch = { authorAsin?: string; seriesAsin?: string; newReleasesOnly?: boolean; newReleasesSince?: string | null };
+  const authors = await rmab.get<{ authors: Watch[] }>('/api/user/watched-authors');
+  const series = await rmab.get<{ series: Watch[] }>('/api/user/watched-series');
+  const watchedAuthor = authors.authors.find((a) => a.authorAsin === WATCH.authorAsin);
+  const watchedSeries = series.series.find((s) => s.seriesAsin === WATCH.seriesAsin);
+  expect(watchedAuthor, 'seeded watched author kept').toMatchObject({ newReleasesOnly: false, newReleasesSince: null });
+  expect(watchedSeries, 'seeded watched series kept').toMatchObject({ newReleasesOnly: false, newReleasesSince: null });
+  if (execBridgeAvailable()) {
+    const columns = psql("select table_name || '.' || is_nullable from information_schema.columns where column_name = 'new_releases_since' and table_name in ('watched_authors', 'watched_series') order by table_name");
+    const values = psql(`select (select count(*) from watched_authors where author_asin = ${sqlStr(WATCH.authorAsin)} and new_releases_since is null), (select count(*) from watched_series where series_asin = ${sqlStr(WATCH.seriesAsin)} and new_releases_since is null)`);
+    writeEvidence('upgrade/302-watch-columns.json', { columns, nullSeededRows: values, watchedAuthor, watchedSeries });
+    expect(columns.split(/\s+/), 'new_releases_since exists, nullable, on both tables').toEqual(['watched_authors.YES', 'watched_series.YES']);
+    expect(values.split(/\s+/), 'seeded watches read null').toEqual(['1', '1']);
+  } else {
+    test.info().annotations.push({ type: 'skipped-check', description: `new_releases_since: ${EXEC_BRIDGE_SKIP}` });
+  }
+
   const search = await rmab.post<any>(`/api/requests/${failed.id}/interactive-search`, {});
   writeEvidence('upgrade/interactive-search.json', search);
   const searches = (await fakeArr.requests(since)).filter((r) => r.service === 'prowlarr' && r.path === '/api/v1/search');
