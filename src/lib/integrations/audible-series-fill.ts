@@ -49,7 +49,7 @@ export interface CatalogFetchProfile {
 
 /** Details fallback when Audnexus fails: full retries, failures logged. */
 export const DETAILS_FALLBACK_PROFILE: CatalogFetchProfile = { maxRetries: 5, onFailure: 'log' };
-/** Series fill: one attempt within 5 s; a failure closes the fill gate. */
+/** Series fill: one attempt within 5 s; a transient failure closes the fill gate. */
 export const SERIES_FILL_PROFILE: CatalogFetchProfile = { maxRetries: 0, deadlineMs: 5000, onFailure: 'throw' };
 
 /** Request config for the profile's deadline (a fresh signal per call). */
@@ -83,12 +83,13 @@ function isAbort(error: FetchError): boolean {
 }
 
 /**
- * Transient: a 429, a 5xx, no response (network error) or an abort/timeout. These pause
- * the fill; anything else (another 4xx, a malformed product) is that ASIN's outcome.
+ * Transient: a 429, a 401/403 (blocked), a 5xx, no response (network error) or an
+ * abort/timeout. These pause the fill; anything else (another 4xx, a malformed product)
+ * is that ASIN's outcome.
  */
 function isTransient(error: FetchError): boolean {
   const status = error.response?.status;
-  if (typeof status === 'number') return status === 429 || status >= 500;
+  if (typeof status === 'number') return status === 429 || status === 401 || status === 403 || status >= 500;
   return isAbort(error) || error.isAxiosError === true || typeof error.code === 'string';
 }
 

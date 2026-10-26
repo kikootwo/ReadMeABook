@@ -203,4 +203,4 @@
 **"How does the bulk import scanner detect audiobooks?"** → [features/bulk-import.md](features/bulk-import.md)
 **"How are books in CD1/Disc 1 folders imported and ordered?"** → [features/multi-disc-folders.md](features/multi-disc-folders.md)
 **"Why is a series page blank / showing no books, then fine after a refresh?"** → [integrations/audible.md](integrations/audible.md#series-page-dual-layout) (Audible A/B-serves two layouts; parsers handle both)
-**"Why is a book's series line missing, or a request saved without a series?"** → [integrations/audible.md](integrations/audible.md#fixed-issues) (series fill from the Audible catalog when Audnexus has none; 15 min pause after a failure, 24 h cache)
+**"Why is a book's series line missing, or a request saved without a series?"** → [integrations/audible.md](integrations/audible.md#fixed-issues) (series fill from the Audible catalog when Audnexus has none; 15 min pause after a catalog outage (429, 401/403, 5xx, timeout, network), 24 h cache)
