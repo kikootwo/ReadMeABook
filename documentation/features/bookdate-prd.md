@@ -23,6 +23,7 @@
 1. **Setup:** Admin configures AI provider, API key, model, library scope, and custom prompt (global for all users)
 2. **Discovery:** AI generates personalized audiobook recommendations based on each user's individual Plex library, ratings, and swipe history
 3. **Interaction:** Swipe right (request), left (not interested), or up (neutral) on recommendations
+   - Right swipe runs the two ownership checks of `POST /api/requests` (`createRequestForUser`) before creating a request: any user's `downloaded`/`available` request for the ASIN, then the library (`findPlexMatch`). Either hit or a failed check → no request; the swipe is always recorded. Not run: the check for another user's in-flight request
 4. **Learning:** AI refines future recommendations based on individual swipe history
 
 ### Key Differentiation
@@ -407,6 +408,7 @@ UI Elements:
   - Response: Array of 10 recommendations
 - `POST /api/bookdate/swipe` - Record swipe action for current user
   - Body: `{ recommendationId, action, markedAsKnown? }`
+  - Response: `{ success, action, markedAsKnown, requestCreated, reason?, alreadyInLibrary }`; `reason` only when a right swipe created no request: `alreadyInLibrary` | `alreadyRequested` (any user's downloaded/available request, or this user's own request) | `libraryCheckFailed` (fail closed) | `requestFailed`; `alreadyInLibrary` = `reason === 'alreadyInLibrary'`
 - `POST /api/bookdate/undo` - Undo last swipe (left/up only)
 - `POST /api/bookdate/generate` - Force generate new batch (for "Get More" button)
 

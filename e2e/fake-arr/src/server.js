@@ -3,7 +3,7 @@
  * Documentation: documentation/testing/e2e-harness.md
  *
  * Listeners: prowlarr (+ relative-redirect hops), tracker (foreign origin for redirect hops),
- * qbit, sab, plex, control. Every non-control request is recorded with its listener port and
+ * qbit, sab, plex, metadata (answering proxy for Audible/Audnexus, see metadata.js), control. Every non-control request is recorded with its listener port and
  * all headers so specs can assert where credentials travelled.
  */
 
@@ -16,6 +16,7 @@ import { handleProwlarr, handleTrackerHop } from './prowlarr.js';
 import { handleQbit } from './qbit.js';
 import { handleSab } from './sab.js';
 import { handlePlex } from './plex.js';
+import { handleMetadata, refuseConnect } from './metadata.js';
 import { handleControl } from './control.js';
 import { sendJson, sendText, notFound } from './http-util.js';
 
@@ -52,6 +53,8 @@ function routerFor(service, state) {
         return handleSab(state, req, res, url, entry);
       case 'plex':
         return handlePlex(state, req, res, url);
+      case 'metadata':
+        return handleMetadata(state, req, res, entry);
       default:
         return notFound(res);
     }
@@ -71,6 +74,7 @@ export async function startFakeArr(config = loadConfig()) {
         else res.end();
       });
     });
+    if (service === 'metadata') server.on('connect', (req, socket) => refuseConnect(state, req, socket));
     await new Promise((resolve, reject) => {
       server.once('error', reject);
       server.listen(port, '0.0.0.0', resolve);

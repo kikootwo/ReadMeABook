@@ -17,6 +17,7 @@ Solves false positive matches in Audiobookshelf fuzzy search by using file hash 
 3. During library scan: compare ABS item files against database hashes
 4. Match found → Use request's ASIN for 100% accurate metadata
 5. No match → Fallback to fuzzy search (external content)
+6. ASIN read-back (#287): store the ASIN from the ABS match response on `plex_library` in the same scan
 
 ## How It Works
 
@@ -35,7 +36,7 @@ await prisma.audiobook.update({
 ```
 
 ### Library Scan Phase
-**Files:** `scan-plex.processor.ts`, `plex-recently-added.processor.ts`
+**Files:** `scan-plex.processor.ts`, `plex-recently-added.processor.ts` → both call `matchItemsWithoutAsin(items, logger)` in `src/lib/services/audiobookshelf/match-missing-asins.ts`
 
 **Phase 1: File Hash Matching (Items WITHOUT ASIN)**
 ```typescript
@@ -55,7 +56,10 @@ for (const item of itemsWithoutAsin) {
   });
 
   // 4. Trigger metadata match (with ASIN if matched, undefined if not)
-  await triggerABSItemMatch(item.externalId, matched?.audibleAsin);
+  const outcome = await triggerABSItemMatch(item.externalId, matched?.audibleAsin);
+
+  // 5. Read the ASIN back (#287): request checks see it now, not at the next scan
+  await storeMatchedAsin(item.externalId, item.title, outcome, logger);
 }
 ```
 
@@ -118,6 +122,24 @@ model Audiobook {
 - Filter: `libraryItems.filter(item => !item.asin)`
 - Trigger metadata match with file-hash-matched ASIN or undefined
 - **This is the ONLY phase that triggers ABS metadata matching**
+- Read-back: the ASIN ABS holds after the match is stored at once (runs before Phase 2, so a waiting request goes `available` in the same scan)
+
+### ASIN Read-Back (#287)
+- **Why:** the match response was discarded; the ASIN reached `plex_library` only at the next full scan (up to 6 h), so a request for an owned book inside that window passed the library check
+- **ABS API:** `POST /api/items/:id/match` (ABS 2.36/2.37) is synchronous and saves before replying
+  - No match: `200 { warning: "No <provider> match found" }`
+  - Else: `{ updated, libraryItem }`, ASIN at `libraryItem.media.metadata.asin`
+- **Client:** `triggerABSItemMatch(itemId, asin?)` → `ABSMatchOutcome` = `matched {updated, libraryItem}` | `no_match {warning}` | `error {error}`; never throws; `ABS_MATCH_TIMEOUT_MS = 180_000` (a legitimate match takes ~60 s; Node fetch would stop at 300 s)
+
+| Case | Write |
+|---|---|
+| Valid ASIN (`/^[A-Z0-9]{10}$/i` after trim; numeric Audible ASINs pass) | `plexLibrary.updateMany({where:{plexGuid}})` |
+| Different valid ASIN on the row | Replaced + logged (same end state as the next scan's `item.asin \|\| existing.asin`) |
+| No match, timeout, HTTP/JSON error | None; next scan retries |
+| Empty, null, ISBN-13, hyphenated, non-string, missing `media.metadata` | None; an existing ASIN is never blanked |
+| ISBN only | None (`isbn` is never read as an ASIN) |
+| File-hash ASIN sent but ABS reports none | None: store only what ABS reports |
+| No `plex_library` row / write throws | None / own catch (logged; the item's match is not counted twice), loop continues |
 
 **Phase 2 (Request Match):** Match requests, no metadata triggering
 - Match requests to library items by ASIN/title/author
@@ -220,6 +242,9 @@ model Audiobook {
 - Hash storage during organization
 - Hash matching during library scan
 - Fallback to fuzzy matching
+
+## Fixed Issues
+- ✅ #287 window: ASIN from the ABS match was discarded until the next full scan → read back in the same scan (`match-missing-asins.ts`); BookDate right swipe now runs the two ownership checks of `POST /api/requests` (any user's downloaded/available request, then library; not the in-flight check) and returns `requestCreated` + `reason`
 
 ## Related
 - [Audiobookshelf Integration](../integrations/audiobookshelf.md) - Backend mode

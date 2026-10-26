@@ -17,7 +17,7 @@ Manages recurring/scheduled jobs providing automated tasks (Plex scans, Audible 
 ## Scheduled Jobs
 
 1. **plex_library_scan** - Default: every 6 hours, full library scan, disabled by default (enable after setup)
-2. **plex_recently_added_check** - Default: every 5 minutes, lightweight polling of top 10 recently added items, enabled by default
+2. **plex_recently_added_check** - Default: every 5 minutes, lightweight polling of top 10 recently added items, enabled by default. ABS: items without ASIN are matched and the ASIN from the match response is stored at once (#287, [file-hash-matching.md](../../fixes/file-hash-matching.md#asin-read-back-287))
 3. **audible_refresh** - Default: daily midnight, fetches 200 popular + 200 new releases, stores with rankings, disabled by default
 4. **retry_missing_torrents** - Default: daily midnight, processes union of `awaiting_search` ∪ eligible `awaiting_release` (limit 50), handles both audiobook and ebook requests. Fair ordering: never-searched first, then least-recently searched; future `awaiting_release` rows do not consume retry slots. Bidirectional transitions: `awaiting_search` → `awaiting_release` when release date is future + `indexer.skip_unreleased` ON; `awaiting_release` → `awaiting_search` + run search when release date has passed or setting OFF. Sole owner of these transitions. Enabled by default.
 5. **retry_failed_imports** - Default: every 6 hours, re-attempts `awaiting_import` status (limit 50), ordered by oldest `lastImportAt` so the backlog rotates fairly; enabled by default

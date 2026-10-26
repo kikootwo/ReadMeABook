@@ -5,6 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  ABS_MATCH_TIMEOUT_MS,
   absRequest,
   deleteABSItem,
   getABSLibraries,
@@ -283,7 +284,69 @@ describe('Audiobookshelf API client', () => {
       statusText: 'Boom',
     });
 
-    await expect(triggerABSItemMatch('item-1', 'ASIN123')).resolves.toBeUndefined();
+    await expect(triggerABSItemMatch('item-1', 'ASIN123')).resolves.toEqual({
+      status: 'error',
+      error: 'ABS API error: 500 Boom',
+    });
+  });
+
+  describe('metadata match outcome (#287)', () => {
+    beforeEach(() => {
+      configServiceMock.get.mockImplementation(async (key: string) => {
+        if (key === 'audiobookshelf.server_url') return 'http://abs';
+        if (key === 'audiobookshelf.api_token') return 'token';
+        return null;
+      });
+      configServiceMock.getAudibleRegion.mockResolvedValue('us');
+    });
+
+    it('returns the matched library item from the response', async () => {
+      const libraryItem = { id: 'item-1', media: { metadata: { asin: 'B0TEST1234' } } };
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ updated: true, libraryItem }) });
+
+      await expect(triggerABSItemMatch('item-1')).resolves.toEqual({ status: 'matched', updated: true, libraryItem });
+    });
+
+    it('returns no_match for the ABS warning response', async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ warning: 'No audible match found' }) });
+
+      await expect(triggerABSItemMatch('item-1')).resolves.toEqual({ status: 'no_match', warning: 'No audible match found' });
+    });
+
+    it('bounds the match call with an abort signal of ABS_MATCH_TIMEOUT_MS', async () => {
+      const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ updated: false, libraryItem: null }) });
+
+      await triggerABSItemMatch('item-1');
+
+      expect(ABS_MATCH_TIMEOUT_MS).toBe(180_000);
+      expect(timeoutSpy).toHaveBeenCalledWith(180_000);
+      expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+      timeoutSpy.mockRestore();
+    });
+
+    it('returns error (never throws) when the match times out', async () => {
+      fetchMock.mockRejectedValue(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+
+      await expect(triggerABSItemMatch('item-1')).resolves.toEqual({
+        status: 'error',
+        error: 'The operation was aborted due to timeout',
+      });
+    });
+
+    it('returns error when the response is not JSON', async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => { throw new SyntaxError('Unexpected token O'); } });
+
+      await expect(triggerABSItemMatch('item-1')).resolves.toMatchObject({ status: 'error' });
+    });
+
+    it('sends no abort signal on other ABS calls', async () => {
+      fetchMock.mockResolvedValue({ ok: true, json: async () => ({ version: '2.37.1' }) });
+
+      await getABSServerInfo();
+
+      expect(fetchMock.mock.calls[0][1]).not.toHaveProperty('signal');
+    });
   });
 
   it('deletes a library item successfully', async () => {
