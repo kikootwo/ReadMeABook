@@ -5,6 +5,7 @@
 
 import { compareTwoStrings } from 'string-similarity';
 import { matchesByInitials } from './author-initials';
+import { foldForMatching, FULLWIDTH_RE, fromFullwidth, hasNonLatinLetter, hasUnspacedScript, isWordInTitle, normalizeForMatching } from './match-normalize';
 
 export interface TorrentResult {
   indexer: string;
@@ -342,37 +343,6 @@ export class RankingAlgorithm {
 
 
   /**
-   * Normalize text for matching by handling CamelCase and punctuation separators
-   * "VirginaEvans TheCorrespondent" → "virgina evans the correspondent"
-   * "Twelve.Months-Jim.Butcher" → "twelve months jim butcher"
-   * "Author_Name_Book" → "author name book"
-   */
-  private normalizeForMatching(text: string, characterReplacements?: Record<string, string>): string {
-    let result = text
-      // Split CamelCase FIRST (before lowercasing): "TheCorrespondent" → "The Correspondent"
-      .replace(/([a-z])([A-Z])/g, '$1 $2')
-      .toLowerCase();
-    // Apply language-specific character replacements before NFD (e.g. ß→ss)
-    if (characterReplacements) {
-      for (const [from, to] of Object.entries(characterReplacements)) {
-        result = result.replace(new RegExp(from, 'g'), to);
-      }
-    }
-    return result
-      // NFD normalization: convert accented chars to ASCII base forms
-      // e.g. "uber" from "uber", "senor" from "senor", "cafe" from "cafe"
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      // Replace underscores with spaces (must be explicit since \w includes _)
-      .replace(/_/g, ' ')
-      // Replace other punctuation/separators with spaces (preserves apostrophes in contractions)
-      .replace(/[^\w\s']/g, ' ')
-      // Collapse multiple spaces
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  /**
    * Score title/author match quality (60 points max)
    * Title similarity: 0-45 points (heavily weighted!)
    * Author presence: 0-15 points
@@ -385,20 +355,23 @@ export class RankingAlgorithm {
     characterReplacements?: Record<string, string>
   ): number {
     // Normalize for matching (handles CamelCase, punctuation separators, diacritics)
-    const torrentTitle = this.normalizeForMatching(torrent.title, characterReplacements);
-    const requestTitle = this.normalizeForMatching(audiobook.title, characterReplacements);
+    const torrentTitle = normalizeForMatching(torrent.title, characterReplacements);
+    const requestTitle = normalizeForMatching(audiobook.title, characterReplacements);
+    // Fail closed: a title with no letters or digits left cannot be matched
+    if (!requestTitle) return 0;
 
     // Parse authors from RAW string first (preserving commas for splitting)
-    // Then normalize individual authors for matching
+    // Then normalize individual authors for matching. Names under 3 characters are dropped,
+    // except names in a non-Latin script, where 2 characters is a full name (金庸, 한강)
     const parsedAuthors = audiobook.author
       .replace(/\s+/g, ' ')
       .trim()
       .split(/,|&| and | - /i)
       .map(a => a.trim())
-      .filter(a => a.length > 2 && !['translator', 'narrator'].includes(a.toLowerCase()));
+      .filter(a => (a.length > 2 || hasNonLatinLetter(a)) && !['translator', 'narrator'].includes(a.toLowerCase()));
 
-    // Normalize parsed authors for matching (handles CamelCase in author names)
-    const normalizedAuthors = parsedAuthors.map(a => this.normalizeForMatching(a, characterReplacements));
+    // Normalize parsed authors; one that normalizes to nothing is dropped (it would match every title)
+    const normalizedAuthors = parsedAuthors.map(a => normalizeForMatching(a, characterReplacements)).filter(a => a.length > 0);
     // Combined normalized author string for fuzzy matching
     const requestAuthorNormalized = normalizedAuthors.join(' ');
 
@@ -407,28 +380,8 @@ export class RankingAlgorithm {
     // Use provided language-specific stop words, or fall back to English defaults
     const stopWords = customStopWords || ['the', 'a', 'an', 'of', 'on', 'in', 'at', 'by', 'for'];
 
-    const extractWords = (text: string, stopList: string[]): string[] => {
-      let processed = text
-        // Split CamelCase FIRST: "TheCorrespondent" → "The Correspondent"
-        .replace(/([a-z])([A-Z])/g, '$1 $2')
-        .toLowerCase();
-      // Apply language-specific character replacements before NFD
-      if (characterReplacements) {
-        for (const [from, to] of Object.entries(characterReplacements)) {
-          processed = processed.replace(new RegExp(from, 'g'), to);
-        }
-      }
-      return processed
-        // NFD normalization for accented characters
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        // Replace underscores with spaces (must be explicit since \w includes _)
-        .replace(/_/g, ' ')
-        // Remove other punctuation (but keep apostrophes for contractions)
-        .replace(/[^\w\s']/g, ' ')
-        .split(/\s+/)
-        .filter(word => word.length > 0 && !stopList.includes(word));
-    };
+    const extractWords = (text: string, stopList: string[]): string[] =>
+      normalizeForMatching(text, characterReplacements).split(' ').filter(word => word.length > 0 && !stopList.includes(word));
 
     // Separate required words (outside parentheses/brackets/colon subtitles) from optional words
     // This handles common patterns like:
@@ -436,11 +389,11 @@ export class RankingAlgorithm {
     //   "Title: Series Name" where Audible appends series names after a colon
     // Note: Run on ORIGINAL title to preserve brackets/colons, then normalize the result
     const separateRequiredOptional = (title: string): { required: string; optional: string } => {
-      // Work with original title format for bracket/colon detection
-      const originalTitle = audiobook.title.toLowerCase();
+      // Work with original title format for bracket/colon detection (fullwidth （）［］： fold to ASCII)
+      const originalTitle = audiobook.title.toLowerCase().replace(FULLWIDTH_RE, fromFullwidth);
 
-      // Extract content in parentheses/brackets as optional
-      const optionalPattern = /[(\[{]([^)\]}]+)[)\]}]/g;
+      // Extract content in parentheses/brackets (including CJK 【】) as optional
+      const optionalPattern = /[(\[{【]([^)\]}】]+)[)\]}】]/g;
       const optionalMatches: string[] = [];
       let match;
 
@@ -449,7 +402,7 @@ export class RankingAlgorithm {
       }
 
       // Remove parenthetical/bracketed content to get the non-bracketed portion
-      let requiredRaw = originalTitle.replace(/[(\[{][^)\]}]+[)\]}]/g, ' ').trim();
+      let requiredRaw = originalTitle.replace(/[(\[{【][^)\]}】]+[)\]}】]/g, ' ').trim();
 
       // Treat content after a colon as optional (Audible commonly appends series names)
       // e.g., "The Finest Edge of Twilight: Dungeons & Dragons" → required: title, optional: series
@@ -463,7 +416,7 @@ export class RankingAlgorithm {
       }
 
       // Normalize the required portion (handles CamelCase, punctuation)
-      const required = this.normalizeForMatching(requiredRaw, characterReplacements);
+      const required = normalizeForMatching(requiredRaw, characterReplacements);
       const optional = optionalMatches.join(' ');
 
       return { required, optional };
@@ -472,15 +425,16 @@ export class RankingAlgorithm {
     const { required: requiredTitle, optional: optionalTitle } = separateRequiredOptional(requestTitle);
 
     // Extract words from required portion only for coverage check
-    const requiredWords = extractWords(requiredTitle, stopWords);
+    // (a required portion with no letters or digits left falls back to the whole title)
+    const requiredWords = extractWords(requiredTitle || requestTitle, stopWords);
     const torrentWords = extractWords(torrentTitle, stopWords);
 
     // Calculate word coverage: how many REQUIRED words appear in TORRENT
     if (requiredWords.length === 0) {
-      // Edge case: title is only stop words or only optional content, skip filter
+      // Edge case: title is only stop words, skip filter
       // Fall through to normal scoring
     } else {
-      const matchedWords = requiredWords.filter(word => torrentWords.includes(word));
+      const matchedWords = requiredWords.filter(word => isWordInTitle(word, torrentWords, torrentTitle));
       const coverage = matchedWords.length / requiredWords.length;
 
       // HARD REQUIREMENT: Must have 80%+ coverage of REQUIRED words
@@ -501,13 +455,12 @@ export class RankingAlgorithm {
     // ========== STAGE 2: TITLE MATCHING (0-35 points) ==========
     let titleScore = 0;
 
-    // Keep original torrent title (lowercased only) for metadata marker detection
-    // Markers like [ ] ( ) : are removed by normalization but needed for suffix validation
-    const torrentTitleOriginal = torrent.title.toLowerCase().replace(/\s+/g, ' ').trim();
+    // Folded torrent title that keeps the markers ([ ] ( ) :) normalization removes, for suffix/prefix checks
+    const torrentTitleOriginal = foldForMatching(torrent.title, characterReplacements);
 
     // Try matching with full title first, then fall back to required title (without parentheses)
     const titlesToTry = [requestTitle];
-    if (requiredTitle !== requestTitle) {
+    if (requiredTitle && requiredTitle !== requestTitle) {
       titlesToTry.push(requiredTitle); // Add required-only version if different
     }
 
@@ -521,7 +474,7 @@ export class RankingAlgorithm {
 
         // For metadata marker detection, try to find where the title starts in the ORIGINAL string
         // Search for key words from the title to locate position in original
-        const titleWords = titleToMatch.split(/\s+/).filter(w => w.length > 2);
+        const titleWords = titleToMatch.split(/\s+/).filter(w => w.length > 2 || hasUnspacedScript(w));
         let afterTitleOriginal = '';
         if (titleWords.length > 0) {
           // Find the last significant title word in the original string
@@ -639,6 +592,8 @@ export class RankingAlgorithm {
   private checkAuthorPresenceWithParsed(torrentTitle: string, normalizedAuthors: string[]): boolean {
     // At least ONE author must match with high confidence
     return normalizedAuthors.some(author => {
+      // An empty author is a substring of every title: never a match
+      if (!author) return false;
       // Check 1: Exact substring match (works well now that both are normalized)
       if (torrentTitle.includes(author)) {
         return true;
@@ -678,27 +633,6 @@ export class RankingAlgorithm {
       // Rejects: "E. L. James" vs "Michael James" (no partial-word match)
       return matchesByInitials(torrentTitle, author);
     });
-  }
-
-  /**
-   * Check if author is present in torrent title with high confidence
-   * Handles variations: middle initials, spacing, punctuation, name order, CamelCase
-   *
-   * @param torrentTitle - Normalized torrent title (already processed by normalizeForMatching)
-   * @param requestAuthor - Raw author string (will be parsed and normalized internally)
-   * @returns true if at least ONE author is present with high confidence
-   */
-  private checkAuthorPresence(torrentTitle: string, requestAuthor: string, characterReplacements?: Record<string, string>): boolean {
-    // Parse multiple authors (same logic as Stage 3 author matching)
-    const authors = requestAuthor
-      .split(/,|&| and | - /)
-      .map(a => a.trim())
-      .filter(a => a.length > 2 && !['translator', 'narrator'].includes(a));
-
-    // Normalize each author for matching
-    const normalizedAuthors = authors.map(a => this.normalizeForMatching(a, characterReplacements));
-
-    return this.checkAuthorPresenceWithParsed(torrentTitle, normalizedAuthors);
   }
 
   /**
