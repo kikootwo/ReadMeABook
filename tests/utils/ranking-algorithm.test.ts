@@ -1439,6 +1439,62 @@ describe('ranking-algorithm', () => {
       expect(ranked[0].bonusModifiers.length).toBeGreaterThan(0);
     });
   });
+
+  describe('Author initials (spaced vs compacted)', () => {
+    const algorithm = new RankingAlgorithm();
+    const matchScore = (torrentTitle: string, title: string, author: string) =>
+      algorithm.getScoreBreakdown({ ...baseTorrent, title: torrentTitle }, { title, author }, true).matchScore;
+
+    // Rejected by the author gate before initials matching existed
+    it.each([
+      ['TJ Klune', 'Olive Juice by T J Klune [ENG / M4B]', 'Olive Juice'],
+      ['T. J. Klune', 'Olive Juice by TJ Klune [M4B]', 'Olive Juice'],
+      ['J D Robb', 'Naked in Death by JD Robb', 'Naked in Death'],
+      ['JK Rowling', 'The Casual Vacancy by J.K. Rowling [M4B]', 'The Casual Vacancy'],
+      ['J.K. Rowling', 'The Casual Vacancy by JK Rowling [M4B]', 'The Casual Vacancy'],
+      ['TJ Klune', 'Olive Juice Book 1 T J Klune', 'Olive Juice'],
+    ])('accepts %s in "%s"', (author, torrentTitle, title) => {
+      expect(matchScore(torrentTitle, title, author)).toBeGreaterThan(0);
+    });
+
+    // Already accepted by the first-name/last-name check; must not regress
+    it.each([
+      ['W. E. B. Du Bois', 'The Souls of Black Folk - Du Bois', 'The Souls of Black Folk'],
+      ['A. E. van Vogt', 'Slan by van Vogt', 'Slan'],
+      ['J.K. Rowling', 'The Casual Vacancy by J. K. Rowling', 'The Casual Vacancy'],
+      ['J. K. Rowling', 'The Casual Vacancy by J.K. Rowling', 'The Casual Vacancy'],
+      ['George R R Martin', 'A Game of Thrones by George RR Martin', 'A Game of Thrones'],
+    ])('still accepts %s in "%s"', (author, torrentTitle, title) => {
+      expect(matchScore(torrentTitle, title, author)).toBeGreaterThan(0);
+    });
+
+    // Title matches, so only the author gate can reject these
+    it.each([
+      ['E. L. James', 'Fifty Shades of Grey by Michael James', 'Fifty Shades of Grey'],
+      ['V. E. Schwab', 'Vicious by Steve Schwab', 'Vicious'],
+      ['E. E. Knight', 'Way of the Wolf by Lee Knight', 'Way of the Wolf'],
+      ['E. E. Knight', 'Way of the Wolf - Three Knights Saga', 'Way of the Wolf'],
+      ['A. J. Smith', 'The Black Guard by Raj Smith', 'The Black Guard'],
+      ['C. S. Lewis', 'Mere Christianity - Audio Classics - Read by Damian Lewis', 'Mere Christianity'],
+      ['X. Y.', 'Galaxy Proxy', 'Galaxy Proxy'],
+    ])('rejects %s in "%s" (initials only match whole words)', (author, torrentTitle, title) => {
+      expect(matchScore(torrentTitle, title, author)).toBe(0);
+    });
+
+    it('leaves a lone initial vs a full first name unchanged, in both directions', () => {
+      expect(matchScore('Some Book by John Smith', 'Some Book', 'J. Smith')).toBe(0);
+      expect(matchScore('Some Book by J Smith', 'Some Book', 'John Smith')).toBe(0);
+    });
+
+    it('keeps the real "Olive Juice by T J Klune" release in automatic mode', () => {
+      const torrent = { ...baseTorrent, title: 'Olive Juice by T J Klune [ENG / M4B]', size: 148268640, seeders: 36 };
+      const ranked = rankTorrents([torrent], { title: 'Olive Juice', author: 'TJ Klune', durationMinutes: 311 });
+
+      expect(ranked).toHaveLength(1);
+      expect(ranked[0].breakdown.matchScore).toBeGreaterThan(0);
+      expect(ranked[0].score).toBeGreaterThanOrEqual(50);
+    });
+  });
 });
 
 

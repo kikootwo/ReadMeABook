@@ -71,6 +71,9 @@ model Request {
      → Do nothing (stop monitoring)
      → torrentsKeptUnlimited++
 
+   "completed" = history downloadStatus completed, OR the live client reports completed/seeding
+     or progress >= 1 (history lags for a cancelled request: the monitor stops polling it)
+
    ELSE IF download not completed, OR evaluateSeeding(config, {seedingTime, ratio}).met:
      (src/lib/utils/seeding-policy.ts, same rule as cleanup_seeded_torrents: every set
       limit met; 0 turns a limit off; unreported ratio with ratioLimit > 0 = not met)
@@ -82,6 +85,7 @@ model Request {
 
    ELSE (still seeding):
      → Log: "Keeping ... to finish seeding: ratio a/b, time x/y min"
+     → History not yet completed → write downloadStatus completed (cleanup only reads completed rows)
      → torrentsKeptSeeding++ (cleanup job removes it later)
    ```
 

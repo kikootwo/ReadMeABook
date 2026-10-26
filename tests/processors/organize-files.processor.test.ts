@@ -73,6 +73,8 @@ describe('processOrganizeFiles', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // An active request: the stop guard's conditional status writes match one row
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     // Default mock for request lookup (processor needs to determine request type)
     prismaMock.request.findUnique.mockResolvedValue({
       id: 'req-default',
@@ -960,6 +962,38 @@ describe('processOrganizeFiles', () => {
       expect(taggingReads()).toHaveLength(1);
       expect(configMock.get).not.toHaveBeenCalledWith('metadata_tagging_enabled');
       expect(placement).toMatchObject({ metadataTaggingEnabled: enabled });
+    });
+  });
+
+  describe('request cancelled after the import was queued', () => {
+    it.each(['audiobook', 'ebook'])('does not import a cancelled or deleted %s request', async (type) => {
+      prismaMock.request.findUnique.mockResolvedValue({ id: 'req-c', type, userId: 'u1', user: { plexUsername: 'testuser' } });
+      // The 'processing' claim matches no row: cancelled (or deleted) while the job waited
+      prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
+
+      const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+      // .catch: on main the import runs on and fails on the unmocked book; the assertion below is the proof
+      const result = await processOrganizeFiles({
+        requestId: 'req-c',
+        audiobookId: 'a1',
+        downloadPath: '/downloads/book',
+        jobId: 'job-c',
+      }).catch((error: unknown) => error);
+
+      // Main overwrote the cancel with a plain 'processing' write and started the import
+      expect(prismaMock.request.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'processing' }) })
+      );
+      expect(result).toMatchObject({ success: true, requestId: 'req-c' });
+      expect(result.message).toContain('not imported');
+      expect(prismaMock.request.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'req-c', deletedAt: null, status: { not: 'cancelled' } },
+        data: expect.objectContaining({ status: 'processing' }),
+      }));
+      expect(prismaMock.request.update).not.toHaveBeenCalled();
+      expect(prismaMock.audiobook.findUnique).not.toHaveBeenCalled();
+      expect(organizerMock.organize).not.toHaveBeenCalled();
+      expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
     });
   });
 });

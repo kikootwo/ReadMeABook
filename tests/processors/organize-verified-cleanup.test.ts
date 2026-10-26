@@ -118,6 +118,8 @@ describe('verified-import cleanup', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // An active request: the stop guard's conditional status writes match one row
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rmab-verified-')));
     downloads = path.join(root, 'downloads');
     media = path.join(root, 'media');

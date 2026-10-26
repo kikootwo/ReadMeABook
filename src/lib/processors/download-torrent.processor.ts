@@ -12,6 +12,7 @@ import { getProwlarrConnection } from '../integrations/prowlarr-connection';
 import { isMagnetUri, toConfiguredProwlarrUrl } from '../utils/prowlarr-url';
 import { RMABLogger } from '../utils/logger';
 import { isTransientConnectionError } from '../utils/connection-errors';
+import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import {
   DownloadSourceError,
   UnusableDownloadSourceError,
@@ -47,17 +48,16 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
   });
 
   try {
-    // Update request status to downloading
-    const request = await prisma.request.update({
+    // Update request status to downloading, unless it was cancelled or deleted
+    // (for example during the search, or between Bull retries): then add nothing
+    if (!(await updateRequestUnlessStopped(requestId, { status: 'downloading', progress: 0 }))) {
+      logger.info(`Request ${requestId} is cancelled or deleted, not adding a download`);
+      return { success: true, message: 'Request cancelled or deleted, download not started', requestId };
+    }
+
+    const request = await prisma.request.findUnique({
       where: { id: requestId },
-      data: {
-        status: 'downloading',
-        progress: 0,
-        updatedAt: new Date(),
-      },
-      include: {
-        user: { select: { plexUsername: true } },
-      },
+      select: { type: true, user: { select: { plexUsername: true } } },
     });
 
     const config = await getConfigService();
@@ -182,9 +182,9 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
         requestId,
         audiobook.title,
         audiobook.author,
-        request.user.plexUsername || 'Unknown User',
+        request?.user.plexUsername || 'Unknown User',
         grabMessage,
-        request.type
+        request?.type
       ).catch((error) => {
         logger.error('Failed to queue grab notification', { error: error instanceof Error ? error.message : String(error) });
       });
@@ -229,15 +229,11 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
           : `Download client unreachable for request ${requestId}, allowing Bull to retry`
       );
     } else {
-      // Permanent error — mark request as failed immediately
-      await prisma.request.update({
-        where: { id: requestId },
-        data: {
-          status: 'failed',
-          errorMessage: error instanceof Error ? error.message : 'Failed to add download to client',
-          updatedAt: new Date(),
-        },
-      });
+      // Permanent error — mark request as failed immediately (a cancel is left in place)
+      await markRequestFailedUnlessStopped(
+        requestId,
+        error instanceof Error ? error.message : 'Failed to add download to client'
+      );
     }
 
     throw error;

@@ -36,6 +36,9 @@ interface Scenario {
   seedingTime: number;
   ratio?: number;
   downloadStatus?: string;
+  /** Live client state; defaults to a finished, seeding torrent. */
+  clientStatus?: string;
+  progress?: number;
   indexerName?: string;
   indexerId?: number | null;
   configured?: { id: number; name: string };
@@ -44,7 +47,7 @@ interface Scenario {
 }
 
 async function deleteWith({
-  seedingTimeMinutes, ratioLimit, seedingTime, ratio, downloadStatus = 'completed',
+  seedingTimeMinutes, ratioLimit, seedingTime, ratio, downloadStatus = 'completed', clientStatus = 'seeding', progress = 1,
   indexerName = 'Tracker', indexerId = null, configured = { id: 1, name: 'Tracker' }, rawConfig,
 }: Scenario) {
   prismaMock.request.findFirst.mockResolvedValue({
@@ -58,7 +61,7 @@ async function deleteWith({
       absItemId: null,
       filePath: path.join('/media', 'Author', 'Book'),
     },
-    downloadHistory: [{ torrentHash: 'hash-1', indexerName, indexerId, downloadStatus }],
+    downloadHistory: [{ id: 'dh-1', torrentHash: 'hash-1', indexerName, indexerId, downloadStatus, completedAt: null }],
   });
   configServiceMock.get.mockImplementation(async (key: string) => {
     if (key === 'prowlarr_indexers') {
@@ -72,7 +75,7 @@ async function deleteWith({
   const client = {
     clientType: 'qbittorrent',
     protocol: 'torrent',
-    getDownload: vi.fn().mockResolvedValue({ id: 'hash-1', name: 'Book', status: 'seeding', seedingTime, ratio }),
+    getDownload: vi.fn().mockResolvedValue({ id: 'hash-1', name: 'Book', status: clientStatus, progress, seedingTime, ratio }),
     deleteDownload: vi.fn().mockResolvedValue(undefined),
   };
   downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(client);
@@ -133,6 +136,7 @@ describe('deleteRequest seeding rule', () => {
   it('removes an incomplete download from a ratio-only indexer (it is not unlimited)', async () => {
     const { result, client } = await deleteWith({
       seedingTimeMinutes: 0, ratioLimit: 1.5, seedingTime: 0, ratio: 0, downloadStatus: 'downloading',
+      clientStatus: 'downloading', progress: 0.4,
     });
 
     expect(client.deleteDownload).toHaveBeenCalledWith('hash-1', true);
@@ -148,7 +152,9 @@ describe('deleteRequest seeding rule', () => {
       args?.where?.downloadHistory?.some?.torrentHash === 'hash-1' ? [{ id: 'req-2', status: 'downloaded' }] : []
     );
 
-    const { result, client } = await deleteWith({ seedingTimeMinutes: 60, ratioLimit: 1, seedingTime: 3600, ratio: 2, downloadStatus });
+    const { result, client } = await deleteWith({ seedingTimeMinutes: 60, ratioLimit: 1, seedingTime: 3600, ratio: 2, downloadStatus,
+      ...(downloadStatus === 'downloading' && { clientStatus: 'downloading', progress: 0.5 }),
+    });
 
     expect(client.deleteDownload).not.toHaveBeenCalled();
     expect(result.torrentsKeptShared).toBe(1);
@@ -198,5 +204,48 @@ describe('deleteRequest seeding rule', () => {
 
     expect(client.deleteDownload).not.toHaveBeenCalled();
     expect(result.torrentsKeptSeeding).toBe(1);
+  });
+
+  describe('history older than the client (the monitor stops polling a cancelled request)', () => {
+    it.each([
+      ['seeding', 1],
+      ['completed', 1], // e.g. a Transmission torrent stopped at 100%
+      ['paused', 1],
+    ])('keeps a torrent the client reports %s at progress %s for seeding, not deleted with its data', async (clientStatus, progress) => {
+      const { result, client } = await deleteWith({
+        seedingTimeMinutes: 60, ratioLimit: 2, seedingTime: 600, ratio: 0.3,
+        downloadStatus: 'downloading', clientStatus, progress,
+      });
+
+      expect(client.deleteDownload).not.toHaveBeenCalled();
+      expect(result.torrentsKeptSeeding).toBe(1);
+      expect(result.torrentsRemoved).toBe(0);
+      // Recorded as completed so the scheduled seeding cleanup can finish it later
+      expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith({
+        where: { id: 'dh-1' },
+        data: { downloadStatus: 'completed', completedAt: expect.any(Date) },
+      });
+    });
+
+    it('still removes a truly incomplete download', async () => {
+      const { result, client } = await deleteWith({
+        seedingTimeMinutes: 60, ratioLimit: 2, seedingTime: 0, ratio: 0,
+        downloadStatus: 'downloading', clientStatus: 'downloading', progress: 0.4,
+      });
+
+      expect(client.deleteDownload).toHaveBeenCalledWith('hash-1', true);
+      expect(result.torrentsRemoved).toBe(1);
+      expect(prismaMock.downloadHistory.update).not.toHaveBeenCalled();
+    });
+
+    it('still removes a finished torrent once its seeding rule is met', async () => {
+      const { result, client } = await deleteWith({
+        seedingTimeMinutes: 60, ratioLimit: 2, seedingTime: 7200, ratio: 2.5,
+        downloadStatus: 'downloading', clientStatus: 'seeding', progress: 1,
+      });
+
+      expect(client.deleteDownload).toHaveBeenCalledWith('hash-1', true);
+      expect(result.torrentsRemoved).toBe(1);
+    });
   });
 });
