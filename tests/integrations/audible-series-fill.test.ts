@@ -87,6 +87,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('getAudiobookDetails series fill', () => {
@@ -103,6 +104,23 @@ describe('getAudiobookDetails series fill', () => {
     expect(config.params.response_groups).toContain('series');
     expect(config.timeout).toBe(5000);
     expect(config.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('gives every fill request its own live 5 s abort deadline', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    audnexusServes({ B0DEAD0001: audnexusBook('B0DEAD0001'), B0DEAD0002: audnexusBook('B0DEAD0002') });
+    catalogServes((asin) => catalogProduct(asin));
+    const service = new AudibleService();
+
+    await service.getAudiobookDetails('B0DEAD0001');
+    await service.getAudiobookDetails('B0DEAD0002');
+
+    expect(timeoutSpy).toHaveBeenCalledTimes(2);
+    expect(timeoutSpy.mock.calls).toEqual([[5000], [5000]]);
+    const signals = apiClientMock.get.mock.calls.map(([, config]) => config.signal as AbortSignal);
+    expect(signals).toEqual(timeoutSpy.mock.results.map((r) => r.value));
+    expect(signals[0]).not.toBe(signals[1]);
+    expect(signals.every((s) => s.aborted === false)).toBe(true);
   });
 
   it('takes only the series from the catalog; every other field stays Audnexus', async () => {
@@ -179,6 +197,7 @@ describe('getAudiobookDetails series fill', () => {
   it.each([
     ['a missing title', { asin: 'SER0000030', sequence: '4' }],
     ['a whitespace-only title', { asin: 'SER0000031', title: '   ', sequence: '4' }],
+    ['a title that is not a string', { asin: 'SER0000032', title: 42, sequence: '4' }],
   ])('fills nothing when the chosen catalog entry has %s', async (_label, entry) => {
     audnexusServes({ B0FILL0007: audnexusBook('B0FILL0007') });
     catalogServes((asin) => catalogProduct(asin, { series: [entry] }));
@@ -186,6 +205,7 @@ describe('getAudiobookDetails series fill', () => {
     const details = await new AudibleService().getAudiobookDetails('B0FILL0007');
 
     expect(apiClientMock.get).toHaveBeenCalledTimes(1);
+    expect(details?.title).toBe('Audnexus Title B0FILL0007');
     expect(details?.series).toBeUndefined();
     expect(details?.seriesPart).toBeUndefined();
     expect(details?.seriesAsin).toBeUndefined();
@@ -207,7 +227,7 @@ describe('series fill failures and the 15 min pause', () => {
     expect(second?.series).toBeUndefined();
     expect(apiClientMock.get).toHaveBeenCalledTimes(1);
     expect(logMock.warn).toHaveBeenCalledTimes(1);
-    expect(logMock.warn.mock.calls[0][0]).toMatch(/Series lookups from the Audible catalog paused for 15 min after: HTTP 503/);
+    expect(logMock.warn.mock.calls[0][0]).toBe('Series lookups from the Audible catalog paused for 15 min after: HTTP 503 on B0FAIL0001');
     expect(logMock.error).not.toHaveBeenCalled();
     expect(logMock.debug.mock.calls.some(([msg]) => /B0FAIL0002 skipped/.test(msg))).toBe(true);
   });
@@ -232,16 +252,47 @@ describe('series fill failures and the 15 min pause', () => {
     expect(details?.series).toBe('Synthetic Saga');
   });
 
-  it('treats a timeout or network error as a failure (details returned, pause logged)', async () => {
-    audnexusServes({ B0FAIL0004: audnexusBook('B0FAIL0004') });
-    apiClientMock.get.mockRejectedValue(Object.assign(new Error('timeout of 5000ms exceeded'), { code: 'ECONNABORTED' }));
+  it.each([
+    ['an axios timeout', { code: 'ECONNABORTED' }, 'timeout (5 s)'],
+    ['an abort at the deadline', { code: 'ERR_CANCELED', name: 'CanceledError' }, 'timeout (5 s)'],
+    ['an abort signal timeout', { name: 'TimeoutError' }, 'timeout (5 s)'],
+    ['a network error', { code: 'ECONNRESET', isAxiosError: true }, 'socket hang up'],
+  ])('pauses after %s, returning the details', async (_label, fields, reason) => {
+    audnexusServes({ B0FAIL0004: audnexusBook('B0FAIL0004'), B0FAIL0005: audnexusBook('B0FAIL0005') });
+    apiClientMock.get.mockRejectedValue(Object.assign(new Error(reason === 'socket hang up' ? reason : 'canceled'), fields));
+    const service = new AudibleService();
 
-    const details = await new AudibleService().getAudiobookDetails('B0FAIL0004');
+    const details = await service.getAudiobookDetails('B0FAIL0004');
+    await service.getAudiobookDetails('B0FAIL0005');
 
     expect(details?.title).toBe('Audnexus Title B0FAIL0004');
     expect(details?.series).toBeUndefined();
     expect(apiClientMock.get).toHaveBeenCalledTimes(1);
-    expect(logMock.warn.mock.calls[0][0]).toMatch(/paused for 15 min after: timeout of 5000ms exceeded/);
+    expect(logMock.warn).toHaveBeenCalledTimes(1);
+    expect(logMock.warn.mock.calls[0][0]).toBe(`Series lookups from the Audible catalog paused for 15 min after: ${reason} on B0FAIL0004`);
+  });
+
+  it.each([
+    ['a 404', () => apiClientMock.get.mockRejectedValueOnce(httpError(404))],
+    ['a malformed product', () => catalogServes((asin) => catalogProduct(asin, { category_ladders: [{}] }))],
+  ])('treats %s as that book having no series, without pausing', async (_label, firstAnswer) => {
+    audnexusServes({ B0NONE0001: audnexusBook('B0NONE0001'), B0NONE0002: audnexusBook('B0NONE0002') });
+    firstAnswer();
+    const service = new AudibleService();
+
+    const first = await service.getAudiobookDetails('B0NONE0001');
+    catalogServes((asin) => catalogProduct(asin));
+    const second = await service.getAudiobookDetails('B0NONE0002');
+    const repeat = await service.getAudiobookDetails('B0NONE0001');
+
+    expect(first?.title).toBe('Audnexus Title B0NONE0001');
+    expect(first?.series).toBeUndefined();
+    expect(second?.series).toBe('Synthetic Saga');
+    expect(repeat?.title).toBe('Audnexus Title B0NONE0001');
+    expect(repeat?.series).toBeUndefined();
+    expect(apiClientMock.get).toHaveBeenCalledTimes(2);
+    expect(logMock.warn).not.toHaveBeenCalled();
+    expect(logMock.debug.mock.calls.some(([msg]) => /B0NONE0001 failed .*treated as no series/.test(msg))).toBe(true);
   });
 });
 

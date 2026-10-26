@@ -67,16 +67,42 @@ interface CachedOutcome {
   expiresAt: number;
 }
 
-function failureReason(error: unknown): string {
-  const status = (error as { response?: { status?: number } } | null)?.response?.status;
-  if (status) return `HTTP ${status}`;
-  return error instanceof Error ? error.message : String(error);
+interface FetchError {
+  response?: { status?: number };
+  code?: unknown;
+  name?: unknown;
+  isAxiosError?: unknown;
+  message?: unknown;
+}
+
+const ABORT_CODES = new Set(['ERR_CANCELED', 'ECONNABORTED']);
+const ABORT_NAMES = new Set(['CanceledError', 'TimeoutError', 'AbortError']);
+
+function isAbort(error: FetchError): boolean {
+  return ABORT_CODES.has(error.code as string) || ABORT_NAMES.has(error.name as string);
+}
+
+/**
+ * Transient: a 429, a 5xx, no response (network error) or an abort/timeout. These pause
+ * the fill; anything else (another 4xx, a malformed product) is that ASIN's outcome.
+ */
+function isTransient(error: FetchError): boolean {
+  const status = error.response?.status;
+  if (typeof status === 'number') return status === 429 || status >= 500;
+  return isAbort(error) || error.isAxiosError === true || typeof error.code === 'string';
+}
+
+function failureReason(error: FetchError): string {
+  const status = error.response?.status;
+  if (typeof status === 'number') return `HTTP ${status}`;
+  if (isAbort(error)) return `timeout (${(SERIES_FILL_PROFILE.deadlineMs ?? 0) / 1000} s)`;
+  return typeof error.message === 'string' && error.message ? error.message : String(error);
 }
 
 /**
  * Fills the series of an Audnexus result that has none from the Audible catalog (same
- * ASIN and region). Outcomes are cached for 24 h; after a failed lookup, fills pause for
- * 15 min. The details are always returned; a skipped or failed fill leaves the series empty.
+ * ASIN and region). Outcomes are cached for 24 h; after a transient failure, fills pause
+ * for 15 min. The details are always returned; a skipped or failed fill leaves the series empty.
  */
 export class SeriesFill {
   private pausedUntil = 0;
@@ -105,9 +131,15 @@ export class SeriesFill {
     let product: AudibleAudiobook | null;
     try {
       product = await loadCatalog();
-    } catch (error) {
+    } catch (caught) {
+      const error = (caught ?? {}) as FetchError;
+      if (!isTransient(error)) {
+        this.logger.debug(`Audible catalog series lookup for ${details.asin} failed (${failureReason(error)}); treated as no series`);
+        this.remember(key, null);
+        return details;
+      }
       if (Date.now() >= this.pausedUntil) {
-        this.logger.warn(`Series lookups from the Audible catalog paused for 15 min after: ${failureReason(error)}`);
+        this.logger.warn(`Series lookups from the Audible catalog paused for 15 min after: ${failureReason(error)} on ${details.asin}`);
       }
       this.pausedUntil = Date.now() + SERIES_FILL_COOLDOWN_MS;
       return details;
@@ -115,7 +147,7 @@ export class SeriesFill {
 
     // All three fields from the chosen entry, and only when it has a name
     const fields: SeriesFields | null =
-      product?.series && product.series.trim() !== ''
+      typeof product?.series === 'string' && product.series.trim() !== ''
         ? { series: product.series, seriesPart: product.seriesPart, seriesAsin: product.seriesAsin }
         : null;
     if (product && !fields) this.logger.debug(`Audible catalog lists no series for ${details.asin}`);

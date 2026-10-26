@@ -30,7 +30,9 @@ vi.mock('@/lib/services/works.service', () => ({
   seedAsin: vi.fn(async () => undefined),
 }));
 
-const { createRequestForUser } = await import('@/lib/services/request-creator.service');
+type CreateRequestForUser = typeof import('@/lib/services/request-creator.service').createRequestForUser;
+/** Re-imported per test: a fresh Audible service (no series cache or pause carried over). */
+let createRequestForUser: CreateRequestForUser;
 
 const USER = 'user-1';
 
@@ -48,11 +50,13 @@ function audibleServes(asin: string, catalog: 'series' | 'fails') {
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  vi.resetModules();
+  ({ createRequestForUser } = await import('@/lib/services/request-creator.service'));
   axiosMock.get.mockReset();
   apiClientMock.get.mockReset();
-  axiosMock.create.mockReturnValue(htmlClientMock);
+  axiosMock.create.mockReset();
   axiosMock.create.mockReturnValueOnce(htmlClientMock).mockReturnValueOnce(apiClientMock);
   prismaMock.request.findFirst.mockResolvedValue(null);
   prismaMock.request.create.mockResolvedValue({ id: 'req-1', audiobook: { id: 'book-1' }, user: { id: USER } });
