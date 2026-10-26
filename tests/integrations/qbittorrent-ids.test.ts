@@ -8,6 +8,7 @@ import parseTorrent from 'parse-torrent';
 import {
   acceptedAddId,
   base32ToHex,
+  hexToBase32,
   candidateIds,
   findTorrent,
   isSameTorrent,
@@ -18,6 +19,7 @@ import {
   SharedRequest,
   TorrentIdMap,
   torrentFileHashes,
+  torrentHashForms,
   validTorrentId,
 } from '@/lib/integrations/qbittorrent-ids';
 import { HYBRID, torrentFile } from '../helpers/fake-qbittorrent';
@@ -35,6 +37,14 @@ describe('base32 hashes', () => {
     expect(normalizeTorrentId(value)).toBe(hex);
   });
 
+  it('encodes hex as base32 and lists every form a row may hold', () => {
+    expect(hexToBase32(HEX)).toBe(B32);
+    expect(hexToBase32('b6692ea5df920cad691c20319a6fffd7a4a766b8')).toBe('WZUS5JO7SIGK22I4EAYZU37726SKOZVY');
+    expect(torrentHashForms(B32)).toEqual([B32, HEX, B32.toLowerCase()]);
+    expect(torrentHashForms(HEX)).toEqual([HEX, B32.toLowerCase()]);
+    expect(torrentHashForms('hash-1')).toEqual(['hash-1']);
+  });
+
   it.each([['too short', B32.slice(1)], ['not base32 (0, 1, 8, 9)', '0'.repeat(32)], ['hex', HEX]])('rejects %s', (_label, value) => {
     expect(base32ToHex(value)).toBeNull();
     expect(normalizeTorrentId(value)).toBe(value);
@@ -50,6 +60,7 @@ describe('magnetHashes', () => {
     ['btih and btmh', `magnet:?xt=urn:btih:${HYBRID.v1}&xt=urn:btmh:${btmh}`, { v1: HYBRID.v1, v2: HYBRID.v2 }],
     ['numbered xt params', `magnet:?xt.1=urn:btmh:${btmh}&xt.2=urn:btih:${HYBRID.v1}`, { v1: HYBRID.v1, v2: HYBRID.v2 }],
     ['btmh only', `magnet:?xt=urn:btmh:${btmh}`, { v2: HYBRID.v2 }],
+    ['HTML-escaped separators', `magnet:?dn=Book&amp;xt=urn:btih:${HYBRID.v1}&amp;xt=urn:btmh:${btmh}`, { v1: HYBRID.v1, v2: HYBRID.v2 }],
   ])('reads %s', (_label, url, hashes) => {
     expect(magnetHashes(url)).toEqual(hashes);
   });
@@ -130,6 +141,12 @@ describe('TorrentIdMap and SharedRequest', () => {
     map.set('d', 'all');
     expect([map.get('a'), map.get('b'), map.get('C'), map.get('d')]).toEqual([undefined, HYBRID.id, HYBRID.v1, undefined]);
     expect(new TorrentIdMap().get('x')).toBeUndefined();
+  });
+
+  it('keeps 5000 entries by default', () => {
+    const map = new TorrentIdMap();
+    for (let i = 0; i <= 5000; i++) map.set(`id-${i}`, HEX);
+    expect([map.get('id-0'), map.get('id-1'), map.get('id-5000')]).toEqual([undefined, HEX, HEX]);
   });
 
   it('shares one pending request and starts a new one after it settles', async () => {

@@ -682,7 +682,7 @@ describe('QBittorrentService', () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=ok';
     vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(undefined);
-    vi.spyOn(service as any, 'getTorrent').mockRejectedValue(new Error('not found'));
+    clientMock.get.mockResolvedValue({ status: 200, data: [] });
 
     axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent') });
     parseTorrentMock.mockResolvedValueOnce({ infoHash: 'hash-1', name: 'Book' });
@@ -763,7 +763,7 @@ describe('QBittorrentService', () => {
   it('throws when qBittorrent rejects torrent file uploads', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=reject';
-    vi.spyOn(service as any, 'getTorrent').mockRejectedValue(new Error('not found'));
+    clientMock.get.mockResolvedValue({ status: 200, data: [] });
 
     axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent') });
     parseTorrentMock.mockResolvedValueOnce({ infoHash: 'hash-2', name: 'Book' });

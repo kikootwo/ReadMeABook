@@ -89,12 +89,13 @@ describe.each(['5.2', 'legacy'] as const)('qBittorrent %s (libtorrent 2)', (vers
     expect(fake.list.map((t) => t.category)).toEqual(['done', 'done']);
   });
 
-  it('adds a plain v1 .torrent as before: one lookup by v1, then the add', async () => {
+  it('adds a plain v1 .torrent after checking by v1 and the full list', async () => {
     const qb = service();
     await expect(qb.addDownload(fileUrl(PLAIN))).resolves.toEqual({ id: PLAIN.v1, alreadyInClient: false, infoHash: PLAIN.v1 });
     const calls = fake.requests.filter((r) => r.path !== '/api/v2/torrents/categories');
     expect(calls.map((r) => [r.path, r.params.hashes])).toEqual([
       ['/api/v2/torrents/info', PLAIN.v1],
+      ['/api/v2/torrents/info', undefined],
       ['/api/v2/torrents/add', undefined],
     ]);
   });
@@ -142,6 +143,19 @@ describe('a hybrid already in the client, added again by a btih-only magnet', ()
     await expect(service().addDownload(magnetOf(HYBRID))).resolves.toEqual({ id: HYBRID.id, alreadyInClient: true, infoHash: HYBRID.v1 });
     expect(fake.requests.some((r) => r.path === '/api/v2/torrents/add')).toBe(false);
     expect(fake.list).toHaveLength(1);
+  });
+});
+
+describe('the pre-add full list cannot be read', () => {
+  it.each([
+    ['503', 'magnet', () => magnetOf(PLAIN)],
+    ['503', '.torrent', () => fileUrl(PLAIN)],
+    ['not-a-list', 'magnet', () => magnetOf(PLAIN)],
+    ['not-a-list', '.torrent', () => fileUrl(HYBRID)],
+  ] as const)('%s answer, %s add: nothing is added and the add fails closed', async (fault, _kind, url) => {
+    fake.listFault = fault;
+    await expect(service().addDownload(url())).rejects.toThrow("Couldn't read qBittorrent's torrent list to check for an existing copy");
+    expect(fake.requests.some((r) => r.path === '/api/v2/torrents/add')).toBe(false);
   });
 });
 

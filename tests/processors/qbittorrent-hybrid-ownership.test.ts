@@ -111,6 +111,19 @@ describe('someone else\'s hybrid torrent', () => {
     expect(posts('add')).toHaveLength(0);
   });
 
+  it.each(['4.4', 'legacy', '5.2'] as const)('qBittorrent %s: a magnet with its btih and a different btmh is recorded as already in the client, never touched', async (version) => {
+    fake.version = version;
+    fake.seed(HYBRID, { addedAgoSec: 600 });
+    const crafted = `magnet:?xt=urn:btih:${HYBRID.v1}&xt=urn:btmh:1220${'ab'.repeat(32)}&dn=Hybrid`;
+    const result = await new QBittorrentService(fake.url, '', '').addDownload(crafted);
+    expect(result).toMatchObject({ id: HYBRID.id, alreadyInClient: true });
+    const fields = { downloadClientId: result.id, addedByRmab: !result.alreadyInClient };
+    await postImport(fields);
+    await expect(requestDelete(fields)).resolves.toMatchObject({ torrentsRemoved: 0 });
+    expect([...posts('add'), ...posts('setCategory'), ...posts('delete')]).toEqual([]);
+    expect(fake.list).toEqual([{ id: HYBRID.id, category: 'other', name: HYBRID.name }]);
+  });
+
   it('older than the grab: the probe finds it and the post-import category is refused', async () => {
     fake.seed(HYBRID, { addedAgoSec: 2 * 86400 });
     await postImport();
@@ -136,12 +149,26 @@ describe('someone else\'s hybrid torrent', () => {
   });
 });
 
+// Known risk: qBittorrent 4.4 answered "Ok." to a duplicate, so v1.2.11 recorded the user's hybrid
+// as RMAB's (addedByRmab: true, stored by v1). Such a row now resolves; only the 24 h window guards it.
+describe('a v1.2.11 row for a duplicate of the user\'s hybrid', () => {
+  it.each([
+    ['added 1 h before the grab: resolves to it, and a request delete removes it', 3600, { torrentsRemoved: 1 }, 0],
+    ['added 25 h before the grab: the ownership check refuses it', 25 * 3600, { torrentsRemoved: 0, torrentsKeptNotOwned: 1 }, 1],
+  ])('%s', async (_label, addedAgoSec, outcome, left) => {
+    fake.version = '4.4';
+    fake.seed(HYBRID, { addedAgoSec });
+    await expect(requestDelete()).resolves.toMatchObject(outcome);
+    expect(fake.list).toHaveLength(left);
+  });
+});
+
 describe('shared-torrent guard', () => {
-  it('matches a row stored by a base32 hash under both its base32 and hex forms', async () => {
+  it('matches a row stored by a base32 or hex hash under both forms', async () => {
     const { otherActiveRequestsUsingTorrent } = await import('@/lib/utils/shared-torrent');
     await otherActiveRequestsUsingTorrent('req-1', PLAIN.b32.toLowerCase());
     await otherActiveRequestsUsingTorrent('req-1', PLAIN.v1);
     const filters = prismaMock.request.findMany.mock.calls.map(([args]) => args.where.downloadHistory.some.torrentHash);
-    expect(filters).toEqual([{ in: [PLAIN.b32.toLowerCase(), PLAIN.v1] }, { in: [PLAIN.v1] }]);
+    expect(filters).toEqual([{ in: [PLAIN.b32.toLowerCase(), PLAIN.v1] }, { in: [PLAIN.v1, PLAIN.b32.toLowerCase()] }]);
   });
 });
