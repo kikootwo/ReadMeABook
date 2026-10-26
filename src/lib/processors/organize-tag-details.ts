@@ -49,12 +49,16 @@ export async function readMetadataTaggingEnabled(logger: RMABLogger): Promise<bo
 /**
  * At most one Audible details lookup per import, shared by the series backfill and
  * the metadata tags. Resolves to null without an ASIN; never called until needed.
+ * `fillSeries: false` when the series is already known (the tags never read it).
  */
-export function createAudibleDetailsLoader(asin: string | null | undefined): AudibleDetailsLoader {
+export function createAudibleDetailsLoader(
+  asin: string | null | undefined,
+  options: { fillSeries: boolean } = { fillSeries: true }
+): AudibleDetailsLoader {
   let pending: Promise<AudibleAudiobook | null> | undefined;
   return () => {
     if (!asin) return Promise.resolve(null);
-    pending ??= getAudibleService().getAudiobookDetails(asin);
+    pending ??= getAudibleService().getAudiobookDetails(asin, options);
     return pending;
   };
 }

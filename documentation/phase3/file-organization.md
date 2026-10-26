@@ -125,7 +125,7 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 **Tag details lookup** (`src/lib/processors/organize-tag-details.ts`):
 - Processor reads `metadata_tagging_enabled` once (`readMetadataTaggingEnabled`), passes it to the lookup and `organize()` (`placement.metadataTaggingEnabled`); unreadable → undefined: no lookup, `organize()` reads it itself
 - Only when tagging is on; one `getAudiobookDetails(asin)` per import (`createAudibleDetailsLoader`), shared with the missing-series backfill
-- Series known (lookup serves tags only): raced against `TAG_DETAILS_TIMEOUT_MS` (15 s); series backfill awaits it in full (unchanged)
+- Series known (lookup serves tags only): `{ fillSeries: false }` (no catalog series call), raced against `TAG_DETAILS_TIMEOUT_MS` (15 s); series missing: the lookup may add one catalog series call (`integrations/audible.md` series fill) and the backfill awaits it in full
 - Description: Audible summary (Audnexus `summary`) → stored `Audiobook.description` fallback (client text: bounded by `truncateRawText`, then `stripHtml` like the lookup)
 - Started right after the switch read, awaited just before `organize()` (setup reads run meanwhile; a no-op handler keeps a rejection handled if setup throws first)
 - A failed ffmpeg run reports `describeFfmpegFailure` (stderr tail, never the argv, so no description in job logs)

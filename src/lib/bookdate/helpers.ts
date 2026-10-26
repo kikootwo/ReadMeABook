@@ -935,7 +935,7 @@ export async function matchToAudnexus(
     logger.info(`Found on Audible: "${firstResult.title}" (ASIN: ${firstResult.asin})`);
 
     // Step 3: Use ASIN to fetch full details from Audnexus (or Audible as fallback)
-    const details = await audibleService.getAudiobookDetails(firstResult.asin);
+    const details = await audibleService.getAudiobookDetails(firstResult.asin, { fillSeries: false });
 
     if (!details) {
       logger.warn(`Could not fetch details for ASIN ${firstResult.asin}`);

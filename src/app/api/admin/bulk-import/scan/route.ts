@@ -168,7 +168,7 @@ export async function POST(request: NextRequest) {
                 // keyword text search. Fall back to text search if the lookup fails.
                 if (book.extractedAsin) {
                   try {
-                    const asinResult = await audibleService.getAudiobookDetails(book.extractedAsin);
+                    const asinResult = await audibleService.getAudiobookDetails(book.extractedAsin, { fillSeries: false });
                     if (asinResult) {
                       match = asinResult;
                     }

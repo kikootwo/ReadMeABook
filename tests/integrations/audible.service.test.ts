@@ -1484,7 +1484,7 @@ describe('AudibleService', () => {
           rating: '4.7',
           language: 'english',
           formatType: 'unabridged',
-          publisherName: 'Test Publisher',
+          publisherName: 'Test Publisher', seriesPrimary: { asin: 'S000000001', name: 'Some Series', position: '1' },
         },
       });
 
@@ -1557,7 +1557,7 @@ describe('AudibleService', () => {
     it('prefers the full Audnexus summary over the short description, as plain text with paragraphs', async () => {
       axiosMock.get.mockResolvedValueOnce({
         data: {
-          title: 'Audnexus Book',
+          title: 'Audnexus Book', seriesPrimary: { name: 'Some Series', position: '1' },
           description: 'Short merchandising blurb.',
           summary: '<p>Full publisher summary &amp; details.</p> <p>A <b>second</b> paragraph.</p>',
         },
@@ -1577,7 +1577,7 @@ describe('AudibleService', () => {
       ['not a string', { summary: 42 }],
     ])('falls back to the Audnexus description when the summary is %s, without the catalog API', async (_label, extra) => {
       axiosMock.get.mockResolvedValueOnce({
-        data: { title: 'Audnexus Book', description: 'Short merchandising blurb.', ...extra },
+        data: { title: 'Audnexus Book', seriesPrimary: { name: 'Some Series' }, description: 'Short merchandising blurb.', ...extra },
       });
 
       const service = new AudibleService();

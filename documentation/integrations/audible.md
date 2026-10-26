@@ -8,13 +8,14 @@ Audiobook metadata for discovery, search, and detail pages. Split by access patt
 
 - **Nightly discovery refresh** (popular / new releases / category lists) — scraped from Audible's **curated HTML storefronts** (`www.audible.<tld>/adblbestsellers`, `/newreleases`, `/search?node=<id>`). The HTML pages reflect Audible's own editorial picks.
 - **User-facing real-time** (search, author books, categories listing, per-ASIN details) — Audible's unauthenticated public **JSON catalog API** (`api.audible.<tld>/1.0/catalog/*`).
-- **Per-ASIN detail lookups** — Audnexus (`api.audnex.us/books/{asin}`) primary; catalog API used as fallback when Audnexus returns 404.
+- **Per-ASIN detail lookups** — Audnexus (`api.audnex.us/books/{asin}`) primary; catalog API used as fallback when Audnexus returns 404, and for the series when Audnexus has none (series fill).
 
 ## Architecture
 
 - **Curated HTML (refresh job only):** the three methods called solely by `audible-refresh.processor.ts` (`getPopularAudiobooks`, `getNewReleases`, `getCategoryBooks`) scrape Audible's storefront HTML to inherit editorial curation. Beefed-up retry/backoff knobs (12 retries, 3-min jittered cap) handle 503 storms patiently on the nightly job without slowing healthy users.
 - **JSON catalog API (real-time):** `search`, `searchByAuthorAsin`, `getCategories` (categories listing), and `fetchAudibleDetailsFromApi` (per-ASIN fallback). Same endpoint used by the official Audible mobile apps. No authentication, no API key, no user credentials, no special headers.
 - **Audnexus (per-ASIN):** `getAudiobookDetails` and `getRuntime` prefer Audnexus, with catalog API fallback for `getAudiobookDetails`.
+- **Series fill** (`audible-series-fill.ts`, `SeriesFill`, one per service): Audnexus result without a series → `series`/`seriesPart`/`seriesAsin` from `/1.0/catalog/products/{asin}` (same region), only when the chosen entry has a non-empty title, all three or none; every other field stays Audnexus. `getAudiobookDetails(asin, { fillSeries: false })` skips it (bulk-import scan, BookDate `matchToAudnexus`, organize tag lookup when the series is stored).
 - **`www.audible.<tld>`:** Used by HTML refresh scraping, by `audible-series.ts`, and by `getBaseUrl()` for "View on Audible" link generation.
 
 ## Data Sources
@@ -65,7 +66,7 @@ Populates every `AudibleAudiobook` field. Covered:
 - **`publisher_summary` is HTML.** Converted with `stripHtml()` (`src/lib/utils/strip-html.ts`, regex-based, no cheerio) before populating `description`. Falls back to `merchandising_summary` (plain text) if `publisher_summary` missing.
 - **Audnexus details prefer `summary`.** `description` = `stripHtml(summary)` if it is a non-empty string, else `stripHtml(description)` (the short blurb). No catalog call for a missing summary.
 - **`description` is plain text, never rendered as HTML.** `stripHtml()`: drop `<script>`/`<style>` blocks → collapse source whitespace → `<br>` = newline, `</p>` = blank line, `<p>`/`<hr>`/div/h1-h6/ul/ol/blockquote and `</li>` = newline, `<li>` = `• ` (case-insensitive; adjacent breaks merge) → strip remaining tags → decode entities in one pass (numeric, common named incl. typographic quotes/dashes and accented letters; exact case first, then case-insensitive; unknown left as-is) → per line collapse spaces/tabs/nbsp and trim, max one blank line. Linear-time on unbalanced input. UI shows it as text (`whitespace-pre-wrap` in the details modal).
-- **Series is an array.** `products[].series[]` — a book may belong to multiple series. Service picks the first entry with non-empty `sequence`, else the first entry. `sequence` is cleaned by extracting first `/\d+(?:\.\d+)?/` match for numeric ordering.
+- **Series is an array.** `products[].series[]` — a book may belong to multiple series. `pickCatalogSeries()` picks the first entry with non-empty (trimmed) `sequence`, else the first entry; same rule for search, author books, the details fallback and the series fill. `sequence` is cleaned by extracting first `/\d+(?:\.\d+)?/` match for numeric ordering.
 - **Stub `product_images`:** cover URL reads from `product_images['500']`; missing keys fall back to `undefined`.
 - **`page` is 0-indexed (catalog API only).** Despite the default value appearing to be 1, the API returns items `(page * num_results)` through `((page + 1) * num_results - 1)`. So `page=1` fetches items 51–100, not 1–50. All catalog-API service methods accept a 1-indexed `page` and subtract 1 at the axios call. The symptom of getting this wrong is silent: queries whose `total_results ≤ num_results` return an empty `products` array while `total_results` is populated (e.g. author searches for small catalogues). HTML paths use Audible's native 1-indexed `page` query param and omit it on the first page.
 
@@ -73,6 +74,7 @@ Populates every `AudibleAudiobook` field. Covered:
 
 - **Real-time JSON API paths:** 503s are uncommon. `fetchWithRetry()` uses jittered exponential backoff, 5 retries, retries on 503/429/5xx. API responses include `Cache-Control: private, max-age=1800`.
 - **Nightly HTML refresh paths:** 503s are more likely (HTML storefront is more rate-sensitive). Same `fetchWithRetry()`, but with `HTML_MAX_RETRIES=12` and `HTML_MAX_BACKOFF_MS=180_000` (3-minute cap on jittered backoff). Healthy refreshes still complete fast (per-page success on attempt 0); users hit by sustained 503 storms grind through patiently rather than abandoning the refresh.
+- **Series fill:** `SERIES_FILL_PROFILE` = one attempt (no retries), `timeout` + `AbortSignal.timeout` 5 s (axios `timeout` alone starts only once connected). A transient failure (429, 401/403, 5xx, no response, abort/timeout) pauses fills 15 min (`SERIES_FILL_COOLDOWN_MS`, per `AudibleService` instance): one warn "Series lookups from the Audible catalog paused for 15 min after: <reason> on <asin>" (abort/timeout reads "timeout (5 s)"), a debug line per skipped fill, details still returned without a series; never cached. Any other failure (another 4xx, a malformed product) is cached as "none" with a debug line, no pause. Outcomes (series or "none") cached 24 h per `region:asin`, max 2000 entries, insertion-order eviction. Details fallback keeps `DETAILS_FALLBACK_PROFILE` (5 retries, no deadline, error log).
 - **`AdaptivePacer`** — inter-page delay 2–4 s baseline, scales up multiplicatively under retry pressure, with a 45–60 s circuit-breaker cooldown after 3 consecutive retry-pages.
 - **Per-batch cooldowns** in `audible-refresh.processor.ts` — 15–30 s between popular/new-releases, 10–20 s between categories.
 
@@ -328,6 +330,12 @@ interface AuthorBooksResult {
 - PostgreSQL (`audible_cache`, `audible_cache_categories`)
 
 ## Fixed Issues
+
+**Series missing from book details and requests (#446, 2026-10-26)**
+- **Problem:** Book details showed no series line for some books, most often the newest in a series; requesting one saved no series, so `{series}` and the series tag stayed empty.
+- **Root cause:** `getAudiobookDetails` returned the Audnexus result whenever Audnexus knew the book; Audnexus has no `seriesPrimary` for some books (stale records) while the catalog lists the series.
+- **Fix:** series fill from the catalog (see Architecture, Rate Limiting). Existing requests pick the series up at organize (series backfill); books already organized keep their folder and tags.
+- **Location:** `src/lib/integrations/audible-series-fill.ts` (new), `audible.service.ts`; tests `tests/integrations/audible-series-fill.test.ts`, `audible-series-pick.test.ts`, `tests/services/request-creator-series.test.ts`.
 
 **Book summaries cut short to the Audnexus blurb (#324, 2026-10-19)**
 - **Problem:** Book details showed only a one- or two-sentence blurb instead of the full publisher summary; multi-paragraph summaries ran together on one line.
