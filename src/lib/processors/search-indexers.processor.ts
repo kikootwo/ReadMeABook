@@ -15,6 +15,7 @@ import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../u
 import type { AudibleRegion } from '../types/audible';
 
 const MAX_RANKED_RESULTS = 100;
+const CANCELLED_DURING_SEARCH = 'Request cancelled or deleted during the search, not re-queued';
 
 /**
  * Process search indexers job
@@ -130,15 +131,12 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
 
       logger.warn(`${errorMessage} for request ${requestId}, marking as awaiting_search`);
 
-      await prisma.request.update({
-        where: { id: requestId },
-        data: {
-          status: 'awaiting_search',
-          errorMessage,
-          lastSearchAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
+      // Unless a cancel or delete landed during the search: re-queueing it would
+      // let the scheduled re-search jobs download the book anyway
+      if (!(await updateRequestUnlessStopped(requestId, { status: 'awaiting_search', errorMessage, lastSearchAt: new Date() }))) {
+        logger.info(`Request ${requestId} was cancelled or deleted during the search, not re-queued`);
+        return { success: true, message: CANCELLED_DURING_SEARCH, requestId };
+      }
 
       return {
         success: false,
@@ -221,15 +219,14 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       // No quality results found - queue for re-search instead of failing
       logger.warn(`No quality matches found for request ${requestId} (all below 50/100), marking as awaiting_search`);
 
-      await prisma.request.update({
-        where: { id: requestId },
-        data: {
-          status: 'awaiting_search',
-          errorMessage: 'No quality matches found. Will retry automatically.',
-          lastSearchAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
+      if (!(await updateRequestUnlessStopped(requestId, {
+        status: 'awaiting_search',
+        errorMessage: 'No quality matches found. Will retry automatically.',
+        lastSearchAt: new Date(),
+      }))) {
+        logger.info(`Request ${requestId} was cancelled or deleted during the search, not re-queued`);
+        return { success: true, message: CANCELLED_DURING_SEARCH, requestId };
+      }
 
       return {
         success: false,

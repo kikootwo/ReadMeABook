@@ -60,8 +60,9 @@ describe('processSearchIndexers', () => {
     });
 
     expect(result.success).toBe(false);
-    expect(prismaMock.request.update).toHaveBeenCalledWith(
+    expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({
+        where: { id: 'req-1', deletedAt: null, status: { not: 'cancelled' } },
         data: expect.objectContaining({ status: 'awaiting_search' }),
       })
     );
@@ -233,6 +234,67 @@ describe('processSearchIndexers', () => {
     );
   });
 
+  describe('a cancel that lands while the search runs', () => {
+    const indexerConfig = async (key: string) => {
+      if (key === 'prowlarr_indexers') {
+        return JSON.stringify([{ id: 1, name: 'Indexer', protocol: 'torrent', priority: 10, categories: [3030] }]);
+      }
+      if (key === 'indexer_flag_config') return JSON.stringify([]);
+      return null;
+    };
+    const run = async (id: string) => {
+      const { processSearchIndexers } = await import('@/lib/processors/search-indexers.processor');
+      return processSearchIndexers({
+        requestId: id,
+        audiobook: { id: `a-${id}`, title: 'Book', author: 'Author' },
+        jobId: `job-${id}`,
+      });
+    };
+    const expectNotRequeued = (id: string, result: unknown) => {
+      // Main overwrote the cancel with a plain 'awaiting_search' write, so the
+      // scheduled re-search jobs picked the request up again
+      expect(prismaMock.request.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'awaiting_search' }) })
+      );
+      expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+        where: { id, deletedAt: null, status: { not: 'cancelled' } },
+        data: expect.objectContaining({ status: 'awaiting_search' }),
+      }));
+      expect(result).toMatchObject({ success: true, requestId: id });
+      expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
+    };
+
+    beforeEach(() => {
+      configMock.get.mockImplementation(indexerConfig);
+      // The 'searching' claim matches; the 'awaiting_search' write matches nothing (cancelled meanwhile)
+      prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+    });
+
+    it('does not re-queue it when the search finds nothing', async () => {
+      prowlarrMock.searchWithVariations.mockResolvedValue([]);
+
+      expectNotRequeued('req-none', await run('req-none'));
+    });
+
+    it('does not re-queue it when nothing reaches the quality threshold', async () => {
+      prowlarrMock.searchWithVariations.mockResolvedValue([
+        {
+          indexer: 'Indexer',
+          indexerId: 1,
+          title: 'Something Else Entirely - Another Writer',
+          size: 50 * 1024 * 1024,
+          seeders: 10,
+          publishDate: new Date(),
+          downloadUrl: 'magnet:?xt=urn:btih:low',
+          guid: 'g-low',
+          format: 'M4B',
+        },
+      ]);
+
+      expectNotRequeued('req-low', await run('req-low'));
+    });
+  });
+
   it('filters out blocklisted releases by name (case-insensitive) before ranking', async () => {
     configMock.get.mockImplementation(async (key: string) => {
       if (key === 'prowlarr_indexers') {
@@ -396,8 +458,9 @@ describe('processSearchIndexers', () => {
 
     expect(result.success).toBe(false);
     expect(result.message).toMatch(/No usable releases — 2 candidates tried, all blocked/);
-    expect(prismaMock.request.update).toHaveBeenCalledWith(
+    expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith(
       expect.objectContaining({
+        where: { id: 'req-exhausted', deletedAt: null, status: { not: 'cancelled' } },
         data: expect.objectContaining({
           status: 'awaiting_search',
           errorMessage: 'No usable releases — 2 candidates tried, all blocked',
