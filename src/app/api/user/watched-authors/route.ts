@@ -8,6 +8,7 @@ import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('API.WatchedAuthors');
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest) {
         })),
       });
     } catch (error) {
-      logger.error('Failed to list watched authors', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to list watched authors', { error: errorForLog(error) });
       return NextResponse.json({ error: 'Failed to list watched authors' }, { status: 500 });
     }
   });
@@ -95,7 +96,7 @@ export async function POST(request: NextRequest) {
         await jobQueue.addCheckWatchedItemJob(req.user.id, undefined, authorAsin);
         logger.info(`Triggered immediate check for watched author "${authorName}" (${authorAsin})`);
       } catch (error) {
-        logger.error('Failed to trigger immediate watched author check', { error: error instanceof Error ? error.message : String(error) });
+        logger.error('Failed to trigger immediate watched author check', { error: errorForLog(error) });
       }
 
       return NextResponse.json({
@@ -110,11 +111,11 @@ export async function POST(request: NextRequest) {
         },
       }, { status: 201 });
     } catch (error) {
-      logger.error('Failed to add watched author', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to add watched author', { error: errorForLog(error) });
 
       if (error instanceof z.ZodError) {
         return NextResponse.json(
-          { error: 'ValidationError', details: error.errors },
+          { error: 'ValidationError', details: zodIssueDetails(error) },
           { status: 400 }
         );
       }

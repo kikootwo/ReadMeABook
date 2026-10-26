@@ -31,6 +31,9 @@ const logger = RMABLogger.create('Transmission');
 /** Transmission RPC numeric status codes */
 type TransmissionStatus = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
+/** Transmission `error` code for a local (disk/IO) error; 1 and 2 are tracker problems */
+const LOCAL_ERROR = 3;
+
 /** Transmission torrent fields we request */
 interface TransmissionTorrent {
   hashString: string;
@@ -486,13 +489,13 @@ export class TransmissionService implements IDownloadClient {
       size: torrent.totalSize,
       bytesDownloaded: torrent.downloadedEver,
       progress: torrent.percentDone,
-      status: this.mapStatus(torrent.status, torrent.error),
+      status: this.mapStatus(torrent.status, torrent.error, torrent.percentDone),
       downloadSpeed: torrent.rateDownload,
       eta: torrent.eta < 0 ? 0 : torrent.eta,
       category: torrent.labels?.[0] || '',
       downloadPath,
       completedAt: torrent.doneDate > 0 ? new Date(torrent.doneDate * 1000) : undefined,
-      errorMessage: torrent.error > 0 ? torrent.errorString : undefined,
+      errorMessage: torrent.error === LOCAL_ERROR ? torrent.errorString : undefined,
       seedingTime: torrent.secondsSeeding,
       ratio: torrent.uploadRatio >= 0 ? torrent.uploadRatio : undefined,
     };
@@ -502,10 +505,20 @@ export class TransmissionService implements IDownloadClient {
    * Map Transmission numeric status to unified DownloadStatus.
    * 0=stopped, 1=check-pending, 2=checking, 3=download-pending,
    * 4=downloading, 5=seed-pending, 6=seeding
+   *
+   * Error codes: 0=ok, 1=tracker warning, 2=tracker error, 3=local error.
+   * Only a local error fails the download; tracker problems are left to the
+   * normal status (as qBittorrent does), so they stall rather than fail.
+   * A stopped torrent with every wanted byte done (manual stop, or a global
+   * ratio/idle limit) is finished, so it reports completed and gets imported.
    */
-  private mapStatus(status: TransmissionStatus, errorCode: number): DownloadStatus {
-    if (errorCode > 0) {
+  private mapStatus(status: TransmissionStatus, errorCode: number, percentDone: number): DownloadStatus {
+    if (errorCode === LOCAL_ERROR) {
       return 'failed';
+    }
+
+    if (status === 0 && percentDone >= 1) {
+      return 'completed';
     }
 
     const statusMap: Record<TransmissionStatus, DownloadStatus> = {

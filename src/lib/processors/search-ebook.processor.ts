@@ -277,10 +277,7 @@ async function searchIndexers(
   // Get Prowlarr service
   const prowlarr = await getProwlarrService();
 
-  // Build search query (title only - cast wide net, let ranking filter)
-  const searchQuery = audiobook.title;
-
-  logger.info(`Searching for: "${searchQuery}"`);
+  logger.info(`Searching for: "${audiobook.title}" by "${audiobook.author}"`);
 
   // Search Prowlarr for each group and combine results
   const allResults = [];
@@ -290,7 +287,9 @@ async function searchIndexers(
     logger.info(`Searching group ${i + 1}/${groups.length}: ${getGroupDescription(group)}`);
 
     try {
-      const groupResults = await prowlarr.search(searchQuery, {
+      // "title author" then "title", deduped (same as audiobooks): a title-only
+      // query on a short or common title can fill maxResults before the right book
+      const groupResults = await prowlarr.searchWithVariations(audiobook.title, audiobook.author, {
         categories: group.categories,
         indexerIds: group.indexerIds,
         minSeeders: 0, // Ebooks may have fewer seeders

@@ -173,7 +173,13 @@ export async function deleteRequest(
             if (downloadInfo) {
               // Same rule as the scheduled seeding cleanup: time AND ratio; no config or both 0 = unlimited
               const seeding = evaluateSeeding(seedingConfig, downloadInfo);
-              const isCompleted = downloadHistory.downloadStatus === 'completed';
+              // History can lag the client: the monitor stops polling a cancelled request,
+              // so a torrent that finished after the cancel still reads 'downloading' there.
+              // The live client state can only mark it complete (keep more), never less.
+              const finishedInClient = downloadInfo.status === 'completed'
+                || downloadInfo.status === 'seeding'
+                || downloadInfo.progress >= 1;
+              const isCompleted = downloadHistory.downloadStatus === 'completed' || finishedInClient;
 
               if (client.protocol === 'usenet') {
                 // Usenet - no seeding concept, delete immediately
@@ -208,7 +214,14 @@ export async function deleteRequest(
                   torrentsRemoved++;
                 }
               } else {
-                // The scheduled seeding cleanup removes it once the requirement is met
+                // The scheduled seeding cleanup removes it once the requirement is met.
+                // It only looks at 'completed' history, so record a finish the monitor never saw.
+                if (downloadHistory.downloadStatus !== 'completed') {
+                  await prisma.downloadHistory.update({
+                    where: { id: downloadHistory.id },
+                    data: { downloadStatus: 'completed', completedAt: downloadHistory.completedAt ?? new Date() },
+                  });
+                }
                 logger.info(`Keeping download ${downloadInfo.name} to finish seeding: ${seeding.progress}`);
                 torrentsKeptSeeding++;
               }

@@ -8,6 +8,7 @@ import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('API.WatchedSeries');
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest) {
         })),
       });
     } catch (error) {
-      logger.error('Failed to list watched series', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to list watched series', { error: errorForLog(error) });
       return NextResponse.json({ error: 'Failed to list watched series' }, { status: 500 });
     }
   });
@@ -95,7 +96,7 @@ export async function POST(request: NextRequest) {
         await jobQueue.addCheckWatchedItemJob(req.user.id, seriesAsin);
         logger.info(`Triggered immediate check for watched series "${seriesTitle}" (${seriesAsin})`);
       } catch (error) {
-        logger.error('Failed to trigger immediate watched series check', { error: error instanceof Error ? error.message : String(error) });
+        logger.error('Failed to trigger immediate watched series check', { error: errorForLog(error) });
       }
 
       return NextResponse.json({
@@ -110,11 +111,11 @@ export async function POST(request: NextRequest) {
         },
       }, { status: 201 });
     } catch (error) {
-      logger.error('Failed to add watched series', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to add watched series', { error: errorForLog(error) });
 
       if (error instanceof z.ZodError) {
         return NextResponse.json(
-          { error: 'ValidationError', details: error.errors },
+          { error: 'ValidationError', details: zodIssueDetails(error) },
           { status: 400 }
         );
       }

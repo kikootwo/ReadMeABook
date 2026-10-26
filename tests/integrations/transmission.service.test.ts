@@ -362,47 +362,69 @@ describe('TransmissionService', () => {
       expect(info).toBeNull();
     });
 
-    it('maps error code to failed status', async () => {
+    const getWith = async (fields: { status: number; error: number; errorString: string; percentDone: number }) => {
       const service = new TransmissionService('http://transmission', 'user', 'pass');
-
       clientMock.post.mockResolvedValueOnce({
         data: {
           result: 'success',
           arguments: {
             torrents: [{
               hashString: 'abc123',
-              name: 'Failed',
+              name: 'Book',
               totalSize: 1000,
-              downloadedEver: 0,
-              percentDone: 0,
-              status: 0,
+              downloadedEver: 1000 * fields.percentDone,
               rateDownload: 0,
               eta: -1,
               labels: [],
               downloadDir: '/downloads',
               doneDate: 0,
-              errorString: 'Tracker error',
-              error: 2,
               uploadRatio: -1,
               uploadedEver: 0,
+              ...fields,
             }],
           },
         },
       });
-
       const info = await service.getDownload('abc123');
-
       expect(info).not.toBeNull();
-      expect(info!.status).toBe('failed');
-      expect(info!.errorMessage).toBe('Tracker error');
+      return info!;
+    };
+
+    it('maps a local error (3) to failed with its error string', async () => {
+      const info = await getWith({ status: 0, error: 3, errorString: 'No space left on device', percentDone: 0.4 });
+
+      expect(info.status).toBe('failed');
+      expect(info.errorMessage).toBe('No space left on device');
+    });
+
+    it('does not fail a downloading torrent on a tracker warning (1) (#286)', async () => {
+      const info = await getWith({
+        status: 4, error: 1, errorString: 'Tracker gave HTTP response code 404', percentDone: 0.3,
+      });
+
+      expect(info.status).toBe('downloading');
+      expect(info.errorMessage).toBeUndefined();
+    });
+
+    it('does not fail a seeding torrent on a tracker error (2)', async () => {
+      const info = await getWith({ status: 6, error: 2, errorString: 'Tracker error', percentDone: 1 });
+
+      expect(info.status).toBe('seeding');
+      expect(info.errorMessage).toBeUndefined();
+    });
+
+    it('reports a stopped torrent at 100% as completed', async () => {
+      const info = await getWith({ status: 0, error: 0, errorString: '', percentDone: 1 });
+
+      expect(info.status).toBe('completed');
     });
   });
 
   describe('status mapping', () => {
     const makeService = () => new TransmissionService('http://transmission', '', '');
 
-    const mapStatus = (service: TransmissionService, status: number, error = 0) => {
-      return (service as any).mapStatus(status, error);
+    const mapStatus = (service: TransmissionService, status: number, error = 0, percentDone = 0) => {
+      return (service as any).mapStatus(status, error, percentDone);
     };
 
     it('maps 0 (stopped) to paused', () => {
@@ -433,9 +455,23 @@ describe('TransmissionService', () => {
       expect(mapStatus(makeService(), 6)).toBe('seeding');
     });
 
-    it('maps any status with error > 0 to failed', () => {
-      expect(mapStatus(makeService(), 4, 1)).toBe('failed');
-      expect(mapStatus(makeService(), 6, 2)).toBe('failed');
+    it('maps only a local error (3) to failed; tracker errors (1, 2) keep the normal status', () => {
+      expect(mapStatus(makeService(), 4, 3)).toBe('failed');
+      expect(mapStatus(makeService(), 6, 3)).toBe('failed');
+      expect(mapStatus(makeService(), 4, 1)).toBe('downloading');
+      expect(mapStatus(makeService(), 4, 2)).toBe('downloading');
+      expect(mapStatus(makeService(), 6, 1)).toBe('seeding');
+      expect(mapStatus(makeService(), 6, 2)).toBe('seeding');
+    });
+
+    it('maps a stopped torrent to completed only once every wanted byte is done', () => {
+      expect(mapStatus(makeService(), 0, 0, 1)).toBe('completed');
+      expect(mapStatus(makeService(), 0, 0, 0.5)).toBe('paused');
+      expect(mapStatus(makeService(), 0, 0, 0.999)).toBe('paused');
+    });
+
+    it('lets a local error win over a stopped torrent at 100%', () => {
+      expect(mapStatus(makeService(), 0, 3, 1)).toBe('failed');
     });
   });
 

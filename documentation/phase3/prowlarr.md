@@ -18,10 +18,15 @@ Indexer aggregator for searching multiple torrent/usenet indexers simultaneously
 
 ## Search Strategy
 
-**Search Query:** Title only (not title + author)
-- Broader search yields more results (e.g., 20 vs 1)
+**Search Query:** `searchWithVariations(title, author)` (`src/lib/integrations/prowlarr.service.ts`)
+- Two queries per indexer group, sequentially: `"title author"` then `"title"`; results merged and deduplicated by guid
+- The second query runs even when the first returns results; a failed query is logged and skipped
+- Blank author (or both queries identical after trimming) → `"title"` once
+- Used by every indexer search: audiobook automatic, manual and interactive search, and ebook automatic and interactive search
+- `"title author"` finds the right book when a short or common title fills `maxResults`; `"title"` keeps the broad net for indexers that miss the combined query
+- Custom title replaces `title`; the request's author is still sent. Automatic search: the request's custom search terms. Interactive: `customTitle` from the body (audiobook interactive search also falls back to custom search terms; ebook interactive routes do not)
 - Ranking algorithm filters out mismatches using author/narrator
-- Works around indexer limitations with complex queries
+- **Cost:** 2 Prowlarr searches per indexer group per search, 1 with a blank author (matters for indexers with daily API caps)
 
 **Extended Search:** Enabled (`extended=1`) - searches title, tags, labels, and metadata fields
 
@@ -30,9 +35,10 @@ Indexer aggregator for searching multiple torrent/usenet indexers simultaneously
 - Filters applied after ranking to remove poor matches
 - Ensures at least basic title/author match quality
 - Audiobook searches rank the full deduplicated result set, then retain the best 100
-- Interactive responses expose `truncated` and the pre-ranking `rawCount`
+- Audiobook interactive responses expose `truncated` and the pre-ranking `rawCount`
+- Ebook interactive routes (`audiobooks/[asin]/interactive-search-ebook`, `requests/[id]/interactive-search-ebook`) return every ranked result: no cap, no `truncated`/`rawCount`
 
-**Example:** "Season of Storms" → finds all "Season of Storms" torrents → ranks by author match → filters score < 50
+**Example:** "Season of Storms" by "Andrzej Sapkowski" → queries "Season of Storms Andrzej Sapkowski" + "Season of Storms" → ranks by author match → filters score < 50
 
 ```typescript
 interface TorrentResult {
@@ -69,7 +75,7 @@ interface TorrentResult {
 
 **Manual Search** (`POST /api/requests/{id}/manual-search`)
 - Triggers automatic search job for requests with status: pending, failed, awaiting_search
-- Searches only enabled indexers (title only)
+- Searches only enabled indexers (title + author, then title)
 - Ranks all results, filters scores < 50
 - Retains the best 100 qualifying results after ranking
 - Selects best torrent from filtered results
@@ -77,7 +83,7 @@ interface TorrentResult {
 
 **Interactive Search** (`POST /api/requests/{id}/interactive-search`)
 - Returns ranked torrent results for user selection
-- Searches only enabled indexers (title only or custom)
+- Searches only enabled indexers (title + author, then title; custom title replaces the title)
 - Accepts optional custom search title in request body
 - Ranks all results, then returns the best 100 with truncation metadata
 - Shows table with: rank, title, size, quality score, seeders, indexer, publish date

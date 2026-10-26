@@ -58,6 +58,8 @@ vi.mock('@/lib/integrations/prowlarr.service', () => ({
 describe('processDownloadTorrent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // An active request: the stop guard's conditional status writes match one row
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     // Restore default implementations cleared by clearAllMocks
     configMock.getMany.mockResolvedValue({ prowlarr_api_key: null });
     jobQueueMock.addNotificationJob.mockResolvedValue(undefined);
@@ -112,7 +114,7 @@ describe('processDownloadTorrent', () => {
       enabled: true,
       category: 'readmeabook',
     });
-    prismaMock.request.update.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
+    prismaMock.request.findUnique.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
     prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-1' });
 
     const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
@@ -143,7 +145,7 @@ describe('processDownloadTorrent', () => {
       enabled: true,
       category: 'readmeabook',
     });
-    prismaMock.request.update.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
+    prismaMock.request.findUnique.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
     prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-2' });
 
     const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
@@ -188,7 +190,7 @@ describe('processDownloadTorrent', () => {
       enabled: true,
       category: 'readmeabook',
     });
-    prismaMock.request.update.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
+    prismaMock.request.findUnique.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
     prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-1' });
 
     const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
@@ -243,7 +245,7 @@ describe('processDownloadTorrent', () => {
       enabled: true,
       category: 'readmeabook',
     });
-    prismaMock.request.update.mockResolvedValue({
+    prismaMock.request.findUnique.mockResolvedValue({
       type: 'audiobook',
       user: { plexUsername: 'testuser' },
     });
@@ -299,7 +301,7 @@ describe('processDownloadTorrent', () => {
       enabled: true,
       category: 'readmeabook',
     });
-    prismaMock.request.update.mockResolvedValue({
+    prismaMock.request.findUnique.mockResolvedValue({
       type: 'audiobook',
       user: { plexUsername: 'testuser' },
     });
@@ -313,7 +315,7 @@ describe('processDownloadTorrent', () => {
       },
     })).rejects.toThrow('Indexer returned HTTP 429');
 
-    expect(prismaMock.request.update).not.toHaveBeenCalledWith(
+    expect(prismaMock.request.updateMany).not.toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'failed' }) })
     );
     expect(prismaMock.downloadHistory.create).not.toHaveBeenCalled();
@@ -322,7 +324,7 @@ describe('processDownloadTorrent', () => {
   const setupQbit = (addDownload: ReturnType<typeof vi.fn>) => {
     downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue({ clientType: 'qbittorrent', protocol: 'torrent', addDownload });
     downloadClientManagerMock.getClientForProtocol.mockResolvedValue({ id: 'client-1', type: 'qbittorrent', enabled: true, category: 'readmeabook' });
-    prismaMock.request.update.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
+    prismaMock.request.findUnique.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
     prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-1' });
   };
   const second = { ...torrentPayload.torrent, title: 'Second', guid: 'guid-2', downloadUrl: 'magnet:?xt=urn:btih:def' };
@@ -377,8 +379,50 @@ describe('processDownloadTorrent', () => {
     await expect(processDownloadTorrent({ ...torrentPayload, alternateTorrents: [second] } as any))
       .rejects.toThrow('HTTP 429');
 
-    expect(prismaMock.request.update).not.toHaveBeenCalledWith(
+    expect(prismaMock.request.updateMany).not.toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'failed' }) })
     );
+  });
+
+  describe('cancelled or deleted requests', () => {
+    const liveOnly = { id: 'req-1', deletedAt: null, status: { not: 'cancelled' } };
+
+    it('adds nothing to the client when the request was cancelled before the job ran', async () => {
+      // e.g. cancelled during the search, or between Bull retries
+      prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
+      // The shape main's plain update returned, so a run on main reaches the client call
+      prismaMock.request.update.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
+      const addDownload = vi.fn().mockResolvedValue('hash-1');
+      setupQbit(addDownload);
+
+      const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+      const result = await processDownloadTorrent(torrentPayload);
+
+      expect(addDownload).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ success: true, requestId: 'req-1' });
+      expect(prismaMock.request.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: liveOnly,
+        data: expect.objectContaining({ status: 'downloading' }),
+      }));
+      expect(prismaMock.request.update).not.toHaveBeenCalled();
+      expect(prismaMock.downloadHistory.create).not.toHaveBeenCalled();
+      expect(jobQueueMock.addMonitorJob).not.toHaveBeenCalled();
+    });
+
+    it('leaves a cancel that lands during a permanent add failure in place', async () => {
+      downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(null);
+      // 'downloading' claim matches; the 'failed' write matches nothing (cancelled meanwhile)
+      prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+
+      const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+      await expect(processDownloadTorrent(torrentPayload)).rejects.toThrow('No torrent download client configured');
+
+      expect(prismaMock.request.update).not.toHaveBeenCalled();
+      expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+        where: liveOnly,
+        data: expect.objectContaining({ status: 'failed' }),
+      }));
+      expect(prismaMock.request.update).not.toHaveBeenCalled();
+    });
   });
 });

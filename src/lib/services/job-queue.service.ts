@@ -10,6 +10,7 @@ import { TorrentResult } from '../utils/ranking-algorithm';
 import { DownloadClientType } from '../interfaces/download-client.interface';
 import { RMABLogger } from '../utils/logger';
 import { oncePerProcess, peekProcessSingleton, processSingleton } from '../utils/process-singleton';
+import { markRequestFailedUnlessStopped } from '../utils/request-stop-guard';
 import type { NotificationEvent } from '@/lib/constants/notification-events';
 
 const logger = RMABLogger.create('JobQueue');
@@ -259,19 +260,18 @@ export class JobQueueService {
         const payload = job.data as MonitorDownloadPayload;
         logger.error(`MonitorDownload job permanently failed for request ${payload.requestId} after ${job.attemptsMade} attempts`);
 
-        // Update request status to failed (only happens after all retries exhausted)
+        // Update request status to failed (only happens after all retries exhausted).
+        // A cancelled or deleted request is left as it is.
         try {
-          await prisma.request.update({
-            where: { id: payload.requestId },
-            data: {
-              status: 'failed',
-              errorMessage: error.message || 'Failed to monitor download after multiple retries',
-              updatedAt: new Date(),
-            },
-          });
+          const marked = await markRequestFailedUnlessStopped(
+            payload.requestId,
+            error.message || 'Failed to monitor download after multiple retries'
+          );
 
-          // Update download history
-          if (payload.downloadHistoryId) {
+          if (!marked) {
+            logger.info(`Request ${payload.requestId} is cancelled or deleted, leaving it unchanged after monitor failure`);
+          } else if (payload.downloadHistoryId) {
+            // Update download history
             await prisma.downloadHistory.update({
               where: { id: payload.downloadHistoryId },
               data: {
@@ -293,14 +293,13 @@ export class JobQueueService {
         logger.error(`DownloadTorrent job permanently failed for request ${payload.requestId} after ${job.attemptsMade} attempts`);
 
         try {
-          await prisma.request.update({
-            where: { id: payload.requestId },
-            data: {
-              status: 'failed',
-              errorMessage: error.message || 'Failed to add download after multiple retries',
-              updatedAt: new Date(),
-            },
-          });
+          const marked = await markRequestFailedUnlessStopped(
+            payload.requestId,
+            error.message || 'Failed to add download after multiple retries'
+          );
+          if (!marked) {
+            logger.info(`Request ${payload.requestId} is cancelled or deleted, leaving it unchanged after download_torrent failure`);
+          }
         } catch (updateError) {
           logger.error('Failed to update request status after download_torrent failure', {
             error: updateError instanceof Error ? updateError.message : String(updateError),

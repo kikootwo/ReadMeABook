@@ -4,6 +4,7 @@
  */
 
 import { compareTwoStrings } from 'string-similarity';
+import { matchesByInitials } from './author-initials';
 
 export interface TorrentResult {
   indexer: string;
@@ -672,7 +673,10 @@ export class RankingAlgorithm {
         }
       }
 
-      return false;
+      // Check 4: Spaced vs compacted initials, matched as whole words
+      // Handles: "TJ Klune" vs "T J Klune", "J D Robb" vs "JD Robb"
+      // Rejects: "E. L. James" vs "Michael James" (no partial-word match)
+      return matchesByInitials(torrentTitle, author);
     });
   }
 

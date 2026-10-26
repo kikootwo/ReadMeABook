@@ -9,6 +9,7 @@ import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 
 const logger = RMABLogger.create('API.ShelvesSync');
 
@@ -65,10 +66,10 @@ export async function POST(request: NextRequest) {
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return NextResponse.json({ error: 'ValidationError', details: error.errors }, { status: 400 });
+        return NextResponse.json({ error: 'ValidationError', details: zodIssueDetails(error) }, { status: 400 });
       }
       logger.error('Failed to trigger manual sync', {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorForLog(error),
       });
       return NextResponse.json(
         { error: 'Failed to trigger manual sync' },

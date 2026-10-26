@@ -10,6 +10,7 @@ import { getNotificationService, getRegisteredProviderTypes } from '@/lib/servic
 import { NOTIFICATION_EVENT_KEYS } from '@/lib/constants/notification-events';
 import { RMABLogger } from '@/lib/utils/logger';
 import { z } from 'zod';
+import { boundedArray, errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 
 const logger = RMABLogger.create('API.Admin.Notifications');
 
@@ -17,7 +18,8 @@ const CreateBackendSchema = z.object({
   type: z.string().refine((val) => getRegisteredProviderTypes().includes(val), { message: 'Unsupported notification provider type' }),
   name: z.string().min(1),
   config: z.record(z.any()),
-  events: z.array(z.enum(NOTIFICATION_EVENT_KEYS)).min(1),
+  // A valid list names each event type at most once
+  events: boundedArray(z.enum(NOTIFICATION_EVENT_KEYS), NOTIFICATION_EVENT_KEYS.length, { min: 1 }),
   enabled: z.boolean().default(true),
 });
 
@@ -47,7 +49,7 @@ export async function GET(request: NextRequest) {
         });
       } catch (error) {
         logger.error('Failed to fetch notification backends', {
-          error: error instanceof Error ? error.message : String(error),
+          error: errorForLog(error),
         });
 
         return NextResponse.json(
@@ -108,14 +110,14 @@ export async function POST(request: NextRequest) {
         }, { status: 201 });
       } catch (error) {
         logger.error('Failed to create notification backend', {
-          error: error instanceof Error ? error.message : String(error),
+          error: errorForLog(error),
         });
 
         if (error instanceof z.ZodError) {
           return NextResponse.json(
             {
               error: 'ValidationError',
-              details: error.errors,
+              details: zodIssueDetails(error),
             },
             { status: 400 }
           );
