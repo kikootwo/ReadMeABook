@@ -25,19 +25,26 @@ export interface BoundedArrayOptions {
 }
 
 /**
- * Array schema whose length bounds are checked before its elements are parsed.
- * An out-of-bounds array yields one length issue and no element issues;
- * an in-bounds array parses exactly like `z.array(element)`.
+ * Array schema whose length bounds are checked before any element is visited.
+ * An out-of-bounds array yields one length issue (same code, shape and default
+ * message as `z.array().max()` / `.min()`) and no element issues; an in-bounds
+ * array or a non-array parses exactly like `z.array(element)`.
  */
 export function boundedArray<T extends z.ZodTypeAny>(
   element: T,
   max: number,
   options: BoundedArrayOptions = {}
 ) {
-  let lengthCheck = z.array(z.unknown()).max(max);
-  if (options.min !== undefined) {
-    lengthCheck = lengthCheck.min(options.min);
-  }
+  const { min } = options;
+  // Reads only `length`; a dirty result stops the pipe before z.array runs
+  const lengthCheck = z.unknown().superRefine((value, ctx) => {
+    if (!Array.isArray(value)) return;
+    if (min !== undefined && value.length < min) {
+      ctx.addIssue({ code: z.ZodIssueCode.too_small, minimum: min, type: 'array', inclusive: true, exact: false });
+    } else if (value.length > max) {
+      ctx.addIssue({ code: z.ZodIssueCode.too_big, maximum: max, type: 'array', inclusive: true, exact: false });
+    }
+  });
   return lengthCheck.pipe(z.array(element));
 }
 

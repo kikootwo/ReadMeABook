@@ -3,7 +3,7 @@
  * Documentation: documentation/backend/validation.md
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import {
   MAX_VALIDATION_ISSUES,
@@ -41,11 +41,36 @@ describe('boundedArray', () => {
     expect(issues[0]).toMatchObject({ code: 'too_big', type: 'array', maximum: 5, path: [] });
   });
 
+  it('reports an over-long array exactly like z.array().max()', () => {
+    const value = Array.from({ length: 6 }, (_, i) => ({ name: `n${i}`, count: i }));
+    expect(issuesOf(boundedArray(Item, 5), value)).toEqual(issuesOf(z.array(Item).max(5), value));
+  });
+
   it('gives one length issue for a very large invalid array, quickly', () => {
-    const started = Date.now();
+    // performance.now is monotonic; Date.now can step inside a container VM
+    const started = performance.now();
     const issues = issuesOf(boundedArray(Item, 5), new Array(100_000).fill(1));
     expect(issues).toHaveLength(1);
-    expect(Date.now() - started).toBeLessThan(2000);
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+
+  it('rejects a 10^6-element array without visiting any element', () => {
+    const visit = vi.fn(() => true);
+    const schema = boundedArray(z.custom<number>(visit), 5);
+    let elementReads = 0;
+    const list = new Proxy(new Array(1_000_000).fill(1), {
+      get(target, key, receiver) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) elementReads++;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const issues = issuesOf(schema, list);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ code: 'too_big', maximum: 5 });
+    expect(elementReads).toBe(0);
+    expect(visit).not.toHaveBeenCalled();
+    expect(schema.parse([1, 2])).toEqual([1, 2]);
+    expect(visit).toHaveBeenCalledTimes(2);
   });
 
   it('checks the minimum before element parsing', () => {

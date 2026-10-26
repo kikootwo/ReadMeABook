@@ -1,5 +1,5 @@
 /**
- * Component: API Validation Bounds Tests (home sections, notification backends)
+ * Component: API Validation Bounds Tests (bounded request lists, validation error logging)
  * Documentation: documentation/backend/validation.md
  */
 
@@ -50,9 +50,9 @@ const jsonRequest = () => ({ json: async () => state.body }) as any;
 const params = { params: Promise.resolve({ id: 'backend-1' }) };
 
 async function expectSingleLengthIssue(call: () => Promise<Response>, maximum: number) {
-  const started = Date.now();
+  const started = performance.now();
   const response = await call();
-  const elapsed = Date.now() - started;
+  const elapsed = performance.now() - started;
   const payload = await response.json();
   expect(response.status).toBe(400);
   expect(payload.error).toBe('ValidationError');
