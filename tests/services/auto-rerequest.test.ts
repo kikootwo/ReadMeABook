@@ -56,15 +56,18 @@ describe('decideAutoReRequest', () => {
     expect(log.info).not.toHaveBeenCalled();
 
     const due = await decideAutoReRequest(request, 'Book', new Date(FAILED.getTime() + 7 * DAY));
-    expect(due).toEqual({ skip: null, nextCount: 3 });
-    expect(log.info).toHaveBeenCalledWith(
-      `Automatic retry 3 of ${status} request req-old ("Book") is due; if it fails again with no new block, the next retry waits 14 days`
-    );
+    expect(due).toEqual({
+      skip: null,
+      nextCount: 3,
+      logLine: `Re-requested ${status} request req-old ("Book") automatically (retry 3); if it fails again with no new block, the next automatic retry waits 14 days`,
+    });
+    // The decision itself never logs at info: the caller does, once the request is created
+    expect(log.info).not.toHaveBeenCalled();
   });
 
   it('waits one day before the first automatic retry', async () => {
     expect((await decideAutoReRequest(existing(), 'Book', new Date(FAILED.getTime() + DAY - 1))).skip?.reason).toBe('retry_not_due');
-    expect(await decideAutoReRequest(existing(), 'Book', new Date(FAILED.getTime() + DAY))).toEqual({ skip: null, nextCount: 1 });
+    expect(await decideAutoReRequest(existing(), 'Book', new Date(FAILED.getTime() + DAY))).toMatchObject({ skip: null, nextCount: 1 });
   });
 
   it.each(['failed', 'warn'])('replaces a %s request at once when its attempt added a block, keeping the count', async (status) => {
@@ -72,12 +75,13 @@ describe('decideAutoReRequest', () => {
 
     const decision = await decideAutoReRequest(existing({ status, autoRerequestCount: 3 }), 'Book', FAILED);
 
-    expect(decision).toEqual({ skip: null, nextCount: 3 });
+    expect(decision).toMatchObject({ skip: null, nextCount: 3 });
+    expect(decision.logLine).toContain('(a release was blocked, so at once); if it fails again with no new block, the next automatic retry waits 14 days');
   });
 
   it('counts only blocks written during this attempt: blocks carried over from earlier requests are older than the request', async () => {
     // The where is the whole test: a block moved over by createRequestReplacing keeps its createdAt
-    // (it only updateMany's requestId, see tests/services/request-creator-rerequest.test.ts:81),
+    // (it only updateMany's requestId, see tests/services/request-creator-rerequest.test.ts:80),
     // so it is older than this request's createdAt and is not counted.
     const decision = await decideAutoReRequest(existing(), 'Book', FAILED);
 

@@ -15,9 +15,8 @@ const txMock = createPrismaMock();
 const txState = vi.hoisted(() => ({ outcome: 'none' as 'none' | 'committed' | 'rolled back' }));
 
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
-vi.mock('@/lib/utils/logger', () => ({
-  RMABLogger: { create: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
-}));
+const log = vi.hoisted(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
+vi.mock('@/lib/utils/logger', () => ({ RMABLogger: { create: () => log } }));
 vi.mock('@/lib/utils/audiobook-matcher', () => ({ findPlexMatch: vi.fn().mockResolvedValue(null) }));
 const audibleServiceMock = vi.hoisted(() => ({ getAudiobookDetails: vi.fn() }));
 vi.mock('@/lib/integrations/audible.service', () => ({ getAudibleService: () => audibleServiceMock }));
@@ -156,5 +155,45 @@ describe('createRequestForUser re-request (#312)', () => {
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
     expect(jobQueue.addSearchJob).not.toHaveBeenCalled();
     expect(jobQueue.addNotificationJob).not.toHaveBeenCalled();
+  });
+
+  describe('automatic re-request info line', () => {
+    const dueFailed = () => ({
+      id: 'req-old', status: 'failed', customSearchTerms: null,
+      createdAt: new Date(Date.now() - 3 * 86_400_000), updatedAt: new Date(Date.now() - 2 * 86_400_000), autoRerequestCount: 0,
+    });
+    const autoInfoLines = () => log.info.mock.calls.filter(([line]) => String(line).includes('automatically'));
+
+    it('logs exactly one info line when the automatic replace is created', async () => {
+      requests(dueFailed());
+      prismaMock.blockedRelease.count.mockResolvedValue(0);
+
+      expect((await createRequestForUser(USER, BOOK, { automatic: true })).success).toBe(true);
+
+      expect(autoInfoLines()).toEqual([[
+        'Re-requested failed request req-old ("Dead Release Book") automatically (retry 1); ' +
+        'if it fails again with no new block, the next automatic retry waits 3 days (new request req-new)',
+      ]]);
+    });
+
+    it('logs no info line when the retry is due but another user\'s request is being processed', async () => {
+      requests(dueFailed(), { id: 'req-other', userId: 'user-2', status: 'downloading' });
+      prismaMock.blockedRelease.count.mockResolvedValue(0);
+
+      expect(await createRequestForUser(USER, BOOK, { automatic: true })).toMatchObject({ success: false, reason: 'being_processed' });
+
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(autoInfoLines()).toEqual([]);
+    });
+
+    it('logs no info line when another caller replaced the request first', async () => {
+      requests(dueFailed());
+      prismaMock.blockedRelease.count.mockResolvedValue(0);
+      txMock.request.deleteMany.mockResolvedValue({ count: 0 });
+
+      expect(await createRequestForUser(USER, BOOK, { automatic: true })).toMatchObject({ success: false, reason: 'duplicate' });
+
+      expect(autoInfoLines()).toEqual([]);
+    });
   });
 });

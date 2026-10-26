@@ -45,13 +45,24 @@ export interface AutoReRequestSkip {
   message: string;
 }
 
-export type AutoReRequestDecision =
-  | { skip: AutoReRequestSkip; nextCount?: never }
-  | { skip: null; nextCount: number };
+/** Go-ahead: the count the new request starts with, and the info line to log once it is created. */
+export interface AutoReRequestGo {
+  skip: null;
+  nextCount: number;
+  logLine: string;
+}
+
+export type AutoReRequestDecision = { skip: AutoReRequestSkip; nextCount?: never; logLine?: never } | AutoReRequestGo;
+
+function goLine(existing: AutoReRequestCandidate, title: string, nextCount: number, why: string): string {
+  return `Re-requested ${existing.status} request ${existing.id} ("${title}") automatically (${why}); ` +
+    `if it fails again with no new block, the next automatic retry waits ${autoReRequestWaitDays(nextCount)} days`;
+}
 
 /**
  * Decide whether an automatic caller may replace `existing`, and with which
- * `autoRerequestCount` the new request starts.
+ * `autoRerequestCount` the new request starts. Logs only at debug; the caller
+ * logs `logLine` at info once the replacement is actually created.
  */
 export async function decideAutoReRequest(
   existing: AutoReRequestCandidate,
@@ -77,7 +88,7 @@ export async function decideAutoReRequest(
     where: { requestId: existing.id, createdAt: { gte: existing.createdAt } },
   });
   if (newBlocks > 0) {
-    return { skip: null, nextCount: retries };
+    return { skip: null, nextCount: retries, logLine: goLine(existing, title, retries, 'a release was blocked, so at once') };
   }
 
   const dueAt = new Date(existing.updatedAt.getTime() + autoReRequestWaitDays(retries) * DAY_MS);
@@ -94,9 +105,6 @@ export async function decideAutoReRequest(
     };
   }
 
-  logger.info(
-    `Automatic retry ${retries + 1} of ${existing.status} request ${existing.id} ("${title}") is due; ` +
-    `if it fails again with no new block, the next retry waits ${autoReRequestWaitDays(retries + 1)} days`
-  );
-  return { skip: null, nextCount: retries + 1 };
+  logger.debug(`Automatic retry ${retries + 1} of ${existing.status} request ${existing.id} ("${title}") is due`);
+  return { skip: null, nextCount: retries + 1, logLine: goLine(existing, title, retries + 1, `retry ${retries + 1}`) };
 }

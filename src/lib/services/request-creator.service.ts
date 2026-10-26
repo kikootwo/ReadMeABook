@@ -17,7 +17,7 @@ import { shouldSkipAutoSearch } from '@/lib/utils/release-date';
 import { seedAsin, getSiblingAsins } from '@/lib/services/works.service';
 import { isLibraryCoverSource, sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 import { createRequestReplacing, RE_REQUESTABLE_STATUSES, RequestAlreadyReplacedError } from '@/lib/services/request-rerequest';
-import { decideAutoReRequest } from '@/lib/services/auto-rerequest';
+import { decideAutoReRequest, type AutoReRequestGo } from '@/lib/services/auto-rerequest';
 
 const logger = RMABLogger.create('RequestCreator');
 
@@ -201,7 +201,7 @@ export async function createRequestForUser(
   // A failed/warn/cancelled request is replaced by the new one (atomically, below),
   // keeping its blocklist; it is not touched until the new request is created
   let replacesRequest: { id: string; customSearchTerms: string | null } | null = null;
-  let autoRerequestCount: number | undefined; // set only by automatic callers; user requests start at 0
+  let autoReRequest: AutoReRequestGo | undefined; // set only by automatic callers; user requests start at count 0
   if (existingRequest) {
     if (!RE_REQUESTABLE_STATUSES.includes(existingRequest.status)) {
       return {
@@ -213,7 +213,7 @@ export async function createRequestForUser(
     if (automatic) {
       const decision = await decideAutoReRequest(existingRequest, audiobookRecord.title);
       if (decision.skip) return decision.skip;
-      autoRerequestCount = decision.nextCount;
+      autoReRequest = decision;
     }
     replacesRequest = { id: existingRequest.id, customSearchTerms: existingRequest.customSearchTerms ?? null };
   }
@@ -304,7 +304,7 @@ export async function createRequestForUser(
           progress: 0,
           releaseDate,
           ...(replacesRequest?.customSearchTerms && { customSearchTerms: replacesRequest.customSearchTerms }),
-          ...(autoRerequestCount !== undefined && { autoRerequestCount }),
+          ...(autoReRequest && { autoRerequestCount: autoReRequest.nextCount }),
         },
         include: {
           audiobook: true,
@@ -322,6 +322,7 @@ export async function createRequestForUser(
   }
   if (replacesRequest) {
     logger.debug(`Replaced ${existingRequest?.status} request ${replacesRequest.id} with ${newRequest.id} (blocklist carried over)`);
+    if (autoReRequest) logger.info(`${autoReRequest.logLine} (new request ${newRequest.id})`);
   }
 
   if (releaseGateSkip) {
