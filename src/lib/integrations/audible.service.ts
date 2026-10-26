@@ -226,9 +226,9 @@ export class AudibleService {
     return this.region;
   }
 
-  public async fetch(url: string, config: any = {}): Promise<{ data: any; meta: FetchResultMeta }> {
+  public async fetch(url: string, config: any = {}, { catalog = false } = {}): Promise<{ data: any; meta: FetchResultMeta }> {
     await this.initialize();
-    return this.fetchWithRetry(url, config);
+    return catalog ? this.fetchWithRetry(url, config, 0, this.apiClient) : this.fetchWithRetry(url, config);
   }
 
   public forceReinitialize(): void {

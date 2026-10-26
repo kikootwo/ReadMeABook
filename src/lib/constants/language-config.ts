@@ -31,8 +31,6 @@ export interface ScrapingConfig {
   languageLabels: string[];
   /** Release date field labels */
   releaseDateLabels: string[];
-  /** Series label prefixes used to find series links in search results */
-  seriesLabels: string[];
   /** Accepted language values for filtering (lowercase) */
   acceptedLanguageValues: string[];
   /** Regex patterns that match hour portions in runtime strings */
@@ -82,7 +80,6 @@ const ENGLISH_CONFIG: LanguageConfig = {
     lengthLabels: ['Length:'],
     languageLabels: ['Language:'],
     releaseDateLabels: ['Release date:'],
-    seriesLabels: ['Series:'],
     acceptedLanguageValues: ['english'],
     runtimeHourPatterns: [/(\d+)\s*hrs?/i, /(\d+)\s*hours?/i],
     runtimeMinutePatterns: [/(\d+)\s*mins?/i, /(\d+)\s*minutes?/i],
@@ -115,7 +112,6 @@ const GERMAN_CONFIG: LanguageConfig = {
     lengthLabels: ['Spieldauer:', 'Dauer:', 'L\u00e4nge:'],
     languageLabels: ['Sprache:'],
     releaseDateLabels: ['Erscheinungsdatum:'],
-    seriesLabels: ['Serie:', 'Reihe:'],
     acceptedLanguageValues: ['deutsch', 'german'],
     runtimeHourPatterns: [/(\d+)\s*Std\.?/i, /(\d+)\s*Stunden?/i],
     runtimeMinutePatterns: [/(\d+)\s*Min\.?/i, /(\d+)\s*Minuten?/i],
@@ -149,7 +145,6 @@ const SPANISH_CONFIG: LanguageConfig = {
     lengthLabels: ['Duraci\u00f3n:'],
     languageLabels: ['Idioma:'],
     releaseDateLabels: ['Fecha de lanzamiento:'],
-    seriesLabels: ['Serie:'],
     acceptedLanguageValues: ['espa\u00f1ol', 'spanish'],
     runtimeHourPatterns: [/(\d+)\s*h\b/i, /(\d+)\s*horas?/i],
     runtimeMinutePatterns: [/(\d+)\s*min/i, /(\d+)\s*minutos?/i],
@@ -183,7 +178,6 @@ const FRENCH_CONFIG: LanguageConfig = {
     lengthLabels: ['Dur\u00e9e :'],
     languageLabels: ['Langue :'],
     releaseDateLabels: ['Date de publication :'],
-    seriesLabels: ['S\u00e9rie :'],
     acceptedLanguageValues: ['français', 'french'],
     runtimeHourPatterns: [/(\d+)\s*h\b/i, /(\d+)\s*heures?/i],
     runtimeMinutePatterns: [/(\d+)\s*min/i, /(\d+)\s*minutes?/i],
@@ -220,7 +214,6 @@ const ITALIAN_CONFIG: LanguageConfig = {
     lengthLabels: ['Durata:'],
     languageLabels: ['Lingua:'],
     releaseDateLabels: ['Data di pubblicazione:'],
-    seriesLabels: ['Serie:'],
     acceptedLanguageValues: ['italiano', 'italian'],
     // "ore"/"ora" must end the word, so "3 orecchie" is not read as 3 hours
     runtimeHourPatterns: [/(\d+)\s*or[ae]\b/i, /(\d+)\s*h\b/i],
@@ -328,4 +321,12 @@ export function extractByPatterns(text: string, patterns: RegExp[]): string | nu
 export function isAcceptedLanguage(languageValue: string, config: LanguageConfig): boolean {
   const normalized = languageValue.toLowerCase().trim();
   return config.scraping.acceptedLanguageValues.includes(normalized);
+}
+
+/**
+ * True when a catalog product belongs with the region's language: its language is
+ * accepted, or it lists no language at all (those are never treated as foreign).
+ */
+export function keepsLanguage(language: string | undefined | null, config: LanguageConfig): boolean {
+  return !language || !language.trim() || isAcceptedLanguage(language, config);
 }
