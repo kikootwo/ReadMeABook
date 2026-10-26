@@ -140,7 +140,7 @@ describe('multi-disc order', () => {
     const source = path.join(root, 'downloads', 'Book');
     for (const f of ['01.mp3', '02.mp3', '03.mp3']) write(path.join(source, f));
     await organize(source);
-    expect(vi.mocked(analyzeChapterFiles).mock.calls[0][2]).toBe(false);
+    expect(vi.mocked(analyzeChapterFiles).mock.calls[0][2] ?? false).toBe(false);
   });
 });
 

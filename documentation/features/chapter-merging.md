@@ -76,6 +76,7 @@ Detection now uses a **permissive heuristic** instead of strict filename pattern
 1. **Primary:** Use embedded track numbers if all files have sequential track metadata
 2. **Fallback:** Use natural filename sorting if metadata incomplete
 3. **Validation:** Compare both methods when available for confidence
+4. **Multi-disc sources** (`CD1/`, `Disc 2/`): the organizer passes its disc-by-disc order (`analyzeChapterFiles(files, logger, keepOrder=true)`; root files, discs by number, per-disc track tags 1..n else natural) and the merger keeps it. Rule: [multi-disc-folders.md](multi-disc-folders.md)
 
 **Why This Works Better:**
 - Catches edge cases like `Andy Weir - Project Hail Mary - 03.mp3` (doesn't match patterns)
