@@ -1,0 +1,162 @@
+/**
+ * Component: Multi-Disc Folder Rule Tests (pure)
+ * Documentation: documentation/features/multi-disc-folders.md
+ */
+
+import { describe, expect, it } from 'vitest';
+import {
+  discBookFiles,
+  isGenericFolderName,
+  isPermutation,
+  orderDiscLayout,
+  parseDiscFolderName,
+  resolveDiscLayout,
+  slashEntryProblem,
+  stripDiscSuffix,
+} from '@/lib/utils/disc-layout';
+
+function shuffle<T>(items: T[], seed: number): T[] {
+  const out = [...items];
+  let s = seed;
+  for (let i = out.length - 1; i > 0; i--) {
+    s = (s * 9301 + 49297) % 233280;
+    const j = Math.floor((s / 233280) * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+describe('disc folder names', () => {
+  it.each([
+    ['CD1', 'disc', 1], ['cd 01', 'disc', 1], ['CD-2', 'disc', 2], ['Disc 1', 'disc', 1], ['Disc_02', 'disc', 2],
+    ['DISK 3', 'disc', 3], ['Disc 1 of 3', 'disc', 1], ['disc.10', 'disc', 10], ['  CD1 ', 'disc', 1],
+    ['Part 1', 'part', 1], ['Part 02', 'part', 2], ['Part 1-2', 'part', 1], ['part3', 'part', 3],
+  ])('%s is a %s folder numbered %d', (name, kind, number) => {
+    expect(parseDiscFolderName(name)).toEqual({ kind, number });
+  });
+
+  it.each([
+    'Vol 1', 'Volume 2', 'Book 1', '1', '2', 'Extras', 'Bonus', 'Sample', 'Artwork',
+    'Part 1 - The Beginning', 'The Way of Kings Part 1', 'Book Title - CD1', 'CD1 (Bonus)', 'Disc One', 'CD1234',
+  ])('%s is not a disc folder', (name) => {
+    expect(parseDiscFolderName(name)).toBeNull();
+  });
+
+  it('generic search-term names are disc names plus volumes', () => {
+    for (const name of ['CD1', 'Disc 2', 'Part 3', 'Volume 1', 'vol 2', 'Disc 1 of 3', 'CD-2']) {
+      expect(isGenericFolderName(name)).toBe(true);
+    }
+    for (const name of ['The Gunslinger', 'Book 1', 'Extras']) {
+      expect(isGenericFolderName(name)).toBe(false);
+    }
+  });
+
+  it('strips a disc suffix from an album title, never Part N', () => {
+    expect(stripDiscSuffix('Book (Disc 2)')).toBe('Book');
+    expect(stripDiscSuffix('Book - CD 2')).toBe('Book');
+    expect(stripDiscSuffix('Book [Disc 1 of 3]')).toBe('Book');
+    expect(stripDiscSuffix('Book, Disc 10')).toBe('Book');
+    expect(stripDiscSuffix('Book Part 2')).toBe('Book Part 2');
+    expect(stripDiscSuffix('Book')).toBe('Book');
+    expect(stripDiscSuffix('CD1')).toBe('CD1');
+  });
+});
+
+describe('resolveDiscLayout', () => {
+  it('two disc folders with audio directly inside are a multi-disc layout', () => {
+    const layout = resolveDiscLayout(['Disc 1/01.m4a', 'Disc 2/01.m4a', 'Intro.m4a', 'Extras/x.m4a']);
+    expect(layout?.discs.map((d) => d.name).sort()).toEqual(['Disc 1', 'Disc 2']);
+    expect(layout?.rootFiles).toEqual(['Intro.m4a']);
+    expect(layout?.otherFiles).toEqual(['Extras/x.m4a']);
+  });
+
+  it('a single disc folder, a nested folder or non-disc folders are not', () => {
+    expect(resolveDiscLayout(['CD1/01.mp3', 'CD1/02.mp3'])).toBeNull();
+    expect(resolveDiscLayout(['Unabridged/01.mp3', 'Unabridged/02.mp3'])).toBeNull();
+    expect(resolveDiscLayout(['Vol 1/01.mp3', 'Vol 2/01.mp3'])).toBeNull();
+    expect(resolveDiscLayout(['01.mp3', '02.mp3'])).toBeNull();
+  });
+
+  it('a disc folder counts only for audio directly inside it (deeper layouts keep today\'s path)', () => {
+    expect(resolveDiscLayout(['CD1/Unabridged/01.mp3', 'CD2/Unabridged/01.mp3'])).toBeNull();
+    const mixed = resolveDiscLayout(['CD1/01.mp3', 'CD2/01.mp3', 'CD2/Bonus/b.mp3']);
+    expect(mixed?.otherFiles).toEqual(['CD2/Bonus/b.mp3']);
+  });
+
+  it('strips a shared wrapper folder first (Book/Book/CD1)', () => {
+    const layout = resolveDiscLayout(['Book/CD1/01.mp3', 'Book/CD2/01.mp3']);
+    expect(layout?.prefix).toBe('Book/');
+    expect(layout?.discs).toHaveLength(2);
+  });
+});
+
+describe('orderDiscLayout', () => {
+  const keys = [
+    'Intro.m4a', 'Disc 1/01.m4a', 'Disc 1/02.m4a', 'Disc 1/10.m4a', 'Disc 2/01.m4a', 'Disc 2/02.m4a',
+    'Disc 10/01.m4a', 'Extras/x.m4a',
+  ];
+  const expected = [
+    'Intro.m4a', 'Disc 1/01.m4a', 'Disc 1/02.m4a', 'Disc 1/10.m4a', 'Disc 2/01.m4a', 'Disc 2/02.m4a',
+    'Disc 10/01.m4a', 'Extras/x.m4a',
+  ];
+
+  it('root files, then discs by number (2 before 10), natural order inside, other files last', () => {
+    expect(orderDiscLayout(resolveDiscLayout(keys)!).order).toEqual(expected);
+  });
+
+  it('shuffled input gives the same order', () => {
+    for (const seed of [1, 7, 42, 99]) {
+      expect(orderDiscLayout(resolveDiscLayout(shuffle(keys, seed))!).order).toEqual(expected);
+    }
+  });
+
+  it('per-disc track tags that run 1..n win inside that disc only', () => {
+    const tracks: Record<string, number> = { 'CD1/a.mp3': 2, 'CD1/b.mp3': 1, 'CD2/a.mp3': 1, 'CD2/b.mp3': 1 };
+    const { order, notes } = orderDiscLayout(resolveDiscLayout(Object.keys(tracks))!, (k) => tracks[k]);
+    // CD1 by its tags (b, a); CD2's duplicate numbers fall back to natural order
+    expect(order).toEqual(['CD1/b.mp3', 'CD1/a.mp3', 'CD2/a.mp3', 'CD2/b.mp3']);
+    expect(notes.byTracks).toEqual(['CD1']);
+  });
+
+  it('a missing tag (a failed probe) falls back to natural order, never a throw', () => {
+    const tracks: Record<string, number | undefined> = { 'CD1/02.mp3': 1, 'CD1/01.mp3': undefined, 'CD2/01.mp3': 1 };
+    const { order } = orderDiscLayout(resolveDiscLayout(Object.keys(tracks))!, (k) => tracks[k]);
+    expect(order).toEqual(['CD1/01.mp3', 'CD1/02.mp3', 'CD2/01.mp3']);
+  });
+
+  it('disc folders sharing a number are ordered by name and noted', () => {
+    const { order, notes } = orderDiscLayout(resolveDiscLayout(['Disc 1/01.mp3', 'CD1/01.mp3', 'CD2/01.mp3'])!);
+    expect(order).toEqual(['CD1/01.mp3', 'Disc 1/01.mp3', 'CD2/01.mp3']);
+    expect(notes.tiedNumbers).toEqual([1]);
+  });
+
+  it('gaps in disc numbers are fine', () => {
+    expect(orderDiscLayout(resolveDiscLayout(['CD3/01.mp3', 'CD1/01.mp3'])!).order).toEqual(['CD1/01.mp3', 'CD3/01.mp3']);
+  });
+
+  it('the book set leaves other folders out', () => {
+    expect(discBookFiles(resolveDiscLayout(keys)!)).toEqual(expected.slice(0, -1));
+  });
+
+  it('isPermutation: same length and same items only', () => {
+    expect(isPermutation(['a', 'b'], ['b', 'a'])).toBe(true);
+    expect(isPermutation(['a', 'b'], ['a'])).toBe(false);
+    expect(isPermutation(['a', 'b'], ['a', 'a'])).toBe(false);
+    expect(isPermutation(['a', 'b'], ['a', 'c'])).toBe(false);
+  });
+});
+
+describe('slashEntryProblem (Manual Import selectedFiles with a /)', () => {
+  const book = new Set(['Disc 1/01.m4a', 'Disc 2/01.m4a']);
+
+  it('accepts members of the book set exactly', () => {
+    expect(slashEntryProblem('Disc 1/01.m4a', book)).toBeNull();
+  });
+
+  it.each([
+    ['Disc 1/../Disc 2/01.m4a'], ['../x.m4a'], ['/abs/Disc 1/01.m4a'], ['C:/Disc 1/01.m4a'], ['Disc 1\\01.m4a'],
+    ['./Disc 1/01.m4a'], ['Disc 1//01.m4a'], ['Disc 1/01.m4a\0'], ['Extras/x.m4a'], ['disc 1/01.m4a'], ['Disc 1/01.m4a/'],
+  ])('refuses %j', (entry) => {
+    expect(slashEntryProblem(entry, book)).not.toBeNull();
+  });
+});
