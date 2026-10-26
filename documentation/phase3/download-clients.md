@@ -164,11 +164,11 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 - Not owned → no remove call at all; no post-import `setCategory`; no Transmission seed-limit rewrite on `torrent-duplicate`
 - Post-import category (`applyPostImportCategory()`, `src/lib/processors/post-import-category.ts`, reads the same row as organize-files: `requestId`, newest `createdAt`): `null`/`false` skip; `true` → one strict probe (error / not found → skip) → `resolveOwnership()` (removed, re-added, older copy → skip). Info log on every skip. Downloads in flight at upgrade (`null`) never get the post-import category
 - Deluge `setCategory` replaces the torrent's label (one label per torrent); now only on RMAB's own torrents
-- **Strict probe** `probeDownload(id)` (seeding cleanup only; one request, no not-found retries, unlike `getDownload()`): `{found:true, info}` | `{found:false}` | throws
+- **Strict probe** `probeDownload(id)` (seeding cleanup only; one request, qBittorrent: plus one unfiltered lookup after an empty answer, for a hybrid stored by its v1 hash; no not-found retries, unlike `getDownload()`): `{found:true, info}` | `{found:false}` | throws
 
 | Client | `found:false` only for | Throws |
 |---|---|---|
-| qBittorrent | HTTP 200 + JSON array without the hash (filter ignored = other torrents) | other status, non-array body (login page, empty, `{}`), 5xx, timeout; 403 → one re-login, second 403 throws |
+| qBittorrent | HTTP 200 + JSON array without the torrent (matched by `hash` or `infohash_v1`; filter ignored = other torrents) | other status, non-array body (login page, empty, `{}`), 5xx, timeout; 403 → one re-login, second 403 throws |
 | Transmission | `result: success` + `arguments.torrents` array without it | RPC error result, missing `arguments`/`torrents`, empty body |
 | Deluge | `core.get_torrent_status` → `{}` (KeyError swallowed upstream, 2.1.1) | daemon error, `null`, non-object |
 - `addedAt` in `DownloadInfo`: qBittorrent `added_on`, Transmission `addedDate`, Deluge `time_added` (0/absent → undefined → legacy rows kept)
