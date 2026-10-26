@@ -64,7 +64,8 @@ interface DownloadClientConfig {
 - **Download path:** `download-dir` argument on `torrent-add`
 - **Torrent files:** Base64-encoded via `metainfo` field
 - **Status codes:** 0=stopped→paused, 1=check-pending→checking, 2=checking→checking, 3=download-pending→queued, 4=downloading→downloading, 5=seed-pending→seeding, 6=seeding→seeding
-- **Error handling:** `error > 0` → failed status
+- **Error handling:** only `error === 3` (local error) → failed, `errorMessage` = `errorString`. `error` 1/2 (tracker warning/error) keep the normal status, so a dead tracker stalls rather than fails (same as qBittorrent). Fixed #286: a tracker 404 used to fail the request and auto-blocklist the release
+- **Stopped at 100%:** status 0 with `percentDone >= 1` → `completed` (monitor imports it). `percentDone` = done fraction of wanted bytes; `isFinished` is not used (it means "seed limit reached")
 - **postProcess():** No-op (same as qBittorrent)
 
 ### NZBGet Service

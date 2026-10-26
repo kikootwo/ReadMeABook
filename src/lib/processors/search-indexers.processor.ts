@@ -11,9 +11,11 @@ import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer
 import { RMABLogger } from '../utils/logger';
 import { getLanguageForRegion } from '../constants/language-config';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
+import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import type { AudibleRegion } from '../types/audible';
 
 const MAX_RANKED_RESULTS = 100;
+const CANCELLED_DURING_SEARCH = 'Request cancelled or deleted during the search, not re-queued';
 
 /**
  * Process search indexers job
@@ -27,15 +29,11 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
   logger.info(`Processing request ${requestId} for "${audiobook.title}"`);
 
   try {
-    // Update request status to searching
-    await prisma.request.update({
-      where: { id: requestId },
-      data: {
-        status: 'searching',
-        searchAttempts: { increment: 1 },
-        updatedAt: new Date(),
-      },
-    });
+    // Update request status to searching, unless it was cancelled or deleted
+    if (!(await updateRequestUnlessStopped(requestId, { status: 'searching', searchAttempts: { increment: 1 } }))) {
+      logger.info(`Request ${requestId} is cancelled or deleted, skipping search`);
+      return { success: true, message: 'Request cancelled or deleted, search skipped', requestId };
+    }
 
     // Check for custom search terms override
     const requestRecord = await prisma.request.findUnique({
@@ -133,15 +131,12 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
 
       logger.warn(`${errorMessage} for request ${requestId}, marking as awaiting_search`);
 
-      await prisma.request.update({
-        where: { id: requestId },
-        data: {
-          status: 'awaiting_search',
-          errorMessage,
-          lastSearchAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
+      // Unless a cancel or delete landed during the search: re-queueing it would
+      // let the scheduled re-search jobs download the book anyway
+      if (!(await updateRequestUnlessStopped(requestId, { status: 'awaiting_search', errorMessage, lastSearchAt: new Date() }))) {
+        logger.info(`Request ${requestId} was cancelled or deleted during the search, not re-queued`);
+        return { success: true, message: CANCELLED_DURING_SEARCH, requestId };
+      }
 
       return {
         success: false,
@@ -224,15 +219,14 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       // No quality results found - queue for re-search instead of failing
       logger.warn(`No quality matches found for request ${requestId} (all below 50/100), marking as awaiting_search`);
 
-      await prisma.request.update({
-        where: { id: requestId },
-        data: {
-          status: 'awaiting_search',
-          errorMessage: 'No quality matches found. Will retry automatically.',
-          lastSearchAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
+      if (!(await updateRequestUnlessStopped(requestId, {
+        status: 'awaiting_search',
+        errorMessage: 'No quality matches found. Will retry automatically.',
+        lastSearchAt: new Date(),
+      }))) {
+        logger.info(`Request ${requestId} was cancelled or deleted during the search, not re-queued`);
+        return { success: true, message: CANCELLED_DURING_SEARCH, requestId };
+      }
 
       return {
         success: false,
@@ -306,14 +300,11 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
-    await prisma.request.update({
-      where: { id: requestId },
-      data: {
-        status: 'failed',
-        errorMessage: error instanceof Error ? error.message : 'Unknown error during search',
-        updatedAt: new Date(),
-      },
-    });
+    // Mark failed, unless a cancel or delete landed meanwhile
+    await markRequestFailedUnlessStopped(
+      requestId,
+      error instanceof Error ? error.message : 'Unknown error during search'
+    );
 
     throw error;
   }

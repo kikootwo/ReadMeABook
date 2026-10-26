@@ -27,6 +27,7 @@ import {
 } from './organize-evidence';
 import { getAudibleService } from '../integrations/audible.service';
 import { addAutoBlock } from '../services/blocklist.service';
+import { updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { createAudibleDetailsLoader, readMetadataTaggingEnabled, resolveTagDetails } from './organize-tag-details';
 
 /**
@@ -64,15 +65,12 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     }
 
     // Continue with audiobook organization flow
-    // Update request status to processing
-    await prisma.request.update({
-      where: { id: requestId },
-      data: {
-        status: 'processing',
-        progress: 100, // Download is complete, now organizing
-        updatedAt: new Date(),
-      },
-    });
+    // Update request status to processing (download is complete, now organizing),
+    // unless the user cancelled or deleted it while this job waited in the queue
+    if (!(await updateRequestUnlessStopped(requestId, { status: 'processing', progress: 100 }))) {
+      logger.info(`Request ${requestId} is cancelled or deleted, not importing`);
+      return { success: true, message: 'Request cancelled or deleted, not imported', requestId };
+    }
 
     // Get audiobook details
     const audiobook = await prisma.audiobook.findUnique({
@@ -679,15 +677,11 @@ async function processEbookOrganization(
 
   logger.info(`Processing ebook organization for request ${requestId}`);
 
-  // Update request status to processing
-  await prisma.request.update({
-    where: { id: requestId },
-    data: {
-      status: 'processing',
-      progress: 100,
-      updatedAt: new Date(),
-    },
-  });
+  // Update request status to processing, unless it was cancelled or deleted meanwhile
+  if (!(await updateRequestUnlessStopped(requestId, { status: 'processing', progress: 100 }))) {
+    logger.info(`Request ${requestId} is cancelled or deleted, not importing`);
+    return { success: true, message: 'Request cancelled or deleted, not imported', requestId };
+  }
 
   // Get book details (works for both audiobooks and ebooks)
   const book = await prisma.audiobook.findUnique({
