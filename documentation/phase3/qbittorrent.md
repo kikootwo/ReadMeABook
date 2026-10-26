@@ -12,7 +12,9 @@ Free, open-source BitTorrent client with comprehensive Web API.
 - JSON must confirm one of the torrent's IDs (case-insensitive): `success_count: 1`, `failure_count: 0`, `pending_count: 0`, one `added_torrent_ids` entry equal to qBittorrent's ID (truncated v2 for a hybrid) or the v1 hash.
 - Pending, malformed, mismatched and rejected bodies stay errors; HTTP 200 alone does not confirm the add.
 - Hashes, IDs and add answers: `src/lib/integrations/qbittorrent-ids.ts` (`magnetHashes()`, `torrentFileHashes()`, `acceptedAddId()`, `lookupTorrent()`). `Ok.` resolves to v1; for a hybrid RMAB then looks up the v2 ID (libtorrent 2 lists it there, 1.2 by v1; not listed yet → v1).
-- Already in qBittorrent (pre-check by each candidate ID, `GET torrents/info?hashes=`; a btih-only magnet also checks the full list, matching `infohash_v1`, since it may be a hybrid listed under its v2 ID and 4.4 answers `Ok.` to that duplicate) → `{ id, alreadyInClient: true }`, no add. A rejected add (`Fails.`, a rejected JSON receipt, or HTTP 409 from 5.2) re-checks the hash once: present → taken over (`alreadyInClient: true`, warn); absent → error as before ([download-clients.md](./download-clients.md#torrent-ownership-423)).
+- Already in qBittorrent (pre-check by each candidate ID, `GET torrents/info?hashes=`; then, for any add with a v1 hash (a btih magnet, any `.torrent`), one full list matching `hash`/`infohash_v1` against every candidate, since a torrent with that v1 may be listed under another ID (a hybrid under its v2 ID, or a magnet with a different `btmh`) and qBittorrent up to 5.1 can answer `Ok.` to that duplicate; cost: one full list per add) → `{ id, alreadyInClient: true }`, no add.
+- Full list unreadable at the pre-check (non-200, timeout, not a list) → fail closed: nothing added, `TorrentListUnavailableError` "Couldn't read qBittorrent's torrent list to check for an existing copy" (one error log line). A client error, not a source error: no other release is tried; the request's normal retry applies. HTTP 403 still re-logs in and retries once.
+- A rejected add (`Fails.`, a rejected JSON receipt, or HTTP 409 from 5.2) re-checks the hash once: present → taken over (`alreadyInClient: true`, warn); absent → error as before ([download-clients.md](./download-clients.md#torrent-ownership-423)).
 - `probeDownload(hash)`: strict lookup for the seeding cleanup, no not-found retries: one lookup by ID, plus one unfiltered lookup when that answer is an empty list (`qbittorrentProbeList()` validates both); `added_on` → `DownloadInfo.addedAt`.
 - Add result: `{ id, alreadyInClient, infoHash }`; `infoHash` (v1) keeps `DownloadHistory.torrentHash` = v1 for hybrids.
 
@@ -170,8 +172,7 @@ organizePath = PathMapper.transform(qbPath, config)
 ```typescript
 interface TorrentInfo {
   hash: string; // qBittorrent's ID: v1, or truncated v2 for hybrid/v2 (libtorrent 2, 4.4+); a btih-only magnet switches to it when metadata arrives
-  infohash_v1: string; // 4.4+, '' for v2-only
-  infohash_v2: string; // 4.4+, '' when none (always '' on libtorrent 1.2)
+  infohash_v1?: string; // 4.4+, '' for v2-only
   name: string;
   size: number;
   progress: number; // 0.0-1.0
@@ -205,6 +206,10 @@ type TorrentState =
 ## Critical Issues
 
 - Pure v2 `.torrent` files (no `pieces`) fail in parse-torrent: unsupported.
+- **Risk (#422):** rows written by v1.2.11 on qBittorrent 4.4-5.1 for a duplicate of a user's hybrid (4.4 answered `Ok.`, so the row says `addedByRmab: true`, stored by v1) now resolve to the user's torrent; the 24 h ownership window is their only guard. No extra guard: "added at or after the row" would disown every legitimate old row (RMAB writes the row after its add).
+- Known limit: after a legacy `Ok.`, a hybrid not listed yet is stored as v1; if it appears only after attempt 0's full list, that `getDownload` call returns null (attempts 1-3 filter by v1); the next monitor run finds it.
+- Known limit: lookups match the stored or learned ID, never the row's `torrentHash`, so a row stored under a truncated v2 ID is lost if the client moves to a libtorrent 1.2 build.
+- Known limit: the seeding cleanup keys `deletedHashes` by the raw stored ID, so sibling rows of one hybrid (v1 and v2 ID) take the probe → missing path (one extra full list; the soft-deleted request is hard-deleted one run later).
 
 ## Fixed Issues ✅
 
@@ -263,14 +268,13 @@ type TorrentState =
    - `pausedDL`/`stoppedDL` remain `paused` — download phase genuinely paused
 - Key insight: any `*UP` state is post-download; any `*DL` state is pre-completion
 
-**19. Hybrid torrents and base32 magnets tracked under the wrong hash (#422)** - qBittorrent's ID for a hybrid is its truncated v2 hash; RMAB used v1 (5.2 adds reported failed, older versions never found) and kept base32 magnet hashes as base32. Fixed (`qbittorrent-ids.ts`): stored `downloadClientId` = qBittorrent's confirmed ID (5.2 receipt; after `Ok.` the v2 ID if listed, else v1); `torrentHash` = v1. Old rows (v1 of a hybrid, base32) resolve through the unfiltered lookup, no rewrite; such old failed requests become findable, so deleting one removes RMAB's own torrent with its files
-
 **17. Prowlarr grab errors blamed on qBittorrent** - Source HTTP errors were collapsed into `Failed to add torrent to qBittorrent`, so a rate-limited indexer permanently failed the request. Fixed by:
 - Forwarding Prowlarr source headers when fetching `.torrent` files (now scoped to Prowlarr download hops, see #18)
 - Preserving the upstream HTTP status as a structured source-grab error
 - Trying the remaining ranked releases on HTTP `429`/`5xx`
 - Reporting the indexer, release, and upstream status instead of blaming a healthy qBittorrent instance
 **18. Magnet at a later redirect hop (#298)** - Only the first `Location` was checked; later hops went through axios, which cannot follow `magnet:`. Fixed by the shared fetcher (`download-source.ts`): every hop checked, relative redirects resolved, Prowlarr key sent only to Prowlarr download hops (see [download-clients.md](./download-clients.md#source-fetch--prowlarr-key-scoping))
+**19. Hybrid torrents and base32 magnets tracked under the wrong hash (#422)** - qBittorrent's ID for a hybrid is its truncated v2 hash; RMAB used v1 (5.2 adds reported failed, older versions never found) and kept base32 magnet hashes as base32. Fixed (`qbittorrent-ids.ts`): stored `downloadClientId` = qBittorrent's confirmed ID (5.2 receipt; after `Ok.` the v2 ID if listed, else v1); `torrentHash` = v1; every add with a v1 hash checks the full list first (fail closed). Old rows (v1 of a hybrid, base32) resolve through the unfiltered lookup, no rewrite, and the ownership check (#423) decides on what they find. So deleting an old failed request now removes the torrent it resolves to, with its files, when that torrent was added less than 24 h before the grab: RMAB's own, or, for a v1.2.11 row on qBittorrent 4.4-5.1, a user's hybrid (see Critical Issues)
 
 ## Tech Stack
 
