@@ -20,7 +20,7 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
   1. **ASIN in folder name** — scans folder name for pattern `B[A-Z0-9]{9}` bounded by bracket/paren/space; if found, uses direct ASIN lookup instead of text search; no badge shown
   2. **Folder name** — cleaned (strips bracketed ASIN/year, underscores→spaces); skipped if generic (CD1, Disc 2, Part 3, Vol 1, etc.); shows "Low Confidence" badge
   3. **First file name** — last resort; shows "Low Confidence" badge
-- **Generic folder detection:** disc/part folder names ([multi-disc-folders.md](multi-disc-folders.md)) + `vol N`/`volume N` (`isGenericFolderName`) — skipped as search terms
+- **Generic folder detection:** disc/part folder names ([multi-disc-folders.md](multi-disc-folders.md)) + `(cd|disc|disk|part|vol|volume) N` with any number of digits (`isGenericFolderName`) — skipped as search terms
 - **Author/narrator dedup:** Splits on `,;& ` delimiters, removes names appearing in both fields
 - **Scan depth:** Max 10 levels recursion
 - **Rate limiting:** 1.5s delay between Audible searches (same as existing scraping rate limit)

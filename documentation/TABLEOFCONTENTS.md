@@ -79,7 +79,7 @@
 - **Verified import (atomic copy, placement records, delete only what reached the library)** → [phase3/file-organization.md](phase3/file-organization.md#verified-import-delete-only-what-reached-the-library)
 - **Custom M4B tags (ASIN, publisher, subtitle, language as iTunes freeform `----` atoms), tagged MP4 faststart** → [phase3/file-organization.md](phase3/file-organization.md#mp4-freeform-tags)
 - **Chapter merging (auto-merge to M4B)** → [features/chapter-merging.md](features/chapter-merging.md)
-- **Multi-disc (CD1/Disc 1) folders: disc names, import order, Manual/Bulk Import, in-place stop** → [features/multi-disc-folders.md](features/multi-disc-folders.md)
+- **Multi-disc (CD1/Disc 1) folders: disc names, import order, disc/track tags, Manual/Bulk Import, in-place stop** → [features/multi-disc-folders.md](features/multi-disc-folders.md)
 
 ## Background Jobs
 - **Bull queue, processors, retry logic** → [backend/services/jobs.md](backend/services/jobs.md)

@@ -45,7 +45,7 @@ Allow admins to manually import audiobook files from the server filesystem into 
 - [ ] `GET /api/admin/filesystem/browse?path=...` — admin-only endpoint
 - [ ] Returns directory listing: `{ entries: [{ name, type, audioFileCount, subfolderCount, totalSize }] }`
 - [ ] If no `path` param, returns root directories (download_dir, media_dir from config)
-- [x] Current response: `{ path, entries: [{ name, type }], audioFiles: [{ name, size }] }`; a multi-disc folder (never a configured root) adds its disc files to `audioFiles` (relative names, import order) plus `discCount`
+- [x] Current response: `{ path, entries: [{ name, type }], audioFiles: [{ name, size }] }`; a multi-disc folder (never a configured root) adds its disc files to `audioFiles` (relative names, disc by disc, names in natural order inside a disc; the import may reorder a disc by its track tags)
 - [ ] Path validation: must be within allowed root directories (prevent directory traversal)
 - [ ] Handles permission errors gracefully
 - [ ] Sorts: folders first, then alphabetical
