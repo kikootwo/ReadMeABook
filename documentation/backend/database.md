@@ -70,6 +70,7 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - `release_date` (Date, nullable) - Book release date snapshot from Audnexus at request creation; used by skip-unreleased-auto-search gate
 - `progress` (0-100), `priority`, `error_message`
 - `search_attempts`, `download_attempts`, `import_attempts`, `max_import_retries` (default 5)
+- `auto_rerequest_count` (Int, default 0) - Automatic re-requests after a failure with no new block (shelf sync / watched lists backoff step); user requests and retries reset it to 0. See [release-blocklist.md](../admin-features/release-blocklist.md#automatic-re-requests-409)
 - `last_search_at`, `last_import_at`, `created_at`, `updated_at`, `completed_at`
 - Unique: `(user_id, audiobook_id)`
 - Indexes: `user_id`, `audiobook_id`, `status`, `created_at DESC`

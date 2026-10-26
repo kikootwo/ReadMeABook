@@ -46,7 +46,7 @@ Accepts provider-agnostic book list + context, performs:
 1. **BookMapping lookup** — Check if book already resolved (`provider` + `externalBookId`)
 2. **Audible search** — Full query (`title author`), fallback with cleaned title (strips parenthetical series info)
 3. **noMatch retry** — Re-searches after `NO_MATCH_RETRY_DAYS` (7 days)
-4. **Request creation** — Calls `createRequestForUser()` for matched ASINs
+4. **Request creation** — Calls `createRequestForUser(..., { automatic: true })` for matched ASINs: never replaces a cancelled request; failed/warn ones on a backoff ([release-blocklist.md](../../admin-features/release-blocklist.md#automatic-re-requests-409))
 5. **Cover enrichment** — Queries `audibleCache` for cached covers, builds `/api/cache/thumbnails/` URLs
 6. **Shelf metadata update** — Writes `lastSyncAt`, `bookCount`, top 8 books as JSON to `coverUrls`
 
