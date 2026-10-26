@@ -132,6 +132,11 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - **Match rules:** Case-insensitive exact match on `release_key` OR exact match on `release_hash`.
 - **Service:** Single writer is `src/lib/services/blocklist.service.ts` (`addAutoBlock` is idempotent via upsert; never throws).
 
+### Watched_Series / Watched_Authors
+- `id` (UUID PK), `user_id` (FK → Users, CASCADE), `series_asin`/`author_asin`, `series_title`/`author_name`, `cover_art_url` (nullable), `last_checked_at` (nullable), `created_at`, `updated_at`
+- `new_releases_since` (DateTime, nullable) - null = request the entire catalog; set = request only books released from this day on (#302)
+- Unique: `(user_id, series_asin)` / `(user_id, author_asin)`. See [features/watched-lists.md](../features/watched-lists.md)
+
 ## Relationships
 
 - User → Requests (1:many)

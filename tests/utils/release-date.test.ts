@@ -4,7 +4,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { isUnreleased, shouldSkipAutoSearch } from '@/lib/utils/release-date';
+import { isUnreleased, shouldSkipAutoSearch, toReleaseDay } from '@/lib/utils/release-date';
 
 describe('isUnreleased', () => {
   it('returns false for null', () => {
@@ -130,5 +130,37 @@ describe('shouldSkipAutoSearch', () => {
     expect(shouldSkipAutoSearch({ releaseDate: null }, true)).toEqual({
       skip: false,
     });
+  });
+});
+
+describe('toReleaseDay', () => {
+  it('keeps an ISO date (catalog API, modern series rows)', () => {
+    expect(toReleaseDay('2021-01-28')).toBe('2021-01-28');
+    expect(toReleaseDay(' 2021-01-28 ')).toBe('2021-01-28');
+  });
+
+  it('takes the date part of an ISO datetime (Audnexus)', () => {
+    expect(toReleaseDay('2021-01-28T00:00:00.000Z')).toBe('2021-01-28');
+  });
+
+  it('uses the UTC day of a Date', () => {
+    expect(toReleaseDay(new Date('2026-10-27T01:00:00Z'))).toBe('2026-10-27');
+    expect(toReleaseDay(new Date('nope'))).toBeNull();
+  });
+
+  it('returns null for a legacy series label date, whose day/month order varies', () => {
+    expect(toReleaseDay('01-28-21')).toBeNull();
+    expect(toReleaseDay('28.01.2021')).toBeNull();
+  });
+
+  it('returns null for impossible dates', () => {
+    expect(toReleaseDay('2021-13-01')).toBeNull();
+    expect(toReleaseDay('2021-02-30')).toBeNull();
+  });
+
+  it('returns null when there is no date', () => {
+    expect(toReleaseDay('')).toBeNull();
+    expect(toReleaseDay(undefined)).toBeNull();
+    expect(toReleaseDay(null)).toBeNull();
   });
 });

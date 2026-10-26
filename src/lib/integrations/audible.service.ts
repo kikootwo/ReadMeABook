@@ -38,7 +38,7 @@ import {
 
 const logger = RMABLogger.create('Audible');
 
-const AUDIBLE_PAGE_SIZE = 50;
+export const AUDIBLE_PAGE_SIZE = 50;
 
 const CATALOG_RESPONSE_GROUPS =
   'contributors,product_desc,product_attrs,product_extended_attrs,media,rating,series,category_ladders,product_details';
@@ -589,6 +589,7 @@ export class AudibleService {
     authorName: string,
     authorAsin: string,
     page: number = 1,
+    { newestFirst = false }: { newestFirst?: boolean } = {},
   ): Promise<AuthorBooksResult> {
     await this.initialize();
 
@@ -606,6 +607,7 @@ export class AudibleService {
             num_results: AUDIBLE_PAGE_SIZE,
             page: page - 1,
             response_groups: CATALOG_RESPONSE_GROUPS,
+            ...(newestFirst && { products_sort_by: '-ReleaseDate' }),
           },
         },
         5,
@@ -634,9 +636,7 @@ export class AudibleService {
           ? totalResults > page * AUDIBLE_PAGE_SIZE
           : products.length >= AUDIBLE_PAGE_SIZE);
 
-      logger.info(
-        `Author books page ${page}: ${books.length} valid results (${totalResults} Audible total)`,
-      );
+      logger.info(`Author books page ${page}: ${books.length} valid results (${totalResults} Audible total)`);
       return { books, hasMore, page, totalResults };
     } catch (error) {
       logger.error(`Author books search failed for "${authorName}"`, {
