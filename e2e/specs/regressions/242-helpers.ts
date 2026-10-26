@@ -173,8 +173,9 @@ export class CaseRun {
   readonly dir: string;
   readonly checks: { name: string; kind: 'safety' | 'log' | 'control'; ok: boolean; detail?: string }[] = [];
 
-  constructor(readonly id: string) {
-    this.dir = `242/${id}`;
+  /** Evidence goes to <issue>/<id>/ (242 unless another regression reuses the recorder). */
+  constructor(readonly id: string, issue = '242') {
+    this.dir = `${issue}/${id}`;
   }
 
   save(name: string, content: unknown) {

@@ -178,6 +178,10 @@ export interface Recorded {
   status?: number;
   location?: string;
   added?: { hash?: string; nzoId?: string; releaseId: string | null }[];
+  /** qBittorrent add: hashes the client already had (answered "Fails." when nothing was new). */
+  duplicates?: string[];
+  /** qBittorrent delete / setCategory form fields. */
+  body?: { hashes?: string; deleteFiles?: boolean; category?: string };
 }
 
 /** fetch() against fake-arr /__control (adds the per-run control token). */

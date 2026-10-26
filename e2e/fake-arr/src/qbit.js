@@ -5,11 +5,13 @@
  * Derived from src/lib/integrations/qbittorrent.service.ts: auth/login :194/:941, app/version :852/:918,
  * torrents/categories :555, createCategory :566, editCategory :588, add (urls) :354, add (multipart) :523,
  * info :632/:675, pause :696, resume :723, delete :750, files :780, setCategory :821.
+ * A duplicate add answers "Fails." like qBittorrent 4.6 (nothing new was added); seedTorrent() puts a
+ * torrent in the client before RMAB sees it (a takeover, #423).
  */
 
 import { randomBytes } from 'node:crypto';
 import { readParams, sendJson, sendText, notFound } from './http-util.js';
-import { startDownload, snapshot, pauseJob, resumeJob, removeJobFiles } from './sim.js';
+import { startDownload, snapshot, pauseJob, resumeJob, removeJobFiles, materialize } from './sim.js';
 
 const QBIT_VERSION = 'v4.6.5';
 
@@ -70,8 +72,9 @@ export function torrentInfo(state, t, now = Date.now()) {
   };
 }
 
+/** New torrent record, or null when the client already has this hash (a duplicate add). */
 function addTorrentRecord(state, { hash, release, name, category, tags, savePathParam, paused }) {
-  if (state.torrents.has(hash)) return state.torrents.get(hash);
+  if (state.torrents.has(hash)) return null;
   const cat = state.qbitCategories[category];
   const savePath = (cat && cat.savePath) || savePathParam || state.config.downloadsDir;
   const record = {
@@ -169,11 +172,13 @@ export async function handleQbit(state, req, res, url, recordEntry) {
       return sendText(res, 200, '');
     }
     case '/torrents/setCategory': {
+      recordEntry.body = { hashes: params.hashes, category: params.category || '' };
       for (const t of selectTorrents(state, params.hashes)) t.category = params.category || '';
       return sendText(res, 200, '');
     }
     case '/torrents/delete': {
       const deleteFiles = String(params.deleteFiles) === 'true';
+      recordEntry.body = { hashes: params.hashes, deleteFiles };
       for (const t of selectTorrents(state, params.hashes)) {
         if (deleteFiles && t.job) removeJobFiles(t.job);
         state.torrents.delete(t.hash);
@@ -186,6 +191,25 @@ export async function handleQbit(state, req, res, url, recordEntry) {
   }
 }
 
+/**
+ * Put a release's torrent in the client as if someone added it `addedAgoSec` ago: finished, files on
+ * disk, seeding since `completedAgoSec`. Refuses a hash the client already has.
+ */
+export function seedTorrent(state, { release: releaseId, addedAgoSec = 172800, completedAgoSec, category = '' }) {
+  const release = state.releases.get(String(releaseId));
+  if (!release || release.protocol !== 'torrent') throw new Error(`no torrent release "${releaseId}" in the scenario`);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const added = nowSec - Math.max(0, Number(addedAgoSec));
+  const completedAgo = completedAgoSec === undefined ? Math.max(0, Number(addedAgoSec) - 60) : Math.max(0, Number(completedAgoSec));
+  const record = addTorrentRecord(state, { hash: release.infoHash, release, name: release.name, category });
+  if (!record) throw new Error(`torrent ${release.infoHash} is already in the client`);
+  record.addedOn = added;
+  record.completionOn = Math.min(nowSec, Math.max(added, nowSec - completedAgo));
+  record.job.startedAt = added * 1000;
+  materialize(state, record.job);
+  return { hash: record.hash, name: record.name, savePath: record.savePath, contentPath: record.job.contentPath, addedOn: record.addedOn, completionOn: record.completionOn };
+}
+
 function selectTorrents(state, hashes) {
   if (hashes === 'all') return [...state.torrents.values()];
   return hashesParam(hashes)
@@ -195,19 +219,25 @@ function selectTorrents(state, hashes) {
 
 function addTorrents(state, res, params, files, recordEntry) {
   const added = [];
+  const duplicates = [];
   const common = { category: params.category, tags: params.tags, savePathParam: params.savepath, paused: params.paused === 'true' || params.stopped === 'true' };
   for (const line of String(params.urls || '').split(/\r?\n/).filter(Boolean)) {
     const hash = /xt=urn:btih:([0-9a-fA-F]{40})/.exec(line)?.[1]?.toLowerCase();
     if (!hash) return sendText(res, 200, 'Fails.');
     const release = state.releaseForHash(hash);
     const dn = new URLSearchParams(line.split('?')[1] || '').get('dn') || hash;
-    added.push(addTorrentRecord(state, { hash, release, name: release?.name || dn, ...common }));
+    const record = addTorrentRecord(state, { hash, release, name: release?.name || dn, ...common });
+    if (record) added.push(record);
+    else duplicates.push(hash);
   }
   for (const file of files.filter((f) => f.name === 'torrents')) {
     const release = [...state.releases.values()].find((r) => r.torrentFile && r.torrentFile.equals(file.data));
     if (!release) return sendText(res, 200, 'Fails.');
-    added.push(addTorrentRecord(state, { hash: release.infoHash, release, name: release.name, ...common }));
+    const record = addTorrentRecord(state, { hash: release.infoHash, release, name: release.name, ...common });
+    if (record) added.push(record);
+    else duplicates.push(release.infoHash);
   }
+  if (duplicates.length) recordEntry.duplicates = duplicates;
   if (added.length === 0) return sendText(res, 200, 'Fails.');
   recordEntry.added = added.map((t) => ({ hash: t.hash, releaseId: t.releaseId || null }));
   return sendText(res, 200, 'Ok.');

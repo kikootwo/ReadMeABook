@@ -21,7 +21,7 @@ export const TAINTED_DISABLED_MESSAGE = 'tainted mode is disabled until build-ti
 export const USAGE = `usage:
   node e2e/run.mjs [stack] --slug <s> --port <3401-3499> (--image <ref> | --worktree <dir> (--trusted | --tainted))
        [--pr-dockerfile] [--dockerfile <file>] [--specs <a,b>] [--scenario <name>]
-       [--backend abs|plex] [--upgrade-from <release tag, e.g. 1.2.3>] [--evidence <dir>]
+       [--backend abs|plex] [--upgrade-from <release tag, e.g. 1.2.3>] [--upgrade-specs <a,b>] [--evidence <dir>]
        [--offline-fixtures] [--rm-image] [--allow-log-canary] [--isolation-check] [--allow-untracked]
        [--overrides <name,name>]   (trusted e2e/overrides/*.yml; untainted only)
        [--isolate-specs]           (fresh stack per --specs entry, same images)
@@ -31,7 +31,7 @@ export const USAGE = `usage:
   node e2e/run.mjs down --slug <s> [--force-reserved]`;
 
 const FLAGS = new Set(['offline-fixtures', 'rm-image', 'help', 'trusted', 'tainted', 'pr-dockerfile', 'allow-log-canary', 'force-reserved', 'isolation-check', 'allow-untracked', 'isolate-specs']);
-const VALUE_OPTIONS = new Set(['slug', 'port', 'image', 'worktree', 'dockerfile', 'specs', 'scenario', 'backend', 'upgrade-from', 'evidence', 'overrides', 'replace-image']);
+const VALUE_OPTIONS = new Set(['slug', 'port', 'image', 'worktree', 'dockerfile', 'specs', 'scenario', 'backend', 'upgrade-from', 'upgrade-specs', 'evidence', 'overrides', 'replace-image']);
 
 /** `child` is inside `parent` (or equal). Case-insensitive on Windows. */
 export function isInside(parent, child) {
@@ -107,6 +107,7 @@ export function parseArgs(argv) {
     if (opts.overrides) throw new Error('--overrides is not allowed with --tainted');
   }
   if (opts['pr-dockerfile'] && !opts.tainted) throw new Error('--pr-dockerfile only applies with --tainted');
+  if (opts['upgrade-specs'] && !opts['upgrade-from']) throw new Error('--upgrade-specs only applies with --upgrade-from');
   return opts;
 }
 

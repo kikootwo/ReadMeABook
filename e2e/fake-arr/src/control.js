@@ -5,7 +5,7 @@
 
 import { timingSafeEqual } from 'node:crypto';
 import { readParams, sendJson, notFound } from './http-util.js';
-import { torrentInfo } from './qbit.js';
+import { torrentInfo, seedTorrent } from './qbit.js';
 import { sabSlots } from './sab.js';
 import { scanAlbums } from './plex.js';
 
@@ -31,6 +31,10 @@ export async function handleControl(state, req, res, url) {
       const { params } = await readParams(req, url);
       const scenario = params.definition ? state.loadScenario(params.definition) : state.loadScenarioByName(params.name);
       return sendJson(res, 200, { ok: true, scenario: scenario.name, releases: [...state.releases.keys()] });
+    }
+    if (p === '/qbit-seed' && req.method === 'POST') {
+      const { params } = await readParams(req, url);
+      return sendJson(res, 200, { ok: true, torrent: seedTorrent(state, params) });
     }
     if (p === '/reset' && req.method === 'POST') {
       const name = state.scenario?.name;

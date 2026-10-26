@@ -92,3 +92,8 @@ test('worktrees outside the trusted root are refused; the trusted checkout itsel
   assert.equal(parseArgs(stack('--worktree', REPO, '--trusted')).trusted, true);
   assert.throws(() => parseArgs(['--slug', 'x', '--port', '3400', '--image', 'y']), /3401-3499/);
 });
+
+test('--upgrade-specs needs --upgrade-from', () => {
+  assert.throws(() => parseArgs(stack('--image', 'y', '--upgrade-specs', '423-upgrade')), /only applies with --upgrade-from/);
+  assert.equal(parseArgs(stack('--image', 'y', '--upgrade-from', '1.2.10', '--upgrade-specs', '423-upgrade'))['upgrade-specs'], '423-upgrade');
+});

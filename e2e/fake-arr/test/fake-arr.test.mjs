@@ -436,3 +436,48 @@ test('prowlarr search honours categories, limit and type', async () => {
   assert.equal((await (await q('type=search&categories=3030&categories=7020&limit=2')).json()).length, 2);
   assert.equal((await q('type=nonsense')).status, 400);
 });
+
+test('qbit: a duplicate add answers Fails.; qbit-seed puts a finished, 2-day-old torrent in the client (#423)', async () => {
+  await loadDef({ name: 'unit-seed', book: 'phm', releases: [
+    { id: 's', title: '{{title}} seeded', fixture: 'phm-mp3' },
+    { id: 'n', title: '{{title}} new', fixture: 'phm-mp3', link: 'magnet' },
+  ] });
+  const seedRes = await fetch(`${base('control')}/__control/qbit-seed`, {
+    method: 'POST',
+    headers: { 'x-control-token': TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ release: 's', addedAgoSec: 172800, category: 'manual' }),
+  }).then((r) => r.json());
+  assert.equal(seedRes.ok, true, JSON.stringify(seedRes));
+  const nowSec = Math.floor(Date.now() / 1000);
+  assert.ok(Math.abs(seedRes.torrent.addedOn - (nowSec - 172800)) <= 2);
+  assert.ok(fs.existsSync(path.join(seedRes.torrent.contentPath, '01 - Chapter 1.mp3')), 'files are on disk at seed time');
+
+  const cookie = await qbitLogin();
+  const h = { Cookie: cookie };
+  const form = (o) => ({ method: 'POST', headers: { ...h, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(o) });
+  const [t] = await fetch(`${base('qbit')}/api/v2/torrents/info?hashes=${seedRes.torrent.hash}`, { headers: h }).then((r) => r.json());
+  assert.equal(t.state, 'uploading');
+  assert.equal(t.progress, 1);
+  assert.equal(t.category, 'manual');
+  assert.equal(t.added_on, seedRes.torrent.addedOn);
+  assert.ok(t.seeding_time > 86400, `seeding since about 2 days (${t.seeding_time})`);
+
+  // Seeding the same hash again is refused; adding it answers "Fails." and records the duplicate
+  const again = await fetch(`${base('control')}/__control/qbit-seed`, {
+    method: 'POST',
+    headers: { 'x-control-token': TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ release: 's' }),
+  });
+  assert.equal(again.status, 400);
+  const since = (await control('/requests')).at(-1).seq;
+  const [sRel] = (await search('Fixture Book One')).filter((r) => r.title.endsWith('seeded'));
+  assert.equal(await fetch(`${base('qbit')}/api/v2/torrents/add`, form({ urls: `magnet:?xt=urn:btih:${sRel.infoHash}` })).then((r) => r.text()), 'Fails.');
+  const nRel = (await search('Fixture Book One')).find((r) => r.title.endsWith('new'));
+  assert.equal(await fetch(`${base('qbit')}/api/v2/torrents/add`, form({ urls: nRel.magnetUrl })).then((r) => r.text()), 'Ok.');
+  await fetch(`${base('qbit')}/api/v2/torrents/delete`, form({ hashes: nRel.infoHash, deleteFiles: 'true' }));
+  const recs = (await control(`/requests?since=${since}`)).filter((r) => r.service === 'qbit');
+  assert.deepEqual(recs.find((r) => r.path.endsWith('/torrents/add'))?.duplicates, [sRel.infoHash]);
+  assert.deepEqual(recs.find((r) => r.path.endsWith('/torrents/delete'))?.body, { hashes: nRel.infoHash, deleteFiles: true });
+  const after = await fetch(`${base('qbit')}/api/v2/torrents/info?hashes=${seedRes.torrent.hash}`, { headers: h }).then((r) => r.json());
+  assert.equal(after[0].added_on, seedRes.torrent.addedOn, 'the duplicate add did not touch the existing torrent');
+});

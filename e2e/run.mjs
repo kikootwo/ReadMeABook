@@ -146,9 +146,11 @@ async function upgradeFlow(ctx, image) {
   }
   ctx.sizeRefs.push(oldRef);
   ctx.summary.upgradeFrom = oldRef;
+  // --upgrade-specs replaces upgrade.spec.ts in both phases (each spec reads E2E_PHASE).
+  const specs = ctx.opts['upgrade-specs'] ? ctx.opts['upgrade-specs'].split(',').map((s) => s.trim()).filter(Boolean) : ['upgrade.spec.ts'];
   // Phase 1: release image on fresh volumes with image-generated secrets (the real upgrade path).
   up(ctx, oldRef, { generatedSecrets: true });
-  let status = await playwright(ctx, ['upgrade.spec.ts'], 'upgrade-seed');
+  let status = await playwright(ctx, specs, 'upgrade-seed');
   if (status !== 0) return status;
   const before = await stableRowCounts(ctx, EXACT_TABLES);
   fs.mkdirSync(path.join(ctx.evidence, 'upgrade'), { recursive: true });
@@ -158,8 +160,9 @@ async function upgradeFlow(ctx, image) {
   compose(ctx.project, ['rm', '-f', 'rmab'], ctx.env);
   // Phase 2: branch image on the same volumes.
   up(ctx, image, { generatedSecrets: true });
-  const statuses = JSON.parse(fs.readFileSync(path.join(ctx.evidence, 'upgrade', 'before.json'), 'utf8')).statuses;
-  status = await playwright(ctx, ['upgrade.spec.ts'], 'upgrade-verify', { E2E_UPGRADE_BEFORE: JSON.stringify({ statuses }) });
+  const beforeFile = path.join(ctx.evidence, 'upgrade', 'before.json'); // written by upgrade.spec.ts
+  const statuses = fs.existsSync(beforeFile) ? JSON.parse(fs.readFileSync(beforeFile, 'utf8')).statuses : {};
+  status = await playwright(ctx, specs, 'upgrade-verify', { E2E_UPGRADE_BEFORE: JSON.stringify({ statuses }) });
   const after = tableRowCounts(ctx);
   fs.writeFileSync(path.join(ctx.evidence, 'upgrade', 'after-counts.json'), JSON.stringify(after, null, 2));
   const problems = compareUpgradeCounts(before, after);
