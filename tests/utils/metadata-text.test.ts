@@ -5,10 +5,15 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  bookDetailValues,
   capUtf8Bytes,
   describeFfmpegFailure,
+  languageTagValue,
   MAX_DESCRIPTION_BYTES,
   MAX_RAW_DESCRIPTION_LENGTH,
+  MAX_SHORT_TAG_BYTES,
+  sanitizeMetadataValue,
+  sanitizeShortTagValue,
   truncateRawText,
 } from '@/lib/utils/metadata-text';
 
@@ -59,5 +64,69 @@ describe('metadata text helpers', () => {
     ['a plain error', new Error('spawn ffmpeg ENOENT'), 'spawn ffmpeg ENOENT'],
   ])('describeFfmpegFailure: %s', (_label, error, expected) => {
     expect(describeFfmpegFailure(error)).toBe(expected);
+  });
+
+  it.each([
+    ['a BOM', '\uFEFF'],
+    ['an NBSP', '\u00A0'],
+    ['a zero-width space', '\u200B'],
+    ['a zero-width non-joiner', '\u200C'],
+    ['a zero-width joiner', '\u200D'],
+  ])('sanitizeMetadataValue drops a leading run of %s, and keeps one inside the value', (_label, char) => {
+    expect(sanitizeMetadataValue(`${char}${char}Title`)).toBe('Title');
+    expect(sanitizeMetadataValue(`Ti${char}tle`)).toBe(`Ti${char}tle`);
+  });
+
+  describe('sanitizeShortTagValue (publisher, subtitle)', () => {
+    it.each([
+      ['surrounding and inner whitespace runs', '  Penguin \t Audio \r\n ', 'Penguin Audio'],
+      ['control characters', 'Pen\u0000gu\u0007in', 'Penguin'],
+      ['a lone surrogate (the MP4 read-back compares bytes)', 'Before \ud800 after', 'Before \uFFFD after'],
+      ['U+FFFE and U+FFFF (ffprobe does not read them back as written)', 'A \uFFFE B \uFFFF C', 'A \uFFFD B \uFFFD C'],
+      ['other noncharacters, which read back as written', 'A \uFDD0 B \u{10ffff}', 'A \uFDD0 B \u{10ffff}'],
+      ['a valid surrogate pair', 'Smile \u{1f600}', 'Smile \u{1f600}'],
+    ])('cleans %s', (_label, input, expected) => {
+      expect(sanitizeShortTagValue(input)).toBe(expected);
+    });
+
+    it.each([[undefined], [null], [''], ['   '], ['\r\n\t'], [42], [{ name: 'Penguin' }]])('is undefined for %j', (input) => {
+      expect(sanitizeShortTagValue(input)).toBeUndefined();
+    });
+
+    it('caps a long value at MAX_SHORT_TAG_BYTES with an ellipsis', () => {
+      const capped = sanitizeShortTagValue('word '.repeat(1000))!;
+      expect(Buffer.byteLength(capped, 'utf8')).toBeLessThanOrEqual(MAX_SHORT_TAG_BYTES);
+      expect(capped.endsWith('word\u2026')).toBe(true);
+    });
+  });
+
+  describe('languageTagValue', () => {
+    it.each([
+      ['english', 'English'],
+      ['german', 'German'],
+      [' english ', 'English'],
+      ['English', 'English'],
+    ])('%j becomes %j (the name Audiobookshelf shows, not an ISO code)', (input, expected) => {
+      expect(languageTagValue(input)).toBe(expected);
+    });
+
+    it.each([[undefined], [''], ['  '], [7]])('is undefined for %j', (input) => {
+      expect(languageTagValue(input)).toBeUndefined();
+    });
+
+    it('stays within MAX_SHORT_TAG_BYTES when the capital letter is longer', () => {
+      // U+0149 (2 bytes) upper-cases to U+02BC U+004E (3 bytes)
+      const value = languageTagValue('\u0149' + 'n'.repeat(MAX_SHORT_TAG_BYTES - 2))!;
+      expect(value.startsWith('\u02BCN')).toBe(true);
+      expect(Buffer.byteLength(value, 'utf8')).toBeLessThanOrEqual(MAX_SHORT_TAG_BYTES);
+    });
+  });
+
+  it('bookDetailValues sanitizes all three, empty ones undefined', () => {
+    expect(bookDetailValues({ publisher: ' Penguin\nAudio ', subtitle: ' ', language: 'english' })).toEqual({
+      publisher: 'Penguin Audio',
+      subtitle: undefined,
+      language: 'English',
+    });
   });
 });
