@@ -5,7 +5,7 @@
 
 import { compareTwoStrings } from 'string-similarity';
 import { matchesByInitials } from './author-initials';
-import { hasUnspacedScript, isWordInTitle, normalizeForMatching } from './match-normalize';
+import { foldForMatching, FULLWIDTH_RE, fromFullwidth, hasNonLatinLetter, hasUnspacedScript, isWordInTitle, normalizeForMatching } from './match-normalize';
 
 export interface TorrentResult {
   indexer: string;
@@ -361,13 +361,14 @@ export class RankingAlgorithm {
     if (!requestTitle) return 0;
 
     // Parse authors from RAW string first (preserving commas for splitting)
-    // Then normalize individual authors for matching
+    // Then normalize individual authors for matching. Names under 3 characters are dropped,
+    // except names in a non-Latin script, where 2 characters is a full name (金庸, 한강)
     const parsedAuthors = audiobook.author
       .replace(/\s+/g, ' ')
       .trim()
       .split(/,|&| and | - /i)
       .map(a => a.trim())
-      .filter(a => a.length > 2 && !['translator', 'narrator'].includes(a.toLowerCase()));
+      .filter(a => (a.length > 2 || hasNonLatinLetter(a)) && !['translator', 'narrator'].includes(a.toLowerCase()));
 
     // Normalize parsed authors; one that normalizes to nothing is dropped (it would match every title)
     const normalizedAuthors = parsedAuthors.map(a => normalizeForMatching(a, characterReplacements)).filter(a => a.length > 0);
@@ -388,11 +389,11 @@ export class RankingAlgorithm {
     //   "Title: Series Name" where Audible appends series names after a colon
     // Note: Run on ORIGINAL title to preserve brackets/colons, then normalize the result
     const separateRequiredOptional = (title: string): { required: string; optional: string } => {
-      // Work with original title format for bracket/colon detection
-      const originalTitle = audiobook.title.toLowerCase();
+      // Work with original title format for bracket/colon detection (fullwidth （）［］： fold to ASCII)
+      const originalTitle = audiobook.title.toLowerCase().replace(FULLWIDTH_RE, fromFullwidth);
 
-      // Extract content in parentheses/brackets as optional
-      const optionalPattern = /[(\[{]([^)\]}]+)[)\]}]/g;
+      // Extract content in parentheses/brackets (including CJK 【】) as optional
+      const optionalPattern = /[(\[{【]([^)\]}】]+)[)\]}】]/g;
       const optionalMatches: string[] = [];
       let match;
 
@@ -401,7 +402,7 @@ export class RankingAlgorithm {
       }
 
       // Remove parenthetical/bracketed content to get the non-bracketed portion
-      let requiredRaw = originalTitle.replace(/[(\[{][^)\]}]+[)\]}]/g, ' ').trim();
+      let requiredRaw = originalTitle.replace(/[(\[{【][^)\]}】]+[)\]}】]/g, ' ').trim();
 
       // Treat content after a colon as optional (Audible commonly appends series names)
       // e.g., "The Finest Edge of Twilight: Dungeons & Dragons" → required: title, optional: series
@@ -454,9 +455,8 @@ export class RankingAlgorithm {
     // ========== STAGE 2: TITLE MATCHING (0-35 points) ==========
     let titleScore = 0;
 
-    // Keep original torrent title (lowercased only) for metadata marker detection
-    // Markers like [ ] ( ) : are removed by normalization but needed for suffix validation
-    const torrentTitleOriginal = torrent.title.toLowerCase().replace(/\s+/g, ' ').trim();
+    // Folded torrent title that keeps the markers ([ ] ( ) :) normalization removes, for suffix/prefix checks
+    const torrentTitleOriginal = foldForMatching(torrent.title, characterReplacements);
 
     // Try matching with full title first, then fall back to required title (without parentheses)
     const titlesToTry = [requestTitle];

@@ -25,42 +25,43 @@ const matchScore = (torrentTitle: string, title: string, author: string, require
   algorithm.getScoreBreakdown(torrent('t', torrentTitle), { title, author }, requireAuthor).matchScore;
 
 describe('ranking: titles and authors in non-Latin scripts', () => {
-  // [script, title, author, right release, same author other book, same title other author]
+  // [script, title, author, right release, its match score, same author other book, same title other author]
   it.each([
     ['Cyrillic', 'Мастер и Маргарита', 'Михаил Булгаков',
-      'Михаил Булгаков - Мастер и Маргарита [2015, MP3, 128kbps]',
+      'Михаил Булгаков - Мастер и Маргарита [2015, MP3, 128kbps]', 60,
       'Михаил Булгаков - Собачье сердце [M4B]',
       'Лев Толстой - Мастер и Маргарита [M4B]'],
     ['Greek', 'Ο Καπετάν Μιχάλης', 'Νίκος Καζαντζάκης',
-      'ΝΙΚΟΣ ΚΑΖΑΝΤΖΑΚΗΣ - Ο ΚΑΠΕΤΑΝ ΜΙΧΑΛΗΣ [MP3]',
+      'ΝΙΚΟΣ ΚΑΖΑΝΤΖΑΚΗΣ - Ο ΚΑΠΕΤΑΝ ΜΙΧΑΛΗΣ [MP3]', 60,
       'Νίκος Καζαντζάκης - Ο Τελευταίος Πειρασμός [M4B]',
       'Γιάννης Ρίτσος - Ο Καπετάν Μιχάλης [M4B]'],
     ['Chinese', '球状闪电', '刘慈欣',
-      '刘慈欣 - 球状闪电 [有声书 MP3]',
+      '刘慈欣 - 球状闪电 [有声书 MP3]', 60,
       '刘慈欣 - 三体 [有声书 M4B]',
       '王晋康 - 球状闪电 [有声书 M4B]'],
+    // 「」 are not complete-title markers, so the title scores by similarity
     ['Japanese', 'ノルウェイの森', '村上春樹',
-      '村上春樹「ノルウェイの森」[朗読 MP3]',
+      '村上春樹「ノルウェイの森」[朗読 MP3]', 40.7,
       '村上春樹「海辺のカフカ」[朗読 M4B]',
       '吉本ばなな「ノルウェイの森」[M4B]'],
     ['Korean', '82년생 김지영', '조남주',
-      '조남주 - 82년생 김지영 [오디오북 MP3]',
+      '조남주 - 82년생 김지영 [오디오북 MP3]', 60,
       '조남주 - 사하맨션 [오디오북 M4B]',
       '정유정 - 82년생 김지영 [M4B]'],
     ['Arabic', 'موسم الهجرة إلى الشمال', 'الطيب صالح',
-      'الطيب صالح - موسم الهجرة إلى الشمال [MP3]',
+      'الطيب صالح - موسم الهجرة إلى الشمال [MP3]', 60,
       'الطيب صالح - عرس الزين [M4B]',
       'نجيب محفوظ - موسم الهجرة إلى الشمال [M4B]'],
     ['Hebrew', 'מיכאל שלי', 'עמוס עוז',
-      'עמוס עוז - מיכאל שלי [MP3]',
+      'עמוס עוז - מיכאל שלי [MP3]', 60,
       'עמוס עוז - סיפור על אהבה וחושך [M4B]',
       'דוד גרוסמן - מיכאל שלי [M4B]'],
     ['Thai', 'ข้างหลังภาพ', 'ศรีบูรพา',
-      'ศรีบูรพา - ข้างหลังภาพ [หนังสือเสียง MP3]',
+      'ศรีบูรพา - ข้างหลังภาพ [หนังสือเสียง MP3]', 60,
       'ศรีบูรพา - แลไปข้างหน้า [M4B]',
       'สุนทรภู่ - ข้างหลังภาพ [M4B]'],
-  ])('%s: picks the right release and rejects the others', (_script, title, author, right, otherBook, otherAuthor) => {
-    expect(matchScore(right, title, author)).toBeGreaterThan(0);
+  ])('%s: picks the right release and rejects the others', (_script, title, author, right, score, otherBook, otherAuthor) => {
+    expect(matchScore(right, title, author)).toBeCloseTo(score as number, 1);
     expect(matchScore(otherBook, title, author)).toBe(0);
     expect(matchScore(otherAuthor, title, author)).toBe(0);
 
@@ -73,7 +74,7 @@ describe('ranking: titles and authors in non-Latin scripts', () => {
   });
 
   it('matches a CJK title inside a release name written without spaces', () => {
-    expect(matchScore('刘慈欣三体全集MP3', '三体', '刘慈欣')).toBeGreaterThan(0);
+    expect(matchScore('刘慈欣三体全集MP3', '三体', '刘慈欣')).toBeCloseTo(24, 1);
     expect(matchScore('刘慈欣球状闪电全集MP3', '三体', '刘慈欣')).toBe(0);
   });
 
@@ -96,16 +97,43 @@ describe('ranking: titles and authors in non-Latin scripts', () => {
   });
 
   it('folds fullwidth letters and digits in release names', () => {
-    expect(matchScore('村上春樹 １Ｑ８４ BOOK1 朗読', '1Q84', '村上春樹')).toBeGreaterThan(0);
+    expect(matchScore('村上春樹 １Ｑ８４ BOOK1 朗読', '1Q84', '村上春樹')).toBeCloseTo(30.9, 1);
+  });
+
+  it('treats a fullwidth or 【】 subtitle in the requested title as optional, like an ASCII one', () => {
+    expect(matchScore('刘慈欣 - 三体 [MP3]', '三体（地球往事）', '刘慈欣')).toBe(60);
+    expect(matchScore('刘慈欣 - 三体 [MP3]', '三体【地球往事】', '刘慈欣')).toBe(60);
+    expect(matchScore('刘慈欣 - 球状闪电 [MP3]', '三体（地球往事）', '刘慈欣')).toBe(0);
+    for (const [release, fullwidth, ascii, author] of [
+      ['村上春樹 - ノルウェイの森 [朗読 MP3]', 'ノルウェイの森（上）', 'ノルウェイの森(上)', '村上春樹'],
+      ['東野圭吾 - 白夜行 [朗読]', '白夜行：新装版', '白夜行:新装版', '東野圭吾'],
+    ]) {
+      expect(matchScore(release, fullwidth, author)).toBe(60);
+      expect(matchScore(release, ascii, author)).toBe(60);
+    }
+  });
+
+  it.each([
+    ['金庸', '射雕英雄传', '金庸 - 射雕英雄传 [有声书 MP3]', '古龙 - 射雕英雄传 [有声书 M4B]', '金庸 - 天龙八部 [有声书 M4B]'],
+    ['한강', '채식주의자', '한강 - 채식주의자 [오디오북 MP3]', '정유정 - 채식주의자 [오디오북 M4B]', '한강 - 소년이 온다 [오디오북 M4B]'],
+  ])('keeps the two-character author %s and still rejects other releases', (author, title, right, otherAuthor, otherBook) => {
+    expect(matchScore(right, title, author)).toBe(60);
+    expect(matchScore(otherAuthor, title, author)).toBe(0);
+    expect(matchScore(otherBook, title, author)).toBe(0);
+  });
+
+  it('splits a katakana word ending in the long-vowel mark from a following digit, both ways', () => {
+    expect(matchScore('山田太郎 - ラブストーリー 2', 'ラブストーリー2', '山田太郎')).toBe(60);
+    expect(matchScore('山田太郎 - ラブストーリー2', 'ラブストーリー 2', '山田太郎')).toBe(60);
+    expect(matchScore('山田太郎 - ラブストーリー 3', 'ラブストーリー2', '山田太郎')).toBe(0);
   });
 
   it('matches a bilingual release name with the Latin title glued to the CJK one', () => {
-    const glued = 'J.K. Rowling 哈利波特与魔法石Harry Potter and the Sorcerers Stone';
-    const spaced = 'J.K. Rowling 哈利波特与魔法石 Harry Potter and the Sorcerers Stone';
-    const score = matchScore(glued, 'Harry Potter and the Sorcerers Stone', 'J.K. Rowling');
+    const glued = 'J.K. Rowling 哈利波特Harry Potter [MP3]';
+    const spaced = 'J.K. Rowling 哈利波特 Harry Potter [MP3]';
 
-    expect(score).toBeGreaterThan(50);
-    expect(score).toBe(matchScore(spaced, 'Harry Potter and the Sorcerers Stone', 'J.K. Rowling'));
+    expect(matchScore(glued, 'Harry Potter', 'J.K. Rowling')).toBe(60);
+    expect(matchScore(spaced, 'Harry Potter', 'J.K. Rowling')).toBe(60);
   });
 
   it('still rejects an unrelated release in interactive mode when only the title is checked', () => {
@@ -114,21 +142,22 @@ describe('ranking: titles and authors in non-Latin scripts', () => {
 });
 
 describe('ranking: Latin letters', () => {
-  // Same result on main: accents fold, ASCII spellings match
+  // Same result as before: accents fold, ASCII spellings match
   it.each([
     ['Café de Flore', 'Hélène Grémillon', 'Helene Gremillon - Cafe de Flore [M4B]'],
     ['Cafe de Flore', 'Helene Gremillon', 'Hélène Grémillon - Café de Flore [M4B]'],
     ['Der Schwarm', 'Frank Schätzing', 'Frank Schatzing - Der Schwarm [MP3]'],
     ['The Snowman', 'Jo Nesbø', 'Jo Nesbo - The Snowman [M4B]'],
   ])('still matches "%s" by %s in "%s"', (title, author, releaseName) => {
-    expect(matchScore(releaseName, title, author)).toBeGreaterThan(50);
+    expect(matchScore(releaseName, title, author)).toBe(60);
     expect(matchScore('Someone Else - Another Book [M4B]', title, author)).toBe(0);
   });
 
   it('folds letters with no accent mark to their usual spelling (ø, ß)', () => {
-    expect(matchScore('Jo Nesbo - Snomannen [MP3]', 'Snømannen', 'Jo Nesbø')).toBeGreaterThan(50);
-    expect(matchScore('Peter Hoeg - Froken Smillas fornemmelse for sne [MP3]', 'Frøken Smillas fornemmelse for sne', 'Peter Høeg')).toBeGreaterThan(0);
-    expect(matchScore('Strasse der Toten - Max Muster [MP3]', 'Straße der Toten', 'Max Muster')).toBeGreaterThan(50);
+    expect(matchScore('Jo Nesbø - Snømannen [MP3]', 'Snømannen', 'Jo Nesbø')).toBe(60);
+    expect(matchScore('Jo Nesbo - Snomannen [MP3]', 'Snømannen', 'Jo Nesbø')).toBe(60);
+    expect(matchScore('Peter Hoeg - Froken Smillas fornemmelse for sne [MP3]', 'Frøken Smillas fornemmelse for sne', 'Peter Høeg')).toBe(60);
+    expect(matchScore('Strasse der Toten - Max Muster [MP3]', 'Straße der Toten', 'Max Muster')).toBe(60);
   });
 
   // Accepted change: ø folds to o like ö does, so the "oe" spelling no longer matches (Björn/Bjoern never did)
@@ -141,7 +170,7 @@ describe('ranking: Latin letters', () => {
   // Accepted change: a non-ASCII letter or digit inside a Latin title is part of the title
   it('requires a non-ASCII letter in a Latin title (π) to be in the release name', () => {
     expect(matchScore('David Blatner - The Joy of Pi [MP3]', 'The Joy of π', 'David Blatner')).toBe(0);
-    expect(matchScore('David Blatner - The Joy of π [MP3]', 'The Joy of π', 'David Blatner')).toBeGreaterThan(0);
+    expect(matchScore('David Blatner - The Joy of π [MP3]', 'The Joy of π', 'David Blatner')).toBeCloseTo(38.2, 1);
   });
 
   it('ignores emoji presentation selectors in a Latin title', () => {
@@ -161,6 +190,11 @@ describe('ranking: titles and authors that normalize to nothing fail closed', ()
   ])('%s matches nothing', (_case, title, author) => {
     expect(matchScore(`Author Name - Great Book ${title} [M4B]`, title, author)).toBe(0);
     expect(matchScore('Totally Different - Someone Else', title, author)).toBe(0);
+  });
+
+  it('gives an emoji-only author no author points in interactive mode', () => {
+    expect(matchScore('Author Name - Great Book [M4B]', 'Great Book', '🔥🔥🔥', false)).toBe(45);
+    expect(matchScore('Author Name - Great Book [M4B]', 'Great Book', 'Author Name', false)).toBe(60);
   });
 
   it('reads a keycap title as its digit, as before', () => {

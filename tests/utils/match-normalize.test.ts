@@ -4,7 +4,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { hasUnspacedScript, isWordInTitle, normalizeForMatching } from '@/lib/utils/match-normalize';
+import {
+  foldForMatching,
+  hasNonLatinLetter,
+  hasUnspacedScript,
+  isWordInTitle,
+  normalizeForMatching,
+} from '@/lib/utils/match-normalize';
 
 // The normalizer as it was before non-Latin support, frozen as the parity oracle for ASCII and accented Latin
 const legacyNormalize = (text: string) => text
@@ -65,6 +71,8 @@ describe('normalizeForMatching', () => {
     ['三体2黑暗森林', '三体 2 黑暗森林'],
     ['村上春樹1Q84', '村上春樹 1q84'],
     ['82년생', '82년생'],
+    ['ラブストーリー2', 'ラブストーリー 2'],
+    ['データ2', 'データ 2'],
   ])('splits a CJK or Thai letter from an adjacent ASCII letter or digit: %s', (text, expected) => {
     expect(normalizeForMatching(text)).toBe(expected);
   });
@@ -107,4 +115,37 @@ describe('isWordInTitle', () => {
     expect(hasUnspacedScript('김지영')).toBe(false);
     expect(hasUnspacedScript('война')).toBe(false);
   });
+
+  it('counts the katakana long-vowel mark as part of an unspaced script', () => {
+    expect(hasUnspacedScript('ー')).toBe(true);
+  });
+});
+
+describe('foldForMatching', () => {
+  it.each([
+    ['Jo Nesbø - Snømannen [MP3]', 'jo nesbo - snomannen [mp3]'],
+    ['ΝΙΚΟΣ - Ο ΚΑΠΕΤΑΝ ΜΙΧΑΛΗΣ [MP3]', 'νικοσ - ο καπεταν μιχαλησ [mp3]'],
+    ['刘慈欣 － 三体２ ［MP3］', '刘慈欣 - 三体 2 [mp3]'],
+  ])('folds like the normalizer but keeps punctuation: %s', (text, expected) => {
+    expect(foldForMatching(text)).toBe(expected);
+  });
+
+  it('only lowercases ASCII text and collapses its whitespace', () => {
+    const text = '  The  Way of Kings (Book 1) - Brandon Sanderson [MP3]: Unabridged, 2010 ';
+    expect(foldForMatching(text)).toBe(text.toLowerCase().replace(/\s+/g, ' ').trim());
+  });
+
+  it('agrees with the normalizer on every word', () => {
+    const text = 'Frøken Smilla – Kapitel 1 «Αθήνα» ノルウェイの森１Ｑ８４';
+    expect(normalizeForMatching(foldForMatching(text))).toBe(normalizeForMatching(text));
+  });
+});
+
+describe('hasNonLatinLetter', () => {
+  it.each([['金庸', true], ['한강', true], ['Лев', true], ['Al', false], ['Søren', false], ['---', false]])(
+    '%s -> %s',
+    (text, expected) => {
+      expect(hasNonLatinLetter(text)).toBe(expected);
+    },
+  );
 });
