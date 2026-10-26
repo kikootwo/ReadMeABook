@@ -23,7 +23,7 @@ interface WatchModeChoiceProps {
 }
 
 export function formatWatchDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 
 export function WatchModeChoice({ kind, name, value, onChange, current, currentSince }: WatchModeChoiceProps) {
@@ -57,8 +57,10 @@ export function WatchModeChoice({ kind, name, value, onChange, current, currentS
           return (
             <label
               key={option.title}
-              className={`flex items-start p-3 border-2 rounded-lg cursor-pointer transition-all hover:bg-gray-50 dark:hover:bg-gray-700/50 ${
-                checked ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-600'
+              className={`flex items-start p-3 border-2 rounded-lg cursor-pointer transition-all ${
+                checked
+                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                  : 'border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/50'
               }`}
             >
               <input
@@ -81,7 +83,7 @@ export function WatchModeChoice({ kind, name, value, onChange, current, currentS
       <div aria-live="polite">
         {current === true && !value && (
           <p className="text-sm rounded-lg px-3 py-2 bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-700/50">
-            The next daily check requests every book {scope} that isn&apos;t in your library. That can be a lot of requests.
+            The next watched-list check requests every book {scope} that isn&apos;t in your library. That can be a lot of requests.
           </p>
         )}
       </div>

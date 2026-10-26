@@ -58,7 +58,7 @@ export function WatchModeControl({ kind, id, name, newReleasesOnly, newReleasesS
           type="button"
           onClick={open}
           aria-label={`Change what is requested for ${name}`}
-          className="-ml-2 px-2 py-1 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 transition-colors"
+          className="px-2 py-0.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 rounded-md border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
         >
           Change
         </button>
@@ -78,7 +78,7 @@ export function WatchModeControl({ kind, id, name, newReleasesOnly, newReleasesS
               current={newReleasesOnly}
               currentSince={newReleasesSince}
             />
-            {error && <p className="text-xs text-red-500">{error}</p>}
+            {error && <p role="alert" className="text-xs text-red-500">{error}</p>}
           </div>
         }
         confirmText="Save"

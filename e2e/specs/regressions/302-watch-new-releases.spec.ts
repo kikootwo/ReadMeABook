@@ -129,7 +129,7 @@ test('302: profile cards show the mode; Change back to the entire catalog warns 
   const save = page.getByRole('button', { name: 'Save' });
   await expect(save).toBeDisabled();
   await page.getByRole('radio', { name: /Entire catalog/ }).check();
-  const warning = page.getByText(/The next daily check requests every book by "Quillon Varrowmere" that isn't in your library/);
+  const warning = page.getByText(/The next watched-list check requests every book by "Quillon Varrowmere" that isn't in your library/);
   await expect(warning).toBeVisible();
   await expect(save).toBeEnabled();
   await shot(page, '2-change-dialog-backlog-warning');
@@ -172,7 +172,7 @@ for (const view of [
 
       await authorCard(page).getByRole('button', { name: /Change what is requested/ }).click();
       await page.getByRole('radio', { name: /Entire catalog/ }).check();
-      await expect(page.getByText(/The next daily check requests every book/)).toBeVisible();
+      await expect(page.getByText(/The next watched-list check requests every book/)).toBeVisible();
       await shot(page, `3-${view.name}-change-dialog`);
       await page.getByRole('button', { name: 'Cancel' }).click();
     } finally {
