@@ -485,6 +485,11 @@ describe('Request action routes', () => {
     expect(payload.message).toMatch(/approval/i);
     expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
     expect(jobQueueMock.addNotificationJob).toHaveBeenCalled();
+    // #409: a user's release pick restarts the automatic re-request backoff, approval or not
+    expect(prismaMock.request.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'req-6' },
+      data: expect.objectContaining({ status: 'awaiting_approval', autoRerequestCount: 0 }),
+    }));
   });
 
   it('auto-approves when global setting is missing and user has no preference', async () => {

@@ -274,6 +274,7 @@ export async function POST(request: NextRequest) {
                 progress: 100,
                 errorMessage: null,
                 importAttempts: 0,
+                autoRerequestCount: 0, // a manual import restarts the automatic re-request backoff
                 updatedAt: new Date(),
               },
             });

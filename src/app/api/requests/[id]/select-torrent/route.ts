@@ -128,6 +128,7 @@ export async function POST(
           data: {
             status: 'awaiting_approval',
             selectedTorrent: torrent as any, // Store the selected torrent
+            autoRerequestCount: 0, // a user retry restarts the automatic re-request backoff
             updatedAt: new Date(),
           },
           include: {

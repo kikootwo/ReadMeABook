@@ -80,4 +80,26 @@ describe('Admin bulk-import execute route: request size limit (32 MB)', () => {
     expect(await response.json()).toEqual({ error: 'PayloadTooLarge', message: 'Request body is larger than 32 MB' });
     expect(prismaMock.configuration.findUnique).not.toHaveBeenCalled();
   });
+
+  it('recycles a failed request in place and resets its automatic re-request count (#409)', async () => {
+    prismaMock.configuration.findUnique.mockImplementation(async ({ where }: { where: { key: string } }) =>
+      (where.key === 'download_dir' ? { key: 'download_dir', value: '/downloads' } : null));
+    fsMock.stat.mockResolvedValue({ isDirectory: () => true });
+    prismaMock.audiobook.findFirst.mockResolvedValue({ id: 'ab-1', audibleAsin: 'B000000409' });
+    prismaMock.request.findFirst.mockResolvedValue({ id: 'req-old', status: 'failed', autoRerequestCount: 4 });
+    prismaMock.request.update.mockResolvedValue({ id: 'req-old' });
+    const { POST } = await import('@/app/api/admin/bulk-import/execute/route');
+
+    const response = await POST(post(JSON.stringify({
+      imports: [{ folderPath: '/downloads/Author/Book', asin: 'B000000409', audioFiles: ['Book.m4b'] }],
+    })));
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).results[0]).toMatchObject({ success: true, requestId: 'req-old' });
+    expect(prismaMock.request.create).not.toHaveBeenCalled();
+    expect(prismaMock.request.update).toHaveBeenCalledWith({
+      where: { id: 'req-old' },
+      data: expect.objectContaining({ status: 'processing', autoRerequestCount: 0 }),
+    });
+  });
 });

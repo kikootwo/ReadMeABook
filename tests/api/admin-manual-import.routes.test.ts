@@ -205,6 +205,30 @@ describe('Admin manual-import route', () => {
     expect(prismaMock.audibleCache.findUnique).not.toHaveBeenCalled();
   });
 
+  it('recycles a failed request in place and resets its automatic re-request count (#409)', async () => {
+    prismaMock.audiobook.findFirst.mockResolvedValueOnce({ id: 'ab-existing', audibleAsin: 'B00TEST0001' });
+    prismaMock.audiobook.findUnique.mockResolvedValueOnce({
+      id: 'ab-existing', audibleAsin: 'B00TEST0001', title: 'Existing Title', author: 'Existing Author',
+      status: 'pending', series: 'Series', year: 2020,
+    });
+    prismaMock.request.findFirst.mockResolvedValueOnce({ id: 'req-old', status: 'failed', autoRerequestCount: 4 });
+    prismaMock.request.update.mockResolvedValueOnce({ id: 'req-old' });
+
+    const { POST } = await import('@/app/api/admin/manual-import/route');
+    const request = {
+      json: vi.fn().mockResolvedValue(requestBody),
+      nextUrl: new URL('http://localhost/api/admin/manual-import'),
+    };
+    const response = await POST(request as never);
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.request.create).not.toHaveBeenCalled();
+    expect(prismaMock.request.update).toHaveBeenCalledWith({
+      where: { id: 'req-old' },
+      data: expect.objectContaining({ status: 'processing', autoRerequestCount: 0 }),
+    });
+  });
+
   it('uses audibleCache when ASIN is not in audiobook table but is cached', async () => {
     prismaMock.audiobook.findFirst.mockResolvedValueOnce(null);
     prismaMock.audibleCache.findUnique.mockResolvedValueOnce({
