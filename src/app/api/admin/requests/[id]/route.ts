@@ -64,6 +64,7 @@ export async function DELETE(
             torrentsKeptSeeding: result.torrentsKeptSeeding,
             torrentsKeptUnlimited: result.torrentsKeptUnlimited,
             torrentsKeptShared: result.torrentsKeptShared,
+            torrentsKeptNotOwned: result.torrentsKeptNotOwned,
             ...(result.filesKeptReason && { filesKeptReason: result.filesKeptReason }),
           },
         });

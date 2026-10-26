@@ -7,7 +7,6 @@
 
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
-import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 import {
   deleteBackendItem,
   deleteLibraryRecords,
@@ -15,9 +14,7 @@ import {
   removeAudiobookFolder,
   removeEbookFiles,
 } from './request-delete-files';
-import { evaluateSeeding } from '../utils/seeding-policy';
-import { otherActiveRequestsUsingTorrent } from '../utils/shared-torrent';
-import { describeIgnoredIndexerId, findIndexerConfig, parseSavedIndexers } from '../utils/indexer-config';
+import { cleanUpRequestDownload, emptyDownloadCleanupCounts } from './request-delete-download';
 
 const logger = RMABLogger.create('RequestDelete');
 
@@ -32,6 +29,8 @@ export interface DeleteRequestResult {
   filesKeptReason?: string;
   /** Torrents left in the client because another active request still uses them. */
   torrentsKeptShared: number;
+  /** Torrents left in the client because RMAB did not add them (it never removes those). */
+  torrentsKeptNotOwned: number;
   error?: string;
 }
 
@@ -43,6 +42,8 @@ export interface DeleteRequestResult {
  * 2. For each download:
  *    - Seeding rule (evaluateSeeding, same as the seeding cleanup job): every limit
  *      that is set (seeding time, ratio) must be met; 0 turns a limit off
+ *    - A torrent RMAB did not add (taken over, or a legacy row whose client added time says
+ *      so or can't tell) is left exactly as it is: never removed, never changed
  *    - If both limits are 0 (or no indexer config): keep seeding forever, no monitoring
  *    - If incomplete download, or every set limit met: delete torrent + files,
  *      unless another active request still uses the torrent
@@ -111,131 +112,17 @@ export async function deleteRequest(
         torrentsKeptSeeding: 0,
         torrentsKeptUnlimited: 0,
         torrentsKeptShared: 0,
+        torrentsKeptNotOwned: 0,
         error: 'NotFound',
       };
     }
 
-    let torrentsRemoved = 0;
-    let torrentsKeptSeeding = 0;
-    let torrentsKeptUnlimited = 0;
-    let torrentsKeptShared = 0;
-
     // 2. Handle downloads & seeding (skip for ebooks - they use direct HTTP downloads)
     const downloadHistory = request.downloadHistory[0];
     const skipTorrentHandling = isEbook; // Ebooks use direct downloads, not torrents/NZBs
-
-    if (!skipTorrentHandling && downloadHistory && downloadHistory.indexerName) {
-      try {
-        // Get indexer seeding configuration
-        const { getConfigService } = await import('./config.service');
-        const configService = getConfigService();
-        const indexersConfigStr = await configService.get('prowlarr_indexers');
-
-        // Handle download cleanup via unified interface
-        const clientId = downloadHistory.downloadClientId || downloadHistory.torrentHash || downloadHistory.nzbId;
-        const clientType = downloadHistory.downloadClient || 'qbittorrent';
-
-        let seedingConfig: any = null;
-        if (indexersConfigStr) {
-          const indexersConfig = parseSavedIndexers(indexersConfigStr);
-          if (!indexersConfig) {
-            // Unreadable settings: leave the download alone (handled by the catch below)
-            throw new Error('Saved indexer configuration is not a list; the download was left in the client');
-          }
-          // By Prowlarr id (survives renames) unless it now means another indexer; else by name
-          const ref = {
-            indexerId: downloadHistory.indexerId,
-            indexerName: downloadHistory.indexerName,
-            protocol: CLIENT_PROTOCOL_MAP[clientType as DownloadClientType] || 'torrent',
-          };
-          const match = findIndexerConfig<any>(indexersConfig as any[], ref);
-          seedingConfig = match.config ?? null;
-          const ignored = describeIgnoredIndexerId(ref, match);
-          if (ignored) logger.warn(ignored);
-          logger.debug(`Indexer config for ${downloadHistory.indexerName}: ${match.matchedBy ? `matched by ${match.matchedBy}` : 'not configured'}`);
-        }
-
-        if (clientId && clientType !== 'direct') {
-          const { getDownloadClientManager } = await import('./download-client-manager.service');
-          const manager = getDownloadClientManager(configService);
-          const protocol = CLIENT_PROTOCOL_MAP[clientType as DownloadClientType] || 'torrent';
-          const client = await manager.getClientServiceForProtocol(protocol as 'torrent' | 'usenet');
-
-          if (client) {
-            // Get download info to check seeding status
-            let downloadInfo;
-            try {
-              downloadInfo = await client.getDownload(clientId);
-            } catch (error) {
-              logger.info(`Download ${clientId} not found in ${clientType}, skipping`);
-            }
-
-            if (downloadInfo) {
-              // Same rule as the scheduled seeding cleanup: time AND ratio; no config or both 0 = unlimited
-              const seeding = evaluateSeeding(seedingConfig, downloadInfo);
-              // History can lag the client: the monitor stops polling a cancelled request,
-              // so a torrent that finished after the cancel still reads 'downloading' there.
-              // The live client state can only mark it complete (keep more), never less.
-              const finishedInClient = downloadInfo.status === 'completed'
-                || downloadInfo.status === 'seeding'
-                || downloadInfo.progress >= 1;
-              const isCompleted = downloadHistory.downloadStatus === 'completed' || finishedInClient;
-
-              if (client.protocol === 'usenet') {
-                // Usenet - no seeding concept, delete immediately
-                try {
-                  await client.deleteDownload(clientId, true);
-                  logger.info(`Deleted download ${clientId} from ${client.clientType}`);
-                  torrentsRemoved++;
-                } catch (error) {
-                  logger.info(`Download ${clientId} not found in ${client.clientType}, skipping`);
-                }
-              } else if (seeding.unlimited) {
-                // Unlimited seeding - keep in client, stop monitoring
-                logger.info(
-                  `Keeping download ${downloadInfo.name} for unlimited seeding (indexer: ${downloadHistory.indexerName})`
-                );
-                torrentsKeptUnlimited++;
-              } else if (!isCompleted || seeding.met) {
-                // Incomplete, or done seeding: remove it, unless another active request still uses it
-                const others = await otherActiveRequestsUsingTorrent(requestId, downloadHistory.torrentHash);
-                if (others.length > 0) {
-                  logger.info(
-                    `Keeping download ${downloadInfo.name}: ${others.length} other active request(s) still use it (IDs: ${others.map((r) => r.id).join(', ')})`
-                  );
-                  torrentsKeptShared++;
-                } else {
-                  logger.info(
-                    isCompleted
-                      ? `Deleting download ${downloadInfo.name} (seeding complete: ${seeding.progress})`
-                      : `Deleting incomplete download: ${downloadInfo.name}`
-                  );
-                  await client.deleteDownload(clientId, true);
-                  torrentsRemoved++;
-                }
-              } else {
-                // The scheduled seeding cleanup removes it once the requirement is met.
-                // It only looks at 'completed' history, so record a finish the monitor never saw.
-                if (downloadHistory.downloadStatus !== 'completed') {
-                  await prisma.downloadHistory.update({
-                    where: { id: downloadHistory.id },
-                    data: { downloadStatus: 'completed', completedAt: downloadHistory.completedAt ?? new Date() },
-                  });
-                }
-                logger.info(`Keeping download ${downloadInfo.name} to finish seeding: ${seeding.progress}`);
-                torrentsKeptSeeding++;
-              }
-            }
-          }
-        }
-      } catch (error) {
-        logger.error(
-          `Error handling download for request ${requestId}`,
-          { error: error instanceof Error ? error.message : String(error) }
-        );
-        // Continue with deletion even if download handling fails
-      }
-    }
+    const downloadCounts = !skipTorrentHandling && downloadHistory && downloadHistory.indexerName
+      ? await cleanUpRequestDownload(requestId, downloadHistory)
+      : emptyDownloadCleanupCounts();
 
 
     // 3. Library files, behind the library delete guard
@@ -357,10 +244,7 @@ export async function deleteRequest(
           : 'Request deleted successfully',
       filesDeleted,
       ...(filesKeptReason && { filesKeptReason }),
-      torrentsRemoved,
-      torrentsKeptSeeding,
-      torrentsKeptUnlimited,
-      torrentsKeptShared,
+      ...downloadCounts,
     };
   } catch (error) {
     logger.error(
@@ -376,6 +260,7 @@ export async function deleteRequest(
       torrentsKeptSeeding: 0,
       torrentsKeptUnlimited: 0,
       torrentsKeptShared: 0,
+      torrentsKeptNotOwned: 0,
       error: error instanceof Error ? error.message : 'Unknown error',
     };
   }

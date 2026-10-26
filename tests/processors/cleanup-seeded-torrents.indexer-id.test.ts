@@ -48,6 +48,7 @@ function setup(
             torrentHash: 'hash-1',
             downloadClientId: 'hash-1',
             downloadClient: 'qbittorrent',
+            addedByRmab: true,
             ...history,
           },
         ],

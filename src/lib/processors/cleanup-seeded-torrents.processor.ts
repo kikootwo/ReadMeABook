@@ -12,6 +12,7 @@ import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-
 import { evaluateSeeding, isUnlimitedSeeding } from '../utils/seeding-policy';
 import { otherActiveRequestsUsingTorrent } from '../utils/shared-torrent';
 import { createIndexerConfigLookup, describeIgnoredIndexerId, parseSavedIndexers } from '../utils/indexer-config';
+import { knownNotOwned, resolveOwnership } from '../utils/torrent-ownership';
 
 export interface CleanupSeededTorrentsPayload {
   jobId?: string;
@@ -96,6 +97,7 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
     let cleaned = 0;
     let skipped = 0;
     let noConfig = 0;
+    let notOwned = 0;
     const deletedHashes = new Set<string>(); // Track torrents already deleted this run
 
     for (const request of completedRequests) {
@@ -127,6 +129,19 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
         const protocol = CLIENT_PROTOCOL_MAP[clientType as DownloadClientType];
         if (!protocol) {
           logger.warn(`Unknown download client type: ${clientType}, skipping`);
+          continue;
+        }
+
+        // A torrent RMAB did not add is never removed: stop tracking it, no client call
+        const known = knownNotOwned(downloadHistory);
+        if (known && !known.owned) {
+          if (request.deletedAt) {
+            await prisma.request.delete({ where: { id: request.id } });
+            logger.info(`Hard-deleted orphaned request ${request.id}; its torrent ${clientId} stays in ${clientType}: ${known.detail}`);
+          } else {
+            logger.debug(`Leaving ${clientId} in ${clientType}: ${known.detail}`);
+          }
+          notOwned++;
           continue;
         }
 
@@ -176,6 +191,13 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
           continue;
         }
 
+        if (client.clientType !== clientType) {
+          // Another client is configured now: don't ask it about (or remove) this id
+          logger.debug(`Download ${clientId} was recorded for ${clientType}, but ${client.clientType} is configured: skipped`);
+          skipped++;
+          continue;
+        }
+
         let downloadInfo;
         try {
           downloadInfo = await client.getDownload(clientId);
@@ -186,6 +208,22 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
 
         if (!downloadInfo) {
           // Download not found in client (already removed)
+          continue;
+        }
+
+        // Only a torrent RMAB added is ever removed (legacy rows: from the client's added time)
+        const ownership = resolveOwnership(downloadHistory, downloadInfo.addedAt);
+        if (!ownership.owned) {
+          logger.info(`Leaving ${downloadInfo.name} in ${clientType}: ${ownership.detail}`);
+          if (ownership.recordNotOwned) {
+            if (request.deletedAt) {
+              await prisma.request.delete({ where: { id: request.id } });
+              logger.info(`Hard-deleted orphaned request ${request.id} (kept a torrent RMAB did not add)`);
+            } else {
+              await prisma.downloadHistory.update({ where: { id: downloadHistory.id }, data: { addedByRmab: false } });
+            }
+          }
+          notOwned++;
           continue;
         }
 
@@ -240,7 +278,7 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
         + '(Prowlarr ids are reused after a rebuild); their settings were looked up by name instead (details at debug level)'
       );
     }
-    logger.info(`Cleanup complete: ${cleaned} downloads cleaned, ${skipped} still seeding, ${noConfig} unlimited`);
+    logger.info(`Cleanup complete: ${cleaned} downloads cleaned, ${skipped} still seeding, ${noConfig} unlimited, ${notOwned} not added by RMAB`);
 
     return {
       success: true,
@@ -249,6 +287,7 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
       cleaned,
       skipped,
       unlimited: noConfig,
+      notOwned,
     };
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);

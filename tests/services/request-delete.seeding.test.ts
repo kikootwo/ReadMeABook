@@ -61,7 +61,7 @@ async function deleteWith({
       absItemId: null,
       filePath: path.join('/media', 'Author', 'Book'),
     },
-    downloadHistory: [{ id: 'dh-1', torrentHash: 'hash-1', indexerName, indexerId, downloadStatus, completedAt: null }],
+    downloadHistory: [{ id: 'dh-1', torrentHash: 'hash-1', indexerName, indexerId, downloadStatus, completedAt: null, addedByRmab: true }],
   });
   configServiceMock.get.mockImplementation(async (key: string) => {
     if (key === 'prowlarr_indexers') {

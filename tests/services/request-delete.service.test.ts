@@ -85,6 +85,7 @@ describe('deleteRequest', () => {
       downloadHistory: [
         {
           torrentHash: 'hash-1',
+          addedByRmab: true,
           indexerName: 'IndexerA',
           downloadStatus: 'completed',
         },
@@ -166,6 +167,7 @@ describe('deleteRequest', () => {
       downloadHistory: [
         {
           nzbId: 'nzb-1',
+          downloadClient: 'sabnzbd',
           indexerName: 'IndexerB',
           downloadStatus: 'completed',
         },
@@ -232,6 +234,7 @@ describe('deleteRequest', () => {
       downloadHistory: [
         {
           torrentHash: 'hash-3',
+          addedByRmab: true,
           indexerName: 'IndexerC',
           downloadStatus: 'completed',
         },
@@ -309,6 +312,7 @@ describe('deleteRequest', () => {
       downloadHistory: [
         {
           torrentHash: 'hash-4',
+          addedByRmab: true,
           indexerName: 'IndexerD',
           downloadStatus: 'completed',
         },
@@ -368,6 +372,7 @@ describe('deleteRequest', () => {
       downloadHistory: [
         {
           nzbId: 'nzb-5',
+          downloadClient: 'sabnzbd',
           indexerName: 'IndexerE',
           downloadStatus: 'completed',
         },

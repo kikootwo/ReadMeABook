@@ -29,6 +29,7 @@ import { getAudibleService } from '../integrations/audible.service';
 import { addAutoBlock } from '../services/blocklist.service';
 import { updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { createAudibleDetailsLoader, readMetadataTaggingEnabled, resolveTagDetails } from './organize-tag-details';
+import { applyPostImportCategory } from './post-import-category';
 
 /**
  * Process organize files job
@@ -1121,59 +1122,6 @@ async function createEbookRequestIfEnabled(
   } catch (error) {
     // Don't fail the main audiobook organization if ebook request creation fails
     logger.error(`Failed to create ebook request: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
-}
-
-// =========================================================================
-// POST-IMPORT CATEGORY
-// =========================================================================
-
-/**
- * Apply post-import category to the download client after successful import.
- * Only applies to torrent clients (qBittorrent/Transmission) when configured.
- * Non-fatal: logs a warning on failure but does not fail the job.
- */
-async function applyPostImportCategory(
-  requestId: string,
-  logger: RMABLogger
-): Promise<void> {
-  try {
-    // Get download history to find client type and download ID
-    const downloadHistory = await prisma.downloadHistory.findFirst({
-      where: { requestId },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (!downloadHistory?.downloadClientId || !downloadHistory?.downloadClient) {
-      return;
-    }
-
-    const clientType = downloadHistory.downloadClient as DownloadClientType;
-
-    // Only applies to torrent clients
-    const protocol = CLIENT_PROTOCOL_MAP[clientType];
-    if (protocol !== 'torrent') {
-      return;
-    }
-
-    // Get client config and check if postImportCategory is set
-    const configService = getConfigService();
-    const manager = getDownloadClientManager(configService);
-    const clients = await manager.getAllClients();
-    const clientConfig = clients.find(c => c.enabled && c.type === clientType);
-
-    if (!clientConfig?.postImportCategory) {
-      return;
-    }
-
-    logger.info(`Applying post-import category "${clientConfig.postImportCategory}" to download ${downloadHistory.downloadClientId}`);
-
-    const service = await manager.createClientFromConfig(clientConfig);
-    await service.setCategory(downloadHistory.downloadClientId, clientConfig.postImportCategory);
-
-    logger.info(`Post-import category applied successfully`);
-  } catch (error) {
-    logger.warn(`Failed to apply post-import category: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
