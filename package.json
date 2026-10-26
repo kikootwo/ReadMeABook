@@ -44,7 +44,7 @@
     "string-similarity": "^4.0.4",
     "swr": "^2.5.1",
     "xml2js": "^0.6.2",
-    "zod": "^3.23.8"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
