@@ -94,8 +94,9 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
 
       let downloadClientId: string;
       let alreadyInClient: boolean;
+      let infoHash: string | undefined;
       try {
-        ({ id: downloadClientId, alreadyInClient } = await client.addDownload(
+        ({ id: downloadClientId, alreadyInClient, infoHash } = await client.addDownload(
           // Prowlarr links go to the configured base (scheme, port, credentials); others as-is
           toConfiguredProwlarrUrl(candidate.downloadUrl, prowlarr.base, { withCredentials: true }) ?? candidate.downloadUrl,
           { category, priority: 'normal', sourceAuth }
@@ -166,7 +167,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
           downloadClientId,
           torrentName: candidate.title,
           // Set protocol-specific ID fields for backward compatibility
-          torrentHash: client.protocol === 'torrent' ? (candidate.infoHash || downloadClientId) : undefined,
+          torrentHash: client.protocol === 'torrent' ? (candidate.infoHash || infoHash || downloadClientId) : undefined,
           nzbId: client.protocol === 'usenet' ? downloadClientId : undefined,
           torrentSizeBytes: candidate.size,
           torrentUrl: indexerPageUrl,

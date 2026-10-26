@@ -108,7 +108,7 @@ describe('qBittorrent add responses over real HTTP', () => {
       ['a 5.2 receipt with an upper-case hash', { ...receipt, added_torrent_ids: [hash.toUpperCase()] }],
     ])('accepts %s and returns the submitted hash', async (_label, body) => {
       addBody = body;
-      await expect(add()).resolves.toEqual({ id: hash, alreadyInClient: false });
+      await expect(add()).resolves.toEqual({ id: hash, alreadyInClient: false, infoHash: hash });
       expect(uploads).toHaveLength(1);
       if (kind === 'magnet') {
         expect(uploads[0].contentType).toContain('application/x-www-form-urlencoded');
@@ -164,7 +164,7 @@ describe('qBittorrent add responses over real HTTP', () => {
 
     it('reports an existing download as already in the client without submitting it again', async () => {
       alreadyAdded = true;
-      await expect(add()).resolves.toEqual({ id: hash, alreadyInClient: true });
+      await expect(add()).resolves.toEqual({ id: hash, alreadyInClient: true, infoHash: hash });
       expect(uploads).toHaveLength(0);
     });
 
@@ -176,7 +176,7 @@ describe('qBittorrent add responses over real HTTP', () => {
       addStatus = status;
       addBody = body;
       presentAfterAdd = true;
-      await expect(add()).resolves.toEqual({ id: hash, alreadyInClient: true });
+      await expect(add()).resolves.toEqual({ id: hash, alreadyInClient: true, infoHash: hash });
       expect(uploads).toHaveLength(1);
     });
   });
