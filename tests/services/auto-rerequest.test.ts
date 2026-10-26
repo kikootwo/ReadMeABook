@@ -57,7 +57,9 @@ describe('decideAutoReRequest', () => {
 
     const due = await decideAutoReRequest(request, 'Book', new Date(FAILED.getTime() + 7 * DAY));
     expect(due).toEqual({ skip: null, nextCount: 3 });
-    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('retry 3; if it fails again with no new block, the next retry waits 14 days'));
+    expect(log.info).toHaveBeenCalledWith(
+      `Automatic retry 3 of ${status} request req-old ("Book") is due; if it fails again with no new block, the next retry waits 14 days`
+    );
   });
 
   it('waits one day before the first automatic retry', async () => {

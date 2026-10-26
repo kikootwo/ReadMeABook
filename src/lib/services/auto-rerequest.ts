@@ -95,7 +95,7 @@ export async function decideAutoReRequest(
   }
 
   logger.info(
-    `Re-requesting ${existing.status} request ${existing.id} ("${title}") automatically: retry ${retries + 1}; ` +
+    `Automatic retry ${retries + 1} of ${existing.status} request ${existing.id} ("${title}") is due; ` +
     `if it fails again with no new block, the next retry waits ${autoReRequestWaitDays(retries + 1)} days`
   );
   return { skip: null, nextCount: retries + 1 };
