@@ -325,7 +325,10 @@ model DownloadHistory {
   downloadClient   String?   @map("download_client") // qbittorrent, sabnzbd, direct (HTTP download for ebooks)
   downloadClientId String?   @map("download_client_id")
   downloadStatus   String?   @map("download_status")
-  // Status values: queued, downloading, completed, failed, stalled
+  // Status values: queued, downloading, completed, failed, stalled, removed (gone from the client)
+  // true = RMAB's add created the torrent; false = it was already in the client (never removed
+  // or changed by RMAB); null = recorded before this field existed (resolved from the client's added time)
+  addedByRmab      Boolean?  @map("added_by_rmab")
   downloadError    String?   @map("download_error") @db.Text
   downloadPath     String?   @map("download_path") @db.Text
   startedAt        DateTime? @map("started_at")

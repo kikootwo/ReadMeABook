@@ -45,7 +45,7 @@ let submitted: string[] = [];
 interface ClientCase {
   name: string;
   protocol: 'torrent' | 'usenet';
-  create: () => { addDownload: (url: string, options?: any) => Promise<string> };
+  create: () => { addDownload: (url: string, options?: any) => Promise<{ id: string; alreadyInClient: boolean }> };
 }
 
 const cases: ClientCase[] = [
@@ -188,7 +188,7 @@ describe('Prowlarr key scoping in download clients', () => {
         servers.on('other', '/hop1', redirectTo(hop === 2 ? TEST_MAGNET : '/hop2'));
         servers.on('other', '/hop2', redirectTo(TEST_MAGNET));
 
-        await expect(create().addDownload(startUrl(), options())).resolves.toBe(TEST_TORRENT_HASH);
+        await expect(create().addDownload(startUrl(), options())).resolves.toEqual({ id: TEST_TORRENT_HASH, alreadyInClient: false });
 
         expect(submitted).toEqual([TEST_MAGNET]);
         expect(servers.keyed('other')).toHaveLength(0);

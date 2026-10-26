@@ -105,7 +105,7 @@ describe('processDownloadTorrent', () => {
     const qbtClientMock = {
       clientType: 'qbittorrent',
       protocol: 'torrent',
-      addDownload: vi.fn().mockResolvedValue('hash-1'),
+      addDownload: vi.fn().mockResolvedValue({ id: 'hash-1', alreadyInClient: false }),
     };
     downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(qbtClientMock);
     downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
@@ -132,11 +132,34 @@ describe('processDownloadTorrent', () => {
     );
   });
 
+  // #423: provenance comes from the client's own add result
+  it.each([
+    [false, true],
+    [true, false],
+  ])('records alreadyInClient=%s from the add result as addedByRmab=%s', async (alreadyInClient, addedByRmab) => {
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue({
+      clientType: 'qbittorrent',
+      protocol: 'torrent',
+      addDownload: vi.fn().mockResolvedValue({ id: 'hash-1', alreadyInClient }),
+    });
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({ id: 'client-1', type: 'qbittorrent', enabled: true });
+    prismaMock.request.findUnique.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
+    prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-1' });
+
+    const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+    const result = await processDownloadTorrent(torrentPayload);
+
+    expect(result.success).toBe(true);
+    expect(prismaMock.downloadHistory.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ downloadClientId: 'hash-1', addedByRmab }),
+    });
+  });
+
   it('routes NZB downloads to SABnzbd', async () => {
     const sabClientMock = {
       clientType: 'sabnzbd',
       protocol: 'usenet',
-      addDownload: vi.fn().mockResolvedValue('nzb-1'),
+      addDownload: vi.fn().mockResolvedValue({ id: 'nzb-1', alreadyInClient: false }),
     };
     downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(sabClientMock);
     downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
@@ -181,7 +204,7 @@ describe('processDownloadTorrent', () => {
     const qbtClientMock = {
       clientType: 'qbittorrent',
       protocol: 'torrent',
-      addDownload: vi.fn().mockResolvedValue('hash-1'),
+      addDownload: vi.fn().mockResolvedValue({ id: 'hash-1', alreadyInClient: false }),
     };
     downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValueOnce(qbtClientMock);
     downloadClientManagerMock.getClientForProtocol.mockResolvedValueOnce({
@@ -202,7 +225,7 @@ describe('processDownloadTorrent', () => {
     const sabClientMock = {
       clientType: 'sabnzbd',
       protocol: 'usenet',
-      addDownload: vi.fn().mockResolvedValue('nzb-1'),
+      addDownload: vi.fn().mockResolvedValue({ id: 'nzb-1', alreadyInClient: false }),
     };
     downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValueOnce(sabClientMock);
     downloadClientManagerMock.getClientForProtocol.mockResolvedValueOnce({
@@ -236,7 +259,7 @@ describe('processDownloadTorrent', () => {
           500,
           'https://prowlarr/1/download/limited'
         ))
-        .mockResolvedValueOnce('fallback-hash'),
+        .mockResolvedValueOnce({ id: 'fallback-hash', alreadyInClient: false }),
     };
     downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(qbtClientMock);
     downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
@@ -330,7 +353,7 @@ describe('processDownloadTorrent', () => {
   const second = { ...torrentPayload.torrent, title: 'Second', guid: 'guid-2', downloadUrl: 'magnet:?xt=urn:btih:def' };
 
   it('skips a release with a malformed magnet before trying any client', async () => {
-    const addDownload = vi.fn().mockResolvedValue('hash-2');
+    const addDownload = vi.fn().mockResolvedValue({ id: 'hash-2', alreadyInClient: false });
     setupQbit(addDownload);
 
     const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
@@ -346,7 +369,7 @@ describe('processDownloadTorrent', () => {
   });
 
   it('ignores null alternates instead of crashing', async () => {
-    const addDownload = vi.fn().mockResolvedValue('hash-1');
+    const addDownload = vi.fn().mockResolvedValue({ id: 'hash-1', alreadyInClient: false });
     setupQbit(addDownload);
 
     const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
@@ -359,7 +382,7 @@ describe('processDownloadTorrent', () => {
   it('skips a release whose source is unusable and grabs the next one', async () => {
     const addDownload = vi.fn()
       .mockRejectedValueOnce(new UnusableDownloadSourceError('Invalid redirect location: magnet:'))
-      .mockResolvedValueOnce('hash-2');
+      .mockResolvedValueOnce({ id: 'hash-2', alreadyInClient: false });
     setupQbit(addDownload);
 
     const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
@@ -392,7 +415,7 @@ describe('processDownloadTorrent', () => {
       prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
       // The shape main's plain update returned, so a run on main reaches the client call
       prismaMock.request.update.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
-      const addDownload = vi.fn().mockResolvedValue('hash-1');
+      const addDownload = vi.fn().mockResolvedValue({ id: 'hash-1', alreadyInClient: false });
       setupQbit(addDownload);
 
       const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');

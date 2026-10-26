@@ -93,12 +93,13 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
       );
 
       let downloadClientId: string;
+      let alreadyInClient: boolean;
       try {
-        downloadClientId = await client.addDownload(
+        ({ id: downloadClientId, alreadyInClient } = await client.addDownload(
           // Prowlarr links go to the configured base (scheme, port, credentials); others as-is
           toConfiguredProwlarrUrl(candidate.downloadUrl, prowlarr.base, { withCredentials: true }) ?? candidate.downloadUrl,
           { category, priority: 'normal', sourceAuth }
-        );
+        ));
       } catch (error) {
         if (error instanceof UnusableDownloadSourceError) {
           // This release can't be fetched (bad redirect, malformed magnet, ...): try the next one
@@ -145,7 +146,13 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
         throw contextualError;
       }
 
-      logger.info(`Download added with ID: ${downloadClientId}`);
+      if (alreadyInClient) {
+        logger.warn(
+          `"${candidate.title}" is already in ${client.clientType} (${downloadClientId}); RMAB will never remove it or its files`
+        );
+      } else {
+        logger.info(`Download added with ID: ${downloadClientId}`);
+      }
 
       // Create DownloadHistory record. Exclude magnet links from the indexer-page fallback.
       const indexerPageUrl = candidate.infoUrl || (candidate.guid?.startsWith('magnet:') ? null : candidate.guid);
@@ -167,6 +174,8 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
           seeders: candidate.seeders || 0,
           leechers: candidate.leechers || 0,
           downloadStatus: 'downloading',
+          // From the client's own add result: false = already there (taken over)
+          addedByRmab: !alreadyInClient,
           selected: true,
           startedAt: new Date(),
         },

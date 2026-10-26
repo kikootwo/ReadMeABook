@@ -566,15 +566,29 @@ describe('QBittorrentService', () => {
     await expect(service.addTorrent('')).rejects.toThrow('Invalid download URL');
   });
 
-  it('skips adding duplicate magnet links', async () => {
+  it('reports a magnet already in the client as taken over and sends no add', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=dup';
     vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(undefined);
     vi.spyOn(service as any, 'getTorrent').mockResolvedValue({ hash: 'existing' });
 
-    const hash = await service.addTorrent('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567');
+    const result = await service.addTorrent('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567');
 
-    expect(hash).toBe('0123456789abcdef0123456789abcdef01234567');
+    expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: true });
+    expect(clientMock.post).not.toHaveBeenCalled();
+  });
+
+  it('reports a .torrent already in the client as taken over and sends no add', async () => {
+    const service = new QBittorrentService('http://qb', 'user', 'pass');
+    (service as any).cookie = 'SID=dup';
+    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(undefined);
+    vi.spyOn(service as any, 'getTorrent').mockResolvedValue({ hash: 'hash-1' });
+    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent') });
+    parseTorrentMock.mockResolvedValueOnce({ infoHash: 'hash-1', name: 'Book' });
+
+    const result = await service.addTorrent('http://example.com/file.torrent');
+
+    expect(result).toEqual({ id: 'hash-1', alreadyInClient: true });
     expect(clientMock.post).not.toHaveBeenCalled();
   });
 
@@ -585,12 +599,12 @@ describe('QBittorrentService', () => {
     vi.spyOn(service as any, 'getTorrent').mockRejectedValue(new Error('not found'));
     clientMock.post.mockResolvedValue({ data: 'Ok.' });
 
-    const hash = await service.addTorrent(
+    const result = await service.addTorrent(
       'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567',
       { tags: ['tag1', 'tag2'] }
     );
 
-    expect(hash).toBe('0123456789abcdef0123456789abcdef01234567');
+    expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: false });
     expect(clientMock.post).toHaveBeenCalledWith(
       '/torrents/add',
       expect.any(URLSearchParams),
@@ -684,9 +698,9 @@ describe('QBittorrentService', () => {
     parseTorrentMock.mockResolvedValueOnce({ infoHash: 'hash-1', name: 'Book' });
     clientMock.post.mockResolvedValue({ data: 'Ok.' });
 
-    const hash = await service.addTorrent('http://example.com/file.torrent');
+    const result = await service.addTorrent('http://example.com/file.torrent');
 
-    expect(hash).toBe('hash-1');
+    expect(result).toEqual({ id: 'hash-1', alreadyInClient: false });
     expect(clientMock.post).toHaveBeenCalledWith(
       '/torrents/add',
       expect.any(Object),

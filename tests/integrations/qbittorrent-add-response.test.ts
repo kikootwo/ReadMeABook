@@ -46,6 +46,8 @@ describe('qBittorrent add responses over real HTTP', () => {
   let addBody: unknown;
   let addStatus: number;
   let alreadyAdded: boolean;
+  // Someone else's copy appears in the client before RMAB's add arrives (the add is then rejected)
+  let presentAfterAdd: boolean;
   let uploads: { contentType: string; body: Buffer }[];
 
   beforeAll(async () => {
@@ -58,7 +60,7 @@ describe('qBittorrent add responses over real HTTP', () => {
         res.end(JSON.stringify({ readmeabook: { savePath: '/downloads' } }));
       } else if (pathname === '/api/v2/torrents/info') {
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(alreadyAdded ? [{ hash }] : []));
+        res.end(JSON.stringify(alreadyAdded || (presentAfterAdd && uploads.length > 0) ? [{ hash }] : []));
       } else if (pathname === '/api/v2/torrents/add') {
         const chunks: Buffer[] = [];
         for await (const chunk of req) chunks.push(Buffer.from(chunk));
@@ -89,6 +91,7 @@ describe('qBittorrent add responses over real HTTP', () => {
     addBody = receipt;
     addStatus = 200;
     alreadyAdded = false;
+    presentAfterAdd = false;
     uploads = [];
   });
 
@@ -105,7 +108,7 @@ describe('qBittorrent add responses over real HTTP', () => {
       ['a 5.2 receipt with an upper-case hash', { ...receipt, added_torrent_ids: [hash.toUpperCase()] }],
     ])('accepts %s and returns the submitted hash', async (_label, body) => {
       addBody = body;
-      await expect(add()).resolves.toBe(hash);
+      await expect(add()).resolves.toEqual({ id: hash, alreadyInClient: false });
       expect(uploads).toHaveLength(1);
       if (kind === 'magnet') {
         expect(uploads[0].contentType).toContain('application/x-www-form-urlencoded');
@@ -159,10 +162,22 @@ describe('qBittorrent add responses over real HTTP', () => {
       expect(uploads).toHaveLength(1);
     });
 
-    it('returns an existing download without submitting it again', async () => {
+    it('reports an existing download as already in the client without submitting it again', async () => {
       alreadyAdded = true;
-      await expect(add()).resolves.toBe(hash);
+      await expect(add()).resolves.toEqual({ id: hash, alreadyInClient: true });
       expect(uploads).toHaveLength(0);
+    });
+
+    // #423: a duplicate add is rejected ("Fails." up to 5.1, 409 from 5.2); the re-check finds it
+    it.each([
+      ['the legacy Fails. body', 200, 'Fails.'],
+      ['a 5.2 409 Conflict', 409, { success_count: 0, failure_count: 1, pending_count: 0, added_torrent_ids: [] }],
+    ])('records a duplicate rejected with %s as already in the client', async (_label, status, body) => {
+      addStatus = status;
+      addBody = body;
+      presentAfterAdd = true;
+      await expect(add()).resolves.toEqual({ id: hash, alreadyInClient: true });
+      expect(uploads).toHaveLength(1);
     });
   });
 });

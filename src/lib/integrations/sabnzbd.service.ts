@@ -18,6 +18,7 @@ import {
   DownloadInfo,
   DownloadStatus,
   AddDownloadOptions,
+  AddDownloadResult,
   ConnectionTestResult,
   DownloadSourceError,
 } from '../interfaces/download-client.interface';
@@ -789,7 +790,7 @@ export class SABnzbdService implements IDownloadClient {
    * Add a download via the unified interface.
    * Delegates to addNZB with mapped options.
    */
-  async addDownload(url: string, options?: AddDownloadOptions): Promise<string> {
+  async addDownload(url: string, options?: AddDownloadOptions): Promise<AddDownloadResult> {
     const priorityMap: Record<string, 'low' | 'normal' | 'high' | 'force'> = {
       low: 'low',
       normal: 'normal',
@@ -797,12 +798,14 @@ export class SABnzbdService implements IDownloadClient {
       force: 'force',
     };
 
-    return this.addNZB(url, {
+    const id = await this.addNZB(url, {
       category: options?.category,
       priority: options?.priority ? priorityMap[options.priority] || 'normal' : undefined,
       paused: options?.paused,
       sourceAuth: options?.sourceAuth,
     });
+    // Every add gets a new nzo_id: never an existing job
+    return { id, alreadyInClient: false };
   }
 
   /**

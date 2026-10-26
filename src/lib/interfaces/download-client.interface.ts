@@ -94,6 +94,19 @@ export interface DownloadInfo {
   seedingTime?: number;
   /** Upload/download ratio (torrent clients only) */
   ratio?: number;
+  /** When the client added it (torrent clients; unset when the client reports none or 0) */
+  addedAt?: Date;
+}
+
+/** Result of addDownload */
+export interface AddDownloadResult {
+  /** Client-assigned identifier (torrent hash or NZB ID) */
+  id: string;
+  /**
+   * True when the torrent was already in the client, so RMAB did not add it (taken over).
+   * RMAB never removes such a torrent or changes it. Usenet clients: always false.
+   */
+  alreadyInClient: boolean;
 }
 
 /** Options for adding a new download */
@@ -183,9 +196,9 @@ export interface IDownloadClient {
    * Add a new download.
    * @param url - Download URL (magnet link, .torrent URL, or .nzb URL)
    * @param options - Optional download settings
-   * @returns Client-assigned download ID (torrent hash or NZB ID)
+   * @returns Client-assigned download ID, and whether the torrent was already in the client
    */
-  addDownload(url: string, options?: AddDownloadOptions): Promise<string>;
+  addDownload(url: string, options?: AddDownloadOptions): Promise<AddDownloadResult>;
 
   /**
    * Get current status of a download.

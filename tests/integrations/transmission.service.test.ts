@@ -180,11 +180,13 @@ describe('TransmissionService', () => {
           },
         });
 
-      const hash = await service.addDownload(
+      const result = await service.addDownload(
         'magnet:?xt=urn:btih:0123456789ABCDEF0123456789ABCDEF01234567'
       );
 
-      expect(hash).toBe('0123456789abcdef0123456789abcdef01234567');
+      expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: false });
+      // Fresh add: RMAB's seed limits are set
+      expect(clientMock.post.mock.calls[2][1]).toMatchObject({ method: 'torrent-set', arguments: { seedRatioMode: 2 } });
     });
 
     it('skips duplicate magnet links', async () => {
@@ -203,14 +205,40 @@ describe('TransmissionService', () => {
         },
       });
 
-      const hash = await service.addDownload(
+      const result = await service.addDownload(
         'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'
       );
 
-      expect(hash).toBe('0123456789abcdef0123456789abcdef01234567');
+      expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: true });
       // Only 1 RPC call (torrent-get), no torrent-add
       expect(clientMock.post).toHaveBeenCalledTimes(1);
     });
+
+    // #423: someone else added it between the pre-check and the add
+    it.each(['magnet', 'file'] as const)(
+      'records a torrent-duplicate answer (%s) as taken over and leaves its seed limits alone',
+      async (kind) => {
+        const service = new TransmissionService('http://transmission', 'user', 'pass');
+        if (kind === 'file') {
+          axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent-data') });
+          parseTorrentMock.mockResolvedValueOnce({ infoHash: 'parsed-hash', name: 'Book' });
+        }
+        const hash = kind === 'file' ? 'parsed-hash' : '0123456789abcdef0123456789abcdef01234567';
+        clientMock.post
+          .mockResolvedValueOnce({ data: { result: 'success', arguments: { torrents: [] } } })
+          .mockResolvedValueOnce({
+            data: { result: 'success', arguments: { 'torrent-duplicate': { hashString: hash, name: 'Theirs' } } },
+          });
+
+        const result = await service.addDownload(
+          kind === 'file' ? 'http://example.com/file.torrent' : `magnet:?xt=urn:btih:${hash}`
+        );
+
+        expect(result).toEqual({ id: hash, alreadyInClient: true });
+        // torrent-get + torrent-add only: no torrent-set rewriting the user's seed limits
+        expect(clientMock.post).toHaveBeenCalledTimes(2);
+      }
+    );
 
     it('throws on invalid magnet link', async () => {
       const service = new TransmissionService('http://transmission', 'user', 'pass');
@@ -256,9 +284,9 @@ describe('TransmissionService', () => {
           },
         });
 
-      const hash = await service.addDownload('http://example.com/file.torrent');
+      const result = await service.addDownload('http://example.com/file.torrent');
 
-      expect(hash).toBe('parsed-hash');
+      expect(result).toEqual({ id: 'parsed-hash', alreadyInClient: false });
       // Verify metainfo was sent
       const addCall = clientMock.post.mock.calls[1];
       const body = addCall[0] === '/transmission/rpc' ? JSON.parse(JSON.stringify(addCall[1])) : null;
@@ -291,8 +319,8 @@ describe('TransmissionService', () => {
           },
         });
 
-      const hash = await service.addDownload('http://example.com/file.torrent');
-      expect(hash).toBe('abcdef0123456789abcdef0123456789abcdef01');
+      const result = await service.addDownload('http://example.com/file.torrent');
+      expect(result).toEqual({ id: 'abcdef0123456789abcdef0123456789abcdef01', alreadyInClient: false });
     });
 
     it('throws on invalid .torrent file', async () => {

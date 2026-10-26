@@ -18,6 +18,7 @@ import {
   DownloadInfo,
   DownloadStatus,
   AddDownloadOptions,
+  AddDownloadResult,
   ConnectionTestResult,
   DownloadSourceError,
 } from '../interfaces/download-client.interface';
@@ -211,7 +212,7 @@ export class NZBGetService implements IDownloadClient {
    * Add a download via the unified interface.
    * Downloads the NZB file from the source URL and uploads to NZBGet via append().
    */
-  async addDownload(url: string, options?: AddDownloadOptions): Promise<string> {
+  async addDownload(url: string, options?: AddDownloadOptions): Promise<AddDownloadResult> {
     logger.info(`Adding NZB from URL: ${urlForLog(url)}`);
 
     const category = options?.category || this.defaultCategory;
@@ -309,7 +310,8 @@ export class NZBGetService implements IDownloadClient {
 
     const id = String(nzbId);
     logger.info(`Added NZB: ${id} (${filename})`);
-    return id;
+    // append with DupeMode FORCE returns a new NZBID: never an existing job
+    return { id, alreadyInClient: false };
   }
 
   /**

@@ -251,23 +251,23 @@ describe('DelugeService', () => {
     // Mock: label.set_torrent
     mockRpc(null);
 
-    const hash = await service.addDownload(
+    const result = await service.addDownload(
       'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'
     );
-    expect(hash).toBe('0123456789abcdef0123456789abcdef01234567');
+    expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: false });
   });
 
-  it('skips adding duplicate magnet links', async () => {
+  it('reports a magnet already in Deluge as taken over and sends no add', async () => {
     const service = new DelugeService('http://deluge', '', 'pass');
     (service as any).sessionCookie = '_session_id=abc';
 
     // Mock: duplicate found
     mockRpc({ name: 'Existing Audiobook' });
 
-    const hash = await service.addDownload(
+    const result = await service.addDownload(
       'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'
     );
-    expect(hash).toBe('0123456789abcdef0123456789abcdef01234567');
+    expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: true });
     // Only 1 RPC call (the duplicate check), no add call
     expect(clientMock.post).toHaveBeenCalledTimes(1);
   });
@@ -278,10 +278,26 @@ describe('DelugeService', () => {
 
     mockRpc({}); // not duplicate
     mockRpc(null, { message: 'rejected' }); // add returns null (failure)
+    mockRpc({}); // re-check after the rejection: still not there
 
     await expect(service.addDownload(
       'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'
     )).rejects.toThrow('Deluge rejected magnet link');
+  });
+
+  // #423: someone else added it between the pre-check and the add; Deluge rejects the duplicate
+  it('records a rejected duplicate add as taken over after one re-check', async () => {
+    const service = new DelugeService('http://deluge', '', 'pass');
+    (service as any).sessionCookie = '_session_id=abc';
+
+    mockRpc({}); // pre-check: not there
+    mockRpc(null, { message: 'Torrent already in session (0123).' });
+    mockRpc({ name: 'Theirs' }); // re-check: there now
+
+    const result = await service.addDownload('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567');
+    expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: true });
+    // No seed-limit or label calls on someone else's torrent
+    expect(clientMock.post).toHaveBeenCalledTimes(3);
   });
 
   it('adds torrent files after parsing', async () => {
@@ -297,8 +313,8 @@ describe('DelugeService', () => {
     mockRpc(null); // label.add
     mockRpc(null); // label.set_torrent
 
-    const hash = await service.addDownload('http://example.com/file.torrent');
-    expect(hash).toBe('hash-1');
+    const result = await service.addDownload('http://example.com/file.torrent');
+    expect(result).toEqual({ id: 'hash-1', alreadyInClient: false });
   });
 
   it('follows redirect to magnet link', async () => {
@@ -317,8 +333,8 @@ describe('DelugeService', () => {
     mockRpc(null); // label.add
     mockRpc(null); // label.set_torrent
 
-    const hash = await service.addDownload('http://example.com/file.torrent');
-    expect(hash).toBe('abcdef0123456789abcdef0123456789abcdef01');
+    const result = await service.addDownload('http://example.com/file.torrent');
+    expect(result).toEqual({ id: 'abcdef0123456789abcdef0123456789abcdef01', alreadyInClient: false });
   });
 
   it('throws for invalid redirect locations', async () => {

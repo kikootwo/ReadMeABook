@@ -21,6 +21,7 @@ import {
   DownloadInfo,
   DownloadStatus,
   AddDownloadOptions,
+  AddDownloadResult,
   ConnectionTestResult,
   DownloadSourceError,
   UnusableDownloadSourceError,
@@ -260,7 +261,7 @@ export class QBittorrentService implements IDownloadClient {
   /**
    * Add torrent (magnet link or file URL) - Enterprise Implementation
    */
-  async addTorrent(url: string, options?: AddTorrentOptions, retried = false): Promise<string> {
+  async addTorrent(url: string, options?: AddTorrentOptions, retried = false): Promise<AddDownloadResult> {
     // Validate URL parameter
     if (!url || typeof url !== 'string' || url.trim() === '') {
       logger.error('Invalid download URL', { url });
@@ -333,6 +334,36 @@ export class QBittorrentService implements IDownloadClient {
     );
   }
 
+  /** POST /torrents/add. 5.2+ answers 409 Conflict when every add failed (duplicates too). */
+  private async postAdd(body: unknown, config: Record<string, unknown>): Promise<{ data: unknown; conflict: boolean }> {
+    try {
+      return { data: (await this.client.post('/torrents/add', body, config)).data, conflict: false };
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 409) return { data: error.response.data, conflict: true };
+      throw error;
+    }
+  }
+
+  /** Whether the client has this torrent now (any lookup error counts as "no"). */
+  private async hasTorrent(infoHash: string): Promise<boolean> {
+    try {
+      await this.getTorrent(infoHash);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * A rejected add (qBittorrent rejects duplicates: "Fails." up to 5.1, 409 from 5.2): check once
+   * more. Present now = it was already in the client (taken over); otherwise the rejection stands.
+   */
+  private async recheckRejectedAdd(infoHash: string, rejection: string): Promise<AddDownloadResult> {
+    if (!(await this.hasTorrent(infoHash))) throw new Error(rejection);
+    logger.warn(`qBittorrent rejected the add of ${infoHash} but already has it: recorded as already in the client`);
+    return { id: infoHash, alreadyInClient: true };
+  }
+
   /** A rejected /torrents/add body as log text: strings as is, JSON receipts serialized (capped). */
   private describeAddResponse(data: unknown): string {
     if (typeof data === 'string') return data;
@@ -346,7 +377,7 @@ export class QBittorrentService implements IDownloadClient {
     magnetUrl: string,
     category: string,
     options?: AddTorrentOptions
-  ): Promise<string> {
+  ): Promise<AddDownloadResult> {
     // Extract info_hash from magnet link (deterministic)
     const infoHash = this.extractHashFromMagnet(magnetUrl);
 
@@ -356,13 +387,10 @@ export class QBittorrentService implements IDownloadClient {
 
     logger.info(` Extracted info_hash from magnet: ${infoHash}`);
 
-    // Check for duplicates
-    try {
-      const existing = await this.getTorrent(infoHash);
-      logger.info(` Torrent ${infoHash} already exists (duplicate), returning existing hash`);
-      return infoHash;
-    } catch {
-      // Torrent doesn't exist, continue with adding
+    // Already in the client: taken over, never added (or later removed) by RMAB
+    if (await this.hasTorrent(infoHash)) {
+      logger.info(` Torrent ${infoHash} is already in qBittorrent (not added by RMAB)`);
+      return { id: infoHash, alreadyInClient: true };
     }
 
     // Upload via 'urls' parameter
@@ -387,19 +415,20 @@ export class QBittorrentService implements IDownloadClient {
 
     logger.info('[QBittorrent] Uploading magnet link...');
 
-    const response = await this.client.post('/torrents/add', form, {
+    const { data, conflict } = await this.postAdd(form, {
       headers: {
         ...this.authHeaders(),
         'Content-Type': 'application/x-www-form-urlencoded',
       },
     });
 
-    if (!this.isAddAccepted(response.data, infoHash)) {
-      throw new Error(`qBittorrent rejected magnet link: ${this.describeAddResponse(response.data)}`);
+    if (conflict || !this.isAddAccepted(data, infoHash)) {
+      const detail = `${this.describeAddResponse(data)}${conflict ? ' (HTTP 409)' : ''}`;
+      return this.recheckRejectedAdd(infoHash, `qBittorrent rejected magnet link: ${detail}`);
     }
 
     logger.info(` Successfully added magnet link: ${infoHash}`);
-    return infoHash;
+    return { id: infoHash, alreadyInClient: false };
   }
 
   /**
@@ -409,7 +438,7 @@ export class QBittorrentService implements IDownloadClient {
     torrentUrl: string,
     category: string,
     options?: AddTorrentOptions
-  ): Promise<string> {
+  ): Promise<AddDownloadResult> {
     logger.info(` Downloading .torrent file from: ${urlForLog(torrentUrl)}`);
 
     // Shared fetcher: follows every redirect hop (relative or absolute), resolves a
@@ -445,13 +474,10 @@ export class QBittorrentService implements IDownloadClient {
     logger.info(` Extracted info_hash: ${infoHash}`);
     logger.info(` Torrent name: ${parsedTorrent.name || 'Unknown'}`);
 
-    // Check for duplicates
-    try {
-      const existing = await this.getTorrent(infoHash);
-      logger.info(` Torrent ${infoHash} already exists (duplicate), returning existing hash`);
-      return infoHash;
-    } catch {
-      // Torrent doesn't exist, continue with adding
+    // Already in the client: taken over, never added (or later removed) by RMAB
+    if (await this.hasTorrent(infoHash)) {
+      logger.info(` Torrent ${infoHash} is already in qBittorrent (not added by RMAB)`);
+      return { id: infoHash, alreadyInClient: true };
     }
 
     // Upload .torrent file content via multipart/form-data
@@ -479,7 +505,7 @@ export class QBittorrentService implements IDownloadClient {
 
     logger.info('[QBittorrent] Uploading .torrent file content...');
 
-    const response = await this.client.post('/torrents/add', formData, {
+    const { data, conflict } = await this.postAdd(formData, {
       headers: {
         ...this.authHeaders(),
         ...formData.getHeaders(),
@@ -488,12 +514,13 @@ export class QBittorrentService implements IDownloadClient {
       maxContentLength: Infinity,
     });
 
-    if (!this.isAddAccepted(response.data, infoHash)) {
-      throw new Error(`qBittorrent rejected .torrent file: ${this.describeAddResponse(response.data)}`);
+    if (conflict || !this.isAddAccepted(data, infoHash)) {
+      const detail = `${this.describeAddResponse(data)}${conflict ? ' (HTTP 409)' : ''}`;
+      return this.recheckRejectedAdd(infoHash, `qBittorrent rejected .torrent file: ${detail}`);
     }
 
     logger.info(` Successfully added torrent: ${infoHash}`);
-    return infoHash;
+    return { id: infoHash, alreadyInClient: false };
   }
 
   /**
@@ -1059,7 +1086,7 @@ export class QBittorrentService implements IDownloadClient {
    * Add a download via the unified interface.
    * Delegates to addTorrent with sensible defaults for audiobook downloads.
    */
-  async addDownload(url: string, options?: AddDownloadOptions): Promise<string> {
+  async addDownload(url: string, options?: AddDownloadOptions): Promise<AddDownloadResult> {
     return this.addTorrent(url, {
       category: options?.category,
       paused: options?.paused,
@@ -1157,6 +1184,7 @@ export class QBittorrentService implements IDownloadClient {
       completedAt: torrent.completion_on > 0 ? new Date(torrent.completion_on * 1000) : undefined,
       seedingTime: torrent.seeding_time,
       ratio: torrent.ratio,
+      addedAt: torrent.added_on > 0 ? new Date(torrent.added_on * 1000) : undefined,
     };
   }
 

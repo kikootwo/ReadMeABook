@@ -190,12 +190,13 @@ describe('NZBGetService', () => {
       });
 
       const service = new NZBGetService('http://nzbget:6789', 'nzbget', 'pass', 'readmeabook', '/downloads');
-      const id = await service.addDownload('https://prowlarr.local/api/download/123', {
+      const { id, alreadyInClient } = await service.addDownload('https://prowlarr.local/api/download/123', {
         category: 'readmeabook',
         priority: 'normal',
       });
 
       expect(id).toBe('12345');
+      expect(alreadyInClient).toBe(false);
 
       // Verify append call
       const appendCall = clientMock.post.mock.calls.find(
@@ -228,9 +229,10 @@ describe('NZBGetService', () => {
       });
 
       const service = new NZBGetService('http://nzbget:6789', 'nzbget', 'pass', 'readmeabook', '/downloads');
-      const id = await service.addDownload('https://example.com/book.nzb', { priority: 'high' });
+      const { id, alreadyInClient } = await service.addDownload('https://example.com/book.nzb', { priority: 'high' });
 
       expect(id).toBe('99');
+      expect(alreadyInClient).toBe(false);
       const appendCall = clientMock.post.mock.calls.find(
         (call: any[]) => call[1]?.method === 'append'
       );
@@ -377,9 +379,10 @@ describe('NZBGetService', () => {
       });
 
       const service = new NZBGetService('http://nzbget:6789', 'nzbget', 'pass', 'readmeabook', '/downloads');
-      const id = await service.addDownload('https://example.com/nzb.gz');
+      const { id, alreadyInClient } = await service.addDownload('https://example.com/nzb.gz');
 
       expect(id).toBe('777');
+      expect(alreadyInClient).toBe(false);
 
       // Verify the base64 content sent to NZBGet is the decompressed XML, not compressed bytes
       const appendCall = clientMock.post.mock.calls.find(

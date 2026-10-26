@@ -20,6 +20,7 @@ import {
   DownloadInfo,
   DownloadStatus,
   AddDownloadOptions,
+  AddDownloadResult,
   ConnectionTestResult,
 } from '../interfaces/download-client.interface';
 
@@ -52,6 +53,7 @@ interface TransmissionTorrent {
   secondsSeeding: number;
   uploadRatio: number;
   uploadedEver: number;
+  addedDate: number;
 }
 
 /** Fields we request from the Transmission RPC API */
@@ -72,6 +74,7 @@ const TORRENT_FIELDS = [
   'secondsSeeding',
   'uploadRatio',
   'uploadedEver',
+  'addedDate',
 ];
 
 export class TransmissionService implements IDownloadClient {
@@ -204,7 +207,7 @@ export class TransmissionService implements IDownloadClient {
     }
   }
 
-  async addDownload(url: string, options?: AddDownloadOptions): Promise<string> {
+  async addDownload(url: string, options?: AddDownloadOptions): Promise<AddDownloadResult> {
     if (!url || typeof url !== 'string' || url.trim() === '') {
       throw new Error('Invalid download URL: URL is required and must be a non-empty string');
     }
@@ -222,7 +225,7 @@ export class TransmissionService implements IDownloadClient {
     magnetUrl: string,
     category: string,
     options?: AddDownloadOptions
-  ): Promise<string> {
+  ): Promise<AddDownloadResult> {
     const infoHash = this.extractHashFromMagnet(magnetUrl);
     if (!infoHash) {
       throw new Error('Invalid magnet link - could not extract info_hash');
@@ -230,11 +233,11 @@ export class TransmissionService implements IDownloadClient {
 
     logger.info(`Extracted info_hash from magnet: ${infoHash}`);
 
-    // Check for duplicates
+    // Already in the client: taken over, never added (or later removed) by RMAB
     try {
       await this.getTorrentByHash(infoHash);
-      logger.info(`Torrent ${infoHash} already exists (duplicate), returning existing hash`);
-      return infoHash;
+      logger.info(`Torrent ${infoHash} is already in Transmission (not added by RMAB)`);
+      return { id: infoHash, alreadyInClient: true };
     } catch {
       // Torrent doesn't exist, continue
     }
@@ -261,19 +264,20 @@ export class TransmissionService implements IDownloadClient {
     if (!added) {
       throw new Error('Transmission did not return torrent info after adding');
     }
+    if (this.isDuplicateAnswer(data, infoHash)) return { id: infoHash, alreadyInClient: true };
 
     // Override Transmission's global seeding rules — RMAB manages torrent lifecycle
     await this.disableSeedLimits(added.hashString || infoHash);
 
     logger.info(`Successfully added magnet link: ${infoHash}`);
-    return infoHash;
+    return { id: infoHash, alreadyInClient: false };
   }
 
   private async addTorrentFile(
     torrentUrl: string,
     category: string,
     options?: AddDownloadOptions
-  ): Promise<string> {
+  ): Promise<AddDownloadResult> {
     logger.info(`Downloading .torrent file from: ${urlForLog(torrentUrl)}`);
 
     // Shared fetcher: follows every redirect hop, resolves a magnet at any hop,
@@ -303,11 +307,11 @@ export class TransmissionService implements IDownloadClient {
 
     logger.info(`Extracted info_hash: ${infoHash}`);
 
-    // Check for duplicates
+    // Already in the client: taken over, never added (or later removed) by RMAB
     try {
       await this.getTorrentByHash(infoHash);
-      logger.info(`Torrent ${infoHash} already exists (duplicate), returning existing hash`);
-      return infoHash;
+      logger.info(`Torrent ${infoHash} is already in Transmission (not added by RMAB)`);
+      return { id: infoHash, alreadyInClient: true };
     } catch {
       // Torrent doesn't exist, continue
     }
@@ -334,12 +338,13 @@ export class TransmissionService implements IDownloadClient {
 
     // torrent-add returns torrent-added or torrent-duplicate
     const added = data.arguments?.['torrent-added'] || data.arguments?.['torrent-duplicate'];
+    if (this.isDuplicateAnswer(data, infoHash)) return { id: infoHash, alreadyInClient: true };
 
     // Override Transmission's global seeding rules — RMAB manages torrent lifecycle
     await this.disableSeedLimits(added?.hashString || infoHash);
 
     logger.info(`Successfully added torrent: ${infoHash}`);
-    return infoHash;
+    return { id: infoHash, alreadyInClient: false };
   }
 
   async getDownload(id: string): Promise<DownloadInfo | null> {
@@ -440,6 +445,16 @@ export class TransmissionService implements IDownloadClient {
   // =========================================================================
 
   /**
+   * torrent-add answered torrent-duplicate (someone else added it after the pre-check): taken
+   * over, so RMAB leaves its seed limits alone and never removes it.
+   */
+  private isDuplicateAnswer(data: any, infoHash: string): boolean {
+    if (data.arguments?.['torrent-added'] || !data.arguments?.['torrent-duplicate']) return false;
+    logger.warn(`Transmission already has ${infoHash} (torrent-duplicate): recorded as already in the client`);
+    return true;
+  }
+
+  /**
    * Disable Transmission's global seed ratio and idle time limits for a torrent.
    * Mode 2 = unlimited (ignore global settings). RMAB manages torrent lifecycle
    * via the cleanup-seeded-torrents processor using per-indexer seeding times.
@@ -498,6 +513,7 @@ export class TransmissionService implements IDownloadClient {
       errorMessage: torrent.error === LOCAL_ERROR ? torrent.errorString : undefined,
       seedingTime: torrent.secondsSeeding,
       ratio: torrent.uploadRatio >= 0 ? torrent.uploadRatio : undefined,
+      addedAt: torrent.addedDate > 0 ? new Date(torrent.addedDate * 1000) : undefined,
     };
   }
 
