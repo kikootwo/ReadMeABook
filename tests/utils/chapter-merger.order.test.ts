@@ -35,6 +35,17 @@ describe('analyzeChapterFiles with a multi-disc order', () => {
     expect(chapters.map((c) => c.chapterTitle)).toEqual(['Chapter 1', 'Chapter 2', 'Chapter 3', 'Chapter 4']);
   });
 
+  it('with a given order, no metadata-or-filename decision is made or logged', async () => {
+    const messages: string[] = [];
+    const log = async (message: string) => {
+      messages.push(message);
+    };
+    const logger = { info: log, warn: log, error: log, debug: log } as unknown as Parameters<typeof analyzeChapterFiles>[1];
+    await analyzeChapterFiles(files, logger, true);
+    expect(messages.filter((m) => /Chapter ordering|Metadata analysis|Track numbers|(metadata|filename)-based/.test(m))).toEqual([]);
+    expect(messages).toContain('Using the multi-disc import order for 4 chapters');
+  });
+
   it('without a given order, per-disc tags fall back to basename order as before', async () => {
     const chapters = await analyzeChapterFiles(files);
     expect(chapters.map((c) => path.basename(path.dirname(c.path)) + '/' + c.filename)).toEqual([

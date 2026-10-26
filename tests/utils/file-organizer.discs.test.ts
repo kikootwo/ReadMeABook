@@ -46,9 +46,14 @@ vi.mock('@/lib/utils/chapter-merger', async (importOriginal) => ({
   detectChapterFiles: vi.fn(async () => true),
   estimateOutputSize: vi.fn(async () => 1),
   checkDiskSpace: vi.fn(async () => null),
-  analyzeChapterFiles: vi.fn(async (files: string[]) =>
-    files.map((p) => ({ path: p, filename: path.basename(p), duration: 30000, chapterTitle: 'Chapter' }))
-  ),
+  // The merger's own rule without a given order: track tags when every file has one and they run 1..N, else names
+  analyzeChapterFiles: vi.fn(async (files: string[], _logger?: unknown, keepOrder?: boolean) => {
+    const chapters = files.map((p) => ({ path: p, filename: path.basename(p), duration: 30000, chapterTitle: 'Chapter' }));
+    if (keepOrder) return chapters;
+    const byTags = [...chapters].sort((a, b) => (tracks.get(a.filename) ?? 0) - (tracks.get(b.filename) ?? 0));
+    if (byTags.every((c, i) => tracks.get(c.filename) === i + 1)) return byTags;
+    return [...chapters].sort((a, b) => a.filename.localeCompare(b.filename, undefined, { numeric: true }));
+  }),
   mergeChapters: vi.fn(async (_chapters: unknown, options: { outputPath: string }) => {
     const nodeFs = await import('fs');
     nodeFs.mkdirSync(path.dirname(options.outputPath), { recursive: true });
@@ -58,7 +63,8 @@ vi.mock('@/lib/utils/chapter-merger', async (importOriginal) => ({
   probeAudioFile: vi.fn(async (filePath: string) => ({ duration: 1000, trackNumber: tracks.get(path.basename(filePath)) })),
 }));
 
-import { analyzeChapterFiles } from '@/lib/utils/chapter-merger';
+import { analyzeChapterFiles, mergeChapters } from '@/lib/utils/chapter-merger';
+import { tagMultipleFiles } from '@/lib/utils/metadata-tagger';
 import { FileOrganizer } from '@/lib/utils/file-organizer';
 
 let root: string;
@@ -100,7 +106,11 @@ beforeEach(() => {
   configState.values.set('metadata_tagging_enabled', 'false');
   tracks.clear();
   vi.mocked(analyzeChapterFiles).mockClear();
+  vi.mocked(mergeChapters).mockClear();
+  vi.mocked(tagMultipleFiles).mockClear();
 });
+
+const rel = (source: string, files: string[]) => files.map((f) => path.relative(source, f).split(path.sep).join('/'));
 
 afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
@@ -142,6 +152,62 @@ describe('multi-disc order', () => {
     await organize(source);
     expect(vi.mocked(analyzeChapterFiles).mock.calls[0][2] ?? false).toBe(false);
   });
+
+  it('track tags that run across the discs (CD2 continues CD1) give the merge order, names do not', async () => {
+    configState.values.set('chapter_merging_enabled', 'true');
+    const source = path.join(root, 'downloads', 'Book');
+    // Chapter-title names that do not sort in play order
+    const playOrder = ['CD1/Prologue.mp3', 'CD1/A Storm.mp3', 'CD1/Kingdoms.mp3', 'CD2/Exile.mp3', 'CD2/Crowns.mp3', 'CD2/Epilogue.mp3'];
+    playOrder.forEach((f, i) => {
+      write(path.join(source, f));
+      tracks.set(path.basename(f), i + 1);
+    });
+    expect((await organize(source)).success).toBe(true);
+    const chapters = vi.mocked(mergeChapters).mock.calls[0][0] as Array<{ path: string }>;
+    expect(rel(source, chapters.map((c) => c.path))).toEqual(playOrder);
+  });
+});
+
+describe('disc and track tags (tagging on)', () => {
+  beforeEach(() => {
+    configState.values.set('metadata_tagging_enabled', 'true');
+  });
+
+  it('each disc file gets its disc (d/D) and its track across the book (n/N), in import order', async () => {
+    const source = path.join(root, 'downloads', 'Book');
+    for (const f of ['Intro.mp3', 'Disc 2/01.mp3', 'Disc 1/02.mp3', 'Disc 1/01.mp3']) write(path.join(source, f));
+    expect((await organize(source)).success).toBe(true);
+    const [files, , positions] = vi.mocked(tagMultipleFiles).mock.calls[0];
+    expect(rel(source, files)).toEqual(['Intro.mp3', 'Disc 1/01.mp3', 'Disc 1/02.mp3', 'Disc 2/01.mp3']);
+    expect(positions).toEqual([
+      { disc: '1/2', track: '1/4' }, { disc: '1/2', track: '2/4' }, { disc: '1/2', track: '3/4' }, { disc: '2/2', track: '4/4' },
+    ]);
+  });
+
+  it('a single folder is tagged exactly as before: no disc or track values', async () => {
+    const source = path.join(root, 'downloads', 'Book');
+    for (const f of ['01.mp3', '02.mp3']) write(path.join(source, f));
+    await organize(source);
+    expect(vi.mocked(tagMultipleFiles).mock.calls[0]).toHaveLength(2);
+  });
+
+  it('a merged multi-disc book: the m4b gets no disc or track values', async () => {
+    configState.values.set('chapter_merging_enabled', 'true');
+    const source = path.join(root, 'downloads', 'Book');
+    for (const f of ['CD1/01.mp3', 'CD2/01.mp3']) write(path.join(source, f));
+    await organize(source);
+    const [files, , positions] = vi.mocked(tagMultipleFiles).mock.calls[0];
+    expect(files.map((f) => path.extname(f))).toEqual(['.m4b']);
+    expect(positions).toEqual([undefined]);
+  });
+
+  it('tagging off: nothing is tagged', async () => {
+    configState.values.set('metadata_tagging_enabled', 'false');
+    const source = path.join(root, 'downloads', 'Book');
+    for (const f of ['CD1/01.mp3', 'CD2/01.mp3']) write(path.join(source, f));
+    await organize(source);
+    expect(tagMultipleFiles).not.toHaveBeenCalled();
+  });
 });
 
 describe('in-place stop (a Manual/Bulk import of the book\'s own library folder)', () => {
@@ -162,6 +228,18 @@ describe('in-place stop (a Manual/Bulk import of the book\'s own library folder)
 
   it('stops before merging, tagging or copying: no .tmp, no temp m4b, no flat copies', async () => {
     expectUntouched(await organize(lib, { stop: true }));
+  });
+
+  it.each([
+    ['one disc', ['CD1/01.mp3', 'CD1/02.mp3']],
+    ['a root file plus one disc', ['Intro.mp3', 'CD2/01.mp3']],
+  ])('stops a subset (%s) of the library folder: no .tmp, no temp m4b, no flat copies', async (_label, selected) => {
+    write(path.join(lib, 'Intro.mp3'));
+    const result = await organize(lib, { stop: true, selected });
+    expect(result.success).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/nothing was changed/);
+    expect(listAll(lib)).toEqual(['CD1/01.mp3', 'CD1/02.mp3', 'CD2/01.mp3', 'Intro.mp3']);
+    expect(listAll(tmpDir())).toEqual([]);
   });
 
   it('stops for a differently-cased source path (case-insensitive filesystems)', async (ctx) => {

@@ -89,7 +89,7 @@ describe('Bulk Import folds disc folders into their book folder', () => {
     expect(results[0].relativePath).toBe(path.basename(tmp));
   });
 
-  it('scan root = a disc folder never reaches up to fold its sibling', async () => {
+  it('scan root = a disc folder: its sibling is never read and the disc folder stays one entry', async () => {
     const book = path.join(tmp, 'Book');
     files(book, ['CD1/01.mp3', 'CD2/01.mp3']);
     const results = await discoverAudiobooks(path.join(book, 'CD1'));
@@ -98,11 +98,36 @@ describe('Bulk Import folds disc folders into their book folder', () => {
     expect(results[0].audioFiles).toEqual(['01.mp3']);
   });
 
-  it('never folds into a configured root (compared canonically)', async () => {
+  it('never folds into a configured root, also when the root is configured through a link', async (ctx) => {
     files(tmp, ['CD1/01.mp3', 'CD2/01.mp3']);
-    const asConfigured = path.join(tmp, 'CD1', '..');
-    const results = await discoverAudiobooks(tmp, undefined, undefined, [asConfigured]);
-    expect(results.map((r) => r.folderName).sort()).toEqual(['CD1', 'CD2']);
+    expect((await discoverAudiobooks(tmp, undefined, undefined, [tmp])).map((r) => r.folderName).sort()).toEqual(['CD1', 'CD2']);
+    // A plain string compare would not match the link's path to the scanned folder
+    const link = `${tmp}-link`;
+    try {
+      fsSync.symlinkSync(tmp, link, 'junction');
+    } catch {
+      ctx.skip();
+    }
+    try {
+      const results = await discoverAudiobooks(tmp, undefined, undefined, [link]);
+      expect(results.map((r) => r.folderName).sort()).toEqual(['CD1', 'CD2']);
+    } finally {
+      fsSync.unlinkSync(link);
+    }
+  });
+
+  it('nested disc folders (Box/CD1 holds its own Disc 1 and Disc 2) never put a file in two entries', async () => {
+    const box = path.join(tmp, 'Box');
+    files(box, ['CD1/own.mp3', 'CD1/Disc 1/01.mp3', 'CD1/Disc 2/01.mp3', 'CD2/01.mp3']);
+    const results = await discoverAudiobooks(tmp);
+    const claimed = results.flatMap((r) => r.audioFiles.map((f) => fwd(path.join(r.folderPath, f))));
+    expect(new Set(claimed).size).toBe(claimed.length);
+    expect(claimed.sort()).toEqual(
+      ['CD1/Disc 1/01.mp3', 'CD1/Disc 2/01.mp3', 'CD1/own.mp3', 'CD2/01.mp3'].map((f) => fwd(path.join(box, f)))
+    );
+    // The deepest book folder folds first: Box/CD1 with its discs; CD2 stays its own entry
+    expect(results.find((r) => r.folderPath === fwd(path.join(box, 'CD1')))?.audioFiles).toEqual(['own.mp3', 'Disc 1/01.mp3', 'Disc 2/01.mp3']);
+    expect(results).toHaveLength(2);
   });
 });
 

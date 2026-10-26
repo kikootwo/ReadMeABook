@@ -296,6 +296,19 @@ describe('verified-import cleanup', () => {
       expect(fs.existsSync(ok)).toBe(true);
       expect(fs.existsSync(bad)).toBe(true);
     });
+
+    it('asks the organizer for the in-place multi-disc stop on Manual and Bulk Import, never on a download', async () => {
+      const source = path.join(downloads, 'manual', 'Book');
+      const ok = mkfile(path.join(source, 'Part 1.mp3'));
+      organizeWith(path.join(media, 'Author', 'Book'), { [ok]: 'copied' });
+
+      // Bulk Import sends cleanupSource false and no download history
+      await runOrganize({ downloadPath: source, cleanupSource: false });
+      await runOrganize({ downloadPath: source, cleanupSource: true });
+      await runOrganize({ downloadPath: source, downloadHistoryId: 'dh-1' });
+
+      expect(organizerMock.organize.mock.calls.map((call) => call[6].stopInPlaceDiscLayout)).toEqual([true, true, false]);
+    });
   });
 
   describe('ebook downloads', () => {

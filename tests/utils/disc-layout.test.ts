@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   discBookFiles,
+  discTrackTags,
   isGenericFolderName,
   isPermutation,
   orderDiscLayout,
@@ -51,6 +52,12 @@ describe('disc folder names', () => {
     }
   });
 
+  it('names with any number of digits stay generic (not search terms), as before', () => {
+    for (const name of ['CD 0001', 'Part 1000', 'cd1234', 'Volume 12']) {
+      expect(isGenericFolderName(name)).toBe(true);
+    }
+  });
+
   it('strips a disc suffix from an album title, never Part N', () => {
     expect(stripDiscSuffix('Book (Disc 2)')).toBe('Book');
     expect(stripDiscSuffix('Book - CD 2')).toBe('Book');
@@ -59,6 +66,15 @@ describe('disc folder names', () => {
     expect(stripDiscSuffix('Book Part 2')).toBe('Book Part 2');
     expect(stripDiscSuffix('Book')).toBe('Book');
     expect(stripDiscSuffix('CD1')).toBe('CD1');
+  });
+
+  it('strips only after a separator or bracket: words ending in cd/disk are kept', () => {
+    for (const title of ['OCD 1', 'Hard Disk 3', 'The Disk 2', 'Abcd 2']) {
+      expect(stripDiscSuffix(title)).toBe(title);
+    }
+    expect(stripDiscSuffix('Book (Disc 2)')).toBe('Book');
+    expect(stripDiscSuffix('Book - CD 2')).toBe('Book');
+    expect(stripDiscSuffix('Book: Disc 2')).toBe('Book');
   });
 });
 
@@ -122,6 +138,38 @@ describe('orderDiscLayout', () => {
     const tracks: Record<string, number | undefined> = { 'CD1/02.mp3': 1, 'CD1/01.mp3': undefined, 'CD2/01.mp3': 1 };
     const { order } = orderDiscLayout(resolveDiscLayout(Object.keys(tracks))!, (k) => tracks[k]);
     expect(order).toEqual(['CD1/01.mp3', 'CD1/02.mp3', 'CD2/01.mp3']);
+  });
+
+  it('track tags that run 1..N across the book win over names in every disc (each disc continues the last)', () => {
+    // Chapter-title names that do not sort in play order: CD1 tagged 1-10, CD2 tagged 11-20
+    const tracks: Record<string, number> = {};
+    const playOrder: string[] = [];
+    for (let t = 1; t <= 20; t++) {
+      const key = `CD${t <= 10 ? 1 : 2}/Chapter ${String.fromCharCode(84 - t)}.mp3`;
+      tracks[key] = t;
+      playOrder.push(key);
+    }
+    const { order, notes } = orderDiscLayout(resolveDiscLayout(shuffle(playOrder, 5))!, (k) => tracks[k]);
+    expect(order).toEqual(playOrder);
+    expect(notes.byTracks).toEqual(['CD1', 'CD2']);
+  });
+
+  it('a book-wide run with a gap falls back per disc', () => {
+    const tracks: Record<string, number> = { 'CD1/b.mp3': 1, 'CD1/a.mp3': 2, 'CD2/b.mp3': 4, 'CD2/a.mp3': 5 };
+    const { order } = orderDiscLayout(resolveDiscLayout(Object.keys(tracks))!, (k) => tracks[k]);
+    // CD1 runs 1..2 on its own; CD2 (4, 5) neither continues CD1 nor starts at 1: natural order
+    expect(order).toEqual(['CD1/b.mp3', 'CD1/a.mp3', 'CD2/a.mp3', 'CD2/b.mp3']);
+  });
+
+  it('disc and track tags: track n/N across the book, disc d/D, root files on the first disc, others on the last', () => {
+    const layout = resolveDiscLayout(['Intro.mp3', 'Disc 2/01.mp3', 'Disc 3/01.mp3', 'Disc 3/Bonus/b.mp3'])!;
+    const { order } = orderDiscLayout(layout);
+    expect(Object.fromEntries(discTrackTags(layout, order))).toEqual({
+      'Intro.mp3': { disc: '2/3', track: '1/4' },
+      'Disc 2/01.mp3': { disc: '2/3', track: '2/4' },
+      'Disc 3/01.mp3': { disc: '3/3', track: '3/4' },
+      'Disc 3/Bonus/b.mp3': { disc: '3/3', track: '4/4' },
+    });
   });
 
   it('disc folders sharing a number are ordered by name and noted', () => {

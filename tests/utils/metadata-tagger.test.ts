@@ -285,6 +285,45 @@ describe('metadata tagger', () => {
     expect(results.every((result) => result.success)).toBe(true);
   });
 
+  describe('disc and track of a multi-disc book', () => {
+    const position = { disc: '2/3', track: '12/20' };
+
+    it.each(['/tmp/book.m4b', '/tmp/book.mp3', '/tmp/book.flac'])('%s: disc and track are single argv elements before the output', async (file) => {
+      mockExecFileSuccess();
+      await tagAudioFileMetadata(file, { title: 'Book', author: 'Author' }, position);
+      const argv = lastCallArgv();
+      expectMetadataArg(argv, 'disc', '2/3');
+      expectMetadataArg(argv, 'track', '12/20');
+      expect(argv.at(-1)).toBe(`${file}.tmp`);
+    });
+
+    it('without a position the argv is exactly as before', async () => {
+      mockExecFileSuccess();
+      await tagAudioFileMetadata('/tmp/book.mp3', { title: 'Book', author: 'Author' });
+      const before = lastCallArgv();
+      await tagMultipleFiles(['/tmp/book.mp3'], { title: 'Book', author: 'Author' }, [undefined]);
+      expect(lastCallArgv()).toEqual(before);
+      expect(before.some((a) => /^(disc|track)=/.test(a))).toBe(false);
+    });
+
+    it('tagMultipleFiles gives each file its own position', async () => {
+      mockExecFileSuccess();
+      await tagMultipleFiles(['/tmp/a.mp3', '/tmp/b.mp3'], { title: 'Book', author: 'Author' }, [
+        { disc: '1/2', track: '1/2' }, { disc: '2/2', track: '2/2' },
+      ]);
+      const [first, second] = execFileMock.mock.calls.slice(-2).map((call) => call[1] as string[]);
+      expectMetadataArg(first, 'track', '1/2');
+      expectMetadataArg(second, 'track', '2/2');
+      expectMetadataArg(second, 'disc', '2/2');
+    });
+
+    it('a value that is not n/N is never written', async () => {
+      mockExecFileSuccess();
+      await tagAudioFileMetadata('/tmp/book.mp3', { title: 'Book', author: 'Author' }, { disc: '1/2', track: '1/2 -y' });
+      expect(lastCallArgv().some((a) => /^(disc|track)=/.test(a))).toBe(false);
+    });
+  });
+
   it('checks ffmpeg availability', async () => {
     mockExecFileSuccess('ffmpeg version');
     await expect(checkFfmpegAvailable()).resolves.toBe(true);

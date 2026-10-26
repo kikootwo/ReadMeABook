@@ -116,11 +116,10 @@ describe('manual import of a multi-disc book folder', () => {
 });
 
 describe('browse of a multi-disc book folder', () => {
-  it('lists the disc folders\' audio as relative names in import order, with sizes and a disc count', async () => {
+  it('lists the disc folders\' audio as relative names, disc by disc, with sizes', async () => {
     mkfile('Disc 10/01.m4a', book, 'longer-audio');
     const { status, payload } = await browse(book);
     expect(status).toBe(200);
-    expect(payload.discCount).toBe(3);
     expect(payload.audioFiles).toEqual([
       { name: 'Disc 1/01.m4a', size: 5 }, { name: 'Disc 1/02.m4a', size: 5 }, { name: 'Disc 2/01.m4a', size: 5 },
       { name: 'Disc 10/01.m4a', size: 12 },
@@ -132,7 +131,6 @@ describe('browse of a multi-disc book folder', () => {
     ['CD1/01.mp3', 'CD2/01.mp3'].forEach((f) => mkfile(f, root));
     mkfile('own.mp3', root);
     const { payload } = await browse(root);
-    expect(payload.discCount).toBeUndefined();
     expect(payload.audioFiles).toEqual([{ name: 'own.mp3', size: 5 }]);
   });
 });

@@ -143,4 +143,24 @@ describe('remove source after a multi-disc manual import', () => {
       expect.objectContaining({ data: expect.objectContaining({ status: 'failed' }) })
     );
   });
+
+  it.each([
+    ['one disc of the library folder', ['Disc 1/01.m4a', 'Disc 1/02.m4a']],
+    ['a root file plus one disc', ['Intro.m4a', 'Disc 2/01.m4a']],
+  ])('%s, remove source on: stops with nothing changed and nothing removed', async (_label, selectedFiles) => {
+    [...DISC_FILES, 'Intro.m4a'].forEach((f) => mkfile(f, target));
+    const before = listAll(target);
+    const result = await runOrganize({ downloadPath: target, cleanupSource: true, selectedFiles });
+    expect(result.success).toBe(false);
+    expect(result.message).toMatch(/nothing was changed/);
+    expect(listAll(target)).toEqual(before);
+  });
+
+  it('one disc from a download folder (not in place) still imports and removes just those files', async () => {
+    const result = await runOrganize({ cleanupSource: true, selectedFiles: ['Disc 1/01.m4a', 'Disc 1/02.m4a'] });
+    expect(result.success).toBe(true);
+    expect(listAll(target)).toEqual(['01.m4a', '02.m4a', 'cover.jpg']);
+    expect(fs.existsSync(path.join(book, 'Disc 1', '01.m4a'))).toBe(false);
+    expect(fs.existsSync(path.join(book, 'Disc 2', '01.m4a'))).toBe(true);
+  });
 });

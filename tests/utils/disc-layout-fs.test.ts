@@ -190,7 +190,7 @@ describe('orderDiscImport', () => {
       }
     }
     const ordered = await orderDiscImport(src, native([...keys].reverse()), { targetPath: path.join(root, 'media') });
-    expect(ordered).toEqual(native(['CD1/t4.mp3', 'CD1/t3.mp3', 'CD1/t2.mp3', 'CD1/t1.mp3',
+    expect(ordered?.order).toEqual(native(['CD1/t4.mp3', 'CD1/t3.mp3', 'CD1/t2.mp3', 'CD1/t1.mp3',
       'CD2/t4.mp3', 'CD2/t3.mp3', 'CD2/t2.mp3', 'CD2/t1.mp3', 'CD3/t4.mp3', 'CD3/t3.mp3', 'CD3/t2.mp3', 'CD3/t1.mp3']));
     expect(probeState.peak).toBeLessThanOrEqual(4);
   });
@@ -201,7 +201,34 @@ describe('orderDiscImport', () => {
     probeState.tracks.set('CD1/b.mp3', 1);
     probeState.tracks.set('CD1/a.mp3', -1);
     const ordered = await orderDiscImport(src, native(['CD2/a.mp3', 'CD1/b.mp3', 'CD1/a.mp3']), { targetPath: root });
-    expect(ordered).toEqual(native(['CD1/a.mp3', 'CD1/b.mp3', 'CD2/a.mp3']));
+    expect(ordered?.order).toEqual(native(['CD1/a.mp3', 'CD1/b.mp3', 'CD2/a.mp3']));
+  });
+
+  it('track tags that run across the book (CD2 continues CD1) order every disc', async () => {
+    const src = path.join(root, 'src');
+    probeState.base = src;
+    // Chapter-title names that do not sort in play order
+    const tracks: Record<string, number> = {
+      'CD1/Prologue.mp3': 1, 'CD1/A Storm.mp3': 2, 'CD1/Kingdoms.mp3': 3,
+      'CD2/Exile.mp3': 4, 'CD2/Crowns.mp3': 5, 'CD2/Epilogue.mp3': 6,
+    };
+    Object.entries(tracks).forEach(([k, t]) => probeState.tracks.set(k, t));
+    const ordered = await orderDiscImport(src, native(Object.keys(tracks).sort()), { targetPath: path.join(root, 'media') });
+    expect(ordered?.order).toEqual(native(Object.keys(tracks)));
+  });
+
+  it('gives each file its disc (d/D) and its track across the book (n/N), root files on the first disc', async () => {
+    const src = path.join(root, 'src');
+    const ordered = await orderDiscImport(src, native(['CD2/01.mp3', 'Intro.mp3', 'CD1/02.mp3', 'CD1/01.mp3']), {
+      targetPath: path.join(root, 'media'),
+    });
+    expect(ordered?.order).toEqual(native(['Intro.mp3', 'CD1/01.mp3', 'CD1/02.mp3', 'CD2/01.mp3']));
+    expect([...ordered!.tags]).toEqual([
+      [native(['Intro.mp3'])[0], { disc: '1/2', track: '1/4' }],
+      [native(['CD1/01.mp3'])[0], { disc: '1/2', track: '2/4' }],
+      [native(['CD1/02.mp3'])[0], { disc: '1/2', track: '3/4' }],
+      [native(['CD2/01.mp3'])[0], { disc: '2/2', track: '4/4' }],
+    ]);
   });
 
   describe('in-place guard (Manual/Bulk Import)', () => {
@@ -213,10 +240,32 @@ describe('orderDiscImport', () => {
     });
 
     it('stops when the source is the target, before any probe', async () => {
-      await expect(orderDiscImport(lib, files, { targetPath: lib, stopInPlace: true })).rejects.toBeInstanceOf(InPlaceDiscImportError);
-      await expect(orderDiscImport(path.join(lib, 'CD1', '..'), files, { targetPath: lib, stopInPlace: true }))
-        .rejects.toThrow(/nothing was changed/);
+      await expect(orderDiscImport(lib, files, { targetPath: lib, stopInPlace: true })).rejects.toThrow(/nothing was changed/);
       expect(probeState.calls).toEqual([]);
+    });
+
+    it('stops a one-disc subset, and a root file plus one disc, of the library folder', async () => {
+      mkfile('CD1/02.mp3', lib);
+      mkfile('Intro.mp3', lib);
+      for (const subset of [['CD1/01.mp3', 'CD1/02.mp3'], ['CD1/01.mp3'], ['Intro.mp3', 'CD1/01.mp3']]) {
+        await expect(orderDiscImport(lib, native(subset), { targetPath: lib, stopInPlace: true, selectedFiles: subset }))
+          .rejects.toBeInstanceOf(InPlaceDiscImportError);
+      }
+      expect(probeState.calls).toEqual([]);
+    });
+
+    it('a one-disc subset from a download folder is not stopped (single folder: the order is kept)', async () => {
+      const download = path.join(root, 'downloads', 'Book');
+      files.forEach((f) => mkfile(f, download));
+      const subset = ['CD1/01.mp3'];
+      expect(await orderDiscImport(download, native(subset), { targetPath: lib, stopInPlace: true, selectedFiles: subset }))
+        .toBeNull();
+    });
+
+    it("a selection of the library folder's own files only is not stopped (single folder)", async () => {
+      mkfile('Own.mp3', lib);
+      expect(await orderDiscImport(lib, ['Own.mp3'], { targetPath: lib, stopInPlace: true, selectedFiles: ['Own.mp3'] }))
+        .toBeNull();
     });
 
     it('stops when the source sits inside the target', async () => {
@@ -238,8 +287,9 @@ describe('orderDiscImport', () => {
     });
 
     it('a download (no stop requested) and a different target are not stopped', async () => {
-      expect(await orderDiscImport(lib, files, { targetPath: lib })).toEqual(files);
-      expect(await orderDiscImport(lib, files, { targetPath: path.join(root, 'media', 'Other'), stopInPlace: true })).toEqual(files);
+      expect((await orderDiscImport(lib, files, { targetPath: lib }))?.order).toEqual(files);
+      expect((await orderDiscImport(lib, files, { targetPath: path.join(root, 'media', 'Other'), stopInPlace: true }))?.order)
+        .toEqual(files);
     });
   });
 });
