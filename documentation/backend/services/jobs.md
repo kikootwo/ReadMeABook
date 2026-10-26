@@ -44,6 +44,8 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 
 ## Special Behaviors
 
+**check_watched_lists:** scheduled run (no payload ASIN) checks every watched series and author; a targeted run (payload `userId` + `seriesAsin` or `authorAsin`, queued when a watch is added) runs only that series or author, never the user's other watched lists (#429). See [features/watched-lists.md](../../features/watched-lists.md).
+
 **cleanup_seeded_torrents:** pages through every candidate, strict probe, ownership check before any remove; see [scheduler.md](scheduler.md).
 
 **monitor_download:**
