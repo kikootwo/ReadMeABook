@@ -9,22 +9,17 @@
  */
 
 import { prisma } from '@/lib/db';
-import { getAudibleService, AudibleAudiobook } from '@/lib/integrations/audible.service';
+import { AudibleAudiobook } from '@/lib/integrations/audible.service';
 import { scrapeSeriesPage } from '@/lib/integrations/audible-series';
-import { deduplicateAndCollectGroups } from '@/lib/utils/deduplicate-audiobooks';
-import { persistDedupGroups } from '@/lib/services/works.service';
 import { createRequestForUser } from '@/lib/services/request-creator.service';
-import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { getSiblingAsins } from '@/lib/services/works.service';
+import { booksForWatch, dedupeAndPersist, delay, scanAuthorLegs } from '@/lib/services/watched-lists-releases';
 import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('WatchedLists');
 
 /** Max books to process per series (avoid excessively long runs) */
 const MAX_BOOKS_PER_SERIES = 200;
-
-/** Max author book pages to scrape */
-const MAX_AUTHOR_PAGES = 4;
 
 /** Delay between scrapes to avoid rate limiting (ms) */
 const SCRAPE_DELAY_MS = 2000;
@@ -36,6 +31,8 @@ export interface WatchedListsSyncStats {
   requestsCreated: number;
   skippedOwned: number;
   skippedExisting: number;
+  /** New-releases-only watches: books released before the cutoff, or undated */
+  skippedBeforeCutoff: number;
   errors: number;
 }
 
@@ -65,14 +62,14 @@ export async function processWatchedLists(
     requestsCreated: 0,
     skippedOwned: 0,
     skippedExisting: 0,
+    skippedBeforeCutoff: 0,
     errors: 0,
   };
 
-  // ---- Watched Series ----
-  await processAllWatchedSeries(log, stats, options);
-
-  // ---- Watched Authors ----
-  await processAllWatchedAuthors(log, stats, options);
+  // A targeted check (a watch just added) runs only the pass for that series or author
+  const targeted = !!(options.seriesAsin || options.authorAsin);
+  if (!targeted || options.seriesAsin) await processAllWatchedSeries(log, stats, options);
+  if (!targeted || options.authorAsin) await processAllWatchedAuthors(log, stats, options);
 
   log.info('Watched lists sync complete', {
     seriesChecked: stats.seriesChecked,
@@ -81,6 +78,7 @@ export async function processWatchedLists(
     requestsCreated: stats.requestsCreated,
     skippedOwned: stats.skippedOwned,
     skippedExisting: stats.skippedExisting,
+    skippedBeforeCutoff: stats.skippedBeforeCutoff,
     errors: stats.errors,
   });
 
@@ -136,7 +134,7 @@ async function processAllWatchedSeries(
 
 async function processSeriesForUsers(
   seriesAsin: string,
-  subscriptions: Array<{ id: string; seriesTitle: string; user: { id: string; plexUsername: string } }>,
+  subscriptions: Array<{ id: string; seriesTitle: string; newReleasesSince?: Date | null; user: { id: string; plexUsername: string } }>,
   log: ReturnType<typeof RMABLogger.forJob> | ReturnType<typeof RMABLogger.create>,
   stats: WatchedListsSyncStats
 ): Promise<void> {
@@ -166,21 +164,19 @@ async function processSeriesForUsers(
   }
 
   stats.booksFound += allBooks.length;
-
-  // Deduplicate
-  const { books: dedupedBooks, groups } = deduplicateAndCollectGroups(allBooks);
-
-  // Persist dedup groups (fire-and-forget)
-  if (groups.length > 0) {
-    persistDedupGroups(groups).catch(() => {});
+  if (hasMore && allBooks.length >= MAX_BOOKS_PER_SERIES && subscriptions.some((s) => s.newReleasesSince != null)) {
+    log.warn(`Series "${title}" has more than ${MAX_BOOKS_PER_SERIES} books; only the first ${MAX_BOOKS_PER_SERIES} in series order are checked, so new-only watches may miss its newest books`);
   }
 
-  // For each user watching this series, create requests for new books
+  // Deduplicate (dedup groups are persisted fire-and-forget)
+  const dedupedBooks = dedupeAndPersist(allBooks).books;
+
+  // For each user watching this series, create requests (new-only watches: released since their cutoff)
   for (const subscription of subscriptions) {
     await createRequestsForUser(
       subscription.user.id,
       subscription.user.plexUsername,
-      dedupedBooks,
+      booksForWatch(dedupedBooks, subscription, `"${title}" for ${subscription.user.plexUsername}`, stats, log),
       log,
       stats
     );
@@ -244,58 +240,30 @@ async function processAllWatchedAuthors(
 
 async function processAuthorForUsers(
   authorAsin: string,
-  subscriptions: Array<{ id: string; authorName: string; user: { id: string; plexUsername: string } }>,
+  subscriptions: Array<{ id: string; authorName: string; newReleasesSince?: Date | null; user: { id: string; plexUsername: string } }>,
   log: ReturnType<typeof RMABLogger.forJob> | ReturnType<typeof RMABLogger.create>,
   stats: WatchedListsSyncStats
 ): Promise<void> {
   const authorName = subscriptions[0].authorName;
   log.info(`Scraping watched author: "${authorName}" (${authorAsin})`);
 
-  const audibleService = getAudibleService();
-  const allBooks: AudibleAudiobook[] = [];
-  let page = 1;
-  let hasMore = true;
+  // Entire-catalog watchers: relevance scan as always; new-only watchers: newest-first scan to the cutoff
+  const scan = await scanAuthorLegs(authorName, authorAsin, subscriptions, log);
 
-  while (hasMore && page <= MAX_AUTHOR_PAGES) {
-    try {
-      const result = await audibleService.searchByAuthorAsin(authorName, authorAsin, page);
-      if (result.books.length === 0) break;
-
-      allBooks.push(...result.books);
-      hasMore = result.hasMore;
-      page++;
-
-      if (hasMore) await delay(1000);
-    } catch (error) {
-      log.error(`Failed to scrape author page ${page} for "${authorName}"`, {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      break;
-    }
-  }
-
-  if (allBooks.length === 0) {
+  if (scan.found === 0) {
     log.info(`No books found for author "${authorName}"`);
     stats.authorsChecked++;
     return;
   }
 
-  stats.booksFound += allBooks.length;
+  stats.booksFound += scan.found;
 
-  // Deduplicate
-  const { books: dedupedBooks, groups } = deduplicateAndCollectGroups(allBooks);
-
-  // Persist dedup groups (fire-and-forget)
-  if (groups.length > 0) {
-    persistDedupGroups(groups).catch(() => {});
-  }
-
-  // For each user watching this author, create requests for new books
+  // For each user watching this author, create requests from the scan for their mode
   for (const subscription of subscriptions) {
     await createRequestsForUser(
       subscription.user.id,
       subscription.user.plexUsername,
-      dedupedBooks,
+      booksForWatch(scan.booksFor(subscription), subscription, `"${authorName}" for ${subscription.user.plexUsername}`, stats, log),
       log,
       stats
     );
@@ -407,8 +375,4 @@ async function getOwnedAsins(asins: string[]): Promise<Set<string>> {
   }
 
   return owned;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }

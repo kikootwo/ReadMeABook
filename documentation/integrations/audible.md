@@ -61,7 +61,7 @@ Populates every `AudibleAudiobook` field. Covered:
 ## Gotchas
 
 - **Catalog API cannot filter preorders or surface curated bestsellers.** The API's `BestSellers` sort is a right-now velocity rank that spikes on launch-day promos and preorder windows; the `-ReleaseDate` sort returns 100% future preorders. There is no server-side `release_time`, `released-only`, `customer_rights`, or alternate sort (`Reviewed`, `MostListened`, etc.) — every plausible variant was tested and silently ignored. This is why the nightly refresh job uses the curated HTML storefront pages instead.
-- **`author=` takes a name, not an ASIN.** The catalog API has no ASIN-based author param. `searchByAuthorAsin()` queries by name, then filters client-side: keeps only products where `products[].authors[].asin === authorAsin`. Preserves ASIN-authoritative author identity. Also filters by `product.language` via `isAcceptedLanguage()` for the configured region.
+- **`author=` takes a name, not an ASIN.** The catalog API has no ASIN-based author param. `searchByAuthorAsin()` queries by name, then filters client-side: keeps only products where `products[].authors[].asin === authorAsin`. Preserves ASIN-authoritative author identity. Also filters by `product.language` via `isAcceptedLanguage()` for the configured region. Optional 4th arg `{ newestFirst: true }` adds `products_sort_by=-ReleaseDate` (strictly descending, preorders first); used only by new-releases-only watched authors ([watched-lists.md](../features/watched-lists.md)). Default order is unchanged (author page, entire-catalog watches).
 - **Invalid ASIN returns HTTP 200 with stub body.** `/1.0/catalog/products/{asin}` responds 200 with `{product: {asin: INPUT}}` and no other fields. `fetchAudibleDetailsFromApi()` detects this via missing `product.title` and returns `null`.
 - **`publisher_summary` is HTML.** Converted with `stripHtml()` (`src/lib/utils/strip-html.ts`, regex-based, no cheerio) before populating `description`. Falls back to `merchandising_summary` (plain text) if `publisher_summary` missing.
 - **Audnexus details prefer `summary`.** `description` = `stripHtml(summary)` if it is a non-empty string, else `stripHtml(description)` (the short blurb). No catalog call for a missing summary.
@@ -161,7 +161,7 @@ Roughly 40% of requests return the **modern** layout, the rest **legacy**. The s
 
 **Critical:** carousel content describes *other* series. `outsideCarousel()` excludes `adbl-product-carousel` descendants from book-count, rating, cover and row selection — the "Listeners also enjoyed" carousel carries its own `slot="child-count"` values.
 
-Modern rows yield strictly richer data (`releaseDate`, `language`, real narrator arrays, author ASIN). `parseSeriesBooks()` returns legacy results only when zero modern rows parse.
+Modern rows yield strictly richer data (`releaseDate` as `YYYY-MM-DD`, `language`, real narrator arrays, author ASIN). Legacy rows carry a `Release date: MM-DD-YY` label (.com) that is not parsed, so legacy books are undated (new-releases-only watches skip them until a dated layout is served). `parseSeriesBooks()` returns legacy results only when zero modern rows parse.
 
 `scrapeSeriesPage()` logs a warning when the header reports books but zero rows parse — that signals Audible changed its markup again.
 

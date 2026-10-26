@@ -694,6 +694,7 @@ model WatchedSeries {
   seriesTitle   String    @map("series_title")
   coverArtUrl   String?   @map("cover_art_url") @db.Text
   lastCheckedAt DateTime? @map("last_checked_at")
+  newReleasesSince DateTime? @map("new_releases_since") // null = entire catalog; set = only books released from this day on
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
@@ -713,6 +714,7 @@ model WatchedAuthor {
   authorName    String    @map("author_name")
   coverArtUrl   String?   @map("cover_art_url") @db.Text
   lastCheckedAt DateTime? @map("last_checked_at")
+  newReleasesSince DateTime? @map("new_releases_since") // null = entire catalog; set = only books released from this day on
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 

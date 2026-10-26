@@ -46,7 +46,9 @@ src/components/
 - **Input** - Label, error display, validation, icons
 - **Select** - Custom styling, search/filter
 - **Modal** ✅ - Dialog overlay with backdrop, sizes (sm/md/lg/xl/full), ESC to close, body scroll lock
-- **ConfirmModal** ✅ - Confirmation dialog with customizable title, message, buttons, loading state, and variant (primary/danger)
+- **ConfirmModal** ✅ - Confirmation dialog with customizable title, message (string or node), buttons, loading state, `confirmDisabled`, and variant (primary/danger)
+- **WatchModeChoice** ✅ - `src/components/ui/WatchModeChoice.tsx`: fieldset radio group "Entire catalog / New releases only" for watched authors/series (Watch dialog, Profile Change dialog); backlog note on New → Entire. See [features/watched-lists.md](../features/watched-lists.md)
+- **WatchModeControl** ✅ - `src/components/profile/WatchModeControl.tsx`: watched card mode line (cutoff shown as its UTC day) + bordered Change button → dialog (Save disabled until changed, PATCH; a failed Save shows a `role="alert"` message)
 - **ChangePasswordModal** ✅ - Password change form for local users. Three fields (current, new, confirm), real-time validation, success/error states, auto-closes on success. Only accessible to users with `authProvider='local'`
 - **Pagination** ✅ - Traditional page navigation with prev/next buttons, smart ellipsis (shows 1...4 5 6...10)
 - **StickyPagination** ✅ - Minimal floating pill at bottom center with prev/next arrows, quick jump input, section label. Shows/hides based on section visibility (IntersectionObserver). Rounded-full design, backdrop blur, subtle shadow, auto-scroll on page change
@@ -156,11 +158,14 @@ interface ConfirmModalProps {
   onClose: () => void;
   onConfirm: () => void;
   title: string;
-  message: string;
+  message: string | React.ReactNode;
   confirmText?: string;
   cancelText?: string;
   isLoading?: boolean;
+  confirmDisabled?: boolean; // disables Confirm (e.g. nothing changed)
   variant?: 'danger' | 'primary';
+  secondaryText?: string; // optional third button between Cancel and Confirm
+  onSecondary?: () => void;
 }
 
 interface PaginationProps {
