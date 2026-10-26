@@ -71,7 +71,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
      - ❌ "E. L. James" vs "Michael James", "A. J. Smith" vs "Raj Smith" (no partial-word match)
      - Digits never join ("Book 1 T J Klune" → "book 1 tj klune"); a lone initial is untouched ("J. Smith" ≠ "John Smith")
      - Pure OR on top of checks 1-3; never rejects anything they accept
-     - Known, accepted collision: a two-letter first name equals the same initials ("Al Smith" ↔ "A. L. Smith", "Ed" ↔ "E. D."); only matters when the title (80% coverage) and the surname also match
+     - Known, accepted collision: any two-letter word right before the surname equals the same initials (a first name like "Al Smith" ↔ "A. L. Smith", or a word like "Possession as Byatt" ↔ "A. S. Byatt"); only matters when the title (80% coverage) and the surname also match
 - Handles variations:
   - Middle initials: "Dennis E. Taylor" ↔ "Dennis Taylor"
   - Name order: "Brandon Sanderson" ↔ "Sanderson, Brandon"
