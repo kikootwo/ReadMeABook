@@ -11,6 +11,7 @@ import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { fetchHardcoverList } from '@/lib/services/hardcover-api.service';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 
 const logger = RMABLogger.create('API.HardcoverShelves');
 
@@ -55,7 +56,7 @@ export async function DELETE(
       return NextResponse.json({ success: true });
     } catch (error) {
       logger.error('Failed to delete list', {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorForLog(error),
       });
       return NextResponse.json(
         { error: 'Failed to delete list' },
@@ -164,7 +165,7 @@ export async function PATCH(
           await jobQueue.addSyncShelvesJob(undefined, updated.id, 'hardcover', 0, req.user.id);
         } catch (error) {
           logger.error('Failed to trigger immediate list sync', {
-            error: error instanceof Error ? error.message : String(error),
+            error: errorForLog(error),
           });
         }
       }
@@ -172,10 +173,10 @@ export async function PATCH(
       return NextResponse.json({ success: true, shelf: updated });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return NextResponse.json({ error: 'ValidationError', details: error.errors }, { status: 400 });
+        return NextResponse.json({ error: 'ValidationError', details: zodIssueDetails(error) }, { status: 400 });
       }
       logger.error('Failed to update list', {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorForLog(error),
       });
       return NextResponse.json({ error: 'Failed to update list' }, { status: 500 });
     }

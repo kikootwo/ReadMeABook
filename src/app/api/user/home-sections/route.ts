@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { z } from 'zod';
+import { boundedArray, errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('API.User.HomeSections');
@@ -27,7 +28,7 @@ const SectionSchema = z.object({
 });
 
 const PutBodySchema = z.object({
-  sections: z.array(SectionSchema).max(MAX_SECTIONS),
+  sections: boundedArray(SectionSchema, MAX_SECTIONS),
 });
 
 /**
@@ -93,7 +94,7 @@ export async function GET(request: NextRequest) {
       });
     } catch (error) {
       logger.error('Failed to get home sections', {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorForLog(error),
       });
       return NextResponse.json(
         { error: 'FetchError', message: 'Failed to fetch home sections' },
@@ -183,12 +184,12 @@ export async function PUT(request: NextRequest) {
       });
     } catch (error) {
       logger.error('Failed to save home sections', {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorForLog(error),
       });
 
       if (error instanceof z.ZodError) {
         return NextResponse.json(
-          { error: 'ValidationError', details: error.errors },
+          { error: 'ValidationError', details: zodIssueDetails(error) },
           { status: 400 }
         );
       }

@@ -10,6 +10,7 @@ import { fetchHardcoverList } from '@/lib/services/hardcover-api.service';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 import { processBooks } from '@/lib/utils/shelf-helpers';
 
@@ -55,7 +56,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, shelves: shelvesWithMeta });
     } catch (error) {
       logger.error('Failed to list Hardcover lists', {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorForLog(error),
       });
       return NextResponse.json(
         { error: 'Failed to list Hardcover lists' },
@@ -159,7 +160,7 @@ export async function POST(request: NextRequest) {
         );
       } catch (error) {
         logger.error('Failed to trigger immediate list sync', {
-          error: error instanceof Error ? error.message : String(error),
+          error: errorForLog(error),
         });
       }
 
@@ -182,12 +183,12 @@ export async function POST(request: NextRequest) {
       );
     } catch (error) {
       logger.error('Failed to add Hardcover list', {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorForLog(error),
       });
 
       if (error instanceof z.ZodError) {
         return NextResponse.json(
-          { error: 'ValidationError', details: error.errors },
+          { error: 'ValidationError', details: zodIssueDetails(error) },
           { status: 400 },
         );
       }

@@ -13,6 +13,7 @@ import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
 import { sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
@@ -314,7 +315,7 @@ export async function POST(request: NextRequest) {
           audiobookRecord.author,
           user.plexUsername || 'Unknown User'
         ).catch((error) => {
-          logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
+          logger.error('Failed to queue notification', { error: errorForLog(error) });
         });
 
         logger.info(`Request ${newRequest.id} created, awaiting admin approval`);
@@ -350,7 +351,7 @@ export async function POST(request: NextRequest) {
           audiobookRecord.author,
           user.plexUsername || 'Unknown User'
         ).catch((error) => {
-          logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
+          logger.error('Failed to queue notification', { error: errorForLog(error) });
         });
 
         logger.info(`Request ${newRequest.id} auto-approved and download queued`);
@@ -361,13 +362,13 @@ export async function POST(request: NextRequest) {
         }, { status: 201 });
       }
     } catch (error) {
-      logger.error('Failed to create request with torrent', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to create request with torrent', { error: errorForLog(error) });
 
       if (error instanceof z.ZodError) {
         return NextResponse.json(
           {
             error: 'ValidationError',
-            details: error.errors,
+            details: zodIssueDetails(error),
           },
           { status: 400 }
         );

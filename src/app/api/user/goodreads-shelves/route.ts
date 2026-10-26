@@ -9,6 +9,7 @@ import { prisma } from '@/lib/db';
 import { fetchAndValidateRss } from '@/lib/services/goodreads-sync.service';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 import { goodreadsRssUrlSchema } from '@/lib/utils/goodreads-rss-url.schema';
 import { DUPLICATE_SHELF_MESSAGE, findShelfWithSameFeed, isUniqueConstraintError } from '@/lib/services/goodreads-shelf-match';
@@ -71,7 +72,7 @@ export async function GET(request: NextRequest) {
 
       return NextResponse.json({ success: true, shelves: shelvesWithMeta });
     } catch (error) {
-      logger.error('Failed to list shelves', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to list shelves', { error: errorForLog(error) });
       return NextResponse.json({ error: 'Failed to list shelves' }, { status: 500 });
     }
   });
@@ -140,7 +141,7 @@ export async function POST(request: NextRequest) {
         await jobQueue.addSyncShelvesJob(undefined, shelf.id, 'goodreads', 0, req.user.id);
         logger.info(`Triggered immediate sync for Goodreads shelf "${shelfName}" (${shelf.id})`);
       } catch (error) {
-        logger.error('Failed to trigger immediate shelf sync', { error: error instanceof Error ? error.message : String(error) });
+        logger.error('Failed to trigger immediate shelf sync', { error: errorForLog(error) });
       }
 
       return NextResponse.json({
@@ -158,11 +159,11 @@ export async function POST(request: NextRequest) {
         bookCount,
       }, { status: 201 });
     } catch (error) {
-      logger.error('Failed to add shelf', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to add shelf', { error: errorForLog(error) });
 
       if (error instanceof z.ZodError) {
         return NextResponse.json(
-          { error: 'ValidationError', message: error.errors[0]?.message, details: error.errors },
+          { error: 'ValidationError', message: error.issues[0]?.message, details: zodIssueDetails(error) },
           { status: 400 }
         );
       }

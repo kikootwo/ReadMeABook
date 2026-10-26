@@ -11,6 +11,7 @@ import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { goodreadsRssUrlSchema } from '@/lib/utils/goodreads-rss-url.schema';
 import { DUPLICATE_SHELF_MESSAGE, findShelfWithSameFeed, isUniqueConstraintError } from '@/lib/services/goodreads-shelf-match';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 
 const logger = RMABLogger.create('API.GoodreadsShelves');
 
@@ -52,7 +53,7 @@ export async function DELETE(
 
       return NextResponse.json({ success: true });
     } catch (error) {
-      logger.error('Failed to delete shelf', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to delete shelf', { error: errorForLog(error) });
       return NextResponse.json({ error: 'Failed to delete shelf' }, { status: 500 });
     }
   });
@@ -116,7 +117,7 @@ export async function PATCH(
           await jobQueue.addSyncShelvesJob(undefined, updated.id, 'goodreads', 0, req.user.id);
         } catch (error) {
           logger.error('Failed to trigger immediate list sync', {
-            error: error instanceof Error ? error.message : String(error),
+            error: errorForLog(error),
           });
         }
       }
@@ -125,14 +126,14 @@ export async function PATCH(
     } catch (error) {
       if (error instanceof z.ZodError) {
         return NextResponse.json(
-          { error: 'ValidationError', message: error.errors[0]?.message, details: error.errors },
+          { error: 'ValidationError', message: error.issues[0]?.message, details: zodIssueDetails(error) },
           { status: 400 }
         );
       }
       if (isUniqueConstraintError(error)) {
         return NextResponse.json({ error: 'DuplicateShelf', message: DUPLICATE_SHELF_MESSAGE }, { status: 409 });
       }
-      logger.error('Failed to update shelf', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to update shelf', { error: errorForLog(error) });
       return NextResponse.json({ error: 'Failed to update shelf' }, { status: 500 });
     }
   });

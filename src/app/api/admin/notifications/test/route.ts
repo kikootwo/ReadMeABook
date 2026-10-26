@@ -8,6 +8,7 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { getNotificationService, getRegisteredProviderTypes, NotificationPayload } from '@/lib/services/notification';
 import { RMABLogger } from '@/lib/utils/logger';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { prisma } from '@/lib/db';
 
 const logger = RMABLogger.create('API.Admin.Notifications.Test');
@@ -107,14 +108,14 @@ export async function POST(request: NextRequest) {
         }
       } catch (error) {
         logger.error('Failed to test notification', {
-          error: error instanceof Error ? error.message : String(error),
+          error: errorForLog(error),
         });
 
         if (error instanceof z.ZodError) {
           return NextResponse.json(
             {
               error: 'ValidationError',
-              details: error.errors,
+              details: zodIssueDetails(error),
             },
             { status: 400 }
           );

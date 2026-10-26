@@ -8,6 +8,7 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { guardTorrentSelection, rejectedSelectionResponse } from '@/lib/services/download-selection-guard';
 import { replaceAudiobook, ReportedIssueError } from '@/lib/services/reported-issue.service';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 
 const logger = RMABLogger.create('API.Admin.ReportedIssues.Replace');
@@ -66,7 +67,7 @@ export async function POST(
       } catch (error) {
         if (error instanceof z.ZodError) {
           return NextResponse.json(
-            { error: 'ValidationError', details: error.errors },
+            { error: 'ValidationError', details: zodIssueDetails(error) },
             { status: 400 }
           );
         }
@@ -79,7 +80,7 @@ export async function POST(
         }
 
         logger.error('Failed to replace audiobook', {
-          error: error instanceof Error ? error.message : String(error),
+          error: errorForLog(error),
         });
         return NextResponse.json(
           { error: 'ServerError', message: 'Failed to replace audiobook' },
