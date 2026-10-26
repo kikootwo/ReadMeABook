@@ -111,11 +111,14 @@ describe('someone else\'s hybrid torrent', () => {
     expect(posts('add')).toHaveLength(0);
   });
 
-  it.each(['4.4', 'legacy', '5.2'] as const)('qBittorrent %s: a magnet with its btih and a different btmh is recorded as already in the client, never touched', async (version) => {
-    fake.version = version;
+  const crafted = {
+    'its btih and a different btmh': `magnet:?xt=urn:btih:${HYBRID.v1}&xt=urn:btmh:1220${'ab'.repeat(32)}&dn=Hybrid`,
+    'only a btmh whose first 40 hex are its v1': `magnet:?xt=urn:btmh:1220${HYBRID.v1}${'cd'.repeat(12)}&dn=Hybrid`,
+  };
+  it.each(['4.4', 'legacy', '5.2'].flatMap((v) => Object.entries(crafted).map(([label, url]) => [v, label, url])))('qBittorrent %s: a magnet with %s is recorded as already in the client, never touched', async (version, _label, url) => {
+    fake.version = version as typeof fake.version;
     fake.seed(HYBRID, { addedAgoSec: 600 });
-    const crafted = `magnet:?xt=urn:btih:${HYBRID.v1}&xt=urn:btmh:1220${'ab'.repeat(32)}&dn=Hybrid`;
-    const result = await new QBittorrentService(fake.url, '', '').addDownload(crafted);
+    const result = await new QBittorrentService(fake.url, '', '').addDownload(url);
     expect.soft(result).toMatchObject({ id: HYBRID.id, alreadyInClient: true }); // soft: the checks below show the harm
     const fields = { downloadClientId: result.id, addedByRmab: !result.alreadyInClient };
     await postImport(fields);

@@ -159,6 +159,20 @@ describe('the pre-add full list cannot be read', () => {
   });
 });
 
+describe('pre-add list answers 403 once', () => {
+  it('with credentials RMAB logs in again and the add goes on', async () => {
+    fake.listFault = '403-once';
+    await expect(new QBittorrentService(fake.url, 'user', 'pass').addDownload(magnetOf(PLAIN))).resolves.toEqual({ id: PLAIN.v1, alreadyInClient: false, infoHash: PLAIN.v1 });
+    expect(fake.requests.filter((r) => r.path === '/api/v2/auth/login')).toHaveLength(2);
+    expect(fake.list).toHaveLength(1);
+  });
+});
+
+it('sends a magnet with HTML-escaped separators as the decoded link it parsed', async () => {
+  await service().addDownload(`magnet:?dn=Plain&amp;xt=urn:btih:${PLAIN.v1}`);
+  expect(fake.requests.find((r) => r.path === '/api/v2/torrents/add')?.params.urls).toBe(`magnet:?dn=Plain&xt=urn:btih:${PLAIN.v1}`);
+});
+
 describe('lookups of a torrent that is gone', () => {
   it('one getDownload call makes exactly one unfiltered lookup (the retries stay filtered)', async () => {
     await expect(service().getDownload(HYBRID.v1)).resolves.toBeNull();

@@ -7,10 +7,12 @@
  *   libtorrent 1.2 builds always use v1 and report an empty `infohash_v2`
  * - a magnet added by its btih hash only switches to the v2 ID when its metadata arrives
  * - `hashes=` (split on `|`, or `all`) matches the ID only; actions skip unknown IDs with HTTP 200
- * - duplicates (SessionImpl::findTorrent): by ID; 4.5+ also by the alternative ID (a hybrid by the
- *   v1 of non-hybrid input; a torrent listed by v1 for hybrid input). 4.4 checks the ID only.
- *   An add qBittorrent lets through ("Ok.") is still dropped by libtorrent when the v1 or v2 matches.
- * - a magnet whose btmh is not the fixture's v2 is a different torrent with the same v1
+ * - duplicates (SessionImpl::findTorrent): by ID; 4.5+ also by the alternative ID (for non-hybrid
+ *   input, v1-only or v2-only, a hybrid whose v1 is the input's ID; for hybrid input, a torrent
+ *   listed by the input's v1). 4.4 checks the ID only. An add qBittorrent lets through ("Ok.") is
+ *   still dropped by libtorrent when its v1 or truncated v2 is already in the session.
+ * - a magnet whose btmh is not the fixture's v2 is a different torrent (same v1 if it has a btih;
+ *   v2-only, ID = truncated btmh, if it has none)
  * Fixture IDs are precomputed (SHA-1 / SHA-256 of the info dicts below), never derived here.
  */
 
@@ -77,8 +79,8 @@ export class FakeQbittorrent {
   lateAdds = false;
   /** Delay for unfiltered /torrents/info answers (to overlap concurrent callers) */
   scanDelayMs = 0;
-  /** Unfiltered /torrents/info answers HTTP 503, or a JSON object instead of a list */
-  listFault: '' | '503' | 'not-a-list' = '';
+  /** Unfiltered /torrents/info answers HTTP 503, a JSON object instead of a list, or HTTP 403 once */
+  listFault: '' | '503' | 'not-a-list' | '403-once' = '';
   readonly requests: FakeRequest[] = [];
   private torrents: Record_[] = [];
   private pending: Record_[] = [];
@@ -87,6 +89,10 @@ export class FakeQbittorrent {
 
   idOf(t: Record_): string {
     return this.libtorrent === '2' && t.v2Known && t.fixture.v2 ? t.fixture.id : t.fixture.v1;
+  }
+
+  private isHybrid(t: Pick<Record_, 'fixture' | 'v2Known'>): boolean {
+    return this.libtorrent === '2' && t.v2Known && !!t.fixture.v1 && !!t.fixture.v2;
   }
 
   get list(): ReadonlyArray<{ id: string; category: string; name: string }> {
@@ -131,16 +137,17 @@ export class FakeQbittorrent {
   /** qBittorrent's duplicate check (SessionImpl::findTorrent) for a new add */
   private duplicate(fixture: Fixture, v2Known: boolean): boolean {
     const all = [...this.torrents, ...this.pending];
-    const hybridInput = this.libtorrent === '2' && v2Known && !!fixture.v2;
-    const id = hybridInput ? fixture.id : fixture.v1;
+    const hybridInput = this.isHybrid({ fixture, v2Known });
+    const id = this.idOf({ fixture, v2Known, category: '', addedOn: 0 });
     if (all.some((t) => this.idOf(t) === id)) return true;
     if (this.version === '4.4') return false;
-    return hybridInput ? all.some((t) => this.idOf(t) === fixture.v1) : all.some((t) => t.fixture.v1 === fixture.v1);
+    return hybridInput ? all.some((t) => this.idOf(t) === fixture.v1) : all.some((t) => this.isHybrid(t) && t.fixture.v1 === id);
   }
 
-  /** libtorrent refuses a torrent whose v1 or v2 is already in the session */
+  /** libtorrent refuses a torrent whose v1 or truncated v2 is already in the session */
   private sessionHas(fixture: Fixture): boolean {
-    return [...this.torrents, ...this.pending].some((t) => t.fixture.v1 === fixture.v1 || (!!fixture.v2 && t.fixture.v2 === fixture.v2));
+    const keys = (f: Fixture) => [f.v1, f.v2?.slice(0, 40)].filter(Boolean);
+    return [...this.torrents, ...this.pending].some((t) => keys(t.fixture).some((k) => keys(fixture).includes(k)));
   }
 
   private add(body: string, contentType: string): { status: number; body: unknown } {
@@ -149,10 +156,11 @@ export class FakeQbittorrent {
       for (const f of [HYBRID, PLAIN]) if (body.includes(torrentFile(f).toString('latin1'))) adds.push({ fixture: f, v2Known: true });
     } else {
       for (const url of (new URLSearchParams(body).get('urls') ?? '').split('\n').filter(Boolean)) {
-        const f = [HYBRID, PLAIN].find((x) => url.toLowerCase().includes(x.v1) || url.toUpperCase().includes(x.b32));
+        const btih = /urn:btih:([0-9a-z]+)/i.exec(url)?.[1];
         const btmh = /urn:btmh:1220([0-9a-f]{64})/i.exec(url)?.[1].toLowerCase();
-        const other = btmh && btmh !== f?.v2 ? { v2: btmh, id: btmh.slice(0, 40), name: `${f?.name} (other v2)` } : {};
-        if (f) adds.push({ fixture: { ...f, ...other }, v2Known: !!btmh });
+        const f = [HYBRID, PLAIN].find((x) => (btih ? btih.toLowerCase() === x.v1 || btih.toUpperCase() === x.b32 : btmh === x.v2));
+        const other = btmh && btmh !== f?.v2 ? { v2: btmh, id: btmh.slice(0, 40), name: `${f?.name ?? 'v2-only'} (other v2)` } : null;
+        if (f || other) adds.push({ fixture: f ? { ...f, ...other } : { info: '', v1: '', b32: '', ...other! }, v2Known: !!btmh });
       }
     }
     const ids: string[] = [];
@@ -174,7 +182,7 @@ export class FakeQbittorrent {
     return { status: 200, body: ids.length && !failures ? 'Ok.' : 'Fails.' };
   }
 
-  private async handle(req: IncomingMessage): Promise<{ status: number; body: unknown }> {
+  private async handle(req: IncomingMessage): Promise<{ status: number; body: unknown; headers?: Record<string, string> }> {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
@@ -184,10 +192,16 @@ export class FakeQbittorrent {
     this.requests.push({ path: url.pathname, params });
     const targets = () => this.select(params.hashes);
     switch (url.pathname) {
+      case '/api/v2/auth/login':
+        return { status: 200, body: 'Ok.', headers: { 'Set-Cookie': 'SID=fake; HttpOnly; path=/' } };
       case '/api/v2/torrents/categories':
         return { status: 200, body: { readmeabook: { savePath: '/downloads' } } };
       case '/api/v2/torrents/info':
         if (params.hashes === undefined && this.scanDelayMs) await new Promise((r) => setTimeout(r, this.scanDelayMs));
+        if (params.hashes === undefined && this.listFault === '403-once') {
+          this.listFault = '';
+          return { status: 403, body: 'Forbidden' };
+        }
         if (params.hashes === undefined && this.listFault) return this.listFault === '503' ? { status: 503, body: 'Service Unavailable' } : { status: 200, body: { error: 'busy' } };
         return { status: 200, body: targets().map((t) => this.entry(t)) };
       case '/api/v2/torrents/add':
@@ -207,8 +221,9 @@ export class FakeQbittorrent {
 
   async start(): Promise<void> {
     this.server = createServer((req, res) => {
-      this.handle(req).then(({ status, body }) => {
+      this.handle(req).then(({ status, body, headers }) => {
         res.statusCode = status;
+        for (const [name, value] of Object.entries(headers ?? {})) res.setHeader(name, value);
         res.setHeader('Content-Type', typeof body === 'string' ? 'text/plain' : 'application/json');
         res.end(typeof body === 'string' ? body : JSON.stringify(body));
       }, () => res.writeHead(500).end());
