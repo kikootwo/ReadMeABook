@@ -140,7 +140,7 @@ describe('series page search failures', () => {
     await waitFor(() => expect(document.activeElement).toBe(again));
   });
 
-  it('shows "No series found" for an empty result, with no error panel', async () => {
+  it('guard: shows "No series found" for an empty result, with no error panel', async () => {
     api.fetcher = async () => ({ success: true, series: [], query: QUERY });
 
     await renderPage();

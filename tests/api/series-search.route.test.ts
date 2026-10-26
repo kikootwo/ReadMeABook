@@ -38,7 +38,7 @@ describe('GET /api/series/search', () => {
     state.queries = [];
   });
 
-  it('returns the series for a trimmed query', async () => {
+  it('guard: returns the series for a trimmed query', async () => {
     state.search = async () => [{ asin: 'B01N9CUGHG', title: 'Expeditionary Force' }];
 
     const { status, body } = await get('  expeditionary force ');
@@ -60,7 +60,7 @@ describe('GET /api/series/search', () => {
     expect(body).toEqual({ error: 'AudibleUnavailable', message: "Audible didn't return series results. Try again in a moment." });
   });
 
-  it('answers 500 for any other failure', async () => {
+  it('guard: answers 500 for any other failure', async () => {
     state.search = async () => {
       throw new TypeError('boom');
     };
@@ -71,14 +71,14 @@ describe('GET /api/series/search', () => {
     expect(body.error).toBe('SearchError');
   });
 
-  it('answers 400 for a whitespace-only query without searching', async () => {
+  it('guard: answers 400 for a whitespace-only query without searching', async () => {
     const { status } = await get('   ');
 
     expect(status).toBe(400);
     expect(state.queries).toEqual([]);
   });
 
-  it('answers 401 without a user', async () => {
+  it('guard: answers 401 without a user', async () => {
     state.user = null;
 
     const { status } = await get('expeditionary force');
