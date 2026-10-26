@@ -275,7 +275,7 @@ describe('Request action routes', () => {
     prismaMock.request.update.mockResolvedValueOnce({ id: 'req-2', status: 'pending' });
 
     const { POST } = await import('@/app/api/requests/[id]/manual-search/route');
-    await POST({} as any, { params: Promise.resolve({ id: 'req-2' }) });
+    await POST({} as never, { params: Promise.resolve({ id: 'req-2' }) });
 
     expect(prismaMock.request.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'req-2' },
@@ -369,17 +369,17 @@ describe('Request action routes', () => {
       status: 'failed',
       autoRerequestCount: 4,
       audiobook: { id: 'ab-2', title: 'Title', author: 'Author' },
-    } as any);
+    } as never);
     prismaMock.user.findUnique.mockResolvedValueOnce({
       id: 'user-1',
       role: 'admin',
       autoApproveRequests: null,
       plexUsername: 'testuser',
-    } as any);
-    prismaMock.request.update.mockResolvedValueOnce({ id: 'req-3', status: 'downloading', audiobook: { title: 'Title' } } as any);
+    } as never);
+    prismaMock.request.update.mockResolvedValueOnce({ id: 'req-3', status: 'downloading', audiobook: { title: 'Title' } } as never);
 
     const { POST } = await import('@/app/api/requests/[id]/select-torrent/route');
-    const response = await POST({} as any, { params: Promise.resolve({ id: 'req-3' }) });
+    const response = await POST({} as never, { params: Promise.resolve({ id: 'req-3' }) });
 
     expect((await response.json()).success).toBe(true);
     expect(prismaMock.request.update).toHaveBeenCalledWith(expect.objectContaining({

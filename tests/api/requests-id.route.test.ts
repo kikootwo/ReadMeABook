@@ -352,7 +352,7 @@ describe('Request by ID API routes', () => {
     prismaMock.request.update.mockResolvedValueOnce({ id: 'req-3', status: 'pending', audiobook: { id: 'ab-2' } });
 
     const { PATCH } = await import('@/app/api/requests/[id]/route');
-    const response = await PATCH({} as any, { params: Promise.resolve({ id: 'req-3' }) });
+    const response = await PATCH({} as never, { params: Promise.resolve({ id: 'req-3' }) });
 
     expect(response.status).toBe(200);
     expect(prismaMock.request.update).toHaveBeenCalledWith(expect.objectContaining({
@@ -378,7 +378,7 @@ describe('Request by ID API routes', () => {
     prismaMock.request.update.mockResolvedValueOnce({ id: 'req-5', status: 'processing', audiobook: { id: 'ab-5' } });
 
     const { PATCH } = await import('@/app/api/requests/[id]/route');
-    const response = await PATCH({} as any, { params: Promise.resolve({ id: 'req-5' }) });
+    const response = await PATCH({} as never, { params: Promise.resolve({ id: 'req-5' }) });
 
     expect(response.status).toBe(200);
     expect(prismaMock.request.update).toHaveBeenCalledWith(expect.objectContaining({
