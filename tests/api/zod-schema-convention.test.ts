@@ -5,9 +5,9 @@
  * Request arrays go through boundedArray (src/lib/utils/zod-validation.ts), which checks the length
  * before any element is parsed; zod's own max check only covers a leading .max() on an array.
  * Caught in src/ (outside zod-validation.ts): z.array/z.set/z.map/z.tuple (also z?.x, z['x'], split
- * across lines), the .array() schema method, any zod import other than `import { z } from 'zod'`
- * (named builders, namespace or default imports), and any zod subpath (zod/v3, zod/v4, zod/compile, ...)
- * in import, export-from, require() or import().
+ * across lines), the .array() schema method, import/export-from statements on 'zod' other than
+ * `import { z } from 'zod'` (named builders, namespace or default imports), and any zod subpath
+ * (zod/v3, zod/v4, zod/compile, ...) in import, export-from, require() or import().
  */
 
 import { readdirSync, readFileSync } from 'fs';

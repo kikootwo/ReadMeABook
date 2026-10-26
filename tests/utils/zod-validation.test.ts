@@ -94,6 +94,15 @@ describe('boundedArray', () => {
   });
 
   it('checks the minimum before element parsing', () => {
+    const visit = vi.fn(() => true);
+    const short = issuesOf(boundedArray(z.custom<number>(visit), 5, { min: 3 }), [1, 2]);
+    expect(short).toHaveLength(1);
+    expect(short[0]).toMatchObject({ code: 'too_small', minimum: 3 });
+    expect(visit).not.toHaveBeenCalled();
+    const parentCheck = vi.fn(() => true);
+    z.object({ list: boundedArray(z.custom<number>(visit), 5, { min: 3 }) }).refine(parentCheck).safeParse({ list: [1, 2] });
+    expect(parentCheck).not.toHaveBeenCalled();
+    expect(visit).not.toHaveBeenCalled();
     const schema = boundedArray(Item, 5, { min: 1 });
     expect(issuesOf(schema, [])).toEqual(issuesOf(z.array(Item).min(1), []));
     expect(schema.parse([{ name: 'a', count: 1 }])).toHaveLength(1);
