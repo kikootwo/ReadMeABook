@@ -8,7 +8,7 @@
  */
 
 import * as path from 'path';
-import type { AudioFileMetadata, DiscoveredAudiobook } from './bulk-import-scanner';
+import { buildGroupingKey, UNGROUPED_PREFIX, type AudioFileMetadata, type DiscoveredAudiobook } from './bulk-import-scanner';
 import { isConfiguredRoot } from './disc-layout-fs';
 import { naturalCompare, parseDiscFolderName, stripDiscSuffix, type DiscFolderName } from './disc-layout';
 
@@ -25,24 +25,16 @@ export interface DiscFoldContext {
   extractAsin: (name: string) => string | null;
 }
 
-const UNGROUPED_PREFIX = '__ungrouped_';
-
 const isTagged = (d: DiscoveredAudiobook) => !d.groupingKey.startsWith(UNGROUPED_PREFIX);
 
 /** The grouping key (title|author|narrator) with a disc suffix stripped from the album title. */
 function foldKey(metadata: AudioFileMetadata): string {
-  const normalize = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  return [normalize(stripDiscSuffix(metadata.title || '')), normalize(metadata.author), normalize(metadata.narrator)].join('|');
+  return buildGroupingKey({ ...metadata, title: stripDiscSuffix(metadata.title || '') }) ?? '';
 }
 
 function parentOf(folderPath: string): string {
   const cut = folderPath.lastIndexOf('/');
   return cut <= 0 ? '/' : folderPath.slice(0, cut);
-}
-
-function isAtOrBelow(dir: string, root: string): boolean {
-  const base = root.endsWith('/') ? root : `${root}/`;
-  return dir === root || dir.startsWith(base);
 }
 
 interface DiscEntry {
@@ -105,10 +97,11 @@ function buildFolded(
 
 /**
  * Fold disc folders into their book folder. A book folder qualifies when two
- * or more of its direct children are disc folders with audio of their own, it
- * is at or below the scan root, and it is not a configured root. Its own audio
- * joins when untagged or when its key agrees with the discs'. Anything that
- * does not qualify is returned unchanged.
+ * or more of its direct children are disc folders with audio of their own and
+ * it is not a configured root. Its own audio joins when untagged or when its
+ * key agrees with the discs'. Deepest book folders fold first; a book folder
+ * whose members another fold already took stays unfolded, so no file is in two
+ * entries. Anything that does not qualify is returned unchanged.
  */
 export async function foldDiscFolders(
   discoveries: DiscoveredAudiobook[],
@@ -128,13 +121,15 @@ export async function foldDiscFolders(
 
   // Each folded member maps to its book's single folded discovery
   const foldedBy = new Map<DiscoveredAudiobook, DiscoveredAudiobook>();
-  for (const [book, discs] of byBook) {
-    if (new Set(discs.map((d) => d.discovery.folderPath)).size < 2 || !isAtOrBelow(book, root)) continue;
+  const depth = (p: string) => p.split('/').length;
+  for (const [book, discs] of [...byBook].sort(([a], [b]) => depth(b) - depth(a))) {
+    if (new Set(discs.map((d) => d.discovery.folderPath)).size < 2 || discs.some((d) => foldedBy.has(d.discovery))) continue;
     const decision = foldDecision(discs, perFolder);
     if (!decision.fold) continue;
     if (await isConfiguredRoot(book, ctx.protectedRoots)) continue;
     const own = discoveries.filter(
-      (d) => d.folderPath === book && (!isTagged(d) || (decision.key !== undefined && foldKey(d.metadata) === decision.key))
+      (d) => d.folderPath === book && !foldedBy.has(d) &&
+        (!isTagged(d) || (decision.key !== undefined && foldKey(d.metadata) === decision.key))
     );
     const folded = buildFolded(book, discs, own, decision.key, ctx, root);
     for (const member of [...own, ...discs.map((d) => d.discovery)]) foldedBy.set(member, folded);

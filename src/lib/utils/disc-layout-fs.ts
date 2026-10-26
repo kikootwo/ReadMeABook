@@ -9,27 +9,26 @@
  */
 
 import * as fs from 'fs/promises';
+import type { Dirent } from 'fs';
 import * as path from 'path';
-import { AUDIO_EXTENSIONS } from '../constants/audio-formats';
+import { asyncPool, isAudioFile } from './bulk-import-scanner';
 import { canonicalize, isSameEntry, isStrictlyInside } from './delete-guard';
 import { probeAudioFile } from './chapter-merger';
 import type { RMABLogger } from './logger';
 import {
   discBookFiles,
+  discTrackTags,
   isPermutation,
   orderDiscLayout,
   parseDiscFolderName,
   resolveDiscLayout,
   slashEntryProblem,
   type DiscLayout,
+  type DiscTrackTags,
 } from './disc-layout';
 
 /** Concurrent ffprobe calls when reading track tags for the import order. */
 const PROBE_CONCURRENCY = 4;
-
-function isAudioName(name: string): boolean {
-  return (AUDIO_EXTENSIONS as readonly string[]).includes(path.extname(name).toLowerCase());
-}
 
 async function readEntries(dir: string) {
   try {
@@ -59,33 +58,37 @@ export interface DiscBook {
  * each disc-named child folder. Null unless two or more disc folders hold
  * audio, or when `dir` is a configured root. Uses Dirent types only, so
  * symlinked folders and files are never listed. Paths use the raw entry names.
+ * `entries`: the caller's own listing of `dir`, when it already has one.
  */
-export async function resolveDiscBook(dir: string, roots: readonly string[]): Promise<DiscBook | null> {
-  const entries = await readEntries(dir);
+export async function resolveDiscBook(
+  dir: string,
+  roots: readonly string[],
+  entries: Dirent[] | null = null
+): Promise<DiscBook | null> {
+  entries ??= await readEntries(dir);
   if (!entries) return null;
   const keys: string[] = [];
   let discFolders = 0;
   for (const entry of entries) {
-    if (entry.isFile() && isAudioName(entry.name)) {
+    if (entry.isFile() && isAudioFile(entry.name)) {
       keys.push(entry.name);
     } else if (entry.isDirectory() && parseDiscFolderName(entry.name)) {
       const children = await readEntries(path.join(dir, entry.name));
-      const audio = (children ?? []).filter((c) => c.isFile() && isAudioName(c.name));
+      const audio = (children ?? []).filter((c) => c.isFile() && isAudioFile(c.name));
       if (audio.length > 0) discFolders++;
       keys.push(...audio.map((c) => `${entry.name}/${c.name}`));
     }
   }
-  if (discFolders < 2) return null;
-  const layout = resolveDiscLayout(keys);
-  if (!layout || layout.prefix !== '' || layout.otherFiles.length > 0) return null;
-  if (await isConfiguredRoot(dir, roots)) return null;
+  // Keys are root files and `disc/file` only, so a layout has no wrapper prefix and no other files
+  const layout = discFolders < 2 ? null : resolveDiscLayout(keys);
+  if (!layout || (await isConfiguredRoot(dir, roots))) return null;
   return { layout, files: discBookFiles(layout) };
 }
 
 /** Audio files directly inside `dir` (Dirent types, as the folder listing shows them). */
 async function countDirectAudio(dir: string): Promise<number> {
   const entries = await readEntries(dir);
-  return (entries ?? []).filter((e) => e.isFile() && isAudioName(e.name)).length;
+  return (entries ?? []).filter((e) => e.isFile() && isAudioFile(e.name)).length;
 }
 
 export type ManualSelection =
@@ -127,7 +130,7 @@ export async function resolveManualSelection(
     if (fileName.includes('\\') || fileName === '..' || fileName === '.') {
       return bad(400, `Invalid file name: ${fileName}`);
     }
-    if (!isAudioName(fileName)) return bad(400, `Not an audio file: ${fileName}`);
+    if (!isAudioFile(fileName)) return bad(400, `Not an audio file: ${fileName}`);
     try {
       const fileStat = await fs.stat(path.join(folder, fileName));
       if (!fileStat.isFile()) return bad(400, `Not a file: ${fileName}`);
@@ -150,51 +153,52 @@ export class InPlaceDiscImportError extends Error {
 }
 
 async function readTrackNumbers(baseDir: string, files: Array<{ key: string; file: string }>) {
-  const tracks = new Map<string, number | undefined>();
-  let next = 0;
-  const worker = async () => {
-    while (next < files.length) {
-      const { key, file } = files[next++];
-      try {
-        tracks.set(key, (await probeAudioFile(path.join(baseDir, file))).trackNumber);
-      } catch {
-        tracks.set(key, undefined);
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(PROBE_CONCURRENCY, files.length) }, worker));
-  return tracks;
+  const tracks = await asyncPool(files, PROBE_CONCURRENCY, ({ file }) =>
+    probeAudioFile(path.join(baseDir, file)).then((probe) => probe.trackNumber, () => undefined)
+  );
+  return new Map(files.map(({ key }, i) => [key, tracks[i]]));
 }
 
 export interface DiscImportOptions {
   targetPath: string;
   /** Manual and Bulk Import: stop when the source is the target folder or inside it. */
   stopInPlace?: boolean;
+  /** The request's file selection: an entry with a '/' names a disc folder's file, so the stop applies. */
+  selectedFiles?: string[];
   logger?: RMABLogger;
 }
 
+export interface DiscImport {
+  /** The audio files (as walked) in import order. */
+  order: string[];
+  /** Disc and track tag values per file (as walked). */
+  tags: Map<string, DiscTrackTags>;
+}
+
 /**
- * Import order for a multi-disc source (relative paths as the organizer walked
- * them), or null when the files are not a multi-disc layout: then the caller
- * keeps its order. Throws InPlaceDiscImportError (before probing) when asked to
- * stop an in-place import. A probe failure or an order that is not a
+ * Import order and disc/track tag values for a multi-disc source (relative
+ * paths as the organizer walked them), or null when the files are not a
+ * multi-disc layout: then the caller keeps its order. When asked to stop an
+ * in-place import, throws InPlaceDiscImportError before probing, for a
+ * multi-disc layout and for any selection that names a disc folder's file
+ * (one disc of a book included). A probe failure or an order that is not a
  * permutation of the input falls back to null, never an error.
  */
 export async function orderDiscImport(
   sourceDir: string,
   audioFiles: string[],
   options: DiscImportOptions
-): Promise<string[] | null> {
+): Promise<DiscImport | null> {
   const byKey = new Map(audioFiles.map((file) => [file.split(path.sep).join('/'), file]));
   const keys = [...byKey.keys()];
   const layout = byKey.size === audioFiles.length ? resolveDiscLayout(keys) : null;
-  if (!layout) return null;
 
-  if (options.stopInPlace) {
+  if (options.stopInPlace && (layout || options.selectedFiles?.some((f) => f.includes('/')))) {
     const source = await canonicalize(sourceDir);
     const target = await canonicalize(options.targetPath);
     if (isSameEntry(source, target) || isStrictlyInside(source, target)) throw new InPlaceDiscImportError();
   }
+  if (!layout) return null;
 
   const discFiles = layout.discs.flatMap((d) => d.files).map((key) => ({ key, file: byKey.get(key)! }));
   const tracks = await readTrackNumbers(sourceDir, discFiles);
@@ -210,5 +214,9 @@ export async function orderDiscImport(
     `Multi-disc layout: ${layout.discs.length} disc folders, ${order.length} files ordered disc by disc` +
       (notes.byTracks.length > 0 ? ` (track tags used in ${notes.byTracks.join(', ')})` : '')
   );
-  return order.map((key) => byKey.get(key)!);
+  const tags = discTrackTags(layout, order);
+  return {
+    order: order.map((key) => byKey.get(key)!),
+    tags: new Map(order.map((key) => [byKey.get(key)!, tags.get(key)!])),
+  };
 }

@@ -135,8 +135,9 @@ export async function GET(request: NextRequest) {
         }
         audioFiles.sort((a, b) => a.name.localeCompare(b.name));
 
-        // A multi-disc book folder also lists its disc folders' audio (`Disc 1/01.m4a`), in import order
-        const discBook = await resolveDiscBook(normalizedPath, allowedRoots);
+        // A multi-disc book folder also lists its disc folders' audio (`Disc 1/01.m4a`), disc by disc
+        // (file names inside a disc: the import may reorder them by track tags)
+        const discBook = await resolveDiscBook(normalizedPath, allowedRoots, dirEntries);
         if (discBook) {
           const sizes = new Map(audioFiles.map((f) => [f.name, f.size]));
           const bookFiles = await Promise.all(
@@ -145,12 +146,7 @@ export async function GET(request: NextRequest) {
               size: sizes.get(name) ?? (await fs.stat(pathModule.join(normalizedPath, name)).then((s) => s.size, () => 0)),
             }))
           );
-          return NextResponse.json({
-            path: normalizedPath,
-            entries,
-            audioFiles: bookFiles,
-            discCount: discBook.layout.discs.length,
-          });
+          return NextResponse.json({ path: normalizedPath, entries, audioFiles: bookFiles });
         }
 
         return NextResponse.json({ path: normalizedPath, entries, audioFiles });

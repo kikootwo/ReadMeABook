@@ -20,6 +20,7 @@ import {
   truncateRawText,
   type BookDetails,
 } from './metadata-text';
+import type { DiscTrackTags } from './disc-layout';
 
 const execFilePromise = promisify(execFile);
 
@@ -106,7 +107,8 @@ export async function addMp4FreeformTags(
  */
 export async function tagAudioFileMetadata(
   filePath: string,
-  metadata: MetadataTaggingOptions
+  metadata: MetadataTaggingOptions,
+  position?: DiscTrackTags
 ): Promise<TaggingResult> {
   try {
     // Check if file exists (its size scales the ffmpeg timeout)
@@ -319,6 +321,12 @@ export async function tagAudioFileMetadata(
       args.push('-f', 'mp3');
     }
 
+    // A multi-disc book's disc and track (`d/D`, `n/N`), one argv element each: trkn/disk, TPOS/TRCK, DISCNUMBER/TRACKNUMBER
+    const isPosition = (v: string) => /^\d{1,4}\/\d{1,4}$/.test(v);
+    if (position && isPosition(position.disc) && isPosition(position.track)) {
+      args.push('-metadata', `disc=${position.disc}`, '-metadata', `track=${position.track}`);
+    }
+
     // Output to temp file
     args.push(tempFile);
 
@@ -352,17 +360,18 @@ export async function tagAudioFileMetadata(
 }
 
 /**
- * Tag multiple audio files with metadata
+ * Tag multiple audio files with metadata (`positions`: each file's disc and track, when it has one)
  */
 export async function tagMultipleFiles(
   filePaths: string[],
-  metadata: MetadataTaggingOptions
+  metadata: MetadataTaggingOptions,
+  positions?: Array<DiscTrackTags | undefined>
 ): Promise<TaggingResult[]> {
   const results: TaggingResult[] = [];
 
-  for (const filePath of filePaths) {
-    const result = await tagAudioFileMetadata(filePath, metadata);
-    results.push(result);
+  for (const [i, filePath] of filePaths.entries()) {
+    const position = positions?.[i];
+    results.push(await (position ? tagAudioFileMetadata(filePath, metadata, position) : tagAudioFileMetadata(filePath, metadata)));
   }
 
   return results;

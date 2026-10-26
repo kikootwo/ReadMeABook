@@ -23,6 +23,8 @@ export const MAX_SCAN_DEPTH = 10;
 
 /** Maximum concurrent ffprobe calls for metadata reads. */
 const METADATA_CONCURRENCY = 10;
+/** Grouping keys of discoveries without title tags start with this (unique per folder). */
+export const UNGROUPED_PREFIX = '__ungrouped_';
 
 /** Metadata extracted from an audio file via ffprobe. */
 export interface AudioFileMetadata {
@@ -59,7 +61,7 @@ export interface ScanProgress {
 /**
  * Check if a file has a supported audio extension.
  */
-function isAudioFile(filename: string): boolean {
+export function isAudioFile(filename: string): boolean {
   const ext = path.extname(filename).toLowerCase();
   return (AUDIO_EXTENSIONS as readonly string[]).includes(ext);
 }
@@ -220,7 +222,7 @@ export function buildSearchTerm(
  * Used to determine which files belong to the same book.
  * Returns null if metadata has no title (ungroupable by metadata).
  */
-function buildGroupingKey(metadata: AudioFileMetadata): string | null {
+export function buildGroupingKey(metadata: AudioFileMetadata): string | null {
   if (!metadata.title) return null;
 
   const normalize = (s?: string) =>
@@ -269,7 +271,7 @@ async function scanDirectoryForAudio(
 /**
  * Run async tasks with a concurrency limit.
  */
-async function asyncPool<T, R>(
+export async function asyncPool<T, R>(
   items: T[],
   concurrency: number,
   fn: (item: T) => Promise<R>
@@ -352,10 +354,8 @@ async function groupAudioFilesByMetadata(
         });
       }
     } else {
-      // No title metadata — collect all such files under one folder-level group.
-      // Key must start with '__ungrouped_' so deduplicateDiscoveries treats it
-      // as unique per folder (prefixes it with folderPath before deduplication).
-      const ungroupedKey = '__ungrouped_folder';
+      // No title metadata — one folder-level group (deduplicateDiscoveries keeps UNGROUPED_PREFIX keys per folder)
+      const ungroupedKey = `${UNGROUPED_PREFIX}folder`;
       const existing = groups.get(ungroupedKey);
       if (existing) {
         existing.files.push(fileName);
@@ -413,7 +413,7 @@ function deduplicateDiscoveries(
 
   for (const disc of discoveries) {
     // Skip ungrouped entries (each is unique)
-    if (disc.groupingKey.startsWith('__ungrouped_')) {
+    if (disc.groupingKey.startsWith(UNGROUPED_PREFIX)) {
       const key = `${disc.folderPath}::${disc.groupingKey}`;
       byKey.set(key, [disc]);
       continue;
