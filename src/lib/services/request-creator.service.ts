@@ -2,7 +2,7 @@
  * Component: Request Creator Service
  * Documentation: documentation/backend/services/goodreads-sync.md
  *
- * Shared request-creation logic used by both the API route and Goodreads sync.
+ * Shared request-creation logic used by the API route and the automatic callers (shelf sync, watched lists: `automatic: true`).
  * Encapsulates: duplicate detection, library check, Audnexus enrichment,
  * audiobook record creation, approval flow, notification queuing, and search job triggering.
  */
@@ -17,6 +17,7 @@ import { shouldSkipAutoSearch } from '@/lib/utils/release-date';
 import { seedAsin, getSiblingAsins } from '@/lib/services/works.service';
 import { isLibraryCoverSource, sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 import { createRequestReplacing, RE_REQUESTABLE_STATUSES, RequestAlreadyReplacedError } from '@/lib/services/request-rerequest';
+import { decideAutoReRequest } from '@/lib/services/auto-rerequest';
 
 const logger = RMABLogger.create('RequestCreator');
 
@@ -33,11 +34,13 @@ export interface CreateRequestOptions {
   skipAutoSearch?: boolean;
   /** When true, skip the per-user ignore list check (used for manual requests) */
   bypassIgnore?: boolean;
+  /** Shelf sync and watched lists: never replace a cancelled request, back off on failures (auto-rerequest.ts) */
+  automatic?: boolean;
 }
 
 export type CreateRequestResult =
   | { success: true; request: any }
-  | { success: false; reason: 'already_available' | 'being_processed' | 'duplicate' | 'user_not_found' | 'ignored'; message: string };
+  | { success: false; reason: 'already_available' | 'being_processed' | 'duplicate' | 'user_not_found' | 'ignored' | 'cancelled_by_user' | 'retry_not_due'; message: string };
 
 /**
  * Create a request for a user, with full duplicate detection, library checks,
@@ -48,7 +51,7 @@ export async function createRequestForUser(
   audiobook: CreateRequestInput,
   options: CreateRequestOptions = {}
 ): Promise<CreateRequestResult> {
-  const { skipAutoSearch = false, bypassIgnore = false } = options;
+  const { skipAutoSearch = false, bypassIgnore = false, automatic = false } = options;
 
   // Check for existing active request (downloaded/available) for this ASIN
   const existingActiveRequest = await prisma.request.findFirst({
@@ -198,6 +201,7 @@ export async function createRequestForUser(
   // A failed/warn/cancelled request is replaced by the new one (atomically, below),
   // keeping its blocklist; it is not touched until the new request is created
   let replacesRequest: { id: string; customSearchTerms: string | null } | null = null;
+  let autoRerequestCount: number | undefined; // set only by automatic callers; user requests start at 0
   if (existingRequest) {
     if (!RE_REQUESTABLE_STATUSES.includes(existingRequest.status)) {
       return {
@@ -205,6 +209,11 @@ export async function createRequestForUser(
         reason: 'duplicate',
         message: 'You have already requested this audiobook',
       };
+    }
+    if (automatic) {
+      const decision = await decideAutoReRequest(existingRequest, audiobookRecord.title);
+      if (decision.skip) return decision.skip;
+      autoRerequestCount = decision.nextCount;
     }
     replacesRequest = { id: existingRequest.id, customSearchTerms: existingRequest.customSearchTerms ?? null };
   }
@@ -295,6 +304,7 @@ export async function createRequestForUser(
           progress: 0,
           releaseDate,
           ...(replacesRequest?.customSearchTerms && { customSearchTerms: replacesRequest.customSearchTerms }),
+          ...(autoRerequestCount !== undefined && { autoRerequestCount }),
         },
         include: {
           audiobook: true,

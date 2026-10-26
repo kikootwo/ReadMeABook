@@ -3,8 +3,9 @@
  * Documentation: documentation/admin-features/release-blocklist.md
  *
  * A failed/warn/cancelled request can be requested again (user re-request,
- * shelf sync, watched lists, interactive pick). The old request is replaced
- * in one transaction:
+ * interactive pick; shelf sync and watched lists only as auto-rerequest.ts
+ * allows: never a cancelled one, failures on a backoff). The old request is
+ * replaced in one transaction:
  *   1. create the new request
  *   2. move the old request's BlockedRelease rows to it (same row ids)
  *   3. delete the old request, guarded by its re-requestable status

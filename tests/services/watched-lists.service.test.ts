@@ -182,7 +182,7 @@ describe('processWatchedLists', () => {
     expect(stats.skippedOwned).toBe(1);
     expect(stats.requestsCreated).toBe(1);
     expect(mockCreateRequestForUser).toHaveBeenCalledTimes(1);
-    expect(mockCreateRequestForUser).toHaveBeenCalledWith('user-1', expect.objectContaining({ asin: 'B001BOOK02' }));
+    expect(mockCreateRequestForUser).toHaveBeenCalledWith('user-1', expect.objectContaining({ asin: 'B001BOOK02' }), { automatic: true });
   });
 
   it('processes watched authors and creates requests', async () => {

@@ -343,13 +343,13 @@ async function createRequestsForUser(
         narrator: book.narrator,
         description: book.description,
         coverArtUrl: book.coverArtUrl,
-      });
+      }, { automatic: true });
 
       if (result.success) {
         stats.requestsCreated++;
         log.info(`Auto-requested "${book.title}" by ${book.author} for ${username}`);
       } else {
-        // already_available, being_processed, duplicate — all expected
+        // already_available, being_processed, duplicate, ignored, cancelled_by_user, retry_not_due — all expected
         stats.skippedExisting++;
       }
     } catch (error) {

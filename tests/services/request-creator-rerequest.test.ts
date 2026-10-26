@@ -2,7 +2,7 @@
  * Component: Request Creator Re-request Tests (#312: the blocklist survives a re-request)
  * Documentation: documentation/admin-features/release-blocklist.md
  *
- * createRequestForUser (shelf sync, watched lists, the user's re-request) replaces a
+ * createRequestForUser (the user's re-request; shelf sync and watched lists as #409 allows) replaces a
  * failed/warn/cancelled request atomically: reads and early returns first, then one
  * transaction (create, move blocklist, guarded delete), then jobs and notifications.
  */
@@ -126,5 +126,35 @@ describe('createRequestForUser re-request (#312)', () => {
 
     expect(await createRequestForUser(USER, BOOK)).toMatchObject({ success: false, reason: 'duplicate' });
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  // #409: the user's own request ignores the automatic backoff and the cancelled rule, and resets the count
+  it.each([
+    ['failed', {}], ['warn', {}], ['cancelled', {}],
+    ['failed', { bypassIgnore: true }], ['cancelled', { bypassIgnore: true }],
+  ])('a user request replaces a %s request at once, even mid-backoff, and starts the count at 0 (%o)', async (status, options) => {
+    requests({ id: 'req-old', status, customSearchTerms: null, createdAt: new Date(), updatedAt: new Date(), autoRerequestCount: 4 });
+
+    const result = await createRequestForUser(USER, BOOK, options);
+
+    expect(result.success).toBe(true);
+    expect(txState.outcome).toBe('committed');
+    expect(prismaMock.blockedRelease.count).not.toHaveBeenCalled();
+    expect(txMock.request.create.mock.calls[0][0].data).not.toHaveProperty('autoRerequestCount');
+  });
+
+  it.each([
+    ['cancelled', 'cancelled_by_user'],
+    ['failed', 'retry_not_due'],
+  ])('an automatic caller skips a %s request (%s): no transaction, no job, no notification', async (status, reason) => {
+    requests({ id: 'req-old', status, customSearchTerms: null, createdAt: new Date(), updatedAt: new Date(), autoRerequestCount: 0 });
+    prismaMock.blockedRelease.count.mockResolvedValue(0);
+
+    const result = await createRequestForUser(USER, BOOK, { automatic: true });
+
+    expect(result).toMatchObject({ success: false, reason });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(jobQueue.addSearchJob).not.toHaveBeenCalled();
+    expect(jobQueue.addNotificationJob).not.toHaveBeenCalled();
   });
 });
