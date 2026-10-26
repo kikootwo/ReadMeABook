@@ -53,6 +53,7 @@ Every file is probed for its track tag (ffprobe, 4 at a time, root files include
   - else once a disc suffix is stripped from each album: after a `-`/`:`/`,` separator or a bracket (`(Disc 2)`, `- CD 2`, `: Disc 2`, `[Disc 1 of 3]`), or after a plain space when the keyword starts a word and the number is that folder's own (`The Hobbit Disc 1` in `Disc 1`, `The Hobbit CD2` in `CD2`, `Book Disc 1 of 3`; never `OCD 1`). The stripped stem is the search term.
   - Before the suffix match, whitespace runs in the album collapse to one space; an album over 500 characters keeps any suffix.
   - An album that strips to nothing (`' '`) keeps the scanner's own key (author and narrator kept).
+  - An album with no letter or digit in any script (`' '`, `!!! (Disc 1)` stripped to `!!!`) keys per book folder with its author and narrator (`NO_TITLE_PREFIX`, counted as tagged): its discs still fold, but two such books never merge across folders.
 - `Part N` folders fold only when tagged and their keys agree (the suffix strip never touches `Part N`). Untagged `Part N` stay separate.
 - A mix of tagged and untagged discs does not fold. R's own audio joins when untagged or its key agrees.
 - Nested disc folders: the deepest book folders fold first; a book folder whose members another fold already took stays unfolded, so no file is in two entries.
