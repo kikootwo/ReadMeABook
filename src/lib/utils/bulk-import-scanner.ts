@@ -14,6 +14,8 @@ import fs from 'fs/promises';
 import { AUDIO_EXTENSIONS } from '../constants/audio-formats';
 import { isGenericFolderName } from './disc-layout';
 import { foldDiscFolders } from './disc-fold';
+import { asyncPool } from './async-pool';
+import { buildGroupingKey, UNGROUPED_FOLDER_KEY, UNGROUPED_PREFIX } from './bulk-import-keys';
 
 // ffprobe runs via execFile with an argv array (never a shell): paths are untrusted.
 const execFilePromise = promisify(execFile);
@@ -23,8 +25,6 @@ export const MAX_SCAN_DEPTH = 10;
 
 /** Maximum concurrent ffprobe calls for metadata reads. */
 const METADATA_CONCURRENCY = 10;
-/** Grouping keys of discoveries without title tags start with this (unique per folder). */
-export const UNGROUPED_PREFIX = '__ungrouped_';
 
 /** Metadata extracted from an audio file via ffprobe. */
 export interface AudioFileMetadata {
@@ -61,7 +61,7 @@ export interface ScanProgress {
 /**
  * Check if a file has a supported audio extension.
  */
-export function isAudioFile(filename: string): boolean {
+function isAudioFile(filename: string): boolean {
   const ext = path.extname(filename).toLowerCase();
   return (AUDIO_EXTENSIONS as readonly string[]).includes(ext);
 }
@@ -218,24 +218,6 @@ export function buildSearchTerm(
 }
 
 /**
- * Build a normalized grouping key from metadata.
- * Used to determine which files belong to the same book.
- * Returns null if metadata has no title (ungroupable by metadata).
- */
-export function buildGroupingKey(metadata: AudioFileMetadata): string | null {
-  if (!metadata.title) return null;
-
-  const normalize = (s?: string) =>
-    (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-
-  return [
-    normalize(metadata.title),
-    normalize(metadata.author),
-    normalize(metadata.narrator),
-  ].join('|');
-}
-
-/**
  * Scan a single directory for audio files (immediate children only).
  * Returns audio file names and total size, or null if no audio files found.
  */
@@ -266,32 +248,6 @@ async function scanDirectoryForAudio(
   } catch {
     return null;
   }
-}
-
-/**
- * Run async tasks with a concurrency limit.
- */
-export async function asyncPool<T, R>(
-  items: T[],
-  concurrency: number,
-  fn: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results: R[] = [];
-  let index = 0;
-
-  async function worker() {
-    while (index < items.length) {
-      const i = index++;
-      results[i] = await fn(items[i]);
-    }
-  }
-
-  const workers = Array.from(
-    { length: Math.min(concurrency, items.length) },
-    () => worker()
-  );
-  await Promise.all(workers);
-  return results;
 }
 
 /**
@@ -355,7 +311,7 @@ async function groupAudioFilesByMetadata(
       }
     } else {
       // No title metadata — one folder-level group (deduplicateDiscoveries keeps UNGROUPED_PREFIX keys per folder)
-      const ungroupedKey = `${UNGROUPED_PREFIX}folder`;
+      const ungroupedKey = UNGROUPED_FOLDER_KEY;
       const existing = groups.get(ungroupedKey);
       if (existing) {
         existing.files.push(fileName);
@@ -376,14 +332,14 @@ async function groupAudioFilesByMetadata(
   // without tags, or a cover/intro file carries different metadata).
   // Only do this when there is a single tagged group — multiple tagged groups
   // mean genuinely different books are mixed in the folder, so keep them separate.
-  const ungrouped = groups.get('__ungrouped_folder');
+  const ungrouped = groups.get(UNGROUPED_FOLDER_KEY);
   if (ungrouped) {
-    const taggedKeys = Array.from(groups.keys()).filter((k) => k !== '__ungrouped_folder');
+    const taggedKeys = Array.from(groups.keys()).filter((k) => k !== UNGROUPED_FOLDER_KEY);
     if (taggedKeys.length === 1) {
       const taggedGroup = groups.get(taggedKeys[0])!;
       taggedGroup.files.push(...ungrouped.files);
       taggedGroup.totalSize += ungrouped.totalSize;
-      groups.delete('__ungrouped_folder');
+      groups.delete(UNGROUPED_FOLDER_KEY);
     }
   }
 

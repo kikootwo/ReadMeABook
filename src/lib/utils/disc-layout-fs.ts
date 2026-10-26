@@ -11,7 +11,8 @@
 import * as fs from 'fs/promises';
 import type { Dirent } from 'fs';
 import * as path from 'path';
-import { asyncPool, isAudioFile } from './bulk-import-scanner';
+import { asyncPool } from './async-pool';
+import { isAudioFile } from './import-inventory';
 import { canonicalize, isSameEntry, isStrictlyInside } from './delete-guard';
 import { probeAudioFile } from './chapter-merger';
 import type { RMABLogger } from './logger';
@@ -142,11 +143,11 @@ export async function resolveManualSelection(
   return { ok: true, files, audioFileCount: files.length };
 }
 
-/** Raised before anything is written when a multi-disc import's source is its own target folder. */
+/** Raised before anything is written when a multi-disc or nested import's source is its own target folder. */
 export class InPlaceDiscImportError extends Error {
   constructor() {
     super(
-      "The selected folder is this book's library folder (or inside it), so its disc folders would be copied flat next to themselves; nothing was changed"
+      "The selected folder is this book's library folder (or inside it), so the files in its subfolders would be copied flat into the same folder; nothing was changed"
     );
     this.name = 'InPlaceDiscImportError';
   }
@@ -168,7 +169,7 @@ export interface DiscImportOptions {
   targetPath: string;
   /** Manual and Bulk Import: stop when the source is the target folder or inside it. */
   stopInPlace?: boolean;
-  /** The request's file selection: an entry with a '/' names a disc folder's file, so the stop applies. */
+  /** The request's file selection: an entry with a '/' names a subfolder's file, so the stop applies. */
   selectedFiles?: string[];
   logger?: RMABLogger;
 }
@@ -185,8 +186,9 @@ export interface DiscImport {
  * paths as the organizer walked them), or null when the files are not a
  * multi-disc layout: then the caller keeps its order. When asked to stop an
  * in-place import, throws InPlaceDiscImportError before probing, for a
- * multi-disc layout and for any selection that names a disc folder's file
- * (one disc of a book included). A probe failure or an order that is not a
+ * multi-disc layout and for any selection that names a subfolder's file
+ * (one disc of a book included). Every file is probed for its track tag (root
+ * files too). A failed probe counts as no tag; an order that is not a
  * permutation of the input falls back to null, never an error.
  */
 export async function orderDiscImport(
@@ -205,8 +207,7 @@ export async function orderDiscImport(
   }
   if (!layout) return null;
 
-  const discFiles = layout.discs.flatMap((d) => d.files).map((key) => ({ key, file: byKey.get(key)! }));
-  const tracks = await readTrackNumbers(sourceDir, discFiles);
+  const tracks = await readTrackNumbers(sourceDir, keys.map((key) => ({ key, file: byKey.get(key)! })));
   const { order, notes } = orderDiscLayout(layout, (key) => tracks.get(key));
   if (!isPermutation(keys, order)) {
     await options.logger?.warn('Multi-disc order did not cover every file; keeping the folder order');

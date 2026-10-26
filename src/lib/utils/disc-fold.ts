@@ -8,7 +8,8 @@
  */
 
 import * as path from 'path';
-import { buildGroupingKey, UNGROUPED_PREFIX, type AudioFileMetadata, type DiscoveredAudiobook } from './bulk-import-scanner';
+import type { AudioFileMetadata, DiscoveredAudiobook } from './bulk-import-scanner';
+import { buildGroupingKey, UNGROUPED_FOLDER_KEY, UNGROUPED_PREFIX } from './bulk-import-keys';
 import { isConfiguredRoot } from './disc-layout-fs';
 import { naturalCompare, parseDiscFolderName, stripDiscSuffix, type DiscFolderName } from './disc-layout';
 
@@ -27,9 +28,16 @@ export interface DiscFoldContext {
 
 const isTagged = (d: DiscoveredAudiobook) => !d.groupingKey.startsWith(UNGROUPED_PREFIX);
 
-/** The grouping key (title|author|narrator) with a disc suffix stripped from the album title. */
-function foldKey(metadata: AudioFileMetadata): string {
-  return buildGroupingKey({ ...metadata, title: stripDiscSuffix(metadata.title || '') }) ?? '';
+/** A disc folder's own number, for stripping a space-separated suffix (`Book Disc 2`); never for `Part N`. */
+const discNumberOf = (disc?: DiscFolderName) => (disc?.kind === 'disc' ? disc.number : undefined);
+
+/**
+ * The grouping key (title|author|narrator) with a disc suffix stripped from the
+ * album title. An album that strips to nothing keeps the scanner's own key.
+ */
+function foldKey(metadata: AudioFileMetadata, disc?: DiscFolderName): string {
+  const stem = stripDiscSuffix(metadata.title || '', discNumberOf(disc));
+  return buildGroupingKey({ ...metadata, title: stem }) ?? buildGroupingKey(metadata) ?? '';
 }
 
 function parentOf(folderPath: string): string {
@@ -46,23 +54,29 @@ interface DiscEntry {
  * Whether the disc folders under one book folder fold, and the shared key:
  * - one discovery per disc folder (a folder holding two books never folds);
  * - all untagged: only cd/disc/disk folders fold (untagged `Part N` stay separate);
- * - all tagged: their keys agree once a disc suffix is stripped from the album;
+ * - all tagged: their keys agree as they are (the album kept unchanged), else
+ *   once a disc suffix is stripped from each album (`strip`);
  * - a mix of tagged and untagged never folds.
  */
-function foldDecision(discs: DiscEntry[], perFolder: Map<string, number>): { fold: boolean; key?: string } {
+function foldDecision(
+  discs: DiscEntry[],
+  perFolder: Map<string, number>
+): { fold: boolean; key?: string; strip?: boolean } {
   if (discs.some((d) => perFolder.get(d.discovery.folderPath) !== 1)) return { fold: false };
   const tagged = discs.filter((d) => isTagged(d.discovery));
   if (tagged.length === 0) return { fold: discs.every((d) => d.disc.kind === 'disc') };
   if (tagged.length !== discs.length) return { fold: false };
-  const keys = new Set(discs.map((d) => foldKey(d.discovery.metadata)));
-  return keys.size === 1 ? { fold: true, key: [...keys][0] } : { fold: false };
+  const same = new Set(discs.map((d) => d.discovery.groupingKey));
+  if (same.size === 1) return { fold: true, key: [...same][0], strip: false };
+  const keys = new Set(discs.map((d) => foldKey(d.discovery.metadata, d.disc)));
+  return keys.size === 1 ? { fold: true, key: [...keys][0], strip: true } : { fold: false };
 }
 
 function buildFolded(
   bookFolder: string,
   discs: DiscEntry[],
   own: DiscoveredAudiobook[],
-  key: string | undefined,
+  decision: { key?: string; strip?: boolean },
   ctx: DiscFoldContext,
   root: string
 ): DiscoveredAudiobook {
@@ -74,8 +88,8 @@ function buildFolded(
     ...ordered.flatMap((d) => [...d.discovery.audioFiles].sort(naturalCompare).map((f) => `${d.discovery.folderName}/${f}`)),
   ];
   const first = ordered[0].discovery;
-  const metadata: AudioFileMetadata = key
-    ? { ...first.metadata, title: stripDiscSuffix(first.metadata.title || '') }
+  const metadata: AudioFileMetadata = decision.strip
+    ? { ...first.metadata, title: stripDiscSuffix(first.metadata.title || '', discNumberOf(ordered[0].disc)) }
     : { ...first.metadata };
   const folderName = path.posix.basename(bookFolder);
   const { searchTerm, source } = ctx.buildSearchTerm(metadata, path.posix.basename(audioFiles[0]), folderName);
@@ -91,7 +105,7 @@ function buildFolded(
     metadataSource: source,
     extractedAsin: ctx.extractAsin(folderName) ?? ordered.find((d) => d.discovery.extractedAsin)?.discovery.extractedAsin,
     audioFiles,
-    groupingKey: key ?? `${UNGROUPED_PREFIX}folder`,
+    groupingKey: decision.key ?? UNGROUPED_FOLDER_KEY,
   };
 }
 
@@ -127,11 +141,11 @@ export async function foldDiscFolders(
     const decision = foldDecision(discs, perFolder);
     if (!decision.fold) continue;
     if (await isConfiguredRoot(book, ctx.protectedRoots)) continue;
+    const ownKey = (d: DiscoveredAudiobook) => (decision.strip ? foldKey(d.metadata) : d.groupingKey);
     const own = discoveries.filter(
-      (d) => d.folderPath === book && !foldedBy.has(d) &&
-        (!isTagged(d) || (decision.key !== undefined && foldKey(d.metadata) === decision.key))
+      (d) => d.folderPath === book && (!isTagged(d) || (decision.key !== undefined && ownKey(d) === decision.key))
     );
-    const folded = buildFolded(book, discs, own, decision.key, ctx, root);
+    const folded = buildFolded(book, discs, own, decision, ctx, root);
     for (const member of [...own, ...discs.map((d) => d.discovery)]) foldedBy.set(member, folded);
   }
 

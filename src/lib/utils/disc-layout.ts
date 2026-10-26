@@ -22,6 +22,8 @@ const PART_NAME_RE = /^part[\s._-]*(\d{1,3})(?:\s*-\s*\d{1,3})?$/i;
 const GENERIC_NAME_RE = /^(?:cd|disc|disk|part|vol(?:ume)?\.?)\s*\d+$/i;
 /** A disc suffix after a start, a `-`/`:`/`,` separator or a bracket (`Book (Disc 2)`, never `Hard Disk 3`). */
 const DISC_SUFFIX_RE = /(?:^|\s*[-–—:,]\s*[([]?|\s*[([])\s*(?:cd|disc|disk)[\s._-]*\d{1,3}(?:\s*(?:of|\/)\s*\d{1,3})?\s*[)\]]?\s*$/i;
+/** A disc suffix after a plain space, the keyword starting a word (`Book Disc 2`, `Book CD2`, never `OCD 1`). */
+const SPACED_DISC_SUFFIX_RE = /\s(?:cd|disc|disk)[\s._-]*(\d{1,3})(?:\s*(?:of|\/)\s*\d{1,3})?\s*$/i;
 
 /** Classify a folder name (trimmed, case-insensitive, the whole name). Null when it is not a disc. */
 export function parseDiscFolderName(rawName: string): DiscFolderName | null {
@@ -38,9 +40,16 @@ export function isGenericFolderName(rawName: string): boolean {
   return parseDiscFolderName(rawName) !== null || GENERIC_NAME_RE.test(rawName.trim());
 }
 
-/** Album title without a trailing disc suffix (`Book (Disc 2)`, `Book - CD 2`, `Book [Disc 1 of 3]`). Never `Part N`. */
-export function stripDiscSuffix(album: string): string {
-  return album.replace(DISC_SUFFIX_RE, '').trim() || album.trim();
+/**
+ * Album title without a trailing disc suffix (`Book (Disc 2)`, `Book - CD 2`, `Book [Disc 1 of 3]`). Never `Part N`.
+ * With `discNumber` (the disc folder's own number), a suffix after a plain space
+ * (`Book Disc 2`, `Book CD2`) is stripped too, only when its number is that one.
+ */
+export function stripDiscSuffix(album: string, discNumber?: number): string {
+  let stem = album.replace(DISC_SUFFIX_RE, '');
+  const spaced = stem === album && discNumber !== undefined ? SPACED_DISC_SUFFIX_RE.exec(album) : null;
+  if (spaced && parseInt(spaced[1], 10) === discNumber) stem = album.slice(0, spaced.index);
+  return stem.trim() || album.trim();
 }
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -123,12 +132,18 @@ export function isPermutation(input: string[], ordered: string[]): boolean {
   return true;
 }
 
-/** Track numbers start..start+n-1, each once, for every file: the order they give, else null. */
-function trackOrder(files: string[], trackOf: (key: string) => number | undefined, start = 1): string[] | null {
+/** Every file tagged with its own positive track number (gaps allowed): the order they give, else null. */
+function uniqueTagOrder(files: string[], trackOf: (key: string) => number | undefined): string[] | null {
   const tracks = files.map((key) => ({ key, track: trackOf(key) }));
   if (tracks.some((t) => !t.track || t.track < 1)) return null;
-  const sorted = [...tracks].sort((a, b) => a.track! - b.track!);
-  return sorted.every((t, i) => t.track === start + i) ? sorted.map((t) => t.key) : null;
+  if (new Set(tracks.map((t) => t.track)).size !== tracks.length) return null;
+  return tracks.sort((a, b) => a.track! - b.track!).map((t) => t.key);
+}
+
+/** Track numbers start..start+n-1, each once, for every file: the order they give, else null. */
+function trackOrder(files: string[], trackOf: (key: string) => number | undefined, start = 1): string[] | null {
+  const sorted = uniqueTagOrder(files, trackOf);
+  return sorted && sorted.every((key, i) => trackOf(key) === start + i) ? sorted : null;
 }
 
 /** Track tags that run 1..N across the discs in disc order (each disc continues the last), else null. */
@@ -157,10 +172,11 @@ function sortDiscs(discs: DiscGroup[]): DiscGroup[] {
 }
 
 /**
- * Import order of a multi-disc layout: the book folder's own files, then each
- * disc by number, then any other files. Inside the discs: track tags that run
- * 1..N across the book, else each disc's tags when they run 1..n in it, else
- * natural order.
+ * Import order of a multi-disc layout, first rule that holds:
+ * 1. every file is tagged and the tags run 1..N: tag order (root files included);
+ * 2. else the book folder's own files, then each disc by number, then any other
+ *    files. Inside the discs: tags that run 1..N across the discs in disc order,
+ *    else each disc whose files all carry distinct tags by them, else natural order.
  */
 export function orderDiscLayout(
   layout: DiscLayout,
@@ -173,11 +189,16 @@ export function orderDiscLayout(
       notes.tiedNumbers.push(disc.number);
     }
   });
+  const wholeBook = trackOrder([...layout.rootFiles, ...discs.flatMap((d) => d.files), ...layout.otherFiles], trackOf);
+  if (wholeBook) {
+    notes.byTracks.push(...discs.map((d) => d.name));
+    return { order: wholeBook, notes };
+  }
   const natural = (files: string[]) => [...files].sort(naturalCompare);
   const order = [...natural(layout.rootFiles)];
   const acrossBook = bookTrackOrder(discs, trackOf);
   discs.forEach((disc, i) => {
-    const byTags = acrossBook?.[i] ?? trackOrder(disc.files, trackOf);
+    const byTags = acrossBook?.[i] ?? uniqueTagOrder(disc.files, trackOf);
     if (byTags) notes.byTracks.push(disc.name);
     order.push(...(byTags ?? natural(disc.files)));
   });
@@ -185,26 +206,32 @@ export function orderDiscLayout(
   return { order, notes };
 }
 
-/** Disc and track tag values of one file: `d/D` and `n/N`. */
+/** Disc and track tag values of one file: `d/D` (left out when no disc value fits the order) and `n/N`. */
 export interface DiscTrackTags {
-  disc: string;
+  disc?: string;
   track: string;
 }
 
 /**
  * Disc and track tags for a multi-disc import in `order` (every key of the
  * layout): track runs 1..N across the book, disc is the folder's number of
- * the highest. Root files share the first disc's number, other files the last's.
+ * the highest. A file outside the disc folders takes the disc of the file
+ * before it (the first disc's at the start). No disc values at all when a disc
+ * is numbered 0 or the numbers would go down along the order: the track alone
+ * then carries the order.
  */
 export function discTrackTags(layout: DiscLayout, order: string[]): Map<string, DiscTrackTags> {
   const discs = sortDiscs(layout.discs);
   const discOf = new Map<string, number>();
   for (const disc of discs) for (const key of disc.files) discOf.set(key, disc.number);
   const total = Math.max(1, ...discs.map((d) => d.number));
+  let current = discs[0].number;
+  const numbers = order.map((key) => (current = discOf.get(key) ?? current));
+  const withDisc = numbers.every((n, i) => n > 0 && (i === 0 || n >= numbers[i - 1]));
   const tags = new Map<string, DiscTrackTags>();
   order.forEach((key, i) => {
-    const disc = discOf.get(key) ?? (layout.rootFiles.includes(key) ? discs[0].number : discs[discs.length - 1].number);
-    tags.set(key, { disc: `${disc}/${total}`, track: `${i + 1}/${order.length}` });
+    const track = `${i + 1}/${order.length}`;
+    tags.set(key, withDisc ? { disc: `${numbers[i]}/${total}`, track } : { track });
   });
   return tags;
 }

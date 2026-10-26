@@ -321,10 +321,15 @@ export async function tagAudioFileMetadata(
       args.push('-f', 'mp3');
     }
 
-    // A multi-disc book's disc and track (`d/D`, `n/N`), one argv element each: trkn/disk, TPOS/TRCK, DISCNUMBER/TRACKNUMBER
+    // A multi-disc book's disc and track (`d/D`, `n/N`), one argv element each: trkn/disk, TPOS/TRCK, DISCNUMBER/TRACKNUMBER.
+    // FLAC keeps totals in their own fields, so they are replaced too.
     const isPosition = (v: string) => /^\d{1,4}\/\d{1,4}$/.test(v);
-    if (position && isPosition(position.disc) && isPosition(position.track)) {
-      args.push('-metadata', `disc=${position.disc}`, '-metadata', `track=${position.track}`);
+    const { disc, track } = position ?? {};
+    if (track && isPosition(track) && (disc === undefined || isPosition(disc))) {
+      const tag = (key: string, value: string, totals: string[]) => ['-metadata', `${key}=${value}`,
+        ...(ext === '.flac' ? totals.flatMap((t) => ['-metadata', `${t}=${value.split('/')[1]}`]) : [])];
+      if (disc) args.push(...tag('disc', disc, ['DISCTOTAL', 'TOTALDISCS']));
+      args.push(...tag('track', track, ['TRACKTOTAL', 'TOTALTRACKS']));
     }
 
     // Output to temp file
