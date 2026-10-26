@@ -294,13 +294,10 @@ function detectBookTitle(files: { titleMetadata?: string }[]): string | null {
 }
 
 /**
- * Analyze and order chapter files
- * Returns files in correct order with metadata populated
+ * Analyze and order chapter files, returned with metadata populated. `keepOrder` (a multi-disc
+ * import's own order) keeps the given order: no metadata/filename decision is made or logged.
  */
-export async function analyzeChapterFiles(
-  filePaths: string[],
-  logger?: RMABLogger
-): Promise<ChapterFile[]> {
+export async function analyzeChapterFiles(filePaths: string[], logger?: RMABLogger, keepOrder = false): Promise<ChapterFile[]> {
   await logger?.info(`Analyzing ${filePaths.length} chapter files...`);
 
   // Probe all files in parallel
@@ -341,6 +338,23 @@ export async function analyzeChapterFiles(
     await logger?.info(`Title metadata flagged as book title - will prioritize filename extraction for chapter names`);
   }
 
+  const orderedFiles = keepOrder ? files : await chooseChapterOrder(files, logger);
+  if (keepOrder) await logger?.info(`Using the multi-disc import order for ${orderedFiles.length} chapters`);
+
+  // Compute chapter titles
+  for (let i = 0; i < orderedFiles.length; i++) {
+    orderedFiles[i].chapterTitle = getChapterTitle(orderedFiles[i], i);
+  }
+
+  // Log sample chapter titles
+  const sampleTitles = orderedFiles.slice(0, 3).map((f, i) => `Ch${i + 1}: "${f.chapterTitle}"`);
+  await logger?.info(`Sample chapter titles: ${sampleTitles.join(', ')}${orderedFiles.length > 3 ? ', ...' : ''}`);
+
+  return orderedFiles;
+}
+
+/** Filename order, or metadata order when every file has a track number and they run 1..N. */
+async function chooseChapterOrder(files: ChapterFile[], logger?: RMABLogger): Promise<ChapterFile[]> {
   // Create filename-based order (natural sort)
   const filenameOrder = [...files].sort((a, b) =>
     naturalSortCompare(a.filename, b.filename)
@@ -383,22 +397,8 @@ export async function analyzeChapterFiles(
     const missingCount = files.filter(f => !f.trackNumber).length;
     await logger?.info(`Chapter ordering: ${missingCount} file(s) missing track numbers - using filename order`);
   }
-
-  // Use the determined order
   const orderedFiles = useMetadataOrder ? metadataOrder : filenameOrder;
-
-  // Log ordering decision summary
   await logger?.info(`Using ${useMetadataOrder ? 'metadata' : 'filename'}-based ordering for ${orderedFiles.length} chapters`);
-
-  // Compute chapter titles
-  for (let i = 0; i < orderedFiles.length; i++) {
-    orderedFiles[i].chapterTitle = getChapterTitle(orderedFiles[i], i);
-  }
-
-  // Log sample chapter titles
-  const sampleTitles = orderedFiles.slice(0, 3).map((f, i) => `Ch${i + 1}: "${f.chapterTitle}"`);
-  await logger?.info(`Sample chapter titles: ${sampleTitles.join(', ')}${orderedFiles.length > 3 ? ', ...' : ''}`);
-
   return orderedFiles;
 }
 

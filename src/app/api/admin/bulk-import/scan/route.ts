@@ -127,7 +127,8 @@ export async function POST(request: NextRequest) {
               (progress) => {
                 send('progress', progress);
               },
-              abortController.signal
+              abortController.signal,
+              allowedRoots
             );
 
             if (audiobooks.length === 0) {

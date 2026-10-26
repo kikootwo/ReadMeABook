@@ -240,7 +240,7 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       jobId ? { jobId, context: 'FileOrganizer' } : undefined,
       renameConfig,
       selectedFiles,
-      { compareExisting, metadataTaggingEnabled }
+      { compareExisting, metadataTaggingEnabled, stopInPlaceDiscLayout: !downloadHistoryId && typeof cleanupSource === 'boolean' }
     );
 
     if (!result.success) {

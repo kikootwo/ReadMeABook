@@ -76,6 +76,7 @@ Detection now uses a **permissive heuristic** instead of strict filename pattern
 1. **Primary:** Use embedded track numbers if all files have sequential track metadata
 2. **Fallback:** Use natural filename sorting if metadata incomplete
 3. **Validation:** Compare both methods when available for confidence
+4. **Multi-disc sources** (`CD1/`, `Disc 2/`): the organizer passes its disc-by-disc order (`analyzeChapterFiles(files, logger, keepOrder=true)`; every file tagged 1..N: tag order; else root files, discs by number, tags 1..N across the discs, else per disc by distinct tags, else natural) and the merger keeps it. Rule: [multi-disc-folders.md](multi-disc-folders.md)
 
 **Why This Works Better:**
 - Catches edge cases like `Andy Weir - Project Hail Mary - 03.mp3` (doesn't match patterns)
@@ -356,7 +357,7 @@ interface MergeResult {
 
 // Main functions
 async function detectChapterFiles(files: string[], logger?: JobLogger): Promise<boolean>;
-async function analyzeChapterFiles(filePaths: string[], logger?: JobLogger): Promise<ChapterFile[]>;
+async function analyzeChapterFiles(filePaths: string[], logger?: JobLogger, keepOrder = false): Promise<ChapterFile[]>; // keepOrder: a multi-disc import's order, no metadata/filename decision
 async function probeAudioFile(filePath: string): Promise<AudioProbeResult>;
 async function mergeChapters(chapters: ChapterFile[], options: MergeOptions, logger?: JobLogger): Promise<MergeResult>;
 function formatDuration(ms: number): string;

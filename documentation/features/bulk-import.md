@@ -14,12 +14,13 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 - **Access:** Admin-only, modal opened from admin dashboard Quick Actions
 - **Audio detection:** Uses `AUDIO_EXTENSIONS` from `src/lib/constants/audio-formats.ts`
 - **Audiobook boundary:** A folder containing audio files = one audiobook. Files with matching metadata tags are grouped by title+author+narrator. Files with no metadata title tag are all grouped together per folder (one entry, not one per file).
+- **Disc folders:** `Book/CD1/`, `Book/CD2/`... fold into ONE entry at `Book` (`audioFiles` = `CD1/01.mp3`...) when untagged or when their tags agree as they are or after a disc suffix is stripped; untagged `Part N`, mixed tagged/untagged and configured roots never fold. Rule and guards: [multi-disc-folders.md](multi-disc-folders.md)
 - **Metadata extraction:** ffprobe (`execFile` argv, no shell) reads `album` (title), `album_artist` (author), `composer` (narrator) from all audio files in folder
 - **Search term fallback chain** (when no `album` tag):
   1. **ASIN in folder name** — scans folder name for pattern `B[A-Z0-9]{9}` bounded by bracket/paren/space; if found, uses direct ASIN lookup instead of text search; no badge shown
   2. **Folder name** — cleaned (strips bracketed ASIN/year, underscores→spaces); skipped if generic (CD1, Disc 2, Part 3, Vol 1, etc.); shows "Low Confidence" badge
   3. **First file name** — last resort; shows "Low Confidence" badge
-- **Generic folder detection:** `/^(cd|disc|disk|part|vol(ume)?)\s*\d+$/i` — these names are skipped as search terms
+- **Generic folder detection:** disc/part folder names ([multi-disc-folders.md](multi-disc-folders.md)) + `(cd|disc|disk|part|vol|volume) N` with any number of digits (`isGenericFolderName`) — skipped as search terms
 - **Author/narrator dedup:** Splits on `,;& ` delimiters, removes names appearing in both fields
 - **Scan depth:** Max 10 levels recursion
 - **Rate limiting:** 1.5s delay between Audible searches (same as existing scraping rate limit)
@@ -67,6 +68,9 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 
 **Backend:**
 - `src/lib/utils/bulk-import-scanner.ts` — Folder discovery + ffprobe metadata
+- `src/lib/utils/bulk-import-keys.ts` — Grouping key (`buildGroupingKey`), `UNGROUPED_PREFIX`/`UNGROUPED_FOLDER_KEY`
+- `src/lib/utils/async-pool.ts` — Concurrency-limited map (ffprobe reads)
+- `src/lib/utils/disc-fold.ts` — Disc folder fold (after the walk, before same-key dedup)
 - `src/app/api/admin/bulk-import/scan/route.ts` — SSE scan endpoint
 - `src/app/api/admin/bulk-import/execute/route.ts` — Batch import endpoint
 
@@ -82,6 +86,7 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 
 ## Related
 - [Manual Import](manual-import.md) — Single-book import (reused pipeline)
+- [Multi-Disc Folders](multi-disc-folders.md) — Disc folder rule and import order
 - [File Organization](../phase3/file-organization.md) — organize_files job
 - [Audible Integration](../integrations/audible.md) — Search/scraping
 - [Background Jobs](../backend/services/jobs.md) — Job queue system

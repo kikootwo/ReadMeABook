@@ -20,6 +20,7 @@ import {
   truncateRawText,
   type BookDetails,
 } from './metadata-text';
+import type { DiscTrackTags } from './disc-layout';
 
 const execFilePromise = promisify(execFile);
 
@@ -106,7 +107,8 @@ export async function addMp4FreeformTags(
  */
 export async function tagAudioFileMetadata(
   filePath: string,
-  metadata: MetadataTaggingOptions
+  metadata: MetadataTaggingOptions,
+  position?: DiscTrackTags
 ): Promise<TaggingResult> {
   try {
     // Check if file exists (its size scales the ffmpeg timeout)
@@ -319,6 +321,17 @@ export async function tagAudioFileMetadata(
       args.push('-f', 'mp3');
     }
 
+    // A multi-disc book's disc and track (`d/D`, `n/N`), one argv element each: trkn/disk, TPOS/TRCK, DISCNUMBER/TRACKNUMBER.
+    // FLAC keeps totals in their own fields, so they are replaced too. No disc value: the source's disc is cleared.
+    const isPosition = (v: string) => /^\d{1,4}\/\d{1,4}$/.test(v);
+    const { disc, track } = position ?? {};
+    if (track && isPosition(track) && (disc === undefined || isPosition(disc))) {
+      const flac = (keys: string[], value: string) => (ext === '.flac' ? keys.flatMap((k) => ['-metadata', `${k}=${value}`]) : []);
+      const total = (value?: string) => value?.split('/')[1] ?? '';
+      args.push('-metadata', `disc=${disc ?? ''}`, ...flac(disc ? [] : ['DISCNUMBER'], ''), ...flac(['DISCTOTAL', 'TOTALDISCS'], total(disc)));
+      args.push('-metadata', `track=${track}`, ...flac(['TRACKTOTAL', 'TOTALTRACKS'], total(track)));
+    }
+
     // Output to temp file
     args.push(tempFile);
 
@@ -352,17 +365,18 @@ export async function tagAudioFileMetadata(
 }
 
 /**
- * Tag multiple audio files with metadata
+ * Tag multiple audio files with metadata (`positions`: each file's disc and track, when it has one)
  */
 export async function tagMultipleFiles(
   filePaths: string[],
-  metadata: MetadataTaggingOptions
+  metadata: MetadataTaggingOptions,
+  positions?: Array<DiscTrackTags | undefined>
 ): Promise<TaggingResult[]> {
   const results: TaggingResult[] = [];
 
-  for (const filePath of filePaths) {
-    const result = await tagAudioFileMetadata(filePath, metadata);
-    results.push(result);
+  for (const [i, filePath] of filePaths.entries()) {
+    const position = positions?.[i];
+    results.push(await (position ? tagAudioFileMetadata(filePath, metadata, position) : tagAudioFileMetadata(filePath, metadata)));
   }
 
   return results;

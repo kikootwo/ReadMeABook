@@ -19,7 +19,8 @@ Allow admins to manually import audiobook files from the server filesystem into 
 - [ ] Each folder row shows: folder icon, name, metadata line (audio file count, subfolder count, total size)
 - [ ] Blue `♪ N` badge on folders containing audio files
 - [ ] Folder icon swaps to `FolderOpenIcon` on hover (150ms transition)
-- [ ] Single-click selects folder (only if it has audio files); double-click navigates into it
+- [x] Folders navigate on click; the footer "Select This Folder" (or "Select N Files") selects the current folder when it lists audio (single-click selection is not used)
+- [x] Multi-disc book folders (2+ disc folders with direct audio: `Disc 1/`, `CD2/`) are selectable: their files are listed as `Disc 1/01.m4a`, footer "N audio files in M discs"; `Extras/` is not included. See [multi-disc-folders.md](multi-disc-folders.md)
 - [ ] Folders without audio files shown at reduced opacity, still navigable but not selectable
 - [ ] Breadcrumb navigation with clickable segments, home icon for root, ellipsis collapse for deep paths
 - [ ] Footer shows selected path (monospace), file stats, "Review Import →" button (only when valid selection)
@@ -44,6 +45,7 @@ Allow admins to manually import audiobook files from the server filesystem into 
 - [ ] `GET /api/admin/filesystem/browse?path=...` — admin-only endpoint
 - [ ] Returns directory listing: `{ entries: [{ name, type, audioFileCount, subfolderCount, totalSize }] }`
 - [ ] If no `path` param, returns root directories (download_dir, media_dir from config)
+- [x] Current response: `{ path, entries: [{ name, type }], audioFiles: [{ name, size }] }`; a multi-disc folder (never a configured root) adds its disc files to `audioFiles` (relative names, disc by disc, names in natural order inside a disc; the import may reorder a disc by its track tags)
 - [ ] Path validation: must be within allowed root directories (prevent directory traversal)
 - [ ] Handles permission errors gracefully
 - [ ] Sorts: folders first, then alphabetical
@@ -51,6 +53,7 @@ Allow admins to manually import audiobook files from the server filesystem into 
 ### AC-5: Manual Import API
 - [ ] `POST /api/admin/manual-import` — admin-only endpoint
 - [ ] Request body: `{ audiobookId: string, folderPath: string }`
+- [x] Current body: `{ audiobookId | asin, folderPath, selectedFiles?: string[], cleanupSource?: boolean }`. `selectedFiles` without `/` = files in the folder (stat-checked); with `/` = exact members of the multi-disc book set (`..`, `.`, absolute, backslash, `//`, NUL, `Extras/x` → 400). No `selectedFiles` on a disc-only folder: the route sends the book set itself, so the import and any source removal stay scoped to the book
 - [ ] Path validation: folderPath must be within allowed roots
 - [ ] Validates folder exists and contains audio files
 - [ ] If no existing request: creates request (status: `processing`) + queues `organize_files` job
@@ -71,7 +74,6 @@ Allow admins to manually import audiobook files from the server filesystem into 
 
 ## Non-Goals
 - No "move" option (copy only, matching existing pipeline)
-- No file-level selection (folder only)
 - No drag-and-drop upload
 - No non-admin access
 

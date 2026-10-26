@@ -38,7 +38,7 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 
 1. Download completes in `/downloads/[torrent-name]/` or `/downloads/[filename]` (single file)
 1b. **Path stored** in `DownloadHistory.downloadPath` (mapped local path) for retry reliability — avoids reconstructing path from `torrentName` which may differ from actual folder name
-2. Identify audiobook files (.m4b, .m4a, .mp3, .mp4, .aa, .aax, .flac, .ogg) - supports both directories and single files
+2. Identify audiobook files (.m4b, .m4a, .mp3, .mp4, .aa, .aax, .flac, .ogg) - supports both directories and single files; `selectedFiles` (`/` separators) filter the walk. Multi-disc sources (`CD1/`, `Disc 2/`) are then ordered disc by disc for the merge, copy and rename numbering, and a Manual/Bulk import of the book's own library folder stops here with nothing changed: [multi-disc-folders.md](../features/multi-disc-folders.md)
 3. Read media directory and path template from database config (`media_dir`, `audiobook_path_template`)
 4. Apply template to create target path: `[media_dir]/[template result]/`
 5. **Tag metadata** (if enabled, before the move) - writes correct title, author, narrator, ASIN, series, description, genre, publisher, subtitle, language to tagged copies of the audio files
@@ -119,6 +119,7 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
   - MP3: `publisher` (TPUB), `TIT3` (the ID3 subtitle frame) plus `subtitle=` (clears a source `TXXX:SUBTITLE`, which would sit next to TIT3), `language` (TLAN, the name; ID3 expects ISO 639-2 there)
   - FLAC: `publisher`, `subtitle`, `language` (replace the source's, case-insensitive; `ORGANIZATION`/`LABEL` left as they are)
   - Audiobookshelf reads `publisher`, `subtitle` (then `tit3`), `language` (case-insensitive)
+- `disc` + `track` - multi-disc sources only (`CD1/`, `Disc 2/`, not merged): disc = the folder's number of the highest (`d/D`), track = position across the book in import order (`n/N`), replacing any source numbers (`tagMultipleFiles(files, metadata, positions)`; values from `discTrackTags`, `n/N` only, one argv element each; no disc value for a disc 0 or a disc number that would go down: the source disc is cleared instead, empty `disc` plus FLAC `DISCNUMBER`/`DISCTOTAL`/`TOTALDISCS`). MP4 `trkn`/`disk`, MP3 `TRCK`/`TPOS`, FLAC `TRACKNUMBER`/`DISCNUMBER` plus `TRACKTOTAL`/`TOTALTRACKS`/`DISCTOTAL`/`TOTALDISCS`; ffprobe reads all three back as `track`/`disc`, the keys Audiobookshelf orders by. Single-folder imports, merged m4bs and tagging off: none written (source numbers kept)
 - Fixed set, no per-field settings; all under `metadata_tagging_enabled`
 
 **Tag details lookup** (`src/lib/processors/organize-tag-details.ts`):
@@ -345,7 +346,7 @@ When user deletes and re-requests the same audiobook:
 - Compare cost: same-size compares run only when a delete may follow (manual `cleanupSource`, or a download that cleanup would remove: `downloadCleanupKind` ≠ `none`; a failed lookup counts as may-follow), except for `.mp4`/`.m4a` targets, which are always compared (also against an existing same-size coerced `.m4b`) so coercion can tell this import's copy (`identical`) from another file; compares stop at the first differing chunk.
 
 **Deletes consume the records (`ImportEvidence`):**
-- Selected files (`cleanupSource` + `selectedFiles`): only those with a verified record (`copied`/`identical`); others are kept and listed in a warning.
+- Selected files (`cleanupSource` + `selectedFiles`): only those with a verified record (`copied`/`identical`); others are kept and listed in a warning. Disc-folder entries (`Disc 1/01.m4a`) work the same; emptied disc folders stay behind (no sweep below the source folder).
 - Whole folder or file (download cleanup, `cleanupSource` without selection, direct download): inventory complete (every source folder readable) and every audio file found in it verified; then a fresh walk right before removal must be complete and find no audio (or ebook) file the import never saw. Otherwise the download is kept and `postProcess` (client history archive) is skipped.
 - Ebook folders: kept when they hold more ebook files than were imported.
 - Only audio (or the ebook) is verified: non-audio extras (cover, nfo, samples) go with the folder.

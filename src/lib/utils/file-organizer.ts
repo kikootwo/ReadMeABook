@@ -7,12 +7,13 @@ import fs from 'fs/promises';
 import path from 'path';
 import axios from 'axios';
 import { RMAB_USER_AGENT } from './user-agent';
-import { tagMultipleFiles, checkFfmpegAvailable, addMp4FreeformTags, buildMp4FreeformTags, type Mp4FreeformMetadata } from './metadata-tagger';
+import { tagMultipleFiles, checkFfmpegAvailable, addMp4FreeformTags, buildMp4FreeformTags, type MetadataTaggingOptions, type Mp4FreeformMetadata } from './metadata-tagger';
 import { RMABLogger } from './logger';
 import { hasCover, publishCover, type CoverPlacement } from './cover-placement';
 import { placeAudio, placeFile, isVerifiedStatus, type AudioPlacement } from './organize-copy';
 import { walkFiles, ORGANIZER_EBOOK_FORMATS, type ImportInventory, type PlacementRecord } from './import-inventory';
 import { getMediaDir } from './media-dir';
+import { orderDiscImport } from './disc-layout-fs';
 import { probeStreamDurationMs } from './audio-duration';
 import { MAX_COVER_ART_BYTES, MAX_COVER_ART_REDIRECTS, cachedThumbnailPath, isAllowedRemoteCoverUrl, isLibraryCoverSource } from './cover-art-url';
 
@@ -66,6 +67,8 @@ export interface PlacementOptions {
   compareExisting?: boolean;
   /** The caller's read of `metadata_tagging_enabled`; read here when omitted. */
   metadataTaggingEnabled?: boolean;
+  /** Manual/Bulk Import: stop a multi-disc import whose source is its own target folder. */
+  stopInPlaceDiscLayout?: boolean;
 }
 
 export interface EbookOrganizationResult {
@@ -149,10 +152,10 @@ export class FileOrganizer {
         await logger?.warn('Some folders in the source could not be read; the source will not be removed');
       }
 
-      // Filter to only selected files if specified
+      // Filter to only selected files if specified (callers name them with '/' separators)
       if (selectedFiles && selectedFiles.length > 0) {
         const selectedSet = new Set(selectedFiles);
-        audioFiles = audioFiles.filter((f) => selectedSet.has(f));
+        audioFiles = audioFiles.filter((f) => selectedSet.has(f.split(path.sep).join('/')));
         await logger?.info(`Filtered to ${audioFiles.length} selected files`);
       }
 
@@ -162,7 +165,13 @@ export class FileOrganizer {
 
       await logger?.info(`Found ${audioFiles.length} audio files`);
 
-      // Determine base path for source files
+      const targetPath = this.buildTargetPath(this.mediaDir, template, audiobook.author, audiobook.title,
+        audiobook.narrator, audiobook.asin, audiobook.year, audiobook.series, audiobook.seriesPart);
+      // Multi-disc sources import disc by disc (merge, copy, rename numbering, disc/track tags); checked before anything is written
+      const discImport = isFile ? null : await orderDiscImport(downloadPath, audioFiles, {
+        targetPath, stopInPlace: placement?.stopInPlaceDiscLayout, selectedFiles, logger: logger ?? undefined });
+      if (discImport) audioFiles = discImport.order;
+
       const baseSourcePath = isFile ? path.dirname(downloadPath) : downloadPath;
 
       const metadataTaggingEnabled = placement?.metadataTaggingEnabled ?? await prisma.configuration.findUnique({ where: { key: 'metadata_tagging_enabled' } }).then((c) => c?.value === 'true', async (error: unknown) => {
@@ -222,7 +231,7 @@ export class FileOrganizer {
                 }
 
                 // Analyze and order chapter files
-                const chapters = await analyzeChapterFiles(sourceFilePaths, logger ?? undefined);
+                const chapters = await analyzeChapterFiles(sourceFilePaths, logger ?? undefined, discImport !== null);
 
                 // Validate that we have valid ordering
                 if (chapters.length === 0) {
@@ -257,9 +266,6 @@ export class FileOrganizer {
                     mergeDurationVerified = mergeResult.durationVerified === true;
 
                     await logger?.info(`Chapter merge complete - organizing single M4B file`);
-
-                    // Update isFile flag since we now have a single file path
-                    // (not in the download directory structure)
                   } else {
                     await logger?.warn(`Chapter merge failed: ${mergeResult.error}. Organizing ${audioFiles.length} files individually.`);
                     result.errors.push(`Chapter merge failed: ${mergeResult.error}`);
@@ -305,7 +311,7 @@ export class FileOrganizer {
                   : path.join(downloadPath, audioFile)
             );
 
-            const taggingResults = await tagMultipleFiles(sourceFilePaths, {
+            const tagValues: MetadataTaggingOptions = {
               title: audiobook.title,
               author: audiobook.author,
               narrator: audiobook.narrator,
@@ -318,7 +324,11 @@ export class FileOrganizer {
               publisher: audiobook.publisher,
               subtitle: audiobook.subtitle,
               language: audiobook.language,
-            });
+            };
+            // A multi-disc layout's files also get their disc and track (merged files never do)
+            const taggingResults = await (discImport
+              ? tagMultipleFiles(sourceFilePaths, tagValues, audioFiles.map((f) => discImport.tags.get(f)))
+              : tagMultipleFiles(sourceFilePaths, tagValues));
 
             const successCount = taggingResults.filter((r) => r.success).length;
             const failCount = taggingResults.filter((r) => !r.success).length;
@@ -355,19 +365,6 @@ export class FileOrganizer {
         result.errors.push(`Metadata tagging failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
         // Don't fail the whole operation if metadata tagging fails - continue with copying files
       }
-
-      // Build target directory
-      const targetPath = this.buildTargetPath(
-        this.mediaDir,
-        template,
-        audiobook.author,
-        audiobook.title,
-        audiobook.narrator,
-        audiobook.asin,
-        audiobook.year,
-        audiobook.series,
-        audiobook.seriesPart
-      );
 
       await logger?.info(`Target path: ${targetPath}`);
 

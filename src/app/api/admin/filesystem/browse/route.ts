@@ -11,6 +11,7 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { AUDIO_EXTENSIONS } from '@/lib/constants/audio-formats';
+import { resolveDiscBook } from '@/lib/utils/disc-layout-fs';
 
 const logger = RMABLogger.create('API.Admin.Filesystem.Browse');
 
@@ -133,6 +134,20 @@ export async function GET(request: NextRequest) {
           }
         }
         audioFiles.sort((a, b) => a.name.localeCompare(b.name));
+
+        // A multi-disc book folder also lists its disc folders' audio (`Disc 1/01.m4a`), disc by disc
+        // (file names inside a disc: the import may reorder them by track tags)
+        const discBook = await resolveDiscBook(normalizedPath, allowedRoots, dirEntries);
+        if (discBook) {
+          const sizes = new Map(audioFiles.map((f) => [f.name, f.size]));
+          const bookFiles = await Promise.all(
+            discBook.files.map(async (name) => ({
+              name,
+              size: sizes.get(name) ?? (await fs.stat(pathModule.join(normalizedPath, name)).then((s) => s.size, () => 0)),
+            }))
+          );
+          return NextResponse.json({ path: normalizedPath, entries, audioFiles: bookFiles });
+        }
 
         return NextResponse.json({ path: normalizedPath, entries, audioFiles });
       } catch (error) {

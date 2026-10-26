@@ -79,6 +79,7 @@
 - **Verified import (atomic copy, placement records, delete only what reached the library)** → [phase3/file-organization.md](phase3/file-organization.md#verified-import-delete-only-what-reached-the-library)
 - **Custom M4B tags (ASIN, publisher, subtitle, language as iTunes freeform `----` atoms), tagged MP4 faststart** → [phase3/file-organization.md](phase3/file-organization.md#mp4-freeform-tags)
 - **Chapter merging (auto-merge to M4B)** → [features/chapter-merging.md](features/chapter-merging.md)
+- **Multi-disc (CD1/Disc 1) folders: disc names, import order, disc/track tags, Manual/Bulk Import, in-place stop** → [features/multi-disc-folders.md](features/multi-disc-folders.md)
 
 ## Background Jobs
 - **Bull queue, processors, retry logic** → [backend/services/jobs.md](backend/services/jobs.md)
@@ -200,4 +201,5 @@
 **"How does bulk import work?"** → [features/bulk-import.md](features/bulk-import.md)
 **"How do I import multiple audiobooks at once?"** → [features/bulk-import.md](features/bulk-import.md)
 **"How does the bulk import scanner detect audiobooks?"** → [features/bulk-import.md](features/bulk-import.md)
+**"How are books in CD1/Disc 1 folders imported and ordered?"** → [features/multi-disc-folders.md](features/multi-disc-folders.md)
 **"Why is a series page blank / showing no books, then fine after a refresh?"** → [integrations/audible.md](integrations/audible.md#series-page-dual-layout) (Audible A/B-serves two layouts; parsers handle both)
