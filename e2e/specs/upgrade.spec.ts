@@ -9,7 +9,8 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { env, writeEvidence, waitFor, fakeArr, snap, urls, loginAdminUi, Rmab } from '../lib/harness';
+import { env, writeEvidence, waitFor, fakeArr, snap, urls, loginAdminUi, Rmab, execBridgeAvailable, EXEC_BRIDGE_SKIP } from '../lib/harness';
+import { psql, sqlStr } from './regressions/242-helpers';
 
 const phase = process.env.E2E_PHASE;
 
@@ -55,6 +56,18 @@ test('upgrade-verify: branch image keeps requests, logins and decryptable secret
   const since = (await fakeArr.requests()).at(-1)?.seq ?? 0;
   const failed = requests.requests.find((r) => r.status === 'failed');
   expect(failed, 'a failed request to search for').toBeTruthy();
+
+  // The startup schema sync added requests.auto_rerequest_count (NOT NULL DEFAULT 0) and the
+  // failed row seeded on the release image reads 0.
+  if (execBridgeAvailable()) {
+    const column = psql("select count(*) from information_schema.columns where table_name = 'requests' and column_name = 'auto_rerequest_count'");
+    const count = psql(`select auto_rerequest_count from requests where id = ${sqlStr(failed.id)}`);
+    writeEvidence('upgrade/auto-rerequest-count.json', { column, failedRequestId: failed.id, count });
+    expect(column, 'requests.auto_rerequest_count exists').toBe('1');
+    expect(count, 'the seeded failed row reads 0').toBe('0');
+  } else {
+    test.info().annotations.push({ type: 'skipped-check', description: `auto_rerequest_count: ${EXEC_BRIDGE_SKIP}` });
+  }
   const search = await rmab.post<any>(`/api/requests/${failed.id}/interactive-search`, {});
   writeEvidence('upgrade/interactive-search.json', search);
   const searches = (await fakeArr.requests(since)).filter((r) => r.service === 'prowlarr' && r.path === '/api/v1/search');
