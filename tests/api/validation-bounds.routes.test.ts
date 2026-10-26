@@ -57,7 +57,7 @@ async function expectSingleLengthIssue(call: () => Promise<Response>, maximum: n
   expect(response.status).toBe(400);
   expect(payload.error).toBe('ValidationError');
   expect(payload.details).toHaveLength(1);
-  expect(payload.details[0]).toMatchObject({ code: 'too_big', type: 'array', maximum });
+  expect(payload.details[0]).toMatchObject({ code: 'too_big', origin: 'array', maximum });
   expect(elapsed).toBeLessThan(2000);
 }
 
