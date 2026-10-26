@@ -47,7 +47,8 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
-vi.mock('@/lib/utils/metadata-tagger', () => ({
+vi.mock('@/lib/utils/metadata-tagger', async (importOriginal) => ({
+  buildMp4FreeformTags: (await importOriginal<typeof import('@/lib/utils/metadata-tagger')>()).buildMp4FreeformTags,
   checkFfmpegAvailable: vi.fn(async () => true),
   addMp4FreeformTags: vi.fn(async () => ({ written: false })),
   tagMultipleFiles: vi.fn(async (files: string[]) => {

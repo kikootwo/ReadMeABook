@@ -41,8 +41,8 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 2. Identify audiobook files (.m4b, .m4a, .mp3, .mp4, .aa, .aax, .flac, .ogg) - supports both directories and single files
 3. Read media directory and path template from database config (`media_dir`, `audiobook_path_template`)
 4. Apply template to create target path: `[media_dir]/[template result]/`
-5. **Tag metadata** (if enabled, before the move) - writes correct title, author, narrator, ASIN, series, description, genre to tagged copies of the audio files
-6. **ASIN step** - adds the MP4 freeform `ASIN` to the file about to be placed, when RMAB wrote it (see MP4 Freeform Tags), then **copy** files (not move - originals stay for seeding)
+5. **Tag metadata** (if enabled, before the move) - writes correct title, author, narrator, ASIN, series, description, genre, publisher, subtitle, language to tagged copies of the audio files
+6. **ASIN step** - adds the MP4 freeform `ASIN` (with tagging on also `PUBLISHER`, `SUBTITLE`, `LANGUAGE`) to the file about to be placed, when RMAB wrote it (see MP4 Freeform Tags), then **copy** files (not move - originals stay for seeding)
 7. Copy cover art if found, else download from Audible. `coverArtUrl` must be a cached thumbnail `/api/cache/thumbnails/<file>` (plain file name, resolved in `/app/cache/thumbnails`) or an https URL on `COVER_ART_HOSTS` (`*.media-amazon.com`, `*.ssl-images-amazon.com`, `*.images-amazon.com`), up to `MAX_COVER_ART_REDIRECTS` (3) redirects with every hop checked; anything else is skipped with a warning (`src/lib/utils/cover-art-url.ts`). An existing `cover.jpg` is never replaced and not fetched for (kept, debug log; a re-import with the same cover lands here too); an empty regular-file `cover.jpg` (older interrupted write) counts as missing and is replaced (`replace` publish, size re-checked under the lock). New covers are published like audio (`src/lib/utils/cover-placement.ts` → `publishCover`): hidden partial (`copyFile` for a cached thumbnail, `writeFileAtomic` for downloaded bytes), fsync + size check, `create` publish (`EEXIST` → kept), under the per-target lock; an interrupted write leaves no `cover.jpg`. Downloaded and copied covers get the library file mode (`applyFileMode`: a refused chmod is a permission warning, a missing file a failure). At request creation, covers are stored for display if they are any http(s) URL or a safe cached path (`sanitizeCoverArtUrl`; shelf-sync Goodreads/Hardcover fallbacks stay visible); a stored cover the library can't use is replaced by a later usable one (`isLibraryCoverSource`)
 8. **Coerce file formats** (if enabled) - rename .mp4 → .m4b and single-file .m4a → .m4b for Plex compatibility (see: Plex Format Coercion below)
 9. **Generate file hash** - SHA256 of sorted audio filenames for library matching (see: [fixes/file-hash-matching.md](../fixes/file-hash-matching.md))
@@ -114,6 +114,11 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
   - MP3: `description` (TXXX); FLAC: `comment` (= Vorbis `DESCRIPTION`; replaces the source's DESCRIPTION/COMMENT, which ffmpeg reads as one `comment`; a `description` key would add a second one, read as "old;new")
 - `genre` - top-level genres (`primaryGenres`, no sub-genre tags) joined with `; `; `/` or `;` in a name → ` & ` (split/trim/join; Audiobookshelf splits on `/`, `//`, `;`)
 - M4B/M4A/MP4 only: `media_type=2` (`stik` Audiobook), `gapless_playback=1` (`pgap`) - always written, before `-movflags +faststart`
+- Publisher, subtitle, language - from the lookup only (`publisherName`, `subtitle`, `language`; the book row stores none). `sanitizeShortTagValue` (`metadata-text.ts`; `bookDetailValues` applies it to all three): non-strings ignored, bounded, whitespace runs → one space, C0 controls dropped, lone surrogates and U+FFFE/U+FFFF → U+FFFD (ffprobe reads neither back as written, which would fail the post-step for every tag, the ASIN included), capped at `MAX_SHORT_TAG_BYTES` (1 KiB). Language: first letter capitalized (`languageTagValue`, "english" → "English", as Audiobookshelf shows it; not an ISO 639 code). Empty → not written (MP3/FLAC keep the source's; an MP4's remux drops the source's freeform tags)
+  - M4B/M4A/MP4: freeform `PUBLISHER`, `SUBTITLE`, `LANGUAGE` (ASIN step; ffmpeg drops them)
+  - MP3: `publisher` (TPUB), `TIT3` (the ID3 subtitle frame) plus `subtitle=` (clears a source `TXXX:SUBTITLE`, which would sit next to TIT3), `language` (TLAN, the name; ID3 expects ISO 639-2 there)
+  - FLAC: `publisher`, `subtitle`, `language` (replace the source's, case-insensitive; `ORGANIZATION`/`LABEL` left as they are)
+  - Audiobookshelf reads `publisher`, `subtitle` (then `tit3`), `language` (case-insensitive)
 - Fixed set, no per-field settings; all under `metadata_tagging_enabled`
 
 **Tag details lookup** (`src/lib/processors/organize-tag-details.ts`):
@@ -123,8 +128,9 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 - Description: Audible summary (Audnexus `summary`) → stored `Audiobook.description` fallback (client text: bounded by `truncateRawText`, then `stripHtml` like the lookup)
 - Started right after the switch read, awaited just before `organize()` (setup reads run meanwhile; a no-op handler keeps a rejection handled if setup throws first)
 - A failed ffmpeg run reports `describeFfmpegFailure` (stderr tail, never the argv, so no description in job logs)
-- Lookup failure or timeout is non-fatal (warning): stored description, no genres
-- Genres/description are tags only (not path template variables); ebooks unchanged
+- Job log "Metadata tag details: description=<n> chars, genres=…, publisher=…, subtitle=…, language=…": publisher, subtitle and language sanitized as written ("English"), a value over 100 characters shortened to 100 plus "…"; genres as looked up
+- Lookup failure or timeout is non-fatal (warning): stored description, no genres/publisher/subtitle/language (an MP4's remux then also drops the source's freeform tags; MP3/FLAC keep theirs)
+- Genres/description/publisher/subtitle/language are tags only (not path template variables); ebooks unchanged
 
 **Note:** ASIN is a custom metadata tag and may not appear in standard file properties viewers (Windows/macOS/Linux). Use specialized tools to verify:
 ```bash
@@ -155,14 +161,14 @@ exiftool "audiobook.m4b" | grep -i asin
 
 **Verification:** before anything is written, the new moov's chunk offsets = offsets computed from the input, chunk sizes unchanged, each tag present exactly once; after the write and before rename: output size and top-level layout as planned, written moov bytes = the verified moov, chunk bytes equal input's (every chunk of non-audio tracks up to 1 MiB each, 64 spread audio chunks × 4 KiB), ffprobe reads every tag. All handles closed before rename (Windows).
 
-**Call site (one):** `file-organizer.ts`, per audio file right before placement, on the file about to be placed when RMAB wrote it: the tagged copy (`${file}.tmp`), else the merged file (tagging off, or the tagging pass failed on it). Never on a download's own file (tagging off, no merge → no ASIN in MP4s). It runs after the merge's own checks. The merger and tagger never write the ASIN; `metadata_tagging_enabled` is read once per `organize()`, or taken from `placement.metadataTaggingEnabled` (unreadable → tagging off, warning + `result.errors` "Metadata tagging skipped: could not read setting (<msg>)"). A written ASIN logs "Embedded ASIN <asin> in <file>" (info); a refused one logs a warning.
+**Call site (one):** `file-organizer.ts`, per audio file right before placement, on the file about to be placed when RMAB wrote it: the tagged copy (`${file}.tmp`), else the merged file (tagging off, or the tagging pass failed on it). Never on a download's own file (tagging off, no merge → no ASIN in MP4s). It runs after the merge's own checks. The merger and tagger never write the ASIN; `metadata_tagging_enabled` is read once per `organize()`, or taken from `placement.metadataTaggingEnabled` (unreadable → tagging off, warning + `result.errors` "Metadata tagging skipped: could not read setting (<msg>)"). With tagging off it gets the ASIN only (publisher/subtitle/language are metadata tags). A write logs "Embedded ASIN <asin>, PUBLISHER, SUBTITLE, LANGUAGE in <file>" (info, the tags it was given); a refused one logs a warning naming every tag ("ASIN, PUBLISHER tags not written (<reason>)").
 
 **Resources:**
-- Disk: the merge check (`TEMP_DIR`) counts the estimated merged size × (1 merged file + 1 post-step copy when the book has an ASIN + 1 tagged copy when tagging is on): 1x-3x. A tagged single file with an ASIN needs 2x its size next to the download (tagged copy + post-step copy)
+- Disk: the merge check (`TEMP_DIR`) counts the estimated merged size × (1 merged file, + 1 post-step copy when there are freeform tags to write, + 1 tagged copy when tagging is on): 1x-3x. Freeform tags: the ASIN, and with tagging on publisher/subtitle/language. A tagged single file with an ASIN needs 2x its size next to the download (tagged copy + post-step copy)
 - Memory: peak ≈ 2x the moov while planning (the read moov is the scratch copy, offsets shifted in place, plus the assembled new moov; then 1x) + ~32 bytes per chunk (`Float64Array` offsets/sizes: the plan's old tables, and the re-analysis of the new moov during verification); moov capped at 128 MiB. Read-back compares run in 1 MiB chunks
 - Time: tagging ffmpeg timeout `ffmpegRemuxTimeoutMs(size)` = 120 s + 120 s/GiB (+faststart writes the file twice); the merger's codec-copy timeout is at least that for its estimated size
 
-**Adding a field (#208):** push `{ name: 'PUBLISHER' | 'SUBTITLE' | 'LANGUAGE', value }` in `buildMp4FreeformTags`; Audiobookshelf 2.37.1 reads `publisher`, `subtitle`, `language` from these names.
+**Fields (#208):** `ASIN` always; `PUBLISHER`, `SUBTITLE`, `LANGUAGE` with tagging on (Audiobookshelf 2.37.1 reads `publisher`, `subtitle`, `language` from these names). New fields go in `buildMp4FreeformTags`; a value empty after sanitizing is left out (the post-step writes all tags or none, so one bad value must not cost the ASIN).
 
 **Configuration:**
 - Key: `metadata_tagging_enabled` (Configuration table)

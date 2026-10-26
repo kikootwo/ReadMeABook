@@ -77,7 +77,7 @@
 - **File organization, seeding** → [phase3/file-organization.md](phase3/file-organization.md)
 - **Post-organize cleanup safety (delete guard, remove-after-processing gate)** → [phase3/file-organization.md](phase3/file-organization.md#post-organize-cleanup-safety)
 - **Verified import (atomic copy, placement records, delete only what reached the library)** → [phase3/file-organization.md](phase3/file-organization.md#verified-import-delete-only-what-reached-the-library)
-- **Custom M4B tags (ASIN, iTunes freeform `----` atoms), tagged MP4 faststart** → [phase3/file-organization.md](phase3/file-organization.md#mp4-freeform-tags)
+- **Custom M4B tags (ASIN, publisher, subtitle, language as iTunes freeform `----` atoms), tagged MP4 faststart** → [phase3/file-organization.md](phase3/file-organization.md#mp4-freeform-tags)
 - **Chapter merging (auto-merge to M4B)** → [features/chapter-merging.md](features/chapter-merging.md)
 
 ## Background Jobs

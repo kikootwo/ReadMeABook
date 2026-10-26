@@ -44,6 +44,7 @@ const HTML_MAX_BACKOFF_MS = 180_000;
 export interface AudibleAudiobook {
   asin: string;
   title: string;
+  subtitle?: string;
   author: string;
   authorAsin?: string;
   narrator?: string;
@@ -104,6 +105,7 @@ interface CatalogProductLadder {
 interface CatalogProduct {
   asin: string;
   title?: string;
+  subtitle?: string;
   authors?: CatalogProductAuthor[];
   narrators?: CatalogProductNarrator[];
   publisher_summary?: string;
@@ -187,6 +189,7 @@ function mapCatalogProduct(product: CatalogProduct): AudibleAudiobook {
   return {
     asin: product.asin,
     title: product.title ?? '',
+    subtitle: typeof product.subtitle === 'string' && product.subtitle ? product.subtitle : undefined,
     author,
     authorAsin,
     narrator,
@@ -697,6 +700,7 @@ export class AudibleService {
       const result: AudibleAudiobook = {
         asin,
         title: data.title || '',
+        subtitle: typeof data.subtitle === 'string' && data.subtitle ? data.subtitle : undefined,
         author: data.authors?.map((a: any) => a.name).join(', ') || '',
         authorAsin: data.authors?.[0]?.asin || undefined,
         narrator: data.narrators?.map((n: any) => n.name).join(', ') || '',

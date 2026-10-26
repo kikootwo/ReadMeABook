@@ -20,7 +20,7 @@ export const MAX_DESCRIPTION_BYTES = 16 * 1024;
  */
 export function sanitizeMetadataValue(value: string): string {
   return value
-    .replace(/^[﻿ ​‌‍]+/, '') // leading BOM / NBSP / ZWSP / ZWNJ / ZWJ
+    .replace(/^[\uFEFF\u00A0\u200B\u200C\u200D]+/, '') // leading BOM / NBSP / ZWSP / ZWNJ / ZWJ
     .replace(/[\x00\r\n]/g, '') // null bytes and line breaks anywhere
     .trim();
 }
@@ -64,6 +64,47 @@ export function sanitizeGenreName(name: string): string {
     .map((part) => sanitizeMetadataValue(part))
     .filter((part) => part.length > 0)
     .join(' & ');
+}
+
+/** Longest publisher, subtitle or language written, in UTF-8 bytes (Audible's are well under 200). */
+export const MAX_SHORT_TAG_BYTES = 1024;
+
+/**
+ * A one-line tag value (publisher, subtitle, language): bounded, whitespace runs
+ * collapsed, control characters dropped, capped. The MP4 post-step reads every
+ * value back byte for byte, so what ffprobe would not read back as written is
+ * replaced with U+FFFD: lone surrogates, and U+FFFE/U+FFFF (ffprobe's string
+ * validation replaces those two). Undefined when nothing is left, or for a non-string.
+ */
+export function sanitizeShortTagValue(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value) return undefined;
+  const bounded = truncateRawText(value, 4 * MAX_SHORT_TAG_BYTES).toWellFormed().replace(/[\uFFFE\uFFFF]/g, '\uFFFD');
+  return capUtf8Bytes(sanitizeMultilineValue(bounded), MAX_SHORT_TAG_BYTES) || undefined;
+}
+
+/**
+ * The language tag: Audible's language name with its first letter capitalized
+ * ("english" → "English"), as Audiobookshelf shows it. Not an ISO 639 code.
+ */
+export function languageTagValue(value: unknown): string | undefined {
+  const clean = sanitizeShortTagValue(value);
+  return clean ? capUtf8Bytes(clean.charAt(0).toUpperCase() + clean.slice(1), MAX_SHORT_TAG_BYTES) : undefined;
+}
+
+/** Publisher, subtitle and language from the Audible lookup: tags only (the book row stores none). */
+export interface BookDetails {
+  publisher?: string; // Publisher name
+  subtitle?: string; // Book subtitle
+  language?: string; // Audible language name ("english"), written capitalized
+}
+
+/** Publisher, subtitle and language as every format writes them (undefined when empty once sanitized). */
+export function bookDetailValues(details: BookDetails): BookDetails {
+  return {
+    publisher: sanitizeShortTagValue(details.publisher),
+    subtitle: sanitizeShortTagValue(details.subtitle),
+    language: languageTagValue(details.language),
+  };
 }
 
 /**

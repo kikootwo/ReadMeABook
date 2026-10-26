@@ -7,7 +7,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import axios from 'axios';
 import { RMAB_USER_AGENT } from './user-agent';
-import { tagMultipleFiles, checkFfmpegAvailable, addMp4FreeformTags } from './metadata-tagger';
+import { tagMultipleFiles, checkFfmpegAvailable, addMp4FreeformTags, buildMp4FreeformTags, type Mp4FreeformMetadata } from './metadata-tagger';
 import { RMABLogger } from './logger';
 import { hasCover, publishCover, type CoverPlacement } from './cover-placement';
 import { placeAudio, placeFile, isVerifiedStatus, type AudioPlacement } from './organize-copy';
@@ -40,6 +40,9 @@ export interface AudiobookMetadata {
   seriesPart?: string;
   description?: string; // Metadata tags only (not used in path templates)
   genres?: string[]; // Metadata tags only (not used in path templates)
+  publisher?: string; // Metadata tags only (not used in path templates)
+  subtitle?: string; // Metadata tags only (not used in path templates)
+  language?: string; // Metadata tags only (not used in path templates)
 }
 
 export interface OrganizationResult {
@@ -167,6 +170,15 @@ export class FileOrganizer {
         await logger?.warn(skipped); result.errors.push(skipped); return false;
       }); // read once: merge disk-space check + tagging pass
 
+      // The ASIN step always writes the ASIN; publisher/subtitle/language are metadata tags (tagging on only)
+      const freeformMetadata: Mp4FreeformMetadata = metadataTaggingEnabled
+        ? { asin: audiobook.asin, publisher: audiobook.publisher, subtitle: audiobook.subtitle, language: audiobook.language }
+        : { asin: audiobook.asin };
+      // What the ASIN step will write (sanitized, empty values left out), for the disk check and the log
+      const freeformLabel = buildMp4FreeformTags(freeformMetadata)
+        .map((tag) => (tag.name === 'ASIN' ? `ASIN ${tag.value}` : tag.name))
+        .join(', ');
+
       // Track if we created a merged file that needs cleanup
       let tempMergedFile: string | null = null;
       // Original chapter files behind the merged file, and whether its duration was verified
@@ -197,8 +209,8 @@ export class FileOrganizer {
             const isChapterDownload = await detectChapterFiles(sourceFilePaths, logger ?? undefined);
 
             if (isChapterDownload) {
-              // Check disk space: the merged file, the ASIN post-step's full copy (with an ASIN), and the tagged copy when tagging
-              const estimatedSize = (await estimateOutputSize(sourceFilePaths)) * (1 + (audiobook.asin ? 1 : 0) + (metadataTaggingEnabled ? 1 : 0));
+              // Check disk space: the merged file, the ASIN post-step's full copy (when it has tags to write), and the tagged copy when tagging
+              const estimatedSize = (await estimateOutputSize(sourceFilePaths)) * (1 + (freeformLabel ? 1 : 0) + (metadataTaggingEnabled ? 1 : 0));
               const availableSpace = await checkDiskSpace(this.tempDir);
 
               if (availableSpace !== null && availableSpace < estimatedSize) {
@@ -303,6 +315,9 @@ export class FileOrganizer {
               seriesPart: audiobook.seriesPart,
               description: audiobook.description,
               genres: audiobook.genres,
+              publisher: audiobook.publisher,
+              subtitle: audiobook.subtitle,
+              language: audiobook.language,
             });
 
             const successCount = taggingResults.filter((r) => r.success).length;
@@ -414,11 +429,11 @@ export class FileOrganizer {
 
         // Tagged derivative (when tagging succeeded); the original stays untouched for seeding
         const taggedFilePath = taggedFileMap.get(originalSourcePath);
-        // The one ASIN step (MP4 freeform tag), only on a file RMAB wrote: the tagged copy, else the merged file
+        // The one ASIN step (MP4 freeform tags), only on a file RMAB wrote: the tagged copy, else the merged file
         const ownOutput = taggedFilePath ?? (originalSourcePath === tempMergedFile ? tempMergedFile : undefined);
-        const freeform = ownOutput ? await addMp4FreeformTags(ownOutput, path.extname(audioFile), audiobook) : null;
+        const freeform = ownOutput ? await addMp4FreeformTags(ownOutput, path.extname(audioFile), freeformMetadata) : null;
         if (freeform?.warning) await logger?.warn(`${path.basename(audioFile)}: ${freeform.warning}`);
-        if (freeform?.written) await logger?.info(`Embedded ASIN ${audiobook.asin} in ${path.basename(audioFile)}`);
+        if (freeform?.written) await logger?.info(`Embedded ${freeformLabel} in ${path.basename(audioFile)}`);
 
         const placed: AudioPlacement = await placeAudio(originalSourcePath, taggedFilePath, targetFilePath, {
           fileMode: this.fileMode,

@@ -51,7 +51,7 @@ All `products` endpoints share:
 Populates every `AudibleAudiobook` field. Covered:
 - `contributors` → authors (with ASINs), narrators
 - `product_desc` → `publisher_summary`, `merchandising_summary`
-- `product_attrs` / `product_extended_attrs` / `product_details` → title, release_date, language, runtime_length_min
+- `product_attrs` / `product_extended_attrs` / `product_details` → title, subtitle, release_date, language, runtime_length_min
 - `media` → `product_images` (cover URLs, uses `500` variant)
 - `rating` → `overall_distribution.display_stars`
 - `series` → array of `{asin, title, sequence}`
@@ -278,6 +278,7 @@ Response:
 interface AudibleAudiobook {
   asin: string;
   title: string;
+  subtitle?: string; // Audnexus `subtitle` / catalog `subtitle` (non-empty strings only); metadata tags
   author: string;
   authorAsin?: string;
   narrator?: string;

@@ -3,7 +3,7 @@
  * Documentation: documentation/phase3/file-organization.md
  *
  * ffmpeg's mp4 muxer writes only the iTunes atoms it knows, so custom tags
- * (ASIN, and later PUBLISHER/SUBTITLE/LANGUAGE) never reach an .m4b through
+ * (ASIN, PUBLISHER, SUBTITLE, LANGUAGE) never reach an .m4b through
  * `-metadata`. This writes a NEW file, moov first (faststart), with the tags
  * added, verifies it, then renames it over RMAB's own fresh ffmpeg output.
  * On any refusal or failure the ffmpeg output is left untouched (a valid file
@@ -213,7 +213,7 @@ export async function addFreeformTags(filePath: string, tags: FreeformTag[]): Pr
   if (tags.length === 0) return { written: false };
   const failed = (error: unknown): FreeformTagResult => ({
     written: false,
-    warning: `${tags.map((t) => t.name).join(', ')} tag not written (${error instanceof Error ? error.message : String(error)})`,
+    warning: `${tags.map((t) => t.name).join(', ')} ${tags.length === 1 ? 'tag' : 'tags'} not written (${error instanceof Error ? error.message : String(error)})`,
   });
   const dir = path.dirname(filePath);
   await removeStalePartials(dir, path.basename(filePath));

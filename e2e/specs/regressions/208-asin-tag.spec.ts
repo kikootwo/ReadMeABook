@@ -13,7 +13,10 @@
  * Each also checks the placed file is moov first (faststart) through Audiobookshelf's container.
  * With tagging on (1 and 3) it also checks the #397 tags as Audiobookshelf reads them: the book's
  * genres array is the genre tag split on "; " (names like "Science Fiction & Fantasy" kept whole),
- * and the book has one description, the tag's.
+ * and the book has one description, the tag's; and the freeform PUBLISHER and LANGUAGE ("English",
+ * the capitalized name) become the book's publisher and language. Without tagging (2) neither is
+ * written. No fixture book has a subtitle on Audible, so SUBTITLE is covered by the unit and
+ * real-ffmpeg tests only.
  * Requests all three fixture books (phm too, like smoke): run with --isolate-specs next to other specs.
  */
 
@@ -92,6 +95,8 @@ async function importAndScan(scenario: string, bookKey: string, label: string) {
     bookAsin: item.media.metadata.asin,
     bookGenres: item.media.metadata.genres as string[],
     bookDescription: item.media.metadata.description as string | null,
+    bookPublisher: item.media.metadata.publisher as string | null,
+    bookLanguage: item.media.metadata.language as string | null,
     chapters: item.media.chapters?.length,
     embeddedCoverArt: audio[0]?.embeddedCoverArt ?? null,
     layout: audio[0] ? topLevelTypes(audio[0].metadata.path) : [],
@@ -121,6 +126,17 @@ function expectTagDetails(e: Awaited<ReturnType<typeof importAndScan>>['evidence
   const tagDescription = e.metaTags?.tagDescription as string | undefined;
   expect(tagDescription, 'description tag written').toBeTruthy();
   expect(e.bookDescription, 'one description, the tag\'s').toBe(tagDescription);
+  const tagPublisher = e.metaTags?.tagPublisher as string | undefined;
+  expect(tagPublisher, 'publisher tag written').toBeTruthy();
+  expect(e.bookPublisher, 'Audiobookshelf takes the publisher from the tag').toBe(tagPublisher);
+  expect(e.metaTags?.tagLanguage, 'language tag: the capitalized name').toBe('English');
+  expect(e.bookLanguage).toBe('English');
+}
+
+/** Tagging off: the ASIN step writes the ASIN only (publisher and language are metadata tags). */
+function expectNoTagDetails(e: Awaited<ReturnType<typeof importAndScan>>['evidence']) {
+  expect(e.metaTags?.tagPublisher ?? null, 'no publisher tag without tagging').toBeNull();
+  expect(e.metaTags?.tagLanguage ?? null, 'no language tag without tagging').toBeNull();
 }
 
 test('#208: single m4b, tagging on: the tagged m4b carries the ASIN', async () => {
@@ -135,6 +151,7 @@ test('#208: chapter merge, tagging off: the merged m4b carries the ASIN', async 
   await withSettings({ chapter_merging_enabled: 'true', metadata_tagging_enabled: 'false' }, async () => {
     const { book, evidence } = await importAndScan('asin-merge', 'artemis', 'merge, tagging off');
     expectAsinInFile(book, evidence, 3);
+    expectNoTagDetails(evidence);
   });
 });
 

@@ -41,6 +41,7 @@ vi.mock('@/lib/services/config.service', () => ({
 interface ProductOverrides {
   asin?: string;
   title?: string;
+  subtitle?: unknown;
   authors?: Array<{ asin?: string; name: string }>;
   narrators?: Array<{ name: string }>;
   publisher_summary?: string;
@@ -730,6 +731,21 @@ describe('AudibleService', () => {
       // Duplicates removed
       const genreSet = new Set(results[0].genres);
       expect(genreSet.size).toBe(5);
+    });
+
+    it.each([
+      ['a subtitle', { subtitle: 'An Easy & Proven Way' }, 'An Easy & Proven Way'],
+      ['an empty subtitle', { subtitle: '' }, undefined],
+      ['a non-string subtitle', { subtitle: 42 }, undefined],
+      ['no subtitle', {}, undefined],
+    ])('maps the catalog subtitle for %s', async (_label, extra, expected) => {
+      const products = [makeProduct(extra)];
+      apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(products)));
+
+      const service = new AudibleService();
+      const { results } = await service.search('test', 1);
+
+      expect(results[0].subtitle).toBe(expected);
     });
 
     it('maps primaryGenres to the deduplicated top of each category ladder', async () => {
@@ -1483,6 +1499,20 @@ describe('AudibleService', () => {
       expect(details?.publisherName).toBe('Test Publisher');
       // Catalog API should NOT be called when Audnexus succeeds.
       expect(apiClientMock.get).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a subtitle', { subtitle: 'An Easy & Proven Way' }, 'An Easy & Proven Way'],
+      ['no subtitle', {}, undefined],
+      ['an empty subtitle', { subtitle: '' }, undefined],
+      ['a non-string subtitle', { subtitle: 42 }, undefined],
+    ])('maps the Audnexus subtitle for %s', async (_label, extra, expected) => {
+      axiosMock.get.mockResolvedValueOnce({ data: { title: 'Atomic Habits', ...extra } });
+
+      const service = new AudibleService();
+      const details = await service.getAudiobookDetails('B000SUBTTL');
+
+      expect(details?.subtitle).toBe(expected);
     });
 
     it('maps primaryGenres to the Audnexus genres of type genre, without the sub-genre tags', async () => {

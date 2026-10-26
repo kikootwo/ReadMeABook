@@ -871,6 +871,21 @@ describe('processOrganizeFiles', () => {
       });
     });
 
+    it('passes publisher, subtitle and language from the lookup to the organizer', async () => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      taggingEnabled(true);
+      audibleServiceMock.getAudiobookDetails.mockResolvedValue({
+        description: 'Full Audible summary.',
+        publisherName: 'Penguin Audio',
+        subtitle: 'An Easy & Proven Way',
+        language: 'english',
+      });
+
+      const { metadata } = await runOrganize();
+
+      expect(metadata).toMatchObject({ publisher: 'Penguin Audio', subtitle: 'An Easy & Proven Way', language: 'english' });
+    });
+
     it('series already known: the lookup serves only the tags (one call)', async () => {
       setupBook({ series: 'The Saga', seriesPart: '1' });
       taggingEnabled(true);

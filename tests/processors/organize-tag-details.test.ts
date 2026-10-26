@@ -85,6 +85,60 @@ describe('organize tag details', () => {
       });
     });
 
+    it('takes publisher, subtitle and language from the lookup; the log shows them as the tags get them', async () => {
+      const load = vi.fn().mockResolvedValue({
+        description: 'Full summary.',
+        publisherName: 'Penguin Audio',
+        subtitle: 'An Easy & Proven Way',
+        language: 'english',
+      });
+
+      await expect(resolveTagDetails('Stored blurb.', load, true, logger)).resolves.toMatchObject({
+        publisher: 'Penguin Audio',
+        subtitle: 'An Easy & Proven Way',
+        language: 'english',
+      });
+      expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('publisher=Penguin Audio, subtitle=An Easy & Proven Way, language=English'));
+    });
+
+    it('logs the sanitized values: a line break from the lookup cannot split the log line', async () => {
+      const load = vi.fn().mockResolvedValue({ publisherName: 'Penguin\r\nAudio', subtitle: '  Part\tOne ', language: ' german\n' });
+
+      await resolveTagDetails(null, load, true, logger);
+
+      const line = vi.mocked(logger.info).mock.calls.at(-1)?.[0] as string;
+      expect(line).toContain('publisher=Penguin Audio, subtitle=Part One, language=German');
+      expect(line).not.toMatch(/[\r\n\t]/);
+    });
+
+    it('ignores a publisher, subtitle or language that is not a string, and never throws on it', async () => {
+      const load = vi.fn().mockResolvedValue({ publisherName: 42, subtitle: { text: 'x' }, language: ['english'] });
+
+      const details = await resolveTagDetails(null, load, true, logger);
+
+      expect([details.publisher, details.subtitle, details.language]).toEqual([undefined, undefined, undefined]);
+      expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('publisher=none, subtitle=none, language=none'));
+    });
+
+    it('shortens a long value to 100 characters plus "…" in the job log', async () => {
+      const load = vi.fn().mockResolvedValue({ subtitle: 's'.repeat(5000) });
+
+      await resolveTagDetails(null, load, true, logger);
+
+      const line = vi.mocked(logger.info).mock.calls.at(-1)?.[0] as string;
+      expect(line).toContain(`subtitle=${'s'.repeat(100)}…,`);
+      expect(line.length).toBeLessThan(400);
+    });
+
+    it('has no publisher, subtitle or language without the lookup (the book row stores none)', async () => {
+      const load = vi.fn().mockResolvedValue(null);
+
+      const details = await resolveTagDetails('Stored blurb.', load, true, logger);
+
+      expect(details).toEqual({ description: 'Stored blurb.' });
+      expect([details.publisher, details.subtitle, details.language]).toEqual([undefined, undefined, undefined]);
+    });
+
     it('keeps the stored description when the lookup fails, and warns', async () => {
       const load = vi.fn().mockRejectedValue(new Error('Audnexus down'));
 
