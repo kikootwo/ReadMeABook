@@ -54,6 +54,12 @@ async function openWatchDialog(page: Page, author = AUTHOR) {
   await expect(page.getByRole('group', { name: 'What should be requested?' })).toBeVisible();
 }
 
+/** Snapshot once the option cards' border/background transitions have finished */
+async function shot(page: Page, name: string) {
+  await page.waitForFunction(() => document.getAnimations().every((a) => !(a instanceof CSSTransition) || a.playState !== 'running'));
+  await snap(page, '302', name);
+}
+
 const authorCard = (page: Page) => page.locator('div.rounded-xl.p-4', { hasText: AUTHOR.name }).first();
 const seriesCard = (page: Page) => page.locator('div.rounded-xl.p-4', { hasText: SERIES.title }).first();
 
@@ -78,14 +84,14 @@ test('302: watch dialog choice, keyboard selection, and the cutoff it stores', a
   await expect(entire).toBeChecked();
   await expect(entire).toBeFocused();
   await expect(page.getByText("Request only books released from today on. Older books aren't requested.")).toBeVisible();
-  await snap(page, '302', '1-watch-dialog-default');
+  await shot(page, '1-watch-dialog-default');
 
   // Keyboard only: arrow to the second radio, Space keeps it selected
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Space');
   await expect(fresh).toBeChecked();
   await expect(fresh).toBeFocused();
-  await snap(page, '302', '1-watch-dialog-new-only-keyboard');
+  await shot(page, '1-watch-dialog-new-only-keyboard');
 
   const reqP = page.waitForRequest((r) => r.url().endsWith('/api/user/watched-authors') && r.method() === 'POST');
   const resP = page.waitForResponse((r) => r.url().endsWith('/api/user/watched-authors') && r.request().method() === 'POST');
@@ -117,7 +123,7 @@ test('302: profile cards show the mode; Change back to the entire catalog warns 
   await expect(authorCard(page).getByText(/^New releases since /)).toBeVisible();
   await expect(seriesCard(page).getByText('Entire catalog', { exact: true })).toBeVisible();
   await authorCard(page).scrollIntoViewIfNeeded();
-  await snap(page, '302', '2-watched-list-new-only');
+  await shot(page, '2-watched-list-new-only');
 
   await authorCard(page).getByRole('button', { name: /Change what is requested/ }).click();
   const save = page.getByRole('button', { name: 'Save' });
@@ -126,7 +132,7 @@ test('302: profile cards show the mode; Change back to the entire catalog warns 
   const warning = page.getByText(/The next daily check requests every book by "Quillon Varrowmere" that isn't in your library/);
   await expect(warning).toBeVisible();
   await expect(save).toBeEnabled();
-  await snap(page, '302', '2-change-dialog-backlog-warning');
+  await shot(page, '2-change-dialog-backlog-warning');
 
   const resP = page.waitForResponse((r) => r.url().includes('/api/user/watched-authors/') && r.request().method() === 'PATCH');
   await save.click();
@@ -135,7 +141,7 @@ test('302: profile cards show the mode; Change back to the entire catalog warns 
   expect(patch.status).toBe(200);
   expect(patch.body.author).toMatchObject({ newReleasesOnly: false, newReleasesSince: null });
   await expect(authorCard(page).getByText('Entire catalog', { exact: true })).toBeVisible();
-  await snap(page, '302', '2-watched-list-entire');
+  await shot(page, '2-watched-list-entire');
 
   const listed = await rmab.get<{ authors: { authorAsin: string; newReleasesOnly: boolean }[] }>('/api/user/watched-authors');
   const db = dbSince('watched_authors', 'author_asin', AUTHOR.asin);
@@ -156,18 +162,18 @@ for (const view of [
     const { ctx, page } = await viewSession(browser, view);
     try {
       await openWatchDialog(page, VIEW_AUTHOR);
-      await snap(page, '302', `3-${view.name}-watch-dialog`);
+      await shot(page, `3-${view.name}-watch-dialog`);
       await page.getByRole('button', { name: 'Cancel' }).click();
 
       await page.goto('/profile');
       await expect(authorCard(page)).toBeVisible();
       await authorCard(page).scrollIntoViewIfNeeded();
-      await snap(page, '302', `3-${view.name}-cards`);
+      await shot(page, `3-${view.name}-cards`);
 
       await authorCard(page).getByRole('button', { name: /Change what is requested/ }).click();
       await page.getByRole('radio', { name: /Entire catalog/ }).check();
       await expect(page.getByText(/The next daily check requests every book/)).toBeVisible();
-      await snap(page, '302', `3-${view.name}-change-dialog`);
+      await shot(page, `3-${view.name}-change-dialog`);
       await page.getByRole('button', { name: 'Cancel' }).click();
     } finally {
       await ctx.close();
