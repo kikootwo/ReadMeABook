@@ -153,9 +153,14 @@ export class InPlaceDiscImportError extends Error {
 }
 
 async function readTrackNumbers(baseDir: string, files: Array<{ key: string; file: string }>) {
-  const tracks = await asyncPool(files, PROBE_CONCURRENCY, ({ file }) =>
-    probeAudioFile(path.join(baseDir, file)).then((probe) => probe.trackNumber, () => undefined)
-  );
+  // A probe that fails in any way (throws, rejects, returns nothing) is no tag
+  const tracks = await asyncPool(files, PROBE_CONCURRENCY, async ({ file }) => {
+    try {
+      return (await probeAudioFile(path.join(baseDir, file)))?.trackNumber;
+    } catch {
+      return undefined;
+    }
+  });
   return new Map(files.map(({ key }, i) => [key, tracks[i]]));
 }
 
