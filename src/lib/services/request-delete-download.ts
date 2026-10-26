@@ -10,9 +10,9 @@ import type { DownloadHistory } from '@/generated/prisma';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
-import { evaluateSeeding } from '../utils/seeding-policy';
+import { evaluateSeeding, type SeedingRequirement } from '../utils/seeding-policy';
 import { otherActiveRequestsUsingTorrent } from '../utils/shared-torrent';
-import { describeIgnoredIndexerId, findIndexerConfig, parseSavedIndexers } from '../utils/indexer-config';
+import { describeIgnoredIndexerId, findIndexerConfig, parseSavedIndexers, type SavedIndexerConfig } from '../utils/indexer-config';
 import { knownNotOwned, resolveOwnership, type OwnershipVerdict } from '../utils/torrent-ownership';
 
 const logger = RMABLogger.create('RequestDelete');
@@ -69,7 +69,7 @@ export async function cleanUpRequestDownload(
     const clientId = downloadHistory.downloadClientId || downloadHistory.torrentHash || downloadHistory.nzbId;
     const clientType = downloadHistory.downloadClient || 'qbittorrent';
 
-    let seedingConfig: any = null;
+    let seedingConfig: SeedingRequirement | null = null;
     if (indexersConfigStr) {
       const indexersConfig = parseSavedIndexers(indexersConfigStr);
       if (!indexersConfig) {
@@ -82,7 +82,7 @@ export async function cleanUpRequestDownload(
         indexerName: downloadHistory.indexerName,
         protocol: CLIENT_PROTOCOL_MAP[clientType as DownloadClientType] || 'torrent',
       };
-      const match = findIndexerConfig<any>(indexersConfig as any[], ref);
+      const match = findIndexerConfig(indexersConfig as SavedIndexerConfig[], ref);
       seedingConfig = match.config ?? null;
       const ignored = describeIgnoredIndexerId(ref, match);
       if (ignored) logger.warn(ignored);

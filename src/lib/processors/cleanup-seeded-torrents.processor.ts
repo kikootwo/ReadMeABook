@@ -8,6 +8,7 @@
  * and marks a row 'removed' once its torrent is definitely gone from the client.
  */
 
+import type { Prisma } from '@/generated/prisma';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType, IDownloadClient } from '../interfaces/download-client.interface';
@@ -43,6 +44,7 @@ const CANDIDATES = {
 // Rows marked 'removed' (gone from the client) are no longer 'completed', so they drop out here
 const HAS_FINISHED_DOWNLOAD = { downloadHistory: { some: { selected: true, downloadStatus: 'completed' } } };
 
+type CandidateRequest = Prisma.RequestGetPayload<{ include: { downloadHistory: true } }>;
 type Outcome = 'cleaned' | 'seeding' | 'unlimited' | 'notOwned' | 'missing' | 'errors' | 'otherClient' | 'none';
 
 export async function processCleanupSeededTorrents(payload: CleanupSeededTorrentsPayload): Promise<any> {
@@ -89,7 +91,7 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
     const markRemoved = (downloadHistoryId: string) =>
       prisma.downloadHistory.update({ where: { id: downloadHistoryId }, data: { downloadStatus: 'removed' } });
 
-    const cleanUpRequest = async (request: any): Promise<Outcome> => {
+    const cleanUpRequest = async (request: CandidateRequest): Promise<Outcome> => {
       const downloadHistory = request.downloadHistory[0];
 
       if (!downloadHistory || !downloadHistory.indexerName) {

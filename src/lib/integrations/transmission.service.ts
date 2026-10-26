@@ -457,7 +457,7 @@ export class TransmissionService implements IDownloadClient {
    * torrent-add answered torrent-duplicate (someone else added it after the pre-check): taken
    * over, so RMAB leaves its seed limits alone and never removes it.
    */
-  private isDuplicateAnswer(data: any, infoHash: string): boolean {
+  private isDuplicateAnswer(data: { arguments?: Record<string, unknown> }, infoHash: string): boolean {
     if (data.arguments?.['torrent-added'] || !data.arguments?.['torrent-duplicate']) return false;
     logger.warn(`Transmission already has ${infoHash} (torrent-duplicate): recorded as already in the client`);
     return true;
