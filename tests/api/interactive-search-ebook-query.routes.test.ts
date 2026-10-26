@@ -48,7 +48,7 @@ vi.mock('@/lib/services/ebook-scraper', () => ({
 }));
 vi.mock('@/lib/integrations/audible.service', () => ({
   getAudibleService: () => ({
-    getAudiobookDetails: async () => ({ asin: 'B000000001', title: 'Real Title', author: 'Real Author' }),
+    getAudiobookDetails: async () => ({ asin: 'B000000001', title: 'Audible Title', author: 'Audible Author' }),
   }),
 }));
 vi.mock('@/lib/utils/audiobook-matcher', () => ({ findPlexMatch: async () => ({ id: 'plex-1' }) }));
@@ -68,13 +68,14 @@ describe('interactive ebook search sends title + author to indexers', () => {
   describe('POST /api/audiobooks/[asin]/interactive-search-ebook', () => {
     beforeEach(() => {
       prismaMock.audiobook.findFirst.mockResolvedValue({
-        id: 'ab-1', audibleAsin: 'B000000001', title: 'Real Title', author: 'Real Author',
+        id: 'ab-1', audibleAsin: 'B000000001', title: 'Db Title', author: 'Db Author',
       });
       prismaMock.request.findFirst.mockResolvedValue(null);
     });
 
+    // DB record and Audible differ: the route searches with the stored audiobook record
     it.each([
-      ['no custom title', {}, 'Real Title'],
+      ['no custom title', {}, 'Db Title'],
       ['a custom title', { customTitle: 'Custom Title' }, 'Custom Title'],
     ])('with %s', async (_label, body, expectedTitle) => {
       const { POST } = await import('@/app/api/audiobooks/[asin]/interactive-search-ebook/route');
@@ -84,7 +85,7 @@ describe('interactive ebook search sends title + author to indexers', () => {
       expect((await response.json()).searchTitle).toBe(expectedTitle);
       expect(prowlarrMock.search).not.toHaveBeenCalled();
       expect(prowlarrMock.searchWithVariations).toHaveBeenCalledTimes(1);
-      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith(expectedTitle, 'Real Author', EXPECTED_FILTERS);
+      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith(expectedTitle, 'Db Author', EXPECTED_FILTERS);
     });
   });
 
