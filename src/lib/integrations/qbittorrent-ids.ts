@@ -67,10 +67,15 @@ export function hexToBase32(hex: string): string {
   return out;
 }
 
+/** A magnet link with HTML-escaped separators (`&amp;`) read as `&` */
+export function decodedMagnet(magnetUrl: string): string {
+  return magnetUrl.replace(/&amp;/gi, '&');
+}
+
 /** v1 (`btih`, hex or base32) and v2 (`btmh` SHA-256 multihash) hashes of a magnet link (`&amp;` read as `&`) */
 export function magnetHashes(magnetUrl: string): TorrentHashes | null {
   const hashes: TorrentHashes = {};
-  for (const [, kind, value] of magnetUrl.replace(/&amp;/gi, '&').matchAll(/[?&]xt(?:\.\d+)?=urn:(btih|btmh):([0-9a-z]+)/gi)) {
+  for (const [, kind, value] of decodedMagnet(magnetUrl).matchAll(/[?&]xt(?:\.\d+)?=urn:(btih|btmh):([0-9a-z]+)/gi)) {
     if (kind.toLowerCase() === 'btmh') {
       if (/^1220[0-9a-f]{64}/i.test(value)) hashes.v2 ??= value.slice(4, 68).toLowerCase();
     } else if (/^[0-9a-f]{40}/i.test(value)) {

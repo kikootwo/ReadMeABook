@@ -15,7 +15,7 @@ import { DownloadSourceTimeoutError, fetchDownloadSource, type SourceAuth } from
 import { urlForLog } from '../utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import { qbittorrentProbeList } from './torrent-probe';
-import { acceptedAddId, candidateIds, findTorrent, lookupTorrent, magnetHashes, normalizeTorrentId, SharedRequest, TorrentHashes, TorrentIdMap, torrentFileHashes, TorrentListUnavailableError, validTorrentId } from './qbittorrent-ids';
+import { acceptedAddId, candidateIds, decodedMagnet, findTorrent, lookupTorrent, magnetHashes, normalizeTorrentId, SharedRequest, TorrentHashes, TorrentIdMap, torrentFileHashes, TorrentListUnavailableError, validTorrentId } from './qbittorrent-ids';
 import {
   IDownloadClient,
   DownloadClientType,
@@ -363,9 +363,9 @@ export class QBittorrentService implements IDownloadClient {
 
   /**
    * Shared by magnet and .torrent adds: the pre-add check, the add, and the ID to record.
-   * With a v1 hash, the pre-add check ends with the full list: a torrent with this v1 may be listed
-   * under another ID (a hybrid under its v2 ID, or a different btmh), and qBittorrent up to 5.1 can
-   * answer "Ok." to that duplicate. If that list can't be read, nothing is added (fail closed).
+   * The pre-add check ends with the full list: the torrent may be listed under another ID (a hybrid
+   * under its v2 ID; a btih or truncated btmh equal to another torrent's v1), and qBittorrent up to 5.1
+   * can answer "Ok." to that duplicate. If that list can't be read, nothing is added (fail closed).
    */
   private async addOnce(
     hashes: TorrentHashes,
@@ -373,7 +373,7 @@ export class QBittorrentService implements IDownloadClient {
     post: () => Promise<{ data: unknown; conflict: boolean }>
   ): Promise<AddDownloadResult> {
     // Already in the client: taken over, never added (or later removed) by RMAB
-    const present = await this.presentId(hashes, !!hashes.v1).catch((error: unknown) => {
+    const present = await this.presentId(hashes, true).catch((error: unknown) => {
       if (axios.isAxiosError(error) && error.response?.status === 403) throw error; // re-login, then retry
       logger.error(`Nothing added: couldn't read the torrent list to check for an existing copy (${error instanceof Error ? error.message : String(error)})`);
       throw new TorrentListUnavailableError();
@@ -406,7 +406,8 @@ export class QBittorrentService implements IDownloadClient {
     options?: AddTorrentOptions
   ): Promise<AddDownloadResult> {
     // Extract the btih (v1, hex or base32) and btmh (v2) hashes from the magnet link
-    const hashes = magnetHashes(magnetUrl);
+    const magnet = decodedMagnet(magnetUrl); // the string parsed is the string sent
+    const hashes = magnetHashes(magnet);
 
     if (!hashes) {
       throw new Error('Invalid magnet link - could not extract info_hash');
@@ -423,7 +424,7 @@ export class QBittorrentService implements IDownloadClient {
     // global seeding rules don't remove the torrent prematurely.
     // RMAB manages torrent lifecycle via the cleanup-seeded-torrents processor.
     const form = new URLSearchParams({
-      urls: magnetUrl,
+      urls: magnet,
       category,
       paused: options?.paused ? 'true' : 'false',
       ratioLimit: '-1',
