@@ -280,7 +280,7 @@ export async function PATCH(
             data: {
               status: 'processing',
               progress: 100,
-              errorMessage: null,
+              errorMessage: null, autoRerequestCount: 0,
               updatedAt: new Date(),
             },
             include: {
@@ -320,7 +320,7 @@ export async function PATCH(
             data: {
               status: 'pending',
               progress: 0,
-              errorMessage: null,
+              errorMessage: null, autoRerequestCount: 0,
               updatedAt: new Date(),
             },
             include: {

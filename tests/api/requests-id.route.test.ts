@@ -343,6 +343,50 @@ describe('Request by ID API routes', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith('req-6', 'ab-6', '/usenet/book', undefined, undefined, undefined, 'dh-s');
   });
 
+  // #409: a user retry restarts the automatic re-request backoff
+  it('a search retry of a failed request resets the automatic re-request count', async () => {
+    authRequest.json.mockResolvedValue({ action: 'retry' });
+    prismaMock.request.findFirst
+      .mockResolvedValueOnce({ id: 'req-3', userId: 'user-1', status: 'failed', autoRerequestCount: 4 })
+      .mockResolvedValueOnce({ id: 'req-3', userId: 'user-1', audiobook: { id: 'ab-2', title: 'Title', author: 'Author', audibleAsin: 'ASIN-2' } });
+    prismaMock.request.update.mockResolvedValueOnce({ id: 'req-3', status: 'pending', audiobook: { id: 'ab-2' } });
+
+    const { PATCH } = await import('@/app/api/requests/[id]/route');
+    const response = await PATCH({} as any, { params: Promise.resolve({ id: 'req-3' }) });
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.request.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'req-3' },
+      data: expect.objectContaining({ status: 'pending', autoRerequestCount: 0 }),
+    }));
+  });
+
+  it('an import retry of a warn request resets the automatic re-request count', async () => {
+    authRequest.json.mockResolvedValue({ action: 'retry' });
+    prismaMock.request.findFirst
+      .mockResolvedValueOnce({ id: 'req-5', userId: 'user-1', status: 'warn', autoRerequestCount: 4 })
+      .mockResolvedValueOnce({
+        id: 'req-5',
+        userId: 'user-1',
+        audiobook: { id: 'ab-5' },
+        downloadHistory: [{ id: 'dh-q', torrentHash: 'hash-1', selected: true, downloadClient: 'qbittorrent' }],
+      });
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue({
+      clientType: 'qbittorrent',
+      getDownload: vi.fn().mockResolvedValue({ downloadPath: '/downloads/Book' }),
+    });
+    prismaMock.request.update.mockResolvedValueOnce({ id: 'req-5', status: 'processing', audiobook: { id: 'ab-5' } });
+
+    const { PATCH } = await import('@/app/api/requests/[id]/route');
+    const response = await PATCH({} as any, { params: Promise.resolve({ id: 'req-5' }) });
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.request.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'req-5' },
+      data: expect.objectContaining({ status: 'processing', autoRerequestCount: 0 }),
+    }));
+  });
+
   it('returns 400 when download history is missing for import retry', async () => {
     authRequest.json.mockResolvedValue({ action: 'retry' });
     prismaMock.request.findFirst

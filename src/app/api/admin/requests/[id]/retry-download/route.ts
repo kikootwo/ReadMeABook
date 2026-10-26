@@ -198,6 +198,7 @@ export async function POST(
           data: {
             status: 'downloading',
             errorMessage: null,
+            autoRerequestCount: 0, // a manual retry restarts the automatic re-request backoff
             downloadAttempts: { increment: 1 },
             updatedAt: new Date(),
           },

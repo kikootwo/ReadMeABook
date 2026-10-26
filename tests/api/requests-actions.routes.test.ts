@@ -264,6 +264,25 @@ describe('Request action routes', () => {
     expect(jobQueueMock.addSearchJob).toHaveBeenCalled();
   });
 
+  it('manual search on a failed request resets the automatic re-request count (#409)', async () => {
+    prismaMock.request.findUnique.mockResolvedValueOnce({
+      id: 'req-2',
+      userId: 'user-1',
+      status: 'failed',
+      autoRerequestCount: 4,
+      audiobook: { id: 'ab-1', title: 'Title', author: 'Author', audibleAsin: 'ASIN' },
+    });
+    prismaMock.request.update.mockResolvedValueOnce({ id: 'req-2', status: 'pending' });
+
+    const { POST } = await import('@/app/api/requests/[id]/manual-search/route');
+    await POST({} as any, { params: Promise.resolve({ id: 'req-2' }) });
+
+    expect(prismaMock.request.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'req-2' },
+      data: expect.objectContaining({ status: 'pending', autoRerequestCount: 0 }),
+    }));
+  });
+
   it('returns 401 when manual search user is not authenticated', async () => {
     authRequest.user = null;
 
@@ -340,6 +359,33 @@ describe('Request action routes', () => {
 
     expect(payload.success).toBe(true);
     expect(jobQueueMock.addDownloadJob).toHaveBeenCalled();
+  });
+
+  it('selecting a release on a failed request resets the automatic re-request count (#409)', async () => {
+    authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
+    prismaMock.request.findUnique.mockResolvedValueOnce({
+      id: 'req-3',
+      userId: 'user-1',
+      status: 'failed',
+      autoRerequestCount: 4,
+      audiobook: { id: 'ab-2', title: 'Title', author: 'Author' },
+    } as any);
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      id: 'user-1',
+      role: 'admin',
+      autoApproveRequests: null,
+      plexUsername: 'testuser',
+    } as any);
+    prismaMock.request.update.mockResolvedValueOnce({ id: 'req-3', status: 'downloading', audiobook: { title: 'Title' } } as any);
+
+    const { POST } = await import('@/app/api/requests/[id]/select-torrent/route');
+    const response = await POST({} as any, { params: Promise.resolve({ id: 'req-3' }) });
+
+    expect((await response.json()).success).toBe(true);
+    expect(prismaMock.request.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'req-3' },
+      data: expect.objectContaining({ status: 'downloading', autoRerequestCount: 0 }),
+    }));
   });
 
   it('returns 401 when user is not authenticated', async () => {

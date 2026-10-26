@@ -69,6 +69,18 @@ describe('POST /api/admin/requests/[id]/retry-download', () => {
     expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
   });
 
+  it('a retry of a failed download resets the automatic re-request count (#409)', async () => {
+    clientMock.getDownload.mockResolvedValue({ status: 'downloading' });
+    const { POST } = await import('@/app/api/admin/requests/[id]/retry-download/route');
+    const response = await POST({} as any, { params: Promise.resolve({ id: 'req-1' }) });
+
+    expect(response.status).toBe(200);
+    expect(prismaMock.request.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'req-1' },
+      data: expect.objectContaining({ status: 'downloading', autoRerequestCount: 0 }),
+    }));
+  });
+
   it('rejects re-adding a stored link that is not a Prowlarr download link or magnet', async () => {
     clientMock.getDownload.mockResolvedValue(null);
     const { POST } = await import('@/app/api/admin/requests/[id]/retry-download/route');

@@ -99,6 +99,7 @@ export async function PATCH(
             data: {
               status: 'pending',
               errorMessage: null,
+              autoRerequestCount: 0, // a manual retry restarts the automatic re-request backoff
               updatedAt: new Date(),
             },
           });
