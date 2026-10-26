@@ -12,6 +12,7 @@ import { serializeDownloadClients } from '@/lib/services/download-client-storage
 import { RMABLogger } from '@/lib/utils/logger';
 import { randomUUID } from 'crypto';
 import { MASKED_PASSWORD } from '@/lib/utils/saved-credential';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Settings.DownloadClients');
 
@@ -51,7 +52,9 @@ export async function POST(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const body = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         const {
           type,
           name,

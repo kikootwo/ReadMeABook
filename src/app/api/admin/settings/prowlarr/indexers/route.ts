@@ -9,6 +9,7 @@ import { getProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { getConfigService } from '@/lib/services/config.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { invalidIndexerLimit, toSavedIndexerConfig, type IndexerConfigInput } from '@/lib/utils/indexer-config';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Settings.ProwlarrIndexers');
 
@@ -94,7 +95,9 @@ export async function PUT(request: NextRequest) {
       try {
         let body: any;
         try {
-          body = await req.json();
+          const bodyResult = await readJsonBody(req);
+          if (!bodyResult.ok) return bodyResult.response;
+          body = bodyResult.data;
         } catch {
           return badRequest(400, 'Request body must be JSON');
         }

@@ -7,11 +7,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSetupIncompleteOrAdmin } from '@/lib/middleware/auth';
 import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
 import { savedAudiobookshelfCredential } from '@/lib/services/saved-credentials.service';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 export async function POST(request: NextRequest) {
   return requireSetupIncompleteOrAdmin(request, async (req) => {
   try {
-    const { serverUrl, apiToken } = await req.json();
+    const bodyResult = await readJsonBody(req);
+    if (!bodyResult.ok) return bodyResult.response;
+    const { serverUrl, apiToken } = bodyResult.data;
 
     if (!serverUrl) {
       return NextResponse.json(

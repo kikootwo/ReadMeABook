@@ -9,6 +9,7 @@ import { prisma } from '@/lib/db';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { isSameServiceUrl, savedCredentialUrlMismatch } from '@/lib/utils/saved-credential';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.BookDateConfig');
 
@@ -49,7 +50,9 @@ async function getConfig(req: AuthenticatedRequest) {
 // POST: Create or update global BookDate configuration (Admin only)
 async function saveConfig(req: AuthenticatedRequest) {
   try {
-    const body = await req.json();
+    const bodyResult = await readJsonBody(req);
+    if (!bodyResult.ok) return bodyResult.response;
+    const body = bodyResult.data;
     const { provider, apiKey, model, baseUrl, isEnabled, clearApiKey } = body;
 
     // Check if config exists

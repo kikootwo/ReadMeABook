@@ -18,6 +18,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
 import { savedClientCredential } from '@/lib/services/saved-credentials.service';
 import { randomUUID } from 'crypto';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Settings.DownloadClient');
 
@@ -25,6 +26,8 @@ export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
         const {
           type,
           url,
@@ -34,7 +37,7 @@ export async function PUT(request: NextRequest) {
           remotePathMappingEnabled,
           remotePath,
           localPath,
-        } = await request.json();
+        } = bodyResult.data;
 
         logger.warn('DEPRECATED: Using legacy single-client API. Please use /api/admin/settings/download-clients instead.');
 

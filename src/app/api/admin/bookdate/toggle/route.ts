@@ -7,12 +7,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.BookDate.Toggle');
 
 async function handler(req: AuthenticatedRequest) {
   try {
-    const body = await req.json();
+    const bodyResult = await readJsonBody(req);
+    if (!bodyResult.ok) return bodyResult.response;
+    const body = bodyResult.data;
     const { isEnabled } = body;
 
     if (typeof isEnabled !== 'boolean') {

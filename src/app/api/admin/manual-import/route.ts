@@ -13,6 +13,7 @@ import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { AUDIO_EXTENSIONS } from '@/lib/constants/audio-formats';
 import { getAudibleService } from '@/lib/integrations/audible.service';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.ManualImport');
 
@@ -54,7 +55,9 @@ export async function POST(request: NextRequest) {
         const pathModule = await import('path');
         const fs = await import('fs/promises');
 
-        const body = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         const { folderPath, asin, cleanupSource, selectedFiles } = body;
         let { audiobookId } = body;
 

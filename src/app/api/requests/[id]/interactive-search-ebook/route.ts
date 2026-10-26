@@ -22,6 +22,7 @@ import {
   searchByTitle,
   getSlowDownloadLinks,
 } from '@/lib/services/ebook-scraper';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.InteractiveSearchEbook');
 
@@ -69,7 +70,9 @@ export async function POST(
     return requireAdmin(req, async () => {
       try {
         const { id: parentRequestId } = await params;
-        const body = await request.json().catch(() => ({}));
+        const bodyResult = await readJsonBody(request, { fallback: {} });
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         const customTitle = body.customTitle as string | undefined;
 
         // Get the request (can be audiobook parent or direct ebook request)

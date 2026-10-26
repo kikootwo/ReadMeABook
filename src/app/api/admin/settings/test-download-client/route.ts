@@ -14,6 +14,7 @@ import { SUPPORTED_CLIENT_TYPES } from '@/lib/interfaces/download-client.interfa
 import { RMABLogger } from '@/lib/utils/logger';
 import { isSameServiceUrl, resolveSecretForUrl } from '@/lib/utils/saved-credential';
 import { savedClientCredential } from '@/lib/services/saved-credentials.service';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.TestDownloadClient');
 
@@ -21,6 +22,8 @@ export async function POST(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
         const {
           type,
           name: clientName,
@@ -31,7 +34,7 @@ export async function POST(request: NextRequest) {
           remotePathMappingEnabled,
           remotePath,
           localPath,
-        } = await request.json();
+        } = bodyResult.data;
 
         logger.debug('Received request', { type, url, hasUsername: !!username, hasPassword: !!password });
 

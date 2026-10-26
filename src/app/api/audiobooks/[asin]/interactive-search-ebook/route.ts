@@ -26,6 +26,7 @@ import {
   searchByTitle,
   getSlowDownloadLinks,
 } from '@/lib/services/ebook-scraper';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Audiobooks.InteractiveSearchEbook');
 
@@ -92,7 +93,9 @@ export async function POST(
       const accessDenied = await denyWithoutInteractiveSearchAccess(req.user?.id);
       if (accessDenied) return accessDenied;
 
-      const body = await request.json().catch(() => ({}));
+      const bodyResult = await readJsonBody(request, { fallback: {} });
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const customTitle = body.customTitle as string | undefined;
 
       if (!asin || asin.length !== 10) {

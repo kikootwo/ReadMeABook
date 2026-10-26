@@ -7,13 +7,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Issuer } from 'openid-client';
 import { requireSetupIncompleteOrAdmin } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Setup.TestOIDC');
 
 export async function POST(request: NextRequest) {
   return requireSetupIncompleteOrAdmin(request, async (req) => {
   try {
-    const body = await req.json();
+    const bodyResult = await readJsonBody(req);
+    if (!bodyResult.ok) return bodyResult.response;
+    const body = bodyResult.data;
     const { issuerUrl, clientId, clientSecret } = body;
 
     // Validate required fields

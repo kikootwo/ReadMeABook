@@ -10,6 +10,7 @@ import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.WatchedAuthors');
 
@@ -64,7 +65,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
 
-      const body = await req.json();
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const { authorAsin, authorName, coverArtUrl } = AddWatchedAuthorSchema.parse(body);
 
       // Check for duplicate

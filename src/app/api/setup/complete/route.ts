@@ -14,12 +14,15 @@ import { getClientDisplayName } from '@/lib/interfaces/download-client.interface
 import { requireSetupIncomplete } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
 import { toSavedIndexerConfig, type IndexerConfigInput } from '@/lib/utils/indexer-config';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Setup.Complete');
 
 export async function POST(request: NextRequest) {
   return requireSetupIncomplete(request, async (req) => {
   try {
+    const bodyResult = await readJsonBody(req);
+    if (!bodyResult.ok) return bodyResult.response;
     const {
       backendMode,
       audibleRegion,
@@ -33,7 +36,7 @@ export async function POST(request: NextRequest) {
       downloadClient,
       paths,
       bookdate,
-    } = await req.json();
+    } = bodyResult.data;
 
     // Validate backend mode
     if (!backendMode || !['plex', 'audiobookshelf'].includes(backendMode)) {

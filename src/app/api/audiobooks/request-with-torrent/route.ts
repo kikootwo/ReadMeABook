@@ -19,6 +19,7 @@ import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive
 import { sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 import { guardTorrentSelection, rejectedSelectionResponse } from '@/lib/services/download-selection-guard';
 import { hideStoredPick } from '@/lib/services/request-detail-query';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.RequestWithTorrent');
 
@@ -70,7 +71,9 @@ export async function POST(request: NextRequest) {
       const accessDenied = await denyWithoutInteractiveSearchAccess(req.user.id);
       if (accessDenied) return accessDenied;
 
-      const body = await req.json();
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const { audiobook, torrent: pickedTorrent } = RequestWithTorrentSchema.parse(body);
 
       // Only magnet links or Prowlarr download links may be fetched on the user's behalf

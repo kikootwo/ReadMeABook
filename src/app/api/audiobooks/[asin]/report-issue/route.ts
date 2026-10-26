@@ -9,6 +9,7 @@ import { reportIssue, ReportedIssueError } from '@/lib/services/reported-issue.s
 import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.ReportIssue');
 
@@ -37,7 +38,9 @@ export async function POST(
       }
 
       const { asin } = await params;
-      const body = await req.json();
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const { reason, title, author, coverArtUrl } = ReportIssueSchema.parse(body);
 
       const issue = await reportIssue(asin, req.user.id, reason, { title, author, coverArtUrl });

@@ -11,6 +11,7 @@ import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 import { createRequestForUser } from '@/lib/services/request-creator.service';
 import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Requests');
 
@@ -42,7 +43,9 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const body = await req.json();
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const { audiobook } = CreateRequestSchema.parse(body);
 
       const skipAutoSearch = req.nextUrl.searchParams.get('skipAutoSearch') === 'true';

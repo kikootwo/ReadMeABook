@@ -12,6 +12,7 @@ import { getConfigService } from '@/lib/services/config.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
 import { savedPlexCredential } from '@/lib/services/saved-credentials.service';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.AdminPlexSettings');
 
@@ -19,7 +20,9 @@ export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { url, token, libraryId, triggerScanAfterImport } = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const { url, token, libraryId, triggerScanAfterImport } = bodyResult.data;
 
     if (!url || !token || !libraryId) {
       return NextResponse.json(

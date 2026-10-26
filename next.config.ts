@@ -28,6 +28,11 @@ const nextConfig: NextConfig = {
   // Turbopack configuration (silence migration warning)
   turbopack: {},
 
+  experimental: {
+    // Page routes take no request body; keep Next's middleware body copy small.
+    proxyClientMaxBodySize: '64kb',
+  },
+
   // Webpack configuration for when not using Turbopack
   webpack: (config, { isServer }) => {
     if (!isServer) {

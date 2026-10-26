@@ -12,6 +12,7 @@ import { goodreadsRssUrlSchema } from '@/lib/utils/goodreads-rss-url.schema';
 import { DUPLICATE_SHELF_MESSAGE, findShelfWithSameFeed, isUniqueConstraintError } from '@/lib/services/goodreads-shelf-match';
 import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.GoodreadsShelves');
 
@@ -84,7 +85,9 @@ export async function PATCH(
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
 
-      const body = await request.json();
+      const bodyResult = await readJsonBody(request);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const { rssUrl, autoRequest } = UpdateGoodreadsSchema.parse(body);
 
       const updateData: Record<string, unknown> = {};

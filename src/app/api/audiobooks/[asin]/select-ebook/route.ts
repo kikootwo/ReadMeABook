@@ -17,6 +17,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { startAnnasArchiveDownload, startIndexerEbookDownload, type SelectedEbook } from '@/lib/services/ebook-selection.service';
 import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
 import { guardEbookSelection, selectionFailureResponse } from '@/lib/services/download-selection-guard';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Audiobooks.SelectEbook');
 
@@ -45,7 +46,9 @@ export async function POST(
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     try {
       const { asin } = await params;
-      const body = await request.json();
+      const bodyResult = await readJsonBody(request);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       let selectedEbook = body.ebook as SelectedEbook;
 
       if (!asin || asin.length !== 10) {

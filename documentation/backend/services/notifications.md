@@ -153,12 +153,14 @@ model NotificationBackend {
 **POST /api/admin/notifications**
 - Create backend (encrypts sensitive values)
 - Body: `{type, name, config, events, enabled}`
+- `events`: 1 to N event keys (N = number of event types in `NOTIFICATION_EVENTS`); duplicates removed before saving
 
 **GET /api/admin/notifications/[id]**
 - Get single backend (sensitive values masked)
 
 **PUT /api/admin/notifications/[id]**
 - Update backend (masked values kept via `mergeMaskedSecrets`, URL-bound for Apprise/ntfy; new values encrypted)
+- Body: any of `{name, config, events, enabled}`; `events` limits as for POST
 
 **DELETE /api/admin/notifications/[id]**
 - Delete backend

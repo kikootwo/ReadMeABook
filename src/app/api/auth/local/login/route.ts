@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { LocalAuthProvider } from '@/lib/services/auth/LocalAuthProvider';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody, AUTH_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Auth.LocalLogin');
 
@@ -19,7 +20,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { username, password } = await request.json();
+    const bodyResult = await readJsonBody(request, { maxBytes: AUTH_JSON_BODY_LIMIT_BYTES });
+    if (!bodyResult.ok) return bodyResult.response;
+    const { username, password } = bodyResult.data;
 
     if (!username || !password) {
       return NextResponse.json(

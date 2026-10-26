@@ -12,6 +12,7 @@ import { invalidateProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
 import { savedProwlarrCredential } from '@/lib/services/saved-credentials.service';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Settings.Prowlarr');
 
@@ -19,7 +20,9 @@ export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { url, apiKey } = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const { url, apiKey } = bodyResult.data;
 
         if (!url || !apiKey) {
           return NextResponse.json(

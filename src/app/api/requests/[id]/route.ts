@@ -12,6 +12,7 @@ import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '@/lib/interfaces/downlo
 import { CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
 import { ADMIN_REQUEST_DETAIL_INCLUDE, OWNER_REQUEST_DETAIL_SELECT } from '@/lib/services/request-detail-query';
 import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.RequestById');
 
@@ -92,7 +93,9 @@ export async function PATCH(
       }
 
       const { id } = await params;
-      const body = await req.json();
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const { action } = body;
 
       const requestRecord = await prisma.request.findFirst({

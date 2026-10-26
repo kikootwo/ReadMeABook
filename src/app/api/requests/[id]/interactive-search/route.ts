@@ -14,6 +14,7 @@ import type { AudibleRegion } from '@/lib/types/audible';
 import { RMABLogger } from '@/lib/utils/logger';
 import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
 import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.InteractiveSearch');
 const MAX_RANKED_RESULTS = 100;
@@ -41,7 +42,9 @@ export async function POST(
       // Parse optional request body
       let customTitle: string | undefined;
       try {
-        const body = await req.json();
+        const bodyResult = await readJsonBody(req);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         customTitle = body.customTitle;
       } catch (e) {
         // No body or invalid JSON - that's okay, customTitle will be undefined

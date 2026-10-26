@@ -13,6 +13,7 @@ import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 import { goodreadsRssUrlSchema } from '@/lib/utils/goodreads-rss-url.schema';
 import { DUPLICATE_SHELF_MESSAGE, findShelfWithSameFeed, isUniqueConstraintError } from '@/lib/services/goodreads-shelf-match';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.GoodreadsShelves');
 
@@ -89,7 +90,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
 
-      const body = await req.json();
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const { rssUrl, autoRequest } = AddShelfSchema.parse(body);
 
       // Check for duplicate (compares normalised feed URLs, so older http/bare-host rows match)

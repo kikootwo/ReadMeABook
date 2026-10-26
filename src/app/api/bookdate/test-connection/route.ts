@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AuthenticatedRequest, requireSetupIncompleteOrAdmin } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.BookDate.TestConnection');
 
@@ -119,7 +120,9 @@ async function readBodyForLog(response: Response): Promise<string> {
 
 async function testConnection(req: NextRequest, options: { callerIsAdmin: boolean }) {
   try {
-    const body = await req.json();
+    const bodyResult = await readJsonBody(req);
+    if (!bodyResult.ok) return bodyResult.response;
+    const body = bodyResult.data;
     const { provider, apiKey, baseUrl, useSavedKey } = body;
 
     // Only a signed-in admin may use the saved key (never the setup wizard)

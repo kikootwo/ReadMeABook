@@ -9,6 +9,7 @@ import { getDownloadClientManager, DownloadClientConfig } from '@/lib/services/d
 import { SUPPORTED_CLIENT_TYPES } from '@/lib/interfaces/download-client.interface';
 import { requireSetupIncomplete } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Setup.DownloadClientCategories');
 
@@ -18,7 +19,9 @@ const logger = RMABLogger.create('API.Setup.DownloadClientCategories');
 export async function POST(request: NextRequest) {
   return requireSetupIncomplete(request, async (req) => {
     try {
-      const { type, name, url, username, password, disableSSLVerify } = await req.json();
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const { type, name, url, username, password, disableSSLVerify } = bodyResult.data;
 
       if (!type || !url) {
         return NextResponse.json(

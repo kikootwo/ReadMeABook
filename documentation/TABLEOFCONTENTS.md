@@ -17,7 +17,7 @@
 - **Settings architecture refactoring (Jan 2026)** → [settings-pages.md](settings-pages.md#architecture-refactored-jan-2026)
 - **Audiobook organization templates** → [settings-pages.md](settings-pages.md#audiobook-organization-template), [phase3/file-organization.md](phase3/file-organization.md#target-structure)
 - **Setup middleware & status check** → [backend/middleware.md](backend/middleware.md)
-- **API request validation (zod array bounds, validation error details/logging)** → [backend/validation.md](backend/validation.md)
+- **API request validation (request size limits / readJsonBody, zod array bounds, validation error details/logging)** → [backend/validation.md](backend/validation.md)
 - **Environment variables, PUBLIC_URL, OAuth configuration** → [backend/services/environment.md](backend/services/environment.md)
 
 ## Database & Data Models

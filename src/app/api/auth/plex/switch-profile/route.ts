@@ -11,6 +11,7 @@ import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { canSignInAsPlexIdentity } from '@/lib/services/auth/plex-identity';
+import { readJsonBody, AUTH_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.PlexSwitchProfile');
 
@@ -32,7 +33,9 @@ const PROFILE_REFUSED = {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const bodyResult = await readJsonBody(request, { maxBytes: AUTH_JSON_BODY_LIMIT_BYTES });
+    if (!bodyResult.ok) return bodyResult.response;
+    const body = bodyResult.data;
     const { userId, pin, pinId, profileInfo } = body;
 
     // Validate pinId is provided

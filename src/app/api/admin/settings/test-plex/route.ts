@@ -9,6 +9,7 @@ import { getPlexService } from '@/lib/integrations/plex.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
 import { savedPlexCredential } from '@/lib/services/saved-credentials.service';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Settings.TestPlex');
 
@@ -16,7 +17,9 @@ export async function POST(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { url, token } = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const { url, token } = bodyResult.data;
 
         if (!url || !token) {
           return NextResponse.json(

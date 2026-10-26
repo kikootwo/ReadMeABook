@@ -9,6 +9,7 @@ import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
 import { RMABLogger } from '@/lib/utils/logger';
 import { checkTokenLoginRateLimit } from '@/lib/utils/rateLimit';
 import crypto from 'crypto';
+import { readJsonBody, AUTH_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Auth.TokenLogin');
 
@@ -26,7 +27,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { token } = await request.json();
+    const bodyResult = await readJsonBody(request, { maxBytes: AUTH_JSON_BODY_LIMIT_BYTES });
+    if (!bodyResult.ok) return bodyResult.response;
+    const { token } = bodyResult.data;
 
     if (!token) {
       return NextResponse.json({ error: 'Missing token parameter' }, { status: 400 });

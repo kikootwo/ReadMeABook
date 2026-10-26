@@ -13,6 +13,7 @@ import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { startAnnasArchiveDownload, startIndexerEbookDownload, type SelectedEbook } from '@/lib/services/ebook-selection.service';
 import { guardEbookSelection, selectionFailureResponse } from '@/lib/services/download-selection-guard';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.SelectEbook');
 
@@ -24,7 +25,9 @@ export async function POST(
     return requireAdmin(req, async () => {
       try {
         const { id: parentRequestId } = await params;
-        const body = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         let selectedEbook = body.ebook as SelectedEbook;
 
         if (!selectedEbook) {

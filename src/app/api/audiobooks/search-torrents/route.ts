@@ -17,6 +17,7 @@ import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
 import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.AudiobookSearch');
 const MAX_RANKED_RESULTS = 100;
@@ -44,7 +45,9 @@ export async function POST(request: NextRequest) {
       const accessDenied = await denyWithoutInteractiveSearchAccess(req.user.id);
       if (accessDenied) return accessDenied;
 
-      const body = await req.json();
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const { title, author, asin } = SearchSchema.parse(body);
 
       // Get enabled indexers from configuration

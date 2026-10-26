@@ -12,6 +12,7 @@ import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Requests.Approve');
 
@@ -39,7 +40,9 @@ export async function POST(
         }
 
         const { id } = await params;
-        const body = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
 
         // Validate action and optional admin-selected torrent
         const { action, selectedTorrent: adminSelectedTorrent } = ApprovalActionSchema.parse(body);

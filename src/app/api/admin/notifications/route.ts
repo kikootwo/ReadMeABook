@@ -11,6 +11,7 @@ import { NOTIFICATION_EVENT_KEYS } from '@/lib/constants/notification-events';
 import { RMABLogger } from '@/lib/utils/logger';
 import { z } from 'zod';
 import { boundedArray, errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Notifications');
 
@@ -18,8 +19,8 @@ const CreateBackendSchema = z.object({
   type: z.string().refine((val) => getRegisteredProviderTypes().includes(val), { message: 'Unsupported notification provider type' }),
   name: z.string().min(1),
   config: z.record(z.any()),
-  // A valid list names each event type at most once
-  events: boundedArray(z.enum(NOTIFICATION_EVENT_KEYS), NOTIFICATION_EVENT_KEYS.length, { min: 1 }),
+  // At most one entry per event type; duplicates are removed
+  events: boundedArray(z.enum(NOTIFICATION_EVENT_KEYS), NOTIFICATION_EVENT_KEYS.length, { min: 1, unique: true }),
   enabled: z.boolean().default(true),
 });
 
@@ -72,7 +73,9 @@ export async function POST(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const body = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         const { type, name, config, events, enabled } = CreateBackendSchema.parse(body);
 
         const notificationService = getNotificationService();

@@ -13,6 +13,7 @@ import { prisma } from '@/lib/db';
 import { z } from 'zod';
 import { boundedArray, errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.User.HomeSections');
 
@@ -116,7 +117,9 @@ export async function PUT(request: NextRequest) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
 
-      const body = await req.json();
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const { sections } = PutBodySchema.parse(body);
 
       // Validate category sections have categoryId

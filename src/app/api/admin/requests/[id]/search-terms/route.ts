@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.SearchTerms');
 
@@ -34,7 +35,9 @@ export async function PATCH(
         // Parse body
         let body;
         try {
-          body = await req.json();
+          const bodyResult = await readJsonBody(req);
+          if (!bodyResult.ok) return bodyResult.response;
+          body = bodyResult.data;
         } catch {
           return NextResponse.json(
             { error: 'BadRequest', message: 'Invalid JSON body' },

@@ -8,6 +8,7 @@ import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { getConfigService } from '@/lib/services/config.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.BookDate.Preferences');
 
@@ -76,7 +77,9 @@ async function updatePreferences(req: AuthenticatedRequest) {
     const userId = req.user!.id;
 
     // Parse request body
-    const body = await req.json();
+    const bodyResult = await readJsonBody(req);
+    if (!bodyResult.ok) return bodyResult.response;
+    const body = bodyResult.data;
     const { libraryScope, favoriteBookIds, customPrompt, onboardingComplete } = body;
 
     // Validate library scope

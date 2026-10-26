@@ -13,6 +13,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { discoverAudiobooks, cleanSearchString } from '@/lib/utils/bulk-import-scanner';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.BulkImport.Scan');
 
@@ -68,7 +69,9 @@ export async function POST(request: NextRequest) {
 
       let body: any;
       try {
-        body = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        body = bodyResult.data;
       } catch {
         return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
       }

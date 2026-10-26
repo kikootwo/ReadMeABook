@@ -12,6 +12,7 @@ import { MAX_TOKENS_PER_USER } from '@/lib/constants/api-tokens';
 import { generateApiToken } from '@/lib/utils/api-token';
 import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.ApiTokens');
 
@@ -88,7 +89,9 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const body = await req.json();
+        const bodyResult = await readJsonBody(req);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         const { name, expiresAt, userId, role } = CreateTokenSchema.parse(body);
 
         // Determine target user (defaults to the admin themselves)

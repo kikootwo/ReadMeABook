@@ -12,6 +12,7 @@ import { serializeDownloadClients } from '@/lib/services/download-client-storage
 import { RMABLogger } from '@/lib/utils/logger';
 import { MASKED_PASSWORD, resolveSecretForUrl } from '@/lib/utils/saved-credential';
 import { savedClientCredential } from '@/lib/services/saved-credentials.service';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Settings.DownloadClients.ID');
 
@@ -27,7 +28,9 @@ export async function PUT(
       try {
         // Await params in Next.js 15+
         const { id } = await params;
-        const body = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         const {
           name,
           enabled,

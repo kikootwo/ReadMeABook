@@ -10,6 +10,7 @@ import { replaceAudiobook, ReportedIssueError } from '@/lib/services/reported-is
 import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.ReportedIssues.Replace');
 
@@ -52,7 +53,9 @@ export async function POST(
         }
 
         const { id } = await params;
-        const body = await req.json();
+        const bodyResult = await readJsonBody(req);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         const { torrent } = ReplaceSchema.parse(body);
 
         const torrentCheck = await guardTorrentSelection(torrent);

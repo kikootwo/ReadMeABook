@@ -11,6 +11,7 @@ import { getConfigService } from '@/lib/services/config.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { shouldSkipAutoSearch } from '@/lib/utils/release-date';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.BookDateSwipe');
 
@@ -20,7 +21,9 @@ type SwipeSkipReason = 'alreadyInLibrary' | 'alreadyRequested' | 'libraryCheckFa
 async function handler(req: AuthenticatedRequest) {
   try {
     const userId = req.user!.id;
-    const body = await req.json();
+    const bodyResult = await readJsonBody(req);
+    if (!bodyResult.ok) return bodyResult.response;
+    const body = bodyResult.data;
     const { recommendationId, action, markedAsKnown } = body;
 
     // Validation

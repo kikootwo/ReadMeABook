@@ -12,6 +12,7 @@ import { getEncryptionService } from '@/lib/services/encryption.service';
 import { fetchHardcoverList } from '@/lib/services/hardcover-api.service';
 import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.HardcoverShelves');
 
@@ -91,7 +92,9 @@ export async function PATCH(
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
 
-      const body = await request.json();
+      const bodyResult = await readJsonBody(request);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const { listId, apiToken, forceSync, autoRequest } = UpdateHardcoverSchema.parse(body);
 
       const updateData: { listId?: string; apiToken?: string; autoRequest?: boolean; lastSyncAt?: null; bookCount?: null; coverUrls?: null } = {};
