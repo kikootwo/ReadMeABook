@@ -16,6 +16,9 @@ export interface WatchedSeriesItem {
   seriesTitle: string;
   coverArtUrl: string | null;
   lastCheckedAt: string | null;
+  /** false = entire catalog; true = only books released since newReleasesSince */
+  newReleasesOnly: boolean;
+  newReleasesSince: string | null;
   createdAt: string;
 }
 
@@ -45,7 +48,7 @@ export function useAddWatchedSeries() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const addSeries = async (seriesAsin: string, seriesTitle: string, coverArtUrl?: string) => {
+  const addSeries = async (seriesAsin: string, seriesTitle: string, coverArtUrl?: string, newReleasesOnly = false) => {
     if (!accessToken) throw new Error('Not authenticated');
 
     setIsLoading(true);
@@ -55,7 +58,7 @@ export function useAddWatchedSeries() {
       const response = await fetchWithAuth('/api/user/watched-series', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ seriesAsin, seriesTitle, coverArtUrl }),
+        body: JSON.stringify({ seriesAsin, seriesTitle, coverArtUrl, newReleasesOnly }),
       });
 
       const data = await response.json();
@@ -116,4 +119,44 @@ export function useDeleteWatchedSeries() {
   };
 
   return { deleteSeries, isLoading, error };
+}
+
+export function useUpdateWatchedSeries() {
+  const { accessToken } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  /** Switch a watch between entire catalog (false) and new releases only (true). */
+  const setNewReleasesOnly = async (id: string, newReleasesOnly: boolean) => {
+    if (!accessToken) throw new Error('Not authenticated');
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetchWithAuth(`/api/user/watched-series/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newReleasesOnly }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || data.error || 'Failed to update watched series');
+      }
+
+      mutate((key) => typeof key === 'string' && key.includes('/api/user/watched-series'));
+
+      return data.series as WatchedSeriesItem;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return { setNewReleasesOnly, isLoading, error };
 }

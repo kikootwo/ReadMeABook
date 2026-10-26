@@ -18,6 +18,8 @@ interface ConfirmModalProps {
   confirmText?: string;
   cancelText?: string;
   isLoading?: boolean;
+  /** Disables Confirm (e.g. nothing changed yet). */
+  confirmDisabled?: boolean;
   variant?: 'danger' | 'primary';
   /** Optional third choice, shown between Cancel and Confirm. */
   secondaryText?: string;
@@ -33,6 +35,7 @@ export function ConfirmModal({
   confirmText = 'Confirm',
   cancelText = 'Cancel',
   isLoading = false,
+  confirmDisabled = false,
   variant = 'primary',
   secondaryText,
   onSecondary,
@@ -57,6 +60,7 @@ export function ConfirmModal({
             onClick={onConfirm}
             variant={variant}
             loading={isLoading}
+            disabled={confirmDisabled}
           >
             {confirmText}
           </Button>
