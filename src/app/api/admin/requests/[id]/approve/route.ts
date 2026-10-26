@@ -11,6 +11,7 @@ import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 
 const logger = RMABLogger.create('API.Admin.Requests.Approve');
 
@@ -197,7 +198,7 @@ export async function POST(
               existingRequest.audiobook.author,
               existingRequest.user.plexUsername || 'Unknown User'
             ).catch((error) => {
-              logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
+              logger.error('Failed to queue notification', { error: errorForLog(error) });
             });
 
             logger.info(`Request ${id} approved by admin ${req.user.sub}, downloading ${torrentSource}-selected torrent`, {
@@ -268,7 +269,7 @@ export async function POST(
               updatedRequest.audiobook.author,
               updatedRequest.user.plexUsername || 'Unknown User'
             ).catch((error) => {
-              logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
+              logger.error('Failed to queue notification', { error: errorForLog(error) });
             });
 
             logger.info(`Request ${id} approved by admin ${req.user.sub}`, {
@@ -322,7 +323,7 @@ export async function POST(
         }
       } catch (error) {
         logger.error('Failed to process approval action', {
-          error: error instanceof Error ? error.message : String(error)
+          error: errorForLog(error)
         });
 
         if (error instanceof z.ZodError) {
@@ -330,7 +331,7 @@ export async function POST(
             {
               error: 'ValidationError',
               message: 'Invalid action. Must be "approve" or "deny"',
-              details: error.errors,
+              details: zodIssueDetails(error),
             },
             { status: 400 }
           );

@@ -11,6 +11,7 @@ import { checkApiTokenCreateRateLimit } from '@/lib/utils/rateLimit';
 import { MAX_TOKENS_PER_USER } from '@/lib/constants/api-tokens';
 import { generateApiToken } from '@/lib/utils/api-token';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 
 const logger = RMABLogger.create('API.Admin.ApiTokens');
 
@@ -57,7 +58,7 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json({ tokens: sanitized });
       } catch (error) {
-        logger.error('Failed to list API tokens', { error: error instanceof Error ? error.message : String(error) });
+        logger.error('Failed to list API tokens', { error: errorForLog(error) });
         return NextResponse.json({ error: 'Failed to list API tokens' }, { status: 500 });
       }
     })
@@ -177,10 +178,10 @@ export async function POST(request: NextRequest) {
           fullToken,
         }, { status: 201 });
       } catch (error) {
-        logger.error('Failed to create API token', { error: error instanceof Error ? error.message : String(error) });
+        logger.error('Failed to create API token', { error: errorForLog(error) });
 
         if (error instanceof z.ZodError) {
-          return NextResponse.json({ error: 'Validation error', details: error.errors }, { status: 400 });
+          return NextResponse.json({ error: 'Validation error', details: zodIssueDetails(error) }, { status: 400 });
         }
 
         return NextResponse.json({ error: 'Failed to create API token' }, { status: 500 });

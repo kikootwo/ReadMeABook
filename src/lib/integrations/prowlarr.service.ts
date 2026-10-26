@@ -225,17 +225,16 @@ export class ProwlarrService {
 
   /**
    * Search with multiple query variations to increase coverage
-   * Fires 2 queries per call: "title author" and "title", then deduplicates by guid
+   * Fires 2 queries per call: "title author" and "title", then deduplicates by guid.
+   * Blank author (or both queries identical after trimming): "title" only, once.
    */
   async searchWithVariations(
     title: string,
     author: string,
     filters?: SearchFilters
   ): Promise<TorrentResult[]> {
-    const queries = [
-      `${title} ${author}`,
-      title,
-    ];
+    const combined = `${title} ${author ?? ''}`;
+    const queries = combined.trim() === title.trim() ? [title] : [combined, title];
 
     logger.info(`Searching with ${queries.length} query variations`, { queries });
 

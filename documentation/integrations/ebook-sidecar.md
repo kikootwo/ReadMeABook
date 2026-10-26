@@ -20,6 +20,7 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
    - Uses FlareSolverr if configured (Cloudflare bypass)
 2. **Indexer Search** (if enabled, and no Anna's Archive result)
    - Searches Prowlarr with ebook categories (default: 7020)
+   - Query: `searchWithVariations(title, author)`, two queries per indexer group (`"title author"` then `"title"`, deduped), same as audiobooks. Automatic (`search_ebook`) and both interactive routes. Title override: `search_ebook` uses the request's custom search terms; the interactive routes use only `customTitle` from the body (not custom search terms). The author is always sent. See [prowlarr.md](../phase3/prowlarr.md#search-strategy)
    - Ranks using unified ranking algorithm with ebook-specific scoring
    - Downloads via qBittorrent (torrents) or SABnzbd (Usenet)
 3. **Both disabled** → Ebook downloads disabled entirely

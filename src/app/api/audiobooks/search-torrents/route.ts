@@ -13,6 +13,7 @@ import { groupIndexersByCategories, getGroupDescription } from '@/lib/utils/inde
 import { getLanguageForRegion } from '@/lib/constants/language-config';
 import type { AudibleRegion } from '@/lib/types/audible';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
 import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
@@ -228,13 +229,13 @@ export async function POST(request: NextRequest) {
           : 'No results found',
       });
     } catch (error) {
-      logger.error('Failed to search for torrents', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to search for torrents', { error: errorForLog(error) });
 
       if (error instanceof z.ZodError) {
         return NextResponse.json(
           {
             error: 'ValidationError',
-            details: error.errors,
+            details: zodIssueDetails(error),
           },
           { status: 400 }
         );
