@@ -1,7 +1,7 @@
 # Intelligent Ranking Algorithm
 
 **Status:** ✅ Implemented | Comprehensive edge case test coverage
-**Tests:** tests/utils/ranking-algorithm.test.ts (80+ test cases), ranking-non-latin.test.ts, match-normalize.test.ts
+**Tests:** tests/utils/ranking-algorithm.test.ts (80+ test cases), ranking-non-latin.test.ts, match-normalize.test.ts, tests/processors/search-indexers-non-latin.test.ts
 
 Evaluates and scores torrents to automatically select best audiobook download.
 
@@ -45,9 +45,11 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - Handles common indexer naming patterns (NZB, torrent scene releases)
 - **Every script kept** (`src/lib/utils/match-normalize.ts`): letters, marks and digits of any script survive (`\p{L}\p{M}\p{N}`); everything else becomes a space
 - **Folds:** accents (NFD, drop U+0300–036F, NFC; Greek tonos and Cyrillic ё/й fold too), Greek ς→σ, fullwidth ASCII → ASCII, `ø→o æ→ae œ→oe ß→ss ł→l đ ð→d þ→th ı→i ħ→h`; emoji presentation selectors (U+FE00–FE0F, U+E0100–E01EF, keycap U+20E3) dropped
-- **CJK/Thai next to ASCII** gets a space: `哈利波特与魔法石Harry` → `哈利波特与魔法石 harry`, `三体2` → `三体 2`
+- **CJK/Thai next to ASCII** gets a space: `哈利波特与魔法石Harry` → `哈利波特与魔法石 harry`, `三体2` → `三体 2`, `ラブストーリー2` → `ラブストーリー 2` (Script_Extensions, so shared marks like `ー` count)
 - **Accepted changes vs. before #424 (Latin):** ø now behaves like ö, so `Bjørn` no longer matches `Bjoern` (`Björn`/`Bjoern` never did); non-ASCII letters or digits in a Latin title (π, µ, α, ², º, ʻ) are now part of it, so `The Joy of π` no longer matches `The Joy of Pi`
-- **Known limits (fail closed):** a space inside a CJK author name (`村上 春樹` vs `村上春樹`); Simplified vs Traditional characters (`刘`/`劉`); halfwidth katakana not folded; authors of 1-2 characters (`鲁迅`) are dropped, as before
+- **Known limits, fail closed:** spacing that differs inside a name (`村上 春樹` vs `村上春樹`; Korean names written without spaces vs with them); Simplified vs Traditional (`刘`/`劉`); Arabic/Persian letter variants (hamza forms `أ إ آ`/`ا`, taa marbuta `ة`/`ه`, `ی ک`/`ي ك`); vowel marks (Arabic harakat, Hebrew niqqud) must match exactly; halfwidth katakana, Roman-numeral (`Ⅲ`) and ligature (`ﬁ`) characters are not folded; no transliteration (`村上春樹` doesn't match `Haruki Murakami`); initials in non-Latin scripts don't join (`А. С. Пушкин` vs `АС Пушкин`)
+- **Known limits, score lower:** a bilingual release with the non-Latin title first (`Гарри Поттер … / Harry Potter …`) still matches a Latin request but loses the complete-title bonus; CJK title markers `「」` don't earn that bonus; a one-character title (`心`) often lands under the automatic threshold unless the release name is plain (`夏目漱石 - 心`)
+- **Known limit, too loose:** a 2-character CJK title inside the author's name (`春樹` / `村上春樹`) passes coverage; the author gate and scoring limit the impact
 
 **Examples of normalization:**
 - `"VirginaEvans TheCorrespondent"` → `"virgina evans the correspondent"`
@@ -58,7 +60,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
 
 **Stage 1: Word Coverage Filter (MANDATORY)**
 - Extracts significant words from request (filters stop words: "the", "a", "an", "of", "on", "in", "at", "by", "for")
-- **Parenthetical/bracketed content is optional**: Content in () [] {} treated as subtitle (may be omitted from torrents)
+- **Parenthetical/bracketed content is optional**: Content in () [] {} 【】 (and fullwidth （）［］｛｝, folded first) treated as subtitle (may be omitted from torrents); so is text after `:` or `：`
   - "We Are Legion (We Are Bob)" → Required: ["we", "are", "legion"], Optional: ["bob"]
   - "Title [Series Name]" → Required: ["title"], Optional: ["series", "name"]
   - "Book Title {Extra Info}" → Required: ["book", "title"], Optional: ["extra", "info"]
@@ -84,7 +86,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
   - Middle initials: "Dennis E. Taylor" ↔ "Dennis Taylor"
   - Name order: "Brandon Sanderson" ↔ "Sanderson, Brandon"
   - Multiple authors: Only ONE needs to match (OR logic)
-  - Filters roles: "translator", "narrator" ignored
+  - Filters roles: "translator", "narrator" ignored; names under 3 characters dropped unless in a non-Latin script (`金庸`, `한강` kept)
 - **If check fails in automatic mode → automatic 0 score**
 - An author that normalizes to nothing (emoji, punctuation) is ignored; none left → rejected in automatic mode
 - **Prevents wrong-author matches**: Stops "Project Hail Mary" (no author) from matching request for Andy Weir
@@ -106,7 +108,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - **Tries full title first, then required title (without parentheses)** if no match
   - Example: "We Are Legion (We Are Bob)" tries both full title and "We Are Legion"
   - Handles torrents that include subtitle AND those that omit it
-- Complete title match requirements (both must be true):
+- Complete title match requirements (both must be true; markers are found in a folded copy of the release name that keeps punctuation, `foldForMatching`, so `Jo Nesbø - Snømannen [MP3]` counts):
   - **Acceptable prefix** (any of these):
     - No significant words before title (clean match)
     - Title preceded by metadata separator (` - `, `: `, `—`) — handles "Author - Series - 01 - Title"
