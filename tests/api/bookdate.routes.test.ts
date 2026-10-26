@@ -66,6 +66,8 @@ vi.mock('@/lib/bookdate/helpers', () => bookdateHelpersMock);
 describe('BookDate routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Right swipes run the real library check (findPlexMatch); default: book not in the library
+    prismaMock.plexLibrary.findMany.mockResolvedValue([]);
     authRequest = { user: { id: 'user-1', role: 'admin' }, json: vi.fn() };
     requireAuthMock.mockImplementation((_req: any, handler: any) => handler(authRequest));
     requireAdminMock.mockImplementation((_req: any, handler: any) => handler(authRequest));
@@ -720,7 +722,9 @@ describe('BookDate routes', () => {
       audibleAsin: 'ASIN-YEAR',
     } as any);
     prismaMock.audiobook.update.mockResolvedValueOnce({ id: 'ab-year' } as any);
-    prismaMock.request.findFirst.mockResolvedValueOnce({ id: 'req-existing' } as any);
+    prismaMock.request.findFirst
+      .mockResolvedValueOnce(null) // no downloaded/available request by any user (#287 check)
+      .mockResolvedValueOnce({ id: 'req-existing' } as any); // this user's own request
 
     const { POST } = await import('@/app/api/bookdate/swipe/route');
     const response = await POST({} as any);

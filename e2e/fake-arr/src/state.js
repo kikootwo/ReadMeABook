@@ -28,6 +28,7 @@ export function loadConfig(env = process.env) {
       qbit: Number(env.QBIT_PORT || 8081),
       sab: Number(env.SAB_PORT || 8085),
       plex: Number(env.PLEX_PORT || 32400),
+      metadata: Number(env.METADATA_PORT || 9898),
       control: Number(env.CONTROL_PORT || 9999),
     },
     defaultScenario: env.SCENARIO || 'smoke',

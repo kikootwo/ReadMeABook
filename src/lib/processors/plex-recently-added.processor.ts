@@ -178,75 +178,11 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
       }
     }
 
-    // For Audiobookshelf: Trigger metadata match for items without ASIN
-    // This ensures ASIN gets populated so items can be matched against requests
+    // For Audiobookshelf: Trigger metadata match for items without ASIN, and store the ASIN
+    // from the match response now (#287), before requests are matched below
     if (backendMode === 'audiobookshelf') {
-      const { triggerABSItemMatch, getABSItem } = await import('../services/audiobookshelf/api');
-      const { generateFilesHash } = await import('../utils/files-hash');
-
-      const itemsWithoutAsin = recentItems.filter(item => !item.asin && item.externalId);
-
-      if (itemsWithoutAsin.length > 0) {
-        logger.info(`Found ${itemsWithoutAsin.length} recent items without ASIN, attempting file hash matching...`);
-
-        let fileMatchCount = 0;
-        let fuzzyMatchCount = 0;
-
-        for (const item of itemsWithoutAsin) {
-          try {
-            // 1. Fetch full item details to get file list
-            const absItem = await getABSItem(item.externalId);
-
-            // 2. Extract audio filenames and generate hash
-            const audioFilenames = absItem.media?.audioFiles?.map((f: any) => f.metadata?.filename).filter(Boolean) || [];
-            const itemHash = generateFilesHash(audioFilenames);
-
-            // 3. Query database for matching downloaded request
-            let matchedAsin: string | undefined = undefined;
-
-            if (itemHash) {
-              const matchedAudiobook = await prisma.audiobook.findFirst({
-                where: {
-                  filesHash: itemHash,
-                  status: 'completed',
-                },
-                select: {
-                  audibleAsin: true,
-                  title: true,
-                },
-              });
-
-              if (matchedAudiobook?.audibleAsin) {
-                matchedAsin = matchedAudiobook.audibleAsin;
-                logger.info(
-                  `File hash match found for "${item.title}" → ASIN: ${matchedAsin} (from "${matchedAudiobook.title}")`
-                );
-                fileMatchCount++;
-              }
-            }
-
-            // 4. Trigger metadata match (with ASIN if matched, undefined if not)
-            await triggerABSItemMatch(item.externalId, matchedAsin);
-
-            if (matchedAsin) {
-              logger.info(`Triggered metadata match with ASIN ${matchedAsin} for: "${item.title}"`);
-            } else {
-              logger.info(`No file match found, triggering fuzzy metadata match for: "${item.title}"`);
-              fuzzyMatchCount++;
-            }
-
-          } catch (error) {
-            logger.error(
-              `Failed to process metadata match for "${item.title}": ${error instanceof Error ? error.message : 'Unknown error'}`
-            );
-            fuzzyMatchCount++;
-          }
-        }
-
-        logger.info(
-          `Metadata match complete: ${fileMatchCount} file hash matches, ${fuzzyMatchCount} fuzzy matches (ASIN population is async)`
-        );
-      }
+      const { matchItemsWithoutAsin } = await import('../services/audiobookshelf/match-missing-asins');
+      await matchItemsWithoutAsin(recentItems, logger, 'recent items');
     }
 
     // Check for all non-terminal audiobook requests to match

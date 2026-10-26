@@ -32,6 +32,7 @@
 - **ABS library service** → `src/lib/services/library/AudiobookshelfLibraryService.ts`
 - **Backend mode selection (Plex vs ABS)** → [backend/services/config.md](backend/services/config.md)
 - **File hash matching for accurate ASIN** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md)
+- **ASIN read-back after the ABS match (#287)** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#asin-read-back-287)
 - **OIDC authentication** → [backend/services/auth.md](backend/services/auth.md)
 
 ## Reading Shelves (Goodreads, Hardcover)

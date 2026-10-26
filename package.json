@@ -1,6 +1,6 @@
 {
   "name": "readmeabook",
-  "version": "1.2.9",
+  "version": "1.2.10",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -17,7 +17,7 @@
     "rmab:recover": "node scripts/recover-credentials.js",
     "e2e": "node e2e/run.mjs",
     "e2e:unit": "node e2e/run.mjs unit",
-    "e2e:selftest": "node --test e2e/fake-arr/test/fake-arr.test.mjs e2e/fixtures/test/generate.test.mjs e2e/fake-arr/test/egress-proxy.test.mjs e2e/lib/test/fetch-image.test.mjs e2e/lib/test/args.test.mjs e2e/lib/test/exec-bridge.test.mjs"
+    "e2e:selftest": "node --test e2e/fake-arr/test/fake-arr.test.mjs e2e/fixtures/test/generate.test.mjs e2e/fake-arr/test/egress-proxy.test.mjs e2e/fake-arr/test/metadata.test.mjs e2e/lib/test/fetch-image.test.mjs e2e/lib/test/args.test.mjs e2e/lib/test/exec-bridge.test.mjs"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",

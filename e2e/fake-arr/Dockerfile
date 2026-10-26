@@ -21,7 +21,7 @@ COPY fake-arr/src/ ./src/
 COPY scenarios/ /scenarios/
 COPY --from=fixtures /fixtures /fixtures
 ENV NODE_ENV=production FIXTURES_DIR=/fixtures SCENARIOS_DIR=/scenarios DOWNLOADS_DIR=/downloads MEDIA_DIR=/media
-EXPOSE 9696 9797 8081 8085 32400 9999
+EXPOSE 9696 9797 8081 8085 32400 9898 9999
 HEALTHCHECK --interval=2s --timeout=2s --retries=15 CMD wget -q -O /dev/null http://127.0.0.1:9999/__control/health || exit 1
 # Runs as root on purpose: it chowns the shared named volumes to PUID:PGID (see prepareVolumes).
 CMD ["node", "src/server.js"]

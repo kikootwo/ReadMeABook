@@ -85,7 +85,7 @@ before(async () => {
     MEDIA_DIR: posix(path.join(tmp, 'media')),
     PUBLIC_HOST: '127.0.0.1',
     TRACKER_HOST: 'localhost',
-    PROWLARR_PORT: '0', TRACKER_PORT: '0', QBIT_PORT: '0', SAB_PORT: '0', PLEX_PORT: '0', CONTROL_PORT: '0',
+    PROWLARR_PORT: '0', TRACKER_PORT: '0', QBIT_PORT: '0', SAB_PORT: '0', PLEX_PORT: '0', METADATA_PORT: '0', CONTROL_PORT: '0',
     SCENARIO: 'smoke',
     CONTROL_TOKEN: TOKEN,
   });
