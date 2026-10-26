@@ -116,7 +116,7 @@ describe('someone else\'s hybrid torrent', () => {
     fake.seed(HYBRID, { addedAgoSec: 600 });
     const crafted = `magnet:?xt=urn:btih:${HYBRID.v1}&xt=urn:btmh:1220${'ab'.repeat(32)}&dn=Hybrid`;
     const result = await new QBittorrentService(fake.url, '', '').addDownload(crafted);
-    expect(result).toMatchObject({ id: HYBRID.id, alreadyInClient: true });
+    expect.soft(result).toMatchObject({ id: HYBRID.id, alreadyInClient: true }); // soft: the checks below show the harm
     const fields = { downloadClientId: result.id, addedByRmab: !result.alreadyInClient };
     await postImport(fields);
     await expect(requestDelete(fields)).resolves.toMatchObject({ torrentsRemoved: 0 });
