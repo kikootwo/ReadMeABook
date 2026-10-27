@@ -126,6 +126,7 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 - Service constructors (`defaultSavePath` / `defaultDownloadDir`)
 - Category creation (qBittorrent `ensureCategory`, SABnzbd `ensureCategory`)
 - Torrent/NZB addition (save path / download-dir)
+  - qBittorrent (#326): every add sends `category` + `autoTMM=true` and no `savepath`, so the category's path applies even when qBittorrent's default Torrent Management Mode is Manual. Category not ensured (`ensureCategory()` → `false`) → `autoTMM=false` + `savepath` = resolved path (remote-mapped). `autoTMM` on add needs qBittorrent 4.1.5+ (Web API 2.2.0); 4.1.0 to 4.1.4 ignore it
 - Remote path mapping (applied after customPath resolution)
 - Singleton getters (`getQBittorrentService`, `getSABnzbdService`)
 - Retry fallback path construction (`retry-failed-imports.processor.ts`)

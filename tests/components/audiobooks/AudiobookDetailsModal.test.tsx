@@ -14,6 +14,8 @@ const useAudiobookDetailsMock = vi.hoisted(() => vi.fn());
 const createRequestMock = vi.hoisted(() => vi.fn());
 const fetchEbookMock = vi.hoisted(() => vi.fn());
 const revalidateEbookStatusMock = vi.hoisted(() => vi.fn());
+// What the mocked search modal hands to onSuccess when its success button is clicked
+const modalOutcome = vi.hoisted(() => ({ value: undefined as { needsApproval?: boolean } | undefined }));
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => useAuthMock(),
@@ -38,12 +40,20 @@ vi.mock('@/lib/hooks/useRequests', () => ({
 }));
 
 vi.mock('@/components/requests/InteractiveTorrentSearchModal', () => ({
-  InteractiveTorrentSearchModal: ({ isOpen, requestId }: { isOpen: boolean; requestId?: string }) => (
+  InteractiveTorrentSearchModal: ({ isOpen, requestId, searchMode, onSuccess }: {
+    isOpen: boolean;
+    requestId?: string;
+    searchMode?: string;
+    onSuccess?: (outcome?: { needsApproval?: boolean }) => void;
+  }) => (
     <div
       data-testid="interactive-modal"
       data-open={String(isOpen)}
       data-request-id={requestId ?? ''}
-    />
+      data-search-mode={searchMode ?? 'audiobook'}
+    >
+      <button type="button" data-testid="interactive-modal-success" onClick={() => onSuccess?.(modalOutcome.value)} />
+    </div>
   ),
 }));
 
@@ -458,6 +468,65 @@ describe('AudiobookDetailsModal', () => {
         requestedByUserId: 'user-1',
       });
       expect(forwarded).toBe('');
+    });
+
+    describe('ebook request opened from My Requests (#281)', () => {
+      const openEbookSearch = async (status: string, user = { id: 'user-1', username: 'u' }) => {
+        useAuthMock.mockReturnValue({ user });
+        const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+        render(
+          <AudiobookDetailsModal
+            asin="ASIN123"
+            isOpen={true}
+            onClose={vi.fn()}
+            requestStatus={status}
+            requestId="ebook-1"
+            requestedByUserId="user-1"
+            requestType="ebook"
+          />
+        );
+
+        await act(async () => {});
+        fireEvent.click(screen.getByTitle('Interactive Search'));
+        return screen.getByTestId('interactive-modal');
+      };
+
+      it.each(['pending', 'failed', 'awaiting_search'])(
+        'searches ebooks for that request when it is %s',
+        async (status) => {
+          const modal = await openEbookSearch(status);
+          expect(modal).toHaveAttribute('data-search-mode', 'ebook');
+          expect(modal).toHaveAttribute('data-request-id', 'ebook-1');
+        }
+      );
+
+      it.each(['searching', 'downloading', 'awaiting_release'])(
+        'searches ebooks by ASIN without the request id when it is %s',
+        async (status) => {
+          const modal = await openEbookSearch(status);
+          expect(modal).toHaveAttribute('data-search-mode', 'ebook');
+          expect(modal).toHaveAttribute('data-request-id', '');
+        }
+      );
+
+      it('does not forward another user ebook request id to a non-admin', async () => {
+        const modal = await openEbookSearch('failed', { id: 'user-2', username: 'other' });
+        expect(modal).toHaveAttribute('data-search-mode', 'ebook');
+        expect(modal).toHaveAttribute('data-request-id', '');
+      });
+
+      it.each([
+        [true, 'Ebook request submitted for approval!'],
+        [false, 'Ebook download started!'],
+      ])('a pick with needsApproval %s shows "%s"', async (needsApproval, toast) => {
+        modalOutcome.value = { needsApproval };
+        await openEbookSearch('failed');
+
+        fireEvent.click(screen.getByTestId('interactive-modal-success'));
+
+        expect(screen.getByText(toast)).toBeInTheDocument();
+      });
     });
   });
 });

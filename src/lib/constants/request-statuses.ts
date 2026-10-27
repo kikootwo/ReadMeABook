@@ -29,6 +29,17 @@ export const ADVANCEABLE_FROM_INTERACTIVE_SEARCH = [
 ] as const;
 
 /**
+ * Ebook request statuses where Interactive Search picks for that request via
+ * /api/requests/[id]/interactive-search-ebook + select-ebook (the statuses
+ * those routes accept for a direct ebook search).
+ */
+export const EBOOK_ADVANCEABLE_FROM_INTERACTIVE_SEARCH = [
+  'pending',
+  'failed',
+  'awaiting_search',
+] as const;
+
+/**
  * errorMessage of an audiobook request the library scan failed because the book
  * left the library and its organized folder is gone (#214). Users may request it
  * again; automatic callers (shelf sync, watched lists) never do.

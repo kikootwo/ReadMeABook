@@ -10,7 +10,7 @@ Backend unit tests (Node) and frontend component tests (jsdom) with isolated moc
 - **Environments:** Node for `*.test.ts`, jsdom for `*.test.tsx` via `environmentMatchGlobs`
 - **Setup:** `tests/setup.ts` sets `NODE_ENV=test`, `TZ=UTC`, jest-dom, DOM polyfills, Next.js `Link/Image` mocks
 - **Frontend helpers:** `tests/helpers/render.tsx`, `tests/helpers/mock-auth.ts`, `tests/helpers/mock-next-navigation.ts`
-- **Backend helpers:** `tests/helpers/prisma.ts`, `tests/helpers/job-queue.ts`
+- **Backend helpers:** `tests/helpers/prisma.ts`, `tests/helpers/job-queue.ts`, `tests/helpers/user-rows.ts` (`countUsersIn(rows)`: `prisma.user.count` that applies `where` to fixture rows)
 - **GitHub Actions (3 workflows, see [deployment/ci-workflows.md](deployment/ci-workflows.md)):**
   - `.github/workflows/pr-ci.yml` (PR Tests): every `pull_request`: `npm ci`, `npx prisma generate`, ffmpeg install, `npm test`
   - `.github/workflows/run-tests.yml` (Backend Tests): manual dispatch + `workflow_call`; runs `npm test`

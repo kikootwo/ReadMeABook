@@ -19,7 +19,7 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - Active downloads (status: 'downloading')
 - Completed requests (status: 'downloaded' or 'available', last 30 days)
 - Failed requests (status: 'failed', last 30 days)
-- Total users
+- Total users (`deletedAt: null`, same filter as the Users page)
 - System health indicators
 
 **GET /api/admin/downloads/active**
@@ -137,6 +137,10 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - Shows related audiobook/user for request jobs
 - Expandable error messages, duration calc, attempt tracking, Bull job ID
 - Pagination: page-size selector (25 / 50 / 100), default 50
+
+## Fixed Issues
+
+- **#215 Total users counted deleted users:** `GET /api/admin/metrics` used `prisma.user.count()` with no filter, so the dashboard total ran higher than the Users page. Fix: `deletedAt: null`. Related lockout flags: [backend/services/auth.md](backend/services/auth.md#fixed-issues).
 
 ## Tech Stack
 
