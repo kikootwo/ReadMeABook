@@ -40,14 +40,19 @@ describe('base32 hashes', () => {
   it('encodes hex as base32 and lists every form a row may hold', () => {
     expect(hexToBase32(HEX)).toBe(B32);
     expect(hexToBase32('b6692ea5df920cad691c20319a6fffd7a4a766b8')).toBe('WZUS5JO7SIGK22I4EAYZU37726SKOZVY');
-    expect(torrentHashForms(B32)).toEqual([B32, HEX, B32.toLowerCase()]);
-    expect(torrentHashForms(HEX)).toEqual([HEX, B32.toLowerCase()]);
+    expect(torrentHashForms(B32)).toEqual([B32, HEX, HEX.toUpperCase(), B32.toLowerCase()]);
+    expect(torrentHashForms(HEX)).toEqual([HEX, HEX.toUpperCase(), B32.toLowerCase(), B32]);
     expect(torrentHashForms('hash-1')).toEqual(['hash-1']);
   });
 
   it.each([['too short', B32.slice(1)], ['not base32 (0, 1, 8, 9)', '0'.repeat(32)], ['hex', HEX]])('rejects %s', (_label, value) => {
     expect(base32ToHex(value)).toBeNull();
     expect(normalizeTorrentId(value)).toBe(value);
+  });
+
+  it('lower-cases a stored upper-case hex hash; the row forms list it in both cases (#460)', () => {
+    expect(normalizeTorrentId(HEX.toUpperCase())).toBe(HEX);
+    expect(torrentHashForms(HEX.toUpperCase())).toEqual([HEX.toUpperCase(), HEX, B32.toLowerCase(), B32]);
   });
 });
 

@@ -62,6 +62,12 @@ test('smoke: a requested book is grabbed, downloaded, organized and shows up in 
     await shot(page, '05-requests-downloaded');
   });
 
+  await test.step('GET /api/requests/:id returns the selected download with its size as a number (#261)', async () => {
+    const body = await rmab.get<{ request: { downloadHistory: { torrentSizeBytes: unknown }[] } }>(`/api/requests/${request.id}`);
+    writeEvidence('smoke/request-by-id.json', body);
+    expect(body.request.downloadHistory[0]?.torrentSizeBytes).toBe(420 * 1024 * 1024);
+  });
+
   await test.step(`${plexMode ? 'fake Plex' : 'Audiobookshelf'} has the book and RMAB marks it available`, async () => {
     if (plexMode) {
       // fake Plex lists <media>/audiobooks/<Author>/<Title> folders, so the organized book is the album.

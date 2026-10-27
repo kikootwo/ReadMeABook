@@ -111,13 +111,18 @@ export function addedTorrentId(reported: unknown, hashes: TorrentHashes, warn: (
   return id;
 }
 
-/** A stored base32 hash (any case) as hex; any other value unchanged */
+/** A stored hash as lower-case hex: 40-hex (any case) lower-cased, base32 (any case) converted; any other value unchanged */
 export function normalizeTorrentId(id: string): string {
-  return base32ToHex(id) ?? id;
+  return validTorrentId(id) ?? base32ToHex(id) ?? id;
 }
 
-/** A stored torrent hash in every form a row may hold it: as given, hex, and lower-case base32 */
+/**
+ * A stored torrent hash in every form a row may hold it: as given, then hex and base32, each in lower and
+ * upper case (the indexer's infohash is stored in whatever case it came in). Only adds matches.
+ */
 export function torrentHashForms(hash: string): string[] {
   const hex = validTorrentId(normalizeTorrentId(hash));
-  return [...new Set([hash, ...(hex ? [hex, hexToBase32(hex).toLowerCase()] : [])])];
+  if (!hex) return [hash];
+  const base32 = hexToBase32(hex);
+  return [...new Set([hash, hex, hex.toUpperCase(), base32.toLowerCase(), base32])];
 }
