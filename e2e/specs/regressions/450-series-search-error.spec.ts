@@ -33,6 +33,8 @@ const FAKE_PROXY = 'http://fake-arr:9898';
 /** Hosts the fake metadata proxy stands in for (mirrors e2e/fake-arr/src/metadata.js). */
 const FAKED_HOST = /^(api\.audible\.(com|ca|co\.uk|com\.au|fr|de|co\.jp|it|in|es)|(www\.)?audible\.(com|ca|co\.uk|com\.au|fr|de|co\.jp|it|in|es)|api\.audnex\.us)$/;
 const COVER_HOST = 'm.media-amazon.com';
+/** role="alert" elements other than Next.js's (empty) route announcer */
+const PANEL = '[role="alert"]:not(#__next-route-announcer__)';
 /** The route's answer for the recorded US "expeditionary force" catalog page (unit-test fixtures) */
 const RESULTS = JSON.parse(fs.readFileSync(path.join(__dirname, '450-series-results.json'), 'utf8')) as { asin: string; title: string }[];
 
@@ -117,7 +119,7 @@ test('#450: a failed series search shows the Audible error, Try again reruns it 
   try {
     // 1. The first search fails on the real path.
     const first = await searchAndFail(page);
-    const alert = page.getByRole('alert');
+    const alert = page.locator(PANEL);
     await expect(alert).toContainText(AUDIBLE_HEADING);
     await expect(alert).toContainText(AUDIBLE_LINE);
     await expect(page.getByText(/No series found/)).toHaveCount(0);
@@ -170,7 +172,7 @@ for (const view of VIEWS) {
     try {
       const { status } = await searchAndFail(page);
       expect(status).toBe(502);
-      const alert = page.getByRole('alert');
+      const alert = page.locator(PANEL);
       await expect(alert).toContainText(AUDIBLE_HEADING);
       const box = await page.getByRole('button', { name: 'Try again' }).boundingBox();
       expect(box?.height ?? 0, 'Try again target height').toBeGreaterThanOrEqual(44);
@@ -193,7 +195,7 @@ for (const view of REPLAY_VIEWS) {
       );
       await page.goto(SEARCH_PATH);
       await expect(page.getByText(RESULTS[0].title, { exact: true }).first()).toBeVisible();
-      await expect(page.getByRole('alert')).toHaveCount(0);
+      await expect(page.locator(PANEL)).toHaveCount(0);
       await page.evaluate(() => document.fonts.ready);
       await page.waitForFunction(() => Array.from(document.images).every((img) => img.complete));
       await shot(page, `3-replay-results-${view.name}`);
