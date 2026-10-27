@@ -163,7 +163,7 @@ describe('signed-in sessions follow the account status', () => {
     });
   });
 
-  describe('getCurrentUserAsync with an API token', () => {
+  describe('getOptionalAuthUser with an API token', () => {
     const tokenRow = (row: Row) => ({
       id: 'token-1',
       tokenHash: API_TOKEN_HASH,
@@ -175,17 +175,18 @@ describe('signed-in sessions follow the account status', () => {
 
     it.each(REFUSED)('returns null for a %s account', async (_label, row) => {
       prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow(row));
-      const { getCurrentUserAsync } = await import('@/lib/middleware/auth');
+      const { getOptionalAuthUser } = await import('@/lib/middleware/auth');
 
-      expect(await getCurrentUserAsync(makeRequest(`Bearer ${API_TOKEN}`) as any)).toBeNull();
+      expect(await getOptionalAuthUser(makeRequest(`Bearer ${API_TOKEN}`) as any)).toBeNull();
       expect(prismaMock.apiToken.update).not.toHaveBeenCalled();
     });
 
     it.each(ALLOWED)('returns the token owner for an %s account', async (_label, row) => {
       prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow(row));
-      const { getCurrentUserAsync } = await import('@/lib/middleware/auth');
+      const { getOptionalAuthUser } = await import('@/lib/middleware/auth');
 
-      expect(await getCurrentUserAsync(makeRequest(`Bearer ${API_TOKEN}`) as any)).toEqual({
+      expect(await getOptionalAuthUser(makeRequest(`Bearer ${API_TOKEN}`) as any)).toEqual({
+        id: 'user-1',
         sub: 'user-1',
         plexId: 'local-reader',
         username: 'reader',

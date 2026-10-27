@@ -20,7 +20,6 @@ vi.mock('@/lib/middleware/auth', () => ({
     };
     return handler(mockReq);
   }),
-  getCurrentUser: vi.fn(() => ({ sub: 'user-1' })),
 }));
 
 vi.mock('@/lib/utils/logger', () => ({

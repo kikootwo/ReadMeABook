@@ -105,6 +105,7 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 
 **requireAuth()** - Verifies JWT exists/valid, adds user to request, returns 401 if invalid
 **requireAdmin()** - Checks `user.role === 'admin'`, returns 403 if not, chains after requireAuth
+**getOptionalAuthUser()** - For routes that also answer without a session: the caller after the same account checks as requireAuth (API tokens: allowlist too), else `null`, never a 401
 **requireSetupIncomplete()** - Setup-only routes; 403 once `setup_completed='true'`
 **requireSetupIncompleteOrAdmin()** - Shared setup/settings routes; open during setup, admin after
 - Both **fail closed**: if the `setup_completed` lookup throws → 503 `ServiceUnavailable` (handler not run; details logged only)
@@ -318,6 +319,7 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 - **Admin job routes:** `/api/admin/jobs`, `/api/admin/jobs/:id`, `/api/admin/jobs/:id/trigger` and `/api/admin/job-status/:id` use `requireAuth` + `requireAdmin` like the other admin routes: the account must still exist, its sessions must not be revoked, and the session must be an admin session. API tokens are refused (not on the allowlist).
 - **Author and series catalog routes:** `/api/authors/:asin`, `/api/authors/:asin/books`, `/api/authors/search`, `/api/series/:asin` and `/api/series/search` use `requireAuth` like the other signed-in routes: the account must still exist, be approved, and its sessions must not be revoked. API tokens get 403 (not on the allowlist; previously 401). Popular, new releases, category and audiobook search are unchanged.
 - **Admin checks use the current role:** `requireAuth` selects `role` in its existing user lookup and sets `request.user.role` from the account, not the access token, so `requireAdmin`/`requireLocalAdmin` and route role checks follow a role change (either way) on the next request. API tokens: effective role = token role capped by the owner's current role (never raised on promotion). `/api/auth/refresh` already issued the current role.
+- **Discovery routes check the account before adding request details:** `/api/audiobooks/popular`, `/new-releases`, `/category/:categoryId` and `/search` take the caller from `getOptionalAuthUser` (same account checks as `requireAuth`). Request details (`isRequested`, `requestStatus`, `requestId`, `requestedByUserId`, `requestedByUsername`) and ignore flags are added only for a checked account; any other caller gets the same books with none of them. Signed-in responses unchanged. The unchecked `getCurrentUser`, `getCurrentUserAsync` and `isAdmin` helpers were removed.
 
 ## Tech Stack
 

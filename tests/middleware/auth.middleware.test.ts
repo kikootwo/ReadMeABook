@@ -427,46 +427,43 @@ describe('auth middleware', () => {
     });
   });
 
-  it('returns current user from token', async () => {
-    verifyAccessTokenMock.mockReturnValue({
-      sub: 'user-1',
-      plexId: 'plex-1',
-      username: 'user',
-      role: 'admin',
-      iat: 1,
-      exp: 2,
-    });
-    const { getCurrentUser, isAdmin } = await import('@/lib/middleware/auth');
+  describe('getOptionalAuthUser', () => {
+    const SEARCH = '/api/audiobooks/search';
+    const jwtPayload = { sub: 'user-jwt', plexId: 'plex-jwt', username: 'jwtuser', role: 'admin', iat: 1, exp: 2 };
 
-    const payload = getCurrentUser(makeRequest('Bearer token') as any);
-    expect(payload?.sub).toBe('user-1');
-    expect(isAdmin(payload)).toBe(true);
-  });
-
-  describe('getCurrentUserAsync', () => {
     it('returns null when no token is present', async () => {
-      const { getCurrentUserAsync } = await import('@/lib/middleware/auth');
-      const payload = await getCurrentUserAsync(makeRequest() as any);
-      expect(payload).toBeNull();
+      const { getOptionalAuthUser } = await import('@/lib/middleware/auth');
+      expect(await getOptionalAuthUser(makeRequest(undefined, SEARCH) as any)).toBeNull();
     });
 
-    it('resolves JWT tokens via verifyAccessToken', async () => {
-      verifyAccessTokenMock.mockReturnValue({
-        sub: 'user-jwt',
-        plexId: 'plex-jwt',
-        username: 'jwtuser',
-        role: 'user',
-        iat: 1,
-        exp: 2,
+    it('returns a checked JWT caller with the role from the account row', async () => {
+      verifyAccessTokenMock.mockReturnValue(jwtPayload);
+      prismaMock.user.findUnique.mockResolvedValue({
+        id: 'user-jwt', role: 'user', deletedAt: null, sessionsInvalidatedAt: null, registrationStatus: 'approved',
       });
-      const { getCurrentUserAsync } = await import('@/lib/middleware/auth');
+      const { getOptionalAuthUser } = await import('@/lib/middleware/auth');
 
-      const payload = await getCurrentUserAsync(makeRequest('Bearer jwttoken') as any);
-      expect(payload?.sub).toBe('user-jwt');
-      expect(payload?.role).toBe('user');
+      const user = await getOptionalAuthUser(makeRequest('Bearer jwttoken', SEARCH) as any);
+      expect(user).toMatchObject({ id: 'user-jwt', sub: 'user-jwt', role: 'user' });
     });
 
-    it('resolves API tokens via apiToken lookup', async () => {
+    it('returns null for a JWT whose account row is gone', async () => {
+      verifyAccessTokenMock.mockReturnValue(jwtPayload);
+      prismaMock.user.findUnique.mockResolvedValue(null);
+      const { getOptionalAuthUser } = await import('@/lib/middleware/auth');
+
+      expect(await getOptionalAuthUser(makeRequest('Bearer jwttoken', SEARCH) as any)).toBeNull();
+    });
+
+    it('returns null for an unverifiable JWT without a lookup', async () => {
+      verifyAccessTokenMock.mockReturnValue(null);
+      const { getOptionalAuthUser } = await import('@/lib/middleware/auth');
+
+      expect(await getOptionalAuthUser(makeRequest('Bearer badtoken', SEARCH) as any)).toBeNull();
+      expect(prismaMock.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('resolves API tokens via apiToken lookup on an allowlisted endpoint', async () => {
       const apiTok = 'rmab_async_test_1234567890';
       const apiTokHash = crypto.createHash('sha256').update(apiTok).digest('hex');
       prismaMock.apiToken.findUnique.mockResolvedValue({
@@ -483,21 +480,27 @@ describe('auth middleware', () => {
         },
       });
       prismaMock.apiToken.update.mockResolvedValue({});
-      const { getCurrentUserAsync } = await import('@/lib/middleware/auth');
+      const { getOptionalAuthUser } = await import('@/lib/middleware/auth');
 
-      const payload = await getCurrentUserAsync(makeRequest(`Bearer ${apiTok}`) as any);
-      expect(payload?.sub).toBe('user-api');
-      expect(payload?.username).toBe('apiuser');
+      const user = await getOptionalAuthUser(makeRequest(`Bearer ${apiTok}`, SEARCH) as any);
+      expect(user).toMatchObject({ id: 'user-api', sub: 'user-api', username: 'apiuser' });
+    });
+
+    it('returns null for an API token on an endpoint outside its allowlist, without a lookup', async () => {
+      const { getOptionalAuthUser } = await import('@/lib/middleware/auth');
+
+      const user = await getOptionalAuthUser(
+        makeRequest('Bearer rmab_async_test_1234567890', '/api/audiobooks/popular') as any
+      );
+      expect(user).toBeNull();
+      expect(prismaMock.apiToken.findUnique).not.toHaveBeenCalled();
     });
 
     it('returns null for invalid API tokens', async () => {
       prismaMock.apiToken.findUnique.mockResolvedValue(null);
-      const { getCurrentUserAsync } = await import('@/lib/middleware/auth');
+      const { getOptionalAuthUser } = await import('@/lib/middleware/auth');
 
-      const payload = await getCurrentUserAsync(
-        makeRequest('Bearer rmab_invalid_token_abc') as any
-      );
-      expect(payload).toBeNull();
+      expect(await getOptionalAuthUser(makeRequest('Bearer rmab_invalid_token_abc', SEARCH) as any)).toBeNull();
     });
   });
 });
