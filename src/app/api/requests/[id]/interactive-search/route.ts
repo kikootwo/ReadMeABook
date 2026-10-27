@@ -50,8 +50,9 @@ export async function POST(
         // No body or invalid JSON - that's okay, customTitle will be undefined
       }
 
-      const requestRecord = await prisma.request.findUnique({
-        where: { id },
+      // A deleted request answers 404 for everyone
+      const requestRecord = await prisma.request.findFirst({
+        where: { id, deletedAt: null },
         include: {
           audiobook: true,
         },

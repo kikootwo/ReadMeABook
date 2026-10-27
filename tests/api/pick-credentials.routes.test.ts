@@ -64,7 +64,7 @@ describe('picked Prowlarr links with configured credentials', () => {
 
   it('select-torrent stores the pick without credentials and hides it from the owner', async () => {
     authRequest.json.mockResolvedValue({ torrent });
-    prismaMock.request.findUnique.mockResolvedValue({
+    prismaMock.request.findFirst.mockResolvedValue({
       id: 'req-2', userId: 'user-1', status: 'awaiting_search', audiobook: { id: 'ab-1', title: 'T', author: 'A' },
     });
     prismaMock.request.update.mockResolvedValue({
