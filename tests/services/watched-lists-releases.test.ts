@@ -69,16 +69,17 @@ describe('booksForWatch', () => {
 });
 
 describe('scanAuthorBooks', () => {
-  it('without a cutoff: relevance order, stops at a page with no matching books', async () => {
+  it('without a cutoff: relevance order, a page with no matching books does not end the scan (#310)', async () => {
     searchByAuthorAsin
       .mockResolvedValueOnce(page([book('A', '2001-01-01')]))
-      .mockResolvedValueOnce(page([]));
+      .mockResolvedValueOnce(page([])) // a page of namesakes / other languages
+      .mockResolvedValueOnce(page([book('C', '2003-01-01')], 130, false));
 
     const { books, complete } = await run(scanAuthorBooks('Name', 'AUTH', logger));
 
-    expect(books.map((b) => b.asin)).toEqual(['A']);
-    expect(complete).toBe(false);
-    expect(searchByAuthorAsin.mock.calls).toEqual([['Name', 'AUTH', 1], ['Name', 'AUTH', 2]]);
+    expect(books.map((b) => b.asin)).toEqual(['A', 'C']);
+    expect(complete).toBe(true);
+    expect(searchByAuthorAsin.mock.calls).toEqual([['Name', 'AUTH', 1], ['Name', 'AUTH', 2], ['Name', 'AUTH', 3]]);
   });
 
   it('without a cutoff: complete when Audible has no further pages within the cap', async () => {
@@ -157,7 +158,7 @@ describe('scanAuthorLegs', () => {
   });
 
   it('runs both scans for a mixed group and feeds each watcher its own', async () => {
-    // Relevance scan ends at a page with no matching books while Audible still has more
+    // Relevance scan reaches the page cap while Audible still has more
     searchByAuthorAsin.mockImplementation(async (_n: string, _a: string, p: number, opts?: { newestFirst?: boolean }) =>
       opts?.newestFirst
         ? page([book('NEW', '2026-11-20'), book('MID', '2024-01-01')], 200, true)
@@ -165,7 +166,7 @@ describe('scanAuthorLegs', () => {
 
     const scan = await run(scanAuthorLegs('Name', 'AUTH', [entireWatch, newWatch], logger));
 
-    expect(searchByAuthorAsin.mock.calls.map((c) => c[3]?.newestFirst ?? false)).toEqual([false, false, true]);
+    expect(searchByAuthorAsin.mock.calls.map((c) => c[3]?.newestFirst ?? false)).toEqual([false, false, false, false, true]);
     expect(scan.booksFor(entireWatch).map((b) => b.asin)).toEqual(['BACK1', 'MID']);
     expect(scan.booksFor(newWatch).map((b) => b.asin)).toEqual(['NEW', 'MID']);
     expect(scan.found).toBe(3);

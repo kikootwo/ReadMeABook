@@ -174,7 +174,8 @@ describe('watched authors, new releases only', () => {
 
     const stats = await run();
 
-    expect(searchByAuthorAsin.mock.calls.map((c) => c[3]?.newestFirst ?? false)).toEqual([false, false, true]);
+    // The relevance scan reads past its empty pages to the 4-page cap (#310), then the newest-first scan
+    expect(searchByAuthorAsin.mock.calls.map((c) => c[3]?.newestFirst ?? false)).toEqual([false, false, false, false, true]);
     expect(requested()).toEqual({ entire: ['B0BACK0001', 'B0BACK0002'], fresh: ['B0NEW00001'] });
     expect(stats.booksFound).toBe(4);
   });
