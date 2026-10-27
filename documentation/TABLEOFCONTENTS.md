@@ -71,7 +71,7 @@
 - **Full pipeline overview** → [phase3/README.md](phase3/README.md)
 - **Search via Prowlarr (torrents + NZBs)** → [phase3/prowlarr.md](phase3/prowlarr.md)
 - **Torrent ranking/selection** → [phase3/ranking-algorithm.md](phase3/ranking-algorithm.md)
-- **Multi-download-client support (qBittorrent, Transmission, SABnzbd, NZBGet)** → [phase3/download-clients.md](phase3/download-clients.md)
+- **Multi-download-client support (qBittorrent, Transmission, Deluge, SABnzbd, NZBGet; base32 magnets, torrent IDs)** → [phase3/download-clients.md](phase3/download-clients.md)
 - **.torrent/.nzb fetch, redirects, Prowlarr key scoping, user-picked release validation** → [phase3/download-clients.md](phase3/download-clients.md#source-fetch--prowlarr-key-scoping)
 - **qBittorrent integration (torrents)** → [phase3/qbittorrent.md](phase3/qbittorrent.md)
 - **qBittorrent torrent IDs (hybrid v1+v2 torrents, base32 magnets)** → [phase3/qbittorrent.md](phase3/qbittorrent.md)
