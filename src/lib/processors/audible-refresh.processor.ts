@@ -89,7 +89,8 @@ export async function processAudibleRefresh(payload: AudibleRefreshPayload): Pro
               books, catId, syncTime, thumbnailCache, logger, 'category book'
             );
 
-            categoriesSynced++;
+            // An empty fetch keeps the previous list, so it doesn't count as synced
+            if (books.length > 0) categoriesSynced++;
             logger.info(`Category ${catId}: saved ${saved} entries`);
           } catch (error) {
             logger.error(`Failed to refresh category ${catId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -128,6 +129,7 @@ export async function processAudibleRefresh(payload: AudibleRefreshPayload): Pro
 /**
  * Wipe previous entries for a category, upsert book metadata into AudibleCache,
  * and insert ranked entries into AudibleCacheCategory.
+ * An empty list leaves the previous entries in place (a failed scrape returns []).
  * Returns the number of books successfully saved.
  */
 async function persistSectionBooks(
@@ -155,6 +157,13 @@ async function persistSectionBooks(
     logger.warn(
       `Dropped ${droppedCount} duplicate ASIN(s) from ${categoryId} input list before persist`,
     );
+  }
+
+  // Scrapers return [] on failure (e.g. a CloudFront 503 storm). Wiping then would
+  // blank the section until the next good night, so keep the last good list instead.
+  if (dedupedBooks.length === 0) {
+    logger.warn(`No books fetched for ${categoryId}, keeping the previous entries`);
+    return 0;
   }
 
   // Wipe previous entries for this section

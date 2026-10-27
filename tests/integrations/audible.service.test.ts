@@ -1420,6 +1420,93 @@ describe('AudibleService', () => {
 
       expect(book.narrator).toBe('Alice, Bob, Carol, Dan');
     });
+
+    describe('catalog API fallback', () => {
+      it('asks the catalog API for the node\'s bestsellers when the storefront page has no books', async () => {
+        htmlClientMock.get.mockResolvedValue(htmlResponse(makeHtmlPage([])));
+        apiClientMock.get.mockResolvedValue(
+          apiResponse(makeProductsResponse([makeProduct({ asin: 'BCATALOG01' })])),
+        );
+
+        const service = new AudibleService();
+        const books = await service.getCategoryBooks('CAT001', 200);
+
+        expect(apiClientMock.get.mock.calls[0][0]).toBe('/1.0/catalog/products');
+        const params = apiClientMock.get.mock.calls[0][1].params;
+        expect(params.category_id).toBe('CAT001');
+        expect(params.products_sort_by).toBe('BestSellers');
+        expect(params.page).toBe(0);
+        expect(params.num_results).toBe(50);
+        expect(books.map((b) => b.asin)).toEqual(['BCATALOG01']);
+      });
+
+      it('falls back after the storefront 503s through every retry (regression: section went blank)', async () => {
+        const error503 = Object.assign(new Error('Request failed with status code 503'), {
+          response: { status: 503 },
+        });
+        htmlClientMock.get.mockRejectedValue(error503);
+        apiClientMock.get.mockResolvedValue(
+          apiResponse(makeProductsResponse([makeProduct({ asin: 'BCATALOG02' })])),
+        );
+
+        const service = new AudibleService();
+        vi.spyOn(service as unknown as { delay: (ms: number) => Promise<void> }, 'delay').mockResolvedValue(undefined);
+        const books = await service.getCategoryBooks('CAT001', 200);
+
+        expect(htmlClientMock.get).toHaveBeenCalled();
+        expect(books.map((b) => b.asin)).toEqual(['BCATALOG02']);
+      });
+
+      it('keeps only the region\'s accepted languages', async () => {
+        htmlClientMock.get.mockResolvedValue(htmlResponse(makeHtmlPage([])));
+        apiClientMock.get.mockResolvedValue(
+          apiResponse(
+            makeProductsResponse([
+              makeProduct({ asin: 'BENGLISH01', language: 'english' }),
+              makeProduct({ asin: 'BSPANISH01', language: 'spanish' }),
+              makeProduct({ asin: 'BNOLANG001', language: undefined }),
+            ]),
+          ),
+        );
+
+        const service = new AudibleService();
+        const books = await service.getCategoryBooks('CAT001', 200);
+
+        expect(books.map((b) => b.asin)).toEqual(['BENGLISH01']);
+      });
+
+      it('pages until the limit and stops at a short page', async () => {
+        const fullPage = Array.from({ length: 50 }, (_, i) =>
+          makeProduct({ asin: `BFULL${String(i).padStart(5, '0')}` }),
+        );
+        const shortPage = [makeProduct({ asin: 'BSHORT0001' })];
+        htmlClientMock.get.mockResolvedValue(htmlResponse(makeHtmlPage([])));
+        apiClientMock.get
+          .mockResolvedValueOnce(apiResponse(makeProductsResponse(fullPage)))
+          .mockResolvedValueOnce(apiResponse(makeProductsResponse(shortPage)));
+
+        const service = new AudibleService();
+        const books = await service.getCategoryBooks('CAT001', 200);
+
+        expect(apiClientMock.get).toHaveBeenCalledTimes(2);
+        expect(apiClientMock.get.mock.calls[1][1].params.page).toBe(1);
+        expect(books).toHaveLength(51);
+      });
+
+      it('returns an empty list when the catalog API fails too', async () => {
+        const error503 = Object.assign(new Error('Service Unavailable'), {
+          response: { status: 503 },
+        });
+        htmlClientMock.get.mockResolvedValue(htmlResponse(makeHtmlPage([])));
+        apiClientMock.get.mockRejectedValue(error503);
+
+        const service = new AudibleService();
+        vi.spyOn(service as unknown as { delay: (ms: number) => Promise<void> }, 'delay').mockResolvedValue(undefined);
+        const books = await service.getCategoryBooks('CAT001', 200);
+
+        expect(books).toEqual([]);
+      });
+    });
   });
 
   // -------------------------------------------------------------------------

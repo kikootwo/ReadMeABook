@@ -29,13 +29,14 @@ Users customize their home page by adding/removing/reordering sections. Each sec
 - All section data stored in `AudibleCacheCategory` with reserved IDs: `__popular__` and `__new_releases__` for built-in sections
 - Popular/new-releases use same wipe-and-populate pattern as user categories
 - After built-in sections, queries DISTINCT categoryIds from `UserHomeSection`
-- Per section: wipe `AudibleCacheCategory` rows, scrape, upsert `AudibleCache` metadata, insert ranked category entries
+- Per section: scrape, wipe `AudibleCacheCategory` rows, upsert `AudibleCache` metadata, insert ranked category entries
+- Empty scrape (e.g. 503 storm) → previous rows kept, warning logged; category not counted in `categoriesSynced`
 - Batch cooldown between sections (10-20s random)
 - Constants exported from `audible-refresh.processor.ts`: `POPULAR_CATEGORY_ID`, `NEW_RELEASES_CATEGORY_ID`
 
 ## AudibleService Methods
 - `getCategories()`: Scrapes `{baseUrl}/categories`, returns `{id, name}[]`
-- `getCategoryBooks(categoryId, limit)`: Scrapes `/search?node={id}&pageSize=50&sort=popularity-rank`, up to 200 results
+- `getCategoryBooks(categoryId, limit)`: Scrapes `/search?node={id}&pageSize=50&sort=popularity-rank`, up to 200 results; storefront yields 0 books → catalog API fallback (`category_id={id}&products_sort_by=BestSellers`, region-language filtered)
 
 ## Frontend
 - **Hooks:** `useHomeSections()`, `useCategoryAudiobooks()`, `useAudibleCategories()` in `src/lib/hooks/useHomeSections.ts`
@@ -48,7 +49,7 @@ Users customize their home page by adding/removing/reordering sections. Each sec
 - 10 section limit per user (total)
 - Category picker scraped live (no categories table)
 - Top-level categories only (v1)
-- Wipe-and-re-scrape per category during refresh
+- Wipe-and-re-scrape per category during refresh, skipped when the scrape returns nothing (last good list kept)
 - Deduplication of categories across users before scraping
 - If category disappears, user sees empty section
 - 10-color palette assigned by sort order

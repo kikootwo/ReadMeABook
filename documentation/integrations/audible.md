@@ -12,7 +12,7 @@ Audiobook metadata for discovery, search, and detail pages. Split by access patt
 
 ## Architecture
 
-- **Curated HTML (refresh job only):** the three methods called solely by `audible-refresh.processor.ts` (`getPopularAudiobooks`, `getNewReleases`, `getCategoryBooks`) scrape Audible's storefront HTML to inherit editorial curation. Beefed-up retry/backoff knobs (12 retries, 3-min jittered cap) handle 503 storms patiently on the nightly job without slowing healthy users.
+- **Curated HTML (refresh job only):** the three methods called solely by `audible-refresh.processor.ts` (`getPopularAudiobooks`, `getNewReleases`, `getCategoryBooks`) scrape Audible's storefront HTML to inherit editorial curation. Beefed-up retry/backoff knobs (12 retries, 3-min jittered cap) handle 503 storms patiently on the nightly job without slowing healthy users. `getCategoryBooks` falls back to the catalog API (`category_id`, `products_sort_by=BestSellers`, region-language filtered) when the storefront yields 0 books; the refresh processor keeps a section's previous entries when a scrape returns nothing.
 - **JSON catalog API (real-time):** `search`, `searchByAuthorAsin`, `getCategories` (categories listing), and `fetchAudibleDetailsFromApi` (per-ASIN fallback); series search (`audible-series-search.ts`, [own doc](./audible-series-search.md)). Same endpoint used by the official Audible mobile apps. No authentication, no API key, no user credentials, no special headers.
 - **Audnexus (per-ASIN):** `getAudiobookDetails` and `getRuntime` prefer Audnexus, with catalog API fallback for `getAudiobookDetails`.
 - **Series fill** (`audible-series-fill.ts`, `SeriesFill`, one per service): Audnexus result without a series → `series`/`seriesPart`/`seriesAsin` from `/1.0/catalog/products/{asin}` (same region), only when the chosen entry has a non-empty title, all three or none; every other field stays Audnexus. `getAudiobookDetails(asin, { fillSeries: false })` skips it (bulk-import scan, BookDate `matchToAudnexus`, organize tag lookup when the series is stored).
@@ -27,6 +27,7 @@ Audiobook metadata for discovery, search, and detail pages. Split by access patt
 | Popular | `/adblbestsellers` | `pageSize=50`, `page=<n>` (omitted on first page) |
 | New releases | `/newreleases` | `pageSize=50`, `page=<n>` (omitted on first page) |
 | Category books | `/search` | `node=<categoryId>&pageSize=50&sort=popularity-rank&page=<n>` |
+| Category books (fallback, catalog API) | `/1.0/catalog/products` | `category_id=<categoryId>&products_sort_by=BestSellers&num_results=50&page=<n>` (0-based) |
 
 Parsed via cheerio. Selectors: `.productListItem` (popular/new releases), `.s-result-item, .productListItem` (categories).
 

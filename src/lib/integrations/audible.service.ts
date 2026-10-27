@@ -895,6 +895,71 @@ export class AudibleService {
     logger.info(
       `Category ${categoryId}: collected ${audiobooks.length} books across ${page - 1} pages`,
     );
+
+    // CloudFront can 503 the storefront for one node through every retry while the
+    // catalog API answers at once; an empty storefront result falls back to it.
+    if (audiobooks.length === 0) {
+      return this.getCategoryBooksFromCatalog(categoryId, limit);
+    }
+
+    return audiobooks;
+  }
+
+  /**
+   * Catalog API fallback for getCategoryBooks: the node's bestsellers, in the region's
+   * accepted languages (the storefront filters language server-side, the catalog doesn't).
+   */
+  private async getCategoryBooksFromCatalog(
+    categoryId: string,
+    limit: number,
+  ): Promise<AudibleAudiobook[]> {
+    logger.warn(`Category ${categoryId}: storefront returned no books, trying the catalog API...`);
+
+    const langConfig = getLanguageForRegion(this.region);
+    const audiobooks: AudibleAudiobook[] = [];
+    const seenAsins = new Set<string>();
+    // Language filtering drops some of each page, so allow twice the storefront's page count
+    const maxPages = Math.ceil(limit / AUDIBLE_PAGE_SIZE) * 2;
+
+    for (let page = 0; page < maxPages && audiobooks.length < limit; page++) {
+      try {
+        const { data: response } = await this.fetchWithRetry(
+          '/1.0/catalog/products',
+          {
+            params: {
+              category_id: categoryId,
+              num_results: AUDIBLE_PAGE_SIZE,
+              page,
+              products_sort_by: 'BestSellers',
+              response_groups: CATALOG_RESPONSE_GROUPS,
+            },
+          },
+          5,
+          this.apiClient,
+        );
+
+        const envelope: CatalogProductsResponse = response.data;
+        const products = envelope.products ?? [];
+
+        for (const product of products) {
+          if (audiobooks.length >= limit) break;
+          if (!product.asin || seenAsins.has(product.asin)) continue;
+          if (!product.language || !isAcceptedLanguage(product.language, langConfig)) continue;
+          seenAsins.add(product.asin);
+          audiobooks.push(mapCatalogProduct(product));
+        }
+
+        if (products.length < AUDIBLE_PAGE_SIZE) break;
+      } catch (error) {
+        logger.error(`Catalog fallback failed for category ${categoryId} page ${page + 1}`, {
+          error: error instanceof Error ? error.message : String(error),
+          collectedSoFar: audiobooks.length,
+        });
+        break;
+      }
+    }
+
+    logger.info(`Category ${categoryId}: collected ${audiobooks.length} books from the catalog API`);
     return audiobooks;
   }
 
