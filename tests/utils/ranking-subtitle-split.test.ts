@@ -101,6 +101,48 @@ describe('the part before the split names several books: the requested one still
   it('a release that names the author after " - " is still a complete title', () => {
     expect(match('Der Herr der Ringe - J.R.R. Tolkien [MP3]', 'Der Herr der Ringe. Die Gefährten', 'J.R.R. Tolkien', 'de')).toBe(60);
   });
+
+  it.each([true, false])('a bracketed note after a split title keeps the complete-title match (automatic: %s)', (auto) => {
+    // Main scores this 60: the full title without its brackets is still tried before the split
+    const release = 'Die Tribute von Panem 1. Tödliche Spiele - Suzanne Collins [MP3]';
+    expect(match(release, 'Die Tribute von Panem 1. Tödliche Spiele (ungekürzt)', 'Suzanne Collins', 'de', auto)).toBe(60);
+  });
+});
+
+describe('a release with neither the position nor the subtitle is another volume (#466)', () => {
+  // [request title, author, lang, release]: all score 0 on main; the series position counts as missing
+  // unless the release also carries the subtitle (colon, " - " and ". " alike)
+  const rows: [string, string, SupportedLanguage, string][] = [
+    ['The Primal Hunter 3: A LitRPG Adventure', 'Zogarth', 'en', 'Zogarth - The Primal Hunter [M4B]'],
+    ['The Primal Hunter 3: A LitRPG Adventure', 'Zogarth', 'en', 'The.Primal.Hunter.Zogarth.M4B'],
+    ['Defiance of the Fall 3: A LitRPG Adventure', 'JF Brink', 'en', 'JF Brink - Defiance of the Fall [M4B]'],
+    ['Beware of Chicken 3: A Xianxia Cultivation Novel', 'Casualfarmer', 'en', 'Casualfarmer - Beware of Chicken [M4B]'],
+    ['The Primal Hunter 3 - A LitRPG Adventure', 'Zogarth', 'en', 'Zogarth - The Primal Hunter [M4B]'],
+    ['Primal Hunter 3. Une aventure de LitRPG', 'Zogarth', 'fr', 'Primal.Hunter.Zogarth.2024.FR.[MP3]'],
+    ['Catch-22. A Novel', 'Joseph Heller', 'en', 'Joseph Heller - Catch Me [MP3]'],
+    ['Apollo 13 - Lost Moon', 'Jim Lovell', 'en', 'Jim Lovell - Apollo [MP3]'],
+  ];
+
+  it.each(rows)('automatic: %s vs %s', (title, author, lang, release) => {
+    expect(match(release, title, author, lang)).toBe(0);
+  });
+
+  it.each(rows)('interactive: %s vs %s', (title, author, lang, release) => {
+    expect(match(release, title, author, lang, false)).toBe(0);
+  });
+
+  it('the catalog series part does not let it through, and the right volume still ranks', () => {
+    const torrents = ['Zogarth - The Primal Hunter [M4B]', 'Zogarth - The Primal Hunter 3 [M4B]'].map((release, i) => ({
+      indexer: 'X', indexerId: 1, title: release, size: 600 * MB, seeders: 10,
+      publishDate: new Date('2025-01-01'), downloadUrl: `x${i}`, guid: `g${i}`,
+    }));
+    const ranked = rankTorrents(torrents,
+      { title: 'The Primal Hunter 3: A LitRPG Adventure', author: 'Zogarth', durationMinutes: 600, series: 'The Primal Hunter', seriesPart: '3' },
+      { requireAuthor: true });
+    expect(ranked[0].title).toBe('Zogarth - The Primal Hunter 3 [M4B]');
+    expect(ranked[0].score).toBeGreaterThanOrEqual(50);
+    expect(ranked[1].breakdown.matchScore).toBe(0);
+  });
 });
 
 describe('what is not a split (#466)', () => {
