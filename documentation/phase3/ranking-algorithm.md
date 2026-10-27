@@ -1,7 +1,7 @@
 # Intelligent Ranking Algorithm
 
 **Status:** ✅ Implemented | Comprehensive edge case test coverage
-**Tests:** tests/utils/ranking-algorithm.test.ts, ranking-non-latin.test.ts, ranking-match-gates.test.ts, ranking-oracle-223.test.ts, match-gates.test.ts, match-normalize.test.ts, ranking-size-floor.test.ts, ranking-series-part.test.ts, ranking-size-score.test.ts, tests/processors/search-indexers-non-latin.test.ts, search-indexers-size-floor.test.ts, search-indexers-series-part.test.ts
+**Tests:** tests/utils/ranking-algorithm.test.ts, ranking-non-latin.test.ts, ranking-match-gates.test.ts, ranking-oracle-223.test.ts, match-gates.test.ts, match-normalize.test.ts, ranking-size-floor.test.ts, ranking-series-part.test.ts, ranking-size-score.test.ts, ranking-subtitle-split.test.ts, tests/processors/search-indexers-non-latin.test.ts, search-indexers-size-floor.test.ts, search-indexers-series-part.test.ts
 **Automatic-search gates (#223):** [match-gates.md](match-gates.md): one-word titles, required numbers, author whole words, volume conflict (title, plus the catalog series part in automatic search, #330)
 
 Evaluates and scores torrents to automatically select best audiobook download.
@@ -34,7 +34,10 @@ Evaluates and scores torrents to automatically select best audiobook download.
 
 **Stage 1: Word Coverage Filter (MANDATORY)**
 - Extracts significant words from request (filters stop words: "the", "a", "an", "of", "on", "in", "at", "by", "for")
-- **Parenthetical/bracketed content is optional**: Content in () [] {} 【】 (and fullwidth （）［］｛｝, folded first) treated as subtitle (may be omitted from torrents); so is text after `:` or `：`
+- **Parenthetical/bracketed content is optional**: Content in () [] {} 【】 (and fullwidth （）［］｛｝, folded first) treated as subtitle (may be omitted from torrents); so is text after the first subtitle split (`splitSubtitle`, `match-normalize.ts`): `:` or `：`, a dash with spaces on both sides (` - ` ` – ` ` — `), or `. ` after a number or a word of 4+ letters (#466). Not a split: a hyphen inside a word (`Spider-Man`), initials and short abbreviations (`A. J.`, `Mr. Mercedes`), `prof capt corp dept bros hrsg`
+  - "Primal Hunter 1. Une aventure de LitRPG" → Required: ["primal", "hunter", "1"], Optional: ["une", "aventure", "litrpg"]
+  - A bare number right before the split (`:`, ` - ` or `. `) is the series position, read by G4a/G4c ([match-gates.md](match-gates.md)). Left out of the 80% coverage count only when the release carries half or more of the subtitle words; otherwise (and when it is the only required word, or the release names another position: G4c conflict) it counts as missing. So `Zogarth - The Primal Hunter [M4B]` (often book 1) scores 0 for "The Primal Hunter 3: A LitRPG Adventure", as on main
+  - A dash or dot split still tries the full title without brackets first, so "Die Tribute von Panem 1. Tödliche Spiele (ungekürzt)" vs `Die Tribute von Panem 1. Tödliche Spiele - Suzanne Collins` stays 60
   - "We Are Legion (We Are Bob)" → Required: ["we", "are", "legion"], Optional: ["bob"]
   - "Title [Series Name]" → Required: ["title"], Optional: ["series", "name"]
   - "Book Title {Extra Info}" → Required: ["book", "title"], Optional: ["extra", "info"]
@@ -91,7 +94,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
   - **Acceptable suffix**: Followed by metadata markers: " by", " [", " -", " (", " {", " :", "," or end of string
     - Also accepts author name in suffix (e.g., "Title AuthorName Year")
 - Complete match → 45 pts
-- `Title: Subtitle` counts as complete only when the subtitle agrees with the request's (G1); one-word titles and volume conflicts: [match-gates.md](match-gates.md) (G4b, G4c)
+- `Title: Subtitle` counts as complete only when the subtitle agrees with the request's (G1). For a request split at ` - ` or `. `, a release ` - ` right after the main part counts only when what follows (up to the next marker) is the request's subtitle (G1 rule), an author, or only volume words and numbers (`dashNamesOtherSubtitle`): `Sherlock Holmes - Das Zeichen der Vier` for "Sherlock Holmes - Der Hund der Baskervilles" → fuzzy (40.7). A colon request keeps the plain ` - ` marker; one-word titles and volume conflicts: [match-gates.md](match-gates.md) (G4b, G4c)
 - Unstructured prefix (words without separators) → fuzzy similarity (partial credit)
 - Suffix continues with non-metadata → fuzzy similarity (partial credit)
 - No substring match → fuzzy similarity (best score from full or required title)
@@ -393,7 +396,9 @@ const bestEbook = ranked[0];  // Safe to auto-download
 - **#330 (wrong book in a series):** automatic search could grab `Azarinth Healer 03` for "Azarinth Healer: Book One": the title names no number, so G4c had nothing to compare. Fixed by passing the catalog `series`/`seriesPart` into G4c ([match-gates.md](match-gates.md)); pinned in `tests/utils/ranking-series-part.test.ts`, `tests/utils/match-gates.test.ts` and `tests/processors/search-indexers-series-part.test.ts`
 - **#323 (large ebooks hidden):** interactive ebook search dropped results > 20 MB, so a large PDF that was the only result showed nothing. Fixed by `enforceSizeCap` (automatic only); pinned in `tests/utils/ranking-ebook-size-cap.test.ts`, `tests/api/interactive-search-ebook-size-cap.routes.test.ts` and `tests/processors/search-ebook-size-cap.test.ts`
 - **#318 (size score comment):** the `scoreSize` comment called 1.0 MB/min "~64 kbps"; it is about 140 kbps, so a 64 kbps release gets 6.9/15. Comment and docs now describe the code; scoring unchanged (moving the baseline goes with the #223 threshold work, which kept it). Pinned in `tests/utils/ranking-size-score.test.ts`
-- **#466 (apostrophe rows):** `L.Intruse…` for "L'intruse", `Changer.L.Eau.Des.Fleurs…`, `Enders.Game…` for "Ender's Game" scored 0 at word coverage (the apostrophe was kept in the word). Fixed by the apostrophe fold; pinned in `tests/utils/ranking-match-gates.test.ts`. Subtitles after `. ` / ` - ` (same issue) still open
+- **#466 (apostrophe rows):** `L.Intruse…` for "L'intruse", `Changer.L.Eau.Des.Fleurs…`, `Enders.Game…` for "Ender's Game" scored 0 at word coverage (the apostrophe was kept in the word). Fixed by the apostrophe fold; pinned in `tests/utils/ranking-match-gates.test.ts`
+- **#466 (subtitle rows):** `Primal.Hunter.T01…` for "Primal Hunter 1. Une aventure de LitRPG" and `C.Etait.Ca.Ou.Mourir…` for "C'était ça ou mourir - Prix du Roman FNAC 2026" scored 0: only brackets and `:` made a subtitle optional. Fixed by `splitSubtitle` (now 33.3 and 27.3, as the colon form); a release naming a different book after ` - ` (`Sherlock Holmes - Das Zeichen der Vier`) loses to the requested one. A release with neither the series position nor the subtitle (`Zogarth - The Primal Hunter` for "The Primal Hunter 3: …", any split) still scores 0. Pinned in `tests/utils/ranking-subtitle-split.test.ts`, `match-normalize.test.ts`, `match-gates.test.ts`
+- **Known limit (#466, shared with colon titles):** a different book after the series or author name in brackets, after a comma or `by`, or the series name alone (`Sherlock Holmes (Das Zeichen der Vier)`, `Sherlock Holmes, Das Zeichen der Vier`, `Arthur Conan Doyle - Sherlock Holmes`) ties the right release at 60 for "Sherlock Holmes - Der Hund der Baskervilles" or "Der Herr der Ringe. Die Gefährten"; the colon form does the same on main. Only a release ` - ` gets the different-subtitle check
 - **Known limit:** a release that splits an English ending (`Ender.s.Game`) misses `enders` (on main only a request with a curly `’` matched it)
 - **Known limit:** a request written without the apostrophe ("Enders Game") does not match `Ender’s Game` (as on main): a release possessive needs the apostrophe in the request, so "The Titans" never matches `The Titan's Curse`
 

@@ -104,11 +104,14 @@ export interface AddDownloadResult {
   id: string;
   /**
    * True when the torrent was already in the client, so RMAB did not add it (taken over).
-   * RMAB never removes such a torrent or changes it. Usenet clients: always false.
+   * RMAB never removes such a torrent or changes it. SABnzbd: true when it reuses a job it
+   * already holds (a duplicate NZB, or a retried add); otherwise false.
    */
   alreadyInClient: boolean;
   /** BitTorrent v1 info hash, when the client knows it (may differ from `id` for hybrid torrents) */
   infoHash?: string;
+  /** SABnzbd: the job it already held waits paused in its queue */
+  paused?: boolean;
 }
 
 /**
@@ -127,6 +130,13 @@ export interface AddDownloadOptions {
   paused?: boolean;
   /** Prowlarr credentials; the key is sent only to Prowlarr proxy-download hops (see download-source.ts) */
   sourceAuth?: SourceAuth;
+  /**
+   * A retried attempt of this grab (Bull retry): an earlier add may have reached the client
+   * even though it failed here (timeout). SABnzbd checks for that job before uploading again.
+   */
+  retry?: boolean;
+  /** The release's title from the indexer (SABnzbd matches an existing job by it, #329) */
+  releaseTitle?: string;
 }
 
 /**
@@ -151,10 +161,15 @@ export class DownloadSourceError extends Error {
 /**
  * The release's source can't be used at all (redirect to an invalid or malformed
  * location, magnet for a usenet client, redirect loop). The processor skips it
- * and tries the next ranked release.
+ * and tries the next ranked release. With `blocklistReason` (the release itself is
+ * unusable, e.g. a duplicate NZB whose files are gone) it also blocklists the release.
  */
 export class UnusableDownloadSourceError extends Error {
   readonly name = 'UnusableDownloadSourceError';
+
+  constructor(message: string, public readonly blocklistReason?: string) {
+    super(message);
+  }
 }
 
 export function isRetryableDownloadSourceError(

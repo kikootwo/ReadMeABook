@@ -73,7 +73,8 @@ model Request {
    IF torrent not in the client:
      → Skip (already removed)
 
-   (usenet: delete the job + files, always RMAB's)
+   (usenet: delete the job + files; a taken-over job (#329) was left above; RMAB's own job is kept
+    while another active request's selected row has the same nzo_id → torrentsKeptShared++)
 
    IF resolveOwnership(row, client added time) says not RMAB's
       (src/lib/utils/torrent-ownership.ts; see download-clients.md#torrent-ownership-423):

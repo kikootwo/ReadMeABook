@@ -81,6 +81,7 @@
 - **qBittorrent integration (torrents)** → [phase3/qbittorrent.md](phase3/qbittorrent.md)
 - **qBittorrent torrent IDs (hybrid v1+v2 torrents, base32 magnets)** → [phase3/qbittorrent.md](phase3/qbittorrent.md)
 - **SABnzbd integration (Usenet/NZB)** → [phase3/sabnzbd.md](phase3/sabnzbd.md)
+- **SABnzbd duplicate NZBs, retried adds after a timeout** → [phase3/sabnzbd.md](phase3/sabnzbd.md#duplicate-nzbs-and-retried-adds-329)
 - **File organization, seeding** → [phase3/file-organization.md](phase3/file-organization.md)
 - **Post-organize cleanup safety (delete guard, remove-after-processing gate)** → [phase3/file-organization.md](phase3/file-organization.md#post-organize-cleanup-safety)
 - **Verified import (atomic copy, placement records, delete only what reached the library)** → [phase3/file-organization.md](phase3/file-organization.md#verified-import-delete-only-what-reached-the-library)

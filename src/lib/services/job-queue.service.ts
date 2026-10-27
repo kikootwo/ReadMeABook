@@ -337,7 +337,7 @@ export class JobQueueService {
     // Download torrent processor
     this.queue.process('download_torrent', 2, async (job: BullJob<DownloadTorrentPayload>) => {
       const { processDownloadTorrent } = await import('../processors/download-torrent.processor');
-      return await processDownloadTorrent(job.data);
+      return await processDownloadTorrent(job.data, { attemptsMade: job.attemptsMade });
     });
 
     // Monitor download processor

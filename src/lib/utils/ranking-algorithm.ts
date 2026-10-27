@@ -7,10 +7,10 @@ import { compareTwoStrings } from 'string-similarity';
 import { matchesByInitials } from './author-initials';
 import {
   apostropheEndingWords, foldForMatching, FULLWIDTH_RE, fromFullwidth, hasNonLatinLetter, hasUnspacedScript, isWordInTitle,
-  keepUnrequestedApostrophes, normalizeForMatching,
+  keepUnrequestedApostrophes, normalizeForMatching, splitSubtitle,
 } from './match-normalize';
 import {
-  authorAppears, colonSubtitleAgrees, foldNumberWord, foldReleaseWords, isAuthorPresent, missingRequiredNumber,
+  authorAppears, colonSubtitleAgrees, dashNamesOtherSubtitle, foldNumberWord, foldReleaseWords, isAuthorPresent, missingRequiredNumber,
   shortTitleStandsAlone, shortTitleWord, splitPositionNumbers, volumeConflict,
 } from './match-gates';
 
@@ -408,12 +408,13 @@ export class RankingAlgorithm {
     const extractWords = (text: string, stopList: string[]): string[] =>
       normalizeForMatching(text, characterReplacements).split(' ').filter(word => word.length > 0 && !stopList.includes(word));
 
-    // Separate required words (outside parentheses/brackets/colon subtitles) from optional words
+    // Separate required words (outside parentheses/brackets/subtitle splits) from optional words
     // This handles common patterns like:
     //   "Title (Subtitle)" where subtitle may be omitted
     //   "Title: Series Name" where Audible appends series names after a colon
+    //   "Series 1. Title" and "Title - Subtitle", split the same way (#466)
     // Note: Run on ORIGINAL title to preserve brackets/colons, then normalize the result
-    const separateRequiredOptional = (title: string): { required: string; optional: string } => {
+    const separateRequiredOptional = (): { required: string; optional: string; dashSplit: boolean; subtitle: string; unbracketed: string } => {
       // Work with original title format for bracket/colon detection (fullwidth （）［］： fold to ASCII)
       const originalTitle = audiobook.title.toLowerCase().replace(FULLWIDTH_RE, fromFullwidth);
 
@@ -429,25 +430,25 @@ export class RankingAlgorithm {
       // Remove parenthetical/bracketed content to get the non-bracketed portion
       let requiredRaw = originalTitle.replace(/[(\[{【][^)\]}】]+[)\]}】]/g, ' ').trim();
 
-      // Treat content after a colon as optional (Audible commonly appends series names)
+      // Treat content after a colon, a spaced dash or ". " as optional (#466; Audible commonly appends series names)
       // e.g., "The Finest Edge of Twilight: Dungeons & Dragons" → required: title, optional: series
-      const colonIndex = requiredRaw.indexOf(':');
-      if (colonIndex > 0 && colonIndex < requiredRaw.length - 1) {
-        const afterColon = requiredRaw.substring(colonIndex + 1).trim();
-        if (afterColon.length > 0) {
-          optionalMatches.push(afterColon);
-        }
-        requiredRaw = requiredRaw.substring(0, colonIndex).trim();
+      // The full title without brackets, before the split: still a complete title for a dash or dot split
+      const unbracketed = normalizeForMatching(requiredRaw, characterReplacements);
+      const split = splitSubtitle(requiredRaw);
+      const dashSplit = split !== null && !split.colon;
+      if (split) {
+        optionalMatches.push(split.subtitle);
+        requiredRaw = split.main;
       }
 
       // Normalize the required portion (handles CamelCase, punctuation)
       const required = normalizeForMatching(requiredRaw, characterReplacements);
       const optional = optionalMatches.join(' ');
 
-      return { required, optional };
+      return { required, optional, dashSplit, subtitle: split?.subtitle ?? '', unbracketed };
     };
 
-    const { required: requiredTitle, optional: optionalTitle } = separateRequiredOptional(requestTitle);
+    const { required: requiredTitle, optional: optionalTitle, dashSplit, subtitle, unbracketed } = separateRequiredOptional();
     const optionalWords = new Set(extractWords(optionalTitle, stopWords));
 
     // Extract words from required portion only for coverage check
@@ -457,22 +458,34 @@ export class RankingAlgorithm {
     const coverageWords = requiredWords.map(foldNumberWord);
     const torrentWords = foldReleaseWords(extractWords(torrentTitle, stopWords));
 
+    const catalog = { series: audiobook.series, seriesPart: audiobook.seriesPart };
+
     // Calculate word coverage: how many REQUIRED words appear in TORRENT
     if (coverageWords.length > 0) {
-      const matchedWords = coverageWords.filter(word => isWordInTitle(word, torrentWords, torrentTitle));
-      // HARD REQUIREMENT: Must have 80%+ coverage of REQUIRED words (a title of only stop words skips this)
-      if (matchedWords.length / coverageWords.length < 0.80) return 0;
-      // G4a (automatic mode): a number in the required title is never optional, unless it is the series
-      // position written before a subtitle split ("Die Tribute von Panem 1. Tödliche Spiele")
+      // The series position written before a subtitle split ("Die Tribute von Panem 1. Tödliche Spiele")
+      // is not a title word: G4a skips it and G4c reads it. Coverage skips it too (#466), but only when the
+      // release carries the subtitle (half its words or more): a release with neither the position nor the
+      // subtitle is often another volume named after the series. Never when it is the only word or the
+      // release names another position (G4c conflict: then it counts as missing)
       const splitPositions = splitPositionNumbers(audiobook.title);
-      if (requireAuthor && missingRequiredNumber(coverageWords.filter(w => !splitPositions.has(w)), torrentWords)) return 0;
+      const nonPositionWords = coverageWords.filter(w => !splitPositions.has(w));
+      const subtitleWords = extractWords(subtitle, stopWords).map(foldNumberWord);
+      const subtitleMatched = subtitleWords.filter(word => isWordInTitle(word, torrentWords, torrentTitle)).length;
+      const skipPositions = nonPositionWords.length > 0 && nonPositionWords.length < coverageWords.length &&
+        subtitleWords.length > 0 && subtitleMatched * 2 >= subtitleWords.length &&
+        !volumeConflict(audiobook.title, release, stopWords, characterReplacements, catalog);
+      const countedWords = skipPositions ? nonPositionWords : coverageWords;
+      const matchedWords = countedWords.filter(word => isWordInTitle(word, torrentWords, torrentTitle));
+      // HARD REQUIREMENT: Must have 80%+ coverage of REQUIRED words (a title of only stop words skips this)
+      if (matchedWords.length / countedWords.length < 0.80) return 0;
+      // G4a (automatic mode): a number in the required title is never optional, unless it is the series position
+      if (requireAuthor && missingRequiredNumber(nonPositionWords, torrentWords)) return 0;
     }
 
     // ========== STAGE 1.5: AUTHOR PRESENCE CHECK (AUTOMATIC MODE) ==========
     // Interactive search (requireAuthor: false) shows all results. Rules: match-gates.md (G3)
     if (requireAuthor && !isAuthorPresent(torrentTitle, normalizedAuthors)) return 0;
     // G4c: the request (title or catalog series part) names one position and the release names another
-    const catalog = { series: audiobook.series, seriesPart: audiobook.seriesPart };
     if (requireAuthor && volumeConflict(audiobook.title, release, stopWords, characterReplacements, catalog)) return 0;
     // G4b: a one-word title must start a name element of the release (left boundary only)
     const shortWord = shortTitleWord(requiredWords);
@@ -491,7 +504,10 @@ export class RankingAlgorithm {
 
     // Try matching with full title first, then fall back to required title (without parentheses)
     const titlesToTry = [requestTitle];
-    if (requiredTitle && requiredTitle !== requestTitle) {
+    if (dashSplit && unbracketed && !titlesToTry.includes(unbracketed)) {
+      titlesToTry.push(unbracketed); // A dash or dot split: the full title without brackets, as main tried it
+    }
+    if (requiredTitle && !titlesToTry.includes(requiredTitle)) {
       titlesToTry.push(requiredTitle); // Add required-only version if different
     }
 
@@ -531,10 +547,13 @@ export class RankingAlgorithm {
         );
 
         // Check metadata markers in both normalized and original suffixes
-        // G1: a colon right after the title counts only when the release subtitle agrees with the request's
+        // G1: a colon right after the title counts only when the release subtitle agrees with the request's;
+        // for a request split at " - " or ". ", so does a " - " after its main part (#466)
+        const otherSubtitle = dashSplit && titleToMatch === requiredTitle && requiredTitle !== unbracketed &&
+          dashNamesOtherSubtitle(afterTitleOriginal, optionalWords, normalizedAuthors, text => extractWords(text, stopWords));
         const hasMetadataSuffix = afterTitle === '' ||
                                   metadataMarkers.some(marker => afterTitle.startsWith(marker)) ||
-                                  metadataMarkers.some(marker => afterTitleOriginal.startsWith(marker)) ||
+                                  metadataMarkers.some(marker => afterTitleOriginal.startsWith(marker) && !(otherSubtitle && marker === ' - ')) ||
                                   afterStartsWithAuthor ||
                                   colonSubtitleAgrees(afterTitleOriginal, optionalWords, text => extractWords(text, stopWords));
 

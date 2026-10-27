@@ -292,6 +292,7 @@ When user deletes and re-requests the same audiobook:
 - Job payload carries `downloadHistoryId` (set by monitor-download, retry-failed-imports, direct-download, request retry route; never by manual or bulk import)
 - That row belongs to the request, `downloadStatus = completed`, stored `downloadPath` == job `downloadPath`
 - Protocol: indexer `protocol` (case-insensitive), else `CLIENT_PROTOCOL_MAP[downloadClient]`; unknown or `torrent` → skip
+- Row not recorded `addedByRmab: false` (a client job RMAB took over, e.g. a SABnzbd duplicate, #329) → else skip, files kept
 - retry-failed-imports writes a client-reported (mapped) path back to the row before queueing; a failed write only skips cleanup
 
 **`assertSafeToDelete(path, ctx)`** guards every delete in both cleanups (download + manual-import `cleanupSource`). Refused deletes log a warning; the job still succeeds.
