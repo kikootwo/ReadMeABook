@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyRefreshToken, generateAccessToken } from '@/lib/utils/jwt';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { getRegistrationRefusal } from '@/lib/services/auth/local-account-status';
 import { readJsonBody, AUTH_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Auth.Refresh');
@@ -55,10 +56,12 @@ export async function POST(request: NextRequest) {
         role: true,
         deletedAt: true,
         sessionsInvalidatedAt: true,
+        registrationStatus: true,
       },
     });
 
-    if (!user || user.deletedAt) {
+    // Missing, deleted, pending-approval and rejected accounts are refused the same way
+    if (!user || user.deletedAt || getRegistrationRefusal(user.registrationStatus)) {
       return NextResponse.json(
         {
           error: 'Unauthorized',
