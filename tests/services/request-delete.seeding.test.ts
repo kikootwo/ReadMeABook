@@ -164,6 +164,24 @@ describe('deleteRequest seeding rule', () => {
     }));
   });
 
+  it('keeps a torrent another request uses even when that request is finished and done seeding (#283)', async () => {
+    // The seeding cleanup may remove it then; deleting one request never does
+    prismaMock.request.findMany.mockImplementation(async (args: { where?: { downloadHistory?: { some?: { torrentHash?: { in?: string[] } } } } }) =>
+      args?.where?.downloadHistory?.some?.torrentHash?.in?.includes('hash-1')
+        ? [{
+          id: 'req-2', type: 'audiobook', status: 'available',
+          downloadHistory: [{ id: 'dh-2', indexerId: 1, indexerName: 'Tracker', downloadClient: 'qbittorrent' }],
+        }]
+        : []
+    );
+
+    const { result, client } = await deleteWith({ seedingTimeMinutes: 60, ratioLimit: 1, seedingTime: 3600, ratio: 2 });
+
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+    expect(result.torrentsKeptShared).toBe(1);
+    expect(result.torrentsRemoved).toBe(0);
+  });
+
   it('keeps a torrent for unlimited seeding only when both criteria are 0', async () => {
     const { result, client } = await deleteWith({ seedingTimeMinutes: 0, ratioLimit: 0, seedingTime: 99999, ratio: 9 });
 
