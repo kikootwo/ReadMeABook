@@ -146,8 +146,9 @@ export async function GET(
     const archive = new ZipArchive({ zlib: { level: 6 } });
     archive.pipe(passThrough);
     for (const filePath of matchingFiles) {
-      // Flat entry names: a '/' or '\' in a file name becomes '_', so each file stays at the zip root
-      archive.file(filePath, { name: path.basename(filePath).replace(/[\\/]/g, '_') });
+      // Flat entry names: '/' or '\' becomes '_', so each file stays at the zip root; so does ':',
+      // since archiver drops a leading 'word:' from entry names
+      archive.file(filePath, { name: path.basename(filePath).replace(/[\\/:]/g, '_') });
     }
     archive.finalize();
 

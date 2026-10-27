@@ -77,7 +77,7 @@ test('349: a multi-file request downloads as one zip with flat entry names and t
 
   const entries = readZip(zip);
   const expected = Object.entries(onDisk)
-    .map(([name, sha256]) => ({ name: name.replace(/[\\/]/g, '_'), sha256 }))
+    .map(([name, sha256]) => ({ name: name.replace(/[\\/:]/g, '_'), sha256 }))
     .sort((a, b) => a.name.localeCompare(b.name));
   const got = entries.map(({ name, sha256 }) => ({ name, sha256 })).sort((a, b) => a.name.localeCompare(b.name));
   writeEvidence('349/zip-download.json', {
