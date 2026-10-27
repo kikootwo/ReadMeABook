@@ -44,6 +44,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - **Preserves apostrophes:** `"O'Brien"` remains `"o'brien"`
 - Handles common indexer naming patterns (NZB, torrent scene releases)
 - **Every script kept** (`src/lib/utils/match-normalize.ts`): letters, marks and digits of any script survive (`\p{L}\p{M}\p{N}`); everything else becomes a space
+- **Other consumer:** Bulk Import grouping keys (`src/lib/utils/bulk-import-keys.ts`) are built with `normalizeForMatching`, so a change here shifts which files group as one book ([bulk-import.md](../features/bulk-import.md))
 - **Folds:** accents (NFD, drop U+0300–036F, NFC; Greek tonos and Cyrillic ё/й fold too), Greek ς→σ, fullwidth ASCII → ASCII, `ø→o æ→ae œ→oe ß→ss ł→l đ ð→d þ→th ı→i ħ→h`; emoji presentation selectors (U+FE00–FE0F, U+E0100–E01EF, keycap U+20E3) dropped
 - **CJK/Thai next to ASCII** gets a space: `哈利波特与魔法石Harry` → `哈利波特与魔法石 harry`, `三体2` → `三体 2`, `ラブストーリー2` → `ラブストーリー 2` (Script_Extensions, so shared marks like `ー` count)
 - **Accepted changes vs. before #424 (Latin):** ø now behaves like ö, so `Bjørn` no longer matches `Bjoern` (`Björn`/`Bjoern` never did); non-ASCII letters or digits in a Latin title (π, µ, α, ², º, ʻ) are now part of it, so `The Joy of π` no longer matches `The Joy of Pi`

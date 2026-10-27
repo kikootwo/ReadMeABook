@@ -9,7 +9,7 @@
 
 import * as path from 'path';
 import type { AudioFileMetadata, DiscoveredAudiobook } from './bulk-import-scanner';
-import { buildGroupingKey, UNGROUPED_FOLDER_KEY, UNGROUPED_PREFIX } from './bulk-import-keys';
+import { buildGroupingKey, NO_TITLE_PREFIX, UNGROUPED_FOLDER_KEY, UNGROUPED_PREFIX } from './bulk-import-keys';
 import { isConfiguredRoot } from './disc-layout-fs';
 import { naturalCompare, parseDiscFolderName, stripDiscSuffix, type DiscFolderName } from './disc-layout';
 
@@ -26,7 +26,8 @@ export interface DiscFoldContext {
   extractAsin: (name: string) => string | null;
 }
 
-const isTagged = (d: DiscoveredAudiobook) => !d.groupingKey.startsWith(UNGROUPED_PREFIX);
+/** Tagged: any title tag, including one with no letter or digit (its key keeps author and narrator). */
+const isTagged = (d: DiscoveredAudiobook) => !d.groupingKey.startsWith(UNGROUPED_PREFIX) || d.groupingKey.startsWith(NO_TITLE_PREFIX);
 
 /** A disc folder's own number, for stripping a space-separated suffix (`Book Disc 2`); never for `Part N`. */
 const discNumberOf = (disc?: DiscFolderName) => (disc?.kind === 'disc' ? disc.number : undefined);
