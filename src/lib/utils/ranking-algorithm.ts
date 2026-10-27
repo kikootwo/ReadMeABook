@@ -6,6 +6,10 @@
 import { compareTwoStrings } from 'string-similarity';
 import { matchesByInitials } from './author-initials';
 import { foldForMatching, FULLWIDTH_RE, fromFullwidth, hasNonLatinLetter, hasUnspacedScript, isWordInTitle, normalizeForMatching } from './match-normalize';
+import {
+  authorAppears, colonSubtitleAgrees, foldNumberWord, foldReleaseWords, isAuthorPresent, missingRequiredNumber,
+  shortTitleBoundary, shortTitleWord, volumeConflict,
+} from './match-gates';
 
 export interface TorrentResult {
   indexer: string;
@@ -423,34 +427,29 @@ export class RankingAlgorithm {
     };
 
     const { required: requiredTitle, optional: optionalTitle } = separateRequiredOptional(requestTitle);
+    const optionalWords = new Set(extractWords(optionalTitle, stopWords));
 
     // Extract words from required portion only for coverage check
     // (a required portion with no letters or digits left falls back to the whole title)
+    // Numbers fold for coverage: 01 = 1, "seven" = 7, and a volume token (t01, book2) names its number
     const requiredWords = extractWords(requiredTitle || requestTitle, stopWords);
-    const torrentWords = extractWords(torrentTitle, stopWords);
+    const coverageWords = requiredWords.map(foldNumberWord);
+    const torrentWords = foldReleaseWords(extractWords(torrentTitle, stopWords));
 
     // Calculate word coverage: how many REQUIRED words appear in TORRENT
-    if (requiredWords.length === 0) {
-      // Edge case: title is only stop words, skip filter
-      // Fall through to normal scoring
-    } else {
-      const matchedWords = requiredWords.filter(word => isWordInTitle(word, torrentWords, torrentTitle));
-      const coverage = matchedWords.length / requiredWords.length;
-
-      // HARD REQUIREMENT: Must have 80%+ coverage of REQUIRED words
-      if (coverage < 0.80) {
-        // Automatic rejection - doesn't contain enough of the requested words
-        return 0;
-      }
+    if (coverageWords.length > 0) {
+      const matchedWords = coverageWords.filter(word => isWordInTitle(word, torrentWords, torrentTitle));
+      // HARD REQUIREMENT: Must have 80%+ coverage of REQUIRED words (a title of only stop words skips this)
+      if (matchedWords.length / coverageWords.length < 0.80) return 0;
+      // G4a (automatic mode): a number in the required title is never optional
+      if (requireAuthor && missingRequiredNumber(coverageWords, torrentWords)) return 0;
     }
 
-    // ========== STAGE 1.5: AUTHOR PRESENCE CHECK (OPTIONAL) ==========
-    // Only enforced in automatic mode (requireAuthor: true)
-    // Interactive search (requireAuthor: false) shows all results
-    if (requireAuthor && !this.checkAuthorPresenceWithParsed(torrentTitle, normalizedAuthors)) {
-      // No high-confidence author match → reject to prevent wrong-author matches
-      return 0;
-    }
+    // ========== STAGE 1.5: AUTHOR PRESENCE CHECK (AUTOMATIC MODE) ==========
+    // Interactive search (requireAuthor: false) shows all results. Rules: match-gates.md (G3)
+    if (requireAuthor && !isAuthorPresent(torrentTitle, normalizedAuthors)) return 0;
+    // G4c: the request names one series position and the release names another right after the title
+    if (requireAuthor && volumeConflict(audiobook.title, torrent.title, stopWords, characterReplacements)) return 0;
 
     // ========== STAGE 2: TITLE MATCHING (0-35 points) ==========
     let titleScore = 0;
@@ -500,10 +499,12 @@ export class RankingAlgorithm {
         );
 
         // Check metadata markers in both normalized and original suffixes
+        // G1: a colon right after the title counts only when the release subtitle agrees with the request's
         const hasMetadataSuffix = afterTitle === '' ||
                                   metadataMarkers.some(marker => afterTitle.startsWith(marker)) ||
                                   metadataMarkers.some(marker => afterTitleOriginal.startsWith(marker)) ||
-                                  afterStartsWithAuthor;
+                                  afterStartsWithAuthor ||
+                                  colonSubtitleAgrees(afterTitleOriginal, optionalWords, text => extractWords(text, stopWords));
 
         // Check prefix validity:
         // - No words before = clean match
@@ -556,6 +557,19 @@ export class RankingAlgorithm {
       }
     }
 
+    // G4b (automatic mode): a one-word title must stand alone; a clean boundary earns the complete 45
+    const shortWord = shortTitleWord(requiredWords);
+    if (requireAuthor && !bestMatch && shortWord) {
+      const boundary = shortTitleBoundary(torrent.title, {
+        word: shortWord, authors: normalizedAuthors, stopWords, subtitleWords: optionalWords, characterReplacements,
+      });
+      if (!boundary) return 0;
+      if (boundary === 'clean') {
+        titleScore = 45;
+        bestMatch = true;
+      }
+    }
+
     if (!bestMatch) {
       // No complete match found, use fuzzy similarity as fallback
       // Try against full title first, then required title
@@ -564,14 +578,14 @@ export class RankingAlgorithm {
     }
 
     // ========== STAGE 3: AUTHOR MATCHING (0-15 points) ==========
-    // Check how many authors appear in torrent title (exact substring match)
+    // How many authors appear as whole words or matching initials (G2, G3)
     const authorMatches = normalizedAuthors.filter(author =>
-      torrentTitle.includes(author)
+      authorAppears(torrentTitle, author) || matchesByInitials(torrentTitle, author)
     );
 
     let authorScore = 0;
     if (authorMatches.length > 0) {
-      // Exact substring match → proportional credit
+      // Whole-word or initials match → proportional credit
       authorScore = (authorMatches.length / normalizedAuthors.length) * 15;
     } else {
       // No exact match → use fuzzy similarity for partial credit
@@ -579,60 +593,6 @@ export class RankingAlgorithm {
     }
 
     return Math.min(60, titleScore + authorScore);
-  }
-
-  /**
-   * Check if author is present in torrent title with high confidence
-   * Uses pre-parsed and normalized authors array
-   *
-   * @param torrentTitle - Normalized torrent title (already processed by normalizeForMatching)
-   * @param normalizedAuthors - Array of normalized author names (roles already filtered)
-   * @returns true if at least ONE author is present with high confidence
-   */
-  private checkAuthorPresenceWithParsed(torrentTitle: string, normalizedAuthors: string[]): boolean {
-    // At least ONE author must match with high confidence
-    return normalizedAuthors.some(author => {
-      // An empty author is a substring of every title: never a match
-      if (!author) return false;
-      // Check 1: Exact substring match (works well now that both are normalized)
-      if (torrentTitle.includes(author)) {
-        return true;
-      }
-
-      // Check 2: High fuzzy similarity (≥ 0.85)
-      // Handles: "J.K. Rowling" vs "J. K. Rowling" vs "JK Rowling"
-      // Also handles: "Dennis E. Taylor" vs "Dennis Taylor"
-      const similarity = compareTwoStrings(author, torrentTitle);
-      if (similarity >= 0.85) {
-        return true;
-      }
-
-      // Check 3: Core name components (first + last name present within 30 chars)
-      // Handles: "Sanderson, Brandon" vs "Brandon Sanderson"
-      // Handles: "Brandon R. Sanderson" vs "Brandon Sanderson"
-      // Now also handles: "VirginaEvans" → "virgina evans" (after normalization)
-      const words = author.split(/\s+/).filter(w => w.length > 1);
-      if (words.length >= 2) {
-        const firstName = words[0];
-        const lastName = words[words.length - 1];
-
-        const firstIdx = torrentTitle.indexOf(firstName);
-        const lastIdx = torrentTitle.indexOf(lastName);
-
-        // Both components present and reasonably close?
-        if (firstIdx !== -1 && lastIdx !== -1) {
-          const distance = Math.abs(lastIdx - firstIdx);
-          if (distance <= 30) {
-            return true;
-          }
-        }
-      }
-
-      // Check 4: Spaced vs compacted initials, matched as whole words
-      // Handles: "TJ Klune" vs "T J Klune", "J D Robb" vs "JD Robb"
-      // Rejects: "E. L. James" vs "Michael James" (no partial-word match)
-      return matchesByInitials(torrentTitle, author);
-    });
   }
 
   /**
