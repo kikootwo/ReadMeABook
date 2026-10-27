@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/middleware/auth';
+import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
 import { scrapeSeriesPage } from '@/lib/integrations/audible-series';
 import { enrichAudiobooksWithMatches } from '@/lib/utils/audiobook-matcher';
@@ -22,72 +22,66 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ asin: string }> }
 ) {
-  try {
-    const currentUser = getCurrentUser(request);
-    if (!currentUser) {
+  return requireAuth(request, async (req: AuthenticatedRequest) => {
+    try {
+      const { asin } = await params;
+
+      if (!asin || !/^[A-Z0-9]{10}$/.test(asin)) {
+        return NextResponse.json(
+          { error: 'ValidationError', message: 'Valid series ASIN is required' },
+          { status: 400 }
+        );
+      }
+
+      const page = parseInt(request.nextUrl.searchParams.get('page') || '1', 10);
+
+      logger.info(`Fetching series detail: ${asin}, page ${page}`);
+
+      const detail = await scrapeSeriesPage(asin, page);
+      if (!detail) {
+        return NextResponse.json(
+          { error: 'NotFound', message: 'Series not found' },
+          { status: 404 }
+        );
+      }
+
+      // Two-pass dedup: local title/narrator/duration matching first, then collapse
+      // any remaining duplicates that the works table already knows are the same book
+      // (handles cases where source metadata diverges across paths or pages).
+      const { books: dedupedBooks, groups } = deduplicateAndCollectGroups(detail.books);
+
+      if (groups.length > 0) {
+        persistDedupGroups(groups).catch(() => {});
+      }
+
+      const collapsedBooks = await collapseByExistingWorks(dedupedBooks);
+
+      // Enrich books with library availability and request status
+      const userId = req.user!.id;
+      const enrichedBooks = await enrichAudiobooksWithMatches(collapsedBooks, userId);
+
+      // Annotate with per-user ignore status
+      const annotatedBooks = await annotateWithIgnoreStatus(enrichedBooks, userId);
+
+      logger.info(`Series detail complete: "${detail.title}" (${annotatedBooks.length} books, page ${page})`);
+
+      return NextResponse.json({
+        success: true,
+        series: {
+          ...detail,
+          books: annotatedBooks,
+        },
+        hasMore: detail.hasMore,
+        page: detail.page,
+      });
+    } catch (error) {
+      logger.error('Failed to fetch series detail', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return NextResponse.json(
-        { error: 'Unauthorized', message: 'Authentication required' },
-        { status: 401 }
+        { error: 'FetchError', message: 'Failed to fetch series details' },
+        { status: 500 }
       );
     }
-
-    const { asin } = await params;
-
-    if (!asin || !/^[A-Z0-9]{10}$/.test(asin)) {
-      return NextResponse.json(
-        { error: 'ValidationError', message: 'Valid series ASIN is required' },
-        { status: 400 }
-      );
-    }
-
-    const page = parseInt(request.nextUrl.searchParams.get('page') || '1', 10);
-
-    logger.info(`Fetching series detail: ${asin}, page ${page}`);
-
-    const detail = await scrapeSeriesPage(asin, page);
-    if (!detail) {
-      return NextResponse.json(
-        { error: 'NotFound', message: 'Series not found' },
-        { status: 404 }
-      );
-    }
-
-    // Two-pass dedup: local title/narrator/duration matching first, then collapse
-    // any remaining duplicates that the works table already knows are the same book
-    // (handles cases where source metadata diverges across paths or pages).
-    const { books: dedupedBooks, groups } = deduplicateAndCollectGroups(detail.books);
-
-    if (groups.length > 0) {
-      persistDedupGroups(groups).catch(() => {});
-    }
-
-    const collapsedBooks = await collapseByExistingWorks(dedupedBooks);
-
-    // Enrich books with library availability and request status
-    const userId = currentUser.sub || undefined;
-    const enrichedBooks = await enrichAudiobooksWithMatches(collapsedBooks, userId);
-
-    // Annotate with per-user ignore status
-    const annotatedBooks = await annotateWithIgnoreStatus(enrichedBooks, userId);
-
-    logger.info(`Series detail complete: "${detail.title}" (${annotatedBooks.length} books, page ${page})`);
-
-    return NextResponse.json({
-      success: true,
-      series: {
-        ...detail,
-        books: annotatedBooks,
-      },
-      hasMore: detail.hasMore,
-      page: detail.page,
-    });
-  } catch (error) {
-    logger.error('Failed to fetch series detail', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return NextResponse.json(
-      { error: 'FetchError', message: 'Failed to fetch series details' },
-      { status: 500 }
-    );
-  }
+  });
 }
