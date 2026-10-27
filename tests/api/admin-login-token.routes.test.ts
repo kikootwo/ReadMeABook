@@ -3,6 +3,7 @@
  * Documentation: documentation/testing.md
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
 
@@ -74,6 +75,43 @@ describe('Admin login token routes', () => {
 
       expect(response.status).toBe(403);
       expect(payload.error).toMatch(/deleted user/);
+    });
+
+    it.each([['pending_approval'], ['rejected']])(
+      'refuses a %s account with 403 and stores no token',
+      async (status) => {
+        prismaMock.user.findUnique.mockResolvedValueOnce({
+          plexUsername: 'newuser',
+          deletedAt: null,
+          registrationStatus: status,
+        });
+
+        const { POST } = await import('@/app/api/admin/users/[id]/login-token/route');
+        const response = await POST({} as any, { params: Promise.resolve({ id: 'u3' }) });
+        const payload = await response.json();
+
+        expect(response.status).toBe(403);
+        expect(payload).toEqual({ error: 'Cannot generate token for an account that is not approved' });
+        expect(prismaMock.user.update).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each([['approved'], [null]])('generates a token for an account with status %s', async (status) => {
+      prismaMock.user.findUnique.mockResolvedValueOnce({
+        plexUsername: 'testuser',
+        deletedAt: null,
+        registrationStatus: status,
+      });
+      prismaMock.user.update.mockResolvedValueOnce({});
+
+      const { POST } = await import('@/app/api/admin/users/[id]/login-token/route');
+      const response = await POST({} as any, { params: Promise.resolve({ id: 'u1' }) });
+
+      expect(response.status).toBe(201);
+      expect((await response.json()).fullToken).toBe('rmab_test_token');
+      expect(prismaMock.user.findUnique.mock.calls[0][0].select).toMatchObject({
+        registrationStatus: true,
+      });
     });
   });
 

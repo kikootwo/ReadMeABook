@@ -3,6 +3,7 @@
  * Documentation: documentation/testing.md
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
 
@@ -195,6 +196,56 @@ describe('Admin API tokens routes', () => {
 
       expect(response.status).toBe(404);
       expect(payload.error).toBe('Target user not found');
+    });
+
+    it.each([['pending_approval'], ['rejected']])(
+      'refuses a %s target with 403 and creates no token',
+      async (status) => {
+        authRequest.json.mockResolvedValueOnce({ name: 'Token for New User', userId: USER_ID });
+        prismaMock.user.findUnique.mockResolvedValueOnce({
+          id: USER_ID,
+          role: 'user',
+          plexUsername: 'newuser',
+          registrationStatus: status,
+        });
+        prismaMock.apiToken.count.mockResolvedValue(0);
+
+        const { POST } = await import('@/app/api/admin/api-tokens/route');
+        const response = await POST({} as any);
+
+        expect(response.status).toBe(403);
+        expect(await response.json()).toEqual({
+          error: 'Cannot create a token for an account that is not approved',
+        });
+        expect(prismaMock.apiToken.create).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each([['approved'], [null]])('creates a token for a target with status %s', async (status) => {
+      authRequest.json.mockResolvedValueOnce({ name: 'Token for User', userId: USER_ID });
+      prismaMock.user.findUnique.mockResolvedValueOnce({
+        id: USER_ID,
+        role: 'user',
+        plexUsername: 'regularuser',
+        registrationStatus: status,
+      });
+      prismaMock.apiToken.count.mockResolvedValueOnce(0);
+      prismaMock.apiToken.create.mockResolvedValueOnce({
+        id: 'token-3',
+        name: 'Token for User',
+        tokenPrefix: 'rmab_test',
+        role: 'user',
+        expiresAt: null,
+        createdAt: new Date(),
+      });
+
+      const { POST } = await import('@/app/api/admin/api-tokens/route');
+      const response = await POST({} as any);
+
+      expect(response.status).toBe(201);
+      expect(prismaMock.user.findUnique.mock.calls[0][0].select).toMatchObject({
+        registrationStatus: true,
+      });
     });
 
     it('returns 429 when rate limited', async () => {

@@ -163,6 +163,37 @@ describe('signed-in sessions follow the account status', () => {
     });
   });
 
+  describe('getCurrentUserAsync with an API token', () => {
+    const tokenRow = (row: Row) => ({
+      id: 'token-1',
+      tokenHash: API_TOKEN_HASH,
+      tokenPrefix: 'rmab_sta',
+      role: 'user',
+      expiresAt: null,
+      tokenUser: userRow(row),
+    });
+
+    it.each(REFUSED)('returns null for a %s account', async (_label, row) => {
+      prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow(row));
+      const { getCurrentUserAsync } = await import('@/lib/middleware/auth');
+
+      expect(await getCurrentUserAsync(makeRequest(`Bearer ${API_TOKEN}`) as any)).toBeNull();
+      expect(prismaMock.apiToken.update).not.toHaveBeenCalled();
+    });
+
+    it.each(ALLOWED)('returns the token owner for an %s account', async (_label, row) => {
+      prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow(row));
+      const { getCurrentUserAsync } = await import('@/lib/middleware/auth');
+
+      expect(await getCurrentUserAsync(makeRequest(`Bearer ${API_TOKEN}`) as any)).toEqual({
+        sub: 'user-1',
+        plexId: 'local-reader',
+        username: 'reader',
+        role: 'user',
+      });
+    });
+  });
+
   describe('POST /api/auth/refresh', () => {
     const refreshRequest = () => ({ json: vi.fn().mockResolvedValue({ refreshToken: 'refresh' }) });
 
