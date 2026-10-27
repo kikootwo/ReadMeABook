@@ -89,4 +89,15 @@ describe('GET /api/requests/[id]/download (multi-file zip)', () => {
     expect(names.filter((n) => n.includes('/') || n.includes('\\'))).toEqual([]);
     expect(zip.getEntry('Disc 2_Part 3.mp3')!.getData().equals(odd)).toBe(true);
   });
+
+  // Windows file names can't hold ':' either
+  it.skipIf(process.platform === 'win32')('keeps the full name of a file whose name starts with a word and a colon', async () => {
+    const intro = Buffer.from('ID3 intro');
+    fs.writeFileSync(path.join(bookDir, 'Intro: The Start.mp3'), intro);
+
+    const { zip } = await downloadZip();
+
+    expect(entryNames(zip)).toEqual(['Intro_ The Start.mp3', 'Part 1.mp3', 'Part 2.mp3']);
+    expect(zip.getEntry('Intro_ The Start.mp3')!.getData().equals(intro)).toBe(true);
+  });
 });
