@@ -43,14 +43,23 @@ function SeriesPageContent() {
 
   const searchedQuery = debouncedQuery.trim();
   const { series, isLoading, error, hasData, retry } = useSeriesSearch(searchedQuery);
-  // The query whose Try again the user pressed: focus returns to the button if it fails again
+  // The query whose Try again the user pressed: focus returns to the button once if it
+  // fails again. Editing the query or showing that failure clears it, so a cached error
+  // never pulls focus out of the search box.
   const [retriedQuery, setRetriedQuery] = useState<string | null>(null);
   const showError = !!error && !isLoading && !hasData;
+
+  const changeQuery = useCallback((value: string) => {
+    setQuery(value);
+    setRetriedQuery(null);
+  }, []);
 
   const handleRetry = useCallback(() => {
     setRetriedQuery(searchedQuery);
     retry();
   }, [searchedQuery, retry]);
+
+  const handleRetryFocused = useCallback(() => setRetriedQuery(null), []);
 
   const handleSearch = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -93,7 +102,7 @@ function SeriesPageContent() {
               <input
                 type="text"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => changeQuery(e.target.value)}
                 placeholder="Search by series name..."
                 className="w-full pl-12 pr-12 py-4 text-lg border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400"
                 autoFocus
@@ -101,7 +110,7 @@ function SeriesPageContent() {
               {query && (
                 <button
                   type="button"
-                  onClick={() => setQuery('')}
+                  onClick={() => changeQuery('')}
                   className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
                 >
                   <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -147,6 +156,7 @@ function SeriesPageContent() {
                   audibleUnavailable={error?.status === 502}
                   onRetry={handleRetry}
                   focusRetry={retriedQuery === searchedQuery}
+                  onRetryFocused={handleRetryFocused}
                 />
               ) : (
                 <SeriesGrid

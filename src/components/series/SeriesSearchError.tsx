@@ -18,14 +18,18 @@ interface SeriesSearchErrorProps {
   onRetry: () => void;
   /** Move focus to Try again when shown (after the user's own retry failed) */
   focusRetry?: boolean;
+  /** Called once focus has moved, so the parent can drop the request */
+  onRetryFocused?: () => void;
 }
 
-export function SeriesSearchError({ audibleUnavailable, onRetry, focusRetry = false }: SeriesSearchErrorProps) {
+export function SeriesSearchError({ audibleUnavailable, onRetry, focusRetry = false, onRetryFocused }: SeriesSearchErrorProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (focusRetry) buttonRef.current?.focus();
-  }, [focusRetry]);
+    if (!focusRetry) return;
+    buttonRef.current?.focus();
+    onRetryFocused?.();
+  }, [focusRetry, onRetryFocused]);
 
   return (
     <div role="alert" className="flex flex-col items-center justify-center py-16 px-6 text-center">

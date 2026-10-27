@@ -140,6 +140,30 @@ describe('series page search failures', () => {
     await waitFor(() => expect(document.activeElement).toBe(again));
   });
 
+  it('keeps focus in the search box when the user types back to a query whose retry failed', async () => {
+    api.fetcher = async (url) => {
+      if (url === KEY) throw failure(502);
+      return { success: true, series: [], query: 'other' };
+    };
+
+    await renderPage();
+    const button = await screen.findByRole('button', { name: 'Try again' });
+    fireEvent.click(button);
+    await waitFor(() => expect(api.urls).toEqual([KEY, KEY]));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Try again' })));
+
+    const input = screen.getByPlaceholderText('Search by series name...');
+    input.focus();
+    fireEvent.change(input, { target: { value: 'other' } });
+    expect(await screen.findByText('No series found for "other"', {}, { timeout: 2000 })).toBeInTheDocument();
+
+    // Back to the failed query: its cached error shows again, but the user is typing
+    fireEvent.change(input, { target: { value: QUERY } });
+    expect(await screen.findByRole('alert', {}, { timeout: 2000 })).toHaveTextContent(AUDIBLE_HEADING);
+    await wait(50);
+    expect(document.activeElement).toBe(input);
+  });
+
   it('guard: shows "No series found" for an empty result, with no error panel', async () => {
     api.fetcher = async () => ({ success: true, series: [], query: QUERY });
 

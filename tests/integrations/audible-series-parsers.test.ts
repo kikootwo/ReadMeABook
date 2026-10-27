@@ -23,7 +23,7 @@ const parseBooks = ($: cheerio.CheerioAPI) =>
   parseSeriesBooks($, LANG.scraping.authorPrefixes, LANG.scraping.narratorPrefixes, LANG);
 
 // ---------------------------------------------------------------------------
-// Fixture data \u2014 one single-narrator and one multi-narrator title
+// Fixture data — one single-narrator and one multi-narrator title
 // ---------------------------------------------------------------------------
 
 interface FixtureBook {
@@ -64,7 +64,7 @@ const BOOKS: FixtureBook[] = [
   },
 ];
 
-/** "Listeners also enjoyed" carousel \u2014 present in BOTH layouts. */
+/** "Listeners also enjoyed" carousel — present in BOTH layouts. */
 function similarSeriesCarousel(): string {
   return `
     <adbl-product-carousel id="SeriestoSeries">
