@@ -13,7 +13,7 @@ import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType, IDownloadClient } from '../interfaces/download-client.interface';
 import { evaluateSeeding, isUnlimitedSeeding } from '../utils/seeding-policy';
-import { FINISHED_REQUESTS, otherActiveRequestsSharingTorrent, siblingKeepsTorrent } from '../utils/shared-torrent';
+import { FINISHED_REQUESTS, otherActiveRequestsSharingTorrent, otherActiveRequestsUsingTorrent, siblingKeepsTorrent } from '../utils/shared-torrent';
 import { createIndexerConfigLookup, describeIgnoredIndexerId, parseSavedIndexers } from '../utils/indexer-config';
 import { knownNotOwned, resolveOwnership } from '../utils/torrent-ownership';
 
@@ -276,6 +276,69 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
       return 'cleaned';
     };
 
+    const cleanUpCancelledRequest = async (request: CandidateRequest): Promise<Outcome> => {
+      const row = request.downloadHistory[0];
+      if (!row) return 'none';
+      if (row.nzbId && !row.torrentHash) return 'none'; // Usenet: nothing seeding in a torrent client
+
+      const clientId = row.downloadClientId || row.torrentHash;
+      const clientType = row.downloadClient;
+      if (!clientId || !clientType) return 'none';
+      if (CLIENT_PROTOCOL_MAP[clientType as DownloadClientType] !== 'torrent') return 'none';
+
+      // A torrent RMAB did not add is never removed
+      const known = knownNotOwned(row);
+      if (known && !known.owned) {
+        logger.debug(`Leaving ${clientId} of cancelled request ${request.id} in ${clientType}: ${known.detail}`);
+        return 'notOwned';
+      }
+
+      // Another live request still using this torrent keeps it (cancelled/failed ones don't count)
+      const others = (await otherActiveRequestsUsingTorrent(request.id, row.torrentHash))
+        .filter((r) => r.status !== 'cancelled' && r.status !== 'failed');
+      if (others.length > 0) return 'seeding';
+
+      const client: IDownloadClient | null = await manager.getClientServiceForProtocol('torrent');
+      if (!client || client.clientType !== clientType) return 'otherClient';
+
+      if (deletedHashes.has(clientId.toLowerCase())) {
+        await markRemoved(row.id);
+        return 'cleaned';
+      }
+
+      let probe;
+      try {
+        if (!client.probeDownload) throw new Error(`${client.clientType} has no strict lookup`);
+        probe = await client.probeDownload(clientId);
+        probeErrorsInARow = 0;
+      } catch (error) {
+        probeErrorsInARow++;
+        logger.warn(`Could not check ${clientId} in ${clientType}, nothing changed: ${error instanceof Error ? error.message : String(error)}`);
+        return 'errors';
+      }
+
+      if (!probe.found) {
+        await markRemoved(row.id);
+        logger.info(`Download ${clientId} of cancelled request ${request.id} is no longer in ${clientType}: marked removed`);
+        return 'missing';
+      }
+
+      const ownership = resolveOwnership(row, probe.info.addedAt);
+      if (!ownership.owned) {
+        logger.info(`Leaving ${probe.info.name} in ${clientType}: ${ownership.detail}`);
+        if (ownership.recordNotOwned) {
+          await prisma.downloadHistory.update({ where: { id: row.id }, data: { addedByRmab: false } });
+        }
+        return 'notOwned';
+      }
+
+      await client.deleteDownload(clientId, true); // true = delete files
+      deletedHashes.add(clientId.toLowerCase());
+      await markRemoved(row.id);
+      logger.info(`Removed cancelled request ${request.id} download ${probe.info.name} from ${clientType}`);
+      return 'cleaned';
+    };
+
     for (;;) {
       const page = await prisma.request.findMany({
         where: { AND: [CANDIDATES, HAS_FINISHED_DOWNLOAD, ...(lastId ? [{ id: { gt: lastId } }] : [])] },
@@ -318,6 +381,49 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
       }
       if (page.length < CLEANUP_PAGE_SIZE) break;
       lastId = page[page.length - 1].id;
+    }
+
+    // Cancelled requests: cancelling only flips the request status; nothing told the download client to
+    // drop the torrent. Remove it (and its partial data) under the same ownership rule as everything else.
+    if (!stoppedEarly) {
+      try {
+        const cancelled = await prisma.request.findMany({
+          where: {
+            status: 'cancelled',
+            deletedAt: null,
+            downloadHistory: { some: { selected: true, downloadStatus: { not: 'removed' } } },
+          },
+          include: {
+            downloadHistory: {
+              where: { selected: true, downloadStatus: { not: 'removed' } },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
+          },
+          orderBy: { updatedAt: 'desc' },
+          take: 200,
+        });
+
+        for (const request of cancelled) {
+          try {
+            const outcome = await cleanUpCancelledRequest(request);
+            if (outcome !== 'none') {
+              counts[outcome]++;
+            }
+          } catch (error) {
+            counts.errors++;
+            logger.error(`Failed to clean cancelled request ${request.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          }
+          if (probeErrorsInARow >= MAX_PROBE_ERRORS_IN_A_ROW) {
+            logger.warn('Stopped the cancelled-request pass: the download client is not answering');
+            break;
+          }
+        }
+      } catch (error) {
+        // Additive pass: never let it fail the seeding cleanup above
+        counts.errors++;
+        logger.error(`Cancelled-request cleanup failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
     }
 
     logger.info(`Indexer config matches: ${matchCounts.id} by id, ${matchCounts.name} by name, ${matchCounts.none} not configured`);
