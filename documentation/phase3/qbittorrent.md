@@ -17,7 +17,7 @@ Free, open-source BitTorrent client with comprehensive Web API.
 - Full list unreadable at the pre-check (non-200, timeout, not a list) → fail closed: nothing added, `TorrentListUnavailableError` "Couldn't read qBittorrent's torrent list to check for an existing copy" (one error log line). A client error, not a source error: no other release is tried; the request's normal retry applies. HTTP 403 with credentials set: one re-login, then the add is retried; without credentials (auth-optional) a 403 fails the add closed with the generic `Failed to add torrent to qBittorrent`.
 - A rejected add (`Fails.`, a rejected JSON receipt, or HTTP 409 from 5.2) re-checks the hash once: present → taken over (`alreadyInClient: true`, warn); absent → error as before ([download-clients.md](./download-clients.md#torrent-ownership-423)).
 - `probeDownload(hash)`: strict lookup for the seeding cleanup, no not-found retries: one lookup by ID, plus one unfiltered lookup when that answer is an empty list (`qbittorrentProbeList()` validates both); `added_on` → `DownloadInfo.addedAt`.
-- Add result: `{ id, alreadyInClient, infoHash }`; `infoHash` (v1) keeps `DownloadHistory.torrentHash` = v1 for hybrids.
+- Add result: `{ id, alreadyInClient, infoHash }`; `infoHash` (v1) is `DownloadHistory.torrentHash` for hybrids unless Prowlarr supplied an infohash.
 
 **Solution (Professional):**
 

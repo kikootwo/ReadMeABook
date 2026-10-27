@@ -73,7 +73,7 @@ interface DownloadClientConfig {
 
 - **Base32 magnets:** `btih` in base32 (32 chars, any case) → 40 lowercase hex on add (`magnetHashes()`); no v1 (`btmh`-only) → `Invalid magnet link`, as before. Fixed #457: a base32 magnet was recorded and looked up in base32, which neither client answers to, so monitoring failed and the seeding cleanup marked the row `removed`
 - **Recorded ID** (`AddDownloadResult.id`): the 40-hex ID the add answer reports, lowercased (Transmission `torrent-added`/`torrent-duplicate` `hashString`; Deluge `core.add_torrent_*` result); a non-hex answer → the computed v1. A reported ID that is none of the computed IDs is still recorded (it is the torrent the add created), with a warn log (`addedTorrentId()`)
-- **`infoHash`** = v1 on every path, so `torrentHash` stays v1 (as qBittorrent)
+- **`infoHash`** = v1 on every path (as qBittorrent). `DownloadHistory.torrentHash` = Prowlarr's infohash when the release has one (any case), else this v1
 - **Deluge add checks** (pre-check, and the re-check after a rejected add): `core.get_torrent_status [id, ['name']]` per candidate ID, first hit wins: truncated v2 (a hybrid `.torrent`'s `meta version` 2, or a magnet's `btmh`), then v1. Non-hybrids: one call, as before. A `.torrent` add sets label + seed limits on the ID Deluge returns (was the parsed v1)
 - **Lookups** send a stored base32 ID as hex (`normalizeTorrentId()`; anything else unchanged): `getDownload`, `probeDownload`, pause, resume, delete, `setCategory` on both clients
 - **Transmission identity check:** `getTorrentByHash` takes only the `torrent-get` entry whose `hashString` is the requested hash (case-insensitive, `sameHash()` in `torrent-probe.ts`); none → `Torrent <id> not found`. Was `torrents[0]`: a server that ignored `ids` could have RMAB act on another torrent
@@ -84,6 +84,7 @@ interface DownloadClientConfig {
   - A btih-only magnet of a hybrid Deluge already holds under its truncated v2: libtorrent rejects the add as a duplicate, the re-check by v1 misses → the add errors, as before
   - Which ID `core.add_torrent_*` returns for a hybrid is not confirmed on a live client; RMAB records whatever it returns
   - Pure v2 `.torrent`: still fails in parse-torrent
+- **Known limit (both clients):** a reported ID that is none of the computed IDs leaves `torrentHash` on the computed v1, so the shared-torrent guard can miss a second request for that torrent; deleting or cleaning one can remove the torrent the other still uses (both rows RMAB's own; rare, logged as a warn)
 - Not tested on a live Transmission or Deluge (fakes that answer by the IDs RMAB sends: `tests/integrations/torrent-client-ids.test.ts`)
 
 ### NZBGet Service
