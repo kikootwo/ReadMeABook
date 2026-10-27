@@ -1,8 +1,8 @@
 # Intelligent Ranking Algorithm
 
 **Status:** ✅ Implemented | Comprehensive edge case test coverage
-**Tests:** tests/utils/ranking-algorithm.test.ts, ranking-non-latin.test.ts, ranking-match-gates.test.ts, ranking-oracle-223.test.ts, match-gates.test.ts, match-normalize.test.ts, ranking-size-floor.test.ts, tests/processors/search-indexers-non-latin.test.ts, search-indexers-size-floor.test.ts
-**Automatic-search gates (#223):** [match-gates.md](match-gates.md): one-word titles, required numbers, author whole words, volume conflict (title-only subset of #330)
+**Tests:** tests/utils/ranking-algorithm.test.ts, ranking-non-latin.test.ts, ranking-match-gates.test.ts, ranking-oracle-223.test.ts, match-gates.test.ts, match-normalize.test.ts, ranking-size-floor.test.ts, ranking-series-part.test.ts, tests/processors/search-indexers-non-latin.test.ts, search-indexers-size-floor.test.ts, search-indexers-series-part.test.ts
+**Automatic-search gates (#223):** [match-gates.md](match-gates.md): one-word titles, required numbers, author whole words, volume conflict (title, plus the catalog series part in automatic search, #330)
 
 Evaluates and scores torrents to automatically select best audiobook download.
 
@@ -232,6 +232,12 @@ interface RankTorrentsOptions {
   minMBPerMinute?: number;                  // Size floor when runtime known (automatic search: 0.15)
 }
 
+interface AudiobookRequest {
+  title: string; author: string; narrator?: string;
+  durationMinutes?: number;                 // Size scoring and floor
+  series?: string; seriesPart?: string;     // Catalog series (#330): G4c volume conflict, automatic search only
+}
+
 interface BonusModifier {
   type: 'indexer_priority' | 'indexer_flag' | 'custom';
   value: number;        // Multiplier (e.g., 0.4 for 40%)
@@ -377,6 +383,7 @@ const bestEbook = ranked[0];  // Safe to auto-download
 
 ## Fixed Issues
 - **#311 (single-file grabs):** automatic search grabbed one 57 MB chapter file of a 97-file Usenet post for a 1182-min book (score 79.7) and imported it as the book. Fixed by the size floor above; pinned in `tests/utils/ranking-size-floor.test.ts` and `tests/processors/search-indexers-size-floor.test.ts`
+- **#330 (wrong book in a series):** automatic search could grab `Azarinth Healer 03` for "Azarinth Healer: Book One": the title names no number, so G4c had nothing to compare. Fixed by passing the catalog `series`/`seriesPart` into G4c ([match-gates.md](match-gates.md)); pinned in `tests/utils/ranking-series-part.test.ts`, `tests/utils/match-gates.test.ts` and `tests/processors/search-indexers-series-part.test.ts`
 - **#466 (apostrophe rows):** `L.Intruse…` for "L'intruse", `Changer.L.Eau.Des.Fleurs…`, `Enders.Game…` for "Ender's Game" scored 0 at word coverage (the apostrophe was kept in the word). Fixed by the apostrophe fold; pinned in `tests/utils/ranking-match-gates.test.ts`. Subtitles after `. ` / ` - ` (same issue) still open
 - **Known limit:** a release that splits an English ending (`Ender.s.Game`) misses `enders` (on main only a request with a curly `’` matched it)
 - **Known limit:** a request written without the apostrophe ("Enders Game") does not match `Ender’s Game` (as on main): a release possessive needs the apostrophe in the request, so "The Titans" never matches `The Titan's Curse`

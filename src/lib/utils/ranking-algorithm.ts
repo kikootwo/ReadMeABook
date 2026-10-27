@@ -38,6 +38,8 @@ export interface AudiobookRequest {
   author: string;
   narrator?: string;
   durationMinutes?: number;
+  series?: string | null;      // Catalog series name; automatic search only (G4c, #330)
+  seriesPart?: string | null;  // Catalog series position ("3", "2.5"); automatic search only (G4c, #330)
 }
 
 export interface IndexerFlagConfig {
@@ -465,8 +467,9 @@ export class RankingAlgorithm {
     // ========== STAGE 1.5: AUTHOR PRESENCE CHECK (AUTOMATIC MODE) ==========
     // Interactive search (requireAuthor: false) shows all results. Rules: match-gates.md (G3)
     if (requireAuthor && !isAuthorPresent(torrentTitle, normalizedAuthors)) return 0;
-    // G4c: the request names one series position and the release names another right after the title
-    if (requireAuthor && volumeConflict(audiobook.title, release, stopWords, characterReplacements)) return 0;
+    // G4c: the request (title or catalog series part) names one position and the release names another
+    const catalog = { series: audiobook.series, seriesPart: audiobook.seriesPart };
+    if (requireAuthor && volumeConflict(audiobook.title, release, stopWords, characterReplacements, catalog)) return 0;
     // G4b: a one-word title must start a name element of the release (left boundary only)
     const shortWord = shortTitleWord(requiredWords);
     if (requireAuthor && shortWord) {
