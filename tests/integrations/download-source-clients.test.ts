@@ -138,7 +138,7 @@ describe('Prowlarr key scoping in download clients', () => {
     submitted = [];
   });
 
-  describe.each(cases)('$name', ({ name, protocol, create }) => {
+  describe.each(cases)('$name', ({ protocol, create }) => {
     const payload = () => serve(protocol === 'torrent' ? TEST_TORRENT : TEST_NZB);
     const startUrl = () => `${servers.prowlarrUrl}/1/download?apikey=${TEST_PROWLARR_KEY}&link=abc`;
 
@@ -188,7 +188,7 @@ describe('Prowlarr key scoping in download clients', () => {
         servers.on('other', '/hop1', redirectTo(hop === 2 ? TEST_MAGNET : '/hop2'));
         servers.on('other', '/hop2', redirectTo(TEST_MAGNET));
 
-        await expect(create().addDownload(startUrl(), options())).resolves.toEqual({ id: TEST_TORRENT_HASH, alreadyInClient: false, infoHash: name === 'qBittorrent' ? TEST_TORRENT_HASH : undefined });
+        await expect(create().addDownload(startUrl(), options())).resolves.toEqual({ id: TEST_TORRENT_HASH, alreadyInClient: false, infoHash: TEST_TORRENT_HASH });
 
         expect(submitted).toEqual([TEST_MAGNET]);
         expect(servers.keyed('other')).toHaveLength(0);

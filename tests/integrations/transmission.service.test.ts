@@ -184,7 +184,7 @@ describe('TransmissionService', () => {
         'magnet:?xt=urn:btih:0123456789ABCDEF0123456789ABCDEF01234567'
       );
 
-      expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: false });
+      expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: false, infoHash: '0123456789abcdef0123456789abcdef01234567' });
       // Fresh add: RMAB's seed limits are set
       expect(clientMock.post.mock.calls[2][1]).toMatchObject({ method: 'torrent-set', arguments: { seedRatioMode: 2 } });
     });
@@ -209,7 +209,7 @@ describe('TransmissionService', () => {
         'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'
       );
 
-      expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: true });
+      expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: true, infoHash: '0123456789abcdef0123456789abcdef01234567' });
       // Only 1 RPC call (torrent-get), no torrent-add
       expect(clientMock.post).toHaveBeenCalledTimes(1);
     });
@@ -234,7 +234,7 @@ describe('TransmissionService', () => {
           kind === 'file' ? 'http://example.com/file.torrent' : `magnet:?xt=urn:btih:${hash}`
         );
 
-        expect(result).toEqual({ id: hash, alreadyInClient: true });
+        expect(result).toEqual({ id: hash, alreadyInClient: true, infoHash: hash });
         // torrent-get + torrent-add only: no torrent-set rewriting the user's seed limits
         expect(clientMock.post).toHaveBeenCalledTimes(2);
       }
@@ -286,7 +286,7 @@ describe('TransmissionService', () => {
 
       const result = await service.addDownload('http://example.com/file.torrent');
 
-      expect(result).toEqual({ id: 'parsed-hash', alreadyInClient: false });
+      expect(result).toEqual({ id: 'parsed-hash', alreadyInClient: false, infoHash: 'parsed-hash' });
       // Verify metainfo was sent
       const addCall = clientMock.post.mock.calls[1];
       const body = addCall[0] === '/transmission/rpc' ? JSON.parse(JSON.stringify(addCall[1])) : null;
@@ -336,7 +336,7 @@ describe('TransmissionService', () => {
         });
 
       const result = await service.addDownload('http://example.com/file.torrent');
-      expect(result).toEqual({ id: 'abcdef0123456789abcdef0123456789abcdef01', alreadyInClient: false });
+      expect(result).toEqual({ id: 'abcdef0123456789abcdef0123456789abcdef01', alreadyInClient: false, infoHash: 'abcdef0123456789abcdef0123456789abcdef01' });
     });
 
     it('throws on invalid .torrent file', async () => {

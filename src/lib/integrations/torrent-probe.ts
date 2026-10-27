@@ -15,7 +15,8 @@ function shape(value: unknown): string {
   return typeof value;
 }
 
-const sameHash = (value: unknown, hash: string) =>
+/** Whether a client-reported hash is this hash (ignoring case); a missing or non-string value never is */
+export const sameHash = (value: unknown, hash: string) =>
   typeof value === 'string' && value.toLowerCase() === hash.toLowerCase();
 
 /**

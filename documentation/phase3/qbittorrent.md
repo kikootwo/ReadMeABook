@@ -11,13 +11,13 @@ Free, open-source BitTorrent client with comprehensive Web API.
 - Magnet and file uploads both accept `Ok.` (older clients).
 - JSON must confirm one of the torrent's IDs (case-insensitive): `success_count: 1`, `failure_count: 0`, `pending_count: 0`, one `added_torrent_ids` entry equal to qBittorrent's ID (truncated v2 for a hybrid) or the v1 hash.
 - Pending, malformed, mismatched and rejected bodies stay errors; HTTP 200 alone does not confirm the add.
-- Hashes, IDs and add answers: `src/lib/integrations/qbittorrent-ids.ts` (`magnetHashes()`, `torrentFileHashes()`, `acceptedAddId()`, `lookupTorrent()`). `Ok.` resolves to v1; for a hybrid RMAB then looks up the v2 ID (libtorrent 2 lists it there, 1.2 by v1; not listed yet → v1).
+- Hashes, IDs and add answers: `src/lib/integrations/qbittorrent-ids.ts` (`acceptedAddId()`, `lookupTorrent()`); hash parsing shared with Transmission and Deluge lives in `torrent-ids.ts` (`magnetHashes()`, `torrentFileHashes()`, `candidateIds()`), re-exported by `qbittorrent-ids.ts`. `Ok.` resolves to v1; for a hybrid RMAB then looks up the v2 ID (libtorrent 2 lists it there, 1.2 by v1; not listed yet → v1).
 - Already in qBittorrent (pre-check by each candidate ID, `GET torrents/info?hashes=`; then, for every add, one full list matching `hash`/`infohash_v1` against every candidate, since the torrent may be listed under another ID (a hybrid under its v2 ID; a magnet with a different `btmh`; a btmh-only magnet whose truncated v2 equals a hybrid's v1) and qBittorrent up to 5.1 can answer `Ok.` to that duplicate; cost: one full list per add, only when the filtered lookups miss) → `{ id, alreadyInClient: true }`, no add.
 - The magnet sent is the decoded string that was parsed (`decodedMagnet()`: `&amp;` → `&`).
 - Full list unreadable at the pre-check (non-200, timeout, not a list) → fail closed: nothing added, `TorrentListUnavailableError` "Couldn't read qBittorrent's torrent list to check for an existing copy" (one error log line). A client error, not a source error: no other release is tried; the request's normal retry applies. HTTP 403 with credentials set: one re-login, then the add is retried; without credentials (auth-optional) a 403 fails the add closed with the generic `Failed to add torrent to qBittorrent`.
 - A rejected add (`Fails.`, a rejected JSON receipt, or HTTP 409 from 5.2) re-checks the hash once: present → taken over (`alreadyInClient: true`, warn); absent → error as before ([download-clients.md](./download-clients.md#torrent-ownership-423)).
 - `probeDownload(hash)`: strict lookup for the seeding cleanup, no not-found retries: one lookup by ID, plus one unfiltered lookup when that answer is an empty list (`qbittorrentProbeList()` validates both); `added_on` → `DownloadInfo.addedAt`.
-- Add result: `{ id, alreadyInClient, infoHash }`; `infoHash` (v1) keeps `DownloadHistory.torrentHash` = v1 for hybrids.
+- Add result: `{ id, alreadyInClient, infoHash }`; `infoHash` (v1) is `DownloadHistory.torrentHash` for hybrids unless Prowlarr supplied an infohash.
 
 **Solution (Professional):**
 

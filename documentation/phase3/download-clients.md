@@ -68,6 +68,25 @@ interface DownloadClientConfig {
 - **Stopped at 100%:** status 0 with `percentDone >= 1` → `completed` (monitor imports it). `percentDone` = done fraction of wanted bytes; `isFinished` is not used (it means "seed limit reached")
 - **postProcess():** No-op (same as qBittorrent)
 
+### Torrent IDs (Transmission, Deluge; #457)
+**File:** `src/lib/integrations/torrent-ids.ts` (shared with qBittorrent: `magnetHashes()`, `torrentFileHashes()`, `candidateIds()`, `normalizeTorrentId()`, `addedTorrentId()`)
+
+- **Base32 magnets:** `btih` in base32 (32 chars, any case) → 40 lowercase hex on add (`magnetHashes()`); no v1 (`btmh`-only) → `Invalid magnet link`, as before. Fixed #457: a base32 magnet was recorded and looked up in base32, which neither client answers to, so monitoring failed and the seeding cleanup marked the row `removed`
+- **Recorded ID** (`AddDownloadResult.id`): the 40-hex ID the add answer reports, lowercased (Transmission `torrent-added`/`torrent-duplicate` `hashString`; Deluge `core.add_torrent_*` result); a non-hex answer → the computed v1. A reported ID that is none of the computed IDs is still recorded (it is the torrent the add created), with a warn log (`addedTorrentId()`)
+- **`infoHash`** = v1 on every path (as qBittorrent). `DownloadHistory.torrentHash` = Prowlarr's infohash when the release has one (any case), else this v1
+- **Deluge add checks** (pre-check, and the re-check after a rejected add): `core.get_torrent_status [id, ['name']]` per candidate ID, first hit wins: truncated v2 (a hybrid `.torrent`'s `meta version` 2, or a magnet's `btmh`), then v1. Non-hybrids: one call, as before. A `.torrent` add sets label + seed limits on the ID Deluge returns (was the parsed v1)
+- **Lookups** send a stored base32 ID as hex (`normalizeTorrentId()`; anything else unchanged): `getDownload`, `probeDownload`, pause, resume, delete, `setCategory` on both clients
+- **Transmission identity check:** `getTorrentByHash` takes only the `torrent-get` entry whose `hashString` is the requested hash (case-insensitive, `sameHash()` in `torrent-probe.ts`); none → `Torrent <id> not found`. Was `torrents[0]`: a server that ignored `ids` could have RMAB act on another torrent
+- **Rows stored in base32 before the fix:** found again while the request is active. Admin retry-download calls `getDownload` first, so a failed base32 request resumes monitoring on its original `addedByRmab: true` row (RMAB's own torrent); post-import category, seeding cleanup and request delete can then act on it. Legacy `null` base32 rows become reachable under the legacy window (residual risk in [Torrent Ownership](#torrent-ownership-423)). Ownership is still `resolveOwnership()`; a row already `removed` stays `removed`
+- Cleanup `deletedHashes` stays keyed by the raw stored ID: a base32 row next to a hex row of the same torrent takes the probe → `missing` path (marks only)
+- **Known limits (Deluge on libtorrent 2):**
+  - A hybrid row stored with v1 before the fix that Deluge keys by truncated v2: not found (`get_torrent_status` is exact-key, no v1 field) → `removed`, never cleaned
+  - A btih-only magnet of a hybrid Deluge already holds under its truncated v2: libtorrent rejects the add as a duplicate, the re-check by v1 misses → the add errors, as before
+  - Which ID `core.add_torrent_*` returns for a hybrid is not confirmed on a live client; RMAB records whatever it returns
+  - Pure v2 `.torrent`: still fails in parse-torrent
+- **Known limit (both clients):** a reported ID that is none of the computed IDs leaves `torrentHash` on the computed v1, so the shared-torrent guard can miss a second request for that torrent; deleting or cleaning one can remove the torrent the other still uses (both rows RMAB's own; rare, logged as a warn)
+- Not tested on a live Transmission or Deluge (fakes that answer by the IDs RMAB sends: `tests/integrations/torrent-client-ids.test.ts`)
+
 ### NZBGet Service
 **File:** `src/lib/integrations/nzbget.service.ts`
 
@@ -147,7 +166,7 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 ### Torrent Ownership (#423)
 **Files:** `src/lib/utils/torrent-ownership.ts` (rule), `src/lib/integrations/torrent-probe.ts` (strict probe parsers)
 - RMAB removes or changes only torrents it added. `addDownload()` → `AddDownloadResult { id, alreadyInClient }`; `download-torrent.processor.ts` writes `DownloadHistory.addedByRmab = (alreadyInClient === false)` (fails closed: only an explicit "newly added" is RMAB's; `added_by_rmab`, nullable, see [database.md](../backend/database.md))
-- "Already in client" (taken over): qBittorrent pre-check hit, or a rejected add (`Fails.` ≤5.1, HTTP 409 5.2) whose one re-check finds the hash; Transmission pre-check hit or `torrent-duplicate`; Deluge pre-check hit, or a rejected add (`Torrent already in session`) whose re-check finds it. Logged at warn: `"<title>" is already in <client> (<id>); RMAB will never remove it or its files`. A rejected add with the hash still absent stays an error. SABnzbd/NZBGet: always `false` (every add is a new job)
+- "Already in client" (taken over): qBittorrent pre-check hit, or a rejected add (`Fails.` ≤5.1, HTTP 409 5.2) whose one re-check finds the hash; Transmission pre-check hit or `torrent-duplicate`; Deluge pre-check hit, or a rejected add (`Torrent already in session`) whose re-check finds it (both by each candidate ID, [Torrent IDs](#torrent-ids-transmission-deluge-457)). Logged at warn: `"<title>" is already in <client> (<id>); RMAB will never remove it or its files`. A rejected add with the hash still absent stays an error. SABnzbd/NZBGet: always `false` (every add is a new job)
 - `resolveOwnership(row, addedAt)` (decided in code, never by a nullable-boolean WHERE):
 
 | Row | Client added time (vs `createdAt`) | Verdict |
@@ -307,6 +326,7 @@ Accepts both legacy single client and new array format:
 | `src/lib/interfaces/download-client.interface.ts` | Client types, display names, `CLIENT_PROTOCOL_MAP` |
 | `src/lib/integrations/nzbget.service.ts` | NZBGet JSON-RPC implementation |
 | `src/lib/integrations/transmission.service.ts` | Transmission RPC implementation |
+| `src/lib/integrations/torrent-ids.ts` | Shared torrent IDs: magnet/.torrent hashes, base32 → hex, candidate IDs, recorded add ID |
 | `src/lib/services/download-client-manager.service.ts` | Core multi-client service, protocol-based routing |
 | `src/lib/integrations/prowlarr.service.ts:379` | Protocol filtering logic (both clients = all results) |
 | `src/lib/processors/download-torrent.processor.ts:44` | Download routing (detect protocol → route), builds `sourceAuth`, writes `addedByRmab` |

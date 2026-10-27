@@ -9,7 +9,7 @@
  */
 
 import { prisma } from '../db';
-import { torrentHashForms } from '../integrations/qbittorrent-ids';
+import { torrentHashForms } from '../integrations/torrent-ids';
 
 export interface ActiveRequestRef {
   id: string;
