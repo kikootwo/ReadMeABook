@@ -21,3 +21,34 @@ export function getRegistrationRefusal(
   if (registrationStatus === 'rejected') return 'rejected';
   return null;
 }
+
+/** Why a session-style check refuses an account (log reasons only, never shown to the caller). */
+export type SessionRefusal = 'missing' | 'deleted' | RegistrationRefusal | 'sessions_revoked';
+
+/** The account fields the session check reads. */
+export interface SessionAccountState {
+  deletedAt?: Date | null;
+  registrationStatus?: string | null;
+  sessionsInvalidatedAt?: Date | null;
+}
+
+/**
+ * The rule `requireAuth` applies to an access token, shared with every other
+ * credential that acts for an account (download links). Refuses a missing,
+ * soft-deleted, pending or rejected account, and a credential issued (`iat`,
+ * seconds) before the account's sessions were revoked.
+ */
+export function getSessionRefusal(
+  user: SessionAccountState | null | undefined,
+  issuedAt: number | undefined
+): SessionRefusal | null {
+  if (!user) return 'missing';
+  if (user.deletedAt) return 'deleted';
+  const refusal = getRegistrationRefusal(user.registrationStatus);
+  if (refusal) return refusal;
+  if (user.sessionsInvalidatedAt && issuedAt &&
+      issuedAt < Math.floor(user.sessionsInvalidatedAt.getTime() / 1000)) {
+    return 'sessions_revoked';
+  }
+  return null;
+}

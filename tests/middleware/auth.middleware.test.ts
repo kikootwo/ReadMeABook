@@ -190,6 +190,41 @@ describe('auth middleware', () => {
     expect(payload.message).toMatch(/user not found/i);
   });
 
+  it('rejects JWT tokens issued before the account sessions were revoked', async () => {
+    verifyAccessTokenMock.mockReturnValue({
+      sub: 'user-1', plexId: 'plex-1', username: 'user', role: 'user', iat: 1000, exp: 5000,
+    });
+    prismaMock.user.findUnique.mockResolvedValue({
+      id: 'user-1', deletedAt: null, registrationStatus: 'approved',
+      sessionsInvalidatedAt: new Date(2000 * 1000),
+    });
+    const { requireAuth } = await import('@/lib/middleware/auth');
+
+    const handler = vi.fn();
+    const response = await requireAuth(makeRequest('Bearer token') as any, handler);
+
+    expect(response.status).toBe(401);
+    expect((await response.json()).message).toBe('Session has been revoked');
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('accepts JWT tokens issued in the same second as, or after, the revocation', async () => {
+    verifyAccessTokenMock.mockReturnValue({
+      sub: 'user-1', plexId: 'plex-1', username: 'user', role: 'user', iat: 2000, exp: 5000,
+    });
+    prismaMock.user.findUnique.mockResolvedValue({
+      id: 'user-1', deletedAt: null, registrationStatus: 'approved',
+      sessionsInvalidatedAt: new Date(2000 * 1000 + 500),
+    });
+    const { requireAuth } = await import('@/lib/middleware/auth');
+
+    const handler = vi.fn(async () => NextResponse.json({ ok: true }));
+    const response = await requireAuth(makeRequest('Bearer token') as any, handler);
+
+    expect(response.status).toBe(200);
+    expect(handler).toHaveBeenCalled();
+  });
+
   describe('API token authentication', () => {
     const testToken = 'rmab_test1234567890abcdef';
     const testTokenHash = createTestApiToken(testToken);

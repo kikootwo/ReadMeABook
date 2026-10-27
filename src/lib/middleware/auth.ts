@@ -9,7 +9,7 @@ import { verifyAccessToken, TokenPayload } from '../utils/jwt';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { API_TOKEN_PREFIX, isEndpointAllowed } from '../constants/api-tokens';
-import { getRegistrationRefusal } from '../services/auth/local-account-status';
+import { getRegistrationRefusal, getSessionRefusal } from '../services/auth/local-account-status';
 
 const logger = RMABLogger.create('Auth');
 
@@ -181,12 +181,13 @@ export async function requireAuth(
     },
   });
 
-  // Missing, deleted, pending-approval and rejected accounts are refused the same way
-  const refusal = user ? getRegistrationRefusal(user.registrationStatus) : null;
-  if (!user || user.deletedAt || refusal) {
+  // Missing, deleted, pending-approval and rejected accounts are refused the same way;
+  // so is a token issued before the account's sessions were revoked
+  const sessionRefusal = getSessionRefusal(user, payload.iat);
+  if (sessionRefusal && sessionRefusal !== 'sessions_revoked') {
     logger.error('Session refused: user missing, deleted or not approved', {
       userId: payload.sub,
-      reason: !user ? 'missing' : user.deletedAt ? 'deleted' : refusal,
+      reason: sessionRefusal,
     });
     return NextResponse.json(
       {
@@ -197,9 +198,7 @@ export async function requireAuth(
     );
   }
 
-  // Check if session was invalidated after this token was issued
-  if (user.sessionsInvalidatedAt && payload.iat &&
-      payload.iat < Math.floor(user.sessionsInvalidatedAt.getTime() / 1000)) {
+  if (sessionRefusal === 'sessions_revoked') {
     logger.warn('Token issued before session invalidation', { userId: payload.sub });
     return NextResponse.json(
       {

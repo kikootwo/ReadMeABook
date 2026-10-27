@@ -1,11 +1,13 @@
 /**
  * Component: Request File Download Endpoint
- * Documentation: documentation/backend/api.md
+ * Documentation: documentation/backend/services/auth.md
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { verifyDownloadToken } from '@/lib/utils/jwt';
+import { getSessionRefusal } from '@/lib/services/auth/local-account-status';
+import { resolveDownloadAccess } from '@/lib/utils/permissions';
 import { RMABLogger } from '@/lib/utils/logger';
 import { AUDIO_EXTENSIONS, EBOOK_EXTENSIONS } from '@/lib/constants/audio-formats';
 import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
@@ -47,6 +49,29 @@ export async function GET(
 
     if (payload.requestId !== id) {
       return NextResponse.json({ error: 'Unauthorized', message: 'Token does not match request' }, { status: 401 });
+    }
+
+    // The link acts for its account: apply the session rule and the download permission the issuer checked
+    const account = await prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: {
+        role: true,
+        downloadAccess: true,
+        deletedAt: true,
+        registrationStatus: true,
+        sessionsInvalidatedAt: true,
+      },
+    });
+
+    const refusal = getSessionRefusal(account, payload.iat);
+    if (!account || refusal) {
+      logger.warn('Download link refused for account', { userId: payload.sub, reason: refusal });
+      return NextResponse.json({ error: 'Unauthorized', message: 'Invalid or expired download token' }, { status: 401 });
+    }
+
+    if (!(await resolveDownloadAccess(account.role, account.downloadAccess))) {
+      logger.warn('Download link refused: account has no download access', { userId: payload.sub });
+      return NextResponse.json({ error: 'Forbidden', message: 'You do not have download access' }, { status: 403 });
     }
 
     const requestRecord = await prisma.request.findFirst({

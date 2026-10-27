@@ -154,6 +154,7 @@ export interface DownloadTokenPayload {
   sub: string; // userId
   requestId: string;
   type: 'download';
+  iat?: number; // Issued-at (auto-set by jsonwebtoken)
 }
 
 /**
