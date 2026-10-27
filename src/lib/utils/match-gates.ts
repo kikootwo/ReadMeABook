@@ -5,7 +5,9 @@
 
 import { compareTwoStrings } from 'string-similarity';
 import { collapseInitials, matchesByInitials } from './author-initials';
-import { foldForMatching, FULLWIDTH_RE, fromFullwidth, hasUnspacedScript, KEPT_APOSTROPHE, normalizeForMatching } from './match-normalize';
+import {
+  foldForMatching, FULLWIDTH_RE, fromFullwidth, hasUnspacedScript, isWordInTitle, KEPT_APOSTROPHE, normalizeForMatching,
+} from './match-normalize';
 
 const DIGITS_RE = /^\d+$/;
 /** English number words, folded to digits for the coverage and number checks only */
@@ -219,17 +221,22 @@ export function shortTitleStandsAlone(release: string, ctx: ShortTitleContext): 
 
 // ========== G4c: volume conflict ==========
 
-/** A volume range ("Book 1-7", "T1-T3", "1 to 3"); read as the set of positions it holds */
+const POSITION_WORD_GROUP = `(?:${POSITION_WORDS.join('|')})`;
+/** A volume range ("Book 1-7", "Books 2-4", "T1-T3", "1 to 3"); read as the set of positions it holds */
 const RANGE_RE = new RegExp(
-  `(?<![\\p{L}\\p{N}])((?:${POSITION_WORDS.join('|')})\\.?\\s*)?0*(\\d{1,3})\\s*(?:[-–—]|to)\\s*` +
+  `(?<![\\p{L}\\p{N}])(${POSITION_WORD_GROUP}s?\\.?\\s*)?0*(\\d{1,3})\\s*(?:[-–—]|to)\\s*` +
   `(?:(?:${POSITION_WORDS.join('|')})\\.?\\s*)?0*(\\d{1,3})(?![\\p{N}])`, 'giu');
 const RANGE_TOKEN_RE = /^(\d{1,3})to(\d{1,3})$/;
 /** A decimal position ("2.5", "02.50"), not one step of a dotted run ("1.64.kbps", "2019.05.01") */
 const DECIMAL_RE = /(?<![\p{L}\p{N}.])(\d{1,3})\.(\d{1,2})(?![\p{L}\p{N}]|\.[\p{L}\p{N}])/gu;
 const DECIMAL_TOKEN_RE = /^(\d{1,3})p(\d{1,2})$/;
-/** Release numbers that are never a position: dates (2019-05-01, 05/01/2019) and part counts ([44/97], 44 of 97) */
+/**
+ * Release numbers that are never a position: dates (2019-05-01, 05/01/2019) and part counts ([44/97],
+ * (1 of 2), 44 of 97). Right after a position word the number stays: "Book 3 of 7" and "#3 of 6" read 3
+ */
 const DATE_RE = /(?<!\p{N})\d{1,4}[-./]\d{1,2}[-./]\d{1,4}(?!\p{N})/gu;
-const PART_COUNT_RE = /(?<!\p{N})\d{1,4}\s*(?:\/|of)\s*\d{1,4}(?!\p{N})/giu;
+const PART_COUNT_RE = new RegExp(
+  `(?<!(?:(?<![\\p{L}\\p{N}])${POSITION_WORD_GROUP}\\.?|#)\\s*)(?<!\\p{N})\\d{1,4}\\s*(?:/|of)\\s*\\d{1,4}(?!\\p{N})`, 'giu');
 /** A bare number followed by one of these is a size, length, count or bitrate, not a position */
 const UNIT_RE = /^(?:kbps|kbs|kb|k|khz|bit|bits|hrs?|hours?|h|mins?|cds?|discs?|parts?|tracks?|books|chapters?|chaps?|ch|files?|mb|gb)$/;
 /** A catalog series part that names one position: "3", "03", "2.5", "Book 3", "#3" */
@@ -290,11 +297,14 @@ function positionAt(tokens: string[], i: number, bare = false): { values: string
  * Read right after the request's title or series name (explicit markers), and right after the series
  * name that precedes the request's position or after a request subtitle word (bare numbers too).
  * Catalog part (#330, automatic search): a one-number seriesPart joins the wanted positions, and bare
- * numbers are read right after the title and the catalog series name too. Dates and part counts never count.
+ * numbers are read right after the title and the catalog series name too. Not when the release carries
+ * every title word beyond the series name: it names this book, so a differing number is another
+ * numbering scheme and the title-only check applies. Dates and part counts never count.
  *   "Dungeon Crawler Carl (book 1)" vs "Dungeon Crawler Carl, T03 …" → true
  *   "Divergent (Divergent Trilogy, Book 1)" vs "Divergent Trilogy 2 - Insurgent" → true
  *   "Guards! Guards! (Discworld, Book 8)" vs "Discworld 08 - City Watch Book 1 - Guards! Guards!" → false
- *   "Azarinth Healer: Book One" (seriesPart 1) vs "Azarinth Healer 03" → true
+ *   "Azarinth Healer: Book One" (Azarinth Healer, part 1) vs "Azarinth Healer 03" → true
+ *   "Blood of Elves" (The Witcher, part 3) vs "The Witcher Book 1 - Blood of Elves" → false
  */
 export function volumeConflict(
   title: string, release: string, stopWords: string[], characterReplacements?: Record<string, string>, catalog: CatalogSeries = {},
@@ -303,10 +313,13 @@ export function volumeConflict(
   const wanted = new Set<string>();
   const anchors: { words: string[]; series: boolean }[] = [];
   const subtitleWords = new Set<string>();
+  const titleWords: string[] = [];
+  const isNameWord = (w: string) => !stop.has(w) && !isPositionWord(w) && !RANGE_TOKEN_RE.test(w) && !DECIMAL_TOKEN_RE.test(w);
   const marked = title.toLowerCase().replace(FULLWIDTH_RE, fromFullwidth).replace(SPLIT_NUMBER_RE, ' book $1');
   marked.split(/[()[\]{}【】:]/).forEach((segment, index) => {
     const tokens = positionTokens(segment, characterReplacements);
-    if (index > 0) tokens.filter((w) => !stop.has(w) && !isPositionWord(w) && !RANGE_TOKEN_RE.test(w) && !DECIMAL_TOKEN_RE.test(w)).forEach((w) => subtitleWords.add(w));
+    titleWords.push(...tokens.filter(isNameWord));
+    if (index > 0) tokens.filter(isNameWord).forEach((w) => subtitleWords.add(w));
     let start = 0;
     for (let i = 0; i < tokens.length; i++) {
       const position = positionAt(tokens, i);
@@ -318,14 +331,20 @@ export function volumeConflict(
     }
     if (start < tokens.length) anchors.push({ words: tokens.slice(start), series: false });
   });
-  const part = catalogPosition(catalog.seriesPart);
+  const releaseTokens = positionTokens(release.replace(DATE_RE, ' ').replace(PART_COUNT_RE, ' '), characterReplacements);
+  const seriesWords = catalog.series ? positionTokens(catalog.series.replace(FULLWIDTH_RE, fromFullwidth), characterReplacements) : [];
+  // The book's own title words beyond the series name; all of them in the release name this book
+  const seriesSet = new Set(seriesWords);
+  const ownWords = titleWords.filter((w) => !seriesSet.has(w));
+  const releaseText = releaseTokens.join(' ');
+  const namesThisBook = ownWords.length > 0 && ownWords.every((w) => isWordInTitle(w, releaseTokens, releaseText));
+  const part = namesThisBook ? null : catalogPosition(catalog.seriesPart);
   if (wanted.size > 1 || (wanted.size === 0 && part === null)) return false;
   if (part !== null) {
     wanted.add(part);
-    if (catalog.series) anchors.push({ words: positionTokens(catalog.series.replace(FULLWIDTH_RE, fromFullwidth), characterReplacements), series: true });
+    if (seriesWords.length > 0) anchors.push({ words: seriesWords, series: true });
   }
 
-  const releaseTokens = positionTokens(release.replace(DATE_RE, ' ').replace(PART_COUNT_RE, ' '), characterReplacements);
   const named = new Set<string>();
   const read = (at: number, bare: boolean) => positionAt(releaseTokens, at, bare)?.values.forEach((v) => named.add(v));
   for (const anchor of anchors.filter((a) => a.words.some((w) => !stop.has(w)))) {

@@ -31,11 +31,11 @@ const release = (guid: string, title: string) => ({
   protocol: 'torrent',
 });
 
-const book2 = release('book-2', 'Pierce Brown - Red Rising Saga 02 - Golden Son [M4B]');
-const book3 = release('book-3', 'Pierce Brown - Red Rising Saga 03 - Golden Son [M4B]');
+const book2 = release('book-2', 'Rhaegar - Azarinth Healer 02 [M4B]');
+const book3 = release('book-3', 'Rhaegar - Azarinth Healer 03 [M4B]');
 
 // No ASIN: no runtime lookup, so the size floor stays out of these cases
-const audiobook = { id: 'ab-1', title: 'Golden Son', author: 'Pierce Brown' };
+const audiobook = { id: 'ab-1', title: 'Azarinth Healer: Book Three', author: 'Rhaegar' };
 
 async function runSearch() {
   const { processSearchIndexers } = await import('@/lib/processors/search-indexers.processor');
@@ -44,7 +44,7 @@ async function runSearch() {
 
 const catalog = (seriesPart: string | null) => ({
   customSearchTerms: null,
-  audiobook: { series: 'Red Rising Saga', seriesPart },
+  audiobook: { series: 'Azarinth Healer', seriesPart },
 });
 
 describe('processSearchIndexers series position', () => {

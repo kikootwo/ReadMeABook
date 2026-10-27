@@ -21,15 +21,15 @@ const release = (title: string) => ({
 
 type Book = { title: string; author: string; series?: string; seriesPart?: string };
 
-/** Automatic search score for one release (0 rows: filtered; matchScore 0: rejected) */
+/** matchScore in automatic search (0: rejected) and in interactive search */
 const automatic = (title: string, book: Book): number =>
   rankTorrents([release(title)], book, { requireAuthor: true })[0].breakdown.matchScore;
 const interactive = (title: string, book: Book): number =>
   rankTorrents([release(title)], book, { requireAuthor: false })[0].breakdown.matchScore;
 
-// The cases from #307, restated: the request title says "Book One" in words, the catalog says part 1
-describe('catalog series part, title only (the #307 cases)', () => {
-  const healer = (seriesPart = '1'): Book => ({ title: 'Azarinth Healer: Book One', author: 'Rhaegar', seriesPart });
+// The cases from #307, restated: the title is the series name plus "Book One" in words, the catalog says part 1
+describe('catalog series part (the #307 cases)', () => {
+  const healer = (seriesPart = '1'): Book => ({ title: 'Azarinth Healer: Book One', author: 'Rhaegar', series: 'Azarinth Healer', seriesPart });
 
   it('rejects a release numbered as another book', () => {
     expect(automatic('Rhaegar - Azarinth Healer 03', healer())).toBe(0);
@@ -64,70 +64,108 @@ describe('catalog series part, title only (the #307 cases)', () => {
   it('does not read a year or a bitrate as the part', () => {
     expect(automatic('Rhaegar - Azarinth Healer 2025 64kbps', healer())).toBeGreaterThan(0);
   });
+
+  it('reads "Book N of M" as book N', () => {
+    expect(automatic('Rhaegar - Azarinth Healer, Book 3 of 6 [M4B]', healer())).toBe(0);
+    expect(automatic('Rhaegar - Azarinth Healer #3 of 6 [M4B]', healer())).toBe(0);
+    expect(automatic('Rhaegar - Azarinth Healer, Book 1 of 6 [M4B]', healer())).toBeGreaterThan(0);
+  });
+
+  it('reads a plural position word before a range', () => {
+    expect(automatic('Rhaegar - Azarinth Healer Books 2-4', healer())).toBe(0);
+    expect(automatic('Rhaegar - Azarinth Healer Vols 2-4', healer())).toBe(0);
+    expect(automatic('Rhaegar - Azarinth Healer Books 1-3', healer())).toBeGreaterThan(0);
+  });
+
+  it('runs title-only when the catalog has no series name', () => {
+    expect(automatic('Rhaegar - Azarinth Healer 03', { ...healer(), series: undefined })).toBeGreaterThan(0);
+  });
 });
 
-describe('catalog series name and part', () => {
-  const book3: Book = { title: 'Golden Son', author: 'Pierce Brown', series: 'Red Rising Saga', seriesPart: '3' };
-  const golden = (name: string) => `Pierce Brown - ${name} - Golden Son`;
+describe('catalog series name and part (title is the series name plus a number)', () => {
+  const book3: Book = { title: 'Azarinth Healer: Book Three', author: 'Rhaegar', series: 'Azarinth Healer', seriesPart: '3' };
+  const named = (rest: string) => `Rhaegar - Azarinth Healer${rest} [M4B]`;
 
   it('rejects another number right after the series name and keeps the right one', () => {
-    expect(automatic(golden('Red Rising Saga 02'), book3)).toBe(0);
-    expect(automatic(golden('Red Rising Saga 03'), book3)).toBeGreaterThan(0);
+    expect(automatic(named(' 02'), book3)).toBe(0);
+    expect(automatic(named(' 03'), book3)).toBeGreaterThan(0);
   });
 
   it('reads every high-confidence form after the series name', () => {
-    expect(automatic(golden('Red Rising Saga, Book 2'), book3)).toBe(0);
-    expect(automatic(golden('Red Rising Saga #2'), book3)).toBe(0);
-    expect(automatic(golden('Red Rising Saga T02'), book3)).toBe(0);
-    expect(automatic(golden('Red Rising Saga Vol. 2'), book3)).toBe(0);
-    expect(automatic(golden('Red Rising Saga, Book 3'), book3)).toBeGreaterThan(0);
-    expect(automatic(golden('Red Rising Saga #3'), book3)).toBeGreaterThan(0);
+    for (const form of [', Book 2', ' #2', ' T02', ' Vol. 2']) expect(automatic(named(form), book3)).toBe(0);
+    for (const form of [', Book 3', ' #3', ' T03', ' Vol. 3']) expect(automatic(named(form), book3)).toBeGreaterThan(0);
   });
 
   it('never reads a date as the part', () => {
-    for (const date of ['2019', '2019-05-01', '(2003)', '05-01-2019', '2019.05.01']) {
-      expect(automatic(golden(`Red Rising Saga ${date}`), book3)).toBeGreaterThan(0);
+    for (const date of [' 2019', ' 2019-05-01', ' (2003)', ' 05-01-2019', ' 2019.05.01']) {
+      expect(automatic(named(date), book3)).toBeGreaterThan(0);
     }
   });
 
   it('never reads a part count, a chapter count or a bitrate as the part', () => {
-    expect(automatic(golden('Red Rising Saga [44/97]'), book3)).toBeGreaterThan(0);
-    expect(automatic(golden('Red Rising Saga 44 of 97'), book3)).toBeGreaterThan(0);
-    expect(automatic(golden('Red Rising Saga 45 Chapters'), book3)).toBeGreaterThan(0);
-    expect(automatic(golden('Red Rising Saga 64 kbps'), book3)).toBeGreaterThan(0);
+    for (const count of [' [44/97]', ' (1 of 2)', ' 44 of 97', ' 45 Chapters', ' 64 kbps']) {
+      expect(automatic(named(count), book3)).toBeGreaterThan(0);
+    }
   });
 
   it('keeps an omnibus range that holds the part', () => {
-    const book2: Book = { title: 'Golden Son', author: 'Pierce Brown', series: 'Red Rising Saga', seriesPart: '2' };
-    expect(automatic('Pierce Brown - Red Rising Saga 1-3 - Golden Son', book2)).toBeGreaterThan(0);
-    expect(automatic('Pierce Brown - Red Rising Saga Books 1-3', { ...book2, title: 'Red Rising Saga' })).toBeGreaterThan(0);
+    expect(automatic(named(' 1-3'), book3)).toBeGreaterThan(0);
+    expect(automatic(named(' Books 1-3'), book3)).toBeGreaterThan(0);
   });
 
   it('never rejects on a bare number away from the series name or title', () => {
-    expect(automatic('Pierce Brown - Golden Son - Unabridged 2 - Red Rising Saga', book3)).toBeGreaterThan(0);
+    expect(automatic('Rhaegar - Unabridged 2 - Azarinth Healer [M4B]', book3)).toBeGreaterThan(0);
   });
 
   it('keeps today\'s behavior when the part is missing or not a number', () => {
-    const noPart: Book = { title: 'Golden Son', author: 'Pierce Brown', series: 'Red Rising Saga' };
-    expect(automatic(golden('Red Rising Saga 02'), noPart)).toBeGreaterThan(0);
-    expect(automatic(golden('Red Rising Saga 02'), { ...noPart, seriesPart: 'Prequel' })).toBeGreaterThan(0);
+    const noPart: Book = { ...book3, seriesPart: undefined };
+    expect(automatic(named(' 02'), noPart)).toBeGreaterThan(0);
+    expect(automatic(named(' 02'), { ...noPart, seriesPart: 'Prequel' })).toBeGreaterThan(0);
   });
 
   it('reads a part written as "Book 3"', () => {
-    expect(automatic(golden('Red Rising Saga 02'), { ...book3, seriesPart: 'Book 3' })).toBe(0);
-    expect(automatic(golden('Red Rising Saga 03'), { ...book3, seriesPart: 'Book 3' })).toBeGreaterThan(0);
-  });
-
-  it('keeps a title-named position from another series beside the catalog part', () => {
-    // Discworld book 8, catalog series City Watch part 1: either number is the right book
-    const guards: Book = { title: 'Guards! Guards! (Discworld, Book 8)', author: 'Terry Pratchett', series: 'City Watch', seriesPart: '1' };
-    expect(automatic('Terry Pratchett - Discworld 08 - Guards! Guards!', guards)).toBeGreaterThan(0);
-    expect(automatic('Terry Pratchett - City Watch 01 - Guards! Guards!', guards)).toBeGreaterThan(0);
-    expect(automatic('Terry Pratchett - City Watch 02 - Guards! Guards!', guards)).toBe(0);
+    expect(automatic(named(' 02'), { ...book3, seriesPart: 'Book 3' })).toBe(0);
+    expect(automatic(named(' 03'), { ...book3, seriesPart: 'Book 3' })).toBeGreaterThan(0);
   });
 
   it('leaves interactive search listing everything', () => {
-    expect(interactive(golden('Red Rising Saga 02'), book3)).toBeGreaterThan(0);
-    expect(interactive('Rhaegar - Azarinth Healer 03', { title: 'Azarinth Healer: Book One', author: 'Rhaegar', seriesPart: '1' })).toBeGreaterThan(0);
+    expect(interactive(named(' 02'), book3)).toBeGreaterThan(0);
+  });
+});
+
+describe('catalog part when the release names the book by its own title (another numbering scheme)', () => {
+  it('keeps right books whose release numbers the series differently', () => {
+    const cases: [string, Book][] = [
+      ['C.S. Lewis - The Chronicles of Narnia Book 1 - The Magician\'s Nephew [M4B]',
+        { title: 'The Magician\'s Nephew', author: 'C.S. Lewis', series: 'The Chronicles of Narnia', seriesPart: '6' }],
+      ['Andrzej Sapkowski - The Witcher Book 1 - Blood of Elves [M4B]',
+        { title: 'Blood of Elves', author: 'Andrzej Sapkowski', series: 'The Witcher', seriesPart: '3' }],
+      ['Terry Pratchett - Guards! Guards! - Book 1 of the City Watch [MP3]',
+        { title: 'Guards! Guards!', author: 'Terry Pratchett', series: 'Discworld', seriesPart: '8' }],
+      ['Robert Jordan - The Eye of the World Book 1 of 14 [M4B]',
+        { title: 'The Eye of the World', author: 'Robert Jordan', series: 'Wheel of Time', seriesPart: '1' }],
+    ];
+    for (const [name, book] of cases) expect(automatic(name, book)).toBeGreaterThan(0);
+  });
+
+  it('still rejects a release named for another book of the series', () => {
+    // Book 3 requested; the release is book 2 under its own title, so the title words are missing
+    const morningStar: Book = { title: 'Morning Star', author: 'Pierce Brown', series: 'Red Rising Saga', seriesPart: '3' };
+    expect(automatic('Pierce Brown - Red Rising Saga Book 2 - Golden Son [M4B]', morningStar)).toBe(0);
+  });
+
+  it('leaves interactive search listing everything', () => {
+    const blood: Book = { title: 'Blood of Elves', author: 'Andrzej Sapkowski', series: 'The Witcher', seriesPart: '3' };
+    expect(interactive('Andrzej Sapkowski - The Witcher Book 1 - Blood of Elves [M4B]', blood)).toBeGreaterThan(0);
+  });
+});
+
+describe('title-only check (no catalog part)', () => {
+  it('reads "Book N of M" after the title as book N, as on main', () => {
+    const dcc: Book = { title: 'Dungeon Crawler Carl (book 1)', author: 'Matt Dinniman' };
+    expect(automatic('Matt Dinniman - Dungeon Crawler Carl Book 3 of 7 [M4B]', dcc)).toBe(0);
+    expect(automatic('Matt Dinniman - Dungeon Crawler Carl, Book 2 of 7 [M4B]', dcc)).toBe(0);
+    expect(automatic('Matt Dinniman - Dungeon Crawler Carl T3 of 7 [M4B]', dcc)).toBe(0);
+    expect(automatic('Matt Dinniman - Dungeon Crawler Carl Book 1 of 7 [M4B]', dcc)).toBeGreaterThan(0);
   });
 });
