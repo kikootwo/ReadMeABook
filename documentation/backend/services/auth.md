@@ -129,6 +129,7 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 - Password hashed with bcrypt (10 rounds) and stored in `authToken` field
 - `bcrypt` 6.x: prebuilt native binaries ship in the package (linux x64/arm64, glibc + musl), no install-time download or compile. `$2a$`/`$2b$` hashes made by bcrypt 5 verify unchanged (`tests/services/auth/bcrypt-compat.test.ts`)
 - Login: POST `/api/auth/admin/login` with username/password
+- Account checks: same as the regular local login (`src/lib/services/auth/local-account-status.ts`). Pending approval: 200 `{success:false, pendingApproval:true}`; rejected: 401 `Account has been rejected`; deleted (`deletedAt` set): 401 `Invalid username or password`. Approved or null `registrationStatus` signs in. Checked after the password, before `lastLoginAt` and tokens
 - Identified by: `isSetupAdmin=true` AND `plexId` starts with `local-`
 
 **Password Management:**
@@ -307,6 +308,7 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 
 - **OIDC accounts:** OIDC sign-in is kept to OIDC accounts.
 - **Plex profile identity:** profile sign-in takes the profile's identity from Plex and requires a profile from the account's Home list.
+- **Admin sign-in account checks:** `/api/auth/admin/login` now applies the same account checks as the regular local sign-in (pending approval, rejected) and also refuses deleted accounts.
 - **#297 Hardcoded JWT fallback secrets:** `jwt.ts` fell back to built-in default strings when `JWT_SECRET`/`JWT_REFRESH_SECRET` were unset (installs that bypass the unified entrypoint). Fix: fallbacks removed; secrets derived from `CONFIG_ENCRYPTION_KEY` via HKDF. Affected installs: all sessions + download links invalidated on upgrade (re-login required).
 - **#215 Soft-deleted users counted as local users/admins:** `hasLocalUsers`/`hasLocalAdmins` (providers + admin settings) had no `deletedAt: null`, so a deleted local admin kept the login form shown and the Auth tab lockout warnings quiet. Fix: count non-deleted users only. First-user checks unchanged (deleted users still count).
 

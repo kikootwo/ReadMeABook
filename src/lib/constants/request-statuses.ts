@@ -27,3 +27,14 @@ export const ADVANCEABLE_FROM_INTERACTIVE_SEARCH = [
   'awaiting_search',
   'awaiting_release',
 ] as const;
+
+/**
+ * Ebook request statuses where Interactive Search picks for that request via
+ * /api/requests/[id]/interactive-search-ebook + select-ebook (the statuses
+ * those routes accept for a direct ebook search).
+ */
+export const EBOOK_ADVANCEABLE_FROM_INTERACTIVE_SEARCH = [
+  'pending',
+  'failed',
+  'awaiting_search',
+] as const;

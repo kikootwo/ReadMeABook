@@ -64,6 +64,9 @@ describe('interactive search access is enforced server-side', () => {
     ['POST /api/audiobooks/request-with-torrent', '@/app/api/audiobooks/request-with-torrent/route',
       { audiobook: { asin: 'B000000001', title: 'T', author: 'A' }, torrent }, undefined],
     ['POST /api/requests/[id]/select-torrent', '@/app/api/requests/[id]/select-torrent/route', { torrent }, { id: 'req-1' }],
+    ['POST /api/requests/[id]/select-ebook', '@/app/api/requests/[id]/select-ebook/route',
+      { ebook: { ...torrent, source: 'prowlarr' } }, { id: 'req-1' }],
+    ['POST /api/requests/[id]/interactive-search-ebook', '@/app/api/requests/[id]/interactive-search-ebook/route', {}, { id: 'req-1' }],
   ])('%s → 403 when the permission is off', async (_label, modulePath, body, routeParams) => {
     authRequest.json.mockResolvedValue(body);
     const { POST } = await import(modulePath);

@@ -57,6 +57,20 @@ export async function resolveInteractiveSearchAccess(
 }
 
 /**
+ * Resolve whether a user's requests skip admin approval
+ * (admin → per-user `autoApproveRequests` → global `auto_approve_requests`, default on).
+ */
+export async function resolveAutoApprove(
+  userRole: string,
+  userAutoApproveRequests: boolean | null
+): Promise<boolean> {
+  if (userRole === 'admin') return true;
+  if (userAutoApproveRequests === true) return true;
+  if (userAutoApproveRequests === false) return false;
+  return getGlobalBooleanSetting('auto_approve_requests', true);
+}
+
+/**
  * Resolve a user's effective download access permission.
  */
 export async function resolveDownloadAccess(
