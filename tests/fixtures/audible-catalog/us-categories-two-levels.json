@@ -1,0 +1,139 @@
+{
+  "categories": [
+    {
+      "children": [
+        {
+          "id": "18571986011",
+          "name": "Biographies & Memoirs"
+        },
+        {
+          "id": "18574496011",
+          "name": "Literature & Fiction"
+        },
+        {
+          "id": "18571927011",
+          "name": "Performing Arts"
+        }
+      ],
+      "id": "24427740011",
+      "name": "Comedy & Humor"
+    },
+    {
+      "children": [
+        {
+          "id": "18574427011",
+          "name": "Action & Adventure"
+        },
+        {
+          "id": "18574542011",
+          "name": "African American"
+        },
+        {
+          "id": "18574435011",
+          "name": "Ancient, Classical & Medieval Literature"
+        },
+        {
+          "id": "18574446011",
+          "name": "Anthologies & Short Stories"
+        },
+        {
+          "id": "18574449011",
+          "name": "Classics"
+        },
+        {
+          "id": "18574450011",
+          "name": "Drama & Plays"
+        },
+        {
+          "id": "18573352011",
+          "name": "Erotica"
+        },
+        {
+          "id": "18574455011",
+          "name": "Essays"
+        },
+        {
+          "id": "18574456011",
+          "name": "Genre Fiction"
+        },
+        {
+          "id": "18574482011",
+          "name": "Historical Fiction"
+        },
+        {
+          "id": "18574490011",
+          "name": "Horror"
+        },
+        {
+          "id": "18574496011",
+          "name": "Humor & Satire"
+        },
+        {
+          "id": "18573754011",
+          "name": "LGBTQ+"
+        },
+        {
+          "id": "18574500011",
+          "name": "Literary History & Criticism"
+        },
+        {
+          "id": "18574501011",
+          "name": "Memoirs, Diaries & Correspondence"
+        },
+        {
+          "id": "18574505011",
+          "name": "Poetry"
+        },
+        {
+          "id": "18574520011",
+          "name": "Women's Fiction"
+        },
+        {
+          "id": "18574521011",
+          "name": "World Literature"
+        }
+      ],
+      "id": "18574426011",
+      "name": "Literature & Fiction"
+    },
+    {
+      "children": [
+        {
+          "id": "18574598011",
+          "name": "Crime Fiction"
+        },
+        {
+          "id": "18574606011",
+          "name": "Mystery"
+        },
+        {
+          "id": "18574621011",
+          "name": "Thriller & Suspense"
+        },
+        {
+          "id": "18572017011",
+          "name": "True Crime"
+        }
+      ],
+      "id": "18574597011",
+      "name": "Mystery, Thriller & Suspense"
+    },
+    {
+      "children": [
+        {
+          "id": "18580607011",
+          "name": "Fantasy"
+        },
+        {
+          "id": "18580628011",
+          "name": "Science Fiction"
+        }
+      ],
+      "id": "18580606011",
+      "name": "Science Fiction & Fantasy"
+    }
+  ],
+  "response_groups": [
+    "always-returned"
+  ]
+}

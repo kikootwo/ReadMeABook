@@ -37,7 +37,7 @@ Parsed via cheerio. Selectors: `.productListItem` (popular/new releases), `.s-re
 | Search | `/1.0/catalog/products` | `keywords=<q>` |
 | Series search | `/1.0/catalog/products` | `keywords=<q>`, then `asins=<series ASINs>` ([audible-series-search.md](./audible-series-search.md)) |
 | Author books | `/1.0/catalog/products` | `author=<name>` (name, NOT ASIN) |
-| Categories listing | `/1.0/catalog/categories` | (none) |
+| Categories listing | `/1.0/catalog/categories` | `categories_num_levels=2` (top level + `children`, [home-sections.md](../features/home-sections.md)) |
 | Single product | `/1.0/catalog/products/{asin}` | — |
 | Audnexus (per-ASIN) | `https://api.audnex.us/books/{asin}` | `region={audnexusParam}` |
 
