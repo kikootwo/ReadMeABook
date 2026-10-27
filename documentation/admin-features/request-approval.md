@@ -137,9 +137,9 @@ Select torrent for existing request (request page interactive search)
 ### POST /api/requests/[id]/select-ebook
 Apply an ebook pick to an ebook request, or to an available audiobook request's ebook (created if missing)
 
-**Auth:** User (owner) or Admin; interactive search access required. Another user's request → 403, unknown id → 404
+**Auth:** Admin: any request. User: own ebook request only; interactive search access required. Another user's request, or a user's audiobook request → 403; unknown or deleted id (or deleted parent) → 404
 
-**Approval Check (non-admin):** `resolveAutoApprove()` (`src/lib/utils/permissions.ts`). If needed → ebook request `awaiting_approval`, pick stored in `selectedTorrent`, pending notification, `needsApproval: true`; else status `searching` and download starts. Admins never need approval and get no notification.
+**Approval Check (non-admin):** `resolveAutoApprove()` (`src/lib/utils/permissions.ts`). If needed → ebook request `awaiting_approval`, pick stored in `selectedTorrent`, pending notification, `needsApproval: true`; else status `searching`, download starts, `request_approved` notification. Admins never need approval and get no notification.
 
 ### GET /api/admin/requests/pending-approval
 Fetch all requests with status 'awaiting_approval'

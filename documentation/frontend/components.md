@@ -156,6 +156,7 @@ interface InteractiveTorrentSearchModalProps {
   onClose: () => void;
   requestId: string;
   audiobook: {title: string, author: string};
+  onSuccess?: (outcome?: {needsApproval?: boolean}) => void; // ebook picks pass needsApproval; details modal toasts "submitted for approval"
 }
 
 interface ConfirmModalProps {
