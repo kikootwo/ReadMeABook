@@ -303,7 +303,7 @@ describe('apostrophes: a release name that drops or splits the apostrophe is the
   });
 
   // A request word without the apostrophe is a different word: a possessive release of the same author
-  // scores as on main (match 0, total 40 here) and is never picked automatically
+  // scores match 0 (total 40 here) and is never picked automatically, as on main for a straight apostrophe
   it.each([
     ["David Levithan - The Lover's Dictionary [M4B]", 'The Lovers', 'David Levithan'],
     ["Rick Riordan - The Titan's Curse [M4B]", 'The Titans', 'Rick Riordan'],
@@ -311,6 +311,9 @@ describe('apostrophes: a release name that drops or splits the apostrophe is the
     ["Liane Moriarty - The Husband's Secret [M4B]", 'The Husbands', 'Liane Moriarty'],
     ["Orson Scott Card - Ender's Game [M4B]", 'Enders', 'Orson Scott Card'],
     ['Orson Scott Card - Ender’s Game [M4B]', 'Enders Game', 'Orson Scott Card'],
+    // main split a curly apostrophe into two words and picked these (70.4 and 76.5)
+    ['David Levithan - The Lover’s Dictionary [M4B]', 'The Lover', 'David Levithan'],
+    ['Freida McFadden - The Housemaid’s Secret [M4B]', 'The Housemaid', 'Freida McFadden'],
   ])('a possessive release for a request without the apostrophe: %s for "%s"', (release, title, author) => {
     expect(rank(release, title, author)).toEqual({ match: 0, total: 40 });
     expect(rank(release, title, author, { requireAuthor: false }).match).toBe(0);
