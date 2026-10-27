@@ -1,7 +1,7 @@
 # Intelligent Ranking Algorithm
 
 **Status:** ✅ Implemented | Comprehensive edge case test coverage
-**Tests:** tests/utils/ranking-algorithm.test.ts, ranking-non-latin.test.ts, ranking-match-gates.test.ts, ranking-oracle-223.test.ts, match-gates.test.ts, match-normalize.test.ts, ranking-size-floor.test.ts, ranking-series-part.test.ts, tests/processors/search-indexers-non-latin.test.ts, search-indexers-size-floor.test.ts, search-indexers-series-part.test.ts
+**Tests:** tests/utils/ranking-algorithm.test.ts, ranking-non-latin.test.ts, ranking-match-gates.test.ts, ranking-oracle-223.test.ts, match-gates.test.ts, match-normalize.test.ts, ranking-size-floor.test.ts, ranking-series-part.test.ts, ranking-size-score.test.ts, tests/processors/search-indexers-non-latin.test.ts, search-indexers-size-floor.test.ts, search-indexers-series-part.test.ts
 **Automatic-search gates (#223):** [match-gates.md](match-gates.md): one-word titles, required numbers, author whole words, volume conflict (title, plus the catalog series part in automatic search, #330)
 
 Evaluates and scores torrents to automatically select best audiobook download.
@@ -140,6 +140,12 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - Formula: `Math.min(15, Math.log10(seeders + 1) * 6)`
 - 1 seeder: 0pts, 10 seeders: 6pts, 100 seeders: 12pts, 1000+: 15pts
 - Note: Usenet/NZB results without seeders get full 15 pts (centralized availability)
+
+**4. Size Quality (15 pts max, `scoreSize`)**
+- Formula: `Math.min(15, mbPerMin * 15)`, `mbPerMin = size in MiB / runtime minutes`; no runtime → 0 pts
+- Full points from 1.0 MB/min ≈ 140 kbps (1 MiB/min = 1,048,576 × 8 / 60 s ≈ 139.8 kbps), not 64 kbps as the old code comment said (#318)
+- 128 kbps (0.92 MB/min): 13.7 pts; 64 kbps (0.46 MB/min): 6.9 pts, about 8 pts below full; 32 kbps (0.23 MB/min): 3.4 pts
+- Notes (`generateNotes`): ≥ 1.5 MB/min premium, ≥ 1.0 high, ≥ 0.5 (about 70 kbps) standard, ≥ 0.3 (about 42 kbps) low, below that very low
 
 **Pre-filters (dropped before scoring, `rankTorrents`)**
 - **< 20 MB:** always dropped (ebooks, samples)
@@ -386,6 +392,7 @@ const bestEbook = ranked[0];  // Safe to auto-download
 - **#311 (single-file grabs):** automatic search grabbed one 57 MB chapter file of a 97-file Usenet post for a 1182-min book (score 79.7) and imported it as the book. Fixed by the size floor above; pinned in `tests/utils/ranking-size-floor.test.ts` and `tests/processors/search-indexers-size-floor.test.ts`
 - **#330 (wrong book in a series):** automatic search could grab `Azarinth Healer 03` for "Azarinth Healer: Book One": the title names no number, so G4c had nothing to compare. Fixed by passing the catalog `series`/`seriesPart` into G4c ([match-gates.md](match-gates.md)); pinned in `tests/utils/ranking-series-part.test.ts`, `tests/utils/match-gates.test.ts` and `tests/processors/search-indexers-series-part.test.ts`
 - **#323 (large ebooks hidden):** interactive ebook search dropped results > 20 MB, so a large PDF that was the only result showed nothing. Fixed by `enforceSizeCap` (automatic only); pinned in `tests/utils/ranking-ebook-size-cap.test.ts`, `tests/api/interactive-search-ebook-size-cap.routes.test.ts` and `tests/processors/search-ebook-size-cap.test.ts`
+- **#318 (size score comment):** the `scoreSize` comment called 1.0 MB/min "~64 kbps"; it is about 140 kbps, so a 64 kbps release gets 6.9/15. Comment and docs now describe the code; scoring unchanged (moving the baseline goes with the #223 threshold work, which kept it). Pinned in `tests/utils/ranking-size-score.test.ts`
 - **#466 (apostrophe rows):** `L.Intruse…` for "L'intruse", `Changer.L.Eau.Des.Fleurs…`, `Enders.Game…` for "Ender's Game" scored 0 at word coverage (the apostrophe was kept in the word). Fixed by the apostrophe fold; pinned in `tests/utils/ranking-match-gates.test.ts`. Subtitles after `. ` / ` - ` (same issue) still open
 - **Known limit:** a release that splits an English ending (`Ender.s.Game`) misses `enders` (on main only a request with a curly `’` matched it)
 - **Known limit:** a request written without the apostrophe ("Enders Game") does not match `Ender’s Game` (as on main): a release possessive needs the apostrophe in the request, so "The Titans" never matches `The Titan's Curse`
