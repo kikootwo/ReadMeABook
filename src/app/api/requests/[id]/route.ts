@@ -1,6 +1,6 @@
 /**
  * Component: Individual Request API Routes
- * Documentation: documentation/backend/api.md
+ * Documentation: documentation/backend/services/api-tokens.md
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -13,6 +13,7 @@ import { CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
 import { ADMIN_REQUEST_DETAIL_INCLUDE, OWNER_REQUEST_DETAIL_SELECT } from '@/lib/services/request-detail-query';
 import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { toJsonSafe } from '@/lib/utils/json-safe';
 
 const logger = RMABLogger.create('API.RequestById');
 
@@ -58,9 +59,10 @@ export async function GET(
         );
       }
 
+      // Sizes are BigInt columns, which JSON.stringify cannot serialize (#261)
       return NextResponse.json({
         success: true,
-        request: isAdmin ? requestRecord : await stripProwlarrKeyFromResults(requestRecord),
+        request: toJsonSafe(isAdmin ? requestRecord : await stripProwlarrKeyFromResults(requestRecord)),
       });
     } catch (error) {
       logger.error('Failed to get request', { error: error instanceof Error ? error.message : String(error) });
