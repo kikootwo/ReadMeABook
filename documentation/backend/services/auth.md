@@ -312,6 +312,7 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 - **#297 Hardcoded JWT fallback secrets:** `jwt.ts` fell back to built-in default strings when `JWT_SECRET`/`JWT_REFRESH_SECRET` were unset (installs that bypass the unified entrypoint). Fix: fallbacks removed; secrets derived from `CONFIG_ENCRYPTION_KEY` via HKDF. Affected installs: all sessions + download links invalidated on upgrade (re-login required).
 - **#215 Soft-deleted users counted as local users/admins:** `hasLocalUsers`/`hasLocalAdmins` (providers + admin settings) had no `deletedAt: null`, so a deleted local admin kept the login form shown and the Auth tab lockout warnings quiet. Fix: count non-deleted users only. First-user checks unchanged (deleted users still count).
 - **Admin job routes:** `/api/admin/jobs`, `/api/admin/jobs/:id`, `/api/admin/jobs/:id/trigger` and `/api/admin/job-status/:id` use `requireAuth` + `requireAdmin` like the other admin routes: the account must still exist, its sessions must not be revoked, and the session must be an admin session. API tokens are refused (not on the allowlist).
+- **Author and series catalog routes:** `/api/authors/:asin`, `/api/authors/:asin/books`, `/api/authors/search`, `/api/series/:asin` and `/api/series/search` use `requireAuth` like the other signed-in routes: the account must still exist and its sessions must not be revoked. API tokens get 403 (not on the allowlist; previously 401). Popular, new releases, category and audiobook search stay open and use the caller's token only to add their request statuses.
 
 ## Tech Stack
 
