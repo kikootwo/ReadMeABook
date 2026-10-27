@@ -18,7 +18,7 @@ export interface ActiveRequestRef {
 
 /**
  * Active (not deleted) requests other than `requestId` whose selected
- * download is the torrent `torrentHash` (hex and base32 forms match each other). Empty when there is no hash.
+ * download is the torrent `torrentHash` (hex and base32 forms, in either letter case, match each other). Empty when there is no hash.
  */
 export async function otherActiveRequestsUsingTorrent(
   requestId: string,

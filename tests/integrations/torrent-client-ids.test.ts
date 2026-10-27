@@ -165,7 +165,7 @@ describe('Deluge', () => {
     expect(fakeD.session.size).toBe(0);
   });
 
-  it('reaches a row with no client ID whose upper-case indexer hash is the fallback: lookups and removal send lower case (#460)', async () => {
+  it('finds and removes a torrent by an upper-case stored hash (the fallback a row with no client ID uses), sending lower case (#460)', async () => {
     fakeD.session.set(HEX, PLAIN.name);
     const d = deluge();
     const stored = HEX.toUpperCase();
