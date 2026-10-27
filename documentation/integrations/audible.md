@@ -63,6 +63,7 @@ Populates every `AudibleAudiobook` field. Covered:
 
 - **Catalog API cannot filter preorders or surface curated bestsellers.** The API's `BestSellers` sort is a right-now velocity rank that spikes on launch-day promos and preorder windows; the `-ReleaseDate` sort returns 100% future preorders. There is no server-side `release_time`, `released-only`, `customer_rights`, or alternate sort (`Reviewed`, `MostListened`, etc.) — every plausible variant was tested and silently ignored. This is why the nightly refresh job uses the curated HTML storefront pages instead.
 - **`author=` takes a name, not an ASIN.** The catalog API has no ASIN-based author param. `searchByAuthorAsin()` queries by name, then filters client-side: keeps only products where `products[].authors[].asin === authorAsin`. Preserves ASIN-authoritative author identity. Also filters by `product.language` via `isAcceptedLanguage()` for the configured region. Optional 4th arg `{ newestFirst: true }` adds `products_sort_by=-ReleaseDate` (strictly descending, preorders first); used only by new-releases-only watched authors ([watched-lists.md](../features/watched-lists.md)). Default order is unchanged (author page, entire-catalog watches).
+- **Author `hasMore` comes from the raw page, not the filtered books (#310).** A page can hold no products that pass the ASIN/language filters (namesakes, other languages) while later pages hold more of the author's books. `hasMore` = raw `products` non-empty, `page < AUDIBLE_MAX_AUTHOR_PAGES` (20), and `total_results > page*50` (no total: full raw page). `useAuthorBooks` loads past a page with no books by itself.
 - **Invalid ASIN returns HTTP 200 with stub body.** `/1.0/catalog/products/{asin}` responds 200 with `{product: {asin: INPUT}}` and no other fields. `fetchAudibleDetailsFromApi()` detects this via missing `product.title` and returns `null`.
 - **`publisher_summary` is HTML.** Converted with `stripHtml()` (`src/lib/utils/strip-html.ts`, regex-based, no cheerio) before populating `description`. Falls back to `merchandising_summary` (plain text) if `publisher_summary` missing.
 - **Audnexus details prefer `summary`.** `description` = `stripHtml(summary)` if it is a non-empty string, else `stripHtml(description)` (the short blurb). No catalog call for a missing summary.
@@ -333,6 +334,12 @@ interface AuthorBooksResult {
 - PostgreSQL (`audible_cache`, `audible_cache_categories`)
 
 ## Fixed Issues
+
+**Author pages missing books (#310 part 1, 2026-10-27)**
+- **Problem:** Author pages (e.g. J.R.R. Tolkien) and entire-catalog watched authors stopped before the end of the author's catalog.
+- **Root cause:** `searchByAuthorAsin` set `hasMore` only when the page had books left after the author-ASIN/language filters, so a page of namesakes or other languages ended paging; `scanAuthorBooks` (relevance scan) also stopped at such a page.
+- **Fix:** `hasMore` from the raw catalog page, capped at `AUDIBLE_MAX_AUTHOR_PAGES` (20); the relevance scan reads on to its 4-page cap; `useAuthorBooks` loads past an empty page and shows loading, not "No books found", while it does.
+- **Location:** `src/lib/integrations/audible.service.ts`, `src/lib/services/watched-lists-releases.ts`, `src/lib/hooks/useAuthors.ts`; tests `tests/integrations/audible-author-paging.test.ts`, `tests/lib/hooks/useAuthors.test.tsx`.
 
 **Series missing from book details and requests (#446, 2026-10-26)**
 - **Problem:** Book details showed no series line for some books, most often the newest in a series; requesting one saved no series, so `{series}` and the series tag stayed empty.

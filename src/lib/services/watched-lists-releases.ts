@@ -70,8 +70,8 @@ export function booksForWatch(
 
 /**
  * Scan an author's catalog.
- * - No `since`: relevance order, stops at a page with no matching books or when Audible has no more.
- *   `complete` = Audible reported no further pages within the page cap (the whole catalog was read).
+ * - No `since`: relevance order, stops when Audible has no more pages. A page with no matching books
+ *   doesn't end it. `complete` = Audible reported no further pages within the page cap.
  * - With `since`: newest first; stops after the first page holding a book released before the
  *   cutoff's floor day. A page with no matching books (other languages or namesakes) doesn't end it.
  */
@@ -109,8 +109,6 @@ export async function scanAuthorBooks(
       if (pastCutoff || !more) break;
     } else if (!result.hasMore) {
       return { books, complete: true };
-    } else if (result.books.length === 0) {
-      break;
     }
 
     if (page < MAX_AUTHOR_PAGES) await delay(PAGE_DELAY_MS);
