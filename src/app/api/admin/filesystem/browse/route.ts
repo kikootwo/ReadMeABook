@@ -2,7 +2,8 @@
  * Component: Admin Filesystem Browse API
  * Documentation: documentation/features/manual-import.md
  *
- * Lets admins browse server directories for manual audiobook import.
+ * Lets admins browse server directories for manual import: audio files for an
+ * audiobook import, ebook files for an ebook import (`type=ebook`).
  * Restricted to download_dir and media_dir roots only.
  */
 
@@ -12,6 +13,7 @@ import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { AUDIO_EXTENSIONS } from '@/lib/constants/audio-formats';
 import { resolveDiscBook } from '@/lib/utils/disc-layout-fs';
+import { isEbookFile } from '@/lib/utils/import-inventory';
 
 const logger = RMABLogger.create('API.Admin.Filesystem.Browse');
 
@@ -67,6 +69,10 @@ export async function GET(request: NextRequest) {
 
         const { downloadDir, mediaDir, bookdropExists } = await getAllowedRoots();
         const requestedPath = request.nextUrl.searchParams.get('path');
+        const type = request.nextUrl.searchParams.get('type') ?? 'audiobook';
+        if (type !== 'audiobook' && type !== 'ebook') {
+          return NextResponse.json({ error: 'type must be "audiobook" or "ebook"' }, { status: 400 });
+        }
 
         // No path param: return root directories
         if (!requestedPath) {
@@ -117,6 +123,20 @@ export async function GET(request: NextRequest) {
           .filter((e) => e.isDirectory())
           .map((entry) => ({ name: entry.name, type: 'directory' as const }))
           .sort((a, b) => a.name.localeCompare(b.name));
+
+        // An ebook import lists the ebook files directly in this folder (no disc folders)
+        if (type === 'ebook') {
+          const ebookFiles = await Promise.all(
+            dirEntries
+              .filter((e) => e.isFile() && isEbookFile(e.name))
+              .map(async (e) => ({
+                name: e.name,
+                size: await fs.stat(pathModule.join(normalizedPath, e.name)).then((st) => st.size, () => 0),
+              }))
+          );
+          ebookFiles.sort((a, b) => a.name.localeCompare(b.name));
+          return NextResponse.json({ path: normalizedPath, entries, ebookFiles });
+        }
 
         // Gather audio files in the current directory
         const audioFiles: Array<{ name: string; size: number }> = [];

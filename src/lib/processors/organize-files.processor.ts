@@ -30,6 +30,7 @@ import { addAutoBlock } from '../services/blocklist.service';
 import { updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { createAudibleDetailsLoader, readMetadataTaggingEnabled, resolveTagDetails } from './organize-tag-details';
 import { applyPostImportCategory } from './post-import-category';
+import { preferredEbookFile } from '../utils/import-inventory';
 
 /**
  * Process organize files job
@@ -674,9 +675,21 @@ async function processEbookOrganization(
   request: { id: string; userId: string; type: string; user: { plexUsername: string | null } },
   logger: RMABLogger
 ): Promise<any> {
-  const { requestId, audiobookId, downloadPath, jobId, cleanupSource, downloadHistoryId } = payload;
+  const { requestId, audiobookId, downloadPath, jobId, cleanupSource, selectedFiles, downloadHistoryId } = payload;
 
   logger.info(`Processing ebook organization for request ${requestId}`);
+
+  // A Manual Import names the ebook files it selected in the folder: import the preferred
+  // one of those, not whatever a walk of the whole folder finds first (#278)
+  let ebookSource = downloadPath;
+  if (selectedFiles && selectedFiles.length > 0) {
+    const chosen = preferredEbookFile(selectedFiles);
+    if (!chosen) {
+      throw new Error('No ebook files found in download (none of the selected files is an ebook)');
+    }
+    ebookSource = path.join(downloadPath, chosen);
+    logger.info(`Importing the selected ebook file: ${chosen}`);
+  }
 
   // Update request status to processing, unless it was cancelled or deleted meanwhile
   if (!(await updateRequestUnlessStopped(requestId, { status: 'processing', progress: 100 }))) {
@@ -820,13 +833,13 @@ async function processEbookOrganization(
   }
 
   // Check if Kindle EPUB fix is needed
-  let effectiveDownloadPath = downloadPath;
+  let effectiveDownloadPath = ebookSource;
   let fixedEpubPath: string | null = null;
   // Request note when a Kindle-fixed copy failed its read-back check (the original is imported)
   let kindleFixNote: string | null = null;
 
   // Detect the actual EPUB file path (handles both single file and directory downloads)
-  const epubFilePath = await detectEpubFilePath(downloadPath);
+  const epubFilePath = await detectEpubFilePath(ebookSource);
 
   // Only apply Kindle fix for EPUB files when enabled
   if (epubFilePath) {

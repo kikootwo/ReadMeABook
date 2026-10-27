@@ -5,11 +5,11 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { AUDIO_EXTENSIONS } from '../constants/audio-formats';
+import { AUDIO_EXTENSIONS, EBOOK_EXTENSIONS } from '../constants/audio-formats';
 import { normalizePath } from './cleanup-helpers';
 
-/** Ebook formats the organizer imports, in preference order. */
-export const ORGANIZER_EBOOK_FORMATS = ['epub', 'pdf', 'mobi', 'azw3', 'azw', 'fb2', 'cbz', 'cbr'];
+/** Ebook formats the organizer imports, in preference order (EBOOK_EXTENSIONS without the dots). */
+export const ORGANIZER_EBOOK_FORMATS: string[] = EBOOK_EXTENSIONS.map((ext) => ext.slice(1));
 
 export type InventoryKind = 'audio' | 'ebook';
 
@@ -53,6 +53,12 @@ export function isAudioFile(name: string): boolean {
 
 export function isEbookFile(name: string): boolean {
   return ORGANIZER_EBOOK_FORMATS.includes(path.extname(name).toLowerCase().slice(1));
+}
+
+/** The ebook file the organizer prefers among `names` (epub first, by EBOOK_EXTENSIONS), or undefined. */
+export function preferredEbookFile(names: readonly string[]): string | undefined {
+  const rank = (name: string) => ORGANIZER_EBOOK_FORMATS.indexOf(path.extname(name).toLowerCase().slice(1));
+  return names.filter(isEbookFile).sort((a, b) => rank(a) - rank(b))[0];
 }
 
 /** Canonical key for a source path, used to match records against delete candidates. */

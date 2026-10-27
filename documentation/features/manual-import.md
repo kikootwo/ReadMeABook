@@ -3,7 +3,7 @@
 **Status:** ⏳ In Progress
 
 ## Overview
-Allow admins to manually import audiobook files from the server filesystem into RMAB's processing pipeline for a specific book.
+Allow admins to manually import audiobook files from the server filesystem into RMAB's processing pipeline for a specific book. From an ebook request (My Requests ebook card) it imports ebook files for that ebook request instead.
 
 ## Acceptance Criteria
 
@@ -45,6 +45,7 @@ Allow admins to manually import audiobook files from the server filesystem into 
 - [ ] `GET /api/admin/filesystem/browse?path=...` — admin-only endpoint
 - [ ] Returns directory listing: `{ entries: [{ name, type, audioFileCount, subfolderCount, totalSize }] }`
 - [ ] If no `path` param, returns root directories (download_dir, media_dir from config)
+- [x] `type=ebook` (ebook import): `{ path, entries, ebookFiles: [{ name, size }] }`, the ebook files directly in the folder (`EBOOK_EXTENSIONS`), no disc folders; unknown `type` → 400
 - [x] Current response: `{ path, entries: [{ name, type }], audioFiles: [{ name, size }] }`; a multi-disc folder (never a configured root) adds its disc files to `audioFiles` (relative names, disc by disc, names in natural order inside a disc; the import may reorder a disc by its track tags)
 - [ ] Path validation: must be within allowed root directories (prevent directory traversal)
 - [ ] Handles permission errors gracefully
@@ -53,7 +54,8 @@ Allow admins to manually import audiobook files from the server filesystem into 
 ### AC-5: Manual Import API
 - [ ] `POST /api/admin/manual-import` — admin-only endpoint
 - [ ] Request body: `{ audiobookId: string, folderPath: string }`
-- [x] Current body: `{ audiobookId | asin, folderPath, selectedFiles?: string[], cleanupSource?: boolean }`. `selectedFiles` without `/` = files in the folder (stat-checked); with `/` = exact members of the multi-disc book set (`..`, `.`, absolute, backslash, `//`, NUL, `Extras/x` → 400). No `selectedFiles` on a disc-only folder: the route sends the book set itself, so the import and any source removal stay scoped to the book
+- [x] Ebook import: body adds `requestId` (the ebook request) and `requestType: 'ebook'`. The stored request's type decides (a `requestType` that disagrees, or an unknown one → 400); the files must be ebook files directly in the folder (audio, `/`, `..` → 400), none selected = every ebook file in the folder. Recycles or creates only an **ebook** request (new one: `parentRequestId` = the book's delivered audiobook request) and queues `organize_files` with the ebook files as `selectedFiles`; the ebook branch imports the preferred one of them (`preferredEbookFile`, `EBOOK_EXTENSIONS` order). Logic: `src/lib/services/manual-import.service.ts`
+- [x] Current body: `{ audiobookId | asin | requestId, folderPath, selectedFiles?: string[], cleanupSource?: boolean, requestType?: 'audiobook' | 'ebook' }`. `selectedFiles` without `/` = files in the folder (stat-checked); with `/` = exact members of the multi-disc book set (`..`, `.`, absolute, backslash, `//`, NUL, `Extras/x` → 400). No `selectedFiles` on a disc-only folder: the route sends the book set itself, so the import and any source removal stay scoped to the book
 - [ ] Path validation: folderPath must be within allowed roots
 - [ ] Validates folder exists and contains audio files
 - [ ] If no existing request: creates request (status: `processing`) + queues `organize_files` job
@@ -72,6 +74,9 @@ Allow admins to manually import audiobook files from the server filesystem into 
 ### AC-7: Docker Build
 - [ ] `docker compose build readmeabook` succeeds with no errors
 
+## Fixed Issues
+- **Manual Import from an ebook request acted on the audiobook (#278):** the modal never passed the request type to `ManualImportBrowser`, so an ebook card listed only audio, accepted only audio, and recycled the book's **audiobook** request (even `available`), re-running the audiobook organize on the folder (with `cleanupSource` if ticked). Fixed: type flows card → modal → browser → browse/import APIs; an ebook import touches only ebook requests and files; its source cleanup removes only the imported ebook file, through the same delete guard
+
 ## Non-Goals
 - No "move" option (copy only, matching existing pipeline)
 - No drag-and-drop upload
@@ -79,6 +84,7 @@ Allow admins to manually import audiobook files from the server filesystem into 
 
 ## Technical Notes
 - Audio extensions: `.m4b`, `.m4a`, `.mp3`, `.mp4`, `.aa`, `.aax`, `.flac`, `.ogg` (from `src/lib/constants/audio-formats.ts`)
+- Ebook extensions: `EBOOK_EXTENSIONS` in the same file, the one list (`.epub`, `.pdf`, `.mobi`, `.azw3`, `.azw`, `.fb2`, `.cbz`, `.cbr`, preference order); `ORGANIZER_EBOOK_FORMATS` and `isEbookFile` (`import-inventory.ts`) derive from it
 - Config keys: `download_dir` (database), `media_dir` (database)
 - Existing file organizer: `src/lib/utils/file-organizer.ts`
 - Organize processor: `src/lib/processors/organize-files.processor.ts`

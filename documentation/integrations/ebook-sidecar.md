@@ -264,6 +264,9 @@ Search: https://annas-archive.gl/search?q=Title+Author&ext=epub&lang=en
 | PDF | `.pdf` | Sometimes |
 | MOBI | `.mobi` | Legacy |
 | AZW3 | `.azw3` | Sometimes |
+| AZW, FB2, CBZ, CBR | `.azw`, `.fb2`, `.cbz`, `.cbr` | Imported; not a preferred-format setting |
+
+- One list: `EBOOK_EXTENSIONS` (`src/lib/constants/audio-formats.ts`), in import preference order
 
 ## Indexer Categories
 
@@ -278,6 +281,8 @@ Categories are configured per-indexer via the tabbed interface in the Edit Index
 **1. Long non-Latin ebook names failed with ENAMETOOLONG (#474)** - `title (100 chars) - author (100 chars).format` reached ~408 bytes (Cyrillic) / ~608 (CJK); the raw `Title - Author.format` queued by the callers had no byte cap; the direct download 200-char cap could cut off the extension, and so could the organizer's 200-char cap in the library; the 100-unit slice could split an emoji. Fixed: byte cap on grapheme boundaries, title cut first, extension kept in downloads and library (see File Naming)
 
 **2. Ebooks over 20 MB hidden from interactive search (#323)** - `rankEbookTorrents` dropped indexer results > 20 MB in every mode, so a large PDF that was the only result showed nothing. Fixed: the cap (`EBOOK_MAX_SIZE_MB`) applies to automatic search only; both interactive routes pass `enforceSizeCap: false` and list the result with its size
+
+**3. Manual Import from an ebook request imported audio into the audiobook (#278)** - the details modal opened the audiobook Manual Import for an ebook card: audio only, and the book's audiobook request (even `available`) was recycled and re-organized. Fixed: an ebook card's Manual Import lists and accepts ebook files and creates or reuses the ebook request; the ebook organize branch imports the selected file (see [manual-import.md](../features/manual-import.md))
 
 ## Limitations
 

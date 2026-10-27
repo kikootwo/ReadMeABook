@@ -2,8 +2,9 @@
  * Component: Manual Import File Browser
  * Documentation: documentation/features/manual-import.md
  *
- * Two-phase modal for browsing server directories and importing audiobook files.
- * Phase 1 (BrowsePhase): Directory navigation with audio file detection.
+ * Two-phase modal for browsing server directories and importing a book's files: audio
+ * for an audiobook import, ebook files for an ebook request's import (`requestType`).
+ * Phase 1 (BrowsePhase): Directory navigation with audio (or ebook) file detection.
  * Phase 2 (ConfirmPhase): Review and start import.
  *
  * Sub-components: manual-import/BrowsePhase.tsx, manual-import/ConfirmPhase.tsx
@@ -29,6 +30,10 @@ interface ManualImportBrowserProps {
     author: string;
     coverArtUrl?: string;
   };
+  /** 'ebook' when opened from an ebook request: lists and imports ebook files for that request. */
+  requestType?: 'audiobook' | 'ebook';
+  /** The ebook request being imported (sent with an ebook import; the server checks its type). */
+  requestId?: string;
 }
 
 type Phase = 'browse' | 'confirm';
@@ -38,7 +43,11 @@ export function ManualImportBrowser({
   onClose,
   onSuccess,
   audiobook,
+  requestType = 'audiobook',
+  requestId,
 }: ManualImportBrowserProps) {
+  const isEbook = requestType === 'ebook';
+  const fileKind = isEbook ? 'ebook' : 'audio';
   const [phase, setPhase] = useState<Phase>('browse');
   const [slideDirection, setSlideDirection] = useState<SlideDirection>('right');
 
@@ -100,14 +109,14 @@ export function ManualImportBrowser({
     setCheckedFiles(new Set());
     try {
       const res = await fetchWithAuth(
-        `/api/admin/filesystem/browse?path=${encodeURIComponent(dirPath)}`
+        `/api/admin/filesystem/browse?path=${encodeURIComponent(dirPath)}${isEbook ? '&type=ebook' : ''}`
       );
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: 'Failed to load' }));
         throw new Error(data.error || 'Failed to browse directory');
       }
       const data = await res.json();
-      const audioFiles: AudioFileEntry[] = data.audioFiles || [];
+      const audioFiles: AudioFileEntry[] = (isEbook ? data.ebookFiles : data.audioFiles) || [];
       setEntries(data.entries || []);
       setCurrentAudioFiles(audioFiles);
       setCurrentPath(data.path || dirPath);
@@ -116,7 +125,7 @@ export function ManualImportBrowser({
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isEbook]);
 
   const navigateInto = (dirPath: string) => {
     setSlideDirection('right');
@@ -227,6 +236,8 @@ export function ManualImportBrowser({
           folderPath: selectedPath,
           selectedFiles: fileNames,
           cleanupSource,
+          // An ebook import names its request; an audiobook import sends what it always did
+          ...(isEbook ? { requestId, requestType } : {}),
         }),
       });
       const data = await res.json();
@@ -284,7 +295,7 @@ export function ManualImportBrowser({
           <div className="flex items-center gap-2.5">
             <FolderArrowDownIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {phase === 'browse' ? 'Manual Import' : 'Confirm Import'}
+              {phase === 'browse' ? (isEbook ? 'Manual Ebook Import' : 'Manual Import') : 'Confirm Import'}
             </h2>
           </div>
           <button
@@ -303,6 +314,7 @@ export function ManualImportBrowser({
               currentPath={currentPath}
               entries={entries}
               currentAudioFiles={currentAudioFiles}
+              fileKind={fileKind}
               checkedFiles={checkedFiles}
               isLoading={isLoading}
               error={error}
@@ -324,6 +336,7 @@ export function ManualImportBrowser({
               audiobook={audiobook}
               selectedPath={selectedPath!}
               audioFiles={selectedAudioFiles}
+              fileKind={fileKind}
               checkedFiles={checkedFiles}
               isImporting={isImporting}
               importError={importError}

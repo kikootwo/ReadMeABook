@@ -10,13 +10,15 @@
 
 import React from 'react';
 import Image from 'next/image';
-import { ArrowLeftIcon, ExclamationCircleIcon, MusicalNoteIcon } from '@heroicons/react/24/outline';
+import { ArrowLeftIcon, BookOpenIcon, ExclamationCircleIcon, MusicalNoteIcon } from '@heroicons/react/24/outline';
 import { AudioFileEntry, formatBytes } from './types';
 
 interface ConfirmPhaseProps {
   audiobook: { asin: string; title: string; author: string; coverArtUrl?: string };
   selectedPath: string;
   audioFiles: AudioFileEntry[];
+  /** What the files are: audio (audiobook import) or ebook files (ebook import). */
+  fileKind?: 'audio' | 'ebook';
   checkedFiles: Set<string>;
   isImporting: boolean;
   importError: string | null;
@@ -33,6 +35,7 @@ export function ConfirmPhase({
   audiobook,
   selectedPath,
   audioFiles,
+  fileKind = 'audio',
   checkedFiles,
   isImporting,
   importError,
@@ -44,6 +47,7 @@ export function ConfirmPhase({
   onBack,
   onStartImport,
 }: ConfirmPhaseProps) {
+  const FileIcon = fileKind === 'ebook' ? BookOpenIcon : MusicalNoteIcon;
   const allChecked = audioFiles.length > 0 && checkedFiles.size === audioFiles.length;
   const someChecked = checkedFiles.size > 0 && !allChecked;
   const checkedSize = audioFiles
@@ -91,7 +95,7 @@ export function ConfirmPhase({
           </p>
         </div>
 
-        {/* Audio files to import */}
+        {/* Files to import */}
         <div>
           <div className="flex items-center gap-3 mb-3">
             <input
@@ -121,7 +125,7 @@ export function ConfirmPhase({
                     disabled={isImporting}
                     className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 cursor-pointer"
                   />
-                  <MusicalNoteIcon className="w-4 h-4 text-blue-500 dark:text-blue-400 flex-shrink-0" />
+                  <FileIcon className="w-4 h-4 text-blue-500 dark:text-blue-400 flex-shrink-0" />
                   <span className="flex-1 min-w-0 text-sm text-gray-700 dark:text-gray-300 truncate">
                     {file.name}
                   </span>
