@@ -5,6 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
+import { countUsersIn } from '../helpers/user-rows';
 
 let authRequest: any;
 
@@ -199,6 +200,51 @@ describe('Auth misc routes', () => {
     expect(payload.backendMode).toBe('audiobookshelf');
     expect(payload.providers).not.toContain('local'); // Should NOT include 'local'
     expect(payload.registrationEnabled).toBe(false);
+    expect(payload.hasLocalUsers).toBe(false);
+  });
+
+  const useConfig = (values: Record<string, string>) =>
+    configServiceMock.get.mockImplementation(async (key: string) => values[key] ?? null);
+
+  it('does not count a soft-deleted local user in audiobookshelf mode', async () => {
+    useConfig({ 'system.backend_mode': 'audiobookshelf', 'oidc.enabled': 'false', 'auth.registration_enabled': 'false' });
+    prismaMock.user.count.mockImplementation(countUsersIn([
+      { id: 'u-gone', authProvider: 'local', role: 'admin', deletedAt: new Date('2026-01-01') },
+      { id: 'u-oidc', authProvider: 'oidc', role: 'user', deletedAt: null },
+    ]));
+
+    const { GET } = await import('@/app/api/auth/providers/route');
+    const payload = await (await GET()).json();
+
+    expect(payload.hasLocalUsers).toBe(false);
+    expect(payload.providers).not.toContain('local');
+  });
+
+  it('still counts an active local user next to a deleted one in audiobookshelf mode', async () => {
+    useConfig({ 'system.backend_mode': 'audiobookshelf', 'oidc.enabled': 'false', 'auth.registration_enabled': 'false' });
+    prismaMock.user.count.mockImplementation(countUsersIn([
+      { id: 'u-gone', authProvider: 'local', role: 'admin', deletedAt: new Date('2026-01-01') },
+      { id: 'u-local', authProvider: 'local', role: 'user', deletedAt: null },
+    ]));
+
+    const { GET } = await import('@/app/api/auth/providers/route');
+    const payload = await (await GET()).json();
+
+    expect(payload.hasLocalUsers).toBe(true);
+    expect(payload.providers).toContain('local');
+  });
+
+  it('does not count a soft-deleted local setup admin in Plex mode', async () => {
+    useConfig({ 'system.backend_mode': 'plex' });
+    prismaMock.user.count.mockImplementation(countUsersIn([
+      { id: 'u-gone', plexId: 'local-admin', isSetupAdmin: true, deletedAt: new Date('2026-01-01') },
+      { id: 'u-plex', plexId: 'plex-123', isSetupAdmin: false, deletedAt: null },
+    ]));
+
+    const { GET } = await import('@/app/api/auth/providers/route');
+    const payload = await (await GET()).json();
+
+    expect(payload.backendMode).toBe('plex');
     expect(payload.hasLocalUsers).toBe(false);
   });
 });

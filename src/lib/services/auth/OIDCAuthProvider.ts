@@ -227,6 +227,7 @@ export class OIDCAuthProvider implements IAuthProvider {
 
         if (!existingUser) {
           // Check if this is the first user - they should bypass approval
+          // Soft-deleted users count on purpose: a deleted account must never let the next sign-up skip approval
           const userCount = await prisma.user.count();
           const isFirstUser = userCount === 0;
 
@@ -423,6 +424,7 @@ export class OIDCAuthProvider implements IAuthProvider {
     const providerName = await this.configService.get('oidc.provider_name');
 
     // Check if this is the first user (should be promoted to admin)
+    // Soft-deleted users count on purpose: a deleted account must never make the next sign-up an admin
     const userCount = await prisma.user.count();
     const isFirstUser = userCount === 0;
     const role = isFirstUser || isAdminFromClaim ? 'admin' : 'user';

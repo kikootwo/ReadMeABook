@@ -36,6 +36,18 @@ const parseTorrent = (parseTorrentModule as any).default || parseTorrentModule;
 // Module-level logger
 const logger = RMABLogger.create('QBittorrent');
 
+/**
+ * Where an add puts the files (#326). Normally Automatic Torrent Management (`autoTMM`) with no
+ * `savepath`: the category's save path (set by ensureCategory) applies, and qBittorrent keeps its
+ * "incomplete downloads" folder. Without `autoTMM` the user's default mode applies, and Manual
+ * mode ignores the category path. When the category could not be ensured its path is unknown
+ * (Automatic mode would use the default folder plus the category name), so the add names the
+ * download folder itself in Manual mode. `autoTMM` needs qBittorrent 4.1.5+ (Web API 2.2.0).
+ */
+function placementFields(savePath?: string): Record<string, string> {
+  return savePath === undefined ? { autoTMM: 'true' } : { autoTMM: 'false', savepath: savePath };
+}
+
 export interface AddTorrentOptions {
   category?: string;
   tags?: string[];
@@ -282,16 +294,16 @@ export class QBittorrentService implements IDownloadClient {
     try {
       const category = options?.category || this.defaultCategory;
 
-      // Ensure category exists
-      await this.ensureCategory(category);
+      // Ensure category exists; if it can't be, the add names the folder itself (Manual mode)
+      const savePath = (await this.ensureCategory(category)) ? undefined : this.remoteSavePath();
 
       // Determine if this is a magnet link or .torrent file URL
       if (url.startsWith('magnet:')) {
         logger.info('[QBittorrent] Detected magnet link');
-        return await this.addMagnetLink(url, category, options);
+        return await this.addMagnetLink(url, category, options, savePath);
       } else {
         logger.info('[QBittorrent] Detected .torrent file URL');
-        return await this.addTorrentFile(url, category, options);
+        return await this.addTorrentFile(url, category, options, savePath);
       }
     } catch (error) {
       // Preserve source/indexer failures so the processor can try another release
@@ -403,7 +415,8 @@ export class QBittorrentService implements IDownloadClient {
   protected async addMagnetLink(
     magnetUrl: string,
     category: string,
-    options?: AddTorrentOptions
+    options?: AddTorrentOptions,
+    savePath?: string
   ): Promise<AddDownloadResult> {
     // Extract the btih (v1, hex or base32) and btmh (v2) hashes from the magnet link
     const magnet = decodedMagnet(magnetUrl); // the string parsed is the string sent
@@ -415,17 +428,15 @@ export class QBittorrentService implements IDownloadClient {
 
     logger.info(` Extracted info_hash from magnet: ${hashes.v1 ?? ''}${hashes.v2 ? ` (v2 ${hashes.v2})` : ''}`);
 
-    // Upload via 'urls' parameter
-    // Note: savepath is intentionally omitted — the category (managed by ensureCategory)
-    // defines the save path. Omitting per-torrent savepath allows qBittorrent to use
-    // Automatic Torrent Management, respecting the user's "incomplete downloads" temp folder.
-    // sequentialDownload is also omitted — left to qBittorrent's own settings.
+    // Upload via 'urls' parameter. Placement (autoTMM / savepath): see placementFields().
+    // sequentialDownload is omitted — left to qBittorrent's own settings.
     // ratioLimit and seedingTimeLimit are set to -1 (unlimited) so qBittorrent's
     // global seeding rules don't remove the torrent prematurely.
     // RMAB manages torrent lifecycle via the cleanup-seeded-torrents processor.
     const form = new URLSearchParams({
       urls: magnet,
       category,
+      ...placementFields(savePath),
       paused: options?.paused ? 'true' : 'false',
       ratioLimit: '-1',
       seedingTimeLimit: '-1',
@@ -449,7 +460,8 @@ export class QBittorrentService implements IDownloadClient {
   protected async addTorrentFile(
     torrentUrl: string,
     category: string,
-    options?: AddTorrentOptions
+    options?: AddTorrentOptions,
+    savePath?: string
   ): Promise<AddDownloadResult> {
     logger.info(` Downloading .torrent file from: ${urlForLog(torrentUrl)}`);
 
@@ -462,7 +474,7 @@ export class QBittorrentService implements IDownloadClient {
     });
     if (source.kind === 'magnet') {
       logger.info(' Download source resolved to a magnet link');
-      return await this.addMagnetLink(source.magnetUrl, category, options);
+      return await this.addMagnetLink(source.magnetUrl, category, options, savePath);
     }
 
     const torrentBuffer = source.data;
@@ -487,11 +499,8 @@ export class QBittorrentService implements IDownloadClient {
     logger.info(` Extracted info_hash: ${hashes.v1}${hashes.v2 ? ` (hybrid, v2 ${hashes.v2})` : ''}`);
     logger.info(` Torrent name: ${parsedTorrent.name || 'Unknown'}`);
 
-    // Upload .torrent file content via multipart/form-data
-    // Note: savepath is intentionally omitted — the category (managed by ensureCategory)
-    // defines the save path. Omitting per-torrent savepath allows qBittorrent to use
-    // Automatic Torrent Management, respecting the user's "incomplete downloads" temp folder.
-    // sequentialDownload is also omitted — left to qBittorrent's own settings.
+    // Upload .torrent file content via multipart/form-data. Placement: see placementFields().
+    // sequentialDownload is omitted — left to qBittorrent's own settings.
     // ratioLimit and seedingTimeLimit override qBittorrent's global seeding rules —
     // RMAB manages torrent lifecycle via the cleanup-seeded-torrents processor.
     const formData = new FormData();
@@ -502,6 +511,7 @@ export class QBittorrentService implements IDownloadClient {
       contentType: 'application/x-bittorrent',
     });
     formData.append('category', category);
+    for (const [name, value] of Object.entries(placementFields(savePath))) formData.append(name, value);
     formData.append('paused', options?.paused ? 'true' : 'false');
     formData.append('ratioLimit', '-1');
     formData.append('seedingTimeLimit', '-1');
@@ -524,14 +534,14 @@ export class QBittorrentService implements IDownloadClient {
    * Ensure category exists in qBittorrent with correct save path
    * Checks existing categories first, then creates or updates as needed
    * Applies reverse path mapping (local → remote) for remote seedbox scenarios
+   * Returns false when it could not (the add then sends the save path itself)
    */
-  protected async ensureCategory(category: string): Promise<void> {
+  protected async ensureCategory(category: string): Promise<boolean> {
     if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
-    // Apply reverse path mapping (local → remote) to get the path qBittorrent expects
-    const remoteSavePath = PathMapper.reverseTransform(this.defaultSavePath, this.pathMappingConfig);
+    const remoteSavePath = this.remoteSavePath();
 
     try {
       // First, get all categories to check if it exists and what save path it has
@@ -587,9 +597,10 @@ export class QBittorrentService implements IDownloadClient {
           logger.info(` Category "${category}" already has correct save path: ${remoteSavePath}`);
         }
       }
+      return true;
     } catch (error) {
-      // If we can't ensure the category, log error but don't throw
-      // Torrents can still be added with per-torrent savepath parameter
+      // If we can't ensure the category, log error but don't throw:
+      // addTorrent then sends the save path itself, in Manual mode
       if (axios.isAxiosError(error)) {
         logger.error(` Failed to ensure category "${category}":`, {
           status: error.response?.status,
@@ -600,7 +611,13 @@ export class QBittorrentService implements IDownloadClient {
       } else {
         logger.error('Failed to ensure category', { error: error instanceof Error ? error.message : String(error) });
       }
+      return false;
     }
+  }
+
+  /** The download folder as qBittorrent sees it (reverse path mapping, local → remote) */
+  private remoteSavePath(): string {
+    return PathMapper.reverseTransform(this.defaultSavePath, this.pathMappingConfig);
   }
 
   /**

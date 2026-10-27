@@ -5,6 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
+import { countUsersIn } from '../helpers/user-rows';
 
 let authRequest: any;
 
@@ -45,6 +46,23 @@ describe('Admin metrics route', () => {
 
     expect(payload.totalRequests).toBe(10);
     expect(payload.systemHealth.status).toBe('healthy');
+  });
+
+  it('does not count soft-deleted users in totalUsers', async () => {
+    prismaMock.request.count.mockResolvedValue(0);
+    prismaMock.user.count.mockImplementation(countUsersIn([
+      { id: 'u-admin', role: 'admin', deletedAt: null },
+      { id: 'u-active', role: 'user', deletedAt: null },
+      { id: 'u-gone-1', role: 'user', deletedAt: new Date('2026-01-01') },
+      { id: 'u-gone-2', role: 'admin', deletedAt: new Date('2026-02-01') },
+    ]));
+    prismaMock.$queryRaw.mockResolvedValueOnce(1);
+
+    const { GET } = await import('@/app/api/admin/metrics/route');
+    const response = await GET({} as Parameters<typeof GET>[0]);
+    const payload = await response.json();
+
+    expect(payload.totalUsers).toBe(2);
   });
 });
 

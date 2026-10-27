@@ -56,7 +56,7 @@ vi.mock('@/lib/utils/audiobook-matcher', () => ({ findPlexMatch: async () => ({ 
 const EXPECTED_FILTERS = { categories: [7020], indexerIds: [1], minSeeders: 0, maxResults: 100 };
 
 function makeRequest(body: Record<string, unknown>) {
-  return { json: async () => body } as any;
+  return { user: { id: 'admin-1', role: 'admin' }, json: async () => body } as any;
 }
 
 describe('interactive ebook search sends title + author to indexers', () => {
@@ -91,7 +91,7 @@ describe('interactive ebook search sends title + author to indexers', () => {
 
   describe('POST /api/requests/[id]/interactive-search-ebook', () => {
     beforeEach(() => {
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-1',
         type: 'ebook',
         status: 'failed',

@@ -464,7 +464,7 @@ export function useRequestWithTorrent() {
           throw new Error('This audiobook is being processed. It will be available in your library soon.');
         }
         if (data.error === 'AlreadyAvailable') {
-          throw new Error('This audiobook is already in your Plex library.');
+          throw new Error('This audiobook is already in your library.');
         }
         throw new Error(data.message || 'Failed to create request and download torrent');
       }

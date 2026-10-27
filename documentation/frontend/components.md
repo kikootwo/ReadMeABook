@@ -123,6 +123,9 @@ interface AudiobookDetailsModalProps {
   requestStatus?: string | null;
   isAvailable?: boolean;
   requestedByUsername?: string | null;
+  requestId?: string | null; // Request behind the card; Interactive Search picks for it (select-torrent / select-ebook) when own or admin and status is advanceable (`ADVANCEABLE_FROM_INTERACTIVE_SEARCH` / `EBOOK_ADVANCEABLE_FROM_INTERACTIVE_SEARCH`, `src/lib/constants/request-statuses.ts`)
+  requestedByUserId?: string | null; // Owner of requestId
+  requestType?: 'audiobook' | 'ebook'; // 'ebook' → Interactive Search searches ebook sources (with requestId when pending/failed/awaiting_search, else by ASIN)
   hideRequestActions?: boolean; // Hides sticky action bar for read-only contexts (BookDate, ShelvesSection)
   hasReportedIssue?: boolean;
   aiReason?: string | null;
@@ -134,7 +137,8 @@ interface BookSummaryProps {
 }
 
 interface RequestCardProps {
-  request: {id, status, progress, audiobook: {title, author, coverArtUrl?}, createdAt, updatedAt};
+  request: {id, type?, userId?, status, progress, audiobook: {title, author, coverArtUrl?, audibleAsin?}, createdAt, updatedAt};
+  // Passes id, userId and type to AudiobookDetailsModal so a My Requests pick goes to this request (#281)
   showActions?: boolean;
 }
 
@@ -152,6 +156,7 @@ interface InteractiveTorrentSearchModalProps {
   onClose: () => void;
   requestId: string;
   audiobook: {title: string, author: string};
+  onSuccess?: (outcome?: {needsApproval?: boolean}) => void; // ebook picks pass needsApproval; details modal toasts "submitted for approval"
 }
 
 interface ConfirmModalProps {
