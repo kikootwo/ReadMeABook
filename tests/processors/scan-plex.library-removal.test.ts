@@ -4,14 +4,14 @@
  *
  * When a delivered book leaves the library, both scan sites that move its
  * 'available' requests on (stale library record, orphaned audiobook) make it
- * 'failed' ("Removed from library") when its organized folder is gone too, and
- * keep 'downloaded' (wait for the next match) while the folder is still there.
+ * 'failed' ("Removed from library") when no audio is left in its organized
+ * folder, and keep 'downloaded' (wait for the next match) while audio is there.
  */
 
-import * as fs from 'fs/promises';
+import fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
 
 const prismaMock = createPrismaMock();
@@ -28,16 +28,31 @@ vi.mock('@/lib/services/thumbnail-cache.service', () => ({
   getThumbnailCacheService: () => ({ cacheLibraryThumbnail: vi.fn(async () => null) }),
 }));
 
+/** Written literally: the stored text must not change (existing rows are matched by equality). */
+const REMOVED_MESSAGE = 'Removed from library. Request it again to download it.';
+
 let root: string;
-let presentFolder: string;
-let goneFolder: string;
+const folders = {} as Record<'present' | 'gone' | 'coverOnly' | 'ebookOnly' | 'discs' | 'tooDeep', string>;
+
+/** Create `folder` holding `files` (paths relative to it). */
+async function folderWith(folder: string, files: string[]): Promise<string> {
+  await fs.mkdir(folder, { recursive: true });
+  for (const file of files) {
+    await fs.mkdir(path.dirname(path.join(folder, file)), { recursive: true });
+    await fs.writeFile(path.join(folder, file), 'data');
+  }
+  return folder;
+}
 
 beforeAll(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'rmab-214-'));
-  presentFolder = path.join(root, 'Author', 'Kept Book');
-  await fs.mkdir(presentFolder, { recursive: true });
-  await fs.writeFile(path.join(presentFolder, 'Kept Book.m4b'), 'audio');
-  goneFolder = path.join(root, 'Author', 'Deleted Book'); // never created: the user deleted it
+  const author = path.join(root, 'Author');
+  folders.present = await folderWith(path.join(author, 'Kept Book'), ['Kept Book.m4b', 'cover.jpg']);
+  folders.gone = path.join(author, 'Deleted Book'); // never created: the user deleted it
+  folders.coverOnly = await folderWith(path.join(author, 'Cover Left'), ['cover.jpg']);
+  folders.ebookOnly = await folderWith(path.join(author, 'Ebook Left'), ['Ebook Left.epub', 'cover.jpg']);
+  folders.discs = await folderWith(path.join(author, 'Disc Book'), ['cover.jpg', 'Disc 1/01.mp3', 'Disc 2/01.mp3']);
+  folders.tooDeep = await folderWith(path.join(author, 'Deep Book'), ['cover.jpg', 'extras/old/01.mp3']);
 });
 
 afterAll(async () => {
@@ -62,10 +77,27 @@ async function scan({ stale = [], linked = [] }: { stale?: Book[]; linked?: Book
   return processScanPlex({ jobId: 'job-214' });
 }
 
+/** Scan with one stale book at `filePath`; returns the data its request was updated with. */
+async function scanStaleBookAt(filePath: string | null): Promise<Record<string, unknown>> {
+  await scan({ stale: [{ id: 'ab-x', title: 'Some Book', filePath, requests: [{ id: 'req-x', status: 'available' }] }] });
+  return requestUpdates()['req-x'];
+}
+
 /** The data each request was updated with, by request id. */
 function requestUpdates(): Record<string, Record<string, unknown>> {
   const calls = prismaMock.request.update.mock.calls as [{ where: { id: string }; data: Record<string, unknown> }][];
   return Object.fromEntries(calls.map(([args]) => [args.where.id, args.data]));
+}
+
+/** Make `method` reject with `code` for `target` only (real behavior for every other path). */
+function rejectFor(method: 'stat' | 'readdir', target: string, code: string) {
+  const real = fs[method].bind(fs) as (...args: unknown[]) => Promise<unknown>;
+  const spy = vi.spyOn(fs, method).mockImplementation((async (p: unknown, ...rest: unknown[]) => {
+    if (p === target) throw Object.assign(new Error(`${code}: ${method} ${target}`), { code });
+    return real(p, ...rest);
+  }) as never);
+  onTestFinished(() => spy.mockRestore());
+  return spy;
 }
 
 beforeEach(async () => {
@@ -84,35 +116,59 @@ beforeEach(async () => {
 
 describe('library scan: delivered book removed from the library (#214)', () => {
   it('stale library record, folder gone: the request becomes failed "Removed from library"', async () => {
-    const result = await scan({ stale: [{ id: 'ab-1', title: 'Deleted Book', filePath: goneFolder, requests: [{ id: 'req-1', status: 'available' }] }] });
+    const result = await scan({ stale: [{ id: 'ab-1', title: 'Deleted Book', filePath: folders.gone, requests: [{ id: 'req-1', status: 'available' }] }] });
 
     expect(result.success).toBe(true);
-    expect(requestUpdates()['req-1']).toMatchObject({ status: 'failed', errorMessage: expect.stringContaining('Removed from library') });
+    expect(requestUpdates()['req-1']).toMatchObject({ status: 'failed', errorMessage: REMOVED_MESSAGE });
     expect(prismaMock.plexLibrary.delete).toHaveBeenCalledWith({ where: { id: 'stale-1' } });
   });
 
   it('orphaned audiobook, folder gone: the request becomes failed "Removed from library"', async () => {
-    await scan({ linked: [{ id: 'ab-2', title: 'Deleted Book', filePath: goneFolder, absItemId: 'missing-guid', requests: [{ id: 'req-2', status: 'available' }] }] });
+    await scan({ linked: [{ id: 'ab-2', title: 'Deleted Book', filePath: folders.gone, absItemId: 'missing-guid', requests: [{ id: 'req-2', status: 'available' }] }] });
 
-    expect(requestUpdates()['req-2']).toMatchObject({ status: 'failed', errorMessage: expect.stringContaining('Removed from library') });
+    expect(requestUpdates()['req-2']).toMatchObject({ status: 'failed', errorMessage: REMOVED_MESSAGE });
   });
 
   it('no organized folder on record: the request becomes failed (nothing left to wait for)', async () => {
-    await scan({ stale: [{ id: 'ab-3', title: 'Matched Only', filePath: null, requests: [{ id: 'req-3', status: 'available' }] }] });
-
-    expect(requestUpdates()['req-3']).toMatchObject({ status: 'failed', errorMessage: expect.stringContaining('Removed from library') });
+    expect(await scanStaleBookAt(null)).toMatchObject({ status: 'failed', errorMessage: REMOVED_MESSAGE });
   });
 
-  it.each(['stale', 'linked'] as const)('%s site, folder still on disk: the request stays downloaded with no error', async (site) => {
-    const book: Book = { id: 'ab-4', title: 'Kept Book', filePath: presentFolder, absItemId: 'missing-guid', requests: [{ id: 'req-4', status: 'available' }] };
+  it.each([
+    ['only cover.jpg', 'coverOnly'],
+    ['only an ebook and its cover', 'ebookOnly'],
+    ['audio deeper than a disc folder only', 'tooDeep'],
+  ] as const)('folder left with %s: the request becomes failed', async (_label, folder) => {
+    expect(await scanStaleBookAt(folders[folder])).toMatchObject({ status: 'failed', errorMessage: REMOVED_MESSAGE });
+  });
+
+  it.each(['stale', 'linked'] as const)('%s site, m4b still in the folder: the request stays downloaded with no error', async (site) => {
+    const book: Book = { id: 'ab-4', title: 'Kept Book', filePath: folders.present, absItemId: 'missing-guid', requests: [{ id: 'req-4', status: 'available' }] };
     await scan({ [site]: [book] });
 
     expect(requestUpdates()['req-4'].status).toBe('downloaded');
     expect(requestUpdates()['req-4']).not.toHaveProperty('errorMessage');
   });
 
+  it('audio in disc folders under the book folder: the request stays downloaded', async () => {
+    expect(await scanStaleBookAt(folders.discs)).toMatchObject({ status: 'downloaded' });
+  });
+
+  it('book folder that cannot be checked (EACCES on stat): counts as present, stays downloaded', async () => {
+    const stat = rejectFor('stat', folders.gone, 'EACCES');
+
+    expect(await scanStaleBookAt(folders.gone)).toMatchObject({ status: 'downloaded' });
+    expect(stat).toHaveBeenCalledWith(folders.gone);
+  });
+
+  it('book folder that cannot be listed (EACCES on readdir): counts as present, stays downloaded', async () => {
+    const readdir = rejectFor('readdir', folders.coverOnly, 'EACCES');
+
+    expect(await scanStaleBookAt(folders.coverOnly)).toMatchObject({ status: 'downloaded' });
+    expect(readdir).toHaveBeenCalledWith(folders.coverOnly, expect.anything());
+  });
+
   it('book still in the library: its request is not touched', async () => {
-    await scan({ linked: [{ id: 'ab-5', title: 'Current Book', filePath: goneFolder, plexGuid: 'guid-1', requests: [{ id: 'req-5', status: 'available' }] }] });
+    await scan({ linked: [{ id: 'ab-5', title: 'Current Book', filePath: folders.gone, plexGuid: 'guid-1', requests: [{ id: 'req-5', status: 'available' }] }] });
 
     expect(prismaMock.request.update).not.toHaveBeenCalled();
     expect(prismaMock.audiobook.update).not.toHaveBeenCalled();
@@ -121,7 +177,7 @@ describe('library scan: delivered book removed from the library (#214)', () => {
   it('only available requests move: a failed or cancelled one on the same book is left alone', async () => {
     await scan({
       stale: [{
-        id: 'ab-6', title: 'Deleted Book', filePath: goneFolder,
+        id: 'ab-6', title: 'Deleted Book', filePath: folders.gone,
         requests: [{ id: 'req-6a', status: 'available' }, { id: 'req-6b', status: 'cancelled' }, { id: 'req-6c', status: 'failed' }],
       }],
     });
@@ -130,7 +186,7 @@ describe('library scan: delivered book removed from the library (#214)', () => {
   });
 
   it('queues no search, download or notification for the removed book', async () => {
-    await scan({ stale: [{ id: 'ab-7', title: 'Deleted Book', filePath: goneFolder, requests: [{ id: 'req-7', status: 'available' }] }] });
+    await scan({ stale: [{ id: 'ab-7', title: 'Deleted Book', filePath: folders.gone, requests: [{ id: 'req-7', status: 'available' }] }] });
 
     expect(requestUpdates()['req-7'].status).toBe('failed');
     expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();

@@ -37,7 +37,7 @@ const LONG_AGO = new Date(Date.now() - 400 * 86_400_000); // every automatic bac
 /** The owner's request, failed by the library scan after the book left the library. */
 const REMOVED = {
   id: 'req-removed', userId: OWNER, audiobookId: 'book-1', type: 'audiobook', status: 'failed',
-  errorMessage: 'Removed from library: its files are gone too. Request it again to download it.',
+  errorMessage: 'Removed from library. Request it again to download it.',
   customSearchTerms: null, createdAt: LONG_AGO, updatedAt: LONG_AGO, autoRerequestCount: 0, deletedAt: null,
 };
 
