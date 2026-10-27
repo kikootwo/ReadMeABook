@@ -36,7 +36,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - Extracts significant words from request (filters stop words: "the", "a", "an", "of", "on", "in", "at", "by", "for")
 - **Parenthetical/bracketed content is optional**: Content in () [] {} 【】 (and fullwidth （）［］｛｝, folded first) treated as subtitle (may be omitted from torrents); so is text after the first subtitle split (`splitSubtitle`, `match-normalize.ts`): `:` or `：`, a dash with spaces on both sides (` - ` ` – ` ` — `), or `. ` after a number or a word of 4+ letters (#466). Not a split: a hyphen inside a word (`Spider-Man`), initials and short abbreviations (`A. J.`, `Mr. Mercedes`), `prof capt corp dept bros hrsg`
   - "Primal Hunter 1. Une aventure de LitRPG" → Required: ["primal", "hunter", "1"], Optional: ["une", "aventure", "litrpg"]
-  - A bare number right before the split is the series position: left out of the 80% coverage count (unless it is the only required word), read by G4a/G4c ([match-gates.md](match-gates.md))
+  - A bare number right before the split is the series position: left out of the 80% coverage count (unless it is the only required word, or the release names another position: G4c conflict, then it counts as missing), read by G4a/G4c ([match-gates.md](match-gates.md))
   - "We Are Legion (We Are Bob)" → Required: ["we", "are", "legion"], Optional: ["bob"]
   - "Title [Series Name]" → Required: ["title"], Optional: ["series", "name"]
   - "Book Title {Extra Info}" → Required: ["book", "title"], Optional: ["extra", "info"]
@@ -390,7 +390,6 @@ const bestEbook = ranked[0];  // Safe to auto-download
 - **#323 (large ebooks hidden):** interactive ebook search dropped results > 20 MB, so a large PDF that was the only result showed nothing. Fixed by `enforceSizeCap` (automatic only); pinned in `tests/utils/ranking-ebook-size-cap.test.ts`, `tests/api/interactive-search-ebook-size-cap.routes.test.ts` and `tests/processors/search-ebook-size-cap.test.ts`
 - **#466 (apostrophe rows):** `L.Intruse…` for "L'intruse", `Changer.L.Eau.Des.Fleurs…`, `Enders.Game…` for "Ender's Game" scored 0 at word coverage (the apostrophe was kept in the word). Fixed by the apostrophe fold; pinned in `tests/utils/ranking-match-gates.test.ts`
 - **#466 (subtitle rows):** `Primal.Hunter.T01…` for "Primal Hunter 1. Une aventure de LitRPG" and `C.Etait.Ca.Ou.Mourir…` for "C'était ça ou mourir - Prix du Roman FNAC 2026" scored 0: only brackets and `:` made a subtitle optional. Fixed by `splitSubtitle` (now 33.3 and 27.3, as the colon form); a different book after the same series or author name loses to the requested one. Pinned in `tests/utils/ranking-subtitle-split.test.ts`, `match-normalize.test.ts`, `match-gates.test.ts`
-- **Known limit (#466):** interactive search orders `Primal Hunter 2 - Zogarth` (44.1) above `Primal.Hunter.T01…` (33.3) for "Primal Hunter 1. …", as it does for the colon form; automatic search rejects it (G4c)
 - **Known limit:** a release that splits an English ending (`Ender.s.Game`) misses `enders` (on main only a request with a curly `’` matched it)
 - **Known limit:** a request written without the apostrophe ("Enders Game") does not match `Ender’s Game` (as on main): a release possessive needs the apostrophe in the request, so "The Titans" never matches `The Titan's Curse`
 

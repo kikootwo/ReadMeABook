@@ -456,13 +456,18 @@ export class RankingAlgorithm {
     const coverageWords = requiredWords.map(foldNumberWord);
     const torrentWords = foldReleaseWords(extractWords(torrentTitle, stopWords));
 
+    const catalog = { series: audiobook.series, seriesPart: audiobook.seriesPart };
+
     // Calculate word coverage: how many REQUIRED words appear in TORRENT
     if (coverageWords.length > 0) {
       // The series position written before a subtitle split ("Die Tribute von Panem 1. Tödliche Spiele")
-      // is not a title word: G4a skips it and G4c reads it. Coverage skips it too, unless it is the only word
+      // is not a title word: G4a skips it and G4c reads it. Coverage skips it too (#466), unless it is the
+      // only word or the release names another position (G4c conflict: then it counts as missing)
       const splitPositions = splitPositionNumbers(audiobook.title);
       const nonPositionWords = coverageWords.filter(w => !splitPositions.has(w));
-      const countedWords = nonPositionWords.length > 0 ? nonPositionWords : coverageWords;
+      const skipPositions = nonPositionWords.length > 0 && nonPositionWords.length < coverageWords.length &&
+        !volumeConflict(audiobook.title, release, stopWords, characterReplacements, catalog);
+      const countedWords = skipPositions ? nonPositionWords : coverageWords;
       const matchedWords = countedWords.filter(word => isWordInTitle(word, torrentWords, torrentTitle));
       // HARD REQUIREMENT: Must have 80%+ coverage of REQUIRED words (a title of only stop words skips this)
       if (matchedWords.length / countedWords.length < 0.80) return 0;
@@ -474,7 +479,6 @@ export class RankingAlgorithm {
     // Interactive search (requireAuthor: false) shows all results. Rules: match-gates.md (G3)
     if (requireAuthor && !isAuthorPresent(torrentTitle, normalizedAuthors)) return 0;
     // G4c: the request (title or catalog series part) names one position and the release names another
-    const catalog = { series: audiobook.series, seriesPart: audiobook.seriesPart };
     if (requireAuthor && volumeConflict(audiobook.title, release, stopWords, characterReplacements, catalog)) return 0;
     // G4b: a one-word title must start a name element of the release (left boundary only)
     const shortWord = shortTitleWord(requiredWords);

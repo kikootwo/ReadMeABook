@@ -79,12 +79,23 @@ describe('the part before the split names several books: the requested one still
     expect(ranked[0].breakdown.matchScore).toBeGreaterThan(ranked[1].breakdown.matchScore);
   });
 
-  it('automatic: series and position before ". ": another volume is rejected, the requested one kept', () => {
+  it.each([true, false])('series and position before ". ": another volume scores 0, the requested one does not (automatic: %s)', (auto) => {
     const title = 'Primal Hunter 1. Une aventure de LitRPG';
     const right = 'Primal.Hunter.T01.Zogarth.2024.FR.[MP3.128.KBPS]-NOTAG';
-    expect(match(right, title, 'Zogarth', 'fr')).toBeGreaterThan(0);
-    expect(match('Primal.Hunter.T02.Zogarth.2024.FR.[MP3.128.KBPS]-NOTAG', title, 'Zogarth', 'fr')).toBe(0);
-    expect(match('Primal Hunter 2 - Zogarth [M4B]', title, 'Zogarth', 'fr')).toBe(0);
+    expect(match(right, title, 'Zogarth', 'fr', auto)).toBeGreaterThan(0);
+    expect(match('Primal.Hunter.T02.Zogarth.2024.FR.[MP3.128.KBPS]-NOTAG', title, 'Zogarth', 'fr', auto)).toBe(0);
+    expect(match('Primal Hunter 2 - Zogarth [M4B]', title, 'Zogarth', 'fr', auto)).toBe(0);
+  });
+
+  it.each([
+    ['de: ". "', 'Suzanne Collins - Die Tribute von Panem - Tödliche Spiele (ungekürzt) [MP3]', 'Die Tribute von Panem 1. Tödliche Spiele', 'Suzanne Collins'],
+    ['de: " - "', 'Sarah J. Maas - Throne of Glass - Die Erwählte [MP3]', 'Throne of Glass 1 - Die Erwählte', 'Sarah J. Maas'],
+  ])('a release that leaves out the position still clears the threshold (#459, %s)', (_name, release, title, author) => {
+    for (const auto of [true, false]) {
+      const [ranked] = rankAll([release], title, author, 'de', auto);
+      expect(ranked.breakdown.matchScore).toBeGreaterThan(40);
+      expect(ranked.score).toBeGreaterThanOrEqual(50);
+    }
   });
 
   it('a release that names the author after " - " is still a complete title', () => {
