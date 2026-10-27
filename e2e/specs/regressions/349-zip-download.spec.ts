@@ -62,8 +62,9 @@ test('349: a multi-file request downloads as one zip with flat entry names and t
   const oddName = 'Disc 2\\Extra track.mp3';
   asApp(`cd ${q(dir)}\ncp ${q(tracks[0])} ${q(oddName)}`);
 
+  // Hash from stdin: sha256sum escapes a file name argument holding '\' and prefixes its line with '\'
   const onDisk = Object.fromEntries(
-    asApp(`cd ${q(dir)}\nfor f in *.mp3; do printf '%s\\t%s\\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$f"; done`)
+    asApp(`cd ${q(dir)}\nfor f in *.mp3; do printf '%s\\t%s\\n' "$(sha256sum < "$f" | cut -d' ' -f1)" "$f"; done`)
       .trim().split('\n').map((line) => { const [sha, name] = line.split('\t'); return [name, sha]; })
   );
 
