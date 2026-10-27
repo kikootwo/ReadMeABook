@@ -157,7 +157,7 @@ describe('deleted requests refuse searches and picks (#470)', () => {
       const result = await call(INTERACTIVE_SEARCH, 'ab-live', {}, OWNER);
 
       expect(result.status).toBe(200);
-      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith('Title', 'Author', expect.objectContaining({ indexerIds: [1] }));
+      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith('Title', 'Author', expect.objectContaining({ indexerIds: [1] }), { exactTitle: false });
     });
   });
 
