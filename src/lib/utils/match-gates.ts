@@ -14,10 +14,14 @@ const NUMBER_WORDS = new Map(Object.entries({
   eleven: '11', twelve: '12', thirteen: '13', fourteen: '14', fifteen: '15', sixteen: '16', seventeen: '17',
   eighteen: '18', nineteen: '19', twenty: '20',
 }));
-/** Words that name a volume, glued to its number (t01, vol3, bk1) or followed by it (book 2): one list for G1, G4a, G4c */
+/** Words that name a volume, glued to its number (t01, vol3, bk1) or followed by it (book 2): one list for G1, G4a, G4b */
 const VOLUME_WORDS = ['t', 'tome', 'vol', 'volume', 'v', 'book', 'bk', 'livre'];
 const VOLUME_WORD_SET = new Set(VOLUME_WORDS);
 const VOLUME_TOKEN_RE = new RegExp(`^(?:${VOLUME_WORDS.join('|')})0*(\\d{1,3})$`);
+/** G4c positions: the same words without v, since a glued v2 is often a re-release tag, not volume 2 */
+const POSITION_WORDS = VOLUME_WORDS.filter((word) => word !== 'v');
+const POSITION_WORD_SET = new Set(POSITION_WORDS);
+const POSITION_TOKEN_RE = new RegExp(`^(?:${POSITION_WORDS.join('|')})0*(\\d{1,3})$`);
 
 const stripZeros = (digits: string): string => digits.replace(/^0+(?=\d)/, '');
 const escapeRe = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -206,6 +210,7 @@ export function shortTitleStandsAlone(release: string, ctx: ShortTitleContext): 
     let j = i;
     while (j > 0 && leading.has(tokens[j - 1])) j--;
     return j === 0 || gaps.slice(j, i + 1).some((gap) => isSeparatorGap(gap, delimiters)) ||
+      DIGITS_RE.test(tokens[j - 1]) || VOLUME_TOKEN_RE.test(tokens[j - 1]) ||
       endsWithAuthor(tokens.slice(0, j), ctx.authors);
   });
 }
@@ -214,11 +219,11 @@ export function shortTitleStandsAlone(release: string, ctx: ShortTitleContext): 
 
 /** A volume range ("Book 1-7", "T1-T3", "1 to 3"); read as the set of positions it holds */
 const RANGE_RE = new RegExp(
-  `(?<![\\p{L}\\p{N}])((?:${VOLUME_WORDS.join('|')})\\.?\\s*)?0*(\\d{1,3})\\s*(?:[-–—]|to)\\s*` +
-  `(?:(?:${VOLUME_WORDS.join('|')})\\.?\\s*)?0*(\\d{1,3})(?![\\p{N}])`, 'giu');
+  `(?<![\\p{L}\\p{N}])((?:${POSITION_WORDS.join('|')})\\.?\\s*)?0*(\\d{1,3})\\s*(?:[-–—]|to)\\s*` +
+  `(?:(?:${POSITION_WORDS.join('|')})\\.?\\s*)?0*(\\d{1,3})(?![\\p{N}])`, 'giu');
 const RANGE_TOKEN_RE = /^(\d{1,3})to(\d{1,3})$/;
 /** A bare number followed by one of these is a size, length or bitrate, not a position */
-const UNIT_RE = /^(?:kbps|kbs|kb|k|khz|bit|bits|hrs?|h|mins?|cds?|mb|gb)$/;
+const UNIT_RE = /^(?:kbps|kbs|kb|k|khz|bit|bits|hrs?|hours?|h|mins?|cds?|discs?|parts?|tracks?|books|mb|gb)$/;
 
 /** Tokens for position reading: "#12" reads as "book 12", a range as one "NtoM" token */
 const positionTokens = (text: string, characterReplacements?: Record<string, string>): string[] =>
@@ -241,9 +246,9 @@ function numberValues(token: string | undefined): string[] | null {
 
 /** The positions named at token i ("t03", "book 2", "vol 1to3"; with bare, also "2") and the tokens spanned */
 function positionAt(tokens: string[], i: number, bare = false): { values: string[]; span: number } | null {
-  const glued = VOLUME_TOKEN_RE.exec(tokens[i] ?? '');
+  const glued = POSITION_TOKEN_RE.exec(tokens[i] ?? '');
   if (glued) return { values: [stripZeros(glued[1])], span: 1 };
-  if (VOLUME_WORD_SET.has(tokens[i])) {
+  if (POSITION_WORD_SET.has(tokens[i])) {
     const values = numberValues(tokens[i + 1]);
     if (values) return { values, span: 2 };
   }

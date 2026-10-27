@@ -53,7 +53,6 @@ describe('automatic search: wrong books are rejected by a gate', () => {
     ['You Like It Darker (It Grows on You, ...)', 'Stephen King - You Like It Darker (It Grows on You, Rattlesnakes) [M4B]', ...IT],
     ['a list of titles', 'Stephen King - Billy Summers, It, The Stand [M4B]', ...IT],
     ['The It Crowd', 'The It Crowd by Stephen King [M4B]', ...IT],
-    ['a number before the word', 'Stephen King - Book 1 It Grows on You [M4B]', ...IT, big],
     ['dash-only name, author first', 'Stephen-King-You-Like-It-Darker-ENG-M4B', ...IT, big],
     ['dash-only name, author last', 'You-Like-It-Darker-Stephen-King-M4B', ...IT, big],
     ['dash-only name, article not in the request', 'Lee-Child-The-Getaway-Car-MatchUp', 'Getaway', 'Lee Child'],
@@ -94,6 +93,7 @@ describe('automatic search: a one-word title is checked on its left only', () =>
     ['F2, dash-only name', 'It-Grows-On-You-by-Stephen-King-M4B', ...IT, 18.214, big],
     ['F2 with a bitrate', 'Stephen King - It Grows on You 64kbps MP3', ...IT, 17.813],
     ['F2 after a colon', 'Stephen King - You Like It Darker: It Grows on You [M4B]', ...IT, 17.195],
+    ['a number before the word', 'Stephen King - Book 1 It Grows on You [M4B]', ...IT, 17.903, big],
     ['It Ends With Us', 'It Ends With Us by Stephen King [M4B]', ...IT, 18.214],
     ['Pin Drop for Pin', 'Pin Drop by Stephen King [M4B]', 'Pin', 'Stephen King', 22.5],
     ['Mistborn sequel, no separator', 'Mistborn The Well of Ascension by Brandon Sanderson [M4B]', 'Mistborn', 'Brandon Sanderson', 26.887],
@@ -132,6 +132,10 @@ describe('automatic search: right books still clear the threshold', () => {
     ['leading bracket tag', '[M4B] Dune - Frank Herbert', ...DUNE],
     ['leading parenthesis tag', '(Audiobook) Dune by Frank Herbert', ...DUNE],
     ['number right before an occurrence', 'Dune Chronicles 01 Dune Frank Herbert M4B', ...DUNE],
+    ['series number right before a one-word title', 'Brandon Sanderson - Stormlight Archive 3 Oathbringer [M4B]', 'Oathbringer', 'Brandon Sanderson'],
+    ['series number right before a one-word title, two-word series', 'Suzanne Collins - Hunger Games 3 Mockingjay [M4B]', 'Mockingjay', 'Suzanne Collins'],
+    ['dotted series number before a one-word title', 'Terry.Pratchett.Discworld.04.Mort.MP3', 'Mort', 'Terry Pratchett'],
+    ['dotted series number before a one-word title, one-word series', 'Hugh.Howey.Silo.01.Wool.MP3', 'Wool', 'Hugh Howey'],
     ['numbered pass-only, as on main', 'Dune Book 1 by Frank Herbert [M4B]', ...DUNE],
     ['a bitrate number after the series name', 'Frank Herbert Dune 64 kbps MP3', ...DUNE_1],
     ['a disc count after the series name', 'Frank Herbert Dune 2 CD MP3', ...DUNE_1],
@@ -225,12 +229,24 @@ describe('automatic search: the right book wins against its sibling', () => {
     [...DUNE_1, 'Frank Herbert - Dune [M4B]', [['Frank Herbert - Dune [M4B]', 20, '2024-01-01'], ['Frank Herbert - Dune Chronicles 2 - Dune Messiah [M4B]', 20, '2025-01-01']]],
     [...DUNE_1, 'Frank Herbert - Dune [M4B]', [['Frank Herbert - Dune [M4B]', 5, '2024-01-01'], ['Dune Chronicles 2 - Dune Messiah - Frank Herbert', 80, '2025-01-01']]],
     ['Wool (Silo, Book 1)', 'Hugh Howey', 'Hugh Howey - Wool [M4B]', [['Hugh Howey - Wool [M4B]', 5, '2024-01-01'], ['Hugh Howey - Wool Silo 3', 80, '2025-01-01']]],
+    ['Wool (Silo, Book 1)', 'Hugh Howey', 'Hugh Howey - Silo 1 Wool [M4B]', [['Hugh Howey - Silo 1 Wool [M4B]', 20, '2024-01-01'], ['Hugh Howey - Wool 2 - Proper Gauge [M4B]', 20, '2023-01-01']]],
     [...DUNE, 'Frank.Herbert.Dune.Unabridged.M4B', [['Frank.Herbert.Dune.Unabridged.M4B', 15, '2024-01-01'], ['Frank Herbert - Children of Dune [M4B]', 15, '2023-01-01']]],
     [...DUNE, 'Frank.Herbert.Dune.64kbps.MP3', [['Frank.Herbert.Dune.64kbps.MP3', 40, '2024-01-01'], ['Frank Herbert - Children of Dune [M4B]', 10, '2025-01-01'], ['Frank Herbert - God Emperor of Dune [M4B]', 10, '2025-01-01']]],
     [...FOUNDATION, 'Isaac.Asimov.Foundation.Unabridged.MP3', [['Isaac.Asimov.Foundation.Unabridged.MP3', 40, '2024-01-01'], ['Isaac Asimov - Second Foundation [M4B]', 10, '2025-01-01']]],
     ['Hyperion', 'Dan Simmons', 'Dan Simmons - Hyperion (Unabridged) [M4B]', [['Dan Simmons - Hyperion (Unabridged) [M4B]', 40, '2024-01-01'], ['Dan Simmons - The Fall of Hyperion [M4B]', 10, '2025-01-01']]],
   ])('%s: %s', (title, author, expected, releases) => {
     expect(pick(title, author, releases)).toBe(expected);
+  });
+});
+
+describe('automatic search: words that do not name a position score as on main', () => {
+  // [case, release, title, author, main matchScore]: a glued v2 can be a re-release tag; a number before a unit word is a length
+  it.each<[string, string, string, string, number]>([
+    ['a glued v2', 'Matt Dinniman - Dungeon Crawler Carl v2 [M4B]', 'Dungeon Crawler Carl (book 1)', 'Matt Dinniman', 45],
+    ['a number before Hours', 'Robert Jordan - The Eye of the World - Wheel of Time 29 Hours [M4B]', 'The Eye of the World (The Wheel of Time, Book 1)', 'Robert Jordan', 60],
+    ['a number before Discs', 'Veronica Roth - Divergent 2 Discs [MP3]', ...DIVERGENT, 34.459],
+  ])('%s', (_name, release, title, author, mainMatch) => {
+    expect(rank(release, title, author).match).toBeCloseTo(mainMatch, 2);
   });
 });
 

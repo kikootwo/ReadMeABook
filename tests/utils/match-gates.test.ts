@@ -106,7 +106,7 @@ describe('one-word titles (G4b)', () => {
     ['Stephen King - You Like It Darker: It Grows on You', true],
     ['You Like It Darker by Stephen King', false],
     ['Stephen King - Billy Summers, It, The Stand', false],
-    ['Stephen King - Book 1 It Grows on You', false],
+    ['Stephen King - Book 1 It Grows on You', true], // a number or volume token before the word is a left boundary
     ['The It Crowd by Stephen King', false], // "the" is not part of the request
   ])('It: %s → %s', (release, expected) => {
     expect(shortTitleStandsAlone(release, ctx('it', ['stephen king']))).toBe(expected);
