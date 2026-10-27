@@ -26,6 +26,7 @@ const SearchSchema = z.object({
   title: z.string(),
   author: z.string(),
   asin: z.string().optional(), // Optional ASIN for runtime-based size scoring
+  exactTitle: z.boolean().optional(), // the user edited the title: sent as given, no fallback queries (#316)
 });
 
 /**
@@ -48,7 +49,7 @@ export async function POST(request: NextRequest) {
       const bodyResult = await readJsonBody(req);
       if (!bodyResult.ok) return bodyResult.response;
       const body = bodyResult.data;
-      const { title, author, asin } = SearchSchema.parse(body);
+      const { title, author, asin, exactTitle } = SearchSchema.parse(body);
 
       // Get enabled indexers from configuration
       const { getConfigService } = await import('@/lib/services/config.service');
@@ -108,7 +109,7 @@ export async function POST(request: NextRequest) {
           const groupResults = await prowlarr.searchWithVariations(title, author, {
             categories: group.categories,
             indexerIds: group.indexerIds,
-          });
+          }, { exactTitle: exactTitle === true });
 
           logger.debug(`Group ${i + 1} returned ${groupResults.length} results`);
           allResults.push(...groupResults);

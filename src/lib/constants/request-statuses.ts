@@ -38,3 +38,12 @@ export const EBOOK_ADVANCEABLE_FROM_INTERACTIVE_SEARCH = [
   'failed',
   'awaiting_search',
 ] as const;
+
+/**
+ * errorMessage of an audiobook request the library scan failed because the book
+ * left the library and no audio is left in its organized folder (#214). Users
+ * may request it again; automatic callers (shelf sync, watched lists) never do.
+ * Do not reword: auto-rerequest.ts finds these requests by equality on this
+ * exact text, so a reworded constant silently stops matching existing rows.
+ */
+export const REMOVED_FROM_LIBRARY_MESSAGE = 'Removed from library. Request it again to download it.';

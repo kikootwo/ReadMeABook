@@ -5,7 +5,10 @@
 
 import { compareTwoStrings } from 'string-similarity';
 import { matchesByInitials } from './author-initials';
-import { foldForMatching, FULLWIDTH_RE, fromFullwidth, hasNonLatinLetter, hasUnspacedScript, isWordInTitle, normalizeForMatching } from './match-normalize';
+import {
+  apostropheEndingWords, foldForMatching, FULLWIDTH_RE, fromFullwidth, hasNonLatinLetter, hasUnspacedScript, isWordInTitle,
+  keepUnrequestedApostrophes, normalizeForMatching,
+} from './match-normalize';
 import {
   authorAppears, colonSubtitleAgrees, foldNumberWord, foldReleaseWords, isAuthorPresent, missingRequiredNumber,
   shortTitleStandsAlone, shortTitleWord, splitPositionNumbers, volumeConflict,
@@ -358,8 +361,10 @@ export class RankingAlgorithm {
     customStopWords?: string[],
     characterReplacements?: Record<string, string>
   ): number {
+    // A release word with an apostrophe ending matches only a request word written with one (#316)
+    const release = keepUnrequestedApostrophes(torrent.title, apostropheEndingWords(audiobook.title, characterReplacements), characterReplacements);
     // Normalize for matching (handles CamelCase, punctuation separators, diacritics)
-    const torrentTitle = normalizeForMatching(torrent.title, characterReplacements);
+    const torrentTitle = normalizeForMatching(release, characterReplacements);
     const requestTitle = normalizeForMatching(audiobook.title, characterReplacements);
     // Fail closed: a title with no letters or digits left cannot be matched
     if (!requestTitle) return 0;
@@ -451,21 +456,21 @@ export class RankingAlgorithm {
     // Interactive search (requireAuthor: false) shows all results. Rules: match-gates.md (G3)
     if (requireAuthor && !isAuthorPresent(torrentTitle, normalizedAuthors)) return 0;
     // G4c: the request names one series position and the release names another right after the title
-    if (requireAuthor && volumeConflict(audiobook.title, torrent.title, stopWords, characterReplacements)) return 0;
+    if (requireAuthor && volumeConflict(audiobook.title, release, stopWords, characterReplacements)) return 0;
     // G4b: a one-word title must start a name element of the release (left boundary only)
     const shortWord = shortTitleWord(requiredWords);
     if (requireAuthor && shortWord) {
       const requiredTokens = (requiredTitle || requestTitle).split(' ');
       const leadingWords = requiredTokens.slice(0, Math.max(0, requiredTokens.indexOf(shortWord)));
       const context = { word: shortWord, authors: normalizedAuthors, leadingWords, characterReplacements };
-      if (!shortTitleStandsAlone(torrent.title, context)) return 0;
+      if (!shortTitleStandsAlone(release, context)) return 0;
     }
 
     // ========== STAGE 2: TITLE MATCHING (0-35 points) ==========
     let titleScore = 0;
 
     // Folded torrent title that keeps the markers ([ ] ( ) :) normalization removes, for suffix/prefix checks
-    const torrentTitleOriginal = foldForMatching(torrent.title, characterReplacements);
+    const torrentTitleOriginal = foldForMatching(release, characterReplacements);
 
     // Try matching with full title first, then fall back to required title (without parentheses)
     const titlesToTry = [requestTitle];

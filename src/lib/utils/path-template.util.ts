@@ -1,10 +1,12 @@
 /**
  * Path Template Engine Utility
- * Documentation: documentation/backend/services/file-organizer.md
+ * Documentation: documentation/phase3/file-organization.md
  *
  * Provides template variable substitution, validation, and preview generation
  * for audiobook file organization paths.
  */
+
+import { capFilenameBytes, capPathComponents } from './path-component';
 
 /**
  * Template variables for path substitution
@@ -215,7 +217,9 @@ export function substituteTemplate(
   result = result.replace(new RegExp(LBRACE_PLACEHOLDER, 'g'), '{');
   result = result.replace(new RegExp(RBRACE_PLACEHOLDER, 'g'), '}');
 
-  return result;
+  // The per-variable cap counts characters; a folder name is limited to 255 bytes,
+  // which non-Latin text or several variables in one component can pass (#264)
+  return capPathComponents(result);
 }
 
 /**
@@ -570,12 +574,11 @@ export function buildRenamedFilename(
     .replace(/\s+/g, ' ')
     .slice(0, 200);
 
-  if (index !== undefined) {
-    baseName = `${baseName} - ${index}`;
-  }
+  const indexSuffix = index !== undefined ? ` - ${index}` : '';
 
   // Ensure extension starts with a dot
   const ext = originalExtension.startsWith('.') ? originalExtension : `.${originalExtension}`;
 
-  return `${baseName}${ext}`;
+  // Fit 255 bytes, cutting the name only so " - N" and the extension stay whole (#264)
+  return capFilenameBytes(baseName, `${indexSuffix}${ext}`);
 }

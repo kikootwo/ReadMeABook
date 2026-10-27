@@ -10,6 +10,7 @@ import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
 import { TorrentResult } from '../utils/ranking-algorithm';
 import { RMABLogger } from '../utils/logger';
 import { urlForLog } from '../utils/prowlarr-url';
+import { fallbackTitles, hasUsableResult, searchQueries } from './prowlarr-query-variations';
 
 // Module-level logger
 const logger = RMABLogger.create('Prowlarr');
@@ -31,6 +32,11 @@ export interface SearchFilters {
   minSeeders?: number;
   maxResults?: number;
   indexerIds?: number[];
+}
+
+export interface SearchVariationOptions {
+  /** Custom search terms (admin's, or typed in interactive search): sent as given, no fallback pass */
+  exactTitle?: boolean;
 }
 
 export interface IndexerCategory {
@@ -224,30 +230,50 @@ export class ProwlarrService {
   }
 
   /**
-   * Search with multiple query variations to increase coverage
-   * Fires 2 queries per call: "title author" and "title", then deduplicates by guid.
-   * Blank author (or both queries identical after trimming): "title" only, once.
+   * Search with query variations, then deduplicate by guid.
+   * First pass: "title author" then "title" (blank author: "title" once; no query is ever empty).
+   * Fallback pass (#316), only when the first pass found nothing that names the title: the title
+   * without punctuation inside its words, then without its subtitle, each as "variation author"
+   * then "variation", stopping at the first query that names the title. Skipped for an exact
+   * title (custom search terms) and when every first-pass query failed.
    */
   async searchWithVariations(
     title: string,
     author: string,
-    filters?: SearchFilters
+    filters?: SearchFilters,
+    options: SearchVariationOptions = {}
   ): Promise<TorrentResult[]> {
-    const combined = `${title} ${author ?? ''}`;
-    const queries = combined.trim() === title.trim() ? [title] : [combined, title];
-
-    logger.info(`Searching with ${queries.length} query variations`, { queries });
-
     const allResults: TorrentResult[] = [];
+    const sent: string[] = [];
+    let succeeded = 0;
 
-    for (const query of queries) {
+    const run = async (query: string): Promise<TorrentResult[]> => {
+      sent.push(query);
       try {
         const results = await this.search(query, filters);
         logger.info(`Query "${query}" returned ${results.length} results`);
+        succeeded++;
         allResults.push(...results);
+        return results;
       } catch (error) {
         logger.error(`Query "${query}" failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
         // Continue with other queries even if one fails
+        return [];
+      }
+    };
+
+    const queries = searchQueries(title, author);
+    logger.info(`Searching with ${queries.length} query variations`, { queries });
+    for (const query of queries) await run(query);
+
+    if (!options.exactTitle && succeeded > 0 && !hasUsableResult(title, allResults)) {
+      const fallback: string[] = [];
+      for (const variation of fallbackTitles(title)) fallback.push(...searchQueries(variation, author, [...sent, ...fallback]));
+      if (fallback.length > 0) {
+        logger.info('First pass found nothing that names the title; trying fallback variations', { queries: fallback });
+      }
+      for (const query of fallback) {
+        if (hasUsableResult(title, await run(query))) break;
       }
     }
 

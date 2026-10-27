@@ -43,7 +43,7 @@ Extra checks inside `scoreMatch` (`src/lib/utils/ranking-algorithm.ts`, helpers 
 - A request that writes `12:` without `#` lets through a sibling that omits the number, scored as on main (`Op-Center: Out of the Ashes`, `He Who Fights with Monsters II`)
 - Numbers: spelled-out above twenty, Roman numerals, or a release that omits a required number (`Op-Center: War of Eagles` for "#12") fail; half of a split book (`The Way of Kings … Vol 2` for "(Book 1)") fails
 - G3: genitive forms (`Стивена Кинга`) fail the gate
-- Not handled: apostrophes in titles (`L'intruse` vs `L.Intruse`)
+- Apostrophes fold before matching (#466, [ranking-algorithm.md](ranking-algorithm.md)): `L'intruse` matches `L.Intruse`, `Ender's Game` matches `Enders.Game`; a release possessive matches only a request that has the apostrophe there ("The Titans" never matches `The Titan's Curse`). Not handled: subtitles after `. ` / ` - ` stay required (#466)
 
 ## Tests
 - `tests/utils/ranking-match-gates.test.ts`: wrong-book table, let-through table (main's scores), must-pass table, ebook, races (the right book must win), interactive

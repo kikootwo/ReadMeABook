@@ -147,11 +147,28 @@ describe('Audiobooks search torrents route', () => {
     expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith('Title', 'Author', {
       categories: [3030],
       indexerIds: [1],
-    });
+    }, { exactTitle: false });
     expect(payload.results).toHaveLength(100);
     expect(payload.results[0]).toEqual(expect.objectContaining({ title: 'Best result', rank: 1 }));
     expect(payload.truncated).toBe(true);
     expect(payload.rawCount).toBe(101);
+  });
+
+  it('sends a title the user edited as given, with no fallback queries (#316)', async () => {
+    authRequest.json.mockResolvedValue({ title: 'Custom Title', author: 'Author', exactTitle: true });
+    configServiceMock.get
+      .mockResolvedValueOnce(JSON.stringify([{ id: 1, name: 'Indexer', protocol: 'torrent', priority: 10 }]))
+      .mockResolvedValueOnce(null);
+    groupIndexersMock.mockReturnValue({ groups: [{ categories: [3030], indexerIds: [1] }], skippedIndexers: [] });
+    prowlarrMock.searchWithVariations.mockResolvedValue([]);
+
+    const { POST } = await import('@/app/api/audiobooks/search-torrents/route');
+    await POST({} as never);
+
+    expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith('Custom Title', 'Author', {
+      categories: [3030],
+      indexerIds: [1],
+    }, { exactTitle: true });
   });
 });
 

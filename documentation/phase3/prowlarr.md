@@ -18,15 +18,19 @@ Indexer aggregator for searching multiple torrent/usenet indexers simultaneously
 
 ## Search Strategy
 
-**Search Query:** `searchWithVariations(title, author)` (`src/lib/integrations/prowlarr.service.ts`)
-- Two queries per indexer group, sequentially: `"title author"` then `"title"`; results merged and deduplicated by guid
+**Search Query:** `searchWithVariations(title, author, filters, { exactTitle })` (`src/lib/integrations/prowlarr.service.ts`, query helpers in `prowlarr-query-variations.ts`)
+- First pass, per indexer group, sequentially: `"title author"` then `"title"`; results merged and deduplicated by guid
 - The second query runs even when the first returns results; a failed query is logged and skipped
-- Blank author (or both queries identical after trimming) → `"title"` once
+- Blank author (or both queries identical after trimming, ignoring case) → `"title"` once; a blank query is never sent
+- **Fallback pass (#316):** only when the first pass returned nothing that names the title (no result holds 80% of the title's words before its subtitle; close to ranking's Stage 1 coverage, with apostrophes and numbers folded the same way, but always with English stop words, and a number's `. ` also starts a subtitle, where ranking splits at `:` only). Variations, each as `"variation author"` then `"variation"`, skipping any query already sent; stops at the first query whose results name the title:
+  1. Stripped: only when a word has punctuation inside it; apostrophes fold (`Anarchist's` → `Anarchists`, `L'intruse` → `L intruse`), other punctuation → space (`Op-Center` → `Op Center`)
+  2. Subtitle-free: text before the first `:` or a number's `. ` (`Primal Hunter 1. Une aventure` → `Primal Hunter 1`), stripped too when needed; none when nothing is left (`: Title`) or the base has under 3 letters and digits and no non-Latin letter (`Re:Zero` sends no `Re`; `三体` is sent)
+- No fallback when `exactTitle` or when every first-pass query failed. `exactTitle`: the request's `customSearchTerms` (automatic search, interactive search); a title edited in interactive search on a request (`customTitle`), on the ebook routes, and with no request (`POST /api/audiobooks/search-torrents` body `exactTitle: true`, sent by the modal when the title differs from the book's)
 - Used by every indexer search: audiobook automatic, manual and interactive search, and ebook automatic and interactive search
 - `"title author"` finds the right book when a short or common title fills `maxResults`; `"title"` keeps the broad net for indexers that miss the combined query
 - Custom title replaces `title`; the request's author is still sent. Automatic search: the request's custom search terms. Interactive: `customTitle` from the body (audiobook interactive search also falls back to custom search terms; ebook interactive routes do not)
 - Ranking algorithm filters out mismatches using author/narrator
-- **Cost:** 2 Prowlarr searches per indexer group per search, 1 with a blank author (matters for indexers with daily API caps)
+- **Cost:** 2 Prowlarr searches per indexer group per search, 1 with a blank author (matters for indexers with daily API caps). Fallback pass: up to 4 more, only after a first pass that found nothing usable
 
 **Extended Search:** Enabled (`extended=1`) - searches title, tags, labels, and metadata fields
 
@@ -116,6 +120,9 @@ interface TorrentResult {
 - Author name must appear in torrent title
 - At least 2 title words (>2 chars) must match
 - First match triggers search job (no duplicates)
+
+## Fixed Issues
+- **#316:** titles with an apostrophe ("The Dungeon Anarchist's Cookbook") found nothing on indexers whose names drop it. Fallback pass sends the stripped title; ranking folds apostrophes (#466). Includes PR #304's subtitle-free query (colon split, guarded against an empty base, custom terms left intact)
 
 ## Tech Stack
 

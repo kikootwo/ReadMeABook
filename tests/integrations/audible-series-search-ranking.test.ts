@@ -210,3 +210,17 @@ describe('series search card fields', () => {
     expect(results[0].tags).toEqual(['Military', 'Epic', 'Science Fiction']);
   });
 });
+
+describe('series match share: apostrophes fold like ranking (#466)', () => {
+  it.each([
+    ["Ender's Game", 'enders game', 'en', 1], // main: 0.5
+    ['Ender’s Game', "ender's game", 'en', 1], // main: 0.5 (curly vs straight)
+    ["L'Héritage", 'heritage', 'fr', 1], // main: 0
+    ["Ender's Game", "ender's game", 'en', 1],
+    ["Ender's Game", 'ender', 'en', 1], // half-typed last word
+  ] as const)('%s for "%s" (%s) -> %s', async (title, query, lang, share) => {
+    const { matchShare } = await import('@/lib/integrations/audible-series-rank');
+    const { LANGUAGE_CONFIGS } = await import('@/lib/constants/language-config');
+    expect(matchShare(title, query, LANGUAGE_CONFIGS[lang])).toBe(share);
+  });
+});

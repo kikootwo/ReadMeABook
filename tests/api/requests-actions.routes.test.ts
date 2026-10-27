@@ -207,7 +207,7 @@ describe('Request action routes', () => {
     expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith('Title', 'Author', {
       categories: [3030],
       indexerIds: [1],
-    });
+    }, { exactTitle: false });
     expect(payload.results).toHaveLength(100);
     expect(payload.results[0]).toEqual(expect.objectContaining({ title: 'Best result', rank: 1 }));
     expect(payload.truncated).toBe(true);

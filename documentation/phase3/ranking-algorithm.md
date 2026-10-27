@@ -14,10 +14,10 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - All titles and author names are normalized before matching
 - **CamelCase splitting:** `"TheCorrespondent"` → `"the correspondent"`
 - **Punctuation to spaces:** `"Twelve.Months-Jim"` → `"twelve months jim"`
-- **Preserves apostrophes:** `"O'Brien"` remains `"o'brien"`
+- **Apostrophes fold** (`foldApostrophes`, #466): `' ’ ‘ ‛` count as one; before an English ending (`s t d m ll re ve`) dropped, else a space. `Ender's` → `enders` (matches `Enders.Game`), `L'intruse` → `l intruse` (matches `L.Intruse`), `O'Brien` → `o brien`. Same in `foldForMatching`, so Stage 2 marker lookups agree. **Release side** (`keepUnrequestedApostrophes`, run first in `scoreMatch` and in the Prowlarr fallback check): a release word with an apostrophe ending folds only when the request writes that word with one (`apostropheEndingWords`); otherwise the apostrophe stays as `ꞌ` (U+A78C, a Latin letter), so the word stays whole and matches no plain word, as before #316. `The Lover's Dictionary` does not match "The Lovers"; `Enders.Game` and `Ender's Game` match "Ender's Game"; G3 author names allow a trailing `ꞌs` like `'s`
 - Handles common indexer naming patterns (NZB, torrent scene releases)
 - **Every script kept** (`src/lib/utils/match-normalize.ts`): letters, marks and digits of any script survive (`\p{L}\p{M}\p{N}`); everything else becomes a space
-- **Other consumer:** Bulk Import grouping keys (`src/lib/utils/bulk-import-keys.ts`) are built with `normalizeForMatching`, so a change here shifts which files group as one book ([bulk-import.md](../features/bulk-import.md))
+- **Other consumers:** Bulk Import grouping keys (`src/lib/utils/bulk-import-keys.ts`) are built with `normalizeForMatching`, so a change here shifts which files group as one book ([bulk-import.md](../features/bulk-import.md)); keys drop every non-letter, so the apostrophe fold leaves them unchanged. Series search match share (`src/lib/integrations/audible-series-rank.ts`): apostrophe titles now match either spelling (`enders game` → "Ender's Game" 0.5 → 1)
 - **Folds:** accents (NFD, drop U+0300–036F, NFC; Greek tonos and Cyrillic ё/й fold too), Greek ς→σ, fullwidth ASCII → ASCII, `ø→o æ→ae œ→oe ß→ss ł→l đ ð→d þ→th ı→i ħ→h`; emoji presentation selectors (U+FE00–FE0F, U+E0100–E01EF, keycap U+20E3) dropped
 - **CJK/Thai next to ASCII** gets a space: `哈利波特与魔法石Harry` → `哈利波特与魔法石 harry`, `三体2` → `三体 2`, `ラブストーリー2` → `ラブストーリー 2` (Script_Extensions, so shared marks like `ー` count)
 - **Accepted changes vs. before #424 (Latin):** ø now behaves like ö, so `Bjørn` no longer matches `Bjoern` (`Björn`/`Bjoern` never did); non-ASCII letters or digits in a Latin title (π, µ, α, ², º, ʻ) are now part of it, so `The Joy of π` no longer matches `The Joy of Pi`
@@ -366,6 +366,11 @@ const ranked = rankEbookTorrents(prowlarrResults, {
 
 const bestEbook = ranked[0];  // Safe to auto-download
 ```
+
+## Fixed Issues
+- **#466 (apostrophe rows):** `L.Intruse…` for "L'intruse", `Changer.L.Eau.Des.Fleurs…`, `Enders.Game…` for "Ender's Game" scored 0 at word coverage (the apostrophe was kept in the word). Fixed by the apostrophe fold; pinned in `tests/utils/ranking-match-gates.test.ts`. Subtitles after `. ` / ` - ` (same issue) still open
+- **Known limit:** a release that splits an English ending (`Ender.s.Game`) misses `enders` (on main only a request with a curly `’` matched it)
+- **Known limit:** a request written without the apostrophe ("Enders Game") does not match `Ender’s Game` (as on main): a release possessive needs the apostrophe in the request, so "The Titans" never matches `The Titan's Curse`
 
 ## Tech Stack
 

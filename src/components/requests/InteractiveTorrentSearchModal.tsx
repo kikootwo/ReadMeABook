@@ -269,7 +269,7 @@ export function InteractiveTorrentSearchModal({
         data = await searchByRequestId(requestId, customTitle);
       } else {
         const audiobookAsin = fullAudiobook?.asin || asin;
-        data = await searchByAudiobook(searchTitle, audiobook.author, audiobookAsin);
+        data = await searchByAudiobook(searchTitle, audiobook.author, audiobookAsin, searchTitle !== audiobook.title);
       }
       setResults(data || []);
     } catch (err) {
