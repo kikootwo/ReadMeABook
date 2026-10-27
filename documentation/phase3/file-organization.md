@@ -271,8 +271,8 @@ exiftool "audiobook.m4b" | grep -i asin
 1. Find requests with status 'available' or soft-deleted (orphaned downloads)
 2. Query qBittorrent for actual `seeding_time` field
 3. **CRITICAL: Check if torrent hash is shared by other active requests**
-   - If yes → Skip torrent deletion, only hard-delete the soft-deleted request record
-   - If no → Delete torrent + files
+   - Any of them not finished, or not done seeding by its own indexer (#283) → Skip torrent deletion, only hard-delete the soft-deleted request record
+   - Else → Delete torrent + files, mark every sharing row removed ([request-deletion.md](../admin-features/request-deletion.md))
 4. Delete torrent + files only after seeding requirement met
 5. Respects config (0 = never cleanup)
 
