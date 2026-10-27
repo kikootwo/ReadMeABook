@@ -376,11 +376,11 @@ describe('useRequests hooks', () => {
           { asin: 'a5', title: 'Book', author: 'Author' } as any,
           { title: 'Torrent' }
         )
-      ).rejects.toThrow('already in your Plex library');
+      ).rejects.toThrow('This audiobook is already in your library.');
     });
 
     await waitFor(() => {
-      expect(result.current.error).toContain('already in your Plex library');
+      expect(result.current.error).toContain('This audiobook is already in your library.');
     });
   });
 });
