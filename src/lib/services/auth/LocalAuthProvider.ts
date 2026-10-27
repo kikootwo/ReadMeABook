@@ -17,6 +17,7 @@ import { getConfigService } from '@/lib/services/config.service';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { getRegistrationRefusal, REJECTED_ACCOUNT_ERROR } from './local-account-status';
 
 const logger = RMABLogger.create('LocalAuth');
 
@@ -70,15 +71,16 @@ export class LocalAuthProvider implements IAuthProvider {
       }
 
       // Check registration status
-      if (user.registrationStatus === 'pending_approval') {
+      const refusal = getRegistrationRefusal(user.registrationStatus);
+      if (refusal === 'pending_approval') {
         return {
           success: false,
           requiresApproval: true,
         };
       }
 
-      if (user.registrationStatus === 'rejected') {
-        return { success: false, error: 'Account has been rejected' };
+      if (refusal === 'rejected') {
+        return { success: false, error: REJECTED_ACCOUNT_ERROR };
       }
 
       // Verify password
@@ -295,7 +297,7 @@ export class LocalAuthProvider implements IAuthProvider {
         return false;
       }
 
-      if (user.registrationStatus === 'pending_approval' || user.registrationStatus === 'rejected') {
+      if (getRegistrationRefusal(user.registrationStatus)) {
         return false;
       }
 

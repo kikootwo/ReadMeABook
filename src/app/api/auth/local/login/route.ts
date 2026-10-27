@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { LocalAuthProvider } from '@/lib/services/auth/LocalAuthProvider';
 import { RMABLogger } from '@/lib/utils/logger';
 import { readJsonBody, AUTH_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
+import { PENDING_APPROVAL_MESSAGE } from '@/lib/services/auth/local-account-status';
 
 const logger = RMABLogger.create('API.Auth.LocalLogin');
 
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           success: false,
           pendingApproval: true,
-          message: 'Account pending admin approval.',
+          message: PENDING_APPROVAL_MESSAGE,
         });
       }
       logger.error('Login failed', { error: result.error });
