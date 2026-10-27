@@ -22,12 +22,15 @@ export function pickUserAgent(): string {
 }
 
 /** Build a full set of realistic browser headers for the given UA */
-export function getBrowserHeaders(userAgent: string): Record<string, string> {
+export function getBrowserHeaders(userAgent: string): Record<string, string | false> {
   return {
     'User-Agent': userAgent,
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
+    // Audible's CloudFront 503s storefront requests that carry any Accept-Encoding
+    // (even `identity`) and serves the same request without it. `false` also stops
+    // axios adding its default `gzip, compress, deflate, br` on Node.
+    'Accept-Encoding': false,
     'Connection': 'keep-alive',
     'Sec-Fetch-Site': 'none',
     'Sec-Fetch-Mode': 'navigate',

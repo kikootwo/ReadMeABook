@@ -38,13 +38,17 @@ describe('getBrowserHeaders', () => {
     expect(headers['User-Agent']).toBe('TestUA/1.0');
     expect(headers['Accept']).toBeDefined();
     expect(headers['Accept-Language']).toBeDefined();
-    expect(headers['Accept-Encoding']).toBeDefined();
     expect(headers['Connection']).toBeDefined();
     expect(headers['Sec-Fetch-Site']).toBeDefined();
     expect(headers['Sec-Fetch-Mode']).toBeDefined();
     expect(headers['Sec-Fetch-Dest']).toBeDefined();
     expect(headers['Sec-Fetch-User']).toBeDefined();
     expect(headers['Upgrade-Insecure-Requests']).toBeDefined();
+  });
+
+  it('suppresses Accept-Encoding, which makes Audible\'s CloudFront answer 503', () => {
+    // false, not omitted: axios on Node adds its own Accept-Encoding when the key is absent
+    expect(getBrowserHeaders('TestUA/1.0')['Accept-Encoding']).toBe(false);
   });
 });
 
