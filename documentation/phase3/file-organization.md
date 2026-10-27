@@ -11,8 +11,10 @@ Target directory read from database config `media_dir` (configurable in setup wi
 **Template-based organization:**
 - Config key: `audiobook_path_template`
 - Default: `{author}/{title} {asin}`
-- Variables: `{author}`, `{title}`, `{narrator}`, `{asin}`, `{year}`
-- Optional variables (narrator, asin, year) are removed if not available
+- Variables: `{author}`, `{primaryAuthor}`, `{title}`, `{narrator}`, `{asin}`, `{year}`, `{series}`, `{seriesPart}` (`src/lib/utils/path-template.util.ts`)
+- Optional variables (narrator, asin, year, series, seriesPart) are removed if not available
+- `{primaryAuthor}`: first entry of `author`, split on `,` `;` `&` (the bulk import set), skipping entries that sanitize to nothing; derived in `src/lib/utils/path-template-variables.ts`. `and` does not split. A comma always splits, so `Martin Luther King, Jr.` gives `Martin Luther King` and `Tolkien, J.R.R.` gives `Tolkien`. Role text stays (`Birgit Schmitz - Übersetzer`). No usable entry → empty, like an empty `{narrator}`
+- Paths are built at organize time only: a template change applies to books organized afterward. Existing folders are not moved; re-importing a book after a change lands it in the new folder
 
 **Examples:**
 ```
@@ -24,6 +26,9 @@ Result: Douglas Adams/The Hitchhiker's Guide to the Galaxy (2005)/
 
 Template: {author}/{narrator}/{title}
 Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
+
+Template: {primaryAuthor}/{title}   (author "Douglas Preston, Lincoln Child")
+Result: Douglas Preston/Relic/
 ```
 
 **Legacy behavior (hardcoded):**

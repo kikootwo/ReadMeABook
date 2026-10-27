@@ -15,10 +15,14 @@ Provides template variable substitution, validation, and preview generation for 
 
 ## Supported Variables
 
-- `{author}` - Audiobook author name
+- `{author}` - Full author string
+- `{primaryAuthor}` - First author: `author` split on `,` `;` `&`, first entry that sanitizes to something (`and` does not split; `Martin Luther King, Jr.` gives `Martin Luther King`)
 - `{title}` - Audiobook title
 - `{narrator}` - Audiobook narrator (optional)
 - `{asin}` - Amazon ASIN identifier (optional)
+- `{year}` - Release year (optional)
+- `{series}` - Series name (optional)
+- `{seriesPart}` - Series part or position (optional)
 
 ## API Reference
 
@@ -65,7 +69,7 @@ const result = validateTemplate('{author}/{title}');
 // Returns: { valid: true }
 
 const invalid = validateTemplate('{invalid}/{title}');
-// Returns: { valid: false, error: "Unknown variable: {invalid}. Valid variables are: {author}, {title}, {narrator}, {asin}" }
+// Returns: { valid: false, error: "No valid variable found in conditional block: {invalid}. Valid variables are: {author}, {primaryAuthor}, {title}, {narrator}, {asin}, {year}, {series}, {seriesPart}" }
 ```
 
 ### `generateMockPreviews(template: string): string[]`
@@ -95,7 +99,7 @@ Get list of valid template variable names.
 **Example:**
 ```typescript
 const variables = getValidVariables();
-// Returns: ['author', 'title', 'narrator', 'asin']
+// Returns: ['author', 'primaryAuthor', 'title', 'narrator', 'asin', 'year', 'series', 'seriesPart']
 ```
 
 ## Usage Examples
