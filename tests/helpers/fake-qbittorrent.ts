@@ -81,6 +81,8 @@ export class FakeQbittorrent {
   scanDelayMs = 0;
   /** Unfiltered /torrents/info answers HTTP 503, a JSON object instead of a list, or HTTP 403 once */
   listFault: '' | '503' | 'not-a-list' | '403-once' = '';
+  /** /torrents/categories answers HTTP 500 (RMAB cannot ensure its category) */
+  categoryFault = false;
   readonly requests: FakeRequest[] = [];
   private torrents: Record_[] = [];
   private pending: Record_[] = [];
@@ -187,7 +189,10 @@ export class FakeQbittorrent {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const raw = Buffer.concat(chunks).toString('latin1');
-    const form = (req.headers['content-type'] ?? '').includes('urlencoded') ? Object.fromEntries(new URLSearchParams(raw)) : {};
+    const type = req.headers['content-type'] ?? '';
+    const form = type.includes('urlencoded') ? Object.fromEntries(new URLSearchParams(raw))
+      : type.includes('multipart/form-data') ? Object.fromEntries([...raw.matchAll(/name="([^"]+)"\r\n\r\n([^\r]*)\r\n/g)].map((m) => [m[1], m[2]])) // text parts; file parts carry a filename
+      : {};
     const params = { ...Object.fromEntries(url.searchParams), ...form };
     this.requests.push({ path: url.pathname, params });
     const targets = () => this.select(params.hashes);
@@ -195,6 +200,7 @@ export class FakeQbittorrent {
       case '/api/v2/auth/login':
         return { status: 200, body: 'Ok.', headers: { 'Set-Cookie': 'SID=fake; HttpOnly; path=/' } };
       case '/api/v2/torrents/categories':
+        if (this.categoryFault) return { status: 500, body: 'Internal Server Error' };
         return { status: 200, body: { readmeabook: { savePath: '/downloads' } } };
       case '/api/v2/torrents/info':
         if (params.hashes === undefined && this.scanDelayMs) await new Promise((r) => setTimeout(r, this.scanDelayMs));
@@ -234,7 +240,7 @@ export class FakeQbittorrent {
   }
 
   reset(): void {
-    Object.assign(this, { version: '5.2', libtorrent: '2', lateAdds: false, scanDelayMs: 0, listFault: '', torrents: [], pending: [] });
+    Object.assign(this, { version: '5.2', libtorrent: '2', lateAdds: false, scanDelayMs: 0, listFault: '', categoryFault: false, torrents: [], pending: [] });
     this.requests.length = 0;
   }
 

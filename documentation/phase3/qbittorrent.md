@@ -89,6 +89,7 @@ Service uses singleton pattern for performance. When settings change (via admin 
 - Handles config changes: if user changes `download_dir` or `customPath`, category updates automatically
 - Uses both `createCategory` and `editCategory` APIs for reliability
 - Remote path mapping applied after `customPath` resolution (outgoing: local → remote)
+- Adds send `autoTMM=true`, no `savepath` (category path applies in any default mode); if the category can't be ensured: `autoTMM=false` + `savepath` (#326, `placementFields()`)
 
 **Why Both Create and Edit:**
 1. Create: Ensures category exists (idempotent, won't fail if exists)
@@ -278,6 +279,7 @@ type TorrentState =
 - Reporting the indexer, release, and upstream status instead of blaming a healthy qBittorrent instance
 **18. Magnet at a later redirect hop (#298)** - Only the first `Location` was checked; later hops went through axios, which cannot follow `magnet:`. Fixed by the shared fetcher (`download-source.ts`): every hop checked, relative redirects resolved, Prowlarr key sent only to Prowlarr download hops (see [download-clients.md](./download-clients.md#source-fetch--prowlarr-key-scoping))
 **19. Hybrid torrents and base32 magnets tracked under the wrong hash (#422)** - qBittorrent's ID for a hybrid is its truncated v2 hash; RMAB used v1 (5.2 adds reported failed, older versions never found) and kept base32 magnet hashes as base32. Fixed (`qbittorrent-ids.ts`): stored `downloadClientId` = qBittorrent's confirmed ID (5.2 receipt; after `Ok.` the v2 ID if listed, else v1); `torrentHash` = v1; every add checks the full list first (fail closed). Old rows (v1 of a hybrid, base32) resolve through the unfiltered lookup, no rewrite, and the ownership check (#423) decides on what they find. So deleting or retrying an old failed request now reaches the torrent it resolves to, with its files, when the ownership window owns it (24 h before the grab for v1.2.11 rows, 15 min before to 5 min after for older rows): RMAB's own, or, for a duplicate recorded on qBittorrent 4.4 (4.5-5.1: mismatched `btmh` only), a user's hybrid (see Critical Issues)
+**20. Category save path ignored in Manual mode (#326)** - Adds sent the category but no `savepath` and no `autoTMM`, so with qBittorrent's default Torrent Management Mode set to Manual the torrent went to the global default folder and the import failed. Fixed: adds send `autoTMM=true` (no `savepath`, the "incomplete downloads" folder still applies); when `ensureCategory()` fails, `autoTMM=false` + `savepath` = resolved download path. Needs qBittorrent 4.1.5+ (Web API 2.2.0; 4.1.0 to 4.1.4 ignore `autoTMM`). Automatic mode: a post-import category or a later category path change can make qBittorrent move the files (its "When Torrent Category changed" / "When Category Save Path changed" settings)
 
 ## Tech Stack
 

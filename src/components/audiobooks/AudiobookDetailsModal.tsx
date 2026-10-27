@@ -24,7 +24,7 @@ import { FolderArrowDownIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
 import { EyeSlashIcon as EyeSlashSolidIcon } from '@heroicons/react/24/solid';
 import { fetchWithAuth } from '@/lib/utils/api';
 import { useIsIgnored, useToggleIgnore } from '@/lib/hooks/useIgnoredAudiobooks';
-import { ADVANCEABLE_FROM_INTERACTIVE_SEARCH } from '@/lib/constants/request-statuses';
+import { ADVANCEABLE_FROM_INTERACTIVE_SEARCH, EBOOK_ADVANCEABLE_FROM_INTERACTIVE_SEARCH } from '@/lib/constants/request-statuses';
 
 interface AudiobookDetailsModalProps {
   asin: string;
@@ -41,6 +41,8 @@ interface AudiobookDetailsModalProps {
   requestId?: string | null;
   /** Owner of the in-flight request (matcher-populated). Used together with the viewer's id/role to gate advance-vs-create routing. */
   requestedByUserId?: string | null;
+  /** Type of the request behind requestId. 'ebook' (My Requests ebook card) makes Interactive Search search ebooks for it. */
+  requestType?: 'audiobook' | 'ebook';
   hideRequestActions?: boolean;
   hasReportedIssue?: boolean;
   aiReason?: string | null;
@@ -87,6 +89,7 @@ export function AudiobookDetailsModal({
   requestedByUsername = null,
   requestId = null,
   requestedByUserId = null,
+  requestType = 'audiobook',
   hideRequestActions = false,
   hasReportedIssue = false,
   aiReason = null,
@@ -130,10 +133,14 @@ export function AudiobookDetailsModal({
   // Advance the existing request via select-torrent (instead of creating a new one)
   // only when the viewer owns the request, or is admin, AND the status is one we route on.
   // Outside this predicate the search modal falls back to today's "create new request" path.
+  const isEbookRequest = requestType === 'ebook';
+  const advanceableStatuses: readonly string[] = isEbookRequest
+    ? EBOOK_ADVANCEABLE_FROM_INTERACTIVE_SEARCH
+    : ADVANCEABLE_FROM_INTERACTIVE_SEARCH;
   const shouldAdvance = !!requestId
     && !!user
     && (requestedByUserId === user.id || user.role === 'admin')
-    && (ADVANCEABLE_FROM_INTERACTIVE_SEARCH as readonly string[]).includes(effectiveStatus ?? '');
+    && advanceableStatuses.includes(effectiveStatus ?? '');
   const advanceRequestId = shouldAdvance ? requestId ?? undefined : undefined;
 
   useEffect(() => {
@@ -181,7 +188,12 @@ export function AudiobookDetailsModal({
       showNotification('Please log in to request audiobooks', 'error');
       return;
     }
-    setShowInteractiveSearch(true);
+    // An ebook request searches ebook sources (for that request when advanceable, else by ASIN)
+    if (isEbookRequest) {
+      setShowInteractiveSearchEbook(true);
+    } else {
+      setShowInteractiveSearch(true);
+    }
   };
 
   const handleFetchEbook = async () => {
@@ -836,10 +848,11 @@ export function AudiobookDetailsModal({
               setShowInteractiveSearchEbook(false);
               revalidateEbookStatus();
             }}
-            onSuccess={() => {
+            onSuccess={(outcome) => {
               revalidateEbookStatus();
-              showNotification('Ebook download started!');
+              showNotification(outcome?.needsApproval ? 'Ebook request submitted for approval!' : 'Ebook download started!');
             }}
+            requestId={isEbookRequest ? advanceRequestId : undefined}
             asin={asin}
             audiobook={{
               title: audiobook.title,

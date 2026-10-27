@@ -20,8 +20,19 @@ import { sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 import { guardTorrentSelection, rejectedSelectionResponse } from '@/lib/services/download-selection-guard';
 import { hideStoredPick } from '@/lib/services/request-detail-query';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { resolveAutoApprove } from '@/lib/utils/permissions';
 
 const logger = RMABLogger.create('API.RequestWithTorrent');
+
+/** 409 reply for a pick on a book whose request is already done or in flight (any user). */
+const IN_FLIGHT_REPLIES: Record<string, { error: string; message: string }> = {
+  available: { error: 'AlreadyAvailable', message: 'This audiobook is already in your library' },
+  downloaded: { error: 'BeingProcessed', message: 'This audiobook is being processed and will be available soon' },
+  downloading: { error: 'BeingProcessed', message: 'This audiobook is being processed and will be available soon' },
+  processing: { error: 'BeingProcessed', message: 'This audiobook is being processed and will be available soon' },
+  awaiting_import: { error: 'BeingProcessed', message: 'This audiobook is being processed and will be available soon' },
+  awaiting_approval: { error: 'AwaitingApproval', message: 'A request for this audiobook is already awaiting admin approval' },
+};
 
 const RequestWithTorrentSchema = z.object({
   audiobook: z.object({
@@ -81,15 +92,16 @@ export async function POST(request: NextRequest) {
       if (!torrentCheck.ok) return rejectedSelectionResponse(torrentCheck.error);
       const torrent = torrentCheck.value;
 
-      // First check: Is there an existing audiobook request in 'downloaded' or 'available' status?
-      // This catches the gap where files are organized but Plex hasn't scanned yet
+      // First check (any user): a request for this book that is already in the library,
+      // being downloaded or imported, or awaiting approval. Covers the gap between files
+      // being organized and the library scan, and says what is actually happening (#291)
       const existingActiveRequest = await prisma.request.findFirst({
         where: {
           audiobook: {
             audibleAsin: audiobook.asin,
           },
           type: 'audiobook', // Only check audiobook requests (ebook requests are separate)
-          status: { in: ['downloaded', 'available'] },
+          status: { in: Object.keys(IN_FLIGHT_REPLIES) },
           deletedAt: null,
         },
         include: {
@@ -99,16 +111,13 @@ export async function POST(request: NextRequest) {
 
       if (existingActiveRequest) {
         const status = existingActiveRequest.status;
-        const isOwnRequest = existingActiveRequest.userId === req.user.id;
+        const reply = IN_FLIGHT_REPLIES[status];
 
         return NextResponse.json(
           {
-            error: status === 'available' ? 'AlreadyAvailable' : 'BeingProcessed',
-            message: status === 'available'
-              ? 'This audiobook is already available in your Plex library'
-              : 'This audiobook is being processed and will be available soon',
+            ...reply,
             requestStatus: status,
-            isOwnRequest,
+            isOwnRequest: existingActiveRequest.userId === req.user.id,
             requestedBy: existingActiveRequest.user?.plexUsername,
           },
           { status: 409 }
@@ -126,8 +135,7 @@ export async function POST(request: NextRequest) {
       if (plexMatch) {
         return NextResponse.json(
           {
-            error: 'AlreadyAvailable',
-            message: 'This audiobook is already available in your Plex library',
+            ...IN_FLIGHT_REPLIES.available,
             plexGuid: plexMatch.plexGuid,
           },
           { status: 409 }
@@ -229,6 +237,30 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // Another user's open request for this book: the pick would start a second download
+      // of the same book, so it is refused. Unlike a plain request, a denied one does not count.
+      const otherUsersRequest = await prisma.request.findFirst({
+        where: {
+          audiobookId: audiobookRecord.id,
+          type: 'audiobook',
+          userId: { not: req.user.id },
+          status: { notIn: [...RE_REQUESTABLE_STATUSES, 'denied', 'available', 'downloaded'] },
+          deletedAt: null,
+        },
+      });
+
+      if (otherUsersRequest) {
+        return NextResponse.json(
+          {
+            error: 'AlreadyRequested',
+            message: 'This audiobook is already being requested by another user',
+            requestStatus: otherUsersRequest.status,
+            isOwnRequest: false,
+          },
+          { status: 409 }
+        );
+      }
+
       // Create the request; replacing a failed one keeps its blocklist and search terms.
       // Null when another re-request replaced it first (nothing created).
       const createRequest = async (status: string, extra: { selectedTorrent?: any } = {}) => {
@@ -259,17 +291,10 @@ export async function POST(request: NextRequest) {
           { status: 409 }
         );
 
-      // Check if request needs approval
-      let needsApproval = false;
-
       // Fetch user with autoApproveRequests setting
       const user = await prisma.user.findUnique({
         where: { id: req.user.id },
-        select: {
-          role: true,
-          autoApproveRequests: true,
-          plexUsername: true,
-        },
+        select: { role: true, autoApproveRequests: true, plexUsername: true },
       });
 
       if (!user) {
@@ -279,26 +304,8 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Determine if approval is needed
-      if (user.role === 'admin') {
-        // Admins always auto-approve
-        needsApproval = false;
-      } else {
-        // Check user's personal setting first
-        if (user.autoApproveRequests === true) {
-          needsApproval = false;
-        } else if (user.autoApproveRequests === false) {
-          needsApproval = true;
-        } else {
-          // User setting is null, check global setting
-          const globalConfig = await prisma.configuration.findUnique({
-            where: { key: 'auto_approve_requests' },
-          });
-          // Default to true if not configured (backward compatibility)
-          const globalAutoApprove = globalConfig === null ? true : globalConfig.value === 'true';
-          needsApproval = !globalAutoApprove;
-        }
-      }
+      // Admins skip approval; users follow their own setting, then the global one
+      const needsApproval = !(await resolveAutoApprove(user.role, user.autoApproveRequests));
 
       const jobQueue = getJobQueueService();
 

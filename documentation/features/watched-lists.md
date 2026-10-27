@@ -30,7 +30,7 @@ Series routes are identical with `seriesAsin`, `seriesTitle`, response key `seri
 - **Series:** `scrapeSeriesPage()` pages up to 200 books (series order, no early stop; the scraper has no newest-first order) → dedup → per watcher `booksForWatch()` → requests.
   - **Limit:** a series with more than 200 books is only checked through its first 200 in series order, so a new-only watch can miss its newest books; such a run logs one warning per series (only when it has a new-only watcher).
 - **Authors** (`src/lib/services/watched-lists-releases.ts` `scanAuthorLegs`):
-  - Entire-catalog watchers: relevance scan as before (`searchByAuthorAsin` without sort), ≤4 pages of 50 raw products, stops at a page with no matching books.
+  - Entire-catalog watchers: relevance scan as before (`searchByAuthorAsin` without sort), ≤4 pages of 50 raw products, stops when Audible has no more pages; a page with no matching books doesn't end it (#310).
   - New-only watchers: separate newest-first scan (`searchByAuthorAsin(..., { newestFirst: true })` → `products_sort_by=-ReleaseDate`), stops after the first page holding a book older than the earliest new-only cutoff's floor day, or when `totalResults <= page*50`; a page with no matching books (namesakes, other languages) doesn't end it; ≤4 pages.
   - An author with only entire-catalog watchers gets exactly the old scan. A mixed group gets both scans, each watcher fed from its own, unless the relevance scan read the whole catalog (Audible reported no more pages within the cap): then the new-only watchers are fed from it (`booksForWatch` applies each cutoff) and no newest-first call is made.
   - Dedup groups of the two scans are persisted one after the other (`dedupeAndPersist(books, after)`), never concurrently.

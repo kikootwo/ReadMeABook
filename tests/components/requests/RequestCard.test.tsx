@@ -248,4 +248,32 @@ describe('RequestCard', () => {
     expect(props.asin).toBe('ASIN123');
     expect(props.hideRequestActions).toBeUndefined();
   });
+
+  // #281: without the request id, a pick from My Requests tried to create a second request
+  it.each(['audiobook', 'ebook'] as const)(
+    'passes its %s request to AudiobookDetailsModal so Interactive Search picks for it',
+    async (type) => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+
+      render(
+        <RequestCard
+          request={{
+            ...baseRequest,
+            type,
+            status: 'failed',
+            userId: 'user-1',
+            audiobook: { ...baseRequest.audiobook, audibleAsin: 'ASIN123', coverArtUrl: '/cover.jpg' },
+          }}
+        />
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: baseRequest.audiobook.title }));
+
+      const props = detailsModalSpy.mock.calls.at(-1)?.[0];
+      expect(props.requestId).toBe('req-1');
+      expect(props.requestedByUserId).toBe('user-1');
+      expect(props.requestType).toBe(type);
+      expect(props.requestStatus).toBe('failed');
+    }
+  );
 });

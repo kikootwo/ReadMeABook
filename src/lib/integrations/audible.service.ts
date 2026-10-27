@@ -40,6 +40,9 @@ const logger = RMABLogger.create('Audible');
 
 export const AUDIBLE_PAGE_SIZE = 50;
 
+/** Max catalog pages for one author, so a bad `total_results` can't page forever. */
+export const AUDIBLE_MAX_AUTHOR_PAGES = 20;
+
 const CATALOG_RESPONSE_GROUPS =
   'contributors,product_desc,product_attrs,product_extended_attrs,media,rating,series,category_ladders,product_details';
 
@@ -630,8 +633,11 @@ export class AudibleService {
         books.push(mapCatalogProduct(product));
       }
 
+      // From Audible's raw page, not the filtered books: a page of namesakes or other
+      // languages can sit between pages of this author's books (#310).
       const hasMore =
-        books.length > 0 &&
+        products.length > 0 &&
+        page < AUDIBLE_MAX_AUTHOR_PAGES &&
         (totalResults > 0
           ? totalResults > page * AUDIBLE_PAGE_SIZE
           : products.length >= AUDIBLE_PAGE_SIZE);

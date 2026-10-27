@@ -117,6 +117,7 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 - Setup admin role is **protected** - cannot be changed to prevent lockout
 - Ensures someone always has admin access after fresh install
 - Subsequent users default to 'user' role
+- First-user check (`prisma.user.count()` in Plex callback, switch-profile, `LocalAuthProvider.register`, `OIDCAuthProvider`) counts soft-deleted users on purpose: a deleted account never makes the next sign-up an admin (the `LocalAuthProvider.register` site is pinned by `tests/services/auth/first-user-admin.test.ts`)
 - Local admin uses username/password authentication (stored in `authToken` field as bcrypt hash)
 - `plexId` format: `local-{username}` for local admin accounts
 
@@ -250,6 +251,7 @@ Automatically grants admin permissions based on OIDC claims (e.g., group members
 - **GET /api/auth/oidc/callback** - Handle OAuth callback, create/update user, return JWT
 - **GET /api/auth/providers** - List enabled auth providers for login page
   - Returns: `backendMode`, `providers[]`, `registrationEnabled`, `hasLocalUsers`, `oidcProviderName`, `localLoginDisabled`, `automationEnabled`
+  - `hasLocalUsers`: non-deleted users only (ABS: `authProvider='local'`; Plex: `local-` setup admin). Same filter for `hasLocalUsers`/`hasLocalAdmins` in GET `/api/admin/settings` (feeds the Auth tab lockout warnings, client-side only)
   - `automationEnabled`: true if Prowlarr/indexer configured (used for dynamic login page description)
 
 ### Configuration Keys
@@ -306,6 +308,7 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 - **OIDC accounts:** OIDC sign-in is kept to OIDC accounts.
 - **Plex profile identity:** profile sign-in takes the profile's identity from Plex and requires a profile from the account's Home list.
 - **#297 Hardcoded JWT fallback secrets:** `jwt.ts` fell back to built-in default strings when `JWT_SECRET`/`JWT_REFRESH_SECRET` were unset (installs that bypass the unified entrypoint). Fix: fallbacks removed; secrets derived from `CONFIG_ENCRYPTION_KEY` via HKDF. Affected installs: all sessions + download links invalidated on upgrade (re-login required).
+- **#215 Soft-deleted users counted as local users/admins:** `hasLocalUsers`/`hasLocalAdmins` (providers + admin settings) had no `deletedAt: null`, so a deleted local admin kept the login form shown and the Auth tab lockout warnings quiet. Fix: count non-deleted users only. First-user checks unchanged (deleted users still count).
 
 ## Tech Stack
 

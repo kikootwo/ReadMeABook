@@ -34,7 +34,9 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
 6. Request marked as `downloaded` (terminal)
 7. "Available" notification sent
 
-**Interactive picks** (`POST /api/audiobooks/[asin]/select-ebook`, admin `requests/[id]/select-ebook`, admin approve): only the result's `md5` is used; download links are rebuilt server-side via `getSlowDownloadLinks(md5, ebook_sidecar_base_url, flaresolverr)` (`resolveAnnasArchiveLinks`, `src/lib/services/download-selection-guard.ts`). Indexer picks (`source: 'prowlarr'`) must be a magnet or Prowlarr download link. User route requires interactive search access.
+**Request-based routes** (`POST /api/requests/[id]/interactive-search-ebook`, `.../select-ebook`): admin, or the request's owner (another user's request → 403; `select-ebook` takes only a user's own ebook request), interactive search access required; a deleted request → 404. Used by admin request rows and by My Requests ebook cards (Interactive Search on an own `pending`/`failed`/`awaiting_search` ebook request picks for that request, #281; other statuses search by ASIN). `select-ebook` restarts the ebook request (`failed`/`awaiting_search`/`pending`) instead of creating one; a non-admin who needs approval gets `awaiting_approval` with the pick stored (see [request-approval.md](../admin-features/request-approval.md#post-apirequestsidselect-ebook)). An ebook request with no parent audiobook request (book was already in the library) uses its own audiobook.
+
+**Interactive picks** (`POST /api/audiobooks/[asin]/select-ebook`, `requests/[id]/select-ebook`, admin approve): only the result's `md5` is used; download links are rebuilt server-side via `getSlowDownloadLinks(md5, ebook_sidecar_base_url, flaresolverr)` (`resolveAnnasArchiveLinks`, `src/lib/services/download-selection-guard.ts`). Indexer picks (`source: 'prowlarr'`) must be a magnet or Prowlarr download link. User route requires interactive search access.
 
 ### Flow (Indexer Search)
 1. Audiobook organization completes

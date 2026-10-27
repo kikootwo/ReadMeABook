@@ -7,7 +7,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
+import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
+import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
 import { prisma } from '@/lib/db';
 import { getConfigService } from '@/lib/services/config.service';
 import { getProwlarrService } from '@/lib/integrations/prowlarr.service';
@@ -62,12 +63,31 @@ export interface EbookSearchResult {
   downloadUrls?: string[];
 }
 
+type SearchUser = NonNullable<AuthenticatedRequest['user']>;
+
+/** Runs the handler for a signed-in user with interactive search access (owner check is per request). */
+async function withSearchAccess(
+  req: AuthenticatedRequest,
+  handler: (user: SearchUser) => Promise<NextResponse>
+): Promise<NextResponse> {
+  if (!req.user) {
+    return NextResponse.json({ error: 'Unauthorized', message: 'User not authenticated' }, { status: 401 });
+  }
+  const accessDenied = await denyWithoutInteractiveSearchAccess(req.user.id);
+  if (accessDenied) return accessDenied;
+  return handler(req.user);
+}
+
+/**
+ * POST /api/requests/[id]/interactive-search-ebook
+ * Owner or admin. Searches ebook sources for an ebook request, or for an available audiobook request's ebook.
+ */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
-    return requireAdmin(req, async () => {
+    return withSearchAccess(req, async (user) => {
       try {
         const { id: parentRequestId } = await params;
         const bodyResult = await readJsonBody(request, { fallback: {} });
@@ -75,14 +95,21 @@ export async function POST(
         const body = bodyResult.data;
         const customTitle = body.customTitle as string | undefined;
 
-        // Get the request (can be audiobook parent or direct ebook request)
-        const requestRecord = await prisma.request.findUnique({
-          where: { id: parentRequestId },
+        // Get the request (can be audiobook parent or direct ebook request); a deleted one is 404
+        const requestRecord = await prisma.request.findFirst({
+          where: { id: parentRequestId, deletedAt: null },
           include: { audiobook: true },
         });
 
         if (!requestRecord) {
           return NextResponse.json({ error: 'Request not found' }, { status: 404 });
+        }
+
+        if (requestRecord.userId !== user.id && user.role !== 'admin') {
+          return NextResponse.json(
+            { error: 'Forbidden', message: 'You do not have access to this request' },
+            { status: 403 }
+          );
         }
 
         // Support two flows:
