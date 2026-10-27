@@ -317,8 +317,8 @@ export class RankingAlgorithm {
    * @returns 0-15 points based on MB/min ratio
    *
    * Algorithm:
-   * - >= 1.0 MB/min → 15/15 points (high quality baseline)
-   * - Linear scaling below 1.0 MB/min
+   * - >= 1.0 MB/min (MiB, about 140 kbps) → 15/15 points (high quality baseline)
+   * - Linear scaling below 1.0 MB/min (64 kbps ≈ 0.46 MB/min ≈ 6.9 points)
    * - 0 points if no runtime data (graceful degradation)
    *
    * Note: Files < 20 MB are pre-filtered in rankTorrents()
@@ -332,15 +332,15 @@ export class RankingAlgorithm {
     const sizeMB = torrent.size / (1024 * 1024);
     const mbPerMin = sizeMB / runtimeMinutes;
 
-    // High quality baseline: 1.0 MB/min or higher gets full points
-    // This is ~64 kbps MP3 equivalent
+    // Full points at 1.0 MB/min or higher (MB = MiB here): about 140 kbps
+    // (1 MiB/min = 1,048,576 bytes x 8 / 60 s ≈ 139.8 kbps), so a 128 kbps MP3 gets about 13.7 (#318)
     if (mbPerMin >= 1.0) {
       return 15;
     }
 
     // Linear scaling below baseline
-    // 0.5 MB/min = 7.5 points
-    // 0.3 MB/min = 4.5 points
+    // 0.5 MB/min (about 70 kbps) = 7.5 points; 64 kbps (0.46 MB/min) = about 6.9 points
+    // 0.3 MB/min (about 42 kbps) = 4.5 points
     return mbPerMin * 15;
   }
 

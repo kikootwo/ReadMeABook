@@ -3,7 +3,8 @@
  * Documentation: documentation/features/manual-import.md
  *
  * Triggers the organize_files pipeline for a manually-selected folder.
- * Creates or recycles a request, then queues the organize job.
+ * Creates or recycles a request of the import's type (audiobook or ebook),
+ * then queues the organize job.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -14,14 +15,9 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { resolveManualSelection } from '@/lib/utils/disc-layout-fs';
+import { claimImportRequest, resolveEbookSelection, resolveImportTarget } from '@/lib/services/manual-import.service';
 
 const logger = RMABLogger.create('API.Admin.ManualImport');
-
-/** Statuses that indicate the request is actively being worked on. */
-const ACTIVE_STATUSES = ['searching', 'downloading', 'processing', 'awaiting_import'];
-
-/** Statuses that can be recycled for a new manual import. */
-const RECYCLABLE_STATUSES = ['failed', 'warn', 'cancelled', 'denied', 'pending', 'awaiting_search', 'awaiting_approval'];
 
 export async function POST(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
@@ -33,7 +29,7 @@ export async function POST(request: NextRequest) {
         const bodyResult = await readJsonBody(request);
         if (!bodyResult.ok) return bodyResult.response;
         const body = bodyResult.data;
-        const { folderPath, asin, cleanupSource, selectedFiles } = body;
+        const { folderPath, asin, cleanupSource, selectedFiles, requestId: targetRequestId, requestType } = body;
         let { audiobookId } = body;
 
         // Validate selectedFiles if provided
@@ -53,9 +49,9 @@ export async function POST(request: NextRequest) {
         }
 
         // Validate required fields
-        if ((!audiobookId && !asin) || !folderPath) {
+        if ((!audiobookId && !asin && !targetRequestId) || !folderPath) {
           return NextResponse.json(
-            { error: 'folderPath and either audiobookId or asin are required' },
+            { error: 'folderPath and one of audiobookId, asin or requestId are required' },
             { status: 400 }
           );
         }
@@ -114,13 +110,29 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // Verify the selected files (single files, or disc-folder files of a multi-disc
-        // book), else the folder's own audio, else its disc folders' audio
-        const selection = await resolveManualSelection(normalizedPath, selectedFiles, allowedRoots);
+        // The import's type: the named request's own type (a disagreeing requestType is a 400)
+        const target = await resolveImportTarget(targetRequestId, requestType);
+        if (!target.ok) {
+          return NextResponse.json({ error: target.error }, { status: target.status });
+        }
+        const { kind, stored } = target;
+        if (stored) {
+          if (audiobookId && audiobookId !== stored.audiobookId) {
+            return NextResponse.json({ error: 'The request belongs to another book' }, { status: 400 });
+          }
+          audiobookId = stored.audiobookId;
+        }
+
+        // Verify the selected files against the type: an ebook import takes ebook files in the
+        // folder only; an audiobook import single files or disc-folder files of a multi-disc
+        // book, else the folder's own audio, else its disc folders' audio
+        const selection = kind === 'ebook'
+          ? await resolveEbookSelection(normalizedPath, selectedFiles)
+          : await resolveManualSelection(normalizedPath, selectedFiles, allowedRoots);
         if (!selection.ok) {
           return NextResponse.json({ error: selection.error }, { status: selection.status });
         }
-        const { files: validatedFiles, audioFileCount } = selection;
+        const validatedFiles = selection.files;
 
         // Resolve audiobook by ASIN if audiobookId not provided
         if (!audiobookId && asin) {
@@ -199,6 +211,9 @@ export async function POST(request: NextRequest) {
             { status: 404 }
           );
         }
+        if (stored && asin && audiobook.audibleAsin && audiobook.audibleAsin !== asin) {
+          return NextResponse.json({ error: 'The request belongs to another book' }, { status: 400 });
+        }
 
         // Enrich missing series/year data from Audnexus (mirrors request-creator.service.ts)
         if (audiobook.audibleAsin && (!audiobook.series || !audiobook.year)) {
@@ -242,74 +257,15 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Check for existing requests
-        const existingRequest = await prisma.request.findFirst({
-          where: {
-            audiobookId,
-            type: 'audiobook',
-            deletedAt: null,
-          },
-          orderBy: { createdAt: 'desc' },
-        });
-
-        let requestId: string;
-
-        if (existingRequest) {
-          // Check if already in an active state
-          if (ACTIVE_STATUSES.includes(existingRequest.status)) {
-            return NextResponse.json(
-              { error: 'This audiobook is already being processed' },
-              { status: 409 }
-            );
-          }
-
-          // Recycle the existing request
-          if (RECYCLABLE_STATUSES.includes(existingRequest.status) ||
-              existingRequest.status === 'downloaded' ||
-              existingRequest.status === 'available') {
-            await prisma.request.update({
-              where: { id: existingRequest.id },
-              data: {
-                status: 'processing',
-                progress: 100,
-                errorMessage: null,
-                importAttempts: 0,
-                autoRerequestCount: 0, // a manual import restarts the automatic re-request backoff
-                updatedAt: new Date(),
-              },
-            });
-            requestId = existingRequest.id;
-            logger.info(`Recycled existing request ${requestId} for manual import`);
-          } else {
-            // Unknown status - create new
-            const newRequest = await prisma.request.create({
-              data: {
-                userId: req.user!.id,
-                audiobookId,
-                type: 'audiobook',
-                status: 'processing',
-                progress: 100,
-              },
-            });
-            requestId = newRequest.id;
-            logger.info(`Created new request ${requestId} (existing had status: ${existingRequest.status})`);
-          }
-        } else {
-          // No existing request - create one
-          const newRequest = await prisma.request.create({
-            data: {
-              userId: req.user!.id,
-              audiobookId,
-              type: 'audiobook',
-              status: 'processing',
-              progress: 100,
-            },
-          });
-          requestId = newRequest.id;
-          logger.info(`Created new request ${requestId} for manual import`);
+        // Recycle or create the request of this type; an ebook import never touches the audiobook request
+        const claim = await claimImportRequest({ kind, audiobookId, userId: req.user!.id, stored });
+        if (!claim.ok) {
+          return NextResponse.json({ error: claim.error }, { status: claim.status });
         }
+        const { requestId } = claim;
+        logger.info(`${claim.recycled ? 'Recycled existing' : 'Created new'} ${kind} request ${requestId} for manual import`);
 
-        // Queue organize_files job
+        // Queue organize_files job (the processor branches on the request's type)
         const jobQueue = getJobQueueService();
         await jobQueue.addOrganizeJob(
           requestId,
@@ -320,12 +276,12 @@ export async function POST(request: NextRequest) {
           validatedFiles.length > 0 ? validatedFiles : undefined
         );
 
-        logger.info(`Manual import queued: request=${requestId}, path=${normalizedPath}, audioFiles=${audioFileCount}`);
+        logger.info(`Manual import queued: request=${requestId}, type=${kind}, path=${normalizedPath}, files=${validatedFiles.length || 'whole folder'}`);
 
         return NextResponse.json({
           success: true,
           requestId,
-          message: `Import started for ${audiobook.title}`,
+          message: `Import started for ${audiobook.title}${kind === 'ebook' ? ' (ebook)' : ''}`,
         });
       } catch (error) {
         logger.error('Manual import failed', {

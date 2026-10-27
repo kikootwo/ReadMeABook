@@ -112,13 +112,15 @@ export const DRM_EXTENSIONS = ['.aa', '.aax'] as const;
 export const TRANSCODE_REQUIRED_EXTENSIONS = ['.ogg', '.opus', '.wma'] as const;
 
 /**
- * All supported ebook file extensions for ebook detection and file serving.
+ * The one list of ebook file extensions (detection, import, serving, delete),
+ * in the organizer's preference order when a folder holds several formats.
  */
 export const EBOOK_EXTENSIONS = [
   '.epub',
   '.pdf',
   '.mobi',
   '.azw3',
+  '.azw',
   '.fb2',
   '.cbz',
   '.cbr',

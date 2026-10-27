@@ -897,6 +897,8 @@ export function AudiobookDetailsModal({
             author: audiobook.author,
             coverArtUrl: audiobook.coverArtUrl,
           }}
+          requestType={requestType}
+          requestId={isEbookRequest ? requestId ?? undefined : undefined}
         />
       )}
     </>

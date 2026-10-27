@@ -1046,8 +1046,7 @@ export class FileOrganizer {
           ebookFiles.sort((a, b) => {
             const extA = path.extname(a).toLowerCase().slice(1);
             const extB = path.extname(b).toLowerCase().slice(1);
-            const priorityOrder = ['epub', 'pdf', 'mobi', 'azw3', 'azw', 'fb2', 'cbz', 'cbr'];
-            return priorityOrder.indexOf(extA) - priorityOrder.indexOf(extB);
+            return ebookFormats.indexOf(extA) - ebookFormats.indexOf(extB);
           });
 
           ebookFile = ebookFiles[0];
