@@ -30,8 +30,9 @@ export async function POST(
 
       const { id } = await params;
 
-      const requestRecord = await prisma.request.findUnique({
-        where: { id },
+      // A deleted request answers 404 for everyone
+      const requestRecord = await prisma.request.findFirst({
+        where: { id, deletedAt: null },
         include: {
           audiobook: true,
         },

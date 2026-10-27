@@ -1,7 +1,7 @@
 # Intelligent Ranking Algorithm
 
 **Status:** ✅ Implemented | Comprehensive edge case test coverage
-**Tests:** tests/utils/ranking-algorithm.test.ts, ranking-non-latin.test.ts, ranking-match-gates.test.ts, ranking-oracle-223.test.ts, match-gates.test.ts, match-normalize.test.ts, tests/processors/search-indexers-non-latin.test.ts
+**Tests:** tests/utils/ranking-algorithm.test.ts, ranking-non-latin.test.ts, ranking-match-gates.test.ts, ranking-oracle-223.test.ts, match-gates.test.ts, match-normalize.test.ts, ranking-size-floor.test.ts, tests/processors/search-indexers-non-latin.test.ts, search-indexers-size-floor.test.ts
 **Automatic-search gates (#223):** [match-gates.md](match-gates.md): one-word titles, required numbers, author whole words, volume conflict (title-only subset of #330)
 
 Evaluates and scores torrents to automatically select best audiobook download.
@@ -141,6 +141,13 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - 1 seeder: 0pts, 10 seeders: 6pts, 100 seeders: 12pts, 1000+: 15pts
 - Note: Usenet/NZB results without seeders get full 15 pts (centralized availability)
 
+**Pre-filters (dropped before scoring, `rankTorrents`)**
+- **< 20 MB:** always dropped (ebooks, samples)
+- **Size floor (`minMBPerMinute`, opt-in):** with a known runtime, drops results under `minMBPerMinute` MB per minute. No runtime: no change
+- **Who sets it:** only automatic search (`search-indexers.processor.ts`), with `AUTO_SEARCH_MIN_MB_PER_MINUTE = 0.15` (about 21 kbps). Every automatic path (request create, approve, watched lists, RSS, retries, admin re-search) runs through that processor. Interactive search (`requests/[id]/interactive-search`, `audiobooks/search-torrents`) doesn't set it, so it still lists undersized results
+- **Why 0.15:** one file of a multi-file Usenet post (57 MB for a 1182-min book, 0.05 MB/min) scored over 50 and was grabbed as the whole book; a complete 0.21 MB/min release must still pass
+- **Log:** `Filtered out N results < 20 MB` gains `or < 0.15 MB/min` only when a runtime is known
+
 ## Bonus Points System
 
 **Extensible multiplicative bonus system** for external quality factors:
@@ -222,6 +229,7 @@ interface RankTorrentsOptions {
   indexerPriorities?: Map<number, number>;  // indexerId -> priority (1-25)
   flagConfigs?: IndexerFlagConfig[];        // Flag bonus configurations
   requireAuthor?: boolean;                  // Enforce author check (default: true)
+  minMBPerMinute?: number;                  // Size floor when runtime known (automatic search: 0.15)
 }
 
 interface BonusModifier {
@@ -368,6 +376,7 @@ const bestEbook = ranked[0];  // Safe to auto-download
 ```
 
 ## Fixed Issues
+- **#311 (single-file grabs):** automatic search grabbed one 57 MB chapter file of a 97-file Usenet post for a 1182-min book (score 79.7) and imported it as the book. Fixed by the size floor above; pinned in `tests/utils/ranking-size-floor.test.ts` and `tests/processors/search-indexers-size-floor.test.ts`
 - **#466 (apostrophe rows):** `L.Intruse…` for "L'intruse", `Changer.L.Eau.Des.Fleurs…`, `Enders.Game…` for "Ender's Game" scored 0 at word coverage (the apostrophe was kept in the word). Fixed by the apostrophe fold; pinned in `tests/utils/ranking-match-gates.test.ts`. Subtitles after `. ` / ` - ` (same issue) still open
 - **Known limit:** a release that splits an English ending (`Ender.s.Game`) misses `enders` (on main only a request with a curly `’` matched it)
 - **Known limit:** a request written without the apostrophe ("Enders Game") does not match `Ender’s Game` (as on main): a release possessive needs the apostrophe in the request, so "The Titans" never matches `The Titan's Curse`

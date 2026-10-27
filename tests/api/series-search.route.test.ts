@@ -13,7 +13,15 @@ const state = vi.hoisted(() => ({
   queries: [] as string[],
 }));
 
-vi.mock('@/lib/middleware/auth', () => ({ getCurrentUser: () => state.user }));
+vi.mock('@/lib/middleware/auth', async () => {
+  const { NextResponse } = await import('next/server');
+  return {
+    requireAuth: (req: object, handler: (r: object) => Promise<Response>) =>
+      state.user
+        ? handler(Object.assign(req, { user: state.user }))
+        : NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+  };
+});
 vi.mock('@/lib/integrations/audible.service', async () => (await import('../helpers/fake-audible-catalog')).audibleServiceModule);
 vi.mock('@/lib/integrations/audible-series', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/integrations/audible-series')>()),

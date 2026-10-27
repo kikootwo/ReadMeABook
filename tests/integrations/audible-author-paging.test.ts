@@ -12,11 +12,13 @@ import { NextRequest } from 'next/server';
 const clientMock = vi.hoisted(() => ({ get: vi.fn() }));
 const axiosMock = vi.hoisted(() => ({ create: vi.fn(), get: vi.fn() }));
 const configServiceMock = vi.hoisted(() => ({ getAudibleRegion: vi.fn() }));
-const currentUserMock = vi.hoisted(() => vi.fn());
 
 vi.mock('axios', () => ({ default: axiosMock, ...axiosMock }));
 vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => configServiceMock }));
-vi.mock('@/lib/middleware/auth', () => ({ getCurrentUser: currentUserMock }));
+vi.mock('@/lib/middleware/auth', () => ({
+  requireAuth: (req: object, handler: (r: object) => Promise<Response>) =>
+    handler(Object.assign(req, { user: { id: 'user-1', sub: 'user-1', role: 'user' } })),
+}));
 vi.mock('@/lib/services/works.service', () => ({
   persistDedupGroups: vi.fn(async () => {}),
   collapseByExistingWorks: vi.fn(async (books: unknown[]) => books),
@@ -79,7 +81,6 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout'] });
   axiosMock.create.mockReturnValue(clientMock);
   configServiceMock.getAudibleRegion.mockResolvedValue('us');
-  currentUserMock.mockReturnValue({ sub: 'user-1' });
   serveCatalog(CATALOG);
 });
 

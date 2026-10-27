@@ -112,7 +112,7 @@ describe('download selection guard on routes', () => {
     });
 
     it('POST /api/admin/requests/[id]/approve with a stored user pick → approves with automatic search', async () => {
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-1', userId: 'user-2', type: 'audiobook', status: 'awaiting_approval',
         selectedTorrent: torrent(url),
         audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
@@ -131,7 +131,7 @@ describe('download selection guard on routes', () => {
     });
 
     it('POST /api/admin/requests/[id]/approve with an admin-provided pick → 400', async () => {
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-1', userId: 'user-2', type: 'audiobook', status: 'awaiting_approval', selectedTorrent: null,
         audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
         user: { id: 'user-2', plexUsername: 'other' },
@@ -178,7 +178,7 @@ describe('download selection guard on routes', () => {
   });
 
   it('rebuilds a stored Anna\'s Archive pick at admin approval', async () => {
-    prismaMock.request.findUnique.mockResolvedValue({
+    prismaMock.request.findFirst.mockResolvedValue({
       id: 'req-2', userId: 'user-2', type: 'ebook', status: 'awaiting_approval',
       selectedTorrent: { source: 'annas_archive', md5: MD5, downloadUrl: EVIL, downloadUrls: [EVIL] },
       audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
@@ -197,7 +197,7 @@ describe('download selection guard on routes', () => {
 
   it('approves with an automatic search when a stored Anna\'s Archive pick has no links any more', async () => {
     slowLinksMock.mockResolvedValue([]);
-    prismaMock.request.findUnique.mockResolvedValue({
+    prismaMock.request.findFirst.mockResolvedValue({
       id: 'req-3', userId: 'user-2', type: 'ebook', status: 'awaiting_approval',
       selectedTorrent: { source: 'annas_archive', md5: MD5 },
       audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
@@ -220,7 +220,7 @@ describe('download selection guard on routes', () => {
 
   it('keeps the stored pick and returns 503 when Anna\'s Archive cannot be reached at approval', async () => {
     slowLinksMock.mockRejectedValue(new Error('FlareSolverr timeout'));
-    prismaMock.request.findUnique.mockResolvedValue({
+    prismaMock.request.findFirst.mockResolvedValue({
       id: 'req-4', userId: 'user-2', type: 'ebook', status: 'awaiting_approval',
       selectedTorrent: { source: 'annas_archive', md5: MD5 },
       audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },

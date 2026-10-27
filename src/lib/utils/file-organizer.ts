@@ -28,8 +28,11 @@ import {
 } from './chapter-merger';
 import { prisma } from '../db';
 import { substituteTemplate, buildRenamedFilename, type TemplateVariables } from './path-template.util';
-import { capFilenameBytes, MAX_COMPONENT_BYTES, TAG_TEMP_SUFFIX } from './path-component';
+import { capFilenameBytes, capGraphemeUnits, MAX_COMPONENT_BYTES, TAG_TEMP_SUFFIX } from './path-component';
 import { AUDIO_EXTENSIONS, COERCION_CANDIDATE_EXTENSIONS } from '../constants/audio-formats';
+
+/** Character cap (UTF-16 units) on one sanitized name, before the 255-byte cap */
+const PATH_NAME_UNITS = 200;
 
 export interface AudiobookMetadata {
   title: string;
@@ -686,9 +689,9 @@ export class FileOrganizer {
   }
 
   /**
-   * Sanitize path component (remove invalid characters)
+   * Remove invalid characters, trim dots and spaces, collapse spaces (no length cap)
    */
-  private sanitizePath(name: string): string {
+  private cleanPathName(name: string): string {
     return (
       name
         // Remove invalid filename characters
@@ -699,9 +702,15 @@ export class FileOrganizer {
         .replace(/\.+$/, '')
         // Collapse multiple spaces
         .replace(/\s+/g, ' ')
-        // Limit length (255 chars max for most filesystems)
-        .slice(0, 200)
     );
+  }
+
+  /**
+   * Sanitize path component: cleaned, then 200 UTF-16 units cut between
+   * characters (#474); the 255-byte cap is applied where the name is used
+   */
+  private sanitizePath(name: string): string {
+    return capGraphemeUnits(this.cleanPathName(name), PATH_NAME_UNITS);
   }
 
   private findDuplicateBasenames(files: string[]): Set<string> {
@@ -942,9 +951,12 @@ export class FileOrganizer {
         targetFilename = buildRenamedFilename(renameConfig.template, variables, originalExt);
         await logger?.info(`Renamed ebook file: ${sourceFilename} -> ${targetFilename}`);
       } else {
-        const cleanName = this.sanitizePath(sourceFilename);
+        // The 200-unit cap applies to the whole name, but cuts the stem only so the extension is kept (#474)
+        const cleanName = this.cleanPathName(sourceFilename);
         const cleanExt = path.extname(cleanName);
-        targetFilename = capFilenameBytes(cleanName.slice(0, cleanName.length - cleanExt.length), cleanExt);
+        const fullStem = cleanName.slice(0, cleanName.length - cleanExt.length);
+        const cutStem = capGraphemeUnits(fullStem, Math.max(0, PATH_NAME_UNITS - cleanExt.length));
+        targetFilename = capFilenameBytes(cutStem === fullStem ? cutStem : cutStem.replace(/[ .]+$/, ''), cleanExt);
       }
       const targetPath = path.join(targetDir, targetFilename);
 
