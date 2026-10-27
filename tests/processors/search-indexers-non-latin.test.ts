@@ -1,5 +1,5 @@
 /**
- * Component: Search Indexers Processor Tests (non-Latin requests)
+ * Component: Search Indexers Processor Tests (non-Latin requests, one-word titles)
  * Documentation: documentation/phase3/ranking-algorithm.md
  */
 
@@ -87,6 +87,41 @@ describe('processSearchIndexers with a Cyrillic request', () => {
       expect.objectContaining({ id: 'a1', title: audiobook.title }),
       expect.objectContaining({ guid: 'right' }),
       [],
+    );
+  });
+});
+
+describe('processSearchIndexers with a one-word title', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.request.update.mockResolvedValue({});
+    prismaMock.blockedRelease.findMany.mockResolvedValue([]);
+    configMock.getAudibleRegion.mockResolvedValue('us');
+    audibleMock.getRuntime.mockResolvedValue(300);
+    configMock.get.mockImplementation(async (key: string) => {
+      if (key === 'prowlarr_indexers') {
+        return JSON.stringify([{ id: 1, name: 'Indexer', protocol: 'usenet', priority: 10, categories: [3030] }]);
+      }
+      if (key === 'indexer_flag_config') return JSON.stringify([]);
+      return null;
+    });
+  });
+
+  it('waits for a later search instead of grabbing a book that only contains the title word', async () => {
+    // An NZB result has no seeders field and gets full seeder points: on main this scored 56.6 and was grabbed
+    const nzb = { ...release('darker', 'You Like It Darker by Stephen King [ENG / M4B]', 0), seeders: undefined };
+    prowlarrMock.searchWithVariations.mockResolvedValue([nzb]);
+
+    const { processSearchIndexers } = await import('@/lib/processors/search-indexers.processor');
+    const result = await processSearchIndexers({
+      requestId: 'req-it', audiobook: { id: 'a2', title: 'It', author: 'Stephen King', asin: 'B000000002' }, jobId: 'job-it',
+    });
+
+    expect(result.success).toBe(false);
+    expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
+    expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'awaiting_search' }) })
     );
   });
 });

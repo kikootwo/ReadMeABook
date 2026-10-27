@@ -101,7 +101,7 @@
 ## Specs (`e2e/specs/`)
 | Spec | Asserts |
 |---|---|
-| `smoke.spec.ts` | UI login (ABS form, or Plex-mode Admin Login toggle) → search → card Request → qBit add → downloaded → ABS item / fake Plex album → `available` (scan + recently-added jobs) → "In Your Library"; Prowlarr key never off the Prowlarr origin |
+| `smoke.spec.ts` | UI login (ABS form, or Plex-mode Admin Login toggle) → search → card Request → qBit add → downloaded → `GET /api/requests/:id` size is a number (#261) → ABS item / fake Plex album → `available` (scan + recently-added jobs) → "In Your Library"; Prowlarr key never off the Prowlarr origin |
 | `regressions/275-transient-grab.spec.ts` | A's grab answered 503, then B fetched after it (fails here on pre-fix code), qBit got only B, request completes |
 | `upgrade.spec.ts` | Seed (available/downloading/failed) on the release image; after upgrade: health, admin login (API, then UI via `loginAdminUi` in either backend mode), statuses kept, stored Prowlarr key decrypts. `run.mjs` adds exact host-side row counts: users/audiobooks/requests/download_history/api_tokens/blocked_releases unchanged (snapshot after counts settle), no table shrinks. #302: a watched author and series seeded on the release image read Entire catalog after the upgrade; `new_releases_since` exists, nullable, on both watch tables and is NULL for them (exec bridge) |
 | `preview-seed.spec.ts` | Preview has `available`, `downloading`, `failed` requests and one library book |
