@@ -130,6 +130,15 @@ describe('Admin bulk-import scan route: ASIN in the folder name', () => {
     expect(result.match.asin).toBe('0062976583');
   });
 
+  it('looks up the last 10-digit run when a folder name holds two', async () => {
+    audibleMock.getAudiobookDetails.mockResolvedValue(catalogBook('0062976583', 'A Quiet Harbor'));
+
+    const result = await scanOne('1234567890 - A Quiet Harbor 0062976583');
+
+    expect(audibleMock.getAudiobookDetails).toHaveBeenCalledWith('0062976583', { fillSeries: false });
+    expect(result.match.asin).toBe('0062976583');
+  });
+
   it('falls back to the text search when the candidate resolves to a different-looking title', async () => {
     audibleMock.getAudiobookDetails.mockResolvedValue(catalogBook('0062976583', 'Gardening for Beginners'));
 
