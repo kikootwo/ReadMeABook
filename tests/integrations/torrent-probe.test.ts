@@ -4,7 +4,8 @@
  *
  * The seeding cleanup marks a row 'removed' only when the client gives a well-formed
  * answer without the torrent. Every other answer must throw (an error is never "gone"),
- * and the probe makes one request: no not-found retries.
+ * and the probe never retries a not-found. qBittorrent: an empty answer by ID gets one
+ * unfiltered lookup (a hybrid torrent can be stored by its v1 hash, #422).
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -38,13 +39,22 @@ describe('qBittorrent probeDownload', () => {
     return s;
   };
 
-  it.each([
-    ['an empty list', []],
-    ['a list with another torrent only (filter ignored)', [{ hash: OTHER, name: 'Other' }]],
-  ])('reports missing for HTTP 200 with %s, in one request', async (_label, data) => {
-    clientMock.get.mockResolvedValueOnce({ status: 200, data });
+  it('reports missing for HTTP 200 with an empty list: one lookup by ID, then one unfiltered lookup', async () => {
+    clientMock.get.mockResolvedValueOnce({ status: 200, data: [] }).mockResolvedValueOnce({ status: 200, data: [{ hash: OTHER }] });
+    await expect(service().probeDownload(HASH)).resolves.toEqual({ found: false });
+    expect(clientMock.get).toHaveBeenCalledTimes(2);
+    expect(clientMock.get.mock.calls.map((call) => call[1].params)).toEqual([{ hashes: HASH }, {}]);
+  });
+
+  it('reports missing for a list with another torrent only (filter ignored), in one request', async () => {
+    clientMock.get.mockResolvedValueOnce({ status: 200, data: [{ hash: OTHER, name: 'Other' }] });
     await expect(service().probeDownload(HASH)).resolves.toEqual({ found: false });
     expect(clientMock.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws when the unfiltered lookup after an empty answer is not a list', async () => {
+    clientMock.get.mockResolvedValueOnce({ status: 200, data: [] }).mockResolvedValueOnce({ status: 200, data: '<html>login</html>' });
+    await expect(service().probeDownload(HASH)).rejects.toThrow('not a torrent list');
   });
 
   it('finds the torrent (case-insensitive hash) and reports its added time', async () => {
@@ -89,7 +99,7 @@ describe('qBittorrent probeDownload', () => {
   it('re-logs in once on 403 and uses the next answer', async () => {
     const s = service();
     vi.spyOn(s, 'login').mockResolvedValue();
-    clientMock.get.mockRejectedValueOnce(httpError(403)).mockResolvedValueOnce({ status: 200, data: [] });
+    clientMock.get.mockRejectedValueOnce(httpError(403)).mockResolvedValue({ status: 200, data: [] });
     await expect(s.probeDownload(HASH)).resolves.toEqual({ found: false });
   });
 });

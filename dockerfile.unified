@@ -6,7 +6,8 @@
 # Static ffmpeg/ffprobe source (static-pie, no runtime deps, GPLv3 build without nonfree/libfdk-aac).
 # Pinned to a multi-arch (amd64 + arm64) index digest; BuildKit copies the variant matching
 # TARGETPLATFORM. Other platforms fail here ("no match for platform"). Multi-arch approach
-# from PR #241 (TaylorMcGinnis). Bump: update tag + digest here AND FFMPEG_VERSION below.
+# from PR #241 (TaylorMcGinnis). Bump: update tag + digest here AND FFMPEG_VERSION below,
+# AND FFMPEG_IMAGE + FFMPEG_VERSION in .github/workflows/pr-ci.yml (PR Tests uses the same binaries).
 FROM mwader/static-ffmpeg:9.0.2-1@sha256:f5d100184884eb3e82b0eb14bb5ebf98da99826ac824989720297fb9ef21c822 AS ffmpeg
 
 # Stages (multi-stage layout from PR #279, ChaoticSciuridae):

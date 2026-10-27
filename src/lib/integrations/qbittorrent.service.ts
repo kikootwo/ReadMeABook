@@ -3,7 +3,7 @@
  * Documentation: documentation/phase3/qbittorrent.md
  */
 
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { RMAB_USER_AGENT } from '../utils/user-agent';
 import https from 'https';
 import path from 'path';
@@ -14,7 +14,8 @@ import { RMABLogger } from '../utils/logger';
 import { DownloadSourceTimeoutError, fetchDownloadSource, type SourceAuth } from './download-source';
 import { urlForLog } from '../utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
-import { qbittorrentProbeMatch } from './torrent-probe';
+import { qbittorrentProbeList } from './torrent-probe';
+import { acceptedAddId, candidateIds, decodedMagnet, findTorrent, lookupTorrent, magnetHashes, normalizeTorrentId, SharedRequest, TorrentHashes, TorrentIdMap, torrentFileHashes, TorrentListUnavailableError, validTorrentId } from './qbittorrent-ids';
 import {
   IDownloadClient,
   DownloadClientType,
@@ -44,7 +45,8 @@ export interface AddTorrentOptions {
 }
 
 export interface TorrentInfo {
-  hash: string;
+  hash: string; // qBittorrent's ID: v1 info hash, or truncated v2 for hybrid/v2 (libtorrent 2)
+  infohash_v1?: string; // 4.4+; '' for v2-only torrents
   name: string;
   size: number;
   progress: number; // 0.0 to 1.0
@@ -123,6 +125,8 @@ export class QBittorrentService implements IDownloadClient {
   private disableSSLVerify: boolean;
   private httpsAgent?: https.Agent;
   private pathMappingConfig: PathMappingConfig;
+  private knownIds = new TorrentIdMap(); // stored ID → the client's current ID
+  private fullList = new SharedRequest<AxiosResponse>(); // one unfiltered /torrents/info at a time
 
   constructor(
     baseUrl: string,
@@ -295,7 +299,8 @@ export class QBittorrentService implements IDownloadClient {
       if (
         error instanceof DownloadSourceError ||
         error instanceof UnusableDownloadSourceError ||
-        error instanceof DownloadSourceTimeoutError
+        error instanceof DownloadSourceTimeoutError ||
+        error instanceof TorrentListUnavailableError // a client error: the request retries, no other release
       ) {
         throw error;
       }
@@ -314,28 +319,6 @@ export class QBittorrentService implements IDownloadClient {
     }
   }
 
-  /**
-   * Whether a /torrents/add body confirms our single submitted torrent.
-   * Accepts the legacy "Ok." text, or the qBittorrent 5.2+ JSON receipt when it
-   * reports exactly one success for this hash and no failures or pending adds.
-   */
-  private isAddAccepted(data: unknown, infoHash: string): boolean {
-    if (data === 'Ok.') return true;
-    if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
-
-    const receipt = data as Record<string, unknown>;
-    const ids = receipt.added_torrent_ids;
-    return (
-      receipt.success_count === 1 &&
-      receipt.failure_count === 0 &&
-      receipt.pending_count === 0 &&
-      Array.isArray(ids) &&
-      ids.length === 1 &&
-      typeof ids[0] === 'string' &&
-      ids[0].toLowerCase() === infoHash.toLowerCase()
-    );
-  }
-
   /** POST /torrents/add. 5.2+ answers 409 Conflict when every add failed (duplicates too). */
   private async postAdd(body: unknown, config: Record<string, unknown>): Promise<{ data: unknown; conflict: boolean }> {
     try {
@@ -346,24 +329,30 @@ export class QBittorrentService implements IDownloadClient {
     }
   }
 
-  /** Whether the client has this torrent now (any lookup error counts as "no"). */
-  private async hasTorrent(infoHash: string): Promise<boolean> {
-    try {
-      await this.getTorrent(infoHash);
-      return true;
-    } catch {
-      return false;
+  /**
+   * The client's ID for this torrent, or null when it is absent: every candidate ID filtered first
+   * (lookup errors count as "no"), then with `scan` one unfiltered lookup matching `hash` or
+   * `infohash_v1`, which finds a hybrid listed under its v2 ID. A non-hex ID keeps the candidate's.
+   */
+  private async presentId(hashes: TorrentHashes, scan: boolean): Promise<string | null> {
+    const ids = candidateIds(hashes);
+    for (const id of ids) {
+      const hit = await this.getTorrent(id, false).catch(() => null);
+      if (hit) return validTorrentId(hit.hash) ?? id;
     }
+    const hit = scan ? await findTorrent([], ids, (hashes) => this.strictList(hashes), true) : null;
+    return hit ? validTorrentId(hit.hash) ?? ids[0] : null;
   }
 
   /**
    * A rejected add (qBittorrent rejects duplicates: "Fails." up to 5.1, 409 from 5.2): check once
    * more. Present now = it was already in the client (taken over); otherwise the rejection stands.
    */
-  private async recheckRejectedAdd(infoHash: string, rejection: string): Promise<AddDownloadResult> {
-    if (!(await this.hasTorrent(infoHash))) throw new Error(rejection);
-    logger.warn(`qBittorrent rejected the add of ${infoHash} but already has it: recorded as already in the client`);
-    return { id: infoHash, alreadyInClient: true };
+  private async recheckRejectedAdd(hashes: TorrentHashes, rejection: string): Promise<AddDownloadResult> {
+    const id = await this.presentId(hashes, true).catch(() => null); // a failed lookup keeps the rejection
+    if (!id) throw new Error(rejection);
+    logger.warn(`qBittorrent rejected the add of ${id} but already has it: recorded as already in the client`);
+    return { id, alreadyInClient: true, infoHash: hashes.v1 };
   }
 
   /** A rejected /torrents/add body as log text: strings as is, JSON receipts serialized (capped). */
@@ -373,27 +362,58 @@ export class QBittorrentService implements IDownloadClient {
   }
 
   /**
-   * Add magnet link - hash is extractable from URI (deterministic)
+   * Shared by magnet and .torrent adds: the pre-add check, the add, and the ID to record.
+   * The pre-add check ends with the full list: the torrent may be listed under another ID (a hybrid
+   * under its v2 ID; a btih or truncated btmh equal to another torrent's v1), and qBittorrent up to 5.1
+   * can answer "Ok." to that duplicate. If that list can't be read, nothing is added (fail closed).
+   */
+  private async addOnce(
+    hashes: TorrentHashes,
+    kind: string,
+    post: () => Promise<{ data: unknown; conflict: boolean }>
+  ): Promise<AddDownloadResult> {
+    // Already in the client: taken over, never added (or later removed) by RMAB
+    const present = await this.presentId(hashes, true).catch((error: unknown) => {
+      if (axios.isAxiosError(error) && error.response?.status === 403) throw error; // re-login, then retry
+      logger.error(`Nothing added: couldn't read the torrent list to check for an existing copy (${error instanceof Error ? error.message : String(error)})`);
+      throw new TorrentListUnavailableError();
+    });
+    if (present) {
+      logger.info(` Torrent ${present} is already in qBittorrent (not added by RMAB)`);
+      return { id: present, alreadyInClient: true, infoHash: hashes.v1 };
+    }
+
+    logger.info(`[QBittorrent] Uploading ${kind}...`);
+    const { data, conflict } = await post();
+    const accepted = conflict ? null : acceptedAddId(data, hashes);
+    if (!accepted) {
+      const detail = `${this.describeAddResponse(data)}${conflict ? ' (HTTP 409)' : ''}`;
+      return this.recheckRejectedAdd(hashes, `qBittorrent rejected ${kind}: ${detail}`);
+    }
+
+    // "Ok." names no ID: libtorrent 2 lists a hybrid by its v2 form, 1.2 by v1 (also the fallback)
+    const id = data === 'Ok.' && hashes.v2 ? (await this.presentId(hashes, false)) ?? accepted : accepted;
+    logger.info(` Successfully added ${kind}: ${id}`);
+    return { id, alreadyInClient: false, infoHash: hashes.v1 };
+  }
+
+  /**
+   * Add magnet link - hashes are extractable from URI (deterministic)
    */
   protected async addMagnetLink(
     magnetUrl: string,
     category: string,
     options?: AddTorrentOptions
   ): Promise<AddDownloadResult> {
-    // Extract info_hash from magnet link (deterministic)
-    const infoHash = this.extractHashFromMagnet(magnetUrl);
+    // Extract the btih (v1, hex or base32) and btmh (v2) hashes from the magnet link
+    const magnet = decodedMagnet(magnetUrl); // the string parsed is the string sent
+    const hashes = magnetHashes(magnet);
 
-    if (!infoHash) {
+    if (!hashes) {
       throw new Error('Invalid magnet link - could not extract info_hash');
     }
 
-    logger.info(` Extracted info_hash from magnet: ${infoHash}`);
-
-    // Already in the client: taken over, never added (or later removed) by RMAB
-    if (await this.hasTorrent(infoHash)) {
-      logger.info(` Torrent ${infoHash} is already in qBittorrent (not added by RMAB)`);
-      return { id: infoHash, alreadyInClient: true };
-    }
+    logger.info(` Extracted info_hash from magnet: ${hashes.v1 ?? ''}${hashes.v2 ? ` (v2 ${hashes.v2})` : ''}`);
 
     // Upload via 'urls' parameter
     // Note: savepath is intentionally omitted — the category (managed by ensureCategory)
@@ -404,7 +424,7 @@ export class QBittorrentService implements IDownloadClient {
     // global seeding rules don't remove the torrent prematurely.
     // RMAB manages torrent lifecycle via the cleanup-seeded-torrents processor.
     const form = new URLSearchParams({
-      urls: magnetUrl,
+      urls: magnet,
       category,
       paused: options?.paused ? 'true' : 'false',
       ratioLimit: '-1',
@@ -415,26 +435,16 @@ export class QBittorrentService implements IDownloadClient {
       form.append('tags', options.tags.join(','));
     }
 
-    logger.info('[QBittorrent] Uploading magnet link...');
-
-    const { data, conflict } = await this.postAdd(form, {
+    return this.addOnce(hashes, 'magnet link', () => this.postAdd(form, {
       headers: {
         ...this.authHeaders(),
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-    });
-
-    if (conflict || !this.isAddAccepted(data, infoHash)) {
-      const detail = `${this.describeAddResponse(data)}${conflict ? ' (HTTP 409)' : ''}`;
-      return this.recheckRejectedAdd(infoHash, `qBittorrent rejected magnet link: ${detail}`);
-    }
-
-    logger.info(` Successfully added magnet link: ${infoHash}`);
-    return { id: infoHash, alreadyInClient: false };
+    }));
   }
 
   /**
-   * Add .torrent file - download, parse, extract hash, upload content (deterministic)
+   * Add .torrent file - download, parse, extract hashes, upload content (deterministic)
    */
   protected async addTorrentFile(
     torrentUrl: string,
@@ -467,20 +477,15 @@ export class QBittorrentService implements IDownloadClient {
       throw new Error('Invalid .torrent file - failed to parse');
     }
 
-    const infoHash = parsedTorrent.infoHash;
+    // v1 = SHA-1 of the info dict; v2 = its SHA-256 for hybrid (meta version 2) torrents
+    const hashes = torrentFileHashes(parsedTorrent);
 
-    if (!infoHash) {
+    if (!hashes) {
       throw new Error('Failed to extract info_hash from .torrent file');
     }
 
-    logger.info(` Extracted info_hash: ${infoHash}`);
+    logger.info(` Extracted info_hash: ${hashes.v1}${hashes.v2 ? ` (hybrid, v2 ${hashes.v2})` : ''}`);
     logger.info(` Torrent name: ${parsedTorrent.name || 'Unknown'}`);
-
-    // Already in the client: taken over, never added (or later removed) by RMAB
-    if (await this.hasTorrent(infoHash)) {
-      logger.info(` Torrent ${infoHash} is already in qBittorrent (not added by RMAB)`);
-      return { id: infoHash, alreadyInClient: true };
-    }
 
     // Upload .torrent file content via multipart/form-data
     // Note: savepath is intentionally omitted — the category (managed by ensureCategory)
@@ -505,24 +510,14 @@ export class QBittorrentService implements IDownloadClient {
       formData.append('tags', options.tags.join(','));
     }
 
-    logger.info('[QBittorrent] Uploading .torrent file content...');
-
-    const { data, conflict } = await this.postAdd(formData, {
+    return this.addOnce(hashes, '.torrent file', () => this.postAdd(formData, {
       headers: {
         ...this.authHeaders(),
         ...formData.getHeaders(),
       },
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
-    });
-
-    if (conflict || !this.isAddAccepted(data, infoHash)) {
-      const detail = `${this.describeAddResponse(data)}${conflict ? ' (HTTP 409)' : ''}`;
-      return this.recheckRejectedAdd(infoHash, `qBittorrent rejected .torrent file: ${detail}`);
-    }
-
-    logger.info(` Successfully added torrent: ${infoHash}`);
-    return { id: infoHash, alreadyInClient: false };
+    }));
   }
 
   /**
@@ -609,41 +604,50 @@ export class QBittorrentService implements IDownloadClient {
   }
 
   /**
-   * Get torrent status and progress
+   * Get torrent status and progress. Matches the reported `hash` or `infohash_v1`: a hybrid can be
+   * stored by its v1 hash, and some qBittorrent-compatible clients (e.g. RDTClient) ignore the
+   * hashes filter and return all torrents. With `scan`, an empty answer gets one unfiltered lookup.
    */
-  async getTorrent(hash: string): Promise<TorrentInfo> {
+  async getTorrent(hash: string, scan = true): Promise<TorrentInfo> {
     if (!this.cookie && !this.authOptional) {
       await this.login();
     }
 
-    try {
-      const response = await this.client.get('/torrents/info', {
-        headers: this.authHeaders(),
-        params: { hashes: hash },
-      });
-
-      const torrents = response.data;
-      if (!torrents || torrents.length === 0) {
-        throw new Error(`Torrent ${hash} not found`);
+    // Don't log errors here - the caller handles them (e.g., duplicate checking)
+    const match = await lookupTorrent(hash, this.knownIds, async (hashes) => {
+      try {
+        const torrents = (await this.queryTorrents(hashes))?.data;
+        if (!torrents) return [];
+        if (!Array.isArray(torrents)) throw new Error(`qBittorrent answered the lookup of ${hash} with ${typeof torrents}, not a torrent list`);
+        return torrents as TorrentInfo[];
+      } catch (error) {
+        if (hashes === undefined) return []; // the unfiltered lookup is best effort here
+        throw error;
       }
-
-      // Find the torrent with the exact matching hash.
-      // Some qBittorrent-compatible clients (e.g. RDTClient) ignore the hashes
-      // filter and return all torrents, so we must verify the hash ourselves.
-      const normalizedHash = hash.toLowerCase();
-      const match = torrents.find(
-        (t: TorrentInfo) => t.hash?.toLowerCase() === normalizedHash
-      );
-
-      if (!match) {
-        throw new Error(`Torrent ${hash} not found`);
-      }
-
-      return match;
-    } catch (error) {
-      // Don't log error here - caller handles it (e.g., duplicate checking)
-      throw error;
+    }, scan);
+    if (!match) {
+      throw new Error(`Torrent ${hash} not found`);
     }
+    return match;
+  }
+
+  /** GET /torrents/info by `hashes`, or the whole list (one request shared by concurrent callers) */
+  private queryTorrents(hashes?: string): Promise<AxiosResponse> {
+    const get = () => this.client.get('/torrents/info', { headers: this.authHeaders(), params: hashes === undefined ? {} : { hashes } });
+    return hashes === undefined ? this.fullList.run(get) : get();
+  }
+
+  /** /torrents/info as a list; anything but HTTP 200 and a JSON list throws */
+  private async strictList(hashes?: string): Promise<TorrentInfo[]> {
+    const response = await this.queryTorrents(hashes);
+    return qbittorrentProbeList(response.status, response.data, hashes ?? 'all torrents') as unknown as TorrentInfo[];
+  }
+
+  /** The client's ID for an action: learned by the lookup every caller makes first, else looked up; never a list or `all` */
+  private async actionId(hash: string): Promise<string> {
+    const stored = normalizeTorrentId(hash);
+    if (stored.includes('|') || stored.toLowerCase() === 'all') throw new Error(`Invalid torrent ID: ${hash}`);
+    return this.knownIds.get(stored) ?? validTorrentId((await this.getTorrent(stored).catch(() => null))?.hash) ?? stored;
   }
 
   /**
@@ -683,7 +687,7 @@ export class QBittorrentService implements IDownloadClient {
     try {
       await this.client.post(
         '/torrents/pause',
-        new URLSearchParams({ hashes: hash }),
+        new URLSearchParams({ hashes: await this.actionId(hash) }),
         {
           headers: {
             ...this.authHeaders(),
@@ -710,7 +714,7 @@ export class QBittorrentService implements IDownloadClient {
     try {
       await this.client.post(
         '/torrents/resume',
-        new URLSearchParams({ hashes: hash }),
+        new URLSearchParams({ hashes: await this.actionId(hash) }),
         {
           headers: {
             ...this.authHeaders(),
@@ -738,7 +742,7 @@ export class QBittorrentService implements IDownloadClient {
       await this.client.post(
         '/torrents/delete',
         new URLSearchParams({
-          hashes: hash,
+          hashes: await this.actionId(hash),
           deleteFiles: deleteFiles.toString(),
         }),
         {
@@ -749,6 +753,7 @@ export class QBittorrentService implements IDownloadClient {
         }
       );
 
+      this.knownIds.delete(normalizeTorrentId(hash));
       logger.info(`Deleted torrent: ${hash}`);
     } catch (error) {
       logger.error('Failed to delete torrent', { error: error instanceof Error ? error.message : String(error) });
@@ -767,7 +772,7 @@ export class QBittorrentService implements IDownloadClient {
     try {
       const response = await this.client.get('/torrents/files', {
         headers: this.authHeaders(),
-        params: { hash },
+        params: { hash: await this.actionId(hash) },
       });
 
       return response.data;
@@ -809,7 +814,7 @@ export class QBittorrentService implements IDownloadClient {
       await this.client.post(
         '/torrents/setCategory',
         new URLSearchParams({
-          hashes: hash,
+          hashes: await this.actionId(hash),
           category,
         }),
         {
@@ -1108,7 +1113,8 @@ export class QBittorrentService implements IDownloadClient {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const torrent = await this.getTorrent(id);
+        // One unfiltered lookup per call at most (first attempt); the retries stay filtered
+        const torrent = await this.getTorrent(id, attempt === 0);
         return this.mapTorrentToDownloadInfo(torrent);
       } catch (error) {
         const message = error instanceof Error ? error.message : '';
@@ -1134,15 +1140,17 @@ export class QBittorrentService implements IDownloadClient {
     return null;
   }
 
-  /** Strict probe for the seeding cleanup: one lookup, no not-found retries; a 403 re-logs in once */
+  /**
+   * Strict probe for the seeding cleanup: no not-found retries (one lookup by ID, plus one unfiltered
+   * lookup when that answer is empty, for a hybrid stored by its v1 hash); a 403 re-logs in once
+   */
   async probeDownload(id: string, retried = false): Promise<DownloadProbe> {
     if (!this.cookie && !this.authOptional) {
       await this.login();
     }
     try {
-      const response = await this.client.get('/torrents/info', { headers: this.authHeaders(), params: { hashes: id } });
-      const torrent = qbittorrentProbeMatch(response.status, response.data, id);
-      return torrent ? { found: true, info: this.mapTorrentToDownloadInfo(torrent as unknown as TorrentInfo) } : { found: false };
+      const torrent = await lookupTorrent(id, this.knownIds, (hashes) => this.strictList(hashes), true);
+      return torrent ? { found: true, info: this.mapTorrentToDownloadInfo(torrent) } : { found: false };
     } catch (error) {
       if (!retried && !this.authOptional && axios.isAxiosError(error) && error.response?.status === 403) {
         await this.login();
@@ -1298,19 +1306,6 @@ export class QBittorrentService implements IDownloadClient {
     };
 
     return stateMap[state] || 'unknown';
-  }
-
-  /**
-   * Extract info_hash from magnet link
-   */
-  protected extractHashFromMagnet(magnetUrl: string): string | null {
-    // Extract hash from magnet:?xt=urn:btih:HASH
-    const match = magnetUrl.match(/xt=urn:btih:([a-fA-F0-9]{40}|[a-zA-Z0-9]{32})/i);
-    if (match) {
-      return match[1].toLowerCase();
-    }
-
-    return null;
   }
 }
 

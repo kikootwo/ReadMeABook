@@ -107,6 +107,8 @@ export interface AddDownloadResult {
    * RMAB never removes such a torrent or changes it. Usenet clients: always false.
    */
   alreadyInClient: boolean;
+  /** BitTorrent v1 info hash, when the client knows it (may differ from `id` for hybrid torrents) */
+  infoHash?: string;
 }
 
 /**
