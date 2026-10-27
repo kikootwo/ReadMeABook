@@ -265,7 +265,8 @@ export async function POST(
           searchIndexersForInteractive(
             searchTitle,
             audiobook.author,
-            format
+            format,
+            Boolean(customTitle)
           ).catch((err) => {
             logger.error(`Indexer search failed: ${err.message}`);
             return null;
@@ -402,7 +403,8 @@ async function searchAnnasArchiveForInteractive(
 async function searchIndexersForInteractive(
   title: string,
   author: string,
-  preferredFormat: string
+  preferredFormat: string,
+  exactTitle: boolean // a custom title: sent as given, no fallback queries (#316)
 ): Promise<EbookSearchResult[]> {
   const configService = getConfigService();
 
@@ -452,7 +454,7 @@ async function searchIndexersForInteractive(
         indexerIds: group.indexerIds,
         minSeeders: 0,
         maxResults: 100,
-      });
+      }, { exactTitle });
       allResults.push(...groupResults);
     } catch (error) {
       logger.error(`Group search failed: ${error instanceof Error ? error.message : 'Unknown'}`);

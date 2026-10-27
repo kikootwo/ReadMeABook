@@ -49,6 +49,7 @@ Delete behavior:
 | `cancelled` (by the user or an admin) | never replaced; result `cancelled_by_user` |
 | `failed`/`warn`, attempt added a block (`BlockedRelease.createdAt >= request.createdAt`) | replaced at once, count unchanged |
 | `failed`/`warn`, no new block | replaced once `updatedAt + wait(count)` has passed, new request gets `count + 1`; before that `retry_not_due` |
+| any user's `failed` request with `errorMessage` = `REMOVED_FROM_LIBRARY_MESSAGE` (book left the library, no audio left, #214) | never requested, for any user, blocks or not; result `removed_from_library` (`removedFromLibrarySkip()`, checked first). A manual request brings it back |
 
 - **Wait** (`AUTO_REREQUEST_WAIT_DAYS`): count 0 → 1 day, 1 → 3, 2 → 7, 3 → 14, 4+ → every 30 days. No cap.
 - **Count:** `Request.autoRerequestCount` (`auto_rerequest_count`, Int, default 0). Carried only by automatic replacements.

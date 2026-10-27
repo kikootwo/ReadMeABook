@@ -103,7 +103,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
           categories: group.categories,
           indexerIds: group.indexerIds,
           minSeeders: 1, // Only torrents with at least 1 seeder
-        });
+        }, { exactTitle: Boolean(requestRecord?.customSearchTerms) }); // custom terms: sent as given (#316)
 
         logger.info(`Group ${i + 1} returned ${groupResults.length} results`);
         allResults.push(...groupResults);

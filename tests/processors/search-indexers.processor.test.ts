@@ -124,7 +124,32 @@ describe('processSearchIndexers', () => {
       categories: [3030],
       indexerIds: [1],
       minSeeders: 1,
+    }, { exactTitle: false });
+  });
+
+  it('sends admin custom search terms exactly, with no fallback variations (#316)', async () => {
+    configMock.get.mockImplementation(async (key: string) => {
+      if (key === 'prowlarr_indexers') {
+        return JSON.stringify([{ id: 1, name: 'Indexer', protocol: 'torrent', priority: 10, categories: [3030] }]);
+      }
+      return null;
     });
+    prismaMock.request.findUnique.mockResolvedValueOnce({ customSearchTerms: "Anarchist's Cookbook: Dungeon" });
+    prowlarrMock.searchWithVariations.mockResolvedValue([]);
+    prismaMock.request.update.mockResolvedValue({});
+
+    const { processSearchIndexers } = await import('@/lib/processors/search-indexers.processor');
+    await processSearchIndexers({
+      requestId: 'req-custom',
+      audiobook: { id: 'a1', title: 'Book', author: 'Author' },
+      jobId: 'job-custom',
+    });
+
+    expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith("Anarchist's Cookbook: Dungeon", 'Author', {
+      categories: [3030],
+      indexerIds: [1],
+      minSeeders: 1,
+    }, { exactTitle: true });
   });
 
   it('ranks all candidates before limiting automatic search to 100 results', async () => {

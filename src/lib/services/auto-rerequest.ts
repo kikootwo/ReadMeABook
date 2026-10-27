@@ -11,10 +11,13 @@
  *   - failed/warn with no new block: after a growing wait from the failure
  *     (`updatedAt`): 1, 3, 7, 14, then every 30 days; count + 1
  * User requests and in-place user retries never come here and reset the count to 0.
+ * A book removed from the library (#214) is never requested automatically, for any
+ * user, while its "Removed from library" failed request stands: removedFromLibrarySkip().
  */
 
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { REMOVED_FROM_LIBRARY_MESSAGE } from '@/lib/constants/request-statuses';
 
 const logger = RMABLogger.create('AutoReRequest');
 
@@ -41,7 +44,7 @@ export interface AutoReRequestCandidate {
 /** A skip, shaped so createRequestForUser can return it as is. */
 export interface AutoReRequestSkip {
   success: false;
-  reason: 'cancelled_by_user' | 'retry_not_due';
+  reason: 'cancelled_by_user' | 'retry_not_due' | 'removed_from_library';
   message: string;
 }
 
@@ -107,4 +110,29 @@ export async function decideAutoReRequest(
 
   logger.debug(`Automatic retry ${retries + 1} of ${existing.status} request ${existing.id} ("${title}") is due`);
   return { skip: null, nextCount: retries + 1, logLine: goLine(existing, title, retries + 1, `retry ${retries + 1}`) };
+}
+
+/**
+ * Skip for automatic callers while any user's request for the book stands failed
+ * by the library scan as removed from the library (#214); null otherwise. Only a
+ * manual request brings the book back (the owner's replaces that failed request).
+ */
+export async function removedFromLibrarySkip(asin: string): Promise<AutoReRequestSkip | null> {
+  const removed = await prisma.request.findFirst({
+    where: {
+      audiobook: { audibleAsin: asin },
+      type: 'audiobook',
+      status: 'failed',
+      errorMessage: REMOVED_FROM_LIBRARY_MESSAGE,
+      deletedAt: null,
+    },
+    select: { id: true },
+  });
+  if (!removed) return null;
+  logger.debug(`Not requesting ASIN ${asin} automatically: request ${removed.id} failed as removed from the library`);
+  return {
+    success: false,
+    reason: 'removed_from_library',
+    message: 'This audiobook was removed from the library; only a manual request brings it back',
+  };
 }

@@ -390,7 +390,8 @@ async function organize(
 - Remove invalid chars: `<>:"/\|?*`
 - Trim dots/spaces
 - Collapse multiple spaces
-- Limit to 200 chars
+- Limit to 200 chars per variable (and per renamed base name)
+- Then every finished component ≤255 UTF-8 bytes (`src/lib/utils/path-component.ts`): `capPathComponents` on `substituteTemplate` output; `capFilenameBytes(stem, suffix)` for renamed files (` - N` + ext), the merge temp `.m4b` (4 bytes left for the tagger's `<name>.tmp` when tagging is on; `TAG_TEMP_SUFFIX`), source-aware names (only the folder prefix cut), ` (N)` dedup, ebook source names. Cut between grapheme clusters (an emoji sequence, flag or accented letter stays whole), trailing spaces/dots trimmed; a component that fits is unchanged
 - Example: `Author: The <Best>! Book?` → `Author The Best! Book`
 
 ## Configuration
@@ -420,6 +421,7 @@ async function organize(
 **12. Silent keeps** - A usenet ebook release with several formats was kept with no request message, and a tagged copy that failed its duration check only showed in job errors. Fixed: both now get a request message (see Verified Import)
 **13. Chapter merge verified a merge that lost audio** - Codec-copy AAC merges count each later chapter's priming + trimmed last packet as full frames (~69 ms/boundary at 22.05 kHz, ~35 ms at 44.1 kHz). The symmetric 1 s + 50 ms/chapter content window let that surplus cancel real loss (80 chapters, last one read short → verified) and failed correct merges past ~56 chapters (and short-chapter merges at the 2% check). Fixed: copy verified by exact packet count (same frame); re-encode shortfall capped at 1 s. VBR MP3 without a Xing header placed later chapters at ffprobe's estimate (holes, markers off) yet the merge succeeded: a timeline with gaps or an end far from the audio now fails the merge. Re-encodes of chapters with one decoded format get `asetpts=N/SR/TB` (ADTS `.aac`, Xing-less VBR MP3 verify instead of failing on estimate drift that grows with chapter length); mixed formats keep container timestamps (a filter-graph rebuild restarts the count). A re-encode over 1 s short fails the merge (rebuilt timestamps leave no gap to catch a short read)
 **14. ASIN never written into .m4b/.m4a; tagging dropped faststart (#208)** - ffmpeg's mp4 muxer silently dropped `-metadata ----:com.apple.iTunes:ASIN=…` (tagger and merger), so Audiobookshelf got no ASIN from RMAB imports (the default `{title} {asin}` folder has no `[ASIN]` brackets). The tagger also had no `+faststart`, so every tagged MP4 (merged ones included) ended moov last, undoing the merger's playback-delay fix. Fixed: MP4 Freeform Tags post-step (moov first, verified) as one organizer step on the file being placed, so the ASIN also survives a failed tagging pass after a merge; the tagger always uses `+faststart`
+**15. Long non-Latin titles failed the import with ENAMETOOLONG (#264)** - The 200-char cap counted characters, not bytes (Cyrillic 2, CJK 3, emoji 4 per char), and nothing capped a joined component (`{title} - {series}`). Fixed: final 255-byte cap per component (see Path Sanitization)
 
 ## Tech Stack
 

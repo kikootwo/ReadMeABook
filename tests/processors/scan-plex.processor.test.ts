@@ -3,7 +3,10 @@
  * Documentation: documentation/backend/services/jobs.md
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs/promises';
+import * as os from 'os';
+import * as path from 'path';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
 
 const prismaMock = createPrismaMock();
@@ -232,6 +235,10 @@ describe('processScanPlex', () => {
   });
 
   it('removes stale items and resets linked audiobooks and requests', async () => {
+    // Audio still on disk: back to downloaded (#214)
+    const keptFolder = await fs.mkdtemp(path.join(os.tmpdir(), 'rmab-scan-'));
+    onTestFinished(() => fs.rm(keptFolder, { recursive: true, force: true }));
+    await fs.writeFile(path.join(keptFolder, 'Stale Book.m4b'), 'audio');
     configMock.getBackendMode.mockResolvedValue('plex');
     configMock.getPlexConfig.mockResolvedValue({
       serverUrl: 'http://plex',
@@ -270,6 +277,7 @@ describe('processScanPlex', () => {
         {
           id: 'ab-1',
           title: 'Stale Book',
+          filePath: keptFolder,
           requests: [{ id: 'req-1', status: 'available' }],
         },
       ])
@@ -286,6 +294,7 @@ describe('processScanPlex', () => {
           title: 'Orphaned Book',
           plexGuid: null,
           absItemId: 'missing-guid',
+          filePath: keptFolder,
           requests: [{ id: 'req-2', status: 'available' }],
         },
       ]);

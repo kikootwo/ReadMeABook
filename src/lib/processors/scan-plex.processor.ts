@@ -12,6 +12,7 @@ import { getLibraryService } from '../services/library';
 import { getConfigService } from '../services/config.service';
 import { getThumbnailCacheService } from '../services/thumbnail-cache.service';
 import { RMABLogger } from '../utils/logger';
+import { resetRequestsAfterLibraryRemoval } from './library-removal';
 
 /**
  * Process library scan job
@@ -254,19 +255,8 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
 
             audiobooksReset++;
 
-            // Reset any 'available' requests back to 'downloaded' or 'failed'
-            for (const request of audiobook.requests) {
-              if (request.status === 'available') {
-                await prisma.request.update({
-                  where: { id: request.id },
-                  data: {
-                    status: 'downloaded', // Back to downloaded state (files may still be there)
-                    updatedAt: new Date(),
-                  },
-                });
-                requestsReset++;
-              }
-            }
+            // 'available' requests: 'failed' when the files are gone too, else 'downloaded' (#214)
+            requestsReset += await resetRequestsAfterLibraryRemoval(audiobook, logger);
 
             logger.info(`Reset audiobook "${staleItem.title}" (no longer in library)`);
           }
@@ -346,19 +336,8 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
 
         orphanedAudiobooksReset++;
 
-        // Reset any 'available' requests
-        for (const request of audiobook.requests) {
-          if (request.status === 'available') {
-            await prisma.request.update({
-              where: { id: request.id },
-              data: {
-                status: 'downloaded',
-                updatedAt: new Date(),
-              },
-            });
-            orphanedRequestsReset++;
-          }
-        }
+        // 'available' requests: 'failed' when the files are gone too, else 'downloaded' (#214)
+        orphanedRequestsReset += await resetRequestsAfterLibraryRemoval(audiobook, logger);
       } catch (error) {
         logger.error(`Failed to reset orphaned audiobook "${audiobook.title}": ${error instanceof Error ? error.message : 'Unknown error'}`);
       }

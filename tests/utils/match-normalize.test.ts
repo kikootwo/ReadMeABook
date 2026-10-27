@@ -5,10 +5,12 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  apostropheEndingWords,
   foldForMatching,
   hasNonLatinLetter,
   hasUnspacedScript,
   isWordInTitle,
+  keepUnrequestedApostrophes,
   normalizeForMatching,
 } from '@/lib/utils/match-normalize';
 
@@ -28,16 +30,35 @@ describe('normalizeForMatching', () => {
     'VirginaEvans TheCorrespondent',
     'Twelve.Months-Jim.Butcher',
     'Author_Name-Book.Title.2024',
-    "O'Brien - The Things They Carried",
     'William.L.Shirer-Berlin.Diary-AUDIOBOOK-96kbs',
     'Author Name — Book Title [M4B] (Unabridged) {2020}',
     'Great\u00A0Book - Author\u00A0Name',
     'Café Señor Über Crème Brûlée Ångström',
     'Hélène Grémillon - Le confident',
-    'The Housemaid’s Secret',
     'I ❤\uFE0F Paris ⭐\uFE0F 1\uFE0F\u20E3',
   ])('matches the previous output for Latin text: %s', (text) => {
     expect(normalizeForMatching(text)).toBe(legacyNormalize(text));
+  });
+
+  // Accepted change (#316, #466): apostrophes fold, so a name with one matches a name without
+  it.each([
+    ["Ender's Game", 'enders game'],
+    ['Enders.Game', 'enders game'],
+    ['Ender’s Game', 'enders game'],
+    ["The Dungeon Anarchist's Cookbook", 'the dungeon anarchists cookbook'],
+    ["Don't Look Back, We'll Go, They're Here, I've, I'd, I'm", 'dont look back well go theyre here ive id im'],
+    ["L'intruse", 'l intruse'],
+    ['L.Intruse', 'l intruse'],
+    ['L’Héritage', 'l heritage'],
+    ["Changer l'eau des fleurs", 'changer l eau des fleurs'],
+    ["C'était ça ou mourir", 'c etait ca ou mourir'],
+    ["O'Brien - The Things They Carried", 'o brien the things they carried'],
+    ["Rock 'n' Roll", 'rock n roll'],
+    ["The Anarchists' Cookbook", 'the anarchists cookbook'],
+    ['‘Salem’s Lot', 'salems lot'],
+    ['The Housemaid’s Secret', 'the housemaids secret'],
+  ])('folds apostrophes: %s', (text, expected) => {
+    expect(normalizeForMatching(text)).toBe(expected);
   });
 
   // Accepted changes for Latin text: these letters used to be deleted
@@ -135,9 +156,47 @@ describe('foldForMatching', () => {
     expect(foldForMatching(text)).toBe(text.toLowerCase().replace(/\s+/g, ' ').trim());
   });
 
-  it('agrees with the normalizer on every word', () => {
-    const text = 'Frøken Smilla – Kapitel 1 «Αθήνα» ノルウェイの森１Ｑ８４';
+  it.each([
+    'Frøken Smilla – Kapitel 1 «Αθήνα» ノルウェイの森１Ｑ８４',
+    "Ender's Game - L'intruse [MP3] ‘Salem’s Lot",
+  ])('agrees with the normalizer on every word: %s', (text) => {
     expect(normalizeForMatching(foldForMatching(text))).toBe(normalizeForMatching(text));
+  });
+
+  it('folds apostrophes the way the normalizer does, keeping other punctuation', () => {
+    expect(foldForMatching("Orson Scott Card - Ender's Game [MP3]")).toBe('orson scott card - enders game [mp3]');
+    expect(foldForMatching("Freida McFadden - L'intruse (2026)")).toBe('freida mcfadden - l intruse (2026)');
+  });
+});
+
+describe('release apostrophes fold only where the request has one (#316)', () => {
+  it.each([
+    ["Ender's Game", ['enders']],
+    ['Ender’s Game', ['enders']],
+    ["Tom Clancy's Op-Center", ['clancys']],
+    ["Don't Look Back, We'll Go", ['dont', 'well']],
+    ["L'intruse", []],
+    ['Enders Game', []],
+  ])('apostropheEndingWords(%s)', (title, words) => {
+    expect([...apostropheEndingWords(title)]).toEqual(words);
+  });
+
+  it.each([
+    // [release, request, normalized release]
+    ["Orson Scott Card - Ender's Game", "Ender's Game", 'orson scott card enders game'],
+    ['Orson Scott Card - Ender’s Game', "Ender's Game", 'orson scott card enders game'],
+    ["Orson Scott Card - Ender's Game", 'Enders', 'orson scott card ender\uA78Cs game'],
+    ["David Levithan - The Lover's Dictionary", 'The Lovers', 'david levithan the lover\uA78Cs dictionary'],
+    ['Rick Riordan - The Titan’s Curse', 'The Titans', 'rick riordan the titan\uA78Cs curse'],
+    ["Stephen King's It", 'It', 'stephen king\uA78Cs it'],
+    ['Enders.Game', "Ender's Game", 'enders game'],
+    ["L'Intruse - 2026", 'Intruse', 'l intruse 2026'],
+  ])('%s for "%s" -> %s', (release, request, expected) => {
+    const kept = keepUnrequestedApostrophes(release, apostropheEndingWords(request));
+    expect(normalizeForMatching(kept)).toBe(expected);
+    // A kept apostrophe survives every later normalization
+    expect(normalizeForMatching(normalizeForMatching(kept))).toBe(expected);
+    expect(normalizeForMatching(foldForMatching(kept))).toBe(expected);
   });
 });
 

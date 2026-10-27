@@ -17,7 +17,7 @@ import { shouldSkipAutoSearch } from '@/lib/utils/release-date';
 import { seedAsin, getSiblingAsins } from '@/lib/services/works.service';
 import { isLibraryCoverSource, sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 import { createRequestReplacing, RE_REQUESTABLE_STATUSES, RequestAlreadyReplacedError } from '@/lib/services/request-rerequest';
-import { decideAutoReRequest, type AutoReRequestGo } from '@/lib/services/auto-rerequest';
+import { decideAutoReRequest, removedFromLibrarySkip, type AutoReRequestGo } from '@/lib/services/auto-rerequest';
 
 const logger = RMABLogger.create('RequestCreator');
 
@@ -40,7 +40,7 @@ export interface CreateRequestOptions {
 
 export type CreateRequestResult =
   | { success: true; request: any }
-  | { success: false; reason: 'already_available' | 'being_processed' | 'duplicate' | 'user_not_found' | 'ignored' | 'cancelled_by_user' | 'retry_not_due'; message: string };
+  | { success: false; reason: 'already_available' | 'being_processed' | 'duplicate' | 'user_not_found' | 'ignored' | 'cancelled_by_user' | 'retry_not_due' | 'removed_from_library'; message: string };
 
 /**
  * Create a request for a user, with full duplicate detection, library checks,
@@ -73,6 +73,10 @@ export async function createRequestForUser(
         : 'This audiobook is being processed and will be available soon',
     };
   }
+
+  // A book removed from the library comes back only through a manual request (#214)
+  const removedSkip = automatic ? await removedFromLibrarySkip(audiobook.asin) : null;
+  if (removedSkip) return removedSkip;
 
   // Check if audiobook is already in Plex/ABS library
   const plexMatch = await findPlexMatch({

@@ -148,7 +148,7 @@ export async function POST(
           const groupResults = await prowlarr.searchWithVariations(searchTitle, searchAuthor, {
             categories: group.categories,
             indexerIds: group.indexerIds,
-          });
+          }, { exactTitle: Boolean(customTitle || requestRecord.customSearchTerms) }); // custom terms: sent as given (#316)
 
           logger.debug(`Group ${i + 1} returned ${groupResults.length} results`);
           allResults.push(...groupResults);

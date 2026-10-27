@@ -28,6 +28,7 @@ import {
 } from './chapter-merger';
 import { prisma } from '../db';
 import { substituteTemplate, buildRenamedFilename, type TemplateVariables } from './path-template.util';
+import { capFilenameBytes, MAX_COMPONENT_BYTES, TAG_TEMP_SUFFIX } from './path-component';
 import { AUDIO_EXTENSIONS, COERCION_CANDIDATE_EXTENSIONS } from '../constants/audio-formats';
 
 export interface AudiobookMetadata {
@@ -237,8 +238,12 @@ export class FileOrganizer {
                 if (chapters.length === 0) {
                   await logger?.warn(`Chapter analysis failed: No valid chapters found. Organizing files individually.`);
                 } else {
-                  // Create output path in temp directory
-                  const outputFilename = `${this.sanitizePath(audiobook.title)}.m4b`;
+                  // Create output path in temp directory; the tagger writes `${name}.tmp` beside it, so leave room
+                  const outputFilename = capFilenameBytes(
+                    this.sanitizePath(audiobook.title),
+                    '.m4b',
+                    metadataTaggingEnabled ? MAX_COMPONENT_BYTES - TAG_TEMP_SUFFIX.length : MAX_COMPONENT_BYTES,
+                  );
                   const outputPath = path.join(this.tempDir, outputFilename);
 
                   // Perform merge
@@ -723,7 +728,8 @@ export class FileOrganizer {
     const ext = path.extname(basename);
     const stem = path.basename(basename, ext);
 
-    let candidate = basename;
+    // Fit 255 bytes (#264); unchanged when it already fits
+    let candidate = capFilenameBytes(stem, ext);
 
     // Preserve folder context for duplicate track names (e.g. CD1/Track01.mp3,
     // CD2/Track01.mp3) so each file keeps a unique target name.
@@ -736,8 +742,10 @@ export class FileOrganizer {
           .map((segment) => this.sanitizePath(segment))
           .join('-');
 
-        if (folderPrefix) {
-          candidate = `${folderPrefix}-${stem}${ext}`;
+        // Only the folder prefix is cut, so the track name and extension stay whole
+        const trackPart = `-${candidate}`;
+        if (folderPrefix && Buffer.byteLength(trackPart, 'utf8') < MAX_COMPONENT_BYTES) {
+          candidate = capFilenameBytes(folderPrefix, trackPart);
         }
       }
     }
@@ -756,7 +764,7 @@ export class FileOrganizer {
     let suffix = 2;
 
     while (true) {
-      const candidate = `${stem} (${suffix})${ext}`;
+      const candidate = capFilenameBytes(stem, ` (${suffix})${ext}`);
       if (!usedFilenames.has(candidate)) {
         usedFilenames.add(candidate);
         return candidate;
@@ -934,7 +942,9 @@ export class FileOrganizer {
         targetFilename = buildRenamedFilename(renameConfig.template, variables, originalExt);
         await logger?.info(`Renamed ebook file: ${sourceFilename} -> ${targetFilename}`);
       } else {
-        targetFilename = this.sanitizePath(sourceFilename);
+        const cleanName = this.sanitizePath(sourceFilename);
+        const cleanExt = path.extname(cleanName);
+        targetFilename = capFilenameBytes(cleanName.slice(0, cleanName.length - cleanExt.length), cleanExt);
       }
       const targetPath = path.join(targetDir, targetFilename);
 
