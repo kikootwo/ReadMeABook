@@ -6,7 +6,7 @@
 import { SearchIndexersPayload, getJobQueueService } from '../services/job-queue.service';
 import { prisma } from '../db';
 import { getProwlarrService } from '../integrations/prowlarr.service';
-import { getRankingAlgorithm } from '../utils/ranking-algorithm';
+import { getRankingAlgorithm, AUTO_SEARCH_MIN_MB_PER_MINUTE } from '../utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer-grouping';
 import { RMABLogger } from '../utils/logger';
 import { getLanguageForRegion } from '../constants/language-config';
@@ -35,11 +35,13 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       return { success: true, message: 'Request cancelled or deleted, search skipped', requestId };
     }
 
-    // Check for custom search terms override
+    // Check for custom search terms override; the catalog series position feeds the volume check (#330)
     const requestRecord = await prisma.request.findUnique({
       where: { id: requestId },
-      select: { customSearchTerms: true },
+      select: { customSearchTerms: true, audiobook: { select: { series: true, seriesPart: true } } },
     });
+    const series = requestRecord?.audiobook?.series ?? undefined;
+    const seriesPart = requestRecord?.audiobook?.seriesPart ?? undefined;
     const effectiveSearchTitle = requestRecord?.customSearchTerms || audiobook.title;
 
     // Get enabled indexers from configuration
@@ -173,25 +175,34 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     const langConfig = getLanguageForRegion(region);
 
     // Rank results with indexer priorities and flag configs
-    // Note: rankTorrents now filters out results < 20 MB internally
+    // Note: rankTorrents filters out results < 20 MB internally, and here also results under
+    // the MB-per-minute floor when the runtime is known (one file of a multi-file post, #311)
     // Use effectiveSearchTitle so custom search terms are respected for ranking
     // requireAuthor: true (default) - strict filtering for automatic selection
+    // series/seriesPart: automatic only, a release naming another book of the series is rejected (#330)
+    if (seriesPart) {
+      logger.info(`Series position: ${series ? `"${series}" ` : ''}#${seriesPart}, releases naming another book are skipped`);
+    }
     const rankedResults = ranker.rankTorrents(searchResults, {
       title: effectiveSearchTitle,
       author: audiobook.author,
       durationMinutes,
+      series,
+      seriesPart,
     }, {
       indexerPriorities,
       flagConfigs,
       requireAuthor: true,  // Automatic mode - prevent wrong authors
       stopWords: langConfig.stopWords,
       characterReplacements: langConfig.characterReplacements,
+      minMBPerMinute: AUTO_SEARCH_MIN_MB_PER_MINUTE,  // Automatic only; interactive lists everything
     });
 
-    // Log filter results
+    // Log filter results (the floor applies only when the runtime is known)
     const postFilterCount = rankedResults.length;
     if (postFilterCount < preFilterCount) {
-      logger.info(`Filtered out ${preFilterCount - postFilterCount} results < ${sizeMBThreshold} MB`);
+      const floorNote = durationMinutes ? ` or < ${AUTO_SEARCH_MIN_MB_PER_MINUTE} MB/min` : '';
+      logger.info(`Filtered out ${preFilterCount - postFilterCount} results < ${sizeMBThreshold} MB${floorNote}`);
     }
 
     // Dual threshold filtering:

@@ -276,7 +276,7 @@ describe('Notification Triggers - Integration Tests', () => {
       };
       requireAuthMock.mockImplementation((_req: any, handler: any) => handler(adminRequest));
 
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-1',
         userId: 'user-1',
         audiobookId: 'audiobook-1',
@@ -335,7 +335,7 @@ describe('Notification Triggers - Integration Tests', () => {
     it('blocks interactive search when request awaiting approval', async () => {
       authRequest.json.mockResolvedValue({});
 
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-1',
         userId: 'user-1',
         audiobookId: 'audiobook-1',
@@ -366,7 +366,7 @@ describe('Notification Triggers - Integration Tests', () => {
         },
       });
 
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-1',
         userId: 'user-1',
         audiobookId: 'audiobook-1',

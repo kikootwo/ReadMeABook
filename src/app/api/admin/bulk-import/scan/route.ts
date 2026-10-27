@@ -14,6 +14,9 @@ import { discoverAudiobooks, cleanSearchString } from '@/lib/utils/bulk-import-s
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { catalogTitleFitsFolder, extractDigitAsinCandidate } from '@/lib/utils/bulk-import-asin';
+import { getConfigService } from '@/lib/services/config.service';
+import { getLanguageForRegion, type LanguageConfig } from '@/lib/constants/language-config';
 
 const logger = RMABLogger.create('API.Admin.BulkImport.Scan');
 
@@ -145,6 +148,8 @@ export async function POST(request: NextRequest) {
             // Phase 2: Match each audiobook against Audible
             const audibleService = getAudibleService();
             const results: any[] = [];
+            // Region language, read once, and only when a folder holds an all-digit ASIN candidate
+            let candidateLangConfig: LanguageConfig | null = null;
 
             for (let i = 0; i < audiobooks.length; i++) {
               if (abortController.signal.aborted) break;
@@ -161,6 +166,8 @@ export async function POST(request: NextRequest) {
               let match: any = null;
               let inLibrary = false;
               let hasActiveRequest = false;
+              // A confirmed all-digit candidate counts as an extracted ASIN; an unconfirmed one is never shown
+              let extractedAsin = book.extractedAsin;
 
               try {
                 // If the scanner extracted an ASIN directly from the folder name,
@@ -174,6 +181,25 @@ export async function POST(request: NextRequest) {
                     }
                   } catch {
                     /* ASIN lookup failed — fall through to text search */
+                  }
+                } else {
+                  // An all-digit ASIN (older books use their ISBN-10) is only a candidate: it is a
+                  // direct match when the catalog title fits the folder name. Otherwise, as before,
+                  // the text search below runs on book.searchTerm.
+                  const candidate = extractDigitAsinCandidate(book.folderName);
+                  if (candidate) {
+                    try {
+                      const candidateResult = await audibleService.getAudiobookDetails(candidate, { fillSeries: false });
+                      if (candidateResult) {
+                        candidateLangConfig ??= getLanguageForRegion(await getConfigService().getAudibleRegion());
+                        if (catalogTitleFitsFolder(candidateResult.title, book.folderName, candidateLangConfig)) {
+                          match = candidateResult;
+                          extractedAsin = candidate;
+                        }
+                      }
+                    } catch {
+                      /* candidate lookup failed — fall through to text search */
+                    }
                   }
                 }
 
@@ -239,7 +265,7 @@ export async function POST(request: NextRequest) {
                 audioFileCount: book.audioFileCount,
                 totalSizeBytes: book.totalSizeBytes,
                 metadataSource: book.metadataSource,
-                extractedAsin: book.extractedAsin,
+                extractedAsin,
                 searchTerm: book.searchTerm,
                 audioFiles: book.audioFiles,
                 match: match

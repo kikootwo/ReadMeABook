@@ -37,6 +37,8 @@ Manages recurring/scheduled jobs providing automated tasks (Plex scans, Audible 
 - Admin UI management
 - Automatic scheduling/unscheduling when jobs enabled/disabled
 - Schedule updates handled by unscheduling old job and scheduling new one
+- Startup (`removeOrphanedRepeatableJobs`, after `scheduleAllJobs`): removes repeatable jobs `scheduled-<id>` whose `scheduled_jobs` row is gone (logs each id, then `Repeatable job check: N found, M orphaned removed`); jobs of existing rows untouched; non-fatal
+- `lastRun` update for a missing row (P2025): one warn per schedule id, never throws
 
 ## Startup Initialization
 
@@ -187,6 +189,8 @@ interface ScheduledJob {
 - ✅ Cron expressions not user-friendly → added human-readable descriptions and visual schedule builder
 - ✅ Scheduled jobs triggered by timer not appearing in system logs → Job records now created automatically for timer-triggered jobs
 - ✅ Scheduled jobs triggered by timer not updating lastRun timestamp → Job queue now updates lastRun when processing timer-triggered jobs
+- ✅ `scheduledJob.update()` "No record was found" error on every run (#222) → a repeatable job left in Redis after its row was deleted (e.g. database reset) kept firing; startup now removes it, and the lastRun update warns once instead
+- ✅ `plexLibrary.create()` unique `plex_guid` error in the recently-added check / full scan (#222) → two jobs inserting the same new item at once; the losing insert now updates the winner's row (`src/lib/processors/library-row-insert.ts`), same field rules as any existing row (an ASIN is never cleared)
 - ✅ Daily cron patterns at non-midnight hours not recognized → Fixed `getIntervalFromCron` to parse any daily time (e.g., "0 4 * * *")
 - ✅ "Every 24 hours" interval validation error → Auto-converts 24+ hour intervals to daily schedule (0 0 * * *)
 

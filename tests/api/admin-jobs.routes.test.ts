@@ -14,6 +14,19 @@ const schedulerMock = vi.hoisted(() => ({
   triggerJobNow: vi.fn(),
 }));
 
+// The routes go through requireAuth, which looks the user up
+vi.mock('@/lib/db', () => ({
+  prisma: {
+    user: {
+      findUnique: async ({ where }: { where: { id: string } }) => ({
+        id: where.id,
+        role: where.id === 'u-admin' ? 'admin' : 'user',
+        deletedAt: null,
+        sessionsInvalidatedAt: null,
+      }),
+    },
+  },
+}));
 vi.mock('@/lib/utils/jwt', () => ({
   verifyAccessToken: verifyAccessTokenMock,
 }));
@@ -32,7 +45,7 @@ const makeRequest = (token?: string, body?: any) => ({
 describe('Admin jobs routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    verifyAccessTokenMock.mockReturnValue({ role: 'admin' });
+    verifyAccessTokenMock.mockReturnValue({ sub: 'u-admin', role: 'admin' });
   });
 
   it('lists scheduled jobs', async () => {
@@ -55,13 +68,13 @@ describe('Admin jobs routes', () => {
   });
 
   it('rejects job list for non-admin users', async () => {
-    verifyAccessTokenMock.mockReturnValue({ role: 'user' });
+    verifyAccessTokenMock.mockReturnValue({ sub: 'u-user', role: 'user' });
     const { GET } = await import('@/app/api/admin/jobs/route');
     const response = await GET(makeRequest('Bearer token') as any);
     const payload = await response.json();
 
     expect(response.status).toBe(403);
-    expect(payload.error).toMatch(/Admin access required/);
+    expect(payload.message).toMatch(/Admin access required/);
   });
 
   it('returns 500 when job list fails', async () => {
@@ -94,13 +107,13 @@ describe('Admin jobs routes', () => {
   });
 
   it('rejects job creation for non-admin users', async () => {
-    verifyAccessTokenMock.mockReturnValue({ role: 'user' });
+    verifyAccessTokenMock.mockReturnValue({ sub: 'u-user', role: 'user' });
     const { POST } = await import('@/app/api/admin/jobs/route');
     const response = await POST(makeRequest('Bearer token') as any);
     const payload = await response.json();
 
     expect(response.status).toBe(403);
-    expect(payload.error).toMatch(/Admin access required/);
+    expect(payload.message).toMatch(/Admin access required/);
   });
 
   it('returns 500 when job creation fails', async () => {
@@ -133,13 +146,13 @@ describe('Admin jobs routes', () => {
   });
 
   it('rejects job updates for non-admin users', async () => {
-    verifyAccessTokenMock.mockReturnValue({ role: 'user' });
+    verifyAccessTokenMock.mockReturnValue({ sub: 'u-user', role: 'user' });
     const { PUT } = await import('@/app/api/admin/jobs/[id]/route');
     const response = await PUT(makeRequest('Bearer token') as any, { params: Promise.resolve({ id: 'job-3' }) });
     const payload = await response.json();
 
     expect(response.status).toBe(403);
-    expect(payload.error).toMatch(/Admin access required/);
+    expect(payload.message).toMatch(/Admin access required/);
   });
 
   it('returns 500 when job update fails', async () => {
@@ -172,13 +185,13 @@ describe('Admin jobs routes', () => {
   });
 
   it('rejects job deletion for non-admin users', async () => {
-    verifyAccessTokenMock.mockReturnValue({ role: 'user' });
+    verifyAccessTokenMock.mockReturnValue({ sub: 'u-user', role: 'user' });
     const { DELETE } = await import('@/app/api/admin/jobs/[id]/route');
     const response = await DELETE(makeRequest('Bearer token') as any, { params: Promise.resolve({ id: 'job-4' }) });
     const payload = await response.json();
 
     expect(response.status).toBe(403);
-    expect(payload.error).toMatch(/Admin access required/);
+    expect(payload.message).toMatch(/Admin access required/);
   });
 
   it('returns 500 when job deletion fails', async () => {

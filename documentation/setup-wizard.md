@@ -37,6 +37,10 @@
 **POST /api/setup/test-download-client**
 - Tests qBittorrent/Transmission, returns client version
 
+**POST /api/setup/test-abs** (also used by Settings > Library)
+- Body `{serverUrl, apiToken}` (masked/empty token reuses the saved one for the saved URL) → `{success, libraries}`
+- Fetch errors → 500 `{error}` from `describeFetchError` (`src/lib/utils/fetch-error.ts`): "Could not reach Audiobookshelf at host:port: reason (CODE)"
+
 **POST /api/setup/complete**
 - Saves all config to database
 - Creates admin user account
@@ -164,6 +168,12 @@ interface SetupState {
   - Updated `triggerJobNow()` to store Bull job ID in database
   - Migration: `20251221072639_add_last_run_job_id_to_scheduled_jobs`
 - Initializing page now successfully finds and polls running jobs
+
+**8. Audiobookshelf test said only "fetch failed" (#221)**
+- Cause: route returned Node fetch's `error.message`; the reason (DNS, refused, timeout, TLS) is on `error.cause` and was never logged
+- Fix: `describeFetchError` / `fetchErrorDetails` (`src/lib/utils/fetch-error.ts`) in `setup/test-abs` and `admin/settings/audiobookshelf/libraries`: reason names cause code + host:port (never path, query, headers or token); cause chain logged, scrubbed. Header-validation errors (token with a line break) are never echoed, since they quote the token
+- URL ending in `/api` → 404 plus "Remove it and use <base>"; non-JSON answer → 400 "Invalid response..."
+- Fetch-blocked ports (e.g. 1) → blocked-port reason instead of undici's bare "bad port"
 
 ## Related Files
 

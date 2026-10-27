@@ -26,7 +26,14 @@ vi.mock('@/lib/db', () => ({
         return state.completed ? { key: 'setup_completed', value: 'true' } : null;
       },
     },
-    user: { findUnique: async ({ where }: { where: { id: string } }) => ({ id: where.id, deletedAt: null, sessionsInvalidatedAt: null }) },
+    user: {
+      findUnique: async ({ where }: { where: { id: string } }) => ({
+        id: where.id,
+        role: where.id === 'u-admin' ? 'admin' : 'user',
+        deletedAt: null,
+        sessionsInvalidatedAt: null,
+      }),
+    },
     apiToken: {
       findUnique: async () => ({
         id: 't1', tokenPrefix: 'rmab_abc', expiresAt: null, role: 'admin',

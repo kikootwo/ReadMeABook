@@ -47,8 +47,9 @@ export async function POST(
       if (!torrentCheck.ok) return rejectedSelectionResponse(torrentCheck.error);
       const torrent = torrentCheck.value;
 
-      const requestRecord = await prisma.request.findUnique({
-        where: { id },
+      // A deleted request answers 404 for everyone
+      const requestRecord = await prisma.request.findFirst({
+        where: { id, deletedAt: null },
         include: {
           audiobook: true,
         },

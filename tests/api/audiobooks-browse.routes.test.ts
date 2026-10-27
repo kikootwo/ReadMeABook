@@ -35,15 +35,14 @@ vi.mock('@/lib/utils/ignored-audiobooks', () => ({
 }));
 
 vi.mock('@/lib/middleware/auth', () => ({
-  getCurrentUser: currentUserMock,
-  getCurrentUserAsync: currentUserMock,
+  getOptionalAuthUser: currentUserMock,
 }));
 
 describe('Audiobooks browse routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     enrichMock.mockResolvedValue([]);
-    currentUserMock.mockReturnValue(null);
+    currentUserMock.mockResolvedValue(null);
   });
 
   it('searches Audible and enriches results', async () => {
@@ -54,7 +53,7 @@ describe('Audiobooks browse routes', () => {
       page: 1,
       hasMore: false,
     });
-    currentUserMock.mockReturnValue({ sub: 'user-1' });
+    currentUserMock.mockResolvedValue({ id: 'user-1', sub: 'user-1' });
     enrichMock.mockResolvedValue([{ asin: 'ASIN', available: false }]);
 
     const { GET } = await import('@/app/api/audiobooks/search/route');
@@ -154,7 +153,7 @@ describe('Audiobooks browse routes', () => {
         lastSyncedAt: new Date('2024-01-02'),
       },
     ]);
-    currentUserMock.mockReturnValue({ sub: 'user-1' });
+    currentUserMock.mockResolvedValue({ id: 'user-1', sub: 'user-1' });
     enrichMock.mockResolvedValueOnce([{ asin: 'ASIN', available: true }]);
 
     const { GET } = await import('@/app/api/audiobooks/new-releases/route');

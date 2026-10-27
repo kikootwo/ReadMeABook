@@ -38,6 +38,8 @@ export interface AudiobookRequest {
   author: string;
   narrator?: string;
   durationMinutes?: number;
+  series?: string | null;      // Catalog series name; automatic search only (G4c, #330)
+  seriesPart?: string | null;  // Catalog series position ("3", "2.5"); automatic search only (G4c, #330)
 }
 
 export interface IndexerFlagConfig {
@@ -51,7 +53,11 @@ export interface RankTorrentsOptions {
   requireAuthor?: boolean;                   // Enforce author presence check (default: true)
   stopWords?: string[];                      // Language-specific stop words for matching
   characterReplacements?: Record<string, string>;  // Language-specific char replacements (e.g. ß→ss)
+  minMBPerMinute?: number;                   // Size floor when runtime is known (opt-in; automatic search only)
 }
+
+/** Size floor for automatic search, about 21 kbps: drops a single file of a multi-file post (#311) */
+export const AUTO_SEARCH_MIN_MB_PER_MINUTE = 0.15;
 
 export interface EbookTorrentRequest {
   title: string;
@@ -65,7 +71,11 @@ export interface RankEbookTorrentsOptions {
   requireAuthor?: boolean;                   // Enforce author presence check (default: true)
   stopWords?: string[];                      // Language-specific stop words for matching
   characterReplacements?: Record<string, string>;  // Language-specific char replacements (e.g. ß→ss)
+  enforceSizeCap?: boolean;                  // Skip results over EBOOK_MAX_SIZE_MB (default: true; interactive passes false)
 }
+
+/** Ebook size cap: automatic search skips larger results; interactive search lists them (#323) */
+export const EBOOK_MAX_SIZE_MB = 20;
 
 export interface BonusModifier {
   type: 'indexer_priority' | 'indexer_flag' | 'custom';
@@ -129,11 +139,17 @@ export class RankingAlgorithm {
       requireAuthor = true,  // Safe default: require author in automatic mode
       stopWords,
       characterReplacements,
+      minMBPerMinute,
     } = options;
-    // Filter out files < 20 MB (likely ebooks/samples)
+    // Filter out files < 20 MB (likely ebooks/samples), and, when a floor is set and the
+    // runtime is known, results too small for the runtime (one file of a multi-file post)
+    const runtime = audiobook.durationMinutes;
+    const floorMB = minMBPerMinute !== undefined && runtime !== undefined && runtime > 0
+      ? minMBPerMinute * runtime
+      : 0;
     const filteredTorrents = torrents.filter((torrent) => {
       const sizeMB = torrent.size / (1024 * 1024);
-      return sizeMB >= 20;
+      return sizeMB >= 20 && sizeMB >= floorMB;
     });
 
     const ranked = filteredTorrents.map((torrent) => {
@@ -455,8 +471,9 @@ export class RankingAlgorithm {
     // ========== STAGE 1.5: AUTHOR PRESENCE CHECK (AUTOMATIC MODE) ==========
     // Interactive search (requireAuthor: false) shows all results. Rules: match-gates.md (G3)
     if (requireAuthor && !isAuthorPresent(torrentTitle, normalizedAuthors)) return 0;
-    // G4c: the request names one series position and the release names another right after the title
-    if (requireAuthor && volumeConflict(audiobook.title, release, stopWords, characterReplacements)) return 0;
+    // G4c: the request (title or catalog series part) names one position and the release names another
+    const catalog = { series: audiobook.series, seriesPart: audiobook.seriesPart };
+    if (requireAuthor && volumeConflict(audiobook.title, release, stopWords, characterReplacements, catalog)) return 0;
     // G4b: a one-word title must start a name element of the release (left boundary only)
     const shortWord = shortTitleWord(requiredWords);
     if (requireAuthor && shortWord) {
@@ -705,7 +722,7 @@ export class RankingAlgorithm {
    * Rank ebook torrents from indexers
    * Reuses title/author matching and seeder scoring from audiobook ranking
    * Uses ebook-specific format scoring (10 pts for match, 0 otherwise)
-   * Uses inverted size scoring (smaller = better, > 20MB filtered)
+   * Uses inverted size scoring (smaller = better, > EBOOK_MAX_SIZE_MB filtered unless enforceSizeCap is false)
    *
    * @param torrents - Array of torrent results from Prowlarr
    * @param ebook - Ebook request details (title, author, preferredFormat)
@@ -722,13 +739,13 @@ export class RankingAlgorithm {
       requireAuthor = true,  // Safe default: require author in automatic mode
       stopWords,
       characterReplacements,
+      enforceSizeCap = true,  // Safe default: automatic mode skips oversized ebooks
     } = options;
 
-    // Filter out files > 20 MB (too large for ebooks)
-    const filteredTorrents = torrents.filter((torrent) => {
-      const sizeMB = torrent.size / (1024 * 1024);
-      return sizeMB <= 20;
-    });
+    // Automatic search skips files over the cap; interactive search lists them (scored 0 for size)
+    const filteredTorrents = enforceSizeCap
+      ? torrents.filter((torrent) => torrent.size / (1024 * 1024) <= EBOOK_MAX_SIZE_MB)
+      : torrents;
 
     const ranked = filteredTorrents.map((torrent) => {
       // Detect ebook format from title
@@ -852,8 +869,8 @@ export class RankingAlgorithm {
    * Score ebook file size (15 points max, inverted - smaller is better)
    * < 5 MB = 15 pts (full)
    * 5-15 MB = 10 pts
-   * 15-20 MB = 5 pts
-   * > 20 MB = filtered out (not scored)
+   * 15-20 MB (EBOOK_MAX_SIZE_MB) = 5 pts
+   * > EBOOK_MAX_SIZE_MB = 0 pts (automatic search filters these out first)
    */
   private scoreEbookSize(torrent: TorrentResult): number {
     const sizeMB = torrent.size / (1024 * 1024);
@@ -862,11 +879,11 @@ export class RankingAlgorithm {
       return 15; // Optimal size for ebooks
     } else if (sizeMB <= 15) {
       return 10; // Acceptable, may have images
-    } else if (sizeMB <= 20) {
+    } else if (sizeMB <= EBOOK_MAX_SIZE_MB) {
       return 5;  // Large but within limit
     }
 
-    // > 20 MB should have been filtered, but return 0 as safety
+    // Over the cap: only interactive search keeps these
     return 0;
   }
 
@@ -924,8 +941,10 @@ export class RankingAlgorithm {
       notes.push('✓ Optimal file size');
     } else if (sizeMB <= 15) {
       notes.push('Good file size (may have images)');
-    } else if (sizeMB <= 20) {
+    } else if (sizeMB <= EBOOK_MAX_SIZE_MB) {
       notes.push('⚠️ Large file size');
+    } else {
+      notes.push(`⚠️ Over ${EBOOK_MAX_SIZE_MB} MB (automatic search skips it)`);
     }
 
     // Seeder notes (same logic as audiobooks)

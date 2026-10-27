@@ -1,6 +1,6 @@
 /**
  * Component: On-Demand Download Token Generator
- * Documentation: documentation/backend/api.md
+ * Documentation: documentation/backend/services/auth.md
  */
 
 import { NextRequest, NextResponse } from 'next/server';

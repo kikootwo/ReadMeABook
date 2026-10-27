@@ -10,6 +10,7 @@ import { prisma } from '@/lib/db';
 import { getConfigService } from '@/lib/services/config.service';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { buildEbookDownloadName } from '@/lib/utils/ebook-download-name';
 
 const logger = RMABLogger.create('EbookSelection');
 
@@ -76,7 +77,7 @@ export async function startAnnasArchiveDownload(
     requestId,
     downloadHistory.id,
     selectedEbook.downloadUrl,
-    `${audiobook.title} - ${audiobook.author}.${selectedEbook.format || preferredFormat}`,
+    buildEbookDownloadName(audiobook.title, audiobook.author, selectedEbook.format || preferredFormat),
     undefined // Size unknown
   );
 

@@ -10,6 +10,7 @@ import { guardEbookSelection, guardTorrentSelection, rejectedSelectionResponse, 
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { buildEbookDownloadName } from '@/lib/utils/ebook-download-name';
 import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { readJsonBody } from '@/lib/utils/request-body';
@@ -47,9 +48,9 @@ export async function POST(
         // Validate action and optional admin-selected torrent
         const { action, selectedTorrent: adminSelectedTorrent } = ApprovalActionSchema.parse(body);
 
-        // Fetch the request
-        const existingRequest = await prisma.request.findUnique({
-          where: { id },
+        // Fetch the request; a deleted request answers 404
+        const existingRequest = await prisma.request.findFirst({
+          where: { id, deletedAt: null },
           include: {
             audiobook: true,
             user: {
@@ -159,7 +160,7 @@ export async function POST(
                 existingRequest.id,
                 downloadHistory.id,
                 selectedTorrent.downloadUrl,
-                `${existingRequest.audiobook.title} - ${existingRequest.audiobook.author}.${selectedTorrent.format || 'epub'}`,
+                buildEbookDownloadName(existingRequest.audiobook.title, existingRequest.audiobook.author, selectedTorrent.format || 'epub'),
                 undefined
               );
             } else {

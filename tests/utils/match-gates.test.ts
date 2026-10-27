@@ -171,7 +171,38 @@ describe('volume conflict (G4c)', () => {
     ['Die Tribute von Panem 1. Tödliche Spiele', 'Die Tribute von Panem 2 - Gefährliche Liebe', true],
     ['Die Tribute von Panem 1. Tödliche Spiele', 'Die Tribute von Panem - Tödliche Spiele', false],
     ["Tom Clancy's Op-Center 12: War of Eagles", "Tom Clancy's Op-Center 11 - Call to Treason", true],
+    ['Dungeon Crawler Carl (book 1)', 'Dungeon Crawler Carl Book 3 of 7', true],
+    ['Dungeon Crawler Carl (book 1)', 'Dungeon Crawler Carl Book 1 of 7', false],
+    ['The Way of Kings (The Stormlight Archive, Book 1)', 'The Way of Kings (2 of 2)', false],
   ])('%s vs %s → %s', (title, release, expected) => {
     expect(volumeConflict(title, release, EN)).toBe(expected);
+  });
+});
+
+describe('volume conflict with the catalog series part (G4c, #330)', () => {
+  const rr = (seriesPart?: string) => ({ series: 'Red Rising Saga', seriesPart });
+  it.each<[string, string, { series?: string; seriesPart?: string }, boolean]>([
+    ['Morning Star', 'Red Rising Saga Book 2 - Golden Son', rr('3'), true],
+    ['Morning Star', 'Red Rising Saga 03 - Morning Star', rr('3'), false],
+    ['Golden Son', 'Red Rising Saga 02 - Golden Son', rr('3'), false], // the title words name this book
+    ['Red Rising', 'Red Rising Saga 02', rr('1'), true], // no title words beyond the series name
+    ['Red Rising', 'Red Rising Saga Book 3 of 7', rr('1'), true],
+    ['Red Rising', 'Red Rising Saga Book 1 of 7', rr('1'), false],
+    ['Red Rising', 'Red Rising Saga (1 of 2)', rr('3'), false],
+    ['Red Rising', 'Red Rising Saga Books 2-4', rr('1'), true],
+    ['Red Rising', 'Red Rising Saga Vols. 1-3', rr('2'), false],
+    ['Red Rising', 'Red Rising Saga 2019-05-01', rr('3'), false],
+    ['Red Rising', 'Red Rising Saga [02/12]', rr('3'), false],
+    ['Red Rising', 'Red Rising Saga 02', rr(), false],
+    ['Golden Son', 'Red Rising Saga 2.5', rr('2.5'), false],
+    ['Golden Son', 'Red Rising Saga 02.50', rr('2.5'), false],
+    ['Golden Son', 'Red Rising Saga 2', rr('2.5'), true],
+    ['Dungeon Crawler Carl (book 1)', 'Dungeon Crawler Carl 3', { series: 'Dungeon Crawler Carl', seriesPart: '1' }, true],
+    ['Azarinth Healer: Book One', 'Azarinth Healer 03', { series: 'Azarinth Healer', seriesPart: '01' }, true],
+    ['Azarinth Healer: Book One', 'Azarinth Healer 03', { seriesPart: '1' }, false], // no series name: title-only
+    ["The Magician's Nephew", "The Chronicles of Narnia Book 1 - The Magician's Nephew",{ series: 'The Chronicles of Narnia', seriesPart: '6' }, false],
+    ['Way of Kings (Book 1) (Book 2)', 'Way of Kings Book 3', { seriesPart: '1' }, false],
+  ])('%s vs %s (%o) → %s', (title, release, book, expected) => {
+    expect(volumeConflict(title, release, EN, undefined, book)).toBe(expected);
   });
 });

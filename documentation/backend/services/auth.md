@@ -105,6 +105,7 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 
 **requireAuth()** - Verifies JWT exists/valid, adds user to request, returns 401 if invalid
 **requireAdmin()** - Checks `user.role === 'admin'`, returns 403 if not, chains after requireAuth
+**getOptionalAuthUser()** - For routes that also answer without a session: the caller after the same account checks as requireAuth (API tokens: allowlist too), else `null`, never a 401
 **requireSetupIncomplete()** - Setup-only routes; 403 once `setup_completed='true'`
 **requireSetupIncompleteOrAdmin()** - Shared setup/settings routes; open during setup, admin after
 - Both **fail closed**: if the `setup_completed` lookup throws → 503 `ServiceUnavailable` (handler not run; details logged only)
@@ -289,6 +290,8 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 - Admin generates/revokes via user permissions modal
 - User navigates to `/auth/token/login?token=rmab_...` → page POSTs token to API in request body
 - API: `POST /api/auth/token/login` with `{ token }` in JSON body
+- Account checks (after the token matches, before `lastLoginAt` and tokens): pending approval: 200 `{success:false, pendingApproval:true, message}` (page sends it to `/login?error=`); rejected: 401 `Account has been rejected`. Approved or null signs in
+- Generating a token (`POST /api/admin/users/[id]/login-token`) for a pending or rejected account: 403
 - Invalid token redirects to `/login`
 
 ## Security
@@ -310,7 +313,14 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 - **Plex profile identity:** profile sign-in takes the profile's identity from Plex and requires a profile from the account's Home list.
 - **Admin sign-in account checks:** `/api/auth/admin/login` now applies the same account checks as the regular local sign-in (pending approval, rejected) and also refuses deleted accounts.
 - **#297 Hardcoded JWT fallback secrets:** `jwt.ts` fell back to built-in default strings when `JWT_SECRET`/`JWT_REFRESH_SECRET` were unset (installs that bypass the unified entrypoint). Fix: fallbacks removed; secrets derived from `CONFIG_ENCRYPTION_KEY` via HKDF. Affected installs: all sessions + download links invalidated on upgrade (re-login required).
+- **Sessions follow approval status:** `requireAuth` (access tokens and API tokens) and `/api/auth/refresh` now read `registrationStatus` in their existing user lookup and refuse `pending_approval`/`rejected` accounts like a deleted one (401); null counts as approved. Token login refuses them like the regular sign-in, and login and API tokens can no longer be created for them. One rule for every check: `getRegistrationRefusal` (`src/lib/services/auth/local-account-status.ts`).
+- **Download links check the account:** `GET /api/requests/:id/download?token=` now checks the link's account like a sign-in does (one `getSessionRefusal` rule shared with `requireAuth`): missing, deleted, pending or rejected accounts, and links made before the account's sessions were revoked, get 401 (`Invalid or expired download token`); an account without download access now (`resolveDownloadAccess`, same rule as `POST /api/requests/:id/download-token`) gets 403. Live accounts with access: unchanged, no session cookie needed.
+- **Multi-file download zip entry names:** a request with several files streams one zip (`archiver` 8, `ZipArchive`). Each entry is the file's base name with any `/`, `\` or `:` replaced by `_`, so every file sits at the zip root under its full name. Before, a `\` in a Linux file name became a folder separator in the entry name, and archiver dropped a leading `word:` (`Prologue: The Start.mp3` downloaded as ` The Start.mp3`).
 - **#215 Soft-deleted users counted as local users/admins:** `hasLocalUsers`/`hasLocalAdmins` (providers + admin settings) had no `deletedAt: null`, so a deleted local admin kept the login form shown and the Auth tab lockout warnings quiet. Fix: count non-deleted users only. First-user checks unchanged (deleted users still count).
+- **Admin job routes:** `/api/admin/jobs`, `/api/admin/jobs/:id`, `/api/admin/jobs/:id/trigger` and `/api/admin/job-status/:id` use `requireAuth` + `requireAdmin` like the other admin routes: the account must still exist, its sessions must not be revoked, and the session must be an admin session. API tokens are refused (not on the allowlist).
+- **Author and series catalog routes:** `/api/authors/:asin`, `/api/authors/:asin/books`, `/api/authors/search`, `/api/series/:asin` and `/api/series/search` use `requireAuth` like the other signed-in routes: the account must still exist, be approved, and its sessions must not be revoked. API tokens get 403 (not on the allowlist; previously 401). Popular, new releases, category and audiobook search are unchanged.
+- **Admin checks use the current role:** `requireAuth` selects `role` in its existing user lookup and sets `request.user.role` from the account, not the access token, so `requireAdmin`/`requireLocalAdmin` and route role checks follow a role change (either way) on the next request. API tokens: effective role = token role capped by the owner's current role (never raised on promotion). `/api/auth/refresh` already issued the current role.
+- **Discovery routes check the account before adding request details:** `/api/audiobooks/popular`, `/new-releases`, `/category/:categoryId` and `/search` take the caller from `getOptionalAuthUser` (same account checks as `requireAuth`). Request details (`isRequested`, `requestStatus`, `requestId`, `requestedByUserId`, `requestedByUsername`) and ignore flags are added only for a checked account; any other caller gets the same books with none of them. Signed-in responses unchanged. The unchecked `getCurrentUser`, `getCurrentUserAsync` and `isAdmin` helpers were removed.
 
 ## Tech Stack
 
