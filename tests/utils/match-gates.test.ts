@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   authorAppears, colonSubtitleAgrees, foldNumberWord, foldReleaseWords, isAuthorPresent, missingRequiredNumber,
-  shortTitleBoundary, shortTitleWord, volumeConflict, ShortTitleContext,
+  shortTitleStandsAlone, shortTitleWord, splitPositionNumbers, volumeConflict, ShortTitleContext,
 } from '@/lib/utils/match-gates';
 
 const EN = ['the', 'a', 'an', 'of', 'on', 'in', 'at', 'by', 'for'];
@@ -20,14 +20,26 @@ describe('numbers (G4a)', () => {
   });
 
   it('reads the number inside volume tokens, never a bare word', () => {
-    expect(foldReleaseWords(['primal', 'hunter', 't01', 'tome2', 'vol3', 'v4', 'book05', 'livre6', 'mp3']))
-      .toEqual(['primal', 'hunter', 't01', 'tome2', 'vol3', 'v4', 'book05', 'livre6', 'mp3', '1', '2', '3', '4', '5', '6']);
+    expect(foldReleaseWords(['primal', 'hunter', 't01', 'tome2', 'vol3', 'v4', 'book05', 'livre6', 'bk7', 'mp3']))
+      .toEqual(['primal', 'hunter', 't01', 'tome2', 'vol3', 'v4', 'book05', 'livre6', 'bk7', 'mp3', '1', '2', '3', '4', '5', '6', '7']);
   });
 
   it('requires every required number, and ignores extra release numbers', () => {
     expect(missingRequiredNumber(['op', 'center', '12'], foldReleaseWords(['op', 'center', '11', '2014']))).toBe(true);
     expect(missingRequiredNumber(['primal', 'hunter', '1'], foldReleaseWords(['primal', 'hunter', '01', '2024', '128']))).toBe(false);
     expect(missingRequiredNumber(['dune'], ['dune', '2021', '64'])).toBe(false);
+  });
+
+  it.each<[string, string[]]>([
+    ['Die Tribute von Panem 1. Tödliche Spiele', ['1']],
+    ['Throne of Glass 01 - Die Erwählte', ['1']],
+    ['He Who Fights with Monsters 1: A LitRPG Adventure', ['1']],
+    ["Tom Clancy's Op-Center #12: War of Eagles", []],
+    ['Primal Hunter 1', []],
+    ['Book 2.5 - Interlude', []],
+    ['1984', []],
+  ])('reads a series position before a subtitle split: %s', (title, positions) => {
+    expect([...splitPositionNumbers(title)]).toEqual(positions);
   });
 });
 
@@ -64,6 +76,10 @@ describe('colon subtitle agreement (G1)', () => {
     [': second son by lee child', ['jack', 'reacher', 'short', 'story'], false],
     [': the well of ascension', [], false],
     [' - a reacher story', ['reacher', 'story'], false],
+    [': book two by frank herbert', ['dune', 'chronicles', 'book', '1'], false],
+    [': mistborn 2 by brandon sanderson', ['mistborn', 'book', '1'], false],
+    [': book 1', ['mistborn', 'book', '1'], false],
+    [': mistborn book 1', ['mistborn', 'book', '1'], true],
   ])('%s', (after, subtitle, expected) => {
     expect(colonSubtitleAgrees(after, new Set(subtitle), words)).toBe(expected);
   });
@@ -78,39 +94,55 @@ describe('one-word titles (G4b)', () => {
   });
 
   const ctx = (word: string, authors: string[], extra: Partial<ShortTitleContext> = {}): ShortTitleContext =>
-    ({ word, authors, stopWords: EN, subtitleWords: new Set(), ...extra });
+    ({ word, authors, leadingWords: [], ...extra });
 
-  it.each([
-    ['Stephen King - It (Unabridged) [M4B]', 'clean'],
-    ['Stephen.King.It.2017.MP3', 'clean'],
-    ['Stephen.Kings.It.MP3', 'clean'],
-    ['It Read by Steven Weber', 'clean'],
-    ['Stephen King - It, Book One', 'loose'],
-    ['It 2 by Stephen King', 'loose'],
-    ['It Grows on You by Stephen King', null],
-    ['You Like It Darker by Stephen King', null],
-    ['Stephen King - Billy Summers, It, The Stand', null],
-    ['Stephen King - It Grows on You and Other It - Stories', null],
+  it.each<[string, boolean]>([
+    ['Stephen King - It (Unabridged) [M4B]', true],
+    ['Stephen.King.It.2017.MP3', true],
+    ['Stephen.Kings.It.MP3', true],
+    ['StephenKing-It-AUDIOBOOK', true],
+    ['It Read by Steven Weber', true],
+    ['It Grows on You by Stephen King', true], // nothing after the word is read
+    ['Stephen King - You Like It Darker: It Grows on You', true],
+    ['You Like It Darker by Stephen King', false],
+    ['Stephen King - Billy Summers, It, The Stand', false],
+    ['Stephen King - Book 1 It Grows on You', false],
+    ['The It Crowd by Stephen King', false], // "the" is not part of the request
   ])('It: %s → %s', (release, expected) => {
-    expect(shortTitleBoundary(release, ctx('it', ['stephen king']))).toBe(expected);
+    expect(shortTitleStandsAlone(release, ctx('it', ['stephen king']))).toBe(expected);
   });
 
-  it('skips stop words on both sides and reads collapsed initials and closing brackets', () => {
-    expect(shortTitleBoundary('Andy.Weir.The.Martian.Unabridged.M4B', ctx('martian', ['andy weir']))).toBe('clean');
-    expect(shortTitleBoundary('JRR Tolkien The Hobbit 1937 MP3', ctx('hobbit', ['j r r tolkien']))).toBe('clean');
-    expect(shortTitleBoundary('[M4B] Dune - Frank Herbert', ctx('dune', ['frank herbert']))).toBe('clean');
-    expect(shortTitleBoundary('Yuval Noah Harari - Sapiens A Brief History', ctx('sapiens', ['yuval noah harari'], { subtitleWords: new Set(['brief', 'history']) }))).toBe('clean');
-    expect(shortTitleBoundary('Andy Weir The Martian Chronicles', ctx('martian', ['andy weir']))).toBeNull();
+  it('skips only the request stop words before the word', () => {
+    const martian = ctx('martian', ['andy weir'], { leadingWords: ['the'] });
+    expect(shortTitleStandsAlone('Andy.Weir.The.Martian.Unabridged.M4B', martian)).toBe(true);
+    expect(shortTitleStandsAlone('Andy Weir - Not The Martian', martian)).toBe(false);
+    expect(shortTitleStandsAlone('The Getaway Car - MatchUp by Lee Child', ctx('getaway', ['lee child']))).toBe(false);
+    expect(shortTitleStandsAlone('Frank Herbert - Children of Dune', ctx('dune', ['frank herbert']))).toBe(false);
   });
 
-  it('judges each occurrence on its own: a number before one occurrence is a left boundary', () => {
-    expect(shortTitleBoundary('Dune Chronicles 01 Dune Frank Herbert M4B', ctx('dune', ['frank herbert']))).toBe('clean');
+  it('reads every author form G3 accepts on the left', () => {
+    expect(shortTitleStandsAlone('JRR Tolkien The Hobbit 1937 MP3', ctx('hobbit', ['j r r tolkien'], { leadingWords: ['the'] }))).toBe(true);
+    expect(shortTitleStandsAlone('Ursula Le Guin Earthsea MP3', ctx('earthsea', ['ursula k le guin']))).toBe(true);
+    expect(shortTitleStandsAlone('Herbert Frank Dune MP3', ctx('dune', ['frank herbert']))).toBe(true);
+    expect(shortTitleStandsAlone('leechild-getaway-mp3', ctx('getaway', ['lee child']))).toBe(true);
+    expect(shortTitleStandsAlone('Andy Weirs Martian', ctx('martian', ['andy weir']))).toBe(true);
   });
 
-  it('reads the languages it is given', () => {
-    const fr = ['le', 'la', 'les', 'un', 'une', 'de', 'des', 'sur', 'dans', 'à', 'et', 'par', 'pour'];
-    expect(shortTitleBoundary('Albert.Camus.La.Peste.Livre.Audio.FR.MP3', ctx('peste', ['albert camus'], { stopWords: fr }))).toBe('clean');
-    expect(shortTitleBoundary('Joel Dicker - Le Tigre lu par Jean Martin', ctx('tigre', ['joel dicker'], { stopWords: fr }))).toBe('clean');
+  it.each<[string, boolean]>([
+    ['[M4B] Dune - Frank Herbert', true],
+    ['Frank Herbert: Dune', true],
+    ['(Audiobook) Dune by Frank Herbert', true],
+    ['Classic - Dune', true],
+    ['Classic_-_Dune', true],
+    ['Classic. Dune', true],
+    ['Classic Dune', false],
+    ['Classic.Dune.MP3', false], // dots are this name's word delimiter
+    ['Classic-Dune-M4B', false], // so are dashes here
+    ['Classic_Dune-M4B', false],
+    ['Classic_Edition-Dune_M4B', true], // a dash beside underscores separates
+    ['Classic Edition.Dune M4B', true],
+  ])('separators: %s → %s', (release, expected) => {
+    expect(shortTitleStandsAlone(release, ctx('dune', ['frank herbert']))).toBe(expected);
   });
 });
 
@@ -126,6 +158,19 @@ describe('volume conflict (G4c)', () => {
     ['Dungeon Crawler Carl', 'Dungeon Crawler Carl, T03', false],
     ['Way of Kings (Book 1) (Book 2)', 'Way of Kings Book 3', false],
     ['Azarinth Healer: Book One', 'Azarinth Healer 03', false],
+    ['Divergent (Divergent Trilogy, Book 1)', 'Veronica Roth - Divergent Trilogy 2 - Insurgent', true],
+    ['Twilight (The Twilight Saga, Book 1)', 'Stephenie Meyer - Twilight Saga 2 - New Moon', true],
+    ['Wool (Silo, Book 1)', 'Hugh Howey - Wool Silo 3', true],
+    ['Dune (Dune Chronicles, Book 1)', 'Frank Herbert Dune 64 kbps', false],
+    ['Dune (Dune Chronicles, Book 1)', 'Frank Herbert Dune 2 CD', false],
+    ['Dune (Dune Chronicles, Book 1)', 'Frank Herbert - Dune 1965', false],
+    ['Chamber of Secrets (Harry Potter, Book 2)', 'Harry Potter Book 1-7 - Chamber of Secrets', false],
+    ['Chamber of Secrets (Harry Potter, Book 2)', 'Harry Potter Vol 1-3 Chamber of Secrets', false],
+    ['Chamber of Secrets (Harry Potter, Book 2)', 'Harry Potter T1-T3', false],
+    ['Chamber of Secrets (Harry Potter, Book 2)', 'Harry Potter Book 4-7', true],
+    ['Die Tribute von Panem 1. Tödliche Spiele', 'Die Tribute von Panem 2 - Gefährliche Liebe', true],
+    ['Die Tribute von Panem 1. Tödliche Spiele', 'Die Tribute von Panem - Tödliche Spiele', false],
+    ["Tom Clancy's Op-Center 12: War of Eagles", "Tom Clancy's Op-Center 11 - Call to Treason", true],
   ])('%s vs %s → %s', (title, release, expected) => {
     expect(volumeConflict(title, release, EN)).toBe(expected);
   });

@@ -8,7 +8,7 @@ import { matchesByInitials } from './author-initials';
 import { foldForMatching, FULLWIDTH_RE, fromFullwidth, hasNonLatinLetter, hasUnspacedScript, isWordInTitle, normalizeForMatching } from './match-normalize';
 import {
   authorAppears, colonSubtitleAgrees, foldNumberWord, foldReleaseWords, isAuthorPresent, missingRequiredNumber,
-  shortTitleBoundary, shortTitleWord, volumeConflict,
+  shortTitleStandsAlone, shortTitleWord, splitPositionNumbers, volumeConflict,
 } from './match-gates';
 
 export interface TorrentResult {
@@ -441,8 +441,10 @@ export class RankingAlgorithm {
       const matchedWords = coverageWords.filter(word => isWordInTitle(word, torrentWords, torrentTitle));
       // HARD REQUIREMENT: Must have 80%+ coverage of REQUIRED words (a title of only stop words skips this)
       if (matchedWords.length / coverageWords.length < 0.80) return 0;
-      // G4a (automatic mode): a number in the required title is never optional
-      if (requireAuthor && missingRequiredNumber(coverageWords, torrentWords)) return 0;
+      // G4a (automatic mode): a number in the required title is never optional, unless it is the series
+      // position written before a subtitle split ("Die Tribute von Panem 1. Tödliche Spiele")
+      const splitPositions = splitPositionNumbers(audiobook.title);
+      if (requireAuthor && missingRequiredNumber(coverageWords.filter(w => !splitPositions.has(w)), torrentWords)) return 0;
     }
 
     // ========== STAGE 1.5: AUTHOR PRESENCE CHECK (AUTOMATIC MODE) ==========
@@ -450,6 +452,14 @@ export class RankingAlgorithm {
     if (requireAuthor && !isAuthorPresent(torrentTitle, normalizedAuthors)) return 0;
     // G4c: the request names one series position and the release names another right after the title
     if (requireAuthor && volumeConflict(audiobook.title, torrent.title, stopWords, characterReplacements)) return 0;
+    // G4b: a one-word title must start a name element of the release (left boundary only)
+    const shortWord = shortTitleWord(requiredWords);
+    if (requireAuthor && shortWord) {
+      const requiredTokens = (requiredTitle || requestTitle).split(' ');
+      const leadingWords = requiredTokens.slice(0, Math.max(0, requiredTokens.indexOf(shortWord)));
+      const context = { word: shortWord, authors: normalizedAuthors, leadingWords, characterReplacements };
+      if (!shortTitleStandsAlone(torrent.title, context)) return 0;
+    }
 
     // ========== STAGE 2: TITLE MATCHING (0-35 points) ==========
     let titleScore = 0;
@@ -554,19 +564,6 @@ export class RankingAlgorithm {
           bestMatch = true;
           break; // Found a good match, stop trying
         }
-      }
-    }
-
-    // G4b (automatic mode): a one-word title must stand alone; a clean boundary earns the complete 45
-    const shortWord = shortTitleWord(requiredWords);
-    if (requireAuthor && !bestMatch && shortWord) {
-      const boundary = shortTitleBoundary(torrent.title, {
-        word: shortWord, authors: normalizedAuthors, stopWords, subtitleWords: optionalWords, characterReplacements,
-      });
-      if (!boundary) return 0;
-      if (boundary === 'clean') {
-        titleScore = 45;
-        bestMatch = true;
       }
     }
 
