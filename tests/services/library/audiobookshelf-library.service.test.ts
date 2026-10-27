@@ -34,6 +34,8 @@ function makeAudiobookItem(overrides: Record<string, any> = {}) {
     id: overrides.id ?? 'item-1',
     addedAt: overrides.addedAt ?? 1700000000000,
     updatedAt: overrides.updatedAt ?? 1700000100000,
+    ...(overrides.path !== undefined ? { path: overrides.path } : {}),
+    ...(overrides.isMissing !== undefined ? { isMissing: overrides.isMissing } : {}),
     media: {
       duration: overrides.duration ?? 3600,
       coverPath: overrides.coverPath ?? '/covers/1.jpg',
@@ -146,13 +148,15 @@ describe('AudiobookshelfLibraryService', () => {
         publishedYear: '2020',
         duration: 3600,
         coverPath: '/covers/1.jpg',
+        path: '/audiobooks/Author/Title',
+        isMissing: false,
       }),
     ]);
 
     const service = new AudiobookshelfLibraryService();
     const items = await service.getLibraryItems('lib-1');
 
-    expect(items[0]).toEqual({
+    expect(items[0]).toStrictEqual({
       id: 'item-1',
       externalId: 'item-1',
       title: 'Title',
@@ -166,7 +170,18 @@ describe('AudiobookshelfLibraryService', () => {
       year: 2020,
       addedAt: new Date(1700000000000),
       updatedAt: new Date(1700000100000),
+      path: '/audiobooks/Author/Title',
+      isMissing: false,
     });
+  });
+
+  it('leaves path fields undefined when ABS sends none', async () => {
+    apiMock.getABSLibraryItems.mockResolvedValue([makeAudiobookItem({ id: 'item-2' })]);
+
+    const [item] = await new AudiobookshelfLibraryService().getLibraryItems('lib-1');
+
+    expect(item.path).toBeUndefined();
+    expect(item.isMissing).toBeUndefined();
   });
 
   it('returns null when item fetch fails', async () => {

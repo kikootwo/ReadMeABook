@@ -10,6 +10,7 @@ import { RMABLogger } from '../utils/logger';
 import { getLibraryService } from '../services/library';
 import { getThumbnailCacheService } from '../services/thumbnail-cache.service';
 import { createLibraryRowUnlessPresent } from './library-row-insert';
+import { matchRequestsToLibrary } from '../services/library/match-requests';
 
 export interface PlexRecentlyAddedPayload {
   jobId?: string;
@@ -91,7 +92,6 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
     // Check for new items not in database
     let newCount = 0;
     let updatedCount = 0;
-    let matchedDownloads = 0;
 
     for (const item of recentItems) {
       let existing = await prisma.plexLibrary.findUnique({
@@ -112,6 +112,7 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
           isbn: item.isbn,  // Store ISBN from library backend
           thumbUrl: item.coverUrl,
           plexLibraryId: libraryId!,
+          filePath: item.path, // ABS item folder (request link, #284); Plex: none
           addedAt: item.addedAt,
           lastScannedAt: new Date(),
         });
@@ -158,6 +159,7 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
           asin: item.asin || existing.asin,  // Update ASIN if available
           isbn: item.isbn || existing.isbn,  // Update ISBN if available
           thumbUrl: item.coverUrl || existing.thumbUrl,
+          filePath: item.path ?? existing.filePath, // ABS item folder (request link, #284); Plex: none
           lastScannedAt: new Date(),
         },
       });
@@ -191,99 +193,10 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
       await matchItemsWithoutAsin(recentItems, logger, 'recent items');
     }
 
-    // Check for all non-terminal audiobook requests to match
+    // Match all non-terminal audiobook requests (ASIN; ABS: delivered books by path/hash)
     // Note: Ebook requests don't match to Plex/ABS library - they stop at 'downloaded' status
-    const matchableRequests = await prisma.request.findMany({
-      where: {
-        type: 'audiobook', // Only match audiobook requests (ebooks don't go to 'available')
-        status: { notIn: ['available', 'cancelled', 'denied'] },
-        deletedAt: null,
-      },
-      include: {
-        audiobook: true,
-        user: {
-          select: {
-            plexUsername: true,
-          },
-        },
-      },
-
-    });
-
-    if (matchableRequests.length > 0) {
-      logger.info(`Checking ${matchableRequests.length} matchable requests for matches (all non-terminal statuses)`);
-
-      const { findPlexMatch } = await import('../utils/audiobook-matcher');
-
-      for (const request of matchableRequests) {
-        try {
-          const audiobook = request.audiobook;
-          const match = await findPlexMatch({
-            asin: audiobook.audibleAsin || '',
-            title: audiobook.title,
-            author: audiobook.author,
-            narrator: audiobook.narrator || undefined,
-          });
-
-          if (match) {
-            const originalStatus = request.status;
-            logger.info(
-              `Match found: "${audiobook.title}" → "${match.title}"` +
-              (originalStatus !== 'downloaded' ? ` (was '${originalStatus}')` : '')
-            );
-
-            // Update audiobook with matched library item ID
-            const updateData: any = { updatedAt: new Date() };
-
-            if (backendMode === 'audiobookshelf') {
-              updateData.absItemId = match.plexGuid; // plexGuid field stores the externalId from either backend
-            } else {
-              updateData.plexGuid = match.plexGuid;
-            }
-
-            await prisma.audiobook.update({
-              where: { id: audiobook.id },
-              data: updateData,
-            });
-
-            await prisma.request.update({
-              where: { id: request.id },
-              data: {
-                status: 'available',
-                completedAt: new Date(),
-                errorMessage: null,
-                searchAttempts: 0,
-                downloadAttempts: 0,
-                importAttempts: 0,
-                updatedAt: new Date(),
-              },
-            });
-
-            // Send notification that audiobook is now available
-            const { getJobQueueService } = await import('../services/job-queue.service');
-            const jobQueue = getJobQueueService();
-            await jobQueue.addNotificationJob(
-              'request_available',
-              request.id,
-              audiobook.title,
-              audiobook.author,
-              request.user.plexUsername || 'Unknown User',
-              undefined,
-              'audiobook'
-            ).catch((error) => {
-              logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
-            });
-
-            matchedDownloads++;
-
-            // Note: Audiobookshelf metadata matching is handled in the file hash phase above
-            // Items without ASIN get file-hash-matched ASIN, items with ASIN already have correct metadata
-          }
-        } catch (error) {
-          logger.error(`Failed to match request ${request.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-      }
-    }
+    const matching = await matchRequestsToLibrary({ backendMode, libraryId, listedItems: recentItems, logger });
+    const matchedDownloads = matching.matched;
 
     logger.info(`Complete: ${newCount} new, ${updatedCount} updated, ${matchedDownloads} matched requests`);
 

@@ -204,4 +204,24 @@ describe('library insert race (#222)', () => {
     expect(db.rows).toHaveLength(1);
     expect(db.rows[0].asin).toBe(ASIN);
   });
+
+  it('the ABS item path (#284) is stored by the insert and kept or filled by the race-fallback update', async () => {
+    const PATH = '/audiobooks/Some Author/Race Book';
+    libraryServiceMock.getRecentlyAdded
+      .mockResolvedValueOnce([{ ...ITEM, asin: ASIN, path: PATH }])
+      .mockResolvedValueOnce([{ ...ITEM, asin: ASIN }]);
+    const { processPlexRecentlyAddedCheck } = await import('@/lib/processors/plex-recently-added.processor');
+    await overlapping(() => processPlexRecentlyAddedCheck({ jobId: 'job-a' }), () => processPlexRecentlyAddedCheck({ jobId: 'job-b' }));
+    expect([db.inserts.map((i) => i.conflict), db.rows.length, db.rows[0].filePath]).toEqual([[false, true], 1, PATH]);
+
+    db.rows = [];
+    db.inserts = [];
+    wirePlexLibrary(); // fresh lookup barrier
+    libraryServiceMock.getLibraryItems
+      .mockResolvedValueOnce([{ ...ITEM, asin: ASIN }])
+      .mockResolvedValueOnce([{ ...ITEM, asin: ASIN, path: PATH }]);
+    const { processScanPlex } = await import('@/lib/processors/scan-plex.processor');
+    await overlapping(() => processScanPlex({ jobId: 'job-c' }), () => processScanPlex({ jobId: 'job-d' }));
+    expect([db.inserts.map((i) => i.conflict), db.rows.length, db.rows[0].filePath]).toEqual([[false, true], 1, PATH]);
+  });
 });
