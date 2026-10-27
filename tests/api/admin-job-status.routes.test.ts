@@ -8,6 +8,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const verifyAccessTokenMock = vi.hoisted(() => vi.fn());
 const jobQueueMock = vi.hoisted(() => ({ getJob: vi.fn() }));
 
+// The routes go through requireAuth, which looks the user up
+vi.mock('@/lib/db', () => ({
+  prisma: {
+    user: {
+      findUnique: async ({ where }: { where: { id: string } }) => ({ id: where.id, deletedAt: null, sessionsInvalidatedAt: null }),
+    },
+  },
+}));
 vi.mock('@/lib/utils/jwt', () => ({
   verifyAccessToken: verifyAccessTokenMock,
 }));
@@ -37,7 +45,7 @@ describe('Admin job status route', () => {
   });
 
   it('returns job status for admin token', async () => {
-    verifyAccessTokenMock.mockReturnValue({ role: 'admin' });
+    verifyAccessTokenMock.mockReturnValue({ sub: 'u-admin', role: 'admin' });
     jobQueueMock.getJob.mockResolvedValue({
       id: '1',
       type: 'search',
@@ -60,18 +68,18 @@ describe('Admin job status route', () => {
   });
 
   it('rejects non-admin tokens', async () => {
-    verifyAccessTokenMock.mockReturnValue({ role: 'user' });
+    verifyAccessTokenMock.mockReturnValue({ sub: 'u-user', role: 'user' });
 
     const { GET } = await import('@/app/api/admin/job-status/[id]/route');
     const response = await GET(makeRequest('Bearer token') as any, { params: Promise.resolve({ id: '1' }) });
     const payload = await response.json();
 
     expect(response.status).toBe(403);
-    expect(payload.error).toMatch(/Admin access required/);
+    expect(payload.message).toMatch(/Admin access required/);
   });
 
   it('returns 404 when job is missing', async () => {
-    verifyAccessTokenMock.mockReturnValue({ role: 'admin' });
+    verifyAccessTokenMock.mockReturnValue({ sub: 'u-admin', role: 'admin' });
     jobQueueMock.getJob.mockResolvedValue(null);
 
     const { GET } = await import('@/app/api/admin/job-status/[id]/route');
@@ -83,7 +91,7 @@ describe('Admin job status route', () => {
   });
 
   it('returns 500 when job lookup fails', async () => {
-    verifyAccessTokenMock.mockReturnValue({ role: 'admin' });
+    verifyAccessTokenMock.mockReturnValue({ sub: 'u-admin', role: 'admin' });
     jobQueueMock.getJob.mockRejectedValue(new Error('lookup failed'));
 
     const { GET } = await import('@/app/api/admin/job-status/[id]/route');

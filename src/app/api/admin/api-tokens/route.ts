@@ -13,6 +13,7 @@ import { generateApiToken } from '@/lib/utils/api-token';
 import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { getRegistrationRefusal } from '@/lib/services/auth/local-account-status';
 
 const logger = RMABLogger.create('API.Admin.ApiTokens');
 
@@ -100,11 +101,18 @@ export async function POST(request: NextRequest) {
         // Verify the target user exists
         const targetUser = await prisma.user.findUnique({
           where: { id: targetUserId },
-          select: { id: true, role: true, plexUsername: true },
+          select: { id: true, role: true, plexUsername: true, registrationStatus: true },
         });
 
         if (!targetUser) {
           return NextResponse.json({ error: 'Target user not found' }, { status: 404 });
+        }
+
+        if (getRegistrationRefusal(targetUser.registrationStatus)) {
+          return NextResponse.json(
+            { error: 'Cannot create a token for an account that is not approved' },
+            { status: 403 }
+          );
         }
 
         // Enforce per-user token cap (count only active, non-expired tokens)

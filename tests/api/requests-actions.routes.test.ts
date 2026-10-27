@@ -105,7 +105,7 @@ describe('Request action routes', () => {
 
   it('performs interactive search and ranks results with runtime from ASIN', async () => {
     authRequest.json.mockResolvedValue({});
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-1',
       userId: 'user-1',
       audiobook: { title: 'Title', author: 'Author', audibleAsin: 'B00ASIN123' },
@@ -139,7 +139,7 @@ describe('Request action routes', () => {
 
   it('performs interactive search without runtime when no ASIN', async () => {
     authRequest.json.mockResolvedValue({});
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-1b',
       userId: 'user-1',
       audiobook: { title: 'Title', author: 'Author', audibleAsin: null },
@@ -171,7 +171,7 @@ describe('Request action routes', () => {
 
   it('ranks the complete interactive result set before returning the top 100', async () => {
     authRequest.json.mockResolvedValue({});
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-complete-ranking',
       userId: 'user-1',
       audiobook: { title: 'Title', author: 'Author', audibleAsin: null },
@@ -216,7 +216,7 @@ describe('Request action routes', () => {
 
   it('performs interactive search gracefully when runtime fetch fails', async () => {
     authRequest.json.mockResolvedValue({});
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-1c',
       userId: 'user-1',
       audiobook: { title: 'Title', author: 'Author', audibleAsin: 'B00FAIL' },
@@ -248,7 +248,7 @@ describe('Request action routes', () => {
   });
 
   it('triggers manual search job', async () => {
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-2',
       userId: 'user-1',
       status: 'failed',
@@ -265,7 +265,7 @@ describe('Request action routes', () => {
   });
 
   it('manual search on a failed request resets the automatic re-request count (#409)', async () => {
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-2',
       userId: 'user-1',
       status: 'failed',
@@ -295,7 +295,7 @@ describe('Request action routes', () => {
   });
 
   it('returns 404 when manual search request is missing', async () => {
-    prismaMock.request.findUnique.mockResolvedValueOnce(null);
+    prismaMock.request.findFirst.mockResolvedValueOnce(null);
 
     const { POST } = await import('@/app/api/requests/[id]/manual-search/route');
     const response = await POST({} as any, { params: Promise.resolve({ id: 'req-missing' }) });
@@ -306,7 +306,7 @@ describe('Request action routes', () => {
   });
 
   it('returns 403 when manual search request is not owned', async () => {
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-9',
       userId: 'user-2',
       status: 'failed',
@@ -322,7 +322,7 @@ describe('Request action routes', () => {
   });
 
   it('returns 400 when manual search status is not eligible', async () => {
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-10',
       userId: 'user-1',
       status: 'downloading',
@@ -339,7 +339,7 @@ describe('Request action routes', () => {
 
   it('selects a torrent and queues download', async () => {
     authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-3',
       userId: 'user-1',
       status: 'awaiting_search',
@@ -363,7 +363,7 @@ describe('Request action routes', () => {
 
   it('selecting a release on a failed request resets the automatic re-request count (#409)', async () => {
     authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-3',
       userId: 'user-1',
       status: 'failed',
@@ -412,7 +412,7 @@ describe('Request action routes', () => {
 
   it('returns 404 when request is not found', async () => {
     authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
-    prismaMock.request.findUnique.mockResolvedValueOnce(null);
+    prismaMock.request.findFirst.mockResolvedValueOnce(null);
 
     const { POST } = await import('@/app/api/requests/[id]/select-torrent/route');
     const response = await POST({} as any, { params: Promise.resolve({ id: 'req-missing' }) });
@@ -424,7 +424,7 @@ describe('Request action routes', () => {
 
   it('returns 403 when user does not own the request', async () => {
     authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-4',
       userId: 'user-2',
       status: 'awaiting_search',
@@ -441,7 +441,7 @@ describe('Request action routes', () => {
 
   it('returns 403 when request is awaiting approval', async () => {
     authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-5',
       userId: 'user-1',
       status: 'awaiting_approval',
@@ -459,7 +459,7 @@ describe('Request action routes', () => {
   it('stores selected torrent when approval is required by global setting', async () => {
     authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
     configState.values.set('auto_approve_requests', 'false');
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-6',
       userId: 'user-1',
       status: 'awaiting_search',
@@ -494,7 +494,7 @@ describe('Request action routes', () => {
 
   it('auto-approves when global setting is missing and user has no preference', async () => {
     authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-7',
       userId: 'user-1',
       status: 'awaiting_search',
@@ -526,7 +526,7 @@ describe('Request action routes', () => {
   // advanceable requests; the release-date gate is intentionally bypassed.
   it('selects a torrent and queues download from awaiting_release (admin)', async () => {
     authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-ar-admin',
       userId: 'user-1',
       status: 'awaiting_release',
@@ -556,7 +556,7 @@ describe('Request action routes', () => {
   it('stores selected torrent on awaiting_release when approval is required', async () => {
     authRequest.json.mockResolvedValue({ torrent: { title: 'Torrent', size: 100, downloadUrl: 'http://prowlarr:9696/1/download' } });
     configState.values.set('auto_approve_requests', 'false');
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-ar-user',
       userId: 'user-1',
       status: 'awaiting_release',
@@ -597,7 +597,7 @@ describe('Request action routes', () => {
 
   it('returns 404 when request is not found', async () => {
     configState.values.set('ebook_sidecar_enabled', 'true');
-    prismaMock.request.findUnique.mockResolvedValueOnce(null);
+    prismaMock.request.findFirst.mockResolvedValueOnce(null);
 
     const { POST } = await import('@/app/api/requests/[id]/fetch-ebook/route');
     const response = await POST({} as any, { params: Promise.resolve({ id: 'req-missing' }) });
@@ -609,7 +609,7 @@ describe('Request action routes', () => {
 
   it('returns 400 when request status is not eligible for ebook fetch', async () => {
     configState.values.set('ebook_sidecar_enabled', 'true');
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-5',
       status: 'pending',
       audiobook: { title: 'Title', author: 'Author', audibleAsin: 'ASIN' },
@@ -627,7 +627,7 @@ describe('Request action routes', () => {
     configState.values.set('ebook_sidecar_enabled', 'true');
 
     // Mock parent request lookup
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-6',
       userId: 'user-1',
       audiobookId: 'ab-1',
@@ -674,7 +674,7 @@ describe('Request action routes', () => {
     configState.values.set('ebook_sidecar_enabled', 'true');
 
     // Mock parent request lookup
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-7',
       userId: 'user-1',
       audiobookId: 'ab-1',
@@ -716,7 +716,7 @@ describe('Request action routes', () => {
     configState.values.set('ebook_sidecar_enabled', 'true');
 
     // Mock parent request lookup
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-8',
       userId: 'user-1',
       audiobookId: 'ab-1',

@@ -32,7 +32,12 @@ function TokenLoginContent() {
     })
       .then((res) => res.json())
       .then((data) => {
-        if (data.error) {
+        if (data.pendingApproval) {
+          router.replace(`/login?error=${encodeURIComponent(data.message)}`);
+          return;
+        }
+
+        if (data.error || !data.accessToken) {
           router.replace('/login');
           return;
         }
