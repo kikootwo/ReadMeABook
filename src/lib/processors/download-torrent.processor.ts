@@ -18,11 +18,33 @@ import {
   DownloadSourceError,
   UnusableDownloadSourceError,
   isRetryableDownloadSourceError,
+  type IDownloadClient,
 } from '../interfaces/download-client.interface';
 
 /** Bull's view of this run: attemptsMade > 0 means an earlier attempt failed (a retry). */
 export interface DownloadAttempt {
   attemptsMade?: number;
+}
+
+/**
+ * A held usenet job that waits paused (#329): resumed only when RMAB added that job for an
+ * earlier download; someone else's paused job is tracked as it is, with a warning.
+ */
+async function resumeHeldJob(client: IDownloadClient, id: string, logger: ReturnType<typeof RMABLogger.forJob>): Promise<void> {
+  const ours = await prisma.downloadHistory.findFirst({
+    where: { downloadClient: client.clientType, addedByRmab: true, OR: [{ downloadClientId: id }, { nzbId: id }] },
+    select: { id: true },
+  });
+  if (!ours) {
+    logger.warn(`${client.clientType} job ${id} is paused and RMAB did not add it; resume it in ${client.clientType} to continue the download`);
+    return;
+  }
+  try {
+    await client.resumeDownload(id);
+    logger.info(`Resumed paused ${client.clientType} job ${id}: RMAB added it for an earlier download (${ours.id})`);
+  } catch (error) {
+    logger.warn(`Could not resume paused ${client.clientType} job ${id}`, { error: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 /**
@@ -103,11 +125,19 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload, at
       let downloadClientId: string;
       let alreadyInClient: boolean;
       let infoHash: string | undefined;
+      let paused: boolean | undefined;
       try {
-        ({ id: downloadClientId, alreadyInClient, infoHash } = await client.addDownload(
+        ({ id: downloadClientId, alreadyInClient, infoHash, paused } = await client.addDownload(
           // Prowlarr links go to the configured base (scheme, port, credentials); others as-is
           toConfiguredProwlarrUrl(candidate.downloadUrl, prowlarr.base, { withCredentials: true }) ?? candidate.downloadUrl,
-          { category, priority: 'normal', sourceAuth, ...(isRetry ? { retry: true } : {}) }
+          {
+            category,
+            priority: 'normal',
+            sourceAuth,
+            ...(isRetry ? { retry: true } : {}),
+            // SABnzbd matches a job it already holds by the release title (#329)
+            ...(protocol === 'usenet' ? { releaseTitle: candidate.title } : {}),
+          }
         ));
       } catch (error) {
         if (error instanceof UnusableDownloadSourceError) {
@@ -171,6 +201,9 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload, at
       if (alreadyInClient && client.protocol === 'usenet') {
         // A duplicate NZB or a retried add: track the job the client already holds
         logger.warn(`"${candidate.title}" is already in ${client.clientType} (${downloadClientId}); tracking that job`);
+        if (paused) {
+          await resumeHeldJob(client, downloadClientId, logger);
+        }
       } else if (alreadyInClient) {
         logger.warn(
           `"${candidate.title}" is already in ${client.clientType} (${downloadClientId}); RMAB will never remove it or its files`

@@ -204,10 +204,11 @@ interface SABnzbdConfig {
 
 **Detection:** refused add without `error` text or without nzo_ids → lookup; accepted add → one queue call: new job `Paused`, or already in history (`nzo_ids` filter) and not `Completed` → lookup (excluding the new job). No existing job found → behaviour as before.
 
-**Lookup** (`findExistingJob`): same name (letters/digits only, case-insensitive; SABnzbd job name = upload name without `.nzb`) and same category, `Failed` rows skipped. Order: queue job not paused → history (`search`, then `archive=1`) → paused queue job.
+**Lookup** (`findExistingJob`, names from `lookupNames`): a job named as the release title (`AddDownloadOptions.releaseTitle`, the indexer title the processor passes) or as the upload name (SABnzbd job name = upload name without `.nzb`), compared by letters/digits only, case-insensitive; same category; `Failed` rows skipped. The upload name counts only when specific (`isSpecificJobName`): not `download`, `api`, `nzb`, `get`, `getnzb`, `file(s)`, `index`, `fetch`, `release` or a bare number (the `download.nzb` fallback of a Prowlarr `/download` URL without Content-Disposition), and sharing a word (2+ letters/digits) with the release title. No names → no lookup → behaviour as before. Order: queue job not paused → history (`search`, then `archive=1`) → paused queue job.
 
 **Outcome** (`resolveExistingJob`):
 - Queued, downloading or post-processing → tracked as the request's download (`alreadyInClient: true` → `addedByRmab: false`)
+- Paused in the queue → `paused: true`; the processor resumes it only when a download row with that nzo_id and `addedByRmab: true` exists (RMAB added it earlier), otherwise tracks it paused with a warning
 - `Completed` and `storage` exists after `PathMapper.transform()` → tracked; the monitor's normal completion path imports it
 - `Completed`, files gone → `UnusableDownloadSourceError` with `blocklistReason: 'Already in SABnzbd, files gone'` → processor blocklists the release, tries the next ranked one
 - Pause mode: RMAB deletes its new paused copy (`del_files=1`); Fail mode: archives the new `Duplicate NZB` row (best effort)
@@ -215,9 +216,11 @@ interface SABnzbdConfig {
 
 **Retried add:** a timed-out `addfile` (axios `ECONNABORTED`/`ETIMEDOUT`) is transient, so Bull re-runs the whole `download_torrent` job (3 attempts, exponential backoff 2 s, `job-queue.service.ts`). On attempts after the first the processor passes `retry: true`; `addNZBJob` runs the same lookup after fetching the NZB and before uploading, and reuses a usable job instead of uploading a second copy (a finished job with files gone is not reused: the upload goes ahead). Admin retry-download is a fresh job (no `retry`).
 
+**Ownership:** a taken-over job (`addedByRmab: false`) is never deleted by request delete, and remove-after-processing keeps its files (`planDownloadCleanup` returns no plan). A retried add that reuses RMAB's own first upload is recorded the same way (kept: the safe side). Request delete keeps RMAB's own job while another active request tracks the same nzo_id (`otherActiveRequestsUsingNzb`, `torrentsKeptShared`).
+
 **Monitor:** `getNZB()` falls back to `history&nzo_ids={id}` (then `archive=1`) when the job is not in the queue or the newest 100 history rows.
 
-**Limits:** a duplicate matched only by md5 or by SABnzbd's NZB backup folder (different name), or in another category, is not found → the old failure; Tag/Off download a second copy (user's setting).
+**Limits:** a duplicate matched only by md5 or by SABnzbd's NZB backup folder (different name), in another category, or only under a generic upload name, is not found → the old failure; Tag/Off download a second copy (user's setting).
 
 ## Remote Path Mapping
 

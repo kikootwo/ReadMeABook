@@ -263,6 +263,11 @@ export async function planDownloadCleanup(
   if (!downloadHistory.indexerId || !downloadHistory.downloadClientId) {
     return null;
   }
+  if (downloadHistory.addedByRmab === false) {
+    // A client job RMAB took over (e.g. a SABnzbd duplicate, #329): its files are never removed
+    logger?.info(`Download ${downloadHistory.downloadClientId} was already in ${downloadHistory.downloadClient} when RMAB grabbed it; download kept`);
+    return null;
+  }
 
   const indexersConfig = await readIndexers();
   if (!indexersConfig) {

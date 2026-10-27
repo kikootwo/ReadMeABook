@@ -110,6 +110,8 @@ export interface AddDownloadResult {
   alreadyInClient: boolean;
   /** BitTorrent v1 info hash, when the client knows it (may differ from `id` for hybrid torrents) */
   infoHash?: string;
+  /** SABnzbd: the job it already held waits paused in its queue */
+  paused?: boolean;
 }
 
 /**
@@ -133,6 +135,8 @@ export interface AddDownloadOptions {
    * even though it failed here (timeout). SABnzbd checks for that job before uploading again.
    */
   retry?: boolean;
+  /** The release's title from the indexer (SABnzbd matches an existing job by it, #329) */
+  releaseTitle?: string;
 }
 
 /**

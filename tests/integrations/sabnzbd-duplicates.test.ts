@@ -281,6 +281,52 @@ describe('SABnzbd duplicate NZB handling (#329)', () => {
     });
   });
 
+  describe('generic upload names never match another book (review finding 2)', () => {
+    // Prowlarr's proxy path with no Content-Disposition: the upload falls back to download.nzb
+    const PROWLARR_URL = 'http://prowlarr:9696/3/download?apikey=k&link=abc&file=Book+B';
+    const addFrom = (url: string, options: Record<string, unknown>) =>
+      service.addDownload(url, { category: CATEGORY, ...options }).catch((error: Error) => error);
+
+    it('a retried add does not take another book\'s "download" job', async () => {
+      const sab = fakeSab({ queue: [queueSlot({ nzo_id: 'SABnzbd_nzo_book_A', filename: 'download' })] }, 'off');
+
+      expect(await addFrom(PROWLARR_URL, { retry: true, releaseTitle: 'Book B - Author B' })).toEqual({ id: NEW_ID, alreadyInClient: false });
+      expect(sab.uploads).toBe(1);
+    });
+
+    it('a discarded add does not take over another book\'s finished "download" job: old failure', async () => {
+      await fs.mkdir(path.join(localRoot, 'download'), { recursive: true });
+      fakeSab({ archive: [historySlot({ nzo_id: 'SABnzbd_nzo_book_A', name: 'download', storage: '/sab/complete/download' })] }, 'discard');
+
+      const result = await addFrom(PROWLARR_URL, { releaseTitle: 'Book B - Author B' });
+
+      expect((result as Error).message).toBe('Failed to add NZB to SABnzbd');
+    });
+
+    it('an upload name that shares no word with the release title is not matched', async () => {
+      axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('<nzb/>'), headers: { 'content-disposition': 'attachment; filename="a1b2c3d4e5.nzb"' } });
+      const sab = fakeSab({ queue: [queueSlot({ nzo_id: 'SABnzbd_nzo_other', filename: 'a1b2c3d4e5' })] }, 'off');
+
+      expect(await addFrom(NZB_URL, { retry: true, releaseTitle: 'My Audiobook Release' })).toEqual({ id: NEW_ID, alreadyInClient: false });
+      expect(sab.uploads).toBe(1);
+    });
+
+    it('with a generic upload name, a job named as the release title is still found', async () => {
+      const sab = fakeSab({ queue: [queueSlot({ status: 'Queued' })] }, 'off');
+
+      expect(await addFrom(PROWLARR_URL, { retry: true, releaseTitle: JOB_NAME })).toEqual({ id: EXISTING_ID, alreadyInClient: true });
+      expect(sab.uploads).toBe(0);
+    });
+  });
+
+  describe('a paused existing job (review finding 3)', () => {
+    it('is tracked and reported as paused', async () => {
+      fakeSab({ queue: [queueSlot({ status: 'Paused' })] }, 'discard');
+
+      expect(await add()).toEqual({ id: EXISTING_ID, alreadyInClient: true, paused: true });
+    });
+  });
+
   describe('monitoring a taken-over job', () => {
     it('finds a finished job outside the last 100 history rows by its nzo_id', async () => {
       const filler = Array.from({ length: 100 }, (_, i) => historySlot({ nzo_id: `filler-${i}`, name: `Filler.${i}` }));

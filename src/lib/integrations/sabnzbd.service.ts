@@ -14,10 +14,12 @@ import { PathMapper, PathMappingConfig } from '@/lib/utils/path-mapper';
 import {
   duplicateOfNewJob,
   findExistingJob,
+  lookupNames,
   nzbJobName,
   resolveExistingJob,
   type ExistingJob,
   type HistoryQuery,
+  type ResolvedJob,
 } from './sabnzbd-duplicates';
 import {
   IDownloadClient,
@@ -41,12 +43,21 @@ export interface AddNZBOptions {
   sourceAuth?: SourceAuth;
   /** A retried grab: reuse the job an earlier, timed-out upload left in SABnzbd */
   retry?: boolean;
+  /** Release title (from the indexer): the name an existing job is matched by, with a specific upload name */
+  releaseTitle?: string;
 }
 
 /** nzo_id to track, and whether it is a job SABnzbd already held (duplicate or retried add) */
 export interface AddNZBResult {
   id: string;
   alreadyInClient: boolean;
+  /** A held job that waits paused in SABnzbd's queue */
+  paused?: boolean;
+}
+
+/** Result for a job SABnzbd already held */
+function heldJob(job: ResolvedJob): AddNZBResult {
+  return job.paused ? { id: job.id, alreadyInClient: true, paused: true } : { id: job.id, alreadyInClient: true };
 }
 
 export interface NZBInfo {
@@ -564,15 +575,17 @@ export class SABnzbdService implements IDownloadClient {
     }
 
     const jobName = nzbJobName(filename);
+    // A generic upload name (`download.nzb`, `api`) could name another book's job: never matched by it
+    const names = lookupNames(jobName, options?.releaseTitle);
 
     // A Bull retry after a timed-out upload: SABnzbd may already hold the first try
     if (options?.retry) {
-      const earlier = await findExistingJob(this, jobName, category);
+      const earlier = await findExistingJob(this, names, category);
       if (earlier) {
         try {
-          const id = await resolveExistingJob(earlier, this.pathMappingConfig);
-          logger.info(`Retried add: SABnzbd already holds "${jobName}" (${id}), not uploading it again`);
-          return { id, alreadyInClient: true };
+          const held = await resolveExistingJob(earlier, this.pathMappingConfig);
+          logger.info(`Retried add: SABnzbd already holds "${earlier.item.name}" (${held.id}), not uploading it again`);
+          return heldJob(held);
         } catch (error) {
           // A finished job whose files are gone is no copy to reuse: upload as a first try would
           logger.info(`Retried add: ${error instanceof Error ? error.message : String(error)}; uploading`);
@@ -602,9 +615,9 @@ export class SABnzbdService implements IDownloadClient {
     const nzbIds = response.data?.nzo_ids;
     if (response.data?.status === false || !nzbIds || nzbIds.length === 0) {
       // No error text is SABnzbd's plain "not added" answer, which a discarded duplicate gets
-      const existing = response.data?.error ? null : await this.findDuplicate(jobName, category);
+      const existing = response.data?.error ? null : await this.findDuplicate(names, category);
       if (existing) {
-        return { id: await resolveExistingJob(existing, this.pathMappingConfig), alreadyInClient: true };
+        return heldJob(await resolveExistingJob(existing, this.pathMappingConfig));
       }
       if (response.data?.status === false) {
         throw new Error(response.data.error || 'Failed to add NZB to SABnzbd');
@@ -618,7 +631,7 @@ export class SABnzbdService implements IDownloadClient {
     // Pause and Fail duplicate modes accept the add but set the new job aside
     let existing: ExistingJob | null = null;
     try {
-      existing = await duplicateOfNewJob(this, nzbId, jobName, category);
+      existing = await duplicateOfNewJob(this, nzbId, names, category);
     } catch (error) {
       logger.warn(`Could not check whether SABnzbd set ${nzbId} aside as a duplicate; tracking it`, {
         error: error instanceof Error ? error.message : String(error),
@@ -627,15 +640,15 @@ export class SABnzbdService implements IDownloadClient {
     if (!existing) {
       return { id: nzbId, alreadyInClient: false };
     }
-    return { id: await resolveExistingJob(existing, this.pathMappingConfig), alreadyInClient: true };
+    return heldJob(await resolveExistingJob(existing, this.pathMappingConfig));
   }
 
   /** Lookup after a refused add; a failed lookup keeps the refusal as it was. */
-  private async findDuplicate(jobName: string, category: string) {
+  private async findDuplicate(names: string[], category: string) {
     try {
-      return await findExistingJob(this, jobName, category);
+      return await findExistingJob(this, names, category);
     } catch (error) {
-      logger.warn(`Could not look for an existing SABnzbd job named "${jobName}"`, {
+      logger.warn(`Could not look for an existing SABnzbd job named "${names.join('" or "')}"`, {
         error: error instanceof Error ? error.message : String(error),
       });
       return null;
@@ -895,6 +908,7 @@ export class SABnzbdService implements IDownloadClient {
       paused: options?.paused,
       sourceAuth: options?.sourceAuth,
       retry: options?.retry,
+      releaseTitle: options?.releaseTitle,
     });
   }
 

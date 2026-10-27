@@ -11,7 +11,7 @@ import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 import { evaluateSeeding, type SeedingRequirement } from '../utils/seeding-policy';
-import { otherActiveRequestsUsingTorrent } from '../utils/shared-torrent';
+import { otherActiveRequestsUsingNzb, otherActiveRequestsUsingTorrent } from '../utils/shared-torrent';
 import { describeIgnoredIndexerId, findIndexerConfig, parseSavedIndexers, type SavedIndexerConfig } from '../utils/indexer-config';
 import { knownNotOwned, resolveOwnership, type OwnershipVerdict } from '../utils/torrent-ownership';
 
@@ -130,7 +130,17 @@ export async function cleanUpRequestDownload(
     const isCompleted = downloadHistory.downloadStatus === 'completed' || finishedInClient;
 
     if (client.protocol === 'usenet') {
-      // Usenet - no seeding concept, delete immediately (every add is a new job: always RMAB's)
+      // Usenet: no seeding, so delete now. A job RMAB took over (a duplicate NZB, recorded
+      // addedByRmab false) was left alone above; RMAB's own job stays while another active
+      // request tracks it (it took it over as a duplicate, #329)
+      const others = await otherActiveRequestsUsingNzb(requestId, clientType, clientId);
+      if (others.length > 0) {
+        logger.info(
+          `Keeping download ${clientId} in ${client.clientType}: ${others.length} other active request(s) still use it (IDs: ${others.map((r) => r.id).join(', ')})`
+        );
+        counts.torrentsKeptShared++;
+        return counts;
+      }
       try {
         await client.deleteDownload(clientId, true);
         logger.info(`Deleted download ${clientId} from ${client.clientType}`);

@@ -74,6 +74,28 @@ export async function otherActiveRequestsUsingTorrent(
   });
 }
 
+/**
+ * Usenet (#329): active requests other than `requestId` whose selected download is the same
+ * client job (a duplicate NZB another request took over). Empty when there is no id.
+ */
+export async function otherActiveRequestsUsingNzb(
+  requestId: string,
+  downloadClient: string,
+  nzbId: string | null | undefined
+): Promise<ActiveRequestRef[]> {
+  if (!nzbId) return [];
+  return prisma.request.findMany({
+    where: {
+      id: { not: requestId },
+      deletedAt: null,
+      downloadHistory: {
+        some: { downloadClient, selected: true, OR: [{ downloadClientId: nzbId }, { nzbId }] },
+      },
+    },
+    select: { id: true, status: true },
+  });
+}
+
 /** Same requests as `otherActiveRequestsUsingTorrent`, with type and their selected rows for this torrent (seeding cleanup) */
 export async function otherActiveRequestsSharingTorrent(
   requestId: string,

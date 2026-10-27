@@ -58,7 +58,7 @@ const goneError = () => new UnusableDownloadSourceError(
 );
 
 describe('processDownloadTorrent: SABnzbd duplicates and retries (#329)', () => {
-  let sab: { clientType: string; protocol: string; addDownload: ReturnType<typeof vi.fn> };
+  let sab: { clientType: string; protocol: string; addDownload: ReturnType<typeof vi.fn>; resumeDownload: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -68,7 +68,7 @@ describe('processDownloadTorrent: SABnzbd duplicates and retries (#329)', () => 
     configMock.getMany.mockResolvedValue({ prowlarr_api_key: null });
     jobQueueMock.addNotificationJob.mockResolvedValue(undefined);
     blocklistMock.addAutoBlock.mockResolvedValue({ blocked: null, wasNew: true });
-    sab = { clientType: 'sabnzbd', protocol: 'usenet', addDownload: vi.fn() };
+    sab = { clientType: 'sabnzbd', protocol: 'usenet', addDownload: vi.fn(), resumeDownload: vi.fn().mockResolvedValue(undefined) };
     downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(sab);
     downloadClientManagerMock.getClientForProtocol.mockResolvedValue({ id: 'sab-1', type: 'sabnzbd', enabled: true, category: 'readmeabook' });
   });
@@ -127,6 +127,46 @@ describe('processDownloadTorrent: SABnzbd duplicates and retries (#329)', () => 
     await processDownloadTorrent(payload, { attemptsMade: 1 });
 
     expect(sab.addDownload).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ retry: true }));
+  });
+
+  it('passes the release title to a usenet client, which matches an existing job by it', async () => {
+    sab.addDownload.mockResolvedValueOnce({ id: 'SABnzbd_nzo_1', alreadyInClient: false });
+
+    const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+    await processDownloadTorrent(payload);
+
+    expect(sab.addDownload).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ releaseTitle: 'Book - Author - Release 1' }));
+  });
+
+  describe('a held job that waits paused', () => {
+    const heldPaused = () => {
+      sab.addDownload.mockResolvedValueOnce({ id: 'SABnzbd_nzo_paused', alreadyInClient: true, paused: true });
+    };
+
+    it('is resumed when RMAB added that job for an earlier download', async () => {
+      heldPaused();
+      prismaMock.downloadHistory.findFirst.mockResolvedValueOnce({ id: 'dh-earlier' });
+
+      const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+      await processDownloadTorrent(payload);
+
+      expect(prismaMock.downloadHistory.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ downloadClient: 'sabnzbd', addedByRmab: true }),
+      }));
+      expect(sab.resumeDownload).toHaveBeenCalledWith('SABnzbd_nzo_paused');
+      expect(jobQueueMock.addMonitorJob).toHaveBeenCalledWith('req-329', 'dh-329', 'SABnzbd_nzo_paused', 'sabnzbd', 3);
+    });
+
+    it('is tracked but left paused when RMAB did not add it', async () => {
+      heldPaused();
+      prismaMock.downloadHistory.findFirst.mockResolvedValueOnce(null);
+
+      const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+      await processDownloadTorrent(payload);
+
+      expect(sab.resumeDownload).not.toHaveBeenCalled();
+      expect(jobQueueMock.addMonitorJob).toHaveBeenCalledWith('req-329', 'dh-329', 'SABnzbd_nzo_paused', 'sabnzbd', 3);
+    });
   });
 
   it('a first attempt is not a retry', async () => {
