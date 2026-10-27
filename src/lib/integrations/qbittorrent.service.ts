@@ -42,7 +42,7 @@ const logger = RMABLogger.create('QBittorrent');
  * "incomplete downloads" folder. Without `autoTMM` the user's default mode applies, and Manual
  * mode ignores the category path. When the category could not be ensured its path is unknown
  * (Automatic mode would use the default folder plus the category name), so the add names the
- * download folder itself in Manual mode. `autoTMM` needs qBittorrent 4.2+ (Web API 2.2.0).
+ * download folder itself in Manual mode. `autoTMM` needs qBittorrent 4.1.5+ (Web API 2.2.0).
  */
 function placementFields(savePath?: string): Record<string, string> {
   return savePath === undefined ? { autoTMM: 'true' } : { autoTMM: 'false', savepath: savePath };
