@@ -61,6 +61,7 @@
 - **First-class ebook requests, separate tracking** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
 - **Multi-source ebook downloads (Anna's Archive + Indexer Search)** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
 - **Ebook indexer search (Prowlarr with ebook categories)** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#flow-indexer-search)
+- **Ebook already in the book folder skips auto-grab (#313)** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#on-disk-check-313)
 - **ASIN-based matching, format selection** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
 - **Ebook ranking algorithm (unified with audiobooks)** → [phase3/ranking-algorithm.md](phase3/ranking-algorithm.md#ebook-torrent-ranking)
 - **Direct HTTP downloads from Anna's Archive** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)

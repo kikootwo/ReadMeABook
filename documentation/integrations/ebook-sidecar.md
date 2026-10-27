@@ -27,7 +27,7 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
 
 ### Flow (Anna's Archive)
 1. Audiobook organization completes
-2. Ebook request created automatically (if source enabled)
+2. Ebook request created automatically (if source enabled and the book folder holds no ebook yet, see On-Disk Check)
 3. `search_ebook` job searches Anna's Archive
 4. `start_direct_download` downloads via HTTP
 5. `organize_files` copies to audiobook folder
@@ -40,7 +40,7 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
 
 ### Flow (Indexer Search)
 1. Audiobook organization completes
-2. Ebook request created automatically (if source enabled)
+2. Ebook request created automatically (if source enabled and the book folder holds no ebook yet)
 3. `search_ebook` job searches indexers (if Anna's Archive failed/disabled)
 4. `download_torrent` job adds to qBittorrent/SABnzbd (reuses audiobook processor)
 5. `monitor_download` tracks progress
@@ -80,6 +80,11 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
 ### Safety-Net: Find Missing Ebooks Job
 
 A scheduled `find_missing_ebooks` job (daily midnight, enabled by default) backstops the auto-grab path for cases where it silently misses books (race conditions, transient indexer failures, requests created before sources were configured, books from Goodreads/Hardcover sync). Per run it scans up to 50 audiobook requests in `downloaded`/`available` status and triggers the existing ebook fetch flow for any audiobook missing a successful ebook companion. **Lifetime auto-retry cap: 5 per audiobook** — after 5 failed auto-attempts the job stops retrying that audiobook (admin Manual "Fetch Ebook" remains available). Counter is tracked in `Request.ebookAutoRetryCount` and is **processor-private**: manual Fetch Ebook routes never read, write, or reset it. Gated by `ebook_auto_grab_enabled` AND at least one source enabled; logs no-op runs honestly. See `documentation/backend/services/scheduler.md` for full details.
+
+### On-Disk Check (#313)
+- `findEbookOnDisk(Audiobook.filePath)` (`src/lib/utils/ebook-on-disk.ts`): name of an `EBOOK_EXTENSIONS` file (any case) at the top level of the book folder, or null. No recursion; dotfiles (`._x.epub`) ignored; no path, a missing/unreadable folder or a non-folder path → null (fetch as before), one debug line. Read-only
+- Used by the automatic paths only: auto-grab after an audiobook import (`createEbookRequestIfEnabled`, checks the organize `targetPath`) and `find_missing_ebooks` (before it would create or retry). A hit: no ebook request created, a `failed`/`warn` one not retried, nothing fetched, this run and every later one (`skippedOnDisk` counter). The user's file is never touched
+- Not checked: manual Fetch Ebook / Interactive Search / Manual Import (an admin can still fetch, e.g. another format), and re-searches of an existing in-flight ebook request (`retry_missing_torrents`, `monitor_rss_feeds`)
 
 ### Kindle EPUB Fix
 
@@ -283,6 +288,8 @@ Categories are configured per-indexer via the tabbed interface in the Edit Index
 **2. Ebooks over 20 MB hidden from interactive search (#323)** - `rankEbookTorrents` dropped indexer results > 20 MB in every mode, so a large PDF that was the only result showed nothing. Fixed: the cap (`EBOOK_MAX_SIZE_MB`) applies to automatic search only; both interactive routes pass `enforceSizeCap: false` and list the result with its size
 
 **3. Manual Import from an ebook request imported audio into the audiobook (#278)** - the details modal opened the audiobook Manual Import for an ebook card: audio only, and the book's audiobook request (even `available`) was recycled and re-organized. Fixed: an ebook card's Manual Import lists and accepts ebook files and creates or reuses the ebook request; the ebook organize branch imports the selected file (see [manual-import.md](../features/manual-import.md))
+
+**4. Auto-grab re-fetched an ebook the user already put next to the audiobook (#313, part b)** - neither the post-import auto-grab nor `find_missing_ebooks` looked at the book folder, so a book with a user-placed ebook got an ebook request after import and a nightly retry after each failure. Fixed: both check the folder first (see On-Disk Check). Bulk-importing standalone ebooks (#313 part a) is not covered
 
 ## Limitations
 
