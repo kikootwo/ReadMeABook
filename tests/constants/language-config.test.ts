@@ -8,6 +8,7 @@ import {
   LANGUAGE_CONFIGS,
   getLanguageForRegion,
   isAcceptedLanguage,
+  keepsLanguage,
   stripPrefixes,
 } from '@/lib/constants/language-config';
 import { AUDIBLE_REGIONS, type AudibleRegion } from '@/lib/types/audible';
@@ -67,8 +68,16 @@ describe('Italian config', () => {
     expect(isAcceptedLanguage('spanish', IT)).toBe(false);
   });
 
-  it('uses the series and length labels shown on audible.it', () => {
-    expect(IT.scraping.seriesLabels).toContain('Serie:');
+  it('uses the length label shown on audible.it', () => {
     expect(IT.scraping.lengthLabels).toContain('Durata:');
+  });
+
+  it('keeps products in the region language or with no language, and no others', () => {
+    expect(keepsLanguage('Italiano', IT)).toBe(true);
+    expect(keepsLanguage(undefined, IT)).toBe(true);
+    expect(keepsLanguage('', IT)).toBe(true);
+    expect(keepsLanguage('  ', IT)).toBe(true);
+    expect(keepsLanguage('english', IT)).toBe(false);
+    expect(keepsLanguage('english', getLanguageForRegion('uk'))).toBe(true);
   });
 });

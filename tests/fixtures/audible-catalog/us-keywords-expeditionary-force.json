@@ -1,0 +1,693 @@
+{
+  "total_results": 251,
+  "products": [
+    {
+      "asin": "B0HG4R9JT6",
+      "title": "Last Ride",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51Y0ZBze5NL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "20"
+        }
+      ]
+    },
+    {
+      "asin": "B0FS2Z2SVC",
+      "title": "Ground State",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51nNOcGqOtL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "19"
+        }
+      ]
+    },
+    {
+      "asin": "B0HDFGKSTL",
+      "title": "Exoplanet",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51QMmltt5IL._SL500_.jpg"
+      },
+      "series": []
+    },
+    {
+      "asin": "B06W5861HP",
+      "title": "SpecOps",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51WFgAB5+gL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "2"
+        }
+      ]
+    },
+    {
+      "asin": "177424361X",
+      "title": "Critical Mass",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51-kqWaNeTL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "10"
+        }
+      ]
+    },
+    {
+      "asin": "B078RV7BWR",
+      "title": "Zero Hour",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/512YigydSIL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "5"
+        }
+      ]
+    },
+    {
+      "asin": "B01N48VJFJ",
+      "title": "Columbus Day",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51NDcPX7W8L._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "1"
+        }
+      ]
+    },
+    {
+      "asin": "B0D38CR7BR",
+      "title": "Task Force Hammer",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51K-G5EL6NL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "17"
+        }
+      ]
+    },
+    {
+      "asin": "B09FR4D8MC",
+      "title": "Fallout",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51wZbV1QeAL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "13"
+        }
+      ]
+    },
+    {
+      "asin": "1774248050",
+      "title": "Breakaway",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51vX6Cjv9-L._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "12"
+        }
+      ]
+    },
+    {
+      "asin": "B071438NCM",
+      "title": "Paradise",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51bIJnxRD6L._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "3"
+        }
+      ]
+    },
+    {
+      "asin": "B0DRPQFHHW",
+      "title": "Gateway",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51lJw-V9g8L._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "18"
+        }
+      ]
+    },
+    {
+      "asin": "1774246325",
+      "title": "Brushfire",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51YT5FJjKOL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "11"
+        }
+      ]
+    },
+    {
+      "asin": "B0BDNMLGFW",
+      "title": "Failure Mode",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51RTMizAjAL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "15"
+        }
+      ]
+    },
+    {
+      "asin": "B0C6FLJTM8",
+      "title": "Aftermath",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51+UKHL2lSL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "16"
+        }
+      ]
+    },
+    {
+      "asin": "B075NMRZTR",
+      "title": "Black Ops",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51GA5TR4yiL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "4"
+        }
+      ]
+    },
+    {
+      "asin": "1774242621",
+      "title": "Valkyrie",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51JBbuLeWlL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "9"
+        }
+      ]
+    },
+    {
+      "asin": "1772306932",
+      "title": "Mavericks",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51tofw6RFrL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "6"
+        }
+      ]
+    },
+    {
+      "asin": "1772308633",
+      "title": "Renegades",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51VAScZOiVS._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "7"
+        }
+      ]
+    },
+    {
+      "asin": "B072YT17GJ",
+      "title": "Trouble on Paradise",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51r-jhH+tyL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "3.5"
+        }
+      ]
+    },
+    {
+      "asin": "1774241285",
+      "title": "Armageddon",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51ehzdSpYcL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "8"
+        }
+      ]
+    },
+    {
+      "asin": "B09V1X64YV",
+      "title": "Match Game",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/514acpDOm-L._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "14"
+        }
+      ]
+    },
+    {
+      "asin": "1774243318",
+      "title": "Freefall",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51xJT7d1x1L._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B07RRBJ23R",
+          "title": "Expeditionary Force Mavericks",
+          "sequence": "2"
+        }
+      ]
+    },
+    {
+      "asin": "1772309141",
+      "title": "Homefront: An Expeditionary Force Audio Drama Special",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51JhGTQ-kOL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B01N9CUGHG",
+          "title": "Expeditionary Force",
+          "sequence": "7.5"
+        }
+      ]
+    },
+    {
+      "asin": "B07QXLT89C",
+      "title": "Deathtrap",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/510+rMBc+EL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B07RRBJ23R",
+          "title": "Expeditionary Force Mavericks",
+          "sequence": "1"
+        }
+      ]
+    },
+    {
+      "asin": "B09V41Y48V",
+      "title": "Expeditionary Force",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51m9MITrqJL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B09JS58KNM",
+          "title": "War Core",
+          "sequence": "2"
+        }
+      ]
+    },
+    {
+      "asin": "B002V19V7Y",
+      "title": "Emma",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51c2a02d4JL._SL500_.jpg"
+      },
+      "series": []
+    },
+    {
+      "asin": "B01KIQVHL6",
+      "title": "Empire of Storms",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51EMceUgxFL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B00FPW78IK",
+          "title": "Throne of Glass",
+          "sequence": "5"
+        }
+      ]
+    },
+    {
+      "asin": "B002UZDTMO",
+      "title": "Endurance",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51cC6xTOmwL._SL500_.jpg"
+      },
+      "series": []
+    },
+    {
+      "asin": "B01KKPH1VA",
+      "title": "The Dispatcher",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51m35+cvJYL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B08HNDYJGJ",
+          "title": "The Dispatcher",
+          "sequence": "1"
+        }
+      ]
+    },
+    {
+      "asin": "B07F1Z91H8",
+      "title": "Empire of Silence",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/513cgTb8hpL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B07F2WWQRB",
+          "title": "Sun Eater",
+          "sequence": "1"
+        }
+      ]
+    },
+    {
+      "asin": "B015YEFH40",
+      "title": "Elantris",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/61jHlAdb0+L._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B0DMXTJ8WH",
+          "title": "The Cosmere",
+          "sequence": ""
+        },
+        {
+          "asin": "B08KXL8CWM",
+          "title": "Elantris",
+          "sequence": "1"
+        }
+      ]
+    },
+    {
+      "asin": "B0CDXWSS5D",
+      "title": "The Eye of the Bedlam Bride",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51qfZAq2J4L._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B0937JMKYV",
+          "title": "Dungeon Crawler Carl",
+          "sequence": "6"
+        }
+      ]
+    },
+    {
+      "asin": "1250772664",
+      "title": "Empire of the Vampire",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51MEsLouJaL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B09SDFP6NG",
+          "title": "Empire of the Vampire",
+          "sequence": "1"
+        }
+      ]
+    },
+    {
+      "asin": "B00BKZQNW8",
+      "title": "The Domain Expeditionary Force Rescue Mission",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51bNR9f7E9L._SL500_.jpg"
+      },
+      "series": []
+    },
+    {
+      "asin": "B002V5A12Y",
+      "title": "Ender's Game",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51hzQWwImUL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B005NAMMQ2",
+          "title": "The Ender Saga",
+          "sequence": "1"
+        },
+        {
+          "asin": "B06Y47TNPL",
+          "title": "The Enderverse",
+          "sequence": "6"
+        }
+      ]
+    },
+    {
+      "asin": "B015TVHUA2",
+      "title": "Extreme Ownership",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/41IO3eCc9hL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B07HFFSK1S",
+          "title": "Extreme Ownership",
+          "sequence": ""
+        }
+      ]
+    },
+    {
+      "asin": "B0CYCWH8J4",
+      "title": "Alaskan Escape",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/41GVR64rHFL._SL500_.jpg"
+      },
+      "series": []
+    },
+    {
+      "asin": "B09ZZ8VMKL",
+      "title": "Convergence",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51H44knGqhL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B0B125D8G8",
+          "title": "Convergence",
+          "sequence": "1"
+        }
+      ]
+    },
+    {
+      "asin": "1401960820",
+      "title": "Expert Secrets",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/416wpR92i5L._SL500_.jpg"
+      },
+      "series": []
+    },
+    {
+      "asin": "B0CTKSG1VB",
+      "title": "Exodus: The Archimedes Engine",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51jr0Otb0HL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B0CTP8LSNX",
+          "title": "Exodus",
+          "sequence": "1"
+        }
+      ]
+    },
+    {
+      "asin": "B0DTZ6C6Z6",
+      "title": "Exit Strategy",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/41nBGevAFtL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B005NASKDG",
+          "title": "Jack Reacher",
+          "sequence": "30"
+        }
+      ]
+    },
+    {
+      "asin": "B00546SXO0",
+      "title": "East of Eden",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/41Pm1xYQueL._SL500_.jpg"
+      },
+      "series": []
+    },
+    {
+      "asin": "B0G79HNG5Q",
+      "title": "Exit Party",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51ApLUXYUBL._SL500_.jpg"
+      },
+      "series": []
+    },
+    {
+      "asin": "B002UZKL7A",
+      "title": "Eragon",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51i7mXy61VL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B005NAKJLW",
+          "title": "The Inheritance Cycle",
+          "sequence": "1"
+        }
+      ]
+    },
+    {
+      "asin": "B0BVKVFWYJ",
+      "title": "Exit Interview",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/416XffVUf6L._SL500_.jpg"
+      },
+      "series": []
+    },
+    {
+      "asin": "B0GP3J13ZL",
+      "title": "Expansion",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/518wDW3E0FL._SL500_.jpg"
+      },
+      "series": [
+        {
+          "asin": "B0GP9N7KDW",
+          "title": "Demon Accords Generations",
+          "sequence": "1"
+        }
+      ]
+    },
+    {
+      "asin": "B077Z8S58Y",
+      "title": "Exactly What to Say",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51R6B8Gj6GL._SL500_.jpg"
+      },
+      "series": []
+    },
+    {
+      "asin": "B0C7XXYPM7",
+      "title": "Expiration Dates",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51tSGnc-V-L._SL500_.jpg"
+      },
+      "series": []
+    },
+    {
+      "asin": "0593416910",
+      "title": "Expecting Better",
+      "language": "english",
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/412+-ysN8WL._SL500_.jpg"
+      },
+      "series": []
+    }
+  ]
+}

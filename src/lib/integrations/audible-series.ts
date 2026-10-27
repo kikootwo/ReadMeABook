@@ -2,9 +2,9 @@
  * Component: Audible Series Scraping
  * Documentation: documentation/integrations/audible.md
  *
- * Standalone series scraping module. Uses the AudibleService fetch wrapper
- * for HTTP requests and Cheerio for HTML parsing.
- * Kept separate from audible.service.ts to avoid bloating the main service.
+ * Series detail pages (/series/{asin}) scraped through the AudibleService HTML fetch
+ * wrapper and parsed with Cheerio. Series search uses the catalog API instead
+ * (audible-series-search.ts) and is re-exported here.
  *
  * HTML parsing lives in audible-series-parsers.ts (Audible A/B-serves two
  * different series-page layouts; the parsers handle both).
@@ -12,19 +12,14 @@
 
 import * as cheerio from 'cheerio';
 import { getAudibleService } from './audible.service';
-import {
-  getLanguageForRegion,
-  buildContainsSelector,
-} from '../constants/language-config';
+import { getLanguageForRegion } from '../constants/language-config';
 import { RMABLogger } from '../utils/logger';
-import { randomDelay } from '../utils/scrape-resilience';
 import {
   parseSeriesBooks,
   parseSeriesDescription,
   parseSeriesPageSummary,
   parseSimilarSeries,
   type SeriesDetail,
-  type SeriesSummary,
 } from './audible-series-parsers';
 
 export type {
@@ -32,162 +27,15 @@ export type {
   SimilarSeries,
   SeriesDetail,
 } from './audible-series-parsers';
+export { searchForSeries, SeriesSearchUnavailableError } from './audible-series-search';
 
 const logger = RMABLogger.create('Audible.Series');
 
 const AUDIBLE_PAGE_SIZE = 50;
-const MAX_SERIES_RESULTS = 15;
-
-// ---------------------------------------------------------------------------
-// Search: extract series links from Audible search results
-// ---------------------------------------------------------------------------
-
-/**
- * Search for series by scraping Audible search results and extracting
- * series links. De-duplicates by ASIN, then scrapes each unique series
- * page in parallel (capped at MAX_SERIES_RESULTS).
- */
-export async function searchForSeries(query: string): Promise<SeriesSummary[]> {
-  const service = getAudibleService();
-  const region = service.getRegion();
-  const baseUrl = service.getBaseUrl();
-  const langConfig = getLanguageForRegion(region);
-  const seriesLabels = langConfig.scraping.seriesLabels;
-
-  logger.info(`Searching series for "${query}" (region: ${region})`);
-
-  // Step 1: Fetch search results page
-  let $: cheerio.CheerioAPI;
-  try {
-    const { data: response } = await service.fetch('/search', {
-      params: {
-        ipRedirectOverride: 'true',
-        keywords: query,
-        pageSize: AUDIBLE_PAGE_SIZE,
-      },
-    });
-    $ = cheerio.load(response.data);
-  } catch (error) {
-    logger.error('Series search fetch failed', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  }
-
-  // Step 2: Extract unique series ASINs from search results
-  // Series links appear inside spans containing locale-specific "Series:" text
-  const seriesMap = new Map<string, { title: string; coverArtUrl?: string }>();
-
-  $('.s-result-item, .productListItem').each((_index, element) => {
-    if (seriesMap.size >= MAX_SERIES_RESULTS) return false;
-
-    const $el = $(element);
-
-    // Find the span containing a series label (e.g. "Series:")
-    const seriesSelector = buildContainsSelector('span', seriesLabels);
-    const seriesContainer = $el.find(seriesSelector).first();
-    if (seriesContainer.length === 0) return;
-
-    // Look for series link within or near the series label container
-    // The series link is a child or sibling: <a href="/series/Name/B006K1QER6">
-    const parentEl = seriesContainer.parent();
-    const seriesLink = parentEl.find('a[href*="/series/"]').first();
-    if (seriesLink.length === 0) return;
-
-    const href = seriesLink.attr('href') || '';
-    const asinMatch = href.match(/\/series\/[^/]*\/([A-Z0-9]{10})/);
-    if (!asinMatch) return;
-
-    const asin = asinMatch[1];
-    if (seriesMap.has(asin)) return;
-
-    const title = seriesLink.text().trim();
-    if (!title) return;
-
-    // Use the first book's cover as representative image
-    const coverArtUrl = $el.find('img').first().attr('src')?.replace(/\._.*_\./, '._SL500_.') || undefined;
-
-    seriesMap.set(asin, { title, coverArtUrl });
-  });
-
-  if (seriesMap.size === 0) {
-    logger.info(`No series found for "${query}"`);
-    return [];
-  }
-
-  logger.info(`Found ${seriesMap.size} unique series, scraping detail pages...`);
-
-  // Step 3: Scrape each series page in parallel (with rate limiting)
-  const entries = Array.from(seriesMap.entries());
-  const BATCH_SIZE = 5;
-  const results: SeriesSummary[] = [];
-
-  for (let i = 0; i < entries.length; i += BATCH_SIZE) {
-    const batch = entries.slice(i, i + BATCH_SIZE);
-    const batchResults = await Promise.all(
-      batch.map(async ([asin, meta]) => {
-        try {
-          const detail = await scrapeSeriesPageSummary(asin);
-          if (!detail) return null;
-          return {
-            ...detail,
-            coverArtUrl: detail.coverArtUrl || meta.coverArtUrl,
-            audibleUrl: `${baseUrl}/series/${asin}`,
-          } as SeriesSummary;
-        } catch (error) {
-          logger.warn(`Failed to scrape series ${asin}`, {
-            error: error instanceof Error ? error.message : String(error),
-          });
-          // Return a minimal result from search data
-          return {
-            asin,
-            title: meta.title,
-            bookCount: 0,
-            tags: [],
-            coverArtUrl: meta.coverArtUrl,
-            audibleUrl: `${baseUrl}/series/${asin}`,
-          } as SeriesSummary;
-        }
-      })
-    );
-
-    results.push(...batchResults.filter((r): r is SeriesSummary => r !== null));
-
-    // Rate limit between batches
-    if (i + BATCH_SIZE < entries.length) {
-      await new Promise(resolve => setTimeout(resolve, randomDelay(1500, 3000)));
-    }
-  }
-
-  logger.info(`Series search complete: "${query}" -> ${results.length} results`);
-  return results;
-}
 
 // ---------------------------------------------------------------------------
 // Series page scraping
 // ---------------------------------------------------------------------------
-
-/**
- * Scrape a series page for summary data (title, book count, rating, tags).
- * Used during search to enrich each series result.
- */
-async function scrapeSeriesPageSummary(asin: string): Promise<Omit<SeriesSummary, 'audibleUrl'> | null> {
-  const service = getAudibleService();
-
-  try {
-    const { data: response } = await service.fetch(`/series/${asin}`, {
-      params: { ipRedirectOverride: 'true' },
-    });
-    const $ = cheerio.load(response.data);
-
-    return parseSeriesPageSummary($, asin);
-  } catch (error) {
-    logger.warn(`Failed to fetch series page ${asin}`, {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return null;
-  }
-}
 
 /**
  * Scrape a series page for full detail data including books and similar series.

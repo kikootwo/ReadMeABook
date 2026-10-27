@@ -6,13 +6,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
-import { searchForSeries } from '@/lib/integrations/audible-series';
+import { searchForSeries, SeriesSearchUnavailableError } from '@/lib/integrations/audible-series';
 
 const logger = RMABLogger.create('API.Series.Search');
 
 /**
  * GET /api/series/search?q=game+of+thrones
- * Search for audiobook series on Audible, de-duplicate, and return enriched summaries
+ * Search for audiobook series in the Audible catalog. 502 when Audible did not answer.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -46,6 +46,12 @@ export async function GET(request: NextRequest) {
       query: query.trim(),
     });
   } catch (error) {
+    if (error instanceof SeriesSearchUnavailableError) {
+      return NextResponse.json(
+        { error: 'AudibleUnavailable', message: "Audible didn't return series results. Try again in a moment." },
+        { status: 502 }
+      );
+    }
     logger.error('Failed to search series', {
       error: error instanceof Error ? error.message : String(error),
     });

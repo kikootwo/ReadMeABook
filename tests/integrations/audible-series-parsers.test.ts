@@ -385,20 +385,6 @@ function italianLegacyPage(): string {
   </body></html>`;
 }
 
-/** One /search result row as audible.it renders it, with an Italian "Serie:" line. */
-function italianSearchPage(): string {
-  return `<html><body>
-    <div class="s-result-item">
-      <h2><a href="/pd/Il-profumo-della-morte-Audiolibri/${IT_BOOK.asin}">${IT_BOOK.title}</a></h2>
-      <ul>
-        <li><span>Di: <a href="/author/Ibon-Martin/B07D5ZJ1QK">Ibon Mart\u00edn</a></span></li>
-        <li><span>Serie: <a href="/series/Unindagine-Audiolibri/${IT_SERIES_ASIN}">Un'indagine dell'ispettore \u00c1lex Cort\u00e9s</a>, Titolo 1</span></li>
-        <li><span>Durata: 5 ore e 54 min</span></li>
-      </ul>
-    </div>
-  </body></html>`;
-}
-
 describe('Italian (audible.it) series pages', () => {
   const expectedBook = {
     asin: IT_BOOK.asin,
@@ -435,9 +421,20 @@ describe('Italian (audible.it) series pages', () => {
     expect(detail?.audibleUrl).toBe(`https://www.audible.it/series/${IT_SERIES_ASIN}`);
   });
 
-  it('searchForSeries finds series from the Italian "Serie:" label', async () => {
-    fakeAudible.fetch.mockImplementation(async (path: string) => ({
-      data: { data: path === '/search' ? italianSearchPage() : italianModernPage() },
+  it('searchForSeries finds an audible.it series through the catalog API', async () => {
+    const children = Array.from({ length: 15 }, (_, i) => ({
+      asin: `B0IT0001${String(i).padStart(2, '0')}`,
+      relationship_to_product: 'child',
+      relationship_type: 'series',
+    }));
+    const book = {
+      asin: IT_BOOK.asin,
+      title: IT_BOOK.title,
+      language: 'italian',
+      series: [{ asin: IT_SERIES_ASIN, title: "Un'indagine dell'ispettore \u00c1lex Cort\u00e9s", sequence: '1' }],
+    };
+    fakeAudible.fetch.mockImplementation(async (_path: string, config: { params: Record<string, unknown> }) => ({
+      data: { data: { products: config.params.asins ? [{ asin: IT_SERIES_ASIN, relationships: children }] : [book] } },
     }));
     const { searchForSeries } = await import('@/lib/integrations/audible-series');
 

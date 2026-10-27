@@ -1,22 +1,22 @@
 # Audible Integration
 
-**Status:** Implemented | Hybrid — curated HTML for discovery refresh + Audible JSON catalog API for user-facing real-time + Audnexus for per-ASIN details
+**Status:** Implemented | Hybrid — curated HTML for discovery refresh + Audible JSON catalog API for user-facing real-time (incl. series search) + Audnexus for per-ASIN details
 
 ## Overview
 
 Audiobook metadata for discovery, search, and detail pages. Split by access pattern:
 
 - **Nightly discovery refresh** (popular / new releases / category lists) — scraped from Audible's **curated HTML storefronts** (`www.audible.<tld>/adblbestsellers`, `/newreleases`, `/search?node=<id>`). The HTML pages reflect Audible's own editorial picks.
-- **User-facing real-time** (search, author books, categories listing, per-ASIN details) — Audible's unauthenticated public **JSON catalog API** (`api.audible.<tld>/1.0/catalog/*`).
+- **User-facing real-time** (search, series search, author books, categories listing, per-ASIN details) — Audible's unauthenticated public **JSON catalog API** (`api.audible.<tld>/1.0/catalog/*`).
 - **Per-ASIN detail lookups** — Audnexus (`api.audnex.us/books/{asin}`) primary; catalog API used as fallback when Audnexus returns 404, and for the series when Audnexus has none (series fill).
 
 ## Architecture
 
 - **Curated HTML (refresh job only):** the three methods called solely by `audible-refresh.processor.ts` (`getPopularAudiobooks`, `getNewReleases`, `getCategoryBooks`) scrape Audible's storefront HTML to inherit editorial curation. Beefed-up retry/backoff knobs (12 retries, 3-min jittered cap) handle 503 storms patiently on the nightly job without slowing healthy users.
-- **JSON catalog API (real-time):** `search`, `searchByAuthorAsin`, `getCategories` (categories listing), and `fetchAudibleDetailsFromApi` (per-ASIN fallback). Same endpoint used by the official Audible mobile apps. No authentication, no API key, no user credentials, no special headers.
+- **JSON catalog API (real-time):** `search`, `searchByAuthorAsin`, `getCategories` (categories listing), and `fetchAudibleDetailsFromApi` (per-ASIN fallback); series search (`audible-series-search.ts`, [own doc](./audible-series-search.md)). Same endpoint used by the official Audible mobile apps. No authentication, no API key, no user credentials, no special headers.
 - **Audnexus (per-ASIN):** `getAudiobookDetails` and `getRuntime` prefer Audnexus, with catalog API fallback for `getAudiobookDetails`.
 - **Series fill** (`audible-series-fill.ts`, `SeriesFill`, one per service): Audnexus result without a series → `series`/`seriesPart`/`seriesAsin` from `/1.0/catalog/products/{asin}` (same region), only when the chosen entry has a non-empty title, all three or none; every other field stays Audnexus. `getAudiobookDetails(asin, { fillSeries: false })` skips it (bulk-import scan, BookDate `matchToAudnexus`, organize tag lookup when the series is stored).
-- **`www.audible.<tld>`:** Used by HTML refresh scraping, by `audible-series.ts`, and by `getBaseUrl()` for "View on Audible" link generation.
+- **`www.audible.<tld>`:** Used by HTML refresh scraping, by the series detail page (`audible-series.ts`, `/series/{asin}`), and by `getBaseUrl()` for "View on Audible" link generation.
 
 ## Data Sources
 
@@ -35,12 +35,13 @@ Parsed via cheerio. Selectors: `.productListItem` (popular/new releases), `.s-re
 | Operation | Endpoint | Key params |
 |---|---|---|
 | Search | `/1.0/catalog/products` | `keywords=<q>` |
+| Series search | `/1.0/catalog/products` | `keywords=<q>`, then `asins=<series ASINs>` ([audible-series-search.md](./audible-series-search.md)) |
 | Author books | `/1.0/catalog/products` | `author=<name>` (name, NOT ASIN) |
 | Categories listing | `/1.0/catalog/categories` | (none) |
 | Single product | `/1.0/catalog/products/{asin}` | — |
 | Audnexus (per-ASIN) | `https://api.audnex.us/books/{asin}` | `region={audnexusParam}` |
 
-All `products` endpoints share:
+`AudibleService`'s `products` calls share (series search sets its own groups, has no `page`):
 - `num_results` — max **50** (service constant `AUDIBLE_PAGE_SIZE = 50`)
 - `page` — **0-indexed at the API** (service public interface is 1-indexed; the service subtracts 1 at the call site). See Gotchas.
 - `response_groups=<CATALOG_RESPONSE_GROUPS>`
@@ -66,13 +67,13 @@ Populates every `AudibleAudiobook` field. Covered:
 - **`publisher_summary` is HTML.** Converted with `stripHtml()` (`src/lib/utils/strip-html.ts`, regex-based, no cheerio) before populating `description`. Falls back to `merchandising_summary` (plain text) if `publisher_summary` missing.
 - **Audnexus details prefer `summary`.** `description` = `stripHtml(summary)` if it is a non-empty string, else `stripHtml(description)` (the short blurb). No catalog call for a missing summary.
 - **`description` is plain text, never rendered as HTML.** `stripHtml()`: drop `<script>`/`<style>` blocks → collapse source whitespace → `<br>` = newline, `</p>` = blank line, `<p>`/`<hr>`/div/h1-h6/ul/ol/blockquote and `</li>` = newline, `<li>` = `• ` (case-insensitive; adjacent breaks merge) → strip remaining tags → decode entities in one pass (numeric, common named incl. typographic quotes/dashes and accented letters; exact case first, then case-insensitive; unknown left as-is) → per line collapse spaces/tabs/nbsp and trim, max one blank line. Linear-time on unbalanced input. UI shows it as text (`whitespace-pre-wrap` in the details modal).
-- **Series is an array.** `products[].series[]` — a book may belong to multiple series. `pickCatalogSeries()` picks the first entry with non-empty (trimmed) `sequence`, else the first entry; same rule for search, author books, the details fallback and the series fill. `sequence` is cleaned by extracting first `/\d+(?:\.\d+)?/` match for numeric ordering.
+- **Series is an array.** `products[].series[]` — a book may belong to multiple series. `pickCatalogSeries()` picks the first entry with non-empty (trimmed) `sequence`, else the first entry; same rule for search, author books, the details fallback and the series fill (series search reads every entry). `sequence` is cleaned by extracting first `/\d+(?:\.\d+)?/` match for numeric ordering.
 - **Stub `product_images`:** cover URL reads from `product_images['500']`; missing keys fall back to `undefined`.
 - **`page` is 0-indexed (catalog API only).** Despite the default value appearing to be 1, the API returns items `(page * num_results)` through `((page + 1) * num_results - 1)`. So `page=1` fetches items 51–100, not 1–50. All catalog-API service methods accept a 1-indexed `page` and subtract 1 at the axios call. The symptom of getting this wrong is silent: queries whose `total_results ≤ num_results` return an empty `products` array while `total_results` is populated (e.g. author searches for small catalogues). HTML paths use Audible's native 1-indexed `page` query param and omit it on the first page.
 
 ## Rate Limiting & Resilience
 
-- **Real-time JSON API paths:** 503s are uncommon. `fetchWithRetry()` uses jittered exponential backoff, 5 retries, retries on 503/429/5xx. API responses include `Cache-Control: private, max-age=1800`.
+- **Real-time JSON API paths:** 503s are uncommon. `fetchWithRetry()` uses jittered exponential backoff, 5 retries, retries on 503/429/5xx. Series search instead has its own 5 s + 3 s budget ([audible-series-search.md](./audible-series-search.md)). API responses include `Cache-Control: private, max-age=1800`.
 - **Nightly HTML refresh paths:** 503s are more likely (HTML storefront is more rate-sensitive). Same `fetchWithRetry()`, but with `HTML_MAX_RETRIES=12` and `HTML_MAX_BACKOFF_MS=180_000` (3-minute cap on jittered backoff). Healthy refreshes still complete fast (per-page success on attempt 0); users hit by sustained 503 storms grind through patiently rather than abandoning the refresh.
 - **Series fill:** `SERIES_FILL_PROFILE` = one attempt (no retries), `timeout` + `AbortSignal.timeout` 5 s (axios `timeout` alone starts only once connected). A transient failure (429, 401/403, 5xx, no response, abort/timeout) pauses fills 15 min (`SERIES_FILL_COOLDOWN_MS`, per `AudibleService` instance): one warn "Series lookups from the Audible catalog paused for 15 min after: <reason> on <asin>" (abort/timeout reads "timeout (5 s)"), a debug line per skipped fill, details still returned without a series; never cached. Any other failure (another 4xx, a malformed product) is cached as "none" with a debug line, no pause. Outcomes (series or "none") cached 24 h per `region:asin`, max 2000 entries, insertion-order eviction. Details fallback keeps `DETAILS_FALLBACK_PROFILE` (5 retries, no deadline, error log).
 - **`AdaptivePacer`** — inter-page delay 2–4 s baseline, scales up multiplicatively under retry pressure, with a 45–60 s circuit-breaker cooldown after 3 consecutive retry-pages.
@@ -102,11 +103,12 @@ Configurable Audible region for accurate metadata matching across international 
 
 **Language configs** (`src/lib/constants/language-config.ts`, `LANGUAGE_CONFIGS`): `en`, `de`, `es`, `fr`, `it`. Region → language via `REGION_LANGUAGE_MAP` (`Record<AudibleRegion, …>`, so tsc fails if a region lacks a mapping). Each holds stop words, `characterReplacements`, Anna's Archive/EPUB code, and `scraping` labels/patterns.
 
-| Lang | `audibleLocaleParam` | Author / narrator | Length | Series | Runtime example | `acceptedLanguageValues` |
-|---|---|---|---|---|---|---|
-| `it` | `italiano` | `Di:` / `Letto da:` | `Durata:` | `Serie:` | `5 ore e 54 min` (`1 ora`) | `italiano`, `italian` |
+| Lang | `audibleLocaleParam` | Author / narrator | Length | Runtime example | `acceptedLanguageValues` |
+|---|---|---|---|---|---|
+| `it` | `italiano` | `Di:` / `Letto da:` | `Durata:` | `5 ore e 54 min` (`1 ora`) | `italiano`, `italian` |
 
-- Italian labels (author, narrator, length, series, language `Lingua:`, release date `Data di pubblicazione:`) were read off audible.it bestsellers, new releases, category search and series pages. `ratingPatterns` / `ratingTextSelector` (`su 5`) and promo `descriptionExcludePatterns` are inferred; no current code path reads them.
+- `keepsLanguage(language, config)`: accepted language, or no language at all (never treated as foreign). Series search ranks by it; the shared rule for a language filter.
+- Italian labels (author, narrator, length, language `Lingua:`, release date `Data di pubblicazione:`) were read off audible.it bestsellers, new releases, category search and series pages. `ratingPatterns` / `ratingTextSelector` (`su 5`) and promo `descriptionExcludePatterns` are inferred; no current code path reads them.
 - Hour pattern `(\d+)\s*or[ae]\b` requires a word end, so `3 orecchie` is not read as hours.
 
 **Adding a region:** add it to `AudibleRegion` + `AUDIBLE_REGIONS` + `REGION_LANGUAGE_MAP` (every region); a new language also needs a `LanguageConfig` in `LANGUAGE_CONFIGS`. Dropdowns (setup wizard, Plex/ABS settings), `PUT /api/admin/settings/audible` validation, ABS provider (`audible.<code>`) and Audnexus `region=` all derive from `AUDIBLE_REGIONS`.
@@ -132,14 +134,15 @@ Configurable Audible region for accurate metadata matching across international 
 - Automatic refresh: Region change triggers `audible_refresh` job.
 
 **Per-region HTTP clients (on init):**
-- `apiClient` — `baseURL=apiBaseUrl`, `Accept: application/json`, `User-Agent: ReadMeABook/1.0`, no language/ipRedirect params. Used for the real-time JSON catalog operations (search, author books, categories listing, per-ASIN details fallback).
-- `htmlClient` — `baseURL=baseUrl`, rotating browser headers (`pickUserAgent` + `getBrowserHeaders`), default params `ipRedirectOverride=true` + `language=<audibleLocaleParam>`. Used by the nightly discovery refresh (`/adblbestsellers`, `/newreleases`, `/search?node=...`), by `audible-series.ts`, and by `getBaseUrl()`-based link generation.
+- `apiClient` — `baseURL=apiBaseUrl`, `Accept: application/json`, `User-Agent: ReadMeABook/1.0`, no language/ipRedirect params. Used for the real-time JSON catalog operations (search, series search via `fetch(url, config, { catalog: true })` = one attempt, author books, categories listing, per-ASIN details fallback).
+- `htmlClient` — `baseURL=baseUrl`, rotating browser headers (`pickUserAgent` + `getBrowserHeaders`), default params `ipRedirectOverride=true` + `language=<audibleLocaleParam>`. Used by the nightly discovery refresh (`/adblbestsellers`, `/newreleases`, `/search?node=...`), by the series detail page (`audible-series.ts`), and by `getBaseUrl()`-based link generation.
 - Audnexus calls include `region=<audnexusParam>`.
 
 **Files:**
 - Types: `src/lib/types/audible.ts`
 - Service: `src/lib/integrations/audible.service.ts`
-- Series (HTML): `src/lib/integrations/audible-series.ts` (fetch/orchestration), `src/lib/integrations/audible-series-parsers.ts` (Cheerio parsing)
+- Series detail (HTML): `src/lib/integrations/audible-series.ts` (fetch/orchestration), `src/lib/integrations/audible-series-parsers.ts` (Cheerio parsing)
+- Series search (catalog API): `src/lib/integrations/audible-series-search.ts`, `audible-series-rank.ts`
 - Config: `src/lib/services/config.service.ts`
 - API: `src/app/api/admin/settings/audible/route.ts`
 
@@ -324,8 +327,8 @@ interface AuthorBooksResult {
 
 ## Tech Stack
 
-- `axios` (HTTP, two clients: `apiClient` for JSON catalog API, `htmlClient` for HTML refresh + series scraping)
-- `cheerio` (HTML parsing for refresh job and `audible-series.ts`)
+- `axios` (HTTP, two clients: `apiClient` for JSON catalog API incl. series search, `htmlClient` for HTML refresh + the series detail page)
+- `cheerio` (HTML parsing for refresh job and the series detail page, `audible-series.ts`)
 - Audnexus API (per-ASIN details, primary)
 - PostgreSQL (`audible_cache`, `audible_cache_categories`)
 
@@ -371,11 +374,12 @@ interface AuthorBooksResult {
 **Non-English locale pages served to users outside US (2026-02-05)**
 - **Problem:** Audible uses IP geolocation to serve locale-specific pages. `ipRedirectOverride=true` only prevents region redirects, NOT language/locale changes.
 - **Impact:** Users self-hosting from non-English-speaking countries got non-English content on HTML-scraped surfaces.
-- **Fix:** Added `language=<audibleLocaleParam>` default param on `htmlClient` (axios default params). Still in effect for the remaining HTML path (`audible-series.ts`). **Not applied to `apiClient`** — the catalog JSON API is region-bound via `apiBaseUrl` and does not require the language param.
+- **Fix:** Added `language=<audibleLocaleParam>` default param on `htmlClient` (axios default params). Still in effect for the remaining HTML paths (the nightly refresh and the series detail page, `audible-series.ts`). **Not applied to `apiClient`** — the catalog JSON API is region-bound via `apiBaseUrl` and does not require the language param.
 - **Location:** `src/lib/integrations/audible.service.ts` — `initialize()` (htmlClient params)
 
 ## Related
 
+- [Audible Series Search](./audible-series-search.md)
 - [Audiobookshelf Integration](./audiobookshelf.md)
 - [Plex Integration](./plex.md)
 - [Ranking Algorithm](../phase3/ranking-algorithm.md)

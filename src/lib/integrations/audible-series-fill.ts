@@ -57,6 +57,30 @@ export function catalogDeadline(profile: CatalogFetchProfile): { timeout?: numbe
   return profile.deadlineMs ? { timeout: profile.deadlineMs, signal: AbortSignal.timeout(profile.deadlineMs) } : {};
 }
 
+/** One deadline shared by every attempt of a call. */
+export interface CatalogBudget {
+  signal: AbortSignal;
+  /** Time left before the deadline, for each attempt's axios `timeout` */
+  remainingMs(): number;
+  /** Clears the deadline timer once the call has settled */
+  done(): void;
+}
+
+/**
+ * Unlike catalogDeadline, the budget spans retries: the second attempt only gets the
+ * time the first one left. The deadline is a plain timer, so tests can drive it.
+ */
+export function catalogBudget(deadlineMs: number): CatalogBudget {
+  const controller = new AbortController();
+  const endsAt = Date.now() + deadlineMs;
+  const timer = setTimeout(() => controller.abort(), deadlineMs);
+  return {
+    signal: controller.signal,
+    remainingMs: () => Math.max(0, endsAt - Date.now()),
+    done: () => clearTimeout(timer),
+  };
+}
+
 export const SERIES_FILL_COOLDOWN_MS = 15 * 60 * 1000;
 export const SERIES_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 export const SERIES_CACHE_MAX_ENTRIES = 2000;
@@ -67,7 +91,7 @@ interface CachedOutcome {
   expiresAt: number;
 }
 
-interface FetchError {
+export interface FetchError {
   response?: { status?: number };
   code?: unknown;
   name?: unknown;
@@ -75,10 +99,11 @@ interface FetchError {
   message?: unknown;
 }
 
-const ABORT_CODES = new Set(['ERR_CANCELED', 'ECONNABORTED']);
+const ABORT_CODES = new Set(['ERR_CANCELED', 'ECONNABORTED', 'ETIMEDOUT']);
 const ABORT_NAMES = new Set(['CanceledError', 'TimeoutError', 'AbortError']);
 
-function isAbort(error: FetchError): boolean {
+/** An abort or a timeout: the request was cut off, it did not fail on its own */
+export function isAbort(error: FetchError): boolean {
   return ABORT_CODES.has(error.code as string) || ABORT_NAMES.has(error.name as string);
 }
 
