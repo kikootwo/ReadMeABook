@@ -286,6 +286,39 @@ describe('file organizer', () => {
     expect(chapterMock.mergeChapters).toHaveBeenCalled();
   });
 
+  it.each([
+    ['a long Cyrillic title is cut to fit 255 bytes, keeping .m4b (#264)', 'Преступление и наказание '.repeat(10).trim(), null],
+    ['a title that fits keeps its name', 'Book: Title', 'Book Title.m4b'],
+  ])('chapter merge output name: %s', async (_label, title, expected) => {
+    configState.values.set('chapter_merging_enabled', 'true');
+    configState.values.set('metadata_tagging_enabled', 'false');
+    configState.values.set('ebook_sidecar_enabled', 'false');
+    chapterMock.detectChapterFiles.mockResolvedValue(true);
+    chapterMock.estimateOutputSize.mockResolvedValue(100);
+    chapterMock.checkDiskSpace.mockResolvedValue(1000);
+    chapterMock.analyzeChapterFiles.mockResolvedValue([
+      { path: '/downloads/book/disc1.mp3', filename: 'disc1.mp3', duration: 1000, chapterTitle: 'One' },
+    ]);
+    chapterMock.mergeChapters.mockResolvedValue({ success: false, error: 'merge failed' });
+    fsMock.access.mockImplementation(async (filePath: string) => {
+      if (path.normalize(filePath).startsWith(path.normalize('/downloads/book'))) return undefined;
+      throw new Error('missing');
+    });
+    fsMock.mkdir.mockResolvedValue(undefined);
+    copyFileMock.copyFile.mockResolvedValue(undefined);
+    fsMock.chmod.mockResolvedValue(undefined);
+
+    const organizer = new FileOrganizer('/media', '/tmp');
+    (organizer as unknown as { findAudiobookFiles: unknown }).findAudiobookFiles = vi.fn().mockResolvedValue({ audioFiles: ['disc1.mp3', 'disc2.mp3'], coverFile: undefined, isFile: false });
+    await organizer.organize('/downloads/book', { title, author: 'Author' }, '{author}/{title}');
+
+    const name = path.basename(chapterMock.mergeChapters.mock.calls[0][1].outputPath);
+    expect(Buffer.byteLength(name, 'utf8')).toBeLessThanOrEqual(255);
+    expect(name.endsWith('.m4b')).toBe(true);
+    if (expected) expect(name).toBe(expected);
+    else expect(title.startsWith(name.slice(0, -'.m4b'.length))).toBe(true);
+  });
+
   describe('the one ASIN step (addMp4FreeformTags) on the file about to be placed', () => {
     const BOOK = { title: 'Book', author: 'Author', asin: 'B0TESTASIN' };
     const merged = path.join('/tmp', 'Book.m4b');
