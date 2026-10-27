@@ -13,6 +13,8 @@ import { createJobQueueMock } from '../helpers/job-queue';
 const prismaMock = createPrismaMock();
 const jobQueueMock = createJobQueueMock();
 const configMock = vi.hoisted(() => ({ get: vi.fn() }));
+/** Audiobook rows the "other book in this folder" lookup reads (filtered like the real query). */
+let books: Array<{ id: string; filePath: string | null }> = [];
 
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/services/job-queue.service', () => ({ getJobQueueService: () => jobQueueMock }));
@@ -58,6 +60,10 @@ beforeEach(async () => {
   prismaMock.request.create.mockImplementation(async (args: { data: Record<string, unknown> }) => ({ id: 'new-ebook-1', ...args.data }));
   prismaMock.request.update.mockResolvedValue({});
   jobQueueMock.addSearchEbookJob.mockResolvedValue(undefined);
+  books = [];
+  prismaMock.audiobook.findMany.mockImplementation(async (args: { where?: { id?: { not?: string } } }) =>
+    books.filter((book) => book.filePath !== null && book.id !== args?.where?.id?.not)
+  );
 });
 
 afterEach(async () => {
@@ -130,5 +136,49 @@ describe('processFindMissingEbooks without an ebook in the book folder (as befor
     await run([]);
     const sql = (prismaMock.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join('?');
     expect(sql).toMatch(/a\.file_path\s+AS audiobook_file_path/);
+  });
+});
+
+describe('processFindMissingEbooks with a PDF in the book folder', () => {
+  it('fetches when a PDF booklet is the only ebook-type file', async () => {
+    const dir = await bookFolder(['01.mp3', 'Companion Booklet.pdf', 'cover.jpg']);
+    const result = await run([row(dir)]);
+
+    expect(prismaMock.request.create).toHaveBeenCalledTimes(1);
+    expect(jobQueueMock.addSearchEbookJob).toHaveBeenCalledWith('new-ebook-1', expect.objectContaining({ id: 'audio-1' }));
+    expect(result).toMatchObject({ created: 1, triggered: 1, skippedOnDisk: 0 });
+  });
+
+  it('skips when an epub sits beside the PDF', async () => {
+    const dir = await bookFolder(['01.mp3', 'Companion Booklet.pdf', 'Book.epub']);
+    const result = await run([row(dir)]);
+
+    expect(prismaMock.request.create).not.toHaveBeenCalled();
+    expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ created: 0, triggered: 0, skippedOnDisk: 1 });
+  });
+});
+
+describe('processFindMissingEbooks with two books in one folder', () => {
+  it("still creates the second book's ebook request when the first book's ebook is in the folder", async () => {
+    const dir = await bookFolder(['A - 01.mp3', 'A.epub', 'B - 01.mp3']);
+    books = [{ id: 'audio-A', filePath: dir }, { id: 'audio-B', filePath: dir }];
+    const result = await run([
+      row(dir, {
+        parent_request_id: 'parent-A',
+        audiobook_id: 'audio-A',
+        audiobook_title: 'Book A',
+        ebook_request_id: 'ebook-A',
+        ebook_status: 'downloaded',
+      }),
+      row(dir, { parent_request_id: 'parent-B', audiobook_id: 'audio-B', audiobook_title: 'Book B' }),
+    ]);
+
+    expect(prismaMock.request.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.request.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ audiobookId: 'audio-B', parentRequestId: 'parent-B' }) })
+    );
+    expect(jobQueueMock.addSearchEbookJob).toHaveBeenCalledWith('new-ebook-1', expect.objectContaining({ id: 'audio-B' }));
+    expect(result).toMatchObject({ scanned: 2, created: 1, triggered: 1, skippedOnDisk: 0 });
   });
 });

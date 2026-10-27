@@ -1109,7 +1109,7 @@ async function createEbookRequestIfEnabled(
     }
 
     // An ebook the user already put in the book folder: nothing to fetch (#313)
-    const ebookOnDisk = await findEbookOnDisk(targetPath, logger);
+    const ebookOnDisk = await findEbookOnDisk(targetPath, audiobook.id, logger);
     if (ebookOnDisk) {
       logger.info(`Book folder already holds an ebook (${ebookOnDisk}), skipping automatic ebook request`);
       return;

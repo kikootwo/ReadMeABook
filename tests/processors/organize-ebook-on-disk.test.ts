@@ -34,6 +34,8 @@ vi.mock('@/lib/utils/format-coercion', async (importOriginal) => ({
 }));
 
 let root: string;
+/** Audiobook rows the "other book in this folder" lookup reads (filtered like the real query). */
+let books: Array<{ id: string; filePath: string | null }> = [];
 
 async function bookFolder(files: string[]): Promise<string> {
   const dir = await fs.mkdtemp(path.join(root, 'book-'));
@@ -73,6 +75,10 @@ describe('automatic ebook request after an audiobook import', () => {
     });
     configMock.getBackendMode.mockResolvedValue('plex');
     configMock.get.mockImplementation(async (key: string) => (key === 'ebook_annas_archive_enabled' ? 'true' : null));
+    books = [];
+    prismaMock.audiobook.findMany.mockImplementation(async (args: { where?: { id?: { not?: string } } }) =>
+      books.filter((book) => book.filePath !== null && book.id !== args?.where?.id?.not)
+    );
   });
 
   afterEach(async () => {
@@ -97,6 +103,31 @@ describe('automatic ebook request after an audiobook import', () => {
     ['a folder with only audio', ['01.mp3', '02.mp3', 'cover.jpg']],
   ])('creates the ebook request and fetches for %s (as before)', async (_label, files) => {
     const dir = await bookFolder(files);
+    await organizeInto(dir);
+
+    expect(ebookCreates()).toHaveLength(1);
+    expect(jobQueueMock.addSearchEbookJob).toHaveBeenCalledWith('ebook-new', expect.objectContaining({ id: 'a1' }));
+  });
+
+  it('creates the ebook request and fetches when a PDF booklet is the only ebook-type file', async () => {
+    const dir = await bookFolder(['01.mp3', 'Companion Booklet.pdf', 'cover.jpg']);
+    await organizeInto(dir);
+
+    expect(ebookCreates()).toHaveLength(1);
+    expect(jobQueueMock.addSearchEbookJob).toHaveBeenCalledWith('ebook-new', expect.objectContaining({ id: 'a1' }));
+  });
+
+  it('creates no ebook request when an epub sits beside a PDF booklet', async () => {
+    const dir = await bookFolder(['01.mp3', 'Companion Booklet.pdf', 'Book.epub']);
+    await organizeInto(dir);
+
+    expect(ebookCreates()).toHaveLength(0);
+    expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
+  });
+
+  it("creates this book's ebook request when another book in the same folder brought its ebook", async () => {
+    const dir = await bookFolder(['A - 01.mp3', 'A.epub', '01.mp3']);
+    books = [{ id: 'other-book', filePath: dir }, { id: 'a1', filePath: dir }];
     await organizeInto(dir);
 
     expect(ebookCreates()).toHaveLength(1);

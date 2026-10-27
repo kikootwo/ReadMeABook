@@ -187,7 +187,7 @@ export async function processFindMissingEbooks(payload: FindMissingEbooksPayload
 
       try {
         // An ebook the user put next to the audiobook: no request, no fetch, this run or any other (#313)
-        const ebookOnDisk = wouldFetch(row) ? await findEbookOnDisk(row.audiobook_file_path, logger) : null;
+        const ebookOnDisk = wouldFetch(row) ? await findEbookOnDisk(row.audiobook_file_path, row.audiobook_id, logger) : null;
         if (ebookOnDisk) {
           action = 'skipped-on-disk';
           skippedOnDisk++;
