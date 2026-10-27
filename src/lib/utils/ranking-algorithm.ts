@@ -51,7 +51,11 @@ export interface RankTorrentsOptions {
   requireAuthor?: boolean;                   // Enforce author presence check (default: true)
   stopWords?: string[];                      // Language-specific stop words for matching
   characterReplacements?: Record<string, string>;  // Language-specific char replacements (e.g. ß→ss)
+  minMBPerMinute?: number;                   // Size floor when runtime is known (opt-in; automatic search only)
 }
+
+/** Size floor for automatic search, about 21 kbps: drops a single file of a multi-file post (#311) */
+export const AUTO_SEARCH_MIN_MB_PER_MINUTE = 0.15;
 
 export interface EbookTorrentRequest {
   title: string;
@@ -129,11 +133,17 @@ export class RankingAlgorithm {
       requireAuthor = true,  // Safe default: require author in automatic mode
       stopWords,
       characterReplacements,
+      minMBPerMinute,
     } = options;
-    // Filter out files < 20 MB (likely ebooks/samples)
+    // Filter out files < 20 MB (likely ebooks/samples), and, when a floor is set and the
+    // runtime is known, results too small for the runtime (one file of a multi-file post)
+    const runtime = audiobook.durationMinutes;
+    const floorMB = minMBPerMinute !== undefined && runtime !== undefined && runtime > 0
+      ? minMBPerMinute * runtime
+      : 0;
     const filteredTorrents = torrents.filter((torrent) => {
       const sizeMB = torrent.size / (1024 * 1024);
-      return sizeMB >= 20;
+      return sizeMB >= 20 && sizeMB >= floorMB;
     });
 
     const ranked = filteredTorrents.map((torrent) => {

@@ -135,6 +135,8 @@ describe('Request action routes', () => {
       expect.objectContaining({ title: 'Title', author: 'Author', durationMinutes: 600 }),
       expect.any(Object)
     );
+    // Interactive search shows undersized releases too: only automatic search sets the size floor
+    expect(rankTorrentsMock.mock.calls[0][2]).not.toHaveProperty('minMBPerMinute');
   });
 
   it('performs interactive search without runtime when no ASIN', async () => {
