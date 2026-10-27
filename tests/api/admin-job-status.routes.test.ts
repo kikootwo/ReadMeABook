@@ -12,7 +12,12 @@ const jobQueueMock = vi.hoisted(() => ({ getJob: vi.fn() }));
 vi.mock('@/lib/db', () => ({
   prisma: {
     user: {
-      findUnique: async ({ where }: { where: { id: string } }) => ({ id: where.id, deletedAt: null, sessionsInvalidatedAt: null }),
+      findUnique: async ({ where }: { where: { id: string } }) => ({
+        id: where.id,
+        role: where.id === 'u-admin' ? 'admin' : 'user',
+        deletedAt: null,
+        sessionsInvalidatedAt: null,
+      }),
     },
   },
 }));

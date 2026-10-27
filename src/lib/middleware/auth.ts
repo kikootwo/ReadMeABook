@@ -90,12 +90,13 @@ async function authenticateApiToken(token: string): Promise<TokenPayload | null>
     });
   });
 
-  // Use the token's target user (userId), not the creator (createdById)
+  // Use the token's target user (userId), not the creator (createdById).
+  // The token's role is an upper bound: it never exceeds the owner's current role.
   return {
     sub: user.id,
     plexId: user.plexId,
     username: user.plexUsername,
-    role: apiToken.role,
+    role: apiToken.role === 'admin' && user.role === 'admin' ? 'admin' : 'user',
   };
 }
 
@@ -175,6 +176,7 @@ export async function requireAuth(
     where: { id: payload.sub },
     select: {
       id: true,
+      role: true,
       deletedAt: true,
       sessionsInvalidatedAt: true,
       registrationStatus: true,
@@ -210,11 +212,12 @@ export async function requireAuth(
     );
   }
 
-  // Add user to request
+  // Add user to request; the role comes from the account, not the token, so role changes apply now
   const authenticatedRequest = request as AuthenticatedRequest;
   authenticatedRequest.user = {
     ...payload,
     id: payload.sub,
+    role: user.role,
   };
 
   return handler(authenticatedRequest);

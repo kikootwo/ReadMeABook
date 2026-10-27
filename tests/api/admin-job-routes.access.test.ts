@@ -14,7 +14,7 @@ import { NextRequest } from 'next/server';
 /** Issued-at (seconds) of every JWT the mocked verifier hands back. */
 const ISSUED_AT = vi.hoisted(() => 1_700_000_000);
 
-type UserRow = { id: string; deletedAt: Date | null; sessionsInvalidatedAt: Date | null };
+type UserRow = { id: string; role: string; deletedAt: Date | null; sessionsInvalidatedAt: Date | null };
 
 const state = vi.hoisted(() => ({ users: {} as Record<string, UserRow> }));
 
@@ -148,8 +148,8 @@ const send = (route: RouteCase, token?: string) =>
 describe('admin job routes use the standard session checks', () => {
   beforeEach(() => {
     state.users = {
-      'u-admin': { id: 'u-admin', deletedAt: null, sessionsInvalidatedAt: null },
-      'u-user': { id: 'u-user', deletedAt: null, sessionsInvalidatedAt: null },
+      'u-admin': { id: 'u-admin', role: 'admin', deletedAt: null, sessionsInvalidatedAt: null },
+      'u-user': { id: 'u-user', role: 'user', deletedAt: null, sessionsInvalidatedAt: null },
     };
     vi.clearAllMocks();
     schedulerMock.getScheduledJobs.mockResolvedValue([{ id: 'job-1' }]);

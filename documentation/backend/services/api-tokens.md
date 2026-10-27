@@ -8,7 +8,7 @@ Static `rmab_`-prefixed tokens act with the owner's full user-level permissions 
 ## Key Details
 - **Prefix:** `rmab_` (12-char stored display prefix: `rmab_` + 7 hex chars)
 - **Storage:** SHA-256 hash in `apiToken.tokenHash`; full token shown ONCE on create
-- **Role binding:** Token `role` matches token owner's role at creation time; admin tokens require admin-created
+- **Role binding:** Token `role` matches token owner's role at creation time; per request the effective role is capped by the owner's current role (admin token of a demoted owner acts as `user`; a `user` token is not raised on promotion); admin tokens require admin-created
 - **Per-user cap:** 25 active (non-expired) tokens (`MAX_TOKENS_PER_USER`)
 - **Expiry:** Optional (`never`, `30d`, `90d`, `1y`)
 - **Soft-deleted users:** Tokens reject if `tokenUser.deletedAt` is set
