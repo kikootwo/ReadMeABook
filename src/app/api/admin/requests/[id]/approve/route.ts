@@ -10,6 +10,7 @@ import { guardEbookSelection, guardTorrentSelection, rejectedSelectionResponse, 
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { buildEbookDownloadName } from '@/lib/utils/ebook-download-name';
 import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { readJsonBody } from '@/lib/utils/request-body';
@@ -159,7 +160,7 @@ export async function POST(
                 existingRequest.id,
                 downloadHistory.id,
                 selectedTorrent.downloadUrl,
-                `${existingRequest.audiobook.title} - ${existingRequest.audiobook.author}.${selectedTorrent.format || 'epub'}`,
+                buildEbookDownloadName(existingRequest.audiobook.title, existingRequest.audiobook.author, selectedTorrent.format || 'epub'),
                 undefined
               );
             } else {

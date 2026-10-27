@@ -212,12 +212,15 @@ Search: https://annas-archive.gl/search?q=Title+Author&ext=epub&lang=en
 
 **Pattern:** `[Title] - [Author].[format]`
 
-**Sanitization:**
-- Remove: `<>:"/\|?*`
-- Collapse spaces, trim, title and author each ≤100 UTF-16 units (cut between characters)
-- Whole name ≤255 UTF-8 bytes (`capTitleAuthorBytes`, `src/lib/utils/path-component.ts`): title cut first, author kept whole unless the title would get under half the room (then title keeps half, author the rest); ` - ` and `.format` kept whole
-- Direct download (`direct-download.processor.ts`): name ≤255 bytes via `capFilenameBytes`, extension kept (no 200-char cap)
-- No suffix is written next to these files (no `.part`/`.tmp`/` (N)`), so the full 255 bytes are used. A name that fits is unchanged
+**Sanitization (Anna's Archive download name):**
+- Built by `buildEbookDownloadName(title, author, format)` (`src/lib/utils/ebook-download-name.ts`) at every `addStartDirectDownloadJob` caller: `search-ebook.processor.ts`, `ebook-selection.service.ts` (select-ebook routes), `api/admin/requests/[id]/approve`
+- Remove `<>:"/\|?*`, collapse spaces, trim (each part; no per-part length cap)
+- ≤255 UTF-8 bytes via `capTitleAuthorBytes` (`src/lib/utils/path-component.ts`): title cut first, author kept whole unless the title would get under half the room (then title keeps half, author the rest); ` - ` and `.format` kept whole; cut between characters
+- Room is kept for a 5-byte extension: the downloader swaps the queued extension for the found file's format, so a `.pdf`/`.fb2`/`.any` name is cut to 254 bytes
+- Downloader backstop (`sanitizeFilename`, `direct-download.processor.ts`): same cleanup, ≤255 bytes via `capFilenameBytes`, extension kept (no 200-char cap)
+- No suffix is written next to the download (no `.part`/`.tmp`/` (N)`), so the full 255 bytes are used. A name that fits is unchanged
+- Library (renaming off): the organizer cuts the source name to 200 UTF-16 units, stem only, so the extension is kept (see [File Organization](../phase3/file-organization.md#path-sanitization))
+- `downloadEbook()` (`ebook-scraper.ts`) is unused; its `sanitizeEbookFilename` applies the same rule after a 100-unit cap per part
 
 ## Error Handling
 
@@ -240,6 +243,7 @@ Search: https://annas-archive.gl/search?q=Title+Author&ext=epub&lang=en
 
 **Utils:**
 - `src/lib/utils/file-organizer.ts` (`organizeEbook` method)
+- `src/lib/utils/ebook-download-name.ts` (`buildEbookDownloadName`: queued download name)
 - `src/lib/utils/ranking-algorithm.ts` (`rankEbookTorrents` function)
 - `src/lib/utils/indexer-grouping.ts` (supports `'ebook'` type)
 - `src/lib/utils/epub-fixer.ts` (Kindle EPUB fix: load, write, read-back)
@@ -271,7 +275,7 @@ Categories are configured per-indexer via the tabbed interface in the Edit Index
 
 ## Fixed Issues ✅
 
-**1. Long non-Latin ebook names failed with ENAMETOOLONG (#474)** - `title (100 chars) - author (100 chars).format` reached ~408 bytes (Cyrillic) / ~608 (CJK); the direct download 200-char cap could cut off the extension; the 100-unit slice could split an emoji. Fixed: byte cap on grapheme boundaries (see File Naming)
+**1. Long non-Latin ebook names failed with ENAMETOOLONG (#474)** - `title (100 chars) - author (100 chars).format` reached ~408 bytes (Cyrillic) / ~608 (CJK); the raw `Title - Author.format` queued by the callers had no byte cap; the direct download 200-char cap could cut off the extension, and so could the organizer's 200-char cap in the library; the 100-unit slice could split an emoji. Fixed: byte cap on grapheme boundaries, title cut first, extension kept in downloads and library (see File Naming)
 
 ## Limitations
 
