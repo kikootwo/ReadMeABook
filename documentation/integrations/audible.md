@@ -12,7 +12,7 @@ Audiobook metadata for discovery, search, and detail pages. Split by access patt
 
 ## Architecture
 
-- **Curated HTML (refresh job only):** the three methods called solely by `audible-refresh.processor.ts` (`getPopularAudiobooks`, `getNewReleases`, `getCategoryBooks`) scrape Audible's storefront HTML to inherit editorial curation. Beefed-up retry/backoff knobs (12 retries, 3-min jittered cap) handle 503 storms patiently on the nightly job without slowing healthy users.
+- **Curated HTML (refresh job only):** the three methods called solely by `audible-refresh.processor.ts` (`getPopularAudiobooks`, `getNewReleases`, `getCategoryBooks`) scrape Audible's storefront HTML to inherit editorial curation. Beefed-up retry/backoff knobs (12 retries, 3-min jittered cap) handle 503 storms patiently on the nightly job without slowing healthy users. `getCategoryBooks` falls back to the catalog API (`category_id`, `products_sort_by=BestSellers`, region-language filtered) when the storefront yields 0 books; the refresh processor keeps a section's previous entries when a scrape returns nothing.
 - **JSON catalog API (real-time):** `search`, `searchByAuthorAsin`, `getCategories` (categories listing), and `fetchAudibleDetailsFromApi` (per-ASIN fallback); series search (`audible-series-search.ts`, [own doc](./audible-series-search.md)). Same endpoint used by the official Audible mobile apps. No authentication, no API key, no user credentials, no special headers.
 - **Audnexus (per-ASIN):** `getAudiobookDetails` and `getRuntime` prefer Audnexus, with catalog API fallback for `getAudiobookDetails`.
 - **Series fill** (`audible-series-fill.ts`, `SeriesFill`, one per service): Audnexus result without a series → `series`/`seriesPart`/`seriesAsin` from `/1.0/catalog/products/{asin}` (same region), only when the chosen entry has a non-empty title, all three or none; every other field stays Audnexus. `getAudiobookDetails(asin, { fillSeries: false })` skips it (bulk-import scan, BookDate `matchToAudnexus`, organize tag lookup when the series is stored).
@@ -27,6 +27,7 @@ Audiobook metadata for discovery, search, and detail pages. Split by access patt
 | Popular | `/adblbestsellers` | `pageSize=50`, `page=<n>` (omitted on first page) |
 | New releases | `/newreleases` | `pageSize=50`, `page=<n>` (omitted on first page) |
 | Category books | `/search` | `node=<categoryId>&pageSize=50&sort=popularity-rank&page=<n>` |
+| Category books (fallback, catalog API) | `/1.0/catalog/products` | `category_id=<categoryId>&products_sort_by=BestSellers&num_results=50&page=<n>` (0-based) |
 
 Parsed via cheerio. Selectors: `.productListItem` (popular/new releases), `.s-result-item, .productListItem` (categories).
 
@@ -136,7 +137,7 @@ Configurable Audible region for accurate metadata matching across international 
 
 **Per-region HTTP clients (on init):**
 - `apiClient` — `baseURL=apiBaseUrl`, `Accept: application/json`, `User-Agent: ReadMeABook/1.0`, no language/ipRedirect params. Used for the real-time JSON catalog operations (search, series search via `fetch(url, config, { catalog: true })` = one attempt, author books, categories listing, per-ASIN details fallback).
-- `htmlClient` — `baseURL=baseUrl`, rotating browser headers (`pickUserAgent` + `getBrowserHeaders`), default params `ipRedirectOverride=true` + `language=<audibleLocaleParam>`. Used by the nightly discovery refresh (`/adblbestsellers`, `/newreleases`, `/search?node=...`), by the series detail page (`audible-series.ts`), and by `getBaseUrl()`-based link generation.
+- `htmlClient` — `baseURL=baseUrl`, rotating browser headers (`pickUserAgent` + `getBrowserHeaders`; `Accept-Encoding: false` — CloudFront 503s storefront requests carrying any Accept-Encoding, and `false` stops axios adding its default), default params `ipRedirectOverride=true` + `language=<audibleLocaleParam>`. Used by the nightly discovery refresh (`/adblbestsellers`, `/newreleases`, `/search?node=...`), by the series detail page (`audible-series.ts`), and by `getBaseUrl()`-based link generation.
 - Audnexus calls include `region=<audnexusParam>`.
 
 **Files:**
@@ -334,6 +335,12 @@ interface AuthorBooksResult {
 - PostgreSQL (`audible_cache`, `audible_cache_categories`)
 
 ## Fixed Issues
+
+**Home category sections empty after the nightly refresh (2026-10-27)**
+- **Problem:** "No audiobooks yet" on user category sections (and partial popular/category lists); job log `Request failed (503)` ×12 then `fetched 0 books`, ~17 min per category.
+- **Root cause:** Audible's CloudFront answers 503 to storefront requests that carry an `Accept-Encoding` header (any value, even `identity`); the same request without it gets 200. `getBrowserHeaders` sent `gzip, deflate, br`, and axios on Node adds its own default when the key is absent. Verified with the same request at the same moment: with the header 0/4 categories answered, without it 4/4. `persistSectionBooks` then wiped the section's previous entries on the empty result.
+- **Fix:** `getBrowserHeaders` sets `Accept-Encoding: false` (pages arrive uncompressed, ~2.5 MB each). Safety nets: `getCategoryBooks` falls back to the catalog API (`category_id`, `BestSellers`) on an empty storefront result; `persistSectionBooks` keeps previous entries when a scrape returns nothing.
+- **Location:** `src/lib/utils/scrape-resilience.ts`, `src/lib/integrations/audible.service.ts`, `src/lib/processors/audible-refresh.processor.ts`; tests `tests/utils/scrape-resilience.test.ts`, `tests/integrations/audible.service.test.ts`, `tests/processors/audible-refresh.processor.test.ts`.
 
 **Author pages missing books (#310 part 1, 2026-10-27)**
 - **Problem:** Author pages (e.g. J.R.R. Tolkien) and entire-catalog watched authors stopped before the end of the author's catalog.
