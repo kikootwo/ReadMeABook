@@ -287,11 +287,17 @@ describe('file organizer', () => {
   });
 
   it.each([
-    ['a long Cyrillic title is cut to fit 255 bytes, keeping .m4b (#264)', 'Преступление и наказание '.repeat(10).trim(), null],
-    ['a title that fits keeps its name', 'Book: Title', 'Book Title.m4b'],
-  ])('chapter merge output name: %s', async (_label, title, expected) => {
+    ['a long Cyrillic title is cut to fit 255 bytes, keeping .m4b (#264)', 'Преступление и наказание '.repeat(10).trim(), false, null],
+    ['a title that fits keeps its name', 'Book: Title', false, 'Book Title.m4b'],
+    ['a title that fits keeps its name when tagged', 'Book: Title', true, 'Book Title.m4b'],
+    // The tagger writes `${name}.tmp` beside the merged file, so that copy must fit too
+    ['200 Cyrillic letters, tagged: the tagger copy fits (#264)', 'Ж'.repeat(200), true, null],
+    ['a 252-byte title, tagged: the tagger copy fits (#264)', 'Ж'.repeat(126), true, null],
+    ['a 250-byte title, untagged: no room reserved, name kept', 'Ж'.repeat(125), false, `${'Ж'.repeat(125)}.m4b`],
+  ])('chapter merge output name: %s', async (_label, title, tagging, expected) => {
     configState.values.set('chapter_merging_enabled', 'true');
-    configState.values.set('metadata_tagging_enabled', 'false');
+    configState.values.set('metadata_tagging_enabled', tagging ? 'true' : 'false');
+    metadataMock.checkFfmpegAvailable.mockResolvedValue(false);
     configState.values.set('ebook_sidecar_enabled', 'false');
     chapterMock.detectChapterFiles.mockResolvedValue(true);
     chapterMock.estimateOutputSize.mockResolvedValue(100);
@@ -315,6 +321,7 @@ describe('file organizer', () => {
     const name = path.basename(chapterMock.mergeChapters.mock.calls[0][1].outputPath);
     expect(Buffer.byteLength(name, 'utf8')).toBeLessThanOrEqual(255);
     expect(name.endsWith('.m4b')).toBe(true);
+    if (tagging) expect(Buffer.byteLength(`${name}.tmp`, 'utf8')).toBeLessThanOrEqual(255);
     if (expected) expect(name).toBe(expected);
     else expect(title.startsWith(name.slice(0, -'.m4b'.length))).toBe(true);
   });

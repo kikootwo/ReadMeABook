@@ -391,7 +391,7 @@ async function organize(
 - Trim dots/spaces
 - Collapse multiple spaces
 - Limit to 200 chars per variable (and per renamed base name)
-- Then every finished component ≤255 UTF-8 bytes (`src/lib/utils/path-component.ts`): `capPathComponents` on `substituteTemplate` output; `capFilenameBytes(stem, suffix)` for renamed files (` - N` + ext), the merge temp `.m4b`, source-aware names (only the folder prefix cut), ` (N)` dedup, ebook source names. Cut between code points, trailing spaces/dots trimmed; a component that fits is unchanged
+- Then every finished component ≤255 UTF-8 bytes (`src/lib/utils/path-component.ts`): `capPathComponents` on `substituteTemplate` output; `capFilenameBytes(stem, suffix)` for renamed files (` - N` + ext), the merge temp `.m4b` (4 bytes left for the tagger's `<name>.tmp` when tagging is on; `TAG_TEMP_SUFFIX`), source-aware names (only the folder prefix cut), ` (N)` dedup, ebook source names. Cut between grapheme clusters (an emoji sequence, flag or accented letter stays whole), trailing spaces/dots trimmed; a component that fits is unchanged
 - Example: `Author: The <Best>! Book?` → `Author The Best! Book`
 
 ## Configuration

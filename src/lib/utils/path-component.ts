@@ -11,23 +11,32 @@
 /** Byte limit of one path component on ext4, XFS, Btrfs, ZFS and most others */
 export const MAX_COMPONENT_BYTES = 255;
 
+/**
+ * Suffix of the copy the metadata tagger writes next to the file it tags
+ * (`${file}.tmp`). A name RMAB creates and then tags must leave room for it.
+ */
+export const TAG_TEMP_SUFFIX = '.tmp';
+
+const graphemes = new Intl.Segmenter('und', { granularity: 'grapheme' });
+
 function utf8Bytes(value: string): number {
   return Buffer.byteLength(value, 'utf8');
 }
 
 /**
  * Cut a folder or file name to at most `maxBytes` UTF-8 bytes. The cut falls
- * between code points (a multi-byte character or a surrogate pair is never
- * split), and trailing spaces and dots are trimmed from the cut name.
+ * between grapheme clusters, so a multi-byte character, a surrogate pair, an
+ * accented letter, a flag or a joined emoji is never split. Trailing spaces
+ * and dots are trimmed from the cut name.
  */
 export function capComponentBytes(name: string, maxBytes: number = MAX_COMPONENT_BYTES): string {
   if (utf8Bytes(name) <= maxBytes) return name;
   let kept = '';
   let bytes = 0;
-  for (const codePoint of name) {
-    const size = utf8Bytes(codePoint);
+  for (const { segment } of graphemes.segment(name)) {
+    const size = utf8Bytes(segment);
     if (bytes + size > maxBytes) break;
-    kept += codePoint;
+    kept += segment;
     bytes += size;
   }
   return kept.replace(/[ .]+$/, '');

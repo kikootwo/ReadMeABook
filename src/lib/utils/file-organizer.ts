@@ -28,7 +28,7 @@ import {
 } from './chapter-merger';
 import { prisma } from '../db';
 import { substituteTemplate, buildRenamedFilename, type TemplateVariables } from './path-template.util';
-import { capFilenameBytes, MAX_COMPONENT_BYTES } from './path-component';
+import { capFilenameBytes, MAX_COMPONENT_BYTES, TAG_TEMP_SUFFIX } from './path-component';
 import { AUDIO_EXTENSIONS, COERCION_CANDIDATE_EXTENSIONS } from '../constants/audio-formats';
 
 export interface AudiobookMetadata {
@@ -238,8 +238,12 @@ export class FileOrganizer {
                 if (chapters.length === 0) {
                   await logger?.warn(`Chapter analysis failed: No valid chapters found. Organizing files individually.`);
                 } else {
-                  // Create output path in temp directory
-                  const outputFilename = capFilenameBytes(this.sanitizePath(audiobook.title), '.m4b');
+                  // Create output path in temp directory; the tagger writes `${name}.tmp` beside it, so leave room
+                  const outputFilename = capFilenameBytes(
+                    this.sanitizePath(audiobook.title),
+                    '.m4b',
+                    metadataTaggingEnabled ? MAX_COMPONENT_BYTES - TAG_TEMP_SUFFIX.length : MAX_COMPONENT_BYTES,
+                  );
                   const outputPath = path.join(this.tempDir, outputFilename);
 
                   // Perform merge

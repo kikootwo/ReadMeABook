@@ -32,6 +32,27 @@ describe('capComponentBytes', () => {
     }
   });
 
+  // Built from code points so no editor or tool normalises them
+  const FAMILY = String.fromCodePoint(0x1f468, 0x200d, 0x1f469, 0x200d, 0x1f467); // 18 bytes, one cluster
+  const FLAG_JP = String.fromCodePoint(0x1f1ef, 0x1f1f5); // 8 bytes, one cluster
+  const E_ACUTE = `e${String.fromCodePoint(0x301)}`; // e + combining acute, 3 bytes, one cluster
+
+  it.each([
+    ['a joined family emoji', 'a'.repeat(245), FAMILY],
+    ['a flag', 'a'.repeat(251), FLAG_JP],
+    ['an accented letter (e + combining accent)', 'a'.repeat(254), E_ACUTE],
+  ])('never cuts %s in half: it is dropped whole', (_label, lead, cluster) => {
+    expect(capComponentBytes(`${lead}${cluster}`)).toBe(lead);
+    expect(capFilenameBytes(`${lead}${cluster}`, '.m4b')).toBe(`${lead.slice(0, 251)}.m4b`);
+  });
+
+  it('keeps those clusters whole when they fit, and unchanged names stay unchanged', () => {
+    const fits = `${'a'.repeat(200)}${FAMILY}${FLAG_JP}${E_ACUTE}`;
+    expect(capComponentBytes(fits)).toBe(fits);
+    const cut = capComponentBytes(`${'a'.repeat(230)}${FAMILY}${FAMILY}`);
+    expect(cut).toBe(`${'a'.repeat(230)}${FAMILY}`);
+  });
+
   it('trims trailing spaces and dots left by the cut', () => {
     expect(capComponentBytes(`${'a'.repeat(250)} ...  ${'b'.repeat(20)}`)).toBe('a'.repeat(250));
     expect(capComponentBytes('abc. def', 5)).toBe('abc');

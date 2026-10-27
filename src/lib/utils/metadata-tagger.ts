@@ -9,6 +9,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { METADATA_TAG_FORMATS, MP4_CONTAINER_FORMATS } from '../constants/audio-formats';
 import { addFreeformTags, type FreeformTag, type FreeformTagResult } from './mp4-freeform-tags';
+import { TAG_TEMP_SUFFIX } from './path-component';
 import {
   bookDetailValues,
   capUtf8Bytes,
@@ -142,7 +143,7 @@ export async function tagAudioFileMetadata(
     const { publisher, subtitle, language } = bookDetailValues(metadata);
 
     // Create temporary file path
-    const tempFile = `${filePath}.tmp`;
+    const tempFile = `${filePath}${TAG_TEMP_SUFFIX}`;
 
     // Build ffmpeg argv. Each element is passed as-is to the OS exec syscall;
     // no shell tokenization, no embedded quoting.
