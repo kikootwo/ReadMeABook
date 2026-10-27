@@ -48,6 +48,10 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - Non-admin callers (owner sessions, user-role tokens): explicit field list `OWNER_REQUEST_DETAIL_SELECT` (`src/lib/services/request-detail-query.ts`) — omits `Request.selectedTorrent`, `DownloadHistory.magnetLink/torrentUrl/downloadPath`, `Audiobook.filePath`, `Job.payload/result/stackTrace`; remaining strings pass through `stripProwlarrKeyFromResults()`. Admins get the full include.
 - Ownership enforced: `requestRecord.userId === req.user.id || role === 'admin'` → otherwise 403.
 - Soft-deleted requests (`deletedAt != null`) return 404.
+- BigInt columns (`downloadHistory[].torrentSizeBytes`, `audiobook.fileSizeBytes`) go out as JSON numbers via `toJsonSafe()` (`src/lib/utils/json-safe.ts`).
+
+## Fixed Issues
+- **#261 GET `/api/requests/:id` 500 `FetchError` for any request with a selected download:** `NextResponse.json` threw `Do not know how to serialize a BigInt` on `DownloadHistory.torrentSizeBytes`. Fix: response passes through `toJsonSafe()` (BigInt → number; Dates/Decimals untouched). Other routes `select` around the BigInt columns or convert with `Number()`; routes with a full `audiobook` include carry `fileSizeBytes`, which nothing writes yet (always null), so they serialize today.
 
 ## GET `/api/audiobooks/search`
 - Auth is optional, NOT gated by allowlist (route never calls `requireAuth`).
@@ -79,6 +83,8 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - `tests/constants/api-tokens.test.ts` — matcher: positive matches, negative matches, sub-route exclusion, method case-insensitivity, allowlist/docs parity.
 - `tests/middleware/auth.middleware.test.ts` — middleware token auth path, allowlist enforcement (incl. dynamic ID match), sibling-route blocking, `getCurrentUserAsync`.
 - `tests/api/requests-id.route.test.ts` — owner GET 200, cross-user GET 403.
+- `tests/api/requests-id.bigint.route.test.ts` — owner/admin GET 200 with BigInt sizes as numbers (#261).
+- `tests/utils/json-safe.test.ts` — `toJsonSafe()` BigInt conversion, Date/Decimal passthrough.
 
 ## Related
 - [backend/services/auth.md](auth.md) — JWT sessions, role-based access control

@@ -1,37 +1,10 @@
 # Intelligent Ranking Algorithm
 
 **Status:** ✅ Implemented | Comprehensive edge case test coverage
-**Tests:** tests/utils/ranking-algorithm.test.ts (80+ test cases), ranking-non-latin.test.ts, match-normalize.test.ts, tests/processors/search-indexers-non-latin.test.ts
+**Tests:** tests/utils/ranking-algorithm.test.ts, ranking-non-latin.test.ts, ranking-match-gates.test.ts, ranking-oracle-223.test.ts, match-gates.test.ts, match-normalize.test.ts, tests/processors/search-indexers-non-latin.test.ts
+**Automatic-search gates (#223):** [match-gates.md](match-gates.md): one-word titles, required numbers, author whole words, volume conflict (title-only subset of #330)
 
 Evaluates and scores torrents to automatically select best audiobook download.
-
-## Test Coverage
-
-**Comprehensive edge case testing includes:**
-- ✅ Parenthetical/bracketed content handling (4 tests)
-- ✅ Structured metadata prefix validation (5 tests)
-- ✅ Suffix validation (5 tests)
-- ✅ Multi-author handling (6 tests)
-- ✅ Bonus modifiers (indexer priority + flags, 7 tests)
-- ✅ Tiebreaker sorting (2 tests)
-- ✅ Word coverage edge cases (4 tests)
-- ✅ Format detection (5 tests)
-- ✅ **Author presence check (10 tests)**
-- ✅ **Context-aware filtering (3 tests)**
-- ✅ **API compatibility (2 tests)**
-- ✅ **CamelCase and punctuation separator handling (7 tests)**
-- ✅ **Non-Latin scripts and empty normalization** (tests/utils/ranking-non-latin.test.ts, tests/utils/match-normalize.test.ts)
-
-**Tested edge cases prevent regressions from previous tweaks:**
-- "We Are Legion (We Are Bob)" matching with/without subtitle
-- "This Inevitable Ruin Dungeon Crawler Carl" NOT matching "Dungeon Crawler Carl"
-- "The Housemaid's Secret" NOT matching "The Housemaid"
-- Multiple author splitting and role filtering
-- Flag bonus stacking and case-insensitive matching
-- Tiebreaker sorting by publish date
-- **"Project Hail Mary" (no author) NOT matching when Andy Weir required (automatic mode)**
-- **All results shown in interactive mode regardless of author**
-- **Middle initials, name order, and role filtering for author matching**
 
 ## Scoring Criteria (100 points max)
 
@@ -67,6 +40,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
   - "Book Title {Extra Info}" → Required: ["book", "title"], Optional: ["extra", "info"]
 - Calculates coverage: % of **required** words found in torrent title
 - **Hard requirement: 80%+ coverage of required words or automatic 0 score**
+- Numbers fold for coverage (`01` = `1`, one to twenty, `t01`); automatic mode also requires every number of the required title (G4a, [match-gates.md](match-gates.md))
 - **Scripts without spaces** (Han, kana, Thai, Lao, Khmer, Myanmar): a required word of 2+ characters counts if it appears anywhere in the release name (`刘慈欣三体全集` covers `三体`); a 1-character word must be a whole word; all other words need an exact word
 - **Fail closed:** a title that normalizes to nothing scores 0; a required part that normalizes to nothing (`★ (Star Stories)`) uses the whole title's words
 
@@ -74,9 +48,9 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - **Automatic mode (requireAuthor: true - default):** At least ONE author must be present with high confidence
 - **Interactive mode (requireAuthor: false):** Check disabled, all results shown to user
 - **High confidence = any of:**
-  1. Exact substring match: "dennis e. taylor" in torrent
+  1. Whole words: "dennis e. taylor" in torrent; `'s`/`s`, glued (`leechild`) allowed; substring only for unspaced-script names, CJK and Thai (G3)
   2. High fuzzy similarity (≥ 0.85): handles spacing/punctuation
-  3. Core components present: First name + Last name within 30 chars
+  3. Core components present: First name + Last name as whole words within 30 chars
   4. Initials match: runs of 2+ single letters collapsed on both sides, then matched as whole words (`src/lib/utils/author-initials.ts`)
      - ✅ "TJ Klune" ↔ "T J Klune", "J D Robb" ↔ "JD Robb", "J.K. Rowling" ↔ "JK Rowling"
      - ❌ "E. L. James" vs "Michael James", "A. J. Smith" vs "Raj Smith" (no partial-word match)
@@ -117,6 +91,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
   - **Acceptable suffix**: Followed by metadata markers: " by", " [", " -", " (", " {", " :", "," or end of string
     - Also accepts author name in suffix (e.g., "Title AuthorName Year")
 - Complete match → 45 pts
+- `Title: Subtitle` counts as complete only when the subtitle agrees with the request's (G1); one-word titles and volume conflicts: [match-gates.md](match-gates.md) (G4b, G4c)
 - Unstructured prefix (words without separators) → fuzzy similarity (partial credit)
 - Suffix continues with non-metadata → fuzzy similarity (partial credit)
 - No substring match → fuzzy similarity (best score from full or required title)
@@ -136,7 +111,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - ❌ "The Housemaid's Secret - Freida McFadden" → REJECTED for "The Housemaid" (suffix continues with "'s Secret")
 
 **Stage 3: Author Matching (0-15 pts)**
-- Exact substring match → proportional credit
+- Whole-word or initials match → proportional credit (G2, G3)
 - No exact match → fuzzy similarity (partial credit)
 - Splits authors on delimiters (comma, &, "and", " - ")
 - Filters out roles ("translator", "narrator")
