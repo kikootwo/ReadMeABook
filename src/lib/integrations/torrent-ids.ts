@@ -97,6 +97,20 @@ export function candidateIds(hashes: TorrentHashes): string[] {
   return [...new Set([libtorrent2Id, hashes.v1].filter((id): id is string => !!id))];
 }
 
+/**
+ * The ID to record for a torrent a client's add just created: the 40-hex ID it reports (lowercased),
+ * else the computed v1. A reported ID that is none of the candidate IDs is still the torrent the add
+ * created (a multi-btih magnet, a non-canonical .torrent), so it is recorded, with a warning.
+ */
+export function addedTorrentId(reported: unknown, hashes: TorrentHashes, warn: (message: string) => void): string {
+  const id = validTorrentId(reported);
+  if (!id) return hashes.v1 ?? candidateIds(hashes)[0];
+  if (!candidateIds(hashes).some((candidate) => candidate.toLowerCase() === id)) {
+    warn(`The client reported ${id} for the torrent it added (computed ${candidateIds(hashes).join(', ')}): recorded as reported`);
+  }
+  return id;
+}
+
 /** A stored base32 hash (any case) as hex; any other value unchanged */
 export function normalizeTorrentId(id: string): string {
   return base32ToHex(id) ?? id;

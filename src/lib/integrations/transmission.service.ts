@@ -13,7 +13,8 @@ import { RMABLogger } from '../utils/logger';
 import { fetchDownloadSource } from './download-source';
 import { urlForLog } from '../utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
-import { transmissionProbeMatch } from './torrent-probe';
+import { sameHash, transmissionProbeMatch } from './torrent-probe';
+import { addedTorrentId, magnetHashes, normalizeTorrentId } from './torrent-ids';
 import {
   IDownloadClient,
   DownloadClientType,
@@ -228,7 +229,7 @@ export class TransmissionService implements IDownloadClient {
     category: string,
     options?: AddDownloadOptions
   ): Promise<AddDownloadResult> {
-    const infoHash = this.extractHashFromMagnet(magnetUrl);
+    const infoHash = magnetHashes(magnetUrl)?.v1;
     if (!infoHash) {
       throw new Error('Invalid magnet link - could not extract info_hash');
     }
@@ -239,7 +240,7 @@ export class TransmissionService implements IDownloadClient {
     try {
       await this.getTorrentByHash(infoHash);
       logger.info(`Torrent ${infoHash} is already in Transmission (not added by RMAB)`);
-      return { id: infoHash, alreadyInClient: true };
+      return { id: infoHash, alreadyInClient: true, infoHash };
     } catch {
       // Torrent doesn't exist, continue
     }
@@ -266,13 +267,15 @@ export class TransmissionService implements IDownloadClient {
     if (!added) {
       throw new Error('Transmission did not return torrent info after adding');
     }
-    if (this.isDuplicateAnswer(data, infoHash)) return { id: infoHash, alreadyInClient: true };
+    // Transmission is v1-only: the hashString it reports is the ID RMAB records
+    const id = addedTorrentId(added.hashString, { v1: infoHash }, (message) => logger.warn(message));
+    if (this.isDuplicateAnswer(data, id)) return { id, alreadyInClient: true, infoHash };
 
     // Override Transmission's global seeding rules — RMAB manages torrent lifecycle
-    await this.disableSeedLimits(added.hashString || infoHash);
+    await this.disableSeedLimits(id);
 
-    logger.info(`Successfully added magnet link: ${infoHash}`);
-    return { id: infoHash, alreadyInClient: false };
+    logger.info(`Successfully added magnet link: ${id}`);
+    return { id, alreadyInClient: false, infoHash };
   }
 
   private async addTorrentFile(
@@ -313,7 +316,7 @@ export class TransmissionService implements IDownloadClient {
     try {
       await this.getTorrentByHash(infoHash);
       logger.info(`Torrent ${infoHash} is already in Transmission (not added by RMAB)`);
-      return { id: infoHash, alreadyInClient: true };
+      return { id: infoHash, alreadyInClient: true, infoHash };
     } catch {
       // Torrent doesn't exist, continue
     }
@@ -343,13 +346,15 @@ export class TransmissionService implements IDownloadClient {
     if (!added) {
       throw new Error('Transmission did not return torrent info after adding');
     }
-    if (this.isDuplicateAnswer(data, infoHash)) return { id: infoHash, alreadyInClient: true };
+    // Transmission is v1-only: the hashString it reports is the ID RMAB records
+    const id = addedTorrentId(added.hashString, { v1: infoHash }, (message) => logger.warn(message));
+    if (this.isDuplicateAnswer(data, id)) return { id, alreadyInClient: true, infoHash };
 
     // Override Transmission's global seeding rules — RMAB manages torrent lifecycle
-    await this.disableSeedLimits(added.hashString || infoHash);
+    await this.disableSeedLimits(id);
 
-    logger.info(`Successfully added torrent: ${infoHash}`);
-    return { id: infoHash, alreadyInClient: false };
+    logger.info(`Successfully added torrent: ${id}`);
+    return { id, alreadyInClient: false, infoHash };
   }
 
   async getDownload(id: string): Promise<DownloadInfo | null> {
@@ -379,8 +384,9 @@ export class TransmissionService implements IDownloadClient {
 
   /** Strict probe for the seeding cleanup: one torrent-get, no not-found retries */
   async probeDownload(id: string): Promise<DownloadProbe> {
-    const data = await this.rpc('torrent-get', { ids: [id], fields: TORRENT_FIELDS });
-    const torrent = transmissionProbeMatch(data, id);
+    const hash = normalizeTorrentId(id);
+    const data = await this.rpc('torrent-get', { ids: [hash], fields: TORRENT_FIELDS });
+    const torrent = transmissionProbeMatch(data, hash);
     return torrent ? { found: true, info: this.mapToDownloadInfo(torrent as unknown as TransmissionTorrent) } : { found: false };
   }
 
@@ -486,21 +492,24 @@ export class TransmissionService implements IDownloadClient {
   }
 
   /**
-   * Get a torrent by its info hash.
+   * Get a torrent by its info hash (a stored base32 hash is sent as hex). Only the entry whose
+   * hashString is that hash counts, so no call can act on another torrent of the answer.
    */
   private async getTorrentByHash(hash: string): Promise<TransmissionTorrent> {
-    const data = await this.rpc('torrent-get', { ids: [hash], fields: TORRENT_FIELDS });
+    const id = normalizeTorrentId(hash);
+    const data = await this.rpc('torrent-get', { ids: [id], fields: TORRENT_FIELDS });
 
     if (data.result !== 'success') {
       throw new Error(`Transmission RPC error: ${data.result}`);
     }
 
-    const torrents: TransmissionTorrent[] = data.arguments?.torrents || [];
-    if (torrents.length === 0) {
+    const torrents: TransmissionTorrent[] = Array.isArray(data.arguments?.torrents) ? data.arguments.torrents : [];
+    const torrent = torrents.find((t) => sameHash(t?.hashString, id));
+    if (!torrent) {
       throw new Error(`Torrent ${hash} not found`);
     }
 
-    return torrents[0];
+    return torrent;
   }
 
   /**
@@ -560,17 +569,6 @@ export class TransmissionService implements IDownloadClient {
     };
 
     return statusMap[status] || 'downloading';
-  }
-
-  /**
-   * Extract info_hash from magnet link.
-   */
-  private extractHashFromMagnet(magnetUrl: string): string | null {
-    const match = magnetUrl.match(/xt=urn:btih:([a-fA-F0-9]{40}|[a-zA-Z0-9]{32})/i);
-    if (match) {
-      return match[1].toLowerCase();
-    }
-    return null;
   }
 }
 
