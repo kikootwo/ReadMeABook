@@ -186,7 +186,7 @@ export async function requireAuth(
   // Missing, deleted, pending-approval and rejected accounts are refused the same way;
   // so is a token issued before the account's sessions were revoked
   const sessionRefusal = getSessionRefusal(user, payload.iat);
-  if (sessionRefusal && sessionRefusal !== 'sessions_revoked') {
+  if (!user || (sessionRefusal && sessionRefusal !== 'sessions_revoked')) {
     logger.error('Session refused: user missing, deleted or not approved', {
       userId: payload.sub,
       reason: sessionRefusal,
