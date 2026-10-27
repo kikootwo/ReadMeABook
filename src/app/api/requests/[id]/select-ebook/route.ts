@@ -4,7 +4,7 @@
  *
  * Applies a user-selected ebook source (Anna's Archive or indexer) to a request:
  * an ebook request directly, or an audiobook request's ebook (created if missing).
- * Owner or admin only; non-admin picks follow the approval settings.
+ * Admin for any request; a user only for their own ebook request, following the approval settings.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -51,9 +51,10 @@ export async function POST(
         return NextResponse.json({ error: 'Ebook source not specified' }, { status: 400 });
       }
 
-      // Get the request - could be an audiobook request or an existing ebook request
-      const foundRequest = await prisma.request.findUnique({
-        where: { id: requestId },
+      // Get the request - could be an audiobook request or an existing ebook request.
+      // A deleted request answers 404 for everyone.
+      const foundRequest = await prisma.request.findFirst({
+        where: { id: requestId, deletedAt: null },
         include: { audiobook: true },
       });
 
@@ -69,6 +70,14 @@ export async function POST(
         );
       }
 
+      // My Requests only sends a non-admin's own ebook request here
+      if (!isAdmin && foundRequest.type !== 'ebook') {
+        return NextResponse.json(
+          { error: 'Forbidden', message: 'Only an admin can pick an ebook for an audiobook request' },
+          { status: 403 }
+        );
+      }
+
       // Indexer picks must be Prowlarr/magnet links; Anna's Archive links are rebuilt from the md5
       const ebookCheck = await guardEbookSelection(selectedEbook);
       if (!ebookCheck.ok) return selectionFailureResponse(ebookCheck);
@@ -79,8 +88,8 @@ export async function POST(
       let parentRequest: typeof foundRequest | null = null;
       if (foundRequest.type === 'ebook') {
         if (foundRequest.parentRequestId) {
-          parentRequest = await prisma.request.findUnique({
-            where: { id: foundRequest.parentRequestId },
+          parentRequest = await prisma.request.findFirst({
+            where: { id: foundRequest.parentRequestId, deletedAt: null },
             include: { audiobook: true },
           });
           if (!parentRequest) {
@@ -199,6 +208,19 @@ export async function POST(
       } else {
         // Indexer: Torrent/NZB download
         await startIndexerEbookDownload(ebookRequest.id, audiobook, selectedEbook, jobQueue);
+      }
+
+      // A user's pick that skipped approval is announced like any auto-approved request
+      if (!isAdmin) {
+        await jobQueue.addNotificationJob(
+          'request_approved',
+          ebookRequest.id,
+          `${audiobook.title} (Ebook)`,
+          audiobook.author,
+          requesterName
+        ).catch((error) => {
+          logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
+        });
       }
 
       return NextResponse.json({

@@ -20,6 +20,7 @@ import { sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 import { guardTorrentSelection, rejectedSelectionResponse } from '@/lib/services/download-selection-guard';
 import { hideStoredPick } from '@/lib/services/request-detail-query';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { resolveAutoApprove } from '@/lib/utils/permissions';
 
 const logger = RMABLogger.create('API.RequestWithTorrent');
 
@@ -237,7 +238,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Another user's open request for this book: the pick would start a second download
-      // of the same book, so it is refused (same rule as a plain request)
+      // of the same book, so it is refused. Unlike a plain request, a denied one does not count.
       const otherUsersRequest = await prisma.request.findFirst({
         where: {
           audiobookId: audiobookRecord.id,
@@ -290,17 +291,10 @@ export async function POST(request: NextRequest) {
           { status: 409 }
         );
 
-      // Check if request needs approval
-      let needsApproval = false;
-
       // Fetch user with autoApproveRequests setting
       const user = await prisma.user.findUnique({
         where: { id: req.user.id },
-        select: {
-          role: true,
-          autoApproveRequests: true,
-          plexUsername: true,
-        },
+        select: { role: true, autoApproveRequests: true, plexUsername: true },
       });
 
       if (!user) {
@@ -310,26 +304,8 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Determine if approval is needed
-      if (user.role === 'admin') {
-        // Admins always auto-approve
-        needsApproval = false;
-      } else {
-        // Check user's personal setting first
-        if (user.autoApproveRequests === true) {
-          needsApproval = false;
-        } else if (user.autoApproveRequests === false) {
-          needsApproval = true;
-        } else {
-          // User setting is null, check global setting
-          const globalConfig = await prisma.configuration.findUnique({
-            where: { key: 'auto_approve_requests' },
-          });
-          // Default to true if not configured (backward compatibility)
-          const globalAutoApprove = globalConfig === null ? true : globalConfig.value === 'true';
-          needsApproval = !globalAutoApprove;
-        }
-      }
+      // Admins skip approval; users follow their own setting, then the global one
+      const needsApproval = !(await resolveAutoApprove(user.role, user.autoApproveRequests));
 
       const jobQueue = getJobQueueService();
 

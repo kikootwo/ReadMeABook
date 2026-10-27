@@ -66,6 +66,7 @@ vi.mock('@/lib/services/ebook-scraper', () => ({
 const BOOK = { id: 'ab-1', audibleAsin: 'B000000001', title: 'Title', author: 'Author' };
 const EBOOK_PICK = { source: 'prowlarr', guid: 'g', title: 'Title.epub', size: 1, indexer: 'Indexer', downloadUrl: 'magnet:?xt=urn:btih:abc' };
 const TORRENT_PICK = { guid: 'g', title: 'Title.m4b', size: 1, indexer: 'Indexer', downloadUrl: 'magnet:?xt=urn:btih:abc' };
+const DELETED_AT = new Date('2026-01-01T00:00:00Z');
 
 const OWNER = { id: 'user-1', role: 'user' };
 const OTHER_USER = { id: 'user-2', role: 'user' };
@@ -94,9 +95,17 @@ describe('pick applied to an existing request', () => {
       'ebook-1': { id: 'ebook-1', type: 'ebook', status: 'failed', userId: 'user-1', audiobookId: BOOK.id, parentRequestId: 'ab-req-1', audiobook: BOOK },
       'ebook-orphan': { id: 'ebook-orphan', type: 'ebook', status: 'awaiting_search', userId: 'user-1', audiobookId: BOOK.id, parentRequestId: null, audiobook: BOOK },
       'ab-req-2': { id: 'ab-req-2', type: 'audiobook', status: 'awaiting_search', userId: 'user-1', audiobookId: BOOK.id, parentRequestId: null, audiobook: BOOK },
+      // Deleted by an admin: status kept, deletedAt set
+      'ebook-del': { id: 'ebook-del', type: 'ebook', status: 'failed', userId: 'user-1', audiobookId: BOOK.id, parentRequestId: null, deletedAt: DELETED_AT, audiobook: BOOK },
+      'ab-del': { id: 'ab-del', type: 'audiobook', status: 'available', userId: 'user-1', audiobookId: BOOK.id, parentRequestId: null, deletedAt: DELETED_AT, audiobook: BOOK },
     };
     prismaMock.request.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => records[where.id] ?? null);
-    prismaMock.request.findFirst.mockResolvedValue(null);
+    // Plain field equality; `deletedAt: null` matches a live record
+    prismaMock.request.findFirst.mockImplementation(async ({ where }: { where: Record<string, unknown> }) =>
+      Object.values(records).find((record) =>
+        Object.entries(where).every(([key, value]) => (value === null ? record[key] == null : record[key] === value))
+      ) ?? null
+    );
     prismaMock.request.update.mockImplementation(
       async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => ({ ...records[where.id], ...data })
     );
@@ -163,6 +172,84 @@ describe('pick applied to an existing request', () => {
 
       expect(result.status).toBe(404);
     });
+
+    it('owner\'s auto-approved pick sends the request_approved notification', async () => {
+      await call(SELECT_EBOOK, 'ebook-1', { ebook: EBOOK_PICK }, OWNER);
+
+      expect(jobQueueMock.addNotificationJob).toHaveBeenCalledTimes(1);
+      expect(jobQueueMock.addNotificationJob).toHaveBeenCalledWith('request_approved', 'ebook-1', 'Title (Ebook)', 'Author', 'user-1');
+    });
+
+    it('admin\'s pick sends no notification', async () => {
+      const result = await call(SELECT_EBOOK, 'ebook-1', { ebook: EBOOK_PICK }, ADMIN);
+
+      expect(result.status).toBe(200);
+      expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+    });
+
+    it('a user may not pick for an audiobook request, even their own (403, nothing changed)', async () => {
+      const result = await call(SELECT_EBOOK, 'ab-req-1', { ebook: EBOOK_PICK }, OWNER);
+
+      expect(result.status).toBe(403);
+      expect(prismaMock.request.update).not.toHaveBeenCalled();
+      expect(prismaMock.request.create).not.toHaveBeenCalled();
+      expect(ebookSelectionMock.startIndexerEbookDownload).not.toHaveBeenCalled();
+    });
+
+    it('admin can still pick for an audiobook request (reuses its failed ebook request)', async () => {
+      const result = await call(SELECT_EBOOK, 'ab-req-1', { ebook: EBOOK_PICK }, ADMIN);
+
+      expect(result.status).toBe(200);
+      expect(result.body.requestId).toBe('ebook-1');
+      expect(ebookSelectionMock.startIndexerEbookDownload).toHaveBeenCalledWith('ebook-1', BOOK, EBOOK_PICK, jobQueueMock);
+    });
+  });
+
+  describe('deleted request', () => {
+    it.each([['owner', OWNER], ['admin', ADMIN]])(
+      'select-ebook on a deleted failed ebook request → 404 for the %s, nothing changed',
+      async (_label, user) => {
+        const result = await call(SELECT_EBOOK, 'ebook-del', { ebook: EBOOK_PICK }, user);
+
+        expect(result.status).toBe(404);
+        expect(prismaMock.request.update).not.toHaveBeenCalled();
+        expect(prismaMock.request.create).not.toHaveBeenCalled();
+        expect(ebookSelectionMock.startIndexerEbookDownload).not.toHaveBeenCalled();
+        expect(ebookSelectionMock.startAnnasArchiveDownload).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each([['owner', OWNER], ['admin', ADMIN]])(
+      'select-ebook on a deleted available audiobook request → 404 for the %s, no ebook request created',
+      async (_label, user) => {
+        const result = await call(SELECT_EBOOK, 'ab-del', { ebook: EBOOK_PICK }, user);
+
+        expect(result.status).toBe(404);
+        expect(prismaMock.request.update).not.toHaveBeenCalled();
+        expect(prismaMock.request.create).not.toHaveBeenCalled();
+        expect(ebookSelectionMock.startIndexerEbookDownload).not.toHaveBeenCalled();
+      }
+    );
+
+    it('select-ebook on an ebook request whose parent was deleted → 404', async () => {
+      records['ebook-1'].parentRequestId = 'ab-del';
+
+      const result = await call(SELECT_EBOOK, 'ebook-1', { ebook: EBOOK_PICK }, ADMIN);
+
+      expect(result.status).toBe(404);
+      expect(prismaMock.request.update).not.toHaveBeenCalled();
+      expect(ebookSelectionMock.startIndexerEbookDownload).not.toHaveBeenCalled();
+    });
+
+    it.each([['owner', OWNER], ['admin', ADMIN]])(
+      'interactive-search-ebook on a deleted ebook request → 404 for the %s, no search',
+      async (_label, user) => {
+        const result = await call(SEARCH_EBOOK, 'ebook-del', {}, user);
+
+        expect(result.status).toBe(404);
+        expect(prowlarrMock.searchWithVariations).not.toHaveBeenCalled();
+      }
+    );
   });
 
   describe('ebook request (interactive-search-ebook)', () => {

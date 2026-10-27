@@ -91,7 +91,7 @@ describe('interactive ebook search sends title + author to indexers', () => {
 
   describe('POST /api/requests/[id]/interactive-search-ebook', () => {
     beforeEach(() => {
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-1',
         type: 'ebook',
         status: 'failed',

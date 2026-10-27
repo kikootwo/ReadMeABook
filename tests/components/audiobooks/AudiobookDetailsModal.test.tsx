@@ -14,6 +14,8 @@ const useAudiobookDetailsMock = vi.hoisted(() => vi.fn());
 const createRequestMock = vi.hoisted(() => vi.fn());
 const fetchEbookMock = vi.hoisted(() => vi.fn());
 const revalidateEbookStatusMock = vi.hoisted(() => vi.fn());
+// What the mocked search modal hands to onSuccess when its success button is clicked
+const modalOutcome = vi.hoisted(() => ({ value: undefined as { needsApproval?: boolean } | undefined }));
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => useAuthMock(),
@@ -38,13 +40,20 @@ vi.mock('@/lib/hooks/useRequests', () => ({
 }));
 
 vi.mock('@/components/requests/InteractiveTorrentSearchModal', () => ({
-  InteractiveTorrentSearchModal: ({ isOpen, requestId, searchMode }: { isOpen: boolean; requestId?: string; searchMode?: string }) => (
+  InteractiveTorrentSearchModal: ({ isOpen, requestId, searchMode, onSuccess }: {
+    isOpen: boolean;
+    requestId?: string;
+    searchMode?: string;
+    onSuccess?: (outcome?: { needsApproval?: boolean }) => void;
+  }) => (
     <div
       data-testid="interactive-modal"
       data-open={String(isOpen)}
       data-request-id={requestId ?? ''}
       data-search-mode={searchMode ?? 'audiobook'}
-    />
+    >
+      <button type="button" data-testid="interactive-modal-success" onClick={() => onSuccess?.(modalOutcome.value)} />
+    </div>
   ),
 }));
 
@@ -505,6 +514,18 @@ describe('AudiobookDetailsModal', () => {
         const modal = await openEbookSearch('failed', { id: 'user-2', username: 'other' });
         expect(modal).toHaveAttribute('data-search-mode', 'ebook');
         expect(modal).toHaveAttribute('data-request-id', '');
+      });
+
+      it.each([
+        [true, 'Ebook request submitted for approval!'],
+        [false, 'Ebook download started!'],
+      ])('a pick with needsApproval %s shows "%s"', async (needsApproval, toast) => {
+        modalOutcome.value = { needsApproval };
+        await openEbookSearch('failed');
+
+        fireEvent.click(screen.getByTestId('interactive-modal-success'));
+
+        expect(screen.getByText(toast)).toBeInTheDocument();
       });
     });
   });

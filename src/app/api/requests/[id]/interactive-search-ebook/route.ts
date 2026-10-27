@@ -95,9 +95,9 @@ export async function POST(
         const body = bodyResult.data;
         const customTitle = body.customTitle as string | undefined;
 
-        // Get the request (can be audiobook parent or direct ebook request)
-        const requestRecord = await prisma.request.findUnique({
-          where: { id: parentRequestId },
+        // Get the request (can be audiobook parent or direct ebook request); a deleted one is 404
+        const requestRecord = await prisma.request.findFirst({
+          where: { id: parentRequestId, deletedAt: null },
           include: { audiobook: true },
         });
 

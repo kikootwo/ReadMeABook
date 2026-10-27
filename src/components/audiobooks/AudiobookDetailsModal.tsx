@@ -848,9 +848,9 @@ export function AudiobookDetailsModal({
               setShowInteractiveSearchEbook(false);
               revalidateEbookStatus();
             }}
-            onSuccess={() => {
+            onSuccess={(outcome) => {
               revalidateEbookStatus();
-              showNotification('Ebook download started!');
+              showNotification(outcome?.needsApproval ? 'Ebook request submitted for approval!' : 'Ebook download started!');
             }}
             requestId={isEbookRequest ? advanceRequestId : undefined}
             asin={asin}
