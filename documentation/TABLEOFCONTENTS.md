@@ -32,6 +32,7 @@
 ## Audiobookshelf Integration
 - **ABS API client, library scanning** → `src/lib/services/audiobookshelf/api.ts`
 - **ABS library service** → `src/lib/services/library/AudiobookshelfLibraryService.ts`
+- **ABS connection test, fetch failure reasons (#221)** → [setup-wizard.md](setup-wizard.md) (API Endpoints, Fixed Issues 8)
 - **Backend mode selection (Plex vs ABS)** → [backend/services/config.md](backend/services/config.md)
 - **File hash matching for accurate ASIN** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md)
 - **ASIN read-back after the ABS match (#287)** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#asin-read-back-287)

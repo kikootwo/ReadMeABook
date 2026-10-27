@@ -1,6 +1,6 @@
 /**
  * Component: Test Audiobookshelf Connection
- * Documentation: documentation/features/audiobookshelf-integration.md
+ * Documentation: documentation/setup-wizard.md
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -8,6 +8,10 @@ import { requireSetupIncompleteOrAdmin } from '@/lib/middleware/auth';
 import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
 import { savedAudiobookshelfCredential } from '@/lib/services/saved-credentials.service';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { apiSuffixHint, describeFetchError, fetchErrorDetails } from '@/lib/utils/fetch-error';
+import { RMABLogger } from '@/lib/utils/logger';
+
+const logger = RMABLogger.create('API.Setup.TestABS');
 
 export async function POST(request: NextRequest) {
   return requireSetupIncompleteOrAdmin(request, async (req) => {
@@ -38,30 +42,50 @@ export async function POST(request: NextRequest) {
     const effectiveApiToken = token.secret;
 
     // Test connection by fetching libraries (which also validates auth)
-    const libResponse = await fetch(`${serverUrl.replace(/\/$/, '')}/api/libraries`, {
-      headers: {
-        'Authorization': `Bearer ${effectiveApiToken}`,
-      },
-    });
+    const librariesUrl = `${serverUrl.replace(/\/$/, '')}/api/libraries`;
+    let libResponse: Response;
+    try {
+      libResponse = await fetch(librariesUrl, {
+        headers: {
+          'Authorization': `Bearer ${effectiveApiToken}`,
+        },
+      });
+    } catch (error) {
+      // Node's fetch says only "fetch failed"; the reason is on error.cause
+      const secrets = [effectiveApiToken, apiToken];
+      const reason = describeFetchError(error, librariesUrl, { service: 'Audiobookshelf', secrets });
+      logger.error('Audiobookshelf connection test failed', { reason, ...fetchErrorDetails(error, librariesUrl, secrets) });
+      return NextResponse.json({ error: reason }, { status: 500 });
+    }
 
     if (!libResponse.ok) {
+      const hint = apiSuffixHint(serverUrl);
       return NextResponse.json(
-        { error: `Connection failed: ${libResponse.status} ${libResponse.statusText}` },
+        { error: `Connection failed: ${libResponse.status} ${libResponse.statusText}${hint ? `. ${hint}` : ''}` },
         { status: 400 }
       );
     }
 
-    const libData = await libResponse.json();
+    let libData: { libraries?: unknown } | null;
+    try {
+      libData = await libResponse.json();
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid response from Audiobookshelf server: the answer was not JSON. Check that the URL points at Audiobookshelf.' },
+        { status: 400 }
+      );
+    }
 
     // Check if response has libraries array
-    if (!libData.libraries || !Array.isArray(libData.libraries)) {
+    const rawLibraries = libData?.libraries;
+    if (!Array.isArray(rawLibraries)) {
       return NextResponse.json(
         { error: 'Invalid response from Audiobookshelf server' },
         { status: 400 }
       );
     }
 
-    const libraries = libData.libraries
+    const libraries = rawLibraries
       .filter((lib: any) => lib.mediaType === 'book')
       .map((lib: any) => ({
         id: lib.id,
