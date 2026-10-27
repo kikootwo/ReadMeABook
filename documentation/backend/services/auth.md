@@ -308,6 +308,7 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 - **OIDC accounts:** OIDC sign-in is kept to OIDC accounts.
 - **Plex profile identity:** profile sign-in takes the profile's identity from Plex and requires a profile from the account's Home list.
 - **#297 Hardcoded JWT fallback secrets:** `jwt.ts` fell back to built-in default strings when `JWT_SECRET`/`JWT_REFRESH_SECRET` were unset (installs that bypass the unified entrypoint). Fix: fallbacks removed; secrets derived from `CONFIG_ENCRYPTION_KEY` via HKDF. Affected installs: all sessions + download links invalidated on upgrade (re-login required).
+- **Sessions follow approval status:** `requireAuth` (access tokens and API tokens) and `/api/auth/refresh` now read `registrationStatus` in their existing user lookup and refuse `pending_approval`/`rejected` accounts like a deleted one (401); null counts as approved. Check: `src/lib/utils/registration-status.ts`.
 - **#215 Soft-deleted users counted as local users/admins:** `hasLocalUsers`/`hasLocalAdmins` (providers + admin settings) had no `deletedAt: null`, so a deleted local admin kept the login form shown and the Auth tab lockout warnings quiet. Fix: count non-deleted users only. First-user checks unchanged (deleted users still count).
 
 ## Tech Stack

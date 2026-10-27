@@ -9,6 +9,7 @@ import { verifyAccessToken, TokenPayload } from '../utils/jwt';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { API_TOKEN_PREFIX, isEndpointAllowed } from '../constants/api-tokens';
+import { isRegistrationRefused } from '../utils/registration-status';
 
 const logger = RMABLogger.create('Auth');
 
@@ -52,6 +53,7 @@ async function authenticateApiToken(token: string): Promise<TokenPayload | null>
           plexUsername: true,
           role: true,
           deletedAt: true,
+          registrationStatus: true,
         },
       },
     },
@@ -71,6 +73,15 @@ async function authenticateApiToken(token: string): Promise<TokenPayload | null>
     logger.warn('API token used by deleted or missing user', {
       tokenPrefix: apiToken.tokenPrefix,
       userId: user?.id,
+    });
+    return null;
+  }
+
+  // Reject tokens for accounts that are pending approval or rejected
+  if (isRegistrationRefused(user.registrationStatus)) {
+    logger.warn('API token used by an account that is not approved', {
+      tokenPrefix: apiToken.tokenPrefix,
+      userId: user.id,
     });
     return null;
   }
@@ -173,11 +184,24 @@ export async function requireAuth(
       id: true,
       deletedAt: true,
       sessionsInvalidatedAt: true,
+      registrationStatus: true,
     },
   });
 
   if (!user || user.deletedAt) {
     logger.error('User not found in database', { userId: payload.sub });
+    return NextResponse.json(
+      {
+        error: 'Unauthorized',
+        message: 'User not found',
+      },
+      { status: 401 }
+    );
+  }
+
+  // Accounts pending approval or rejected are refused like a missing user
+  if (isRegistrationRefused(user.registrationStatus)) {
+    logger.warn('Session refused: account is not approved', { userId: payload.sub });
     return NextResponse.json(
       {
         error: 'Unauthorized',
