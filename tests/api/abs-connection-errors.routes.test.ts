@@ -175,10 +175,16 @@ describe('POST /api/setup/test-abs failure reasons', () => {
     );
   });
 
-  it('never returns or logs a pasted key that breaks the Authorization header', async () => {
+  // A line break inside the value (a wrapped copy) makes Headers throw with the value in its message.
+  // Headers trims leading and trailing whitespace before quoting it, so the quoted text can differ
+  // from the token as supplied.
+  it.each([
+    ['inner line break', `${API_KEY}\nwrapped`],
+    ['trailing line break', `${API_KEY}\nwrapped\n`],
+    ['trailing spaces', `${API_KEY}\nwrapped  `],
+    ['trailing tab', `${API_KEY}\nwrapped\t`],
+  ])('never returns or logs a pasted key that breaks the Authorization header (%s)', async (_label, pasted) => {
     const port = await closedPort();
-    // A line break inside the value (a wrapped copy) makes Headers throw with the value in its message.
-    const pasted = `${API_KEY}\nwrapped`;
 
     const { text } = await testAbs({ serverUrl: `http://127.0.0.1:${port}`, apiToken: pasted });
 

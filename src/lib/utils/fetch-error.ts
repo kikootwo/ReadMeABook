@@ -28,19 +28,19 @@ const CODE_REASONS: Record<string, string> = {
   ERR_INVALID_URL: 'the server URL is not a valid URL',
 };
 
-/** Certificate verification codes; their messages are short and safe to show. */
-const TLS_CERT_CODES = new Set([
-  'DEPTH_ZERO_SELF_SIGNED_CERT',
-  'SELF_SIGNED_CERT_IN_CHAIN',
-  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
-  'UNABLE_TO_GET_ISSUER_CERT',
-  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
-  'CERT_HAS_EXPIRED',
-  'CERT_NOT_YET_VALID',
-  'CERT_REVOKED',
-  'CERT_UNTRUSTED',
-  'ERR_TLS_CERT_ALTNAME_INVALID',
-]);
+/**
+ * Certificate verification codes (their messages are short and safe to show): every
+ * code containing "CERT", plus this one, which doesn't.
+ */
+const TLS_CERT_CODE_WITHOUT_CERT = 'UNABLE_TO_VERIFY_LEAF_SIGNATURE';
+
+/**
+ * Header validation errors ("Headers.append: "Bearer <token>" is an invalid header value.")
+ * quote the value after trimming its edges, so scrubbing the token as supplied can miss it.
+ * A cause-less rejection with such a message is never shown or logged.
+ */
+const HEADER_VALUE_MESSAGE = /header|ByteString/i;
+const WITHHELD_HEADER_MESSAGE = 'message withheld: it quotes a request header value';
 
 const TLS_HANDSHAKE_REASON = 'the TLS handshake failed; if the server uses plain http, start the URL with http://';
 
@@ -103,7 +103,11 @@ function scrub(text: string, url: string, secrets: ReadonlyArray<string | null |
   // The URL first: a secret inside it would otherwise break the match.
   let out = url ? text.split(url).join(describeTarget(url) ?? '[url]') : text;
   for (const secret of secrets) {
-    if (secret) out = out.split(secret).join('[redacted]');
+    if (!secret) continue;
+    // Headers trims a value's edges before quoting it; scrub both forms.
+    for (const form of new Set([secret, secret.trim()])) {
+      if (form) out = out.split(form).join('[redacted]');
+    }
   }
   return out;
 }
@@ -131,7 +135,7 @@ function failureReason(error: unknown, url: string, secrets: ReadonlyArray<strin
   const code = findCode(chain);
   const causeMessage = deepestMessage(chain);
   if (code && CODE_REASONS[code]) return `${CODE_REASONS[code]} (${code})`;
-  if (code && (TLS_CERT_CODES.has(code) || code.includes('CERT'))) {
+  if (code && (code.includes('CERT') || code === TLS_CERT_CODE_WITHOUT_CERT)) {
     const detail = causeMessage ? `: ${firstLine(scrub(causeMessage, url, secrets), MAX_REASON_CHARS)}` : '';
     return `the TLS certificate was rejected${detail} (${code})`;
   }
@@ -146,10 +150,9 @@ function failureReason(error: unknown, url: string, secrets: ReadonlyArray<strin
     return code ? `${text} (${code})` : text;
   }
 
-  // No cause: fetch rejected before connecting. Header validation errors quote the
-  // whole header value (the API token), so the message itself is never echoed.
+  // No cause: fetch rejected before connecting. The message itself is never echoed.
   const message = typeof chain[0]?.message === 'string' ? chain[0].message : '';
-  if (/header|ByteString/i.test(message)) {
+  if (HEADER_VALUE_MESSAGE.test(message)) {
     return 'the request could not be built; check the API token for spaces, line breaks or unusual characters';
   }
   return 'the request failed before it reached the server';
@@ -171,12 +174,17 @@ export function fetchErrorDetails(
   url: string,
   secrets: ReadonlyArray<string | null | undefined> = []
 ): FetchErrorDetails {
-  const chain = causeChain(error).map((link) => {
+  const links = causeChain(error);
+  const chain = links.map((link, index) => {
     const source = link as ErrorLike & Record<string, unknown>;
     const out: FetchErrorLink = {};
     if (typeof source.name === 'string') out.name = source.name;
     if (typeof source.message === 'string') {
-      const message = scrub(source.message, url, secrets);
+      // A rejection with no cause failed before connecting; a header message there quotes the token.
+      const isLeafRejection = index === 0 && links.length === 1;
+      const message = isLeafRejection && HEADER_VALUE_MESSAGE.test(source.message)
+        ? WITHHELD_HEADER_MESSAGE
+        : scrub(source.message, url, secrets);
       out.message = message.length > MAX_LOG_MESSAGE_CHARS ? `${message.slice(0, MAX_LOG_MESSAGE_CHARS)}...` : message;
     }
     if (typeof source.code === 'string') out.code = source.code;

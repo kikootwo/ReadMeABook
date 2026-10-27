@@ -197,6 +197,28 @@ describe('fetchErrorDetails', () => {
   });
 });
 
+describe('fetchErrorDetails with an invalid header value', () => {
+  it.each([`${SECRET}\nwrapped\n`, `${SECRET}\nwrapped  `, `${SECRET}\nwrapped\t`])(
+    'withholds the quoted value even without secrets (real fetch, %j)',
+    async (pasted) => {
+      const url = 'http://127.0.0.1:9999/api/libraries';
+      const error = await rejectionOf(realFetch(url, { headers: { Authorization: `Bearer ${pasted}` } }));
+      expect((error as Error).message).toContain(SECRET);
+
+      const details = fetchErrorDetails(error, url);
+
+      expect(JSON.stringify(details)).not.toContain(SECRET);
+      expect(details.chain).toEqual([{ name: 'TypeError', message: 'message withheld: it quotes a request header value' }]);
+    }
+  );
+
+  it('scrubs a secret by its trimmed form too', () => {
+    const error = new TypeError('fetch failed', { cause: new Error(`odd text ${SECRET}x`) });
+
+    expect(JSON.stringify(fetchErrorDetails(error, 'http://abs/api', [`  ${SECRET}\n`]))).not.toContain(SECRET);
+  });
+});
+
 describe('apiSuffixHint', () => {
   it.each([
     ['http://abs:13378/api', 'http://abs:13378'],
