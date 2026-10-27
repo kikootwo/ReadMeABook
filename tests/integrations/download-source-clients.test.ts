@@ -138,7 +138,7 @@ describe('Prowlarr key scoping in download clients', () => {
     submitted = [];
   });
 
-  describe.each(cases)('$name', ({ name, protocol, create }) => {
+  describe.each(cases)('$name', ({ protocol, create }) => {
     const payload = () => serve(protocol === 'torrent' ? TEST_TORRENT : TEST_NZB);
     const startUrl = () => `${servers.prowlarrUrl}/1/download?apikey=${TEST_PROWLARR_KEY}&link=abc`;
 
