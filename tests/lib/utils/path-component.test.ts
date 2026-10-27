@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { MAX_COMPONENT_BYTES, capComponentBytes, capFilenameBytes, capPathComponents } from '@/lib/utils/path-component';
+import { MAX_COMPONENT_BYTES, capComponentBytes, capFilenameBytes, capGraphemeUnits, capPathComponents, capTitleAuthorBytes } from '@/lib/utils/path-component';
 
 const bytes = (value: string) => Buffer.byteLength(value, 'utf8');
 const roundTrips = (value: string) => Buffer.from(value, 'utf8').toString('utf8') === value;
@@ -96,5 +96,52 @@ describe('capPathComponents', () => {
 
   it('drops a component the cut leaves empty', () => {
     expect(capPathComponents(`A/${'.'.repeat(300)}/B`)).toBe('A/B');
+  });
+});
+
+describe('capGraphemeUnits (#474)', () => {
+  const FAMILY = [0x1f468, 0x1f469, 0x1f467, 0x1f466].map((c) => String.fromCodePoint(c)).join(String.fromCharCode(0x200d));
+
+  it('returns a value that fits unchanged, trailing space included', () => {
+    for (const value of ['', 'Book ', 'x'.repeat(200), `${'a'.repeat(189)}${FAMILY}`]) {
+      expect(capGraphemeUnits(value, 200)).toBe(value);
+    }
+  });
+
+  it.each([
+    ['a surrogate pair', `a${'📚'.repeat(120)}`, `a${'📚'.repeat(99)}`],
+    ['a joined emoji', `${'a'.repeat(196)}${FAMILY}`, 'a'.repeat(196)],
+    ['ASCII', 'x'.repeat(300), 'x'.repeat(200)],
+  ])('cuts %s between characters', (_label, value, expected) => {
+    const cut = capGraphemeUnits(value, 200);
+    expect(cut).toBe(expected);
+    expect(roundTrips(cut)).toBe(true);
+  });
+});
+
+describe('capTitleAuthorBytes (#474)', () => {
+  it('returns a join that fits unchanged', () => {
+    expect(capTitleAuthorBytes('Title', 'Author', ' - ', '.epub')).toBe('Title - Author.epub');
+    expect(capTitleAuthorBytes('x'.repeat(122), 'y'.repeat(125), ' - ', '.epub')).toBe(`${'x'.repeat(122)} - ${'y'.repeat(125)}.epub`);
+  });
+
+  it('cuts the title first and keeps a short author whole', () => {
+    const name = capTitleAuthorBytes('T'.repeat(300), 'Author', ' - ', '.epub');
+    expect(name).toBe(`${'T'.repeat(241)} - Author.epub`);
+    expect(bytes(name)).toBe(255);
+  });
+
+  it('a long author: the title keeps half the room, the author the rest', () => {
+    // Room: 255 - 3 - 5 = 247; the title keeps 123, the author 124
+    expect(capTitleAuthorBytes('T'.repeat(300), 'A'.repeat(300), ' - ', '.epub')).toBe(`${'T'.repeat(123)} - ${'A'.repeat(124)}.epub`);
+  });
+
+  it('a short title with a long author: the title is kept whole', () => {
+    expect(capTitleAuthorBytes('Dune', 'A'.repeat(300), ' - ', '.epub')).toBe(`Dune - ${'A'.repeat(243)}.epub`);
+  });
+
+  it('trims the trailing space a cut leaves', () => {
+    const name = capTitleAuthorBytes(`${'T'.repeat(240)} xyz`, 'Author', ' - ', '.epub');
+    expect(name).toBe(`${'T'.repeat(240)} - Author.epub`);
   });
 });

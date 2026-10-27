@@ -10,6 +10,7 @@ import { StartDirectDownloadPayload, MonitorDirectDownloadPayload, getJobQueueSe
 import { prisma } from '../db';
 import { getConfigService } from '../services/config.service';
 import { RMABLogger } from '../utils/logger';
+import { capFilenameBytes } from '../utils/path-component';
 import { extractDownloadUrl, ExtractedDownload } from '../services/ebook-scraper';
 import axios from 'axios';
 import { RMAB_USER_AGENT } from '../utils/user-agent';
@@ -504,12 +505,14 @@ export async function processMonitorDirectDownload(payload: MonitorDirectDownloa
 }
 
 /**
- * Sanitize filename for filesystem
+ * Sanitize filename for filesystem: at most 255 bytes, cut between
+ * characters, the extension kept whole (#474)
  */
 function sanitizeFilename(filename: string): string {
-  return filename
+  const clean = filename
     .replace(/[<>:"/\\|?*]/g, '') // Remove invalid chars
     .replace(/\s+/g, ' ') // Collapse spaces
-    .trim()
-    .substring(0, 200); // Limit length
+    .trim();
+  const ext = path.extname(clean);
+  return capFilenameBytes(clean.slice(0, clean.length - ext.length), ext);
 }
