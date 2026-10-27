@@ -9,6 +9,7 @@ import { verifyAccessToken, TokenPayload } from '../utils/jwt';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { API_TOKEN_PREFIX, isEndpointAllowed } from '../constants/api-tokens';
+import { getRegistrationRefusal } from '../services/auth/local-account-status';
 
 const logger = RMABLogger.create('Auth');
 
@@ -52,6 +53,7 @@ async function authenticateApiToken(token: string): Promise<TokenPayload | null>
           plexUsername: true,
           role: true,
           deletedAt: true,
+          registrationStatus: true,
         },
       },
     },
@@ -65,12 +67,14 @@ async function authenticateApiToken(token: string): Promise<TokenPayload | null>
     return null;
   }
 
-  // Reject tokens for soft-deleted users
+  // Reject tokens for missing, soft-deleted, pending-approval or rejected users
   const user = apiToken.tokenUser;
-  if (!user || user.deletedAt) {
-    logger.warn('API token used by deleted or missing user', {
+  const refusal = user ? getRegistrationRefusal(user.registrationStatus) : null;
+  if (!user || user.deletedAt || refusal) {
+    logger.warn('API token used by a missing, deleted or unapproved user', {
       tokenPrefix: apiToken.tokenPrefix,
       userId: user?.id,
+      reason: !user ? 'missing' : user.deletedAt ? 'deleted' : refusal,
     });
     return null;
   }
@@ -173,11 +177,17 @@ export async function requireAuth(
       id: true,
       deletedAt: true,
       sessionsInvalidatedAt: true,
+      registrationStatus: true,
     },
   });
 
-  if (!user || user.deletedAt) {
-    logger.error('User not found in database', { userId: payload.sub });
+  // Missing, deleted, pending-approval and rejected accounts are refused the same way
+  const refusal = user ? getRegistrationRefusal(user.registrationStatus) : null;
+  if (!user || user.deletedAt || refusal) {
+    logger.error('Session refused: user missing, deleted or not approved', {
+      userId: payload.sub,
+      reason: !user ? 'missing' : user.deletedAt ? 'deleted' : refusal,
+    });
     return NextResponse.json(
       {
         error: 'Unauthorized',

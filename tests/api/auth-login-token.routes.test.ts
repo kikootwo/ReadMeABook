@@ -3,6 +3,7 @@
  * Documentation: documentation/testing.md
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
 
@@ -59,6 +60,74 @@ describe('POST /api/auth/token/login', () => {
     expect(payload.refreshToken).toBe('refresh-token');
     expect(payload.user.username).toBe('testuser');
     expect(payload.user.email).toBe('test@example.com');
+  });
+
+  describe('account status', () => {
+    const userRow = (registrationStatus: string | null) => ({
+      id: 'u1',
+      plexId: 'plex-1',
+      plexUsername: 'testuser',
+      plexEmail: 'test@example.com',
+      avatarUrl: null,
+      role: 'user',
+      registrationStatus,
+    });
+
+    it('reads the status in the one existing user lookup', async () => {
+      prismaMock.user.findFirst.mockResolvedValueOnce(userRow('approved'));
+      prismaMock.user.update.mockResolvedValueOnce({});
+
+      const { POST } = await import('@/app/api/auth/token/login/route');
+      await POST(makeRequest({ token: 'rmab_valid_token' }) as any);
+
+      expect(prismaMock.user.findFirst).toHaveBeenCalledTimes(1);
+      expect(prismaMock.user.findFirst.mock.calls[0][0].select).toMatchObject({
+        registrationStatus: true,
+      });
+    });
+
+    it('gives a pending account the pending answer and no session', async () => {
+      prismaMock.user.findFirst.mockResolvedValueOnce(userRow('pending_approval'));
+
+      const { POST } = await import('@/app/api/auth/token/login/route');
+      const response = await POST(makeRequest({ token: 'rmab_valid_token' }) as any);
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        success: false,
+        pendingApproval: true,
+        message: 'Account pending admin approval.',
+      });
+      expect(generateAccessTokenMock).not.toHaveBeenCalled();
+      expect(generateRefreshTokenMock).not.toHaveBeenCalled();
+      expect(prismaMock.user.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses a rejected account with 401 and no session', async () => {
+      prismaMock.user.findFirst.mockResolvedValueOnce(userRow('rejected'));
+
+      const { POST } = await import('@/app/api/auth/token/login/route');
+      const response = await POST(makeRequest({ token: 'rmab_valid_token' }) as any);
+
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({ error: 'Account has been rejected' });
+      expect(generateAccessTokenMock).not.toHaveBeenCalled();
+      expect(generateRefreshTokenMock).not.toHaveBeenCalled();
+      expect(prismaMock.user.update).not.toHaveBeenCalled();
+    });
+
+    it.each([['approved'], [null]])('signs in an account with status %s', async (status) => {
+      prismaMock.user.findFirst.mockResolvedValueOnce(userRow(status));
+      prismaMock.user.update.mockResolvedValueOnce({});
+
+      const { POST } = await import('@/app/api/auth/token/login/route');
+      const response = await POST(makeRequest({ token: 'rmab_valid_token' }) as any);
+      const payload = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(payload.accessToken).toBe('access-token');
+      expect(payload.refreshToken).toBe('refresh-token');
+    });
   });
 
   it('returns 400 when token parameter is missing', async () => {

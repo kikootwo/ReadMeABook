@@ -532,7 +532,7 @@ describe('Request Approval Workflow', () => {
         json: vi.fn().mockResolvedValue({ action: 'approve' }),
       };
 
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-1',
         status: 'awaiting_approval',
         selectedTorrent: null,
@@ -582,7 +582,7 @@ describe('Request Approval Workflow', () => {
         json: vi.fn().mockResolvedValue({ action: 'deny' }),
       };
 
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-2',
         status: 'awaiting_approval',
         selectedTorrent: null,
@@ -627,7 +627,7 @@ describe('Request Approval Workflow', () => {
         json: vi.fn().mockResolvedValue({ action: 'approve' }),
       };
 
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-3',
         status: 'pending',
         userId: 'user-1',
@@ -650,7 +650,7 @@ describe('Request Approval Workflow', () => {
         json: vi.fn().mockResolvedValue({ action: 'approve' }),
       };
 
-      prismaMock.request.findUnique.mockResolvedValue(null);
+      prismaMock.request.findFirst.mockResolvedValue(null);
 
       const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
       const response = await POST(mockRequest as any, { params: Promise.resolve({ id: 'non-existent' }) });
@@ -659,6 +659,41 @@ describe('Request Approval Workflow', () => {
       expect(response.status).toBe(404);
       expect(payload.error).toBe('NotFound');
       expect(payload.message).toContain('not found');
+    });
+
+    it.each(['approve', 'deny'])('%s on a request deleted while awaiting approval → 404, nothing queued (#470)', async (action) => {
+      const mockRequest = {
+        json: vi.fn().mockResolvedValue({ action }),
+      };
+      const deleted = {
+        id: 'req-del',
+        status: 'awaiting_approval',
+        deletedAt: new Date('2026-01-01T00:00:00Z'),
+        selectedTorrent: null,
+        userId: 'user-1',
+        audiobook: { id: 'ab-del', title: 'Deleted Book', author: 'Test Author', audibleAsin: 'ASIN-DEL' },
+        user: { id: 'user-1', plexUsername: 'testuser' },
+      };
+      // Plain field equality, as Prisma applies it; `deletedAt: null` matches only a live row
+      const lookup = async ({ where }: { where: Record<string, unknown> }) =>
+        Object.entries(where).every(([key, value]) =>
+          value === null ? (deleted as Record<string, unknown>)[key] == null : (deleted as Record<string, unknown>)[key] === value
+        ) ? deleted : null;
+      prismaMock.request.findUnique.mockImplementation(lookup);
+      prismaMock.request.findFirst.mockImplementation(lookup);
+      prismaMock.request.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ ...deleted, ...data }));
+
+      const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
+      const response = await POST(mockRequest as never, { params: Promise.resolve({ id: 'req-del' }) });
+
+      expect({ status: response.status, body: await response.json() }).toEqual({
+        status: 404,
+        body: { error: 'NotFound', message: 'Request not found' },
+      });
+      expect(prismaMock.request.update).not.toHaveBeenCalled();
+      expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
+      expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
+      expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
     });
 
     it('Non-admin user cannot approve requests (403)', async () => {
@@ -686,7 +721,7 @@ describe('Request Approval Workflow', () => {
         json: vi.fn().mockResolvedValue({}),
       };
 
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-4',
         status: 'awaiting_approval',
         userId: 'user-1',
@@ -708,7 +743,7 @@ describe('Request Approval Workflow', () => {
         json: vi.fn().mockResolvedValue({ action: 'invalid' }),
       };
 
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-5',
         status: 'awaiting_approval',
         userId: 'user-1',

@@ -300,6 +300,10 @@ where: {
 - **Cause:** the cleanup job's shared-torrent check counted every non-deleted sibling, so each finished request kept it for the others
 - **Fix:** cleanup job only: a sibling keeps it unless finished and done seeding by its own indexer's rule (`siblingKeepsTorrent()`); request deletion unchanged
 
+**7. Deleted Request Still Took a Torrent Pick or a Search (#470)**
+- **Issue:** `select-torrent`, `interactive-search`, `manual-search` and `fetch-ebook` (`/api/requests/[id]/`) and admin approve/deny (`/api/admin/requests/[id]/approve`) loaded the request by id only, so a deleted request could still start a download or a search
+- **Fix:** each loads with `deletedAt: null` (as `select-ebook`/`interactive-search-ebook` do since #463); a deleted request answers that route's usual "Request not found" 404
+
 ## File Structure
 
 ```

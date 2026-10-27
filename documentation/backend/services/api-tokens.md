@@ -12,6 +12,7 @@ Static `rmab_`-prefixed tokens act with the owner's full user-level permissions 
 - **Per-user cap:** 25 active (non-expired) tokens (`MAX_TOKENS_PER_USER`)
 - **Expiry:** Optional (`never`, `30d`, `90d`, `1y`)
 - **Soft-deleted users:** Tokens reject if `tokenUser.deletedAt` is set
+- **Unapproved accounts:** Tokens reject if the owner's `registrationStatus` is `pending_approval` or `rejected` (null counts as approved); `POST /api/admin/api-tokens` for such a target returns 403
 - **Identity attribution:** `req.user.id` resolves to `apiToken.userId` (target user), NOT `apiToken.createdById`
 - **Header:** `Authorization: Bearer rmab_<token>`
 

@@ -11,6 +11,7 @@ import { SearchEbookPayload, EbookSearchResult, getJobQueueService } from '../se
 import { prisma } from '../db';
 import { getConfigService } from '../services/config.service';
 import { RMABLogger } from '../utils/logger';
+import { buildEbookDownloadName } from '../utils/ebook-download-name';
 import { getProwlarrService } from '../integrations/prowlarr.service';
 import { rankEbookTorrents, RankedEbookTorrent } from '../utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer-grouping';
@@ -456,7 +457,7 @@ async function handleAnnasArchiveDownload(
     requestId,
     downloadHistory.id,
     result.downloadUrls[0], // Start with first link
-    `${audiobook.title} - ${audiobook.author}.${preferredFormat}`,
+    buildEbookDownloadName(audiobook.title, audiobook.author, preferredFormat),
     undefined // Size unknown
   );
 
