@@ -23,6 +23,16 @@ import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.RequestWithTorrent');
 
+/** 409 reply for a pick on a book whose request is already done or in flight (any user). */
+const IN_FLIGHT_REPLIES: Record<string, { error: string; message: string }> = {
+  available: { error: 'AlreadyAvailable', message: 'This audiobook is already in your library' },
+  downloaded: { error: 'BeingProcessed', message: 'This audiobook is being processed and will be available soon' },
+  downloading: { error: 'BeingProcessed', message: 'This audiobook is being processed and will be available soon' },
+  processing: { error: 'BeingProcessed', message: 'This audiobook is being processed and will be available soon' },
+  awaiting_import: { error: 'BeingProcessed', message: 'This audiobook is being processed and will be available soon' },
+  awaiting_approval: { error: 'AwaitingApproval', message: 'A request for this audiobook is already awaiting admin approval' },
+};
+
 const RequestWithTorrentSchema = z.object({
   audiobook: z.object({
     asin: z.string(),
@@ -81,15 +91,16 @@ export async function POST(request: NextRequest) {
       if (!torrentCheck.ok) return rejectedSelectionResponse(torrentCheck.error);
       const torrent = torrentCheck.value;
 
-      // First check: Is there an existing audiobook request in 'downloaded' or 'available' status?
-      // This catches the gap where files are organized but Plex hasn't scanned yet
+      // First check (any user): a request for this book that is already in the library,
+      // being downloaded or imported, or awaiting approval. Covers the gap between files
+      // being organized and the library scan, and says what is actually happening (#291)
       const existingActiveRequest = await prisma.request.findFirst({
         where: {
           audiobook: {
             audibleAsin: audiobook.asin,
           },
           type: 'audiobook', // Only check audiobook requests (ebook requests are separate)
-          status: { in: ['downloaded', 'available'] },
+          status: { in: Object.keys(IN_FLIGHT_REPLIES) },
           deletedAt: null,
         },
         include: {
@@ -99,16 +110,13 @@ export async function POST(request: NextRequest) {
 
       if (existingActiveRequest) {
         const status = existingActiveRequest.status;
-        const isOwnRequest = existingActiveRequest.userId === req.user.id;
+        const reply = IN_FLIGHT_REPLIES[status];
 
         return NextResponse.json(
           {
-            error: status === 'available' ? 'AlreadyAvailable' : 'BeingProcessed',
-            message: status === 'available'
-              ? 'This audiobook is already available in your Plex library'
-              : 'This audiobook is being processed and will be available soon',
+            ...reply,
             requestStatus: status,
-            isOwnRequest,
+            isOwnRequest: existingActiveRequest.userId === req.user.id,
             requestedBy: existingActiveRequest.user?.plexUsername,
           },
           { status: 409 }
@@ -126,8 +134,7 @@ export async function POST(request: NextRequest) {
       if (plexMatch) {
         return NextResponse.json(
           {
-            error: 'AlreadyAvailable',
-            message: 'This audiobook is already available in your Plex library',
+            ...IN_FLIGHT_REPLIES.available,
             plexGuid: plexMatch.plexGuid,
           },
           { status: 409 }
@@ -227,6 +234,30 @@ export async function POST(request: NextRequest) {
             { status: 409 }
           );
         }
+      }
+
+      // Another user's open request for this book: the pick would start a second download
+      // of the same book, so it is refused (same rule as a plain request)
+      const otherUsersRequest = await prisma.request.findFirst({
+        where: {
+          audiobookId: audiobookRecord.id,
+          type: 'audiobook',
+          userId: { not: req.user.id },
+          status: { notIn: [...RE_REQUESTABLE_STATUSES, 'denied', 'available', 'downloaded'] },
+          deletedAt: null,
+        },
+      });
+
+      if (otherUsersRequest) {
+        return NextResponse.json(
+          {
+            error: 'AlreadyRequested',
+            message: 'This audiobook is already being requested by another user',
+            requestStatus: otherUsersRequest.status,
+            isOwnRequest: false,
+          },
+          { status: 409 }
+        );
       }
 
       // Create the request; replacing a failed one keeps its blocklist and search terms.
