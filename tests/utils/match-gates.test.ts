@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  authorAppears, colonSubtitleAgrees, foldNumberWord, foldReleaseWords, isAuthorPresent, missingRequiredNumber,
+  authorAppears, colonSubtitleAgrees, dashNamesOtherSubtitle, foldNumberWord, foldReleaseWords, isAuthorPresent, missingRequiredNumber,
   shortTitleStandsAlone, shortTitleWord, splitPositionNumbers, volumeConflict, ShortTitleContext,
 } from '@/lib/utils/match-gates';
 
@@ -82,6 +82,21 @@ describe('colon subtitle agreement (G1)', () => {
     [': mistborn book 1', ['mistborn', 'book', '1'], true],
   ])('%s', (after, subtitle, expected) => {
     expect(colonSubtitleAgrees(after, new Set(subtitle), words)).toBe(expected);
+  });
+});
+
+describe('another subtitle after " - " (G1, #466)', () => {
+  const words = (text: string) => text.toLowerCase().split(/\W+/).filter((w) => w && !EN.includes(w));
+  const HUND = ['hund', 'baskervilles'];
+  it.each([
+    [' - das zeichen der vier [mp3]', HUND, true],
+    [' - der hund der baskervilles [mp3]', HUND, false],
+    [' - arthur conan doyle [mp3]', HUND, false],
+    [' - book 2 [mp3]', HUND, false],
+    [' [mp3]', HUND, false],
+    [': das zeichen der vier', HUND, false],
+  ])('%s', (after, subtitle, expected) => {
+    expect(dashNamesOtherSubtitle(after, new Set(subtitle), ['arthur conan doyle'], words)).toBe(expected);
   });
 });
 

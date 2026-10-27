@@ -12,6 +12,7 @@ import {
   isWordInTitle,
   keepUnrequestedApostrophes,
   normalizeForMatching,
+  splitSubtitle,
 } from '@/lib/utils/match-normalize';
 
 // The normalizer as it was before non-Latin support, frozen as the parity oracle for ASCII and accented Latin
@@ -207,4 +208,25 @@ describe('hasNonLatinLetter', () => {
       expect(hasNonLatinLetter(text)).toBe(expected);
     },
   );
+});
+
+describe('splitSubtitle (#466)', () => {
+  it.each<[string, [string, string, boolean] | null]>([
+    ['primal hunter 1. une aventure de litrpg', ['primal hunter 1', 'une aventure de litrpg', false]],
+    ['der herr der ringe. die gefährten', ['der herr der ringe', 'die gefährten', false]],
+    ["c'était ça ou mourir - prix du roman fnac 2026", ["c'était ça ou mourir", 'prix du roman fnac 2026', false]],
+    ['spider-man — forever young', ['spider-man', 'forever young', false]],
+    ['the finest edge of twilight: dungeons & dragons', ['the finest edge of twilight', 'dungeons & dragons', true]],
+    ['mr. mercedes - bill hodges', ['mr. mercedes', 'bill hodges', false]],
+    ['spider-man', null],
+    ['mr. mercedes', null],
+    ['a. j. fikry', null],
+    ['prof. moriarty', null],
+    ['wait... what', null],
+    ['title:', null],
+    ['- title', null],
+  ])('%s', (title, expected) => {
+    const split = splitSubtitle(title);
+    expect(split && [split.main, split.subtitle, split.colon]).toEqual(expected);
+  });
 });

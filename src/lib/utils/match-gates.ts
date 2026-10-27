@@ -125,10 +125,36 @@ const isPositionWord = (word: string): boolean => VOLUME_WORD_SET.has(word) || n
  */
 export function colonSubtitleAgrees(afterTitle: string, subtitleWords: Set<string>, toWords: (text: string) => string[]): boolean {
   if (!afterTitle.startsWith(':') || subtitleWords.size === 0) return false;
-  let subtitle = afterTitle.substring(1);
-  const cuts = [' by ', ' [', ' (', ' {', ' - ', ','].map((m) => subtitle.indexOf(m)).filter((i) => i >= 0);
-  if (cuts.length > 0) subtitle = subtitle.substring(0, Math.min(...cuts));
-  const words = toWords(subtitle);
+  return wordsAgree(toWords(releaseSubtitle(afterTitle.substring(1))), subtitleWords);
+}
+
+/**
+ * G1 for a request split at ` - ` or `. ` (#466): true when the release text after the request's main
+ * part starts with ` - ` and names another subtitle. Not another subtitle: the request's own (G1 rule),
+ * an author name, or only volume words and numbers.
+ *   "Sherlock Holmes - Der Hund der Baskervilles": " - das zeichen der vier [mp3]" -> true
+ */
+export function dashNamesOtherSubtitle(
+  afterTitle: string,
+  subtitleWords: Set<string>,
+  authors: string[],
+  toWords: (text: string) => string[],
+): boolean {
+  if (!afterTitle.startsWith(' - ')) return false;
+  const words = toWords(releaseSubtitle(afterTitle.substring(3)));
+  if (!words.some((w) => !isPositionWord(w))) return false;
+  if (authors.some((author) => authorAppears(words.join(' '), author))) return false;
+  return !wordsAgree(words, subtitleWords);
+}
+
+/** A release subtitle runs up to the next marker */
+function releaseSubtitle(text: string): string {
+  const cuts = [' by ', ' [', ' (', ' {', ' - ', ','].map((m) => text.indexOf(m)).filter((i) => i >= 0);
+  return cuts.length > 0 ? text.substring(0, Math.min(...cuts)) : text;
+}
+
+/** No number the request subtitle lacks, and at least half the other words are in it */
+function wordsAgree(words: string[], subtitleWords: Set<string>): boolean {
   const requestNumbers = new Set([...subtitleWords].map(numberOf).filter((n) => n !== null));
   if (words.some((w) => { const n = numberOf(w); return n !== null && !requestNumbers.has(n); })) return false;
   const named = words.filter((w) => !isPositionWord(w));

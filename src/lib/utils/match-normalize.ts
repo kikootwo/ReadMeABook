@@ -39,6 +39,33 @@ const UNSPACED_RE = new RegExp(`[${UNSPACED}]`, 'u');
 const UNSPACED_THEN_ASCII_RE = new RegExp(`([${UNSPACED}])(?=[a-z0-9])`, 'gu');
 const ASCII_THEN_UNSPACED_RE = new RegExp(`([a-z0-9])(?=[${UNSPACED}])`, 'gu');
 
+/** Words of four or more letters that are still abbreviations before a period ("Prof. Moriarty") */
+const LONG_ABBREVIATIONS = new Set(['prof', 'capt', 'corp', 'dept', 'bros', 'hrsg']);
+/** Subtitle split candidates: a colon, a dash with spaces on both sides, or a word followed by ". " */
+const SPLIT_CANDIDATE_RE = /:|\s+[-–—]\s+|([\p{L}\p{M}\p{N}]+)\.\s+/gu;
+const DIGITS_ONLY_RE = /^\p{N}+$/u;
+
+/**
+ * Split a title at its first subtitle marker (#466): a colon, a dash with spaces on both sides
+ * (" - ", " – ", " — "), or ". " after a number or a word of four or more letters. A hyphen inside
+ * a word ("Spider-Man"), initials ("J. R. R.") and short abbreviations ("Mr. Mercedes") never split.
+ * Returns null when no marker leaves text on both sides; `colon` says which kind of marker split it.
+ *   "Primal Hunter 1. Une aventure de LitRPG" -> { main: "Primal Hunter 1", subtitle: "Une aventure de LitRPG", colon: false }
+ */
+export function splitSubtitle(title: string): { main: string; subtitle: string; colon: boolean } | null {
+  for (const m of title.matchAll(SPLIT_CANDIDATE_RE)) {
+    const word = m[1];
+    if (word !== undefined && !DIGITS_ONLY_RE.test(word) && (Array.from(word).length < 4 || LONG_ABBREVIATIONS.has(word.toLowerCase()))) {
+      continue;
+    }
+    const start = word === undefined ? m.index : m.index + word.length;
+    const main = title.substring(0, start).trim();
+    const subtitle = title.substring(m.index + m[0].length).trim();
+    if (main.length > 0 && subtitle.length > 0) return { main, subtitle, colon: m[0] === ':' };
+  }
+  return null;
+}
+
 /** True when the text contains a letter from a script written without spaces (CJK, Thai and similar) */
 export function hasUnspacedScript(text: string): boolean {
   return UNSPACED_RE.test(text);
