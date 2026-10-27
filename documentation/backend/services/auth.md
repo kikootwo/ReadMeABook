@@ -117,7 +117,7 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 - Setup admin role is **protected** - cannot be changed to prevent lockout
 - Ensures someone always has admin access after fresh install
 - Subsequent users default to 'user' role
-- First-user check (`prisma.user.count()` in Plex callback, switch-profile, `LocalAuthProvider.register`, `OIDCAuthProvider`) counts soft-deleted users on purpose: a deleted account never makes the next sign-up an admin (`tests/services/auth/first-user-admin.test.ts`)
+- First-user check (`prisma.user.count()` in Plex callback, switch-profile, `LocalAuthProvider.register`, `OIDCAuthProvider`) counts soft-deleted users on purpose: a deleted account never makes the next sign-up an admin (the `LocalAuthProvider.register` site is pinned by `tests/services/auth/first-user-admin.test.ts`)
 - Local admin uses username/password authentication (stored in `authToken` field as bcrypt hash)
 - `plexId` format: `local-{username}` for local admin accounts
 
