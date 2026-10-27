@@ -6,7 +6,15 @@
  */
 
 import { capFilenameBytes, capGraphemeUnits, capPathComponents } from './path-component';
-import { variableValue } from './path-template-variables';
+import {
+  VALID_VARIABLES,
+  INVALID_PATH_CHARS,
+  checkBraceContents,
+  findVariablesInContent,
+  resolveFormattedBlock,
+  usesFormat,
+  variableValue,
+} from './path-template-variables';
 
 /**
  * Template variables for path substitution
@@ -28,16 +36,6 @@ export interface ValidationResult {
   valid: boolean;
   error?: string;
 }
-
-/**
- * Supported template variable names
- */
-const VALID_VARIABLES = ['author', 'primaryAuthor', 'title', 'narrator', 'asin', 'year', 'series', 'seriesPart'];
-
-/**
- * Invalid file path characters (outside of template variables)
- */
-const INVALID_PATH_CHARS = /[<>:"|?*]/;
 
 /**
  * Placeholder characters for escaped braces during substitution.
@@ -71,27 +69,6 @@ function sanitizePath(name: string): string {
 }
 
 /**
- * Find valid template variable names within arbitrary content text.
- * Sorts by length descending to prevent substring false matches
- * (e.g., 'seriesPart' matched before 'series').
- * Uses word-boundary detection to avoid matching variable names
- * that are substrings of other words.
- */
-function findVariablesInContent(content: string): string[] {
-  const sortedVars = [...VALID_VARIABLES].sort((a, b) => b.length - a.length);
-  const found: string[] = [];
-
-  for (const varName of sortedVars) {
-    const regex = new RegExp(`(?<![a-zA-Z0-9])${varName}(?![a-zA-Z0-9])`);
-    if (regex.test(content)) {
-      found.push(varName);
-    }
-  }
-
-  return found;
-}
-
-/**
  * Resolve conditional blocks in the template.
  * A conditional block is {literal text varName more text} where the entire
  * content is rendered only if ALL variables inside have non-empty values.
@@ -110,6 +87,11 @@ function resolveConditionalBlocks(
     // If content is exactly a valid variable name, skip (leave for simple substitution)
     if (VALID_VARIABLES.includes(content)) {
       return match;
+    }
+
+    // {seriesPart:00} and blocks using it (#250); all other content resolves as before
+    if (usesFormat(content)) {
+      return resolveFormattedBlock(content, variables, sanitizePath);
     }
 
     // Find variables in the content
@@ -267,41 +249,14 @@ export function validateTemplate(template: string): ValidationResult {
   // Extract all variables from the stripped template
   const variableMatches = templateWithoutEscapedBraces.match(/\{[^}]+\}/g);
 
-  if (variableMatches) {
-    for (const match of variableMatches) {
-      const content = match.slice(1, -1); // Remove { and }
-
-      // Simple variable — exact match to a valid variable name
-      if (VALID_VARIABLES.includes(content)) {
-        continue;
-      }
-
-      // Conditional block — must contain at least one valid variable
-      const foundVars = findVariablesInContent(content);
-      if (foundVars.length === 0) {
-        return {
-          valid: false,
-          error: `No valid variable found in conditional block: {${content}}. Valid variables are: ${VALID_VARIABLES.map(v => `{${v}}`).join(', ')}`
-        };
-      }
-
-      // Check literal text inside conditional block for invalid path chars
-      let literalText = content;
-      const sortedVars = [...foundVars].sort((a, b) => b.length - a.length);
-      for (const varName of sortedVars) {
-        literalText = literalText.replace(
-          new RegExp(`(?<![a-zA-Z0-9])${varName}(?![a-zA-Z0-9])`, 'g'),
-          ''
-        );
-      }
-      const invalidCharsInBlock = literalText.match(INVALID_PATH_CHARS);
-      if (invalidCharsInBlock) {
-        return {
-          valid: false,
-          error: `Invalid characters found: ${[...new Set(invalidCharsInBlock)].join(', ')}. These characters are not allowed in path templates.`
-        };
-      }
-    }
+  // Each {...}: a variable, a supported format, or a conditional block holding one
+  const blockError = checkBraceContents(
+    variableMatches,
+    'No valid variable found in conditional block:',
+    'path templates'
+  );
+  if (blockError) {
+    return blockError;
   }
 
   // Remove valid variables and conditional blocks to check remaining text for invalid chars
@@ -436,41 +391,10 @@ export function validateFilenameTemplate(template: string): ValidationResult {
   // Extract all variables from the stripped template
   const variableMatches = templateWithoutEscapedBraces.match(/\{[^}]+\}/g);
 
-  if (variableMatches) {
-    for (const match of variableMatches) {
-      const content = match.slice(1, -1);
-
-      // Simple variable
-      if (VALID_VARIABLES.includes(content)) {
-        continue;
-      }
-
-      // Conditional block — must contain at least one valid variable
-      const foundVars = findVariablesInContent(content);
-      if (foundVars.length === 0) {
-        return {
-          valid: false,
-          error: `No valid variable found in: {${content}}. Valid variables are: ${VALID_VARIABLES.map(v => `{${v}}`).join(', ')}`,
-        };
-      }
-
-      // Check literal text inside conditional block for invalid filename chars
-      let literalText = content;
-      const sortedVars = [...foundVars].sort((a, b) => b.length - a.length);
-      for (const varName of sortedVars) {
-        literalText = literalText.replace(
-          new RegExp(`(?<![a-zA-Z0-9])${varName}(?![a-zA-Z0-9])`, 'g'),
-          ''
-        );
-      }
-      const invalidCharsInBlock = literalText.match(INVALID_PATH_CHARS);
-      if (invalidCharsInBlock) {
-        return {
-          valid: false,
-          error: `Invalid characters found: ${[...new Set(invalidCharsInBlock)].join(', ')}. These characters are not allowed in filenames.`,
-        };
-      }
-    }
+  // Each {...}: a variable, a supported format, or a conditional block holding one
+  const blockError = checkBraceContents(variableMatches, 'No valid variable found in:', 'filenames');
+  if (blockError) {
+    return blockError;
   }
 
   // Remove valid variables and conditional blocks to check remaining text

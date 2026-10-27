@@ -188,6 +188,7 @@ src/app/admin/settings/
 - Key: `audiobook_path_template` (string, default: `{author}/{title} {asin}`)
 - Variables: `{author}`, `{primaryAuthor}`, `{title}`, `{narrator}`, `{asin}`, `{year}`, `{series}`, `{seriesPart}`
 - `{primaryAuthor}`: first author of `{author}` (split on `,` `;` `&`; see [file-organization.md](phase3/file-organization.md#target-structure))
+- `{seriesPart:00}` / `:000` / `:0000`: series part padded to 2, 3 or 4 digits (`1` → `01`, `1-3` → `01-03`); other shapes unchanged
 - Optional variables removed if not available
 - Template validated on test, shows preview examples
 
@@ -201,6 +202,7 @@ src/app/admin/settings/
 **Validation:**
 - Cannot be empty; must be a relative path (no leading `/`, `\`, `C:`)
 - Every `{...}` must be a supported variable or a conditional block holding one
+- Only `seriesPart` takes a format, and only `00`, `000` or `0000`; any other `{name:format}` gives `Unsupported format`
 - `< > : " | ? *` outside variables are rejected; use `/`, not `\`
 - Invalid templates show an error message in the Paths tab (saving is not blocked)
 - Valid templates show preview paths
@@ -210,6 +212,7 @@ src/app/admin/settings/
 - `{author}/{title} ({year})` → `Douglas Adams/The Hitchhiker's Guide to the Galaxy (2005)/`
 - `{author}/{narrator}/{title}` → `Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/`
 - `{primaryAuthor}/{title}` with author `Douglas Preston, Lincoln Child` → `Douglas Preston/Relic/`
+- `{author}/{series}/{seriesPart:00} - {title}` → `Douglas Preston, Lincoln Child/Pendergast/01 - Relic/`
 
 ## Filesystem Scan Trigger
 
