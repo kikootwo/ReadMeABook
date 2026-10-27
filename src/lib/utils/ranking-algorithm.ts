@@ -539,7 +539,7 @@ export class RankingAlgorithm {
         // Check metadata markers in both normalized and original suffixes
         // G1: a colon right after the title counts only when the release subtitle agrees with the request's;
         // for a request split at " - " or ". ", so does a " - " after its main part (#466)
-        const otherSubtitle = dashSplit && titleToMatch === requiredTitle &&
+        const otherSubtitle = dashSplit && titleToMatch !== requestTitle &&
           dashNamesOtherSubtitle(afterTitleOriginal, optionalWords, normalizedAuthors, text => extractWords(text, stopWords));
         const hasMetadataSuffix = afterTitle === '' ||
                                   metadataMarkers.some(marker => afterTitle.startsWith(marker)) ||
