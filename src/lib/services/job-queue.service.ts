@@ -199,6 +199,8 @@ export interface QueueStats {
 export class JobQueueService {
   private queue: Queue.Queue;
   private redis: Redis;
+  /** Schedule ids already warned about a missing scheduled_jobs row (one warning per id) */
+  private missingScheduleWarned = new Set<string>();
 
   constructor() {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
@@ -463,12 +465,7 @@ export class JobQueueService {
     if (existingJob) {
       // Update lastRun for the scheduled job if this is a timer-triggered job
       if (payload.scheduledJobId) {
-        await prisma.scheduledJob.update({
-          where: { id: payload.scheduledJobId },
-          data: { lastRun: new Date() },
-        }).catch(err => {
-          logger.error(`Failed to update lastRun for scheduled job ${payload.scheduledJobId}`, { error: err instanceof Error ? err.message : String(err) });
-        });
+        await this.recordScheduledRun(payload.scheduledJobId);
       }
       return { ...payload, jobId: existingJob.id };
     }
@@ -488,15 +485,33 @@ export class JobQueueService {
 
     // Update lastRun for the scheduled job if this is a timer-triggered job
     if (payload.scheduledJobId) {
-      await prisma.scheduledJob.update({
-        where: { id: payload.scheduledJobId },
-        data: { lastRun: new Date() },
-      }).catch(err => {
-        logger.error(`Failed to update lastRun for scheduled job ${payload.scheduledJobId}`, { error: err instanceof Error ? err.message : String(err) });
-      });
+      await this.recordScheduledRun(payload.scheduledJobId);
     }
 
     return { ...payload, jobId: dbJob.id };
+  }
+
+  /**
+   * Set lastRun on a timer-triggered job's schedule row. A row that no longer exists
+   * (repeatable job left in Redis after its row was deleted, #222) warns once per id;
+   * the scheduler removes such repeatable jobs at its next start.
+   */
+  private async recordScheduledRun(scheduledJobId: string): Promise<void> {
+    try {
+      await prisma.scheduledJob.update({
+        where: { id: scheduledJobId },
+        data: { lastRun: new Date() },
+      });
+    } catch (err) {
+      if (typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'P2025') {
+        if (!this.missingScheduleWarned.has(scheduledJobId)) {
+          this.missingScheduleWarned.add(scheduledJobId);
+          logger.warn(`Scheduled job ${scheduledJobId} no longer exists; its repeatable job will be removed at the next restart`);
+        }
+        return;
+      }
+      logger.error(`Failed to update lastRun for scheduled job ${scheduledJobId}`, { error: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   /**
@@ -1146,8 +1161,15 @@ export class JobQueueService {
   /**
    * Get all repeatable jobs
    */
-  async getRepeatableJobs(): Promise<any[]> {
+  async getRepeatableJobs(): Promise<Queue.JobInformation[]> {
     return await this.queue.getRepeatableJobs();
+  }
+
+  /**
+   * Remove a repeatable job by its Bull key (from getRepeatableJobs)
+   */
+  async removeRepeatableJobByKey(key: string): Promise<void> {
+    await this.queue.removeRepeatableByKey(key);
   }
 }
 

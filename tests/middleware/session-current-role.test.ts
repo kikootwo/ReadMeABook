@@ -82,6 +82,16 @@ describe('admin checks use the account current role', () => {
   });
 
   describe('access token', () => {
+    it('reports the current role from getOptionalAuthUser', async () => {
+      verifyAccessTokenMock.mockReturnValue(accessPayload('admin'));
+      prismaMock.user.findUnique.mockResolvedValue(userRow('user'));
+      const { getOptionalAuthUser } = await import('@/lib/middleware/auth');
+
+      const user = await getOptionalAuthUser(makeRequest('Bearer jwt') as any);
+
+      expect(user?.role).toBe('user');
+    });
+
     it('refuses an admin route with 403 when the account is now a user', async () => {
       verifyAccessTokenMock.mockReturnValue(accessPayload('admin'));
       prismaMock.user.findUnique.mockResolvedValue(userRow('user'));
@@ -181,11 +191,11 @@ describe('admin checks use the account current role', () => {
       expect(handler).not.toHaveBeenCalled();
     });
 
-    it('reports the current role from getCurrentUserAsync with no extra lookup', async () => {
+    it('reports the current role from getOptionalAuthUser with no extra lookup', async () => {
       prismaMock.apiToken.findUnique.mockResolvedValue(tokenRow('admin', 'user'));
-      const { getCurrentUserAsync } = await import('@/lib/middleware/auth');
+      const { getOptionalAuthUser } = await import('@/lib/middleware/auth');
 
-      const user = await getCurrentUserAsync(makeRequest(`Bearer ${API_TOKEN}`) as any);
+      const user = await getOptionalAuthUser(makeRequest(`Bearer ${API_TOKEN}`) as any);
 
       expect(user?.role).toBe('user');
       expect(prismaMock.apiToken.findUnique).toHaveBeenCalledTimes(1);

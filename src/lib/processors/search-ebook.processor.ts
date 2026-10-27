@@ -13,7 +13,7 @@ import { getConfigService } from '../services/config.service';
 import { RMABLogger } from '../utils/logger';
 import { buildEbookDownloadName } from '../utils/ebook-download-name';
 import { getProwlarrService } from '../integrations/prowlarr.service';
-import { rankEbookTorrents, RankedEbookTorrent } from '../utils/ranking-algorithm';
+import { EBOOK_MAX_SIZE_MB, rankEbookTorrents, RankedEbookTorrent } from '../utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer-grouping';
 import { getLanguageForRegion } from '../constants/language-config';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
@@ -322,11 +322,11 @@ async function searchIndexers(
     return null;
   }
 
-  // Log filter info (ebooks > 20MB will be filtered)
+  // Log filter info (automatic search skips ebooks over EBOOK_MAX_SIZE_MB)
   const preFilterCount = nonBlockedResults.length;
-  const aboveThreshold = nonBlockedResults.filter(r => (r.size / (1024 * 1024)) > 20);
+  const aboveThreshold = nonBlockedResults.filter(r => (r.size / (1024 * 1024)) > EBOOK_MAX_SIZE_MB);
   if (aboveThreshold.length > 0) {
-    logger.info(`Will filter ${aboveThreshold.length} results > 20 MB (too large for ebooks)`);
+    logger.info(`Will filter ${aboveThreshold.length} results > ${EBOOK_MAX_SIZE_MB} MB (too large for ebooks)`);
   }
 
   // Get language-specific stop words for ranking
@@ -334,7 +334,7 @@ async function searchIndexers(
   const ebookLangConfig = getLanguageForRegion(ebookRegion);
 
   // Rank results with ebook-specific scoring
-  // This filters out > 20MB and uses inverted size scoring
+  // This filters out > EBOOK_MAX_SIZE_MB and uses inverted size scoring
   const rankedResults = rankEbookTorrents(nonBlockedResults, {
     title: audiobook.title,
     author: audiobook.author,
@@ -343,6 +343,7 @@ async function searchIndexers(
     indexerPriorities,
     flagConfigs,
     requireAuthor: true, // Automatic mode - prevent wrong authors
+    enforceSizeCap: true, // Automatic mode - skip oversized ebooks (#323)
     stopWords: ebookLangConfig.stopWords,
     characterReplacements: ebookLangConfig.characterReplacements,
   });
@@ -350,7 +351,7 @@ async function searchIndexers(
   // Log filter results
   const postFilterCount = rankedResults.length;
   if (postFilterCount < preFilterCount) {
-    logger.info(`Filtered out ${preFilterCount - postFilterCount} results > 20 MB`);
+    logger.info(`Filtered out ${preFilterCount - postFilterCount} results > ${EBOOK_MAX_SIZE_MB} MB`);
   }
 
   // Dual threshold filtering (same as audiobooks)

@@ -71,7 +71,11 @@ export interface RankEbookTorrentsOptions {
   requireAuthor?: boolean;                   // Enforce author presence check (default: true)
   stopWords?: string[];                      // Language-specific stop words for matching
   characterReplacements?: Record<string, string>;  // Language-specific char replacements (e.g. ß→ss)
+  enforceSizeCap?: boolean;                  // Skip results over EBOOK_MAX_SIZE_MB (default: true; interactive passes false)
 }
+
+/** Ebook size cap: automatic search skips larger results; interactive search lists them (#323) */
+export const EBOOK_MAX_SIZE_MB = 20;
 
 export interface BonusModifier {
   type: 'indexer_priority' | 'indexer_flag' | 'custom';
@@ -718,7 +722,7 @@ export class RankingAlgorithm {
    * Rank ebook torrents from indexers
    * Reuses title/author matching and seeder scoring from audiobook ranking
    * Uses ebook-specific format scoring (10 pts for match, 0 otherwise)
-   * Uses inverted size scoring (smaller = better, > 20MB filtered)
+   * Uses inverted size scoring (smaller = better, > EBOOK_MAX_SIZE_MB filtered unless enforceSizeCap is false)
    *
    * @param torrents - Array of torrent results from Prowlarr
    * @param ebook - Ebook request details (title, author, preferredFormat)
@@ -735,13 +739,13 @@ export class RankingAlgorithm {
       requireAuthor = true,  // Safe default: require author in automatic mode
       stopWords,
       characterReplacements,
+      enforceSizeCap = true,  // Safe default: automatic mode skips oversized ebooks
     } = options;
 
-    // Filter out files > 20 MB (too large for ebooks)
-    const filteredTorrents = torrents.filter((torrent) => {
-      const sizeMB = torrent.size / (1024 * 1024);
-      return sizeMB <= 20;
-    });
+    // Automatic search skips files over the cap; interactive search lists them (scored 0 for size)
+    const filteredTorrents = enforceSizeCap
+      ? torrents.filter((torrent) => torrent.size / (1024 * 1024) <= EBOOK_MAX_SIZE_MB)
+      : torrents;
 
     const ranked = filteredTorrents.map((torrent) => {
       // Detect ebook format from title
@@ -865,8 +869,8 @@ export class RankingAlgorithm {
    * Score ebook file size (15 points max, inverted - smaller is better)
    * < 5 MB = 15 pts (full)
    * 5-15 MB = 10 pts
-   * 15-20 MB = 5 pts
-   * > 20 MB = filtered out (not scored)
+   * 15-20 MB (EBOOK_MAX_SIZE_MB) = 5 pts
+   * > EBOOK_MAX_SIZE_MB = 0 pts (automatic search filters these out first)
    */
   private scoreEbookSize(torrent: TorrentResult): number {
     const sizeMB = torrent.size / (1024 * 1024);
@@ -875,11 +879,11 @@ export class RankingAlgorithm {
       return 15; // Optimal size for ebooks
     } else if (sizeMB <= 15) {
       return 10; // Acceptable, may have images
-    } else if (sizeMB <= 20) {
+    } else if (sizeMB <= EBOOK_MAX_SIZE_MB) {
       return 5;  // Large but within limit
     }
 
-    // > 20 MB should have been filtered, but return 0 as safety
+    // Over the cap: only interactive search keeps these
     return 0;
   }
 
@@ -937,8 +941,10 @@ export class RankingAlgorithm {
       notes.push('✓ Optimal file size');
     } else if (sizeMB <= 15) {
       notes.push('Good file size (may have images)');
-    } else if (sizeMB <= 20) {
+    } else if (sizeMB <= EBOOK_MAX_SIZE_MB) {
       notes.push('⚠️ Large file size');
+    } else {
+      notes.push(`⚠️ Over ${EBOOK_MAX_SIZE_MB} MB (automatic search skips it)`);
     }
 
     // Seeder notes (same logic as audiobooks)

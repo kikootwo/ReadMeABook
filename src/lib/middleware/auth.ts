@@ -9,7 +9,11 @@ import { verifyAccessToken, TokenPayload } from '../utils/jwt';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { API_TOKEN_PREFIX, isEndpointAllowed } from '../constants/api-tokens';
-import { getRegistrationRefusal, getSessionRefusal } from '../services/auth/local-account-status';
+import {
+  getRegistrationRefusal,
+  getSessionRefusal,
+  type SessionRefusal,
+} from '../services/auth/local-account-status';
 
 const logger = RMABLogger.create('Auth');
 
@@ -100,6 +104,38 @@ async function authenticateApiToken(token: string): Promise<TokenPayload | null>
   };
 }
 
+type AuthenticatedUser = NonNullable<AuthenticatedRequest['user']>;
+
+type SessionCheck =
+  | { user: AuthenticatedUser; reason?: undefined }
+  | { user?: undefined; reason: 'invalid_token' | SessionRefusal; userId?: string };
+
+/**
+ * The account check for an access token: a valid signature, then the account row
+ * (missing, deleted, pending, rejected, revoked). The role comes from the row.
+ */
+async function checkAccessToken(token: string): Promise<SessionCheck> {
+  const payload = verifyAccessToken(token);
+  if (!payload) return { reason: 'invalid_token' };
+
+  const user = await prisma.user.findUnique({
+    where: { id: payload.sub },
+    select: {
+      id: true,
+      role: true,
+      deletedAt: true,
+      sessionsInvalidatedAt: true,
+      registrationStatus: true,
+    },
+  });
+
+  const refusal = getSessionRefusal(user, payload.iat);
+  if (!user || refusal) return { reason: refusal ?? 'missing', userId: payload.sub };
+
+  // The role comes from the account, not the token, so role changes apply now
+  return { user: { ...payload, id: payload.sub, role: user.role } };
+}
+
 /**
  * Middleware: Require authentication
  * Verifies JWT token or static API token and adds user to request
@@ -158,68 +194,52 @@ export async function requireAuth(
   }
 
   // Fall back to JWT verification
-  const payload = verifyAccessToken(token);
+  const session = await checkAccessToken(token);
 
-  if (!payload) {
+  if (session.reason === 'invalid_token') {
     logger.error('Token verification failed');
-    return NextResponse.json(
-      {
-        error: 'Unauthorized',
-        message: 'Invalid or expired token',
-      },
-      { status: 401 }
-    );
+    return NextResponse.json({ error: 'Unauthorized', message: 'Invalid or expired token' }, { status: 401 });
   }
 
-  // Verify user still exists in database
-  const user = await prisma.user.findUnique({
-    where: { id: payload.sub },
-    select: {
-      id: true,
-      role: true,
-      deletedAt: true,
-      sessionsInvalidatedAt: true,
-      registrationStatus: true,
-    },
-  });
-
-  // Missing, deleted, pending-approval and rejected accounts are refused the same way;
-  // so is a token issued before the account's sessions were revoked
-  const sessionRefusal = getSessionRefusal(user, payload.iat);
-  if (!user || (sessionRefusal && sessionRefusal !== 'sessions_revoked')) {
-    logger.error('Session refused: user missing, deleted or not approved', {
-      userId: payload.sub,
-      reason: sessionRefusal,
-    });
-    return NextResponse.json(
-      {
-        error: 'Unauthorized',
-        message: 'User not found',
-      },
-      { status: 401 }
-    );
+  if (session.reason === 'sessions_revoked') {
+    logger.warn('Token issued before session invalidation', { userId: session.userId });
+    return NextResponse.json({ error: 'Unauthorized', message: 'Session has been revoked' }, { status: 401 });
   }
 
-  if (sessionRefusal === 'sessions_revoked') {
-    logger.warn('Token issued before session invalidation', { userId: payload.sub });
-    return NextResponse.json(
-      {
-        error: 'Unauthorized',
-        message: 'Session has been revoked',
-      },
-      { status: 401 }
-    );
+  // Missing, deleted, pending-approval and rejected accounts are refused the same way
+  if (!session.user) {
+    logger.error('Session refused: user missing, deleted or not approved', { userId: session.userId, reason: session.reason });
+    return NextResponse.json({ error: 'Unauthorized', message: 'User not found' }, { status: 401 });
   }
 
-  // Add user to request; the role comes from the account, not the token, so role changes apply now
   const authenticatedRequest = request as AuthenticatedRequest;
-  authenticatedRequest.user = {
-    ...payload,
-    id: payload.sub,
-    role: user.role,
-  };
+  authenticatedRequest.user = session.user;
 
   return handler(authenticatedRequest);
+}
+
+/**
+ * Optional authentication for routes that also answer without a session.
+ * Returns the caller only when the credential passes the same account checks as
+ * `requireAuth` (an API token also needs the endpoint on its allowlist); otherwise
+ * null, never a 401. Per-user details must be added only for a non-null caller.
+ */
+export async function getOptionalAuthUser(request: NextRequest): Promise<AuthenticatedUser | null> {
+  const token = extractToken(request);
+  if (!token) return null;
+
+  if (token.startsWith(API_TOKEN_PREFIX)) {
+    if (!isEndpointAllowed(request.method, request.nextUrl.pathname)) return null;
+    const apiUser = await authenticateApiToken(token);
+    return apiUser ? { ...apiUser, id: apiUser.sub } : null;
+  }
+
+  const session = await checkAccessToken(token);
+  if (!session.user) {
+    logger.debug('Optional auth: no checked caller', { userId: session.userId, reason: session.reason });
+    return null;
+  }
+  return session.user;
 }
 
 /**
@@ -251,41 +271,6 @@ export async function requireAdmin(
   }
 
   return handler(request);
-}
-
-/**
- * Helper: Get current user from request (for use in API routes).
- * JWT-only — does NOT recognize API tokens. Use `getCurrentUserAsync` if
- * the caller should also accept `rmab_`-prefixed API tokens.
- */
-export function getCurrentUser(request: NextRequest): TokenPayload | null {
-  const token = extractToken(request);
-  if (!token) return null;
-  return verifyAccessToken(token);
-}
-
-/**
- * Helper: Get current user from request, recognizing BOTH JWT sessions and
- * API tokens (`rmab_` prefix). Returns the same `TokenPayload` shape in both
- * cases so callers don't need to branch on auth type.
- *
- * Use this in routes that are open to optional auth but should still enrich
- * responses with per-user context when called by an API token holder.
- */
-export async function getCurrentUserAsync(request: NextRequest): Promise<TokenPayload | null> {
-  const token = extractToken(request);
-  if (!token) return null;
-  if (token.startsWith(API_TOKEN_PREFIX)) {
-    return authenticateApiToken(token);
-  }
-  return verifyAccessToken(token);
-}
-
-/**
- * Helper: Check if user is admin
- */
-export function isAdmin(user: TokenPayload | null): boolean {
-  return user?.role === 'admin';
 }
 
 /**

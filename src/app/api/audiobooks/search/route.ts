@@ -8,7 +8,7 @@ import { getAudibleService } from '@/lib/integrations/audible.service';
 import { enrichAudiobooksWithMatches } from '@/lib/utils/audiobook-matcher';
 import { deduplicateAndCollectGroups } from '@/lib/utils/deduplicate-audiobooks';
 import { persistDedupGroups, collapseByExistingWorks } from '@/lib/services/works.service';
-import { getCurrentUserAsync } from '@/lib/middleware/auth';
+import { getOptionalAuthUser } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
 import { annotateWithIgnoreStatus } from '@/lib/utils/ignored-audiobooks';
 
@@ -37,9 +37,8 @@ export async function GET(request: NextRequest) {
     const audibleService = getAudibleService();
     const results = await audibleService.search(query, page);
 
-    // Get current user (optional — JWT or API token — for request-status enrichment)
-    const currentUser = await getCurrentUserAsync(request);
-    const userId = currentUser?.sub || undefined;
+    // Optional caller (session or API token): request details and ignore flags only for a checked account
+    const userId = (await getOptionalAuthUser(request))?.id;
 
     // Two-pass dedup: local title/narrator/duration matching first, then collapse
     // any remaining duplicates that the works table already knows are the same book

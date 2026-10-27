@@ -55,10 +55,10 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - **#261 GET `/api/requests/:id` 500 `FetchError` for any request with a selected download:** `NextResponse.json` threw `Do not know how to serialize a BigInt` on `DownloadHistory.torrentSizeBytes`. Fix: response passes through `toJsonSafe()` (BigInt → number; Dates/Decimals untouched). Other routes `select` around the BigInt columns or convert with `Number()`; routes with a full `audiobook` include carry `fileSizeBytes`, which nothing writes yet (always null), so they serialize today.
 
 ## GET `/api/audiobooks/search`
-- Auth is optional, NOT gated by allowlist (route never calls `requireAuth`).
-- Uses `getCurrentUserAsync` to recognize both JWT sessions AND API tokens for per-user enrichment (request status, ignore status).
-- Without auth: returns generic results with no user-context annotations.
-- With JWT or `rmab_` token: returns results enriched with `isRequested`, `requestStatus`, `requestId`, `isIgnored`, etc.
+- Auth is optional (route never calls `requireAuth`). An API token counts only on allowlisted endpoints (this one is listed); elsewhere `getOptionalAuthUser` treats it as no caller.
+- Uses `getOptionalAuthUser` to recognize both JWT sessions AND API tokens (same account checks as `requireAuth`) for per-user enrichment (request status, ignore status).
+- Without a checked caller: same results with no request details (`isRequested: false`, request fields `null`) and `isIgnored: false`.
+- With a checked JWT or `rmab_` token: results enriched with `isRequested`, `requestStatus`, `requestId`, `isIgnored`, etc.
 
 ## Auth flow
 1. Request hits route; `requireAuth` extracts `Authorization: Bearer ...` token.
@@ -74,7 +74,7 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 
 ## Files
 - Constants + matcher: `src/lib/constants/api-tokens.ts`
-- Middleware: `src/lib/middleware/auth.ts` (`requireAuth`, `getCurrentUser`, `getCurrentUserAsync`)
+- Middleware: `src/lib/middleware/auth.ts` (`requireAuth`, `getOptionalAuthUser`)
 - Routes:
   - `src/app/api/user/api-tokens/route.ts` (user create/list/revoke)
   - `src/app/api/admin/api-tokens/route.ts` (admin)
@@ -82,7 +82,7 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 
 ## Tests
 - `tests/constants/api-tokens.test.ts` — matcher: positive matches, negative matches, sub-route exclusion, method case-insensitivity, allowlist/docs parity.
-- `tests/middleware/auth.middleware.test.ts` — middleware token auth path, allowlist enforcement (incl. dynamic ID match), sibling-route blocking, `getCurrentUserAsync`.
+- `tests/middleware/auth.middleware.test.ts` — middleware token auth path, allowlist enforcement (incl. dynamic ID match), sibling-route blocking, `getOptionalAuthUser`.
 - `tests/api/requests-id.route.test.ts` — owner GET 200, cross-user GET 403.
 - `tests/api/requests-id.bigint.route.test.ts` — owner/admin GET 200 with BigInt sizes as numbers (#261).
 - `tests/utils/json-safe.test.ts` — `toJsonSafe()` BigInt conversion, Date/Decimal passthrough.
