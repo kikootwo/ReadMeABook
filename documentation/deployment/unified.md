@@ -50,7 +50,7 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - Digest = multi-arch index (amd64 + arm64); BuildKit copies the TARGETPLATFORM variant. Other platforms fail the build (no match)
 - Build guard: ELF arch byte of each binary must match `uname -m`, and `-version` must equal `FFMPEG_VERSION`
 - License: GPLv3 build (no nonfree/libfdk-aac); bundled lib versions at `/usr/local/share/ffmpeg/versions.json`
-- Bump: change tag + digest on the `FROM` line AND `ARG FFMPEG_VERSION` together
+- Bump: change tag + digest on the `FROM` line AND `ARG FFMPEG_VERSION` together, plus `FFMPEG_IMAGE` + `FFMPEG_VERSION` in `.github/workflows/pr-ci.yml` (PR Tests uses the same binaries)
 - **Fixed (#230):** previously an unpinned amd64-only tarball from johnvansickle.com (host outages broke builds; arm64 got amd64 binaries)
 
 **Stages (multi-stage, from PR #279 by ChaoticSciuridae):**
@@ -126,7 +126,7 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - `ERROR: <bin> e_machine 0x.., expected 0x.. for <arch>` → wrong-arch binary copied (platform selection broken, e.g. a `--platform` added to the ffmpeg `FROM`); never ship it
 - `ERROR: expected <bin> <ver>, got: ...` → `FROM` tag/digest and `ARG FFMPEG_VERSION` disagree
 - `ERROR: no pinned static ffmpeg for <arch>` → unsupported platform (only amd64/arm64)
-- Bump: new tag + its multi-arch index digest on the `FROM` line (`docker buildx imagetools inspect mwader/static-ffmpeg:<tag>`) AND `ARG FFMPEG_VERSION`, in one commit
+- Bump: new tag + its multi-arch index digest on the `FROM` line (`docker buildx imagetools inspect mwader/static-ffmpeg:<tag>`) AND `ARG FFMPEG_VERSION`, in one commit; update `FFMPEG_IMAGE` + `FFMPEG_VERSION` in `.github/workflows/pr-ci.yml` in the same commit
 
 **Files:**
 - `dockerfile.unified` - Main Dockerfile

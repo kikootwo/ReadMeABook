@@ -34,8 +34,49 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      # Same static ffmpeg/ffprobe the image ships. FFMPEG_IMAGE (tag + digest) and
+      # FFMPEG_VERSION move together with dockerfile.unified (the "AS ffmpeg" stage and its
+      # FFMPEG_VERSION arg): bump both files in the same change.
+      - name: Install ffmpeg (pinned static build)
+        id: static-ffmpeg
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          FFMPEG_IMAGE: mwader/static-ffmpeg:9.0.2-1@sha256:f5d100184884eb3e82b0eb14bb5ebf98da99826ac824989720297fb9ef21c822
+        run: |
+          set -eu
+          docker pull "$FFMPEG_IMAGE"
+          cid="$(docker create "$FFMPEG_IMAGE" /ffmpeg)"
+          bin_dir="$RUNNER_TEMP/static-ffmpeg"
+          mkdir -p "$bin_dir"
+          docker cp "$cid:/ffmpeg" "$bin_dir/ffmpeg"
+          docker cp "$cid:/ffprobe" "$bin_dir/ffprobe"
+          docker rm "$cid" > /dev/null
+          echo "$bin_dir" >> "$GITHUB_PATH"
+
+      - name: Check ffmpeg version
+        if: steps.static-ffmpeg.outcome == 'success'
+        env:
+          FFMPEG_VERSION: '9.0.2'
+        run: |
+          set -eu
+          for bin in ffmpeg ffprobe; do
+            ver="$("$bin" -version | head -n 1)"
+            case "$ver" in
+              "$bin version $FFMPEG_VERSION "*) echo "OK: $ver ($(command -v "$bin"))" ;;
+              *) echo "::error::expected $bin $FFMPEG_VERSION, got: $ver"; exit 1 ;;
+            esac
+          done
+
+      # Only when the pull/copy above failed or timed out. The runner's apt ffmpeg is a
+      # different version from the one the image ships, so the run is flagged with a warning.
+      - name: Install ffmpeg (apt fallback)
+        if: steps.static-ffmpeg.outcome != 'success'
+        timeout-minutes: 6
+        run: |
+          echo "::warning::Pinned static ffmpeg unavailable; falling back to apt ffmpeg (not the version the image ships)"
+          sudo timeout 300 sh -c 'apt-get update && apt-get install -y ffmpeg'
+          ffmpeg -version | head -n 1
 
       - name: Run tests
         run: npm test

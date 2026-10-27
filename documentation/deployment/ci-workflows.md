@@ -12,6 +12,12 @@ Three workflows in `.github/workflows/`. No workflow builds the Docker image on 
 | `run-tests.yml` (Backend Tests) | `workflow_dispatch`, `workflow_call` | Node 24, `npm test`, parses results, optional Discord post (skipped when `WEBHOOK_URL` is empty) | `contents: read` |
 | `build-unified-image.yml` | `v*` tag push, `workflow_dispatch` | `test` (run-tests) → `build-and-push` | top `contents: read`; `build-and-push` adds `packages: write` |
 
+## pr-ci.yml ffmpeg
+- **Source:** the static ffmpeg/ffprobe the image ships: `docker pull` of `mwader/static-ffmpeg` by digest, `docker create` + `docker cp` `/ffmpeg` `/ffprobe` into `$RUNNER_TEMP/static-ffmpeg`, added to `$GITHUB_PATH`. Replaced apt install (stalled 20+ min on some runs).
+- **Pin:** `FFMPEG_IMAGE` + `FFMPEG_VERSION` (step env) must match `dockerfile.unified` (`AS ffmpeg` stage + `FFMPEG_VERSION` arg); bump both files together.
+- **Check:** `ffmpeg`/`ffprobe -version` first line must start `<bin> version 9.0.2 `, else the job fails.
+- **Fallback:** static step has `timeout-minutes: 5` + `continue-on-error`; on failure/timeout, `sudo timeout 300` apt install with a `::warning::` (version not checked). No cache.
+
 ## build-unified-image.yml
 - **Publish condition:** `startsWith(github.ref, 'refs/tags/v')`, i.e. a `v*` tag push or a dispatch run on a tag.
 - **Tag runs only:** ghcr login, `push`, `cache-to: type=gha,mode=max`, `DOCKER_BUILD_SUMMARY`, deployment-instructions summary, image Discord post.

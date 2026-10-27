@@ -157,6 +157,25 @@ describe('processDownloadTorrent', () => {
     });
   });
 
+  // #422: a hybrid's client ID is its v2 form; the row's torrentHash stays the v1 info hash
+  it('records the v1 info hash from the add result as torrentHash when the client ID differs', async () => {
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue({
+      clientType: 'qbittorrent',
+      protocol: 'torrent',
+      addDownload: vi.fn().mockResolvedValue({ id: 'v2-id', alreadyInClient: false, infoHash: 'v1-hash' }),
+    });
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({ id: 'client-1', type: 'qbittorrent', enabled: true });
+    prismaMock.request.findUnique.mockResolvedValue({ type: 'audiobook', user: { plexUsername: 'testuser' } });
+    prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-1' });
+
+    const { processDownloadTorrent } = await import('@/lib/processors/download-torrent.processor');
+    await processDownloadTorrent(torrentPayload);
+
+    expect(prismaMock.downloadHistory.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ downloadClientId: 'v2-id', torrentHash: 'v1-hash' }),
+    });
+  });
+
   it('routes NZB downloads to SABnzbd', async () => {
     const sabClientMock = {
       clientType: 'sabnzbd',

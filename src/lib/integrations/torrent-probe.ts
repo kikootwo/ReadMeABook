@@ -18,13 +18,15 @@ function shape(value: unknown): string {
 const sameHash = (value: unknown, hash: string) =>
   typeof value === 'string' && value.toLowerCase() === hash.toLowerCase();
 
-/** qBittorrent GET /torrents/info?hashes=: HTTP 200 and a JSON list (some compatible clients ignore the filter) */
-export function qbittorrentProbeMatch(status: number, data: unknown, hash: string): Record<string, unknown> | null {
+/**
+ * qBittorrent GET /torrents/info: HTTP 200 and a JSON list, else throws. The caller matches the
+ * torrent (some compatible clients ignore the filter; hybrids may be listed by another ID).
+ */
+export function qbittorrentProbeList(status: number, data: unknown, hash: string): Record<string, unknown>[] {
   if (status !== 200 || !Array.isArray(data)) {
     throw new Error(`qBittorrent answered the lookup of ${hash} with HTTP ${status} and ${shape(data)}, not a torrent list`);
   }
-  const match = data.find((t) => t && typeof t === 'object' && sameHash((t as Record<string, unknown>).hash, hash));
-  return (match as Record<string, unknown>) ?? null;
+  return data as Record<string, unknown>[];
 }
 
 /** Transmission torrent-get: result 'success' and arguments.torrents a list */

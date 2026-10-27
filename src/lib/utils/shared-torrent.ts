@@ -9,6 +9,7 @@
  */
 
 import { prisma } from '../db';
+import { torrentHashForms } from '../integrations/qbittorrent-ids';
 
 export interface ActiveRequestRef {
   id: string;
@@ -17,7 +18,7 @@ export interface ActiveRequestRef {
 
 /**
  * Active (not deleted) requests other than `requestId` whose selected
- * download is the torrent `torrentHash`. Empty when there is no hash.
+ * download is the torrent `torrentHash` (hex and base32 forms match each other). Empty when there is no hash.
  */
 export async function otherActiveRequestsUsingTorrent(
   requestId: string,
@@ -30,7 +31,7 @@ export async function otherActiveRequestsUsingTorrent(
       deletedAt: null,
       downloadHistory: {
         some: {
-          torrentHash,
+          torrentHash: { in: torrentHashForms(torrentHash) },
           selected: true,
         },
       },

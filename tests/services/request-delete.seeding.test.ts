@@ -149,7 +149,7 @@ describe('deleteRequest seeding rule', () => {
     ['incomplete', 'downloading'],
   ])('never removes a torrent (%s) that another active request still uses', async (_label, downloadStatus) => {
     prismaMock.request.findMany.mockImplementation(async (args: any) =>
-      args?.where?.downloadHistory?.some?.torrentHash === 'hash-1' ? [{ id: 'req-2', status: 'downloaded' }] : []
+      args?.where?.downloadHistory?.some?.torrentHash?.in?.includes('hash-1') ? [{ id: 'req-2', status: 'downloaded' }] : []
     );
 
     const { result, client } = await deleteWith({ seedingTimeMinutes: 60, ratioLimit: 1, seedingTime: 3600, ratio: 2, downloadStatus,

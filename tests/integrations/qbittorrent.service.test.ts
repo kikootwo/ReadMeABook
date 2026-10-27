@@ -86,16 +86,6 @@ describe('QBittorrentService', () => {
     expect(progress.state).toBe('paused');
   });
 
-  it('extracts info hash from magnet links', () => {
-    const service = new QBittorrentService('http://qb', 'user', 'pass');
-    const hash = (service as any).extractHashFromMagnet(
-      'magnet:?xt=urn:btih:0123456789ABCDEF0123456789ABCDEF01234567'
-    );
-
-    expect(hash).toBe('0123456789abcdef0123456789abcdef01234567');
-    expect((service as any).extractHashFromMagnet('magnet:?xt=urn:btih:')).toBeNull();
-  });
-
   it('maps allocating state to downloading', () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     const progress = service.getDownloadProgress({
@@ -574,7 +564,7 @@ describe('QBittorrentService', () => {
 
     const result = await service.addTorrent('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567');
 
-    expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: true });
+    expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: true, infoHash: '0123456789abcdef0123456789abcdef01234567' });
     expect(clientMock.post).not.toHaveBeenCalled();
   });
 
@@ -588,7 +578,7 @@ describe('QBittorrentService', () => {
 
     const result = await service.addTorrent('http://example.com/file.torrent');
 
-    expect(result).toEqual({ id: 'hash-1', alreadyInClient: true });
+    expect(result).toEqual({ id: 'hash-1', alreadyInClient: true, infoHash: 'hash-1' });
     expect(clientMock.post).not.toHaveBeenCalled();
   });
 
@@ -596,7 +586,7 @@ describe('QBittorrentService', () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=add';
     vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(undefined);
-    vi.spyOn(service as any, 'getTorrent').mockRejectedValue(new Error('not found'));
+    clientMock.get.mockResolvedValue({ status: 200, data: [] }); // lookups by ID and the full list: absent
     clientMock.post.mockResolvedValue({ data: 'Ok.' });
 
     const result = await service.addTorrent(
@@ -604,7 +594,7 @@ describe('QBittorrentService', () => {
       { tags: ['tag1', 'tag2'] }
     );
 
-    expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: false });
+    expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: false, infoHash: '0123456789abcdef0123456789abcdef01234567' });
     expect(clientMock.post).toHaveBeenCalledWith(
       '/torrents/add',
       expect.any(URLSearchParams),
@@ -626,7 +616,7 @@ describe('QBittorrentService', () => {
   it('throws when qBittorrent rejects magnet uploads', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=rejected';
-    vi.spyOn(service as any, 'getTorrent').mockRejectedValue(new Error('not found'));
+    clientMock.get.mockResolvedValue({ status: 200, data: [] }); // lookups by ID and the full list: absent
     clientMock.post.mockResolvedValue({ data: 'Nope' });
 
     await expect(
@@ -692,7 +682,7 @@ describe('QBittorrentService', () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=ok';
     vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(undefined);
-    vi.spyOn(service as any, 'getTorrent').mockRejectedValue(new Error('not found'));
+    clientMock.get.mockResolvedValue({ status: 200, data: [] });
 
     axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent') });
     parseTorrentMock.mockResolvedValueOnce({ infoHash: 'hash-1', name: 'Book' });
@@ -700,7 +690,7 @@ describe('QBittorrentService', () => {
 
     const result = await service.addTorrent('http://example.com/file.torrent');
 
-    expect(result).toEqual({ id: 'hash-1', alreadyInClient: false });
+    expect(result).toEqual({ id: 'hash-1', alreadyInClient: false, infoHash: 'hash-1' });
     expect(clientMock.post).toHaveBeenCalledWith(
       '/torrents/add',
       expect.any(Object),
@@ -773,7 +763,7 @@ describe('QBittorrentService', () => {
   it('throws when qBittorrent rejects torrent file uploads', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=reject';
-    vi.spyOn(service as any, 'getTorrent').mockRejectedValue(new Error('not found'));
+    clientMock.get.mockResolvedValue({ status: 200, data: [] });
 
     axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent') });
     parseTorrentMock.mockResolvedValueOnce({ infoHash: 'hash-2', name: 'Book' });
@@ -1365,7 +1355,7 @@ describe('QBittorrentService', () => {
 
     it('omits Cookie header on requests when auth-optional', async () => {
       const service = new QBittorrentService('http://qb', '', '');
-      vi.spyOn(service as any, 'getTorrent').mockRejectedValue(new Error('not found'));
+      clientMock.get.mockResolvedValue({ status: 200, data: [] }); // lookups by ID and the full list: absent
       clientMock.post.mockResolvedValue({ data: 'Ok.' });
 
       await (service as any).addMagnetLink(
