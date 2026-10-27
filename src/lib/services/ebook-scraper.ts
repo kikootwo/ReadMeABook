@@ -9,6 +9,7 @@ import * as cheerio from 'cheerio';
 import fs from 'fs/promises';
 import path from 'path';
 import { RMABLogger } from '../utils/logger';
+import { capGraphemeUnits, capTitleAuthorBytes } from '../utils/path-component';
 
 // Module-level logger (renamed to avoid shadowing function parameter 'logger')
 const moduleLogger = RMABLogger.create('EbookScraper');
@@ -720,22 +721,24 @@ async function downloadFile(
  * Sanitize filename for e-book
  * Format: "[Title] - [Author].[format]"
  * Note: format should be the actual detected format (e.g., 'pdf', 'epub'), not 'any'
+ * At most 255 bytes: the title is cut first, the author kept whole when it can be (#474)
  */
 function sanitizeEbookFilename(title: string, author: string, format: string): string {
-  const sanitize = (str: string): string => {
-    return str
-      .replace(/[<>:"/\\|?*]/g, '') // Remove invalid chars
-      .replace(/\s+/g, ' ') // Collapse spaces
-      .trim()
-      .slice(0, 100); // Limit length
-  };
+  const sanitize = (str: string): string =>
+    capGraphemeUnits(
+      str
+        .replace(/[<>:"/\\|?*]/g, '') // Remove invalid chars
+        .replace(/\s+/g, ' ') // Collapse spaces
+        .trim(),
+      100, // Limit length, cut between characters
+    );
 
   const cleanTitle = sanitize(title);
   const cleanAuthor = sanitize(author);
   // Use the actual format passed in (should already be the detected format from URL)
   const cleanFormat = format.toLowerCase();
 
-  return `${cleanTitle} - ${cleanAuthor}.${cleanFormat}`;
+  return capTitleAuthorBytes(cleanTitle, cleanAuthor, ' - ', `.${cleanFormat}`);
 }
 
 /**

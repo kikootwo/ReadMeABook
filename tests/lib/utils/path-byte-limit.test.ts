@@ -112,3 +112,29 @@ describe('renamed file names fit in 255 bytes with " - N" and the extension inta
     expect(buildRenamedFilename(template, vars, ext, index)).toBe(expected);
   });
 });
+
+// A joined family emoji: four people and three joiners, 11 UTF-16 code units, one character on screen
+const FAMILY = [0x1f468, 0x1f469, 0x1f467, 0x1f466].map((c) => String.fromCodePoint(c)).join(String.fromCharCode(0x200d));
+
+describe('path template: the 200-unit variable cap never splits a character (#474)', () => {
+  it('a title ending in a family emoji at the cap drops the whole emoji', () => {
+    const result = substituteTemplate('{author}/{title}', { author: 'A', title: `${'a'.repeat(196)}${FAMILY}` });
+    expect(result).toBe(`A/${'a'.repeat(196)}`);
+  });
+
+  it('a renamed file whose title ends in a family emoji at the cap drops the whole emoji', () => {
+    const name = buildRenamedFilename('{title}', { author: 'A', title: `${'a'.repeat(196)}${FAMILY}` }, '.m4b');
+    expect(name).toBe(`${'a'.repeat(196)}.m4b`);
+  });
+
+  it('the 200-unit cap on a renamed name is cut between characters too', () => {
+    const vars: TemplateVariables = { author: `${'b'.repeat(40)}${FAMILY}`, title: 'a'.repeat(150) };
+    expect(buildRenamedFilename('{title} {author}', vars, '.m4b')).toBe(`${'a'.repeat(150)} ${'b'.repeat(40)}.m4b`);
+  });
+
+  it('an emoji that ends exactly at the cap is kept', () => {
+    const title = `${'a'.repeat(189)}${FAMILY}`; // 200 code units
+    expect(substituteTemplate('{author}/{title}', { author: 'A', title })).toBe(`A/${title}`);
+    expect(buildRenamedFilename('{title}', { author: 'A', title }, '.m4b')).toBe(`${title}.m4b`);
+  });
+});
