@@ -270,6 +270,7 @@ describe('processScanPlex', () => {
         {
           id: 'ab-1',
           title: 'Stale Book',
+          filePath: process.cwd(), // files still on disk: back to downloaded (#214)
           requests: [{ id: 'req-1', status: 'available' }],
         },
       ])
@@ -286,6 +287,7 @@ describe('processScanPlex', () => {
           title: 'Orphaned Book',
           plexGuid: null,
           absItemId: 'missing-guid',
+          filePath: process.cwd(),
           requests: [{ id: 'req-2', status: 'available' }],
         },
       ]);

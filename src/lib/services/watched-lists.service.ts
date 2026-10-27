@@ -317,7 +317,7 @@ async function createRequestsForUser(
         stats.requestsCreated++;
         log.info(`Auto-requested "${book.title}" by ${book.author} for ${username}`);
       } else {
-        // already_available, being_processed, duplicate, ignored, cancelled_by_user, retry_not_due — all expected
+        // already_available, being_processed, duplicate, ignored, cancelled_by_user, retry_not_due, removed_from_library — all expected
         stats.skippedExisting++;
       }
     } catch (error) {

@@ -177,6 +177,7 @@
 **"How does the release blocklist work?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md)
 **"Why does the same bad release keep getting re-downloaded?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md) (it shouldn't anymore — auto-blocked on permanent failure)
 **"Why didn't shelf sync / a watch re-request my failed or cancelled book?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md#automatic-re-requests-409) (cancelled: never; a failure that blocked nothing: 1, 3, 7, 14, then every 30 days; pressing Request retries at once)
+**"I deleted a book from the library; why is its request failed / why wasn't it re-downloaded?"** → [backend/services/scheduler.md](backend/services/scheduler.md) (plex_library_scan: files gone → `failed` "Removed from library", request it again by hand; never re-requested automatically, #214)
 **"How do I unblock a release?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md) (admin → /admin/blocklist → Unblock, or chip on the request row)
 **"How does the admin book info modal work?"** → [admin-features/request-approval.md](admin-features/request-approval.md#ui-features), [frontend/components.md](frontend/components.md#component-apis)
 **"How do I customize audiobook folder organization?"** → [settings-pages.md](settings-pages.md#audiobook-organization-template), [phase3/file-organization.md](phase3/file-organization.md#target-structure)
