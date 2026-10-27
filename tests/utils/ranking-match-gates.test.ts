@@ -301,4 +301,28 @@ describe('apostrophes: a release name that drops or splits the apostrophe is the
   it('a longer title that adds a possessive is still not the requested title', () => {
     expect(rank('The Housemaids Secret - Freida McFadden [M4B]', 'The Housemaid', 'Freida McFadden').total).toBeLessThan(50);
   });
+
+  // A request word without the apostrophe is a different word: a possessive release of the same author
+  // scores as on main (match 0, total 40 here) and is never picked automatically
+  it.each([
+    ["David Levithan - The Lover's Dictionary [M4B]", 'The Lovers', 'David Levithan'],
+    ["Rick Riordan - The Titan's Curse [M4B]", 'The Titans', 'Rick Riordan'],
+    ["Margaret Atwood - The Handmaid's Tale [M4B]", 'The Handmaids', 'Margaret Atwood'],
+    ["Liane Moriarty - The Husband's Secret [M4B]", 'The Husbands', 'Liane Moriarty'],
+    ["Orson Scott Card - Ender's Game [M4B]", 'Enders', 'Orson Scott Card'],
+    ['Orson Scott Card - Ender’s Game [M4B]', 'Enders Game', 'Orson Scott Card'],
+  ])('a possessive release for a request without the apostrophe: %s for "%s"', (release, title, author) => {
+    expect(rank(release, title, author)).toEqual({ match: 0, total: 40 });
+    expect(rank(release, title, author, { requireAuthor: false }).match).toBe(0);
+  });
+
+  it('a possessive release still matches the request that has the apostrophe', () => {
+    expect(rank("Margaret Atwood - The Handmaid's Tale [M4B]", "The Handmaid's Tale", 'Margaret Atwood').total).toBeGreaterThanOrEqual(50);
+    expect(rank('Liane Moriarty - The Husband’s Secret [M4B]', "The Husband's Secret", 'Liane Moriarty').total).toBeGreaterThanOrEqual(50);
+  });
+
+  it("a kept possessive on the author's name still counts as the author", () => {
+    const withPossessive = rank("Stephen King's The Stand [M4B]", 'The Stand', 'Stephen King');
+    expect(withPossessive.total).toBeGreaterThanOrEqual(50);
+  });
 });

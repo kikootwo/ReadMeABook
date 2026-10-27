@@ -5,10 +5,12 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  apostropheEndingWords,
   foldForMatching,
   hasNonLatinLetter,
   hasUnspacedScript,
   isWordInTitle,
+  keepUnrequestedApostrophes,
   normalizeForMatching,
 } from '@/lib/utils/match-normalize';
 
@@ -164,6 +166,37 @@ describe('foldForMatching', () => {
   it('folds apostrophes the way the normalizer does, keeping other punctuation', () => {
     expect(foldForMatching("Orson Scott Card - Ender's Game [MP3]")).toBe('orson scott card - enders game [mp3]');
     expect(foldForMatching("Freida McFadden - L'intruse (2026)")).toBe('freida mcfadden - l intruse (2026)');
+  });
+});
+
+describe('release apostrophes fold only where the request has one (#316)', () => {
+  it.each([
+    ["Ender's Game", ['enders']],
+    ['Ender’s Game', ['enders']],
+    ["Tom Clancy's Op-Center", ['clancys']],
+    ["Don't Look Back, We'll Go", ['dont', 'well']],
+    ["L'intruse", []],
+    ['Enders Game', []],
+  ])('apostropheEndingWords(%s)', (title, words) => {
+    expect([...apostropheEndingWords(title)]).toEqual(words);
+  });
+
+  it.each([
+    // [release, request, normalized release]
+    ["Orson Scott Card - Ender's Game", "Ender's Game", 'orson scott card enders game'],
+    ['Orson Scott Card - Ender’s Game', "Ender's Game", 'orson scott card enders game'],
+    ["Orson Scott Card - Ender's Game", 'Enders', 'orson scott card ender\uA78Cs game'],
+    ["David Levithan - The Lover's Dictionary", 'The Lovers', 'david levithan the lover\uA78Cs dictionary'],
+    ['Rick Riordan - The Titan’s Curse', 'The Titans', 'rick riordan the titan\uA78Cs curse'],
+    ["Stephen King's It", 'It', 'stephen king\uA78Cs it'],
+    ['Enders.Game', "Ender's Game", 'enders game'],
+    ["L'Intruse - 2026", 'Intruse', 'l intruse 2026'],
+  ])('%s for "%s" -> %s', (release, request, expected) => {
+    const kept = keepUnrequestedApostrophes(release, apostropheEndingWords(request));
+    expect(normalizeForMatching(kept)).toBe(expected);
+    // A kept apostrophe survives every later normalization
+    expect(normalizeForMatching(normalizeForMatching(kept))).toBe(expected);
+    expect(normalizeForMatching(foldForMatching(kept))).toBe(expected);
   });
 });
 

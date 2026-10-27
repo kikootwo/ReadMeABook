@@ -20,6 +20,13 @@ const NON_WORD_RE = /[^\p{L}\p{M}\p{N}\s]/gu;
 const TYPOGRAPHIC_APOSTROPHE_RE = /[\u2018\u2019\u201B]/g;
 /** An apostrophe before an English ending (possessive or contraction): Ender's, don't, we'll, 90's */
 const ENDING_APOSTROPHE_RE = /(?<=[\p{L}\p{M}\p{N}])'(?=(?:s|t|d|m|ll|re|ve)(?![\p{L}\p{M}\p{N}]))/giu;
+/** A word with an apostrophe (any form, fullwidth too) before an English ending, in raw text: stem, ending */
+const ENDING_WORD_RE = /([\p{L}\p{M}\p{N}]+)['\u2018\u2019\u201B\uFF07](s|t|d|m|ll|re|ve)(?![\p{L}\p{M}\p{N}])/giu;
+/**
+ * Stands in for a release apostrophe the request does not have (keepUnrequestedApostrophes):
+ * U+A78C, a Latin letter shaped like an apostrophe, so every normalization keeps the word whole
+ */
+export const KEPT_APOSTROPHE = '\uA78C';
 /** A letter in any script other than Latin */
 const NON_LATIN_LETTER_RE = /(?!\p{sc=Latin})\p{L}/u;
 /**
@@ -51,6 +58,31 @@ export function hasNonLatinLetter(text: string): boolean {
  */
 export function foldApostrophes(text: string): string {
   return text.replace(TYPOGRAPHIC_APOSTROPHE_RE, "'").replace(ENDING_APOSTROPHE_RE, '').replace(/'/g, ' ');
+}
+
+/** The normalized word an apostrophe-ending match folds to: "Ender" + "s" -> "enders" */
+const endingWord = (stem: string, ending: string, characterReplacements?: Record<string, string>): string =>
+  normalizeForMatching(stem + ending, characterReplacements).split(' ').pop() ?? '';
+
+/** Words a title writes with an apostrophe before an English ending, normalized: "Ender's Game" -> {"enders"} */
+export function apostropheEndingWords(title: string, characterReplacements?: Record<string, string>): Set<string> {
+  return new Set([...title.matchAll(ENDING_WORD_RE)].map((m) => endingWord(m[1], m[2], characterReplacements)).filter(Boolean));
+}
+
+/**
+ * Release side of the apostrophe fold: a release word with an apostrophe ending folds only when the
+ * request writes that word with one too (`requested`, from apostropheEndingWords). Any other keeps
+ * its apostrophe as KEPT_APOSTROPHE, one word that matches no request word, as before #316.
+ *   for "Ender's Game": "Ender's Game" -> unchanged (folds to "enders game"); "Enders.Game" matches too
+ *   for "The Lovers":   "The Lover's Dictionary" -> "The Loverꞌs Dictionary" (no match on "lovers")
+ */
+export function keepUnrequestedApostrophes(
+  release: string,
+  requested: Set<string>,
+  characterReplacements?: Record<string, string>,
+): string {
+  return release.replace(ENDING_WORD_RE, (whole, stem: string, ending: string) =>
+    requested.has(endingWord(stem, ending, characterReplacements)) ? whole : `${stem}${KEPT_APOSTROPHE}${ending}`);
 }
 
 /**

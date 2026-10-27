@@ -144,6 +144,24 @@ describe('ProwlarrService.searchWithVariations: fallback pass (#316)', () => {
     expect(queries(search)).toEqual([`${title} ${author}`, title]);
   });
 
+  it('sends no subtitle-free query shorter than 3 letters ("Re:Zero" sends no "Re")', async () => {
+    const { service, search } = await serviceWithSpy();
+    search.mockResolvedValue([]);
+
+    await service.searchWithVariations('Re:Zero', 'Tappei Nagatsuki', filters);
+
+    expect(queries(search)).toEqual(['Re:Zero Tappei Nagatsuki', 'Re:Zero', 'Re Zero Tappei Nagatsuki', 'Re Zero']);
+  });
+
+  it('still sends a two-character subtitle-free title in a non-Latin script', async () => {
+    const { service, search } = await serviceWithSpy();
+    search.mockResolvedValue([]);
+
+    await service.searchWithVariations('三体: 黑暗森林', '刘慈欣', filters);
+
+    expect(queries(search)).toEqual(['三体: 黑暗森林 刘慈欣', '三体: 黑暗森林', '三体 刘慈欣', '三体']);
+  });
+
   it('sends admin custom search terms exactly as typed, with no fallback', async () => {
     const { service, search } = await serviceWithSpy();
     search.mockResolvedValue([]);
@@ -177,5 +195,20 @@ describe('ProwlarrService.searchWithVariations: fallback pass (#316)', () => {
 
     expect(search).toHaveBeenCalledTimes(2);
     expect(results).toEqual([]);
+  });
+});
+
+describe('hasUsableResult: apostrophes as in ranking (#316)', () => {
+  const named = (title: string) => [{ ...result('a'), title }];
+
+  it.each([
+    ["Ender's Game", 'Enders.Game.Orson.Scott.Card.MP3', true],
+    ["Ender's Game", "Orson Scott Card - Ender's Game [M4B]", true],
+    ["The Lover's Dictionary", "David Levithan - The Lover's Dictionary [M4B]", true],
+    ['The Lovers', "David Levithan - The Lover's Dictionary [M4B]", false],
+    ['Enders', "Orson Scott Card - Ender's Game [M4B]", false],
+  ])('%s: %s -> %s', async (title, release, usable) => {
+    const { hasUsableResult } = await import('@/lib/integrations/prowlarr-query-variations');
+    expect(hasUsableResult(title, named(release) as never)).toBe(usable);
   });
 });

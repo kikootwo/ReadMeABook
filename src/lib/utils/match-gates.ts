@@ -5,7 +5,7 @@
 
 import { compareTwoStrings } from 'string-similarity';
 import { collapseInitials, matchesByInitials } from './author-initials';
-import { foldForMatching, FULLWIDTH_RE, fromFullwidth, hasUnspacedScript, normalizeForMatching } from './match-normalize';
+import { foldForMatching, FULLWIDTH_RE, fromFullwidth, hasUnspacedScript, KEPT_APOSTROPHE, normalizeForMatching } from './match-normalize';
 
 const DIGITS_RE = /^\d+$/;
 /** English number words, folded to digits for the coverage and number checks only */
@@ -60,8 +60,10 @@ export function splitPositionNumbers(title: string): Set<string> {
 
 // ========== G3: author names as whole words ==========
 
+/** A possessive or plural ending on a name: 's (also with a kept apostrophe, keepUnrequestedApostrophes) or s */
+const NAME_ENDING = `(?:['${KEPT_APOSTROPHE}]s|s)`;
 /** A name as whole words: no letter may touch it (digits may), a trailing 's or s is allowed */
-const namePattern = (name: string): string => `(?<![\\p{L}\\p{M}])${escapeRe(name)}(?:'s|s)?(?![\\p{L}\\p{M}])`;
+const namePattern = (name: string): string => `(?<![\\p{L}\\p{M}])${escapeRe(name)}${NAME_ENDING}?(?![\\p{L}\\p{M}])`;
 /** The name, plus its words glued together ("lee child" → "leechild") */
 const nameForms = (author: string): string[] => {
   const glued = author.replace(/ /g, '');
@@ -189,7 +191,7 @@ const endsWithAuthor = (tokens: string[], authors: string[]): boolean => {
     const words = author.split(' ');
     const forms = nameForms(author);
     if (words.length >= 2) forms.push(words[words.length - 1], `${words[words.length - 1]} ${words[0]}`);
-    if (forms.some((form) => new RegExp(`(?:^| )${escapeRe(form)}(?:'s|s| s)?$`, 'u').test(before))) return true;
+    if (forms.some((form) => new RegExp(`(?:^| )${escapeRe(form)}(?:${NAME_ENDING}| s)?$`, 'u').test(before))) return true;
     return ` ${collapseInitials(before)}`.endsWith(` ${collapseInitials(author)}`);
   });
 };

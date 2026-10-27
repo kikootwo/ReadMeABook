@@ -5,9 +5,11 @@
 
 import type { TorrentResult } from '../utils/ranking-algorithm';
 import { foldNumberWord, foldReleaseWords } from '../utils/match-gates';
-import { foldApostrophes, isWordInTitle, normalizeForMatching } from '../utils/match-normalize';
+import {
+  apostropheEndingWords, foldApostrophes, hasNonLatinLetter, isWordInTitle, keepUnrequestedApostrophes, normalizeForMatching,
+} from '../utils/match-normalize';
 
-/** Ranking's default (English) stop words: a release name may leave these out */
+/** Ranking's default (English) stop words: a release name may leave these out (the fallback does not know the language) */
 const STOP_WORDS = ['the', 'a', 'an', 'of', 'on', 'in', 'at', 'by', 'for'];
 /** Ranking's word-coverage bar (Stage 1): share of the required title words a release must hold */
 const MIN_COVERAGE = 0.8;
@@ -15,6 +17,8 @@ const MIN_COVERAGE = 0.8;
 const INNER_PUNCTUATION_RE = /[\p{L}\p{M}\p{N}][^\p{L}\p{M}\p{N}\s]+(?=[\p{L}\p{M}\p{N}])/u;
 /** Subtitle split: a colon (PR #304), or ". " right after a number ("Primal Hunter 1. Une aventure") */
 const SUBTITLE_SPLIT_RE = /:|(?<=\d)\.\s/;
+/** A subtitle-free base with fewer letters and digits than this is too vague to send ("Re:Zero" -> "Re") */
+const MIN_BASE_CHARACTERS = 3;
 /** A bracketed part of a title, which ranking treats as optional */
 const BRACKETED_RE = /[([{][^)\]}]*[)\]}]/g;
 
@@ -49,12 +53,18 @@ export function strippedTitle(title: string): string | null {
   return stripped || null;
 }
 
+/** True when a subtitle-free base names enough to search for: 3+ letters and digits, or any non-Latin letter (三体) */
+const searchableBase = (base: string): boolean =>
+  Array.from(base.replace(/[^\p{L}\p{M}\p{N}]/gu, '')).length >= MIN_BASE_CHARACTERS || hasNonLatinLetter(base);
+
 /**
  * Titles for the fallback pass, in order: the stripped title, then the subtitle-free title
- * (stripped too when it has punctuation inside a word). Empty when there is nothing to vary.
+ * (stripped too when it has punctuation inside a word; left out when it is too short to name
+ * the book). Empty when there is nothing to vary.
  */
 export function fallbackTitles(title: string): string[] {
-  const base = subtitleFreeTitle(title);
+  const subtitleFree = subtitleFreeTitle(title);
+  const base = subtitleFree && searchableBase(subtitleFree) ? subtitleFree : null;
   const titles: string[] = [];
   for (const candidate of [strippedTitle(title), base && (strippedTitle(base) ?? base)]) {
     if (candidate && !titles.some((other) => sameQuery(other, candidate))) titles.push(candidate);
@@ -71,14 +81,16 @@ function requiredWords(title: string): string[] {
 }
 
 /**
- * True when some result names the title: it holds 80% of the required title words, the
- * word-coverage rule ranking applies first. Apostrophes and numbers fold as in ranking.
+ * True when some result names the title: it holds 80% of the required title words, close to the
+ * word-coverage check ranking applies first. Apostrophes and numbers fold as in ranking. Unlike
+ * ranking, the stop words are always English, and a number then ". " also starts a subtitle.
  */
 export function hasUsableResult(title: string, results: TorrentResult[]): boolean {
   const required = requiredWords(title);
   if (required.length === 0) return results.length > 0;
+  const requested = apostropheEndingWords(title);
   return results.some((result) => {
-    const name = normalizeForMatching(result.title ?? '');
+    const name = normalizeForMatching(keepUnrequestedApostrophes(result.title ?? '', requested));
     const words = foldReleaseWords(name.split(' ').filter(Boolean));
     const found = required.filter((word) => isWordInTitle(word, words, name)).length;
     return found / required.length >= MIN_COVERAGE;
