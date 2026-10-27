@@ -428,6 +428,7 @@ async function searchIndexersForInteractive(
     indexerPriorities,
     flagConfigs,
     requireAuthor: false,
+    enforceSizeCap: false, // List oversized ebooks; the user decides (#323)
     stopWords: rankLangConfig.stopWords,
     characterReplacements: rankLangConfig.characterReplacements,
   });

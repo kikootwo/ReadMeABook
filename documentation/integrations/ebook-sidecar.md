@@ -145,7 +145,7 @@ Ebook torrent ranking uses unified algorithm with ebook-specific scoring:
 | **Seeder Count** | 15 pts | Logarithmic scaling (same as audiobooks) |
 
 **Filtering:**
-- Files > 20 MB are filtered out (too large for ebooks)
+- Automatic search skips files > `EBOOK_MAX_SIZE_MB` (20 MB, `ranking-algorithm.ts`); interactive search lists them (size score 0, note `Over 20 MB`) via `enforceSizeCap: false`. Anna's Archive results have no size cap
 - Dual threshold: base score >= 50 AND final score >= 50
 
 **Bonus System:** Same as audiobooks (indexer priority, flag bonuses)
@@ -276,6 +276,8 @@ Categories are configured per-indexer via the tabbed interface in the Edit Index
 ## Fixed Issues ✅
 
 **1. Long non-Latin ebook names failed with ENAMETOOLONG (#474)** - `title (100 chars) - author (100 chars).format` reached ~408 bytes (Cyrillic) / ~608 (CJK); the raw `Title - Author.format` queued by the callers had no byte cap; the direct download 200-char cap could cut off the extension, and so could the organizer's 200-char cap in the library; the 100-unit slice could split an emoji. Fixed: byte cap on grapheme boundaries, title cut first, extension kept in downloads and library (see File Naming)
+
+**2. Ebooks over 20 MB hidden from interactive search (#323)** - `rankEbookTorrents` dropped indexer results > 20 MB in every mode, so a large PDF that was the only result showed nothing. Fixed: the cap (`EBOOK_MAX_SIZE_MB`) applies to automatic search only; both interactive routes pass `enforceSizeCap: false` and list the result with its size
 
 ## Limitations
 
