@@ -22,6 +22,7 @@ Free, open-source Usenet/NZB download client with comprehensive Web API. Industr
 **POST /api (multipart: mode=addfile, nzbfile={binary})** - Add NZB by file upload (RMAB downloads NZB from Prowlarr, uploads to SABnzbd)
 **GET /api?mode=queue&output=json&apikey={key}** - Get active downloads
 **GET /api?mode=history&limit=100&output=json&apikey={key}** - Get completed/failed downloads
+  - `search={term}` (`*` wildcard, case-insensitive), `nzo_ids={id,...}`, `archive=1` (4.3+: archived jobs only) via `queryHistory()`; older versions ignore unknown params, so results are always filtered again client-side
 **GET /api?mode=pause&value={nzbId}&output=json&apikey={key}** - Pause download
 **GET /api?mode=resume&value={nzbId}&output=json&apikey={key}** - Resume download
 **GET /api?mode=queue&name=delete&value={nzbId}&del_files={0|1}&output=json&apikey={key}** - Delete download from queue
@@ -186,6 +187,38 @@ interface SABnzbdConfig {
 - `Completed` (history) → Successfully downloaded and extracted; `storage` gives the download path
 - `Failed` → Download or post-processing failed
 
+## Duplicate NZBs and Retried Adds (#329)
+
+**Files:** `src/lib/integrations/sabnzbd-duplicates.ts` (lookup), `addNZBJob()` in `sabnzbd.service.ts`, fixtures `tests/fixtures/sabnzbd-duplicates.ts`
+
+**What `addfile` answers per "Detect duplicate downloads" mode** (`misc.no_dupes`, SABnzbd 4.0-5.x source). Duplicate = a non-failed history row (archived rows too) or a queued job with the same name (case-insensitive) or NZB md5. `nzo_ids` only ever names the new job:
+
+| Mode | Response | Left behind |
+|---|---|---|
+| 0 Off | `{status:true, nzo_ids:[new]}` | a second copy, downloading |
+| 1 Discard | `{status:false, nzo_ids:[]}` (no `error` key) | nothing |
+| 2 Pause | `{status:true, nzo_ids:[new]}` | new job `Paused` (label `DUPLICATE`) |
+| 3 Fail | `{status:true, nzo_ids:[new]}` | new history row `Failed`, `fail_message: "Duplicate NZB"` (localized) |
+| 4 Tag | `{status:true, nzo_ids:[new]}` | new job downloading (label `DUPLICATE`) |
+| 4.2+, copy already queued (any mode but Off/Tag) | `{status:true, nzo_ids:[new]}` | new job `Paused` |
+
+**Detection:** refused add without `error` text or without nzo_ids → lookup; accepted add → one queue call: new job `Paused`, or already in history (`nzo_ids` filter) and not `Completed` → lookup (excluding the new job). No existing job found → behaviour as before.
+
+**Lookup** (`findExistingJob`): same name (letters/digits only, case-insensitive; SABnzbd job name = upload name without `.nzb`) and same category, `Failed` rows skipped. Order: queue job not paused → history (`search`, then `archive=1`) → paused queue job.
+
+**Outcome** (`resolveExistingJob`):
+- Queued, downloading or post-processing → tracked as the request's download (`alreadyInClient: true` → `addedByRmab: false`)
+- `Completed` and `storage` exists after `PathMapper.transform()` → tracked; the monitor's normal completion path imports it
+- `Completed`, files gone → `UnusableDownloadSourceError` with `blocklistReason: 'Already in SABnzbd, files gone'` → processor blocklists the release, tries the next ranked one
+- Pause mode: RMAB deletes its new paused copy (`del_files=1`); Fail mode: archives the new `Duplicate NZB` row (best effort)
+- Post-add check failing (SABnzbd unreachable) → the new job is tracked, as before
+
+**Retried add:** a timed-out `addfile` (axios `ECONNABORTED`/`ETIMEDOUT`) is transient, so Bull re-runs the whole `download_torrent` job (3 attempts, exponential backoff 2 s, `job-queue.service.ts`). On attempts after the first the processor passes `retry: true`; `addNZBJob` runs the same lookup after fetching the NZB and before uploading, and reuses a usable job instead of uploading a second copy (a finished job with files gone is not reused: the upload goes ahead). Admin retry-download is a fresh job (no `retry`).
+
+**Monitor:** `getNZB()` falls back to `history&nzo_ids={id}` (then `archive=1`) when the job is not in the queue or the newest 100 history rows.
+
+**Limits:** a duplicate matched only by md5 or by SABnzbd's NZB backup folder (different name), or in another category, is not found → the old failure; Tag/Off download a second copy (user's setting).
+
 ## Remote Path Mapping
 
 **Use Case:** SABnzbd runs on different machine/container with different filesystem perspective.
@@ -244,6 +277,7 @@ organizePath = PathMapper.transform(sabPath, config)
    - Applying `transform()` when processing completed downloads (incoming)
    - Using same `PathMapper` utility as qBittorrent for consistency
 **8. Requests failed at 100% before post-processing finished** - A queue item at 100% (the tail of file assembly, before SABnzbd moves the job to history for post-processing) mapped to `completed` with no storage path, so the monitor failed the request with "Download path not available". Fixed by mapping it to `extracting` in `getDownloadProgress()`; only a `Completed` history slot completes. Admin Retry treats `processing` as alive (`ALIVE_STATUSES` in `retry-download/route.ts`), so it resumes monitoring instead of re-adding the NZB.
+**9. Duplicate NZB failed the request; a timed-out add could be added twice (#329)** - Discard answered `status:false` (request failed), Fail mode's `Duplicate NZB` row failed it in the monitor, Pause mode left it stuck paused, and a Bull retry after an upload timeout uploaded a second copy. Fixed: the job SABnzbd already holds is tracked or imported, or the release is blocklisted and the next one tried; retries reuse the earlier job. See [Duplicate NZBs and Retried Adds](#duplicate-nzbs-and-retried-adds-329).
 
 ## Automatic Cleanup
 
