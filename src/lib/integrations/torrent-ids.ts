@@ -111,9 +111,9 @@ export function addedTorrentId(reported: unknown, hashes: TorrentHashes, warn: (
   return id;
 }
 
-/** A stored base32 hash (any case) as hex; any other value unchanged */
+/** A stored hash as lower-case hex: 40-hex (any case) lower-cased, base32 (any case) converted; any other value unchanged */
 export function normalizeTorrentId(id: string): string {
-  return base32ToHex(id) ?? id;
+  return validTorrentId(id) ?? base32ToHex(id) ?? id;
 }
 
 /** A stored torrent hash in every form a row may hold it: as given, hex, and lower-case base32 */

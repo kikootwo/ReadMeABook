@@ -49,6 +49,11 @@ describe('base32 hashes', () => {
     expect(base32ToHex(value)).toBeNull();
     expect(normalizeTorrentId(value)).toBe(value);
   });
+
+  it('lower-cases a stored upper-case hex hash; the row forms keep it as stored (#460)', () => {
+    expect(normalizeTorrentId(HEX.toUpperCase())).toBe(HEX);
+    expect(torrentHashForms(HEX.toUpperCase())).toEqual([HEX.toUpperCase(), HEX, B32.toLowerCase()]);
+  });
 });
 
 describe('magnetHashes', () => {

@@ -165,6 +165,18 @@ describe('Deluge', () => {
     expect(fakeD.session.size).toBe(0);
   });
 
+  it('reaches a row with no client ID whose upper-case indexer hash is the fallback: lookups and removal send lower case (#460)', async () => {
+    fakeD.session.set(HEX, PLAIN.name);
+    const d = deluge();
+    const stored = HEX.toUpperCase();
+    await expect(d.probeDownload(stored)).resolves.toMatchObject({ found: true, info: { id: HEX, name: PLAIN.name } });
+    await expect(d.getDownload(stored)).resolves.toMatchObject({ id: HEX, name: PLAIN.name });
+    await d.deleteDownload(stored, true);
+    expect(fakeD.statusIds()).toEqual([HEX, HEX]);
+    expect(fakeD.callsOf('core.remove_torrent')).toEqual([[HEX, true]]);
+    expect(fakeD.session.size).toBe(0);
+  });
+
   it('finds a hybrid .torrent Deluge holds under its truncated v2 on the pre-check', async () => {
     serveTorrent(HYBRID);
     fakeD.session.set(HYBRID.id, 'Theirs');
