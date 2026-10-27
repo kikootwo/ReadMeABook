@@ -164,6 +164,7 @@ where: {
 - **Not RMAB's torrent:** never removed; a soft-deleted request is hard-deleted, the torrent stays. Details: [scheduler.md](../backend/services/scheduler.md) (cleanup_seeded_torrents)
 - **Shared torrent (#283):** after ownership and this row's seeding check, `otherActiveRequestsSharingTorrent()` lists the other non-deleted requests on the torrent (same hash forms as the delete guard). Each keeps it (logged with the reason) unless `siblingKeepsTorrent()` (`src/lib/utils/shared-torrent.ts`) finds it:
   - finished: `FINISHED_REQUESTS` (audiobook `available`, ebook `downloaded`; also the candidate query's statuses). Any other status keeps it (`downloading`, `processing`, audiobook `downloaded`, `failed`, `cancelled`, ...)
+  - an audiobook also imported by RMAB since it took the torrent: its book record `completed` with a `filePath` (written only by the organizer after the copy) and `completedAt` later than the row's `createdAt`. A library scan can mark it `available` mid-copy, and a library match alone never passes, so either keeps it
   - every row it has for the torrent recorded for the configured client type
   - its own indexer's requirement met (`evaluateSeeding()` with its row's indexer, by the same probe answer); unlimited or unconfigured indexer keeps it
   - None keeps it → one `deleteDownload`, this row `removed` (or soft-deleted: hard-deleted), the siblings' rows `removed` in one `updateMany` (also rows RMAB did not add, which never reach the guard themselves). Same run: `deletedHashes`; later runs: the probe's not-found → `removed`

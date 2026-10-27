@@ -3,7 +3,8 @@
  * Documentation: documentation/admin-features/request-deletion.md
  *
  * The seeding cleanup removes a shared torrent only when every request using it would let it go:
- * each other active request is finished and its own indexer's seeding requirement is met.
+ * each other active request is finished (an audiobook also imported by RMAB since it took the torrent)
+ * and its own indexer's seeding requirement is met.
  * `findMany` answers the page query and the shared-torrent query from fixture requests.
  */
 
@@ -32,6 +33,7 @@ interface Fixture {
   type: string;
   status: string;
   deletedAt: Date | null;
+  audiobook: { status: string; filePath: string | null; completedAt: Date | null } | null;
   downloadHistory: Record<string, unknown>[];
 }
 
@@ -54,6 +56,8 @@ function req(id: string, fields: Partial<Fixture> = {}, row: Record<string, unkn
     type: 'audiobook',
     status: 'available',
     deletedAt: null,
+    // RMAB's organize completed the book after the row took the torrent
+    audiobook: { status: 'completed', filePath: `/library/${id}`, completedAt: new Date('2026-10-01T13:00:00Z') },
     downloadHistory: [{
       id: `dh-${id}`,
       selected: true,
@@ -181,6 +185,45 @@ describe('cleanup of a torrent shared by several requests (#283)', () => {
 
     expect(client.deleteDownload).not.toHaveBeenCalled();
     expect(rowsMarkedRemoved()).toEqual([]);
+    expect(result.errors).toBe(0);
+  });
+
+  // A late joiner on a pack that has already seeded: it took the torrent days after the owner
+  const LATE_JOINER_ROW = { addedByRmab: false, createdAt: new Date('2026-10-05T12:00:00Z') };
+
+  it.each([
+    ['a library scan marked it available while its organize is still copying', { status: 'processing', filePath: null, completedAt: null }],
+    ['it is only matched in the library (no RMAB import)', { status: 'requested', filePath: null, completedAt: null }],
+    ['the only import of the book is older than its row', { status: 'completed', filePath: '/library/Book 2', completedAt: new Date('2026-09-01T12:00:00Z') }],
+  ])('keeps it for an available audiobook RMAB has not imported from it: %s', async (_label, audiobook) => {
+    const client = setup([req('req-a'), req('req-b', { audiobook }, LATE_JOINER_ROW)]);
+
+    const result = await run();
+
+    expect(client.deleteDownload).not.toHaveBeenCalled();
+    expect(rowsMarkedRemoved()).toEqual([]);
+    expect(result.errors).toBe(0);
+  });
+
+  it('lets it go once RMAB has imported the late joiner from it', async () => {
+    const imported = { status: 'completed', filePath: '/library/Book 2', completedAt: new Date('2026-10-05T12:30:00Z') };
+    const client = setup([req('req-a'), req('req-b', { audiobook: imported }, LATE_JOINER_ROW)]);
+
+    const result = await run();
+
+    expect(client.deleteDownload).toHaveBeenCalledTimes(1);
+    expect(rowsMarkedRemoved()).toEqual(['dh-req-a', 'dh-req-b']);
+    expect(result.errors).toBe(0);
+  });
+
+  it('removes it through a soft-deleted owner when the only active sibling is finished and done seeding', async () => {
+    const client = setup([req('req-a', { deletedAt: new Date() }), req('req-b', {}, { addedByRmab: false })]);
+
+    const result = await run();
+
+    expect(client.deleteDownload).toHaveBeenCalledTimes(1);
+    expect(rowsMarkedRemoved()).toEqual(['dh-req-b']);
+    expect(prismaMock.request.delete).toHaveBeenCalledWith({ where: { id: 'req-a' } });
     expect(result.errors).toBe(0);
   });
 

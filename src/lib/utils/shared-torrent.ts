@@ -26,7 +26,15 @@ export const FINISHED_REQUESTS = [
 /** Another active request using the torrent, with its selected row(s) for that torrent */
 export interface TorrentSibling extends ActiveRequestRef {
   type: string;
+  /** Its book record (shared by every request for the book); the organizer completes it after a successful copy */
+  audiobook: SiblingBookRecord | null;
   downloadHistory: TorrentSiblingDownload[];
+}
+
+export interface SiblingBookRecord {
+  status: string;
+  filePath: string | null;
+  completedAt: Date | null;
 }
 
 export interface TorrentSiblingDownload {
@@ -34,6 +42,7 @@ export interface TorrentSiblingDownload {
   indexerId: number | null;
   indexerName: string | null;
   downloadClient: string | null;
+  createdAt: Date;
 }
 
 function otherActiveRequestsWhere(requestId: string, torrentHash: string) {
@@ -77,18 +86,31 @@ export async function otherActiveRequestsSharingTorrent(
       id: true,
       status: true,
       type: true,
+      audiobook: { select: { status: true, filePath: true, completedAt: true } },
       downloadHistory: {
         where: { torrentHash: { in: torrentHashForms(torrentHash) }, selected: true },
-        select: { id: true, indexerId: true, indexerName: true, downloadClient: true },
+        select: { id: true, indexerId: true, indexerName: true, downloadClient: true, createdAt: true },
       },
     },
   });
 }
 
 /**
+ * A library scan can mark an audiobook `available` while its organize is still copying (#283).
+ * Only the organizer completes the book record with a `filePath`, after the copy; it must have done
+ * so after this row took the torrent, since the record is shared by every request for the book.
+ * A book only matched in the library (no RMAB import) never passes.
+ */
+function importedSince(book: SiblingBookRecord | null, row: TorrentSiblingDownload): boolean {
+  if (book?.status !== 'completed' || !book.filePath || !book.completedAt) return false;
+  return new Date(book.completedAt).getTime() > new Date(row.createdAt).getTime();
+}
+
+/**
  * Seeding cleanup only (#283): why `sibling` still needs the torrent, or null when it lets it go.
- * It lets it go only when it is finished, every row it has for the torrent was recorded for
- * `clientType`, and its own indexer's requirement is met (`seeding(row)`, by the same client answer).
+ * It lets it go only when it is finished (an audiobook also imported by RMAB since it took the
+ * torrent), every row it has for the torrent was recorded for `clientType`, and its own indexer's
+ * requirement is met (`seeding(row)`, by the same client answer).
  */
 export function siblingKeepsTorrent(
   sibling: TorrentSibling,
@@ -103,6 +125,9 @@ export function siblingKeepsTorrent(
   for (const row of rows) {
     const recordedFor = row.downloadClient || 'qbittorrent';
     if (recordedFor !== clientType) return `recorded for ${recordedFor}`;
+    if (sibling.type === 'audiobook' && !importedSince(sibling.audiobook, row)) {
+      return 'no RMAB import since it took this torrent';
+    }
     const { unlimited, met, progress } = seeding(row);
     if (unlimited) return `unlimited seeding (${row.indexerName ?? 'no indexer'})`;
     if (!met) return `still seeding for ${row.indexerName ?? 'its indexer'}: ${progress}`;
