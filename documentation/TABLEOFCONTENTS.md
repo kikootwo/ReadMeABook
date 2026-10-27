@@ -6,6 +6,7 @@
 - **Plex OAuth, JWT sessions, RBAC** → [backend/services/auth.md](backend/services/auth.md)
 - **Local admin authentication, password change** → [backend/services/auth.md](backend/services/auth.md)
 - **Admin-generated login token per user (URL-login)** → [backend/services/auth.md](backend/services/auth.md)
+- **Deleting users (any provider), returning user gets a new account** → [backend/services/auth.md](backend/services/auth.md#deleting-users), [admin-dashboard.md](admin-dashboard.md)
 - **API tokens, allowlist, GET /api/requests/:id (field list, BigInt sizes #261)** → [backend/services/api-tokens.md](backend/services/api-tokens.md)
 - **Route protection, auth guards** → [frontend/routing-auth.md](frontend/routing-auth.md)
 - **Login page UI/UX** → [frontend/pages/login.md](frontend/pages/login.md)

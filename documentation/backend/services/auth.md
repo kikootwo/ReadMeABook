@@ -284,6 +284,26 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 - **Admin Settings:** OIDC section in `/admin/settings` (auth tab)
 - **Library:** `openid-client` (OIDC discovery, token exchange, PKCE)
 
+## Deleting Users
+
+- `DELETE /api/admin/users/[id]` (admin): soft delete for any provider; row kept with its requests. Guards: [admin-dashboard.md](../../admin-dashboard.md)
+- Freed keys (`freedAccountKeys`, `src/lib/services/auth/deleted-account-keys.ts`):
+  - local: `plexId` = `local-<username>-deleted-<ms>` (stays in the `local-` space; admin login looks up `local-<username>`, Plex and OIDC sign-in refuse `local-` keys)
+  - Plex, OIDC, null provider: `plexId` = `<plexId>-deleted-<uuid v4>`; `oidcSubject` (when set) = `<oidcSubject>-deleted-<same uuid>`. Random part: no Plex id or IdP subject can equal it
+  - `loginTokenHash` cleared
+- `OIDCAuthProvider.findUserByOIDCSubject` skips deleted rows (`deletedAt: null`)
+- Returning user (new row, role from the new-account rule: `user`, or `admin` from the OIDC admin claim; permissions reset to defaults):
+
+| Path | Returning user gets |
+|------|---------------------|
+| Plex callback, Plex Home `switch-profile` | New row, `registrationStatus` approved (Plex sign-in has no approval step, same as any new Plex user) |
+| OIDC callback | New row; `admin_approval`: `pending_approval` (`/login?pending=approval`); other methods: approved. Lookup is by subject only (no email/username match) |
+| Login token (`/api/auth/token/login`) | Old link 401 `Invalid token`; the new account has no token until an admin issues one |
+| Admin login / local | Deleted row 401 `Invalid username or password`; registering again gives a new row (pending when `auth.require_admin_approval`) |
+
+- Deleted account's access token, refresh token, API tokens and download links: refused by the existing `deletedAt` checks (`getSessionRefusal`, `requireAuth`, `/api/auth/refresh`)
+- Known: a deleted user's Goodreads/Hardcover shelves and watched authors/series stay configured and keep syncing under the deleted row (same as local deletes before #244)
+
 ## Admin-Generated Login Token
 
 - Login token stored as SHA-256 hash in `User.loginTokenHash`

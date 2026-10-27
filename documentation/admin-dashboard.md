@@ -50,6 +50,11 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - Update user role (user/admin), autoApproveRequests (true/false/null)
 - Prevents self-demotion
 
+**DELETE /api/admin/users/[id]** (#244)
+- Soft delete for every provider (local, Plex, OIDC, older rows without a provider): sets `deletedAt`/`deletedBy`, frees the sign-in keys, clears `loginTokenHash`; requests and history stay with the deleted row
+- Refused: own account (403, checked first, same rule for every provider), setup admin (403), missing (404), already deleted (400, also when a concurrent delete wins: `updateMany` on `deletedAt: null`)
+- Returning user: signing in again creates a new account. Rules + freed key format: [backend/services/auth.md](backend/services/auth.md#deleting-users)
+
 **GET /api/admin/settings/auto-approve**
 - Get global auto-approve setting (boolean)
 
@@ -109,6 +114,8 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - List all users with avatar, email, role, request count, last login, autoApproveRequests
 - Edit user roles (user/admin)
 - Cannot change own role (security)
+- Delete (`UserActionsCell`, `src/components/admin/users/UserActionsCell.tsx`): shown for local, Plex and OIDC users, never for the setup admin or yourself (current user from `useAuth`). OIDC rows show "OIDC Managed" instead of Edit Role
+- Delete confirmation (`deleteUserConfirmMessage`): request count kept + what signing in again does for that provider (Plex: new User account; OIDC: new User account, pending with admin approval; local: register again, pending when approval is required)
 - Shows request count per user
 - Role badges (purple for admin, gray for user)
 - **Global Auto-Approve Toggle:**

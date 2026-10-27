@@ -13,6 +13,8 @@ import { ToastProvider, useToast } from '@/components/ui/Toast';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { GlobalUserSettingsModal } from '@/components/admin/users/GlobalUserSettingsModal';
 import { UserPermissionsModal } from '@/components/admin/users/UserPermissionsModal';
+import { UserActionsCell, deleteUserConfirmMessage } from '@/components/admin/users/UserActionsCell';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface User {
   id: string;
@@ -121,66 +123,6 @@ function PermissionBadge({
   );
 }
 
-function UserActionsCell({ user, onEdit, onDelete }: { user: User; onEdit: (u: User) => void; onDelete: (u: User) => void }) {
-  if (user.isSetupAdmin) {
-    return (
-      <span className="inline-flex items-center gap-1 text-gray-400 dark:text-gray-600 cursor-not-allowed" title="Setup admin role cannot be changed">
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-        </svg>
-        <span>Protected</span>
-      </span>
-    );
-  }
-  if (user.authProvider === 'oidc') {
-    return (
-      <span className="inline-flex items-center gap-1 text-gray-400 dark:text-gray-600 cursor-not-allowed" title="OIDC user roles are managed by the identity provider">
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <span>OIDC Managed</span>
-      </span>
-    );
-  }
-  if (user.authProvider === 'local') {
-    return (
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => onEdit(user)}
-          className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-          </svg>
-          <span>Edit Role</span>
-        </button>
-        <button
-          onClick={() => onDelete(user)}
-          className="inline-flex items-center gap-1 text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 transition-colors"
-          title="Delete user and all their requests"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-          </svg>
-          <span>Delete</span>
-        </button>
-      </div>
-    );
-  }
-  // plex or other
-  return (
-    <button
-      onClick={() => onEdit(user)}
-      className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
-    >
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-      </svg>
-      <span>Edit Role</span>
-    </button>
-  );
-}
-
 function AdminUsersPageContent() {
   const { data, error, mutate } = useSWR('/api/admin/users', authenticatedFetcher);
   const { data: pendingData, error: pendingError, mutate: mutatePending } = useSWR(
@@ -223,6 +165,7 @@ function AdminUsersPageContent() {
   const [permissionsUserId, setPermissionsUserId] = useState<string | null>(null);
   const [generatedToken, setGeneratedToken] = useState<string | null>(null);
   const toast = useToast();
+  const currentUserId = useAuth().user?.id ?? null;
 
   const isLoading = !data && !error;
   const pendingUsers: PendingUser[] = pendingData?.users || [];
@@ -699,7 +642,7 @@ function AdminUsersPageContent() {
 
               {/* Card actions */}
               <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-700/60">
-                <UserActionsCell user={user} onEdit={showEditDialog} onDelete={showDeleteDialog} />
+                <UserActionsCell user={user} currentUserId={currentUserId} onEdit={showEditDialog} onDelete={showDeleteDialog} />
               </div>
             </div>
           ))}
@@ -799,7 +742,7 @@ function AdminUsersPageContent() {
                       : 'Never'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <UserActionsCell user={user} onEdit={showEditDialog} onDelete={showDeleteDialog} />
+                    <UserActionsCell user={user} currentUserId={currentUserId} onEdit={showEditDialog} onDelete={showDeleteDialog} />
                   </td>
                 </tr>
               ))}
@@ -823,9 +766,10 @@ function AdminUsersPageContent() {
             <li>• <strong>Admin:</strong> Full system access including settings, user management, and all requests</li>
             <li>• <strong>Setup Admin:</strong> The initial admin account — protected, cannot be changed or deleted</li>
             <li>• <strong>Permissions:</strong> Click a user&apos;s permission badge to manage individual settings. Use Global User Permissions for system-wide defaults. Admins always have full access.</li>
-            <li>• <strong>OIDC Users:</strong> Role management is handled by the identity provider. Cannot be deleted.</li>
-            <li>• <strong>Plex Users:</strong> Role can be changed, but cannot be deleted (access managed by Plex).</li>
-            <li>• <strong>Local Users:</strong> Can have roles freely assigned. Can be deleted (requests are preserved).</li>
+            <li>• <strong>OIDC Users:</strong> Role management is handled by the identity provider. Can be deleted (requests are kept).</li>
+            <li>• <strong>Plex Users:</strong> Role can be changed. Can be deleted (requests are kept).</li>
+            <li>• <strong>Local Users:</strong> Can have roles freely assigned. Can be deleted (requests are kept).</li>
+            <li>• <strong>Deleted users:</strong> Signing in again creates a new account with the User role, which waits for approval when approval is on for that sign-in method</li>
             <li>• You cannot change your own role or delete yourself for security reasons</li>
           </ul>
         </div>
@@ -964,7 +908,7 @@ function AdminUsersPageContent() {
           title="Delete User"
           message={
             deleteDialog.user
-              ? `Are you sure you want to delete "${deleteDialog.user.plexUsername}"? The user will be permanently deleted, but their ${deleteDialog.user._count.requests} request(s) will be preserved for historical records. This action cannot be undone.`
+              ? deleteUserConfirmMessage(deleteDialog.user)
               : ''
           }
           confirmText="Delete User"

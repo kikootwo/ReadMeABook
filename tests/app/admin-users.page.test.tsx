@@ -33,6 +33,12 @@ vi.mock('@/lib/utils/api', () => ({
   fetchJSON: fetchJSONMock,
 }));
 
+const authState = vi.hoisted(() => ({ userId: 'me' as string | null }));
+
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({ user: authState.userId ? { id: authState.userId } : null }),
+}));
+
 vi.mock('@/components/ui/Toast', () => ({
   ToastProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useToast: () => toastMock,
@@ -324,6 +330,71 @@ describe('AdminUsersPage', () => {
         body: JSON.stringify({ approve: true }),
       });
       expect(mutatePending).toHaveBeenCalled();
+    });
+  });
+
+  describe('deleting users', () => {
+    const users = [
+      makeUser({ id: 'setup', plexUsername: 'SetupAdmin', role: 'admin', isSetupAdmin: true, authProvider: 'local' }),
+      makeUser({ id: 'me', plexUsername: 'MePlex', role: 'admin', authProvider: 'plex' }),
+      makeUser({ id: 'p1', plexUsername: 'PlexPat', authProvider: 'plex', _count: { requests: 4 } }),
+      makeUser({ id: 'o1', plexUsername: 'OidcOlive', authProvider: 'oidc', _count: { requests: 1 } }),
+      makeUser({ id: 'l1', plexUsername: 'LocalLee', authProvider: 'local' }),
+    ];
+    const rowFor = (name: string) => screen.getAllByRole('row').find((row) => within(row).queryByText(name))!;
+    const deleteIn = (name: string) => within(rowFor(name)).queryByRole('button', { name: 'Delete' });
+
+    beforeEach(() => {
+      authState.userId = 'me';
+    });
+
+    it('shows Delete for Plex, OIDC and local users, but not the setup admin or yourself', async () => {
+      setupSWR({ users });
+
+      render(<AdminUsersPage />);
+      await screen.findAllByText('PlexPat');
+
+      expect(deleteIn('PlexPat')).toBeInTheDocument();
+      expect(deleteIn('OidcOlive')).toBeInTheDocument();
+      expect(deleteIn('LocalLee')).toBeInTheDocument();
+      expect(deleteIn('SetupAdmin')).toBeNull();
+      expect(deleteIn('MePlex')).toBeNull();
+      expect(within(rowFor('MePlex')).getByRole('button', { name: 'Edit Role' })).toBeInTheDocument();
+      expect(within(rowFor('OidcOlive')).getByText('OIDC Managed')).toBeInTheDocument();
+    });
+
+    it('confirms a Plex user delete with what is kept and what signing in again does, then deletes', async () => {
+      const { mutateUsers } = setupSWR({ users });
+      fetchJSONMock.mockResolvedValueOnce({ success: true, message: 'User "PlexPat" has been deleted.' });
+
+      render(<AdminUsersPage />);
+      await screen.findAllByText('PlexPat');
+      expect(deleteIn('PlexPat')).toBeInTheDocument();
+      fireEvent.click(deleteIn('PlexPat')!);
+
+      const message = await screen.findByText((text) => text.startsWith('Delete "PlexPat"?'));
+      expect(message).toHaveTextContent('Delete "PlexPat"? Their 4 request(s) are kept.');
+      expect(message).toHaveTextContent('If they sign in with Plex again, they get a new account with the User role');
+      fireEvent.click(screen.getByRole('button', { name: 'Delete User' }));
+
+      await waitFor(() => {
+        expect(fetchJSONMock).toHaveBeenCalledWith('/api/admin/users/p1', { method: 'DELETE' });
+        expect(mutateUsers).toHaveBeenCalled();
+      });
+    });
+
+    it('confirms an OIDC user delete with the approval note', async () => {
+      setupSWR({ users });
+
+      render(<AdminUsersPage />);
+      await screen.findAllByText('OidcOlive');
+      expect(deleteIn('OidcOlive')).toBeInTheDocument();
+      fireEvent.click(deleteIn('OidcOlive')!);
+
+      const message = await screen.findByText((text) => text.startsWith('Delete "OidcOlive"?'));
+      expect(message).toHaveTextContent('Their 1 request(s) are kept.');
+      expect(message).toHaveTextContent('If they sign in with single sign-on again, they get a new account with the User role');
+      expect(message).toHaveTextContent('waits for approval when OIDC access is set to admin approval');
     });
   });
 });
