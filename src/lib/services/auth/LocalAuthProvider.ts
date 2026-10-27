@@ -191,6 +191,7 @@ export class LocalAuthProvider implements IAuthProvider {
       const registrationStatus = requireApproval ? 'pending_approval' : 'approved';
 
       // Check if first user (make admin)
+      // Soft-deleted users count on purpose: a deleted account must never make the next sign-up an admin
       const userCount = await prisma.user.count();
       const isFirstUser = userCount === 0;
 

@@ -224,6 +224,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Check if this is the first user (should be promoted to admin)
+    // Soft-deleted users count on purpose: a deleted account must never make the next sign-up an admin
     const userCount = await prisma.user.count();
     const isFirstUser = userCount === 0;
     const role = isFirstUser ? 'admin' : 'user';
