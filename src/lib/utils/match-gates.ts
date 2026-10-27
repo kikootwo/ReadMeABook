@@ -139,7 +139,7 @@ function tokenize(text: string, characterReplacements?: Record<string, string>):
   const tokens: string[] = [];
   const gaps: string[] = [];
   let end = 0;
-  for (const m of folded.matchAll(/[\p{L}\p{M}\p{N}']+/gu)) {
+  for (const m of folded.matchAll(/[\p{L}\p{M}\p{N}]+/gu)) {
     gaps.push(folded.substring(end, m.index));
     tokens.push(m[0]);
     end = m.index + m[0].length;

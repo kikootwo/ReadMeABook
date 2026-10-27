@@ -276,3 +276,29 @@ describe('automatic search: right books that scored low on main', () => {
     expect(rank(release, title, author, { requireAuthor: false }).match).toBeLessThan(45);
   });
 });
+
+describe('apostrophes: a release name that drops or splits the apostrophe is the same title (#316, #466)', () => {
+  // [case, release, title, author, lang]: main scores every row 0 (word coverage)
+  const rows: [string, string, string, string, SupportedLanguage?][] = [
+    ['#466 elision as a dot', 'L.Intruse.Freida.McFadden.2026.FR.[Mp3.128.Kbps]-NOTAG', "L'intruse", 'Freida McFadden', 'fr'],
+    ['#466 elision inside the title', 'Changer.L.Eau.Des.Fleurs.Valerie.Perrin.2022.FR.[M4B.128.kbps]-AG404', "Changer l'eau des fleurs", 'Valérie Perrin', 'fr'],
+    ['#466 possessive without the apostrophe', 'Enders.Game.Orson.Scott.Card.MP3', "Ender's Game", 'Orson Scott Card'],
+    ['#316 possessive without the apostrophe', 'Matt Dinniman - The Dungeon Anarchists Cookbook [M4B]', "The Dungeon Anarchist's Cookbook", 'Matt Dinniman'],
+    ['#316 possessive, scene name', 'Matt.Dinniman.The.Butchers.Masquerade.2022.M4B', "The Butcher's Masquerade", 'Matt Dinniman'],
+    ['curly apostrophe in the request, straight in the release', "Orson Scott Card - Ender's Game [M4B]", 'Ender’s Game', 'Orson Scott Card'],
+  ];
+
+  it.each(rows)('automatic: %s', (_name, release, title, author, lang) => {
+    const { match, total } = rank(release, title, author, { lang });
+    expect(match).toBeGreaterThan(0);
+    expect(total).toBeGreaterThanOrEqual(50);
+  });
+
+  it.each(rows)('interactive: %s', (_name, release, title, author, lang) => {
+    expect(rank(release, title, author, { lang, requireAuthor: false }).match).toBeGreaterThan(0);
+  });
+
+  it('a longer title that adds a possessive is still not the requested title', () => {
+    expect(rank('The Housemaids Secret - Freida McFadden [M4B]', 'The Housemaid', 'Freida McFadden').total).toBeLessThan(50);
+  });
+});

@@ -29,6 +29,17 @@ describe('buildGroupingKey: Latin keys', () => {
     expect(mismatches).toEqual([]);
   });
 
+  // Ranking folds apostrophes (#466); keys already dropped them and must not change
+  it.each([
+    ["L'intruse", 'lintruse||'],
+    ['L’intruse', 'lintruse||'],
+    ["Ender's Game", 'endersgame||'],
+    ['‘Salem’s Lot', 'salemslot||'],
+    ["Rock 'n' Roll", 'rocknroll||'],
+  ])('keys apostrophe titles as before: %s', (title, key) => {
+    expect(buildGroupingKey({ title })).toBe(key);
+  });
+
   it('returns null without a title tag', () => {
     expect(buildGroupingKey({ author: 'Stephen King' })).toBeNull();
     expect(buildGroupingKey({ title: '', author: 'Stephen King' })).toBeNull();

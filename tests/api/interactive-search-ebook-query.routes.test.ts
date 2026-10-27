@@ -75,9 +75,9 @@ describe('interactive ebook search sends title + author to indexers', () => {
 
     // DB record and Audible differ: the route searches with the stored audiobook record
     it.each([
-      ['no custom title', {}, 'Db Title'],
-      ['a custom title', { customTitle: 'Custom Title' }, 'Custom Title'],
-    ])('with %s', async (_label, body, expectedTitle) => {
+      ['no custom title', {}, 'Db Title', false],
+      ['a custom title', { customTitle: 'Custom Title' }, 'Custom Title', true],
+    ])('with %s', async (_label, body, expectedTitle, exactTitle) => {
       const { POST } = await import('@/app/api/audiobooks/[asin]/interactive-search-ebook/route');
       const response = await POST(makeRequest(body), { params: Promise.resolve({ asin: 'B000000001' }) });
 
@@ -85,7 +85,7 @@ describe('interactive ebook search sends title + author to indexers', () => {
       expect((await response.json()).searchTitle).toBe(expectedTitle);
       expect(prowlarrMock.search).not.toHaveBeenCalled();
       expect(prowlarrMock.searchWithVariations).toHaveBeenCalledTimes(1);
-      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith(expectedTitle, 'Db Author', EXPECTED_FILTERS);
+      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith(expectedTitle, 'Db Author', EXPECTED_FILTERS, { exactTitle });
     });
   });
 
@@ -100,9 +100,9 @@ describe('interactive ebook search sends title + author to indexers', () => {
     });
 
     it.each([
-      ['no custom title', {}, 'Real Title'],
-      ['a custom title', { customTitle: 'Custom Title' }, 'Custom Title'],
-    ])('with %s', async (_label, body, expectedTitle) => {
+      ['no custom title', {}, 'Real Title', false],
+      ['a custom title', { customTitle: 'Custom Title' }, 'Custom Title', true],
+    ])('with %s', async (_label, body, expectedTitle, exactTitle) => {
       const { POST } = await import('@/app/api/requests/[id]/interactive-search-ebook/route');
       const response = await POST(makeRequest(body), { params: Promise.resolve({ id: 'req-1' }) });
 
@@ -110,7 +110,7 @@ describe('interactive ebook search sends title + author to indexers', () => {
       expect((await response.json()).searchTitle).toBe(expectedTitle);
       expect(prowlarrMock.search).not.toHaveBeenCalled();
       expect(prowlarrMock.searchWithVariations).toHaveBeenCalledTimes(1);
-      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith(expectedTitle, 'Real Author', EXPECTED_FILTERS);
+      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith(expectedTitle, 'Real Author', EXPECTED_FILTERS, { exactTitle });
     });
   });
 });
