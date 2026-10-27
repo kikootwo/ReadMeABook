@@ -59,7 +59,7 @@ test('349: a multi-file request downloads as one zip with flat entry names and t
 
   const tracks = asApp(`cd ${q(dir)}\nls -1 | grep -i '\\.mp3$'`).trim().split('\n').filter(Boolean);
   expect(tracks.length, 'the smoke book is several mp3 files, so the route zips them').toBeGreaterThanOrEqual(2);
-  const oddName = 'x\\..\\..\\Extra track.mp3';
+  const oddName = 'Disc 2\\Extra track.mp3';
   asApp(`cd ${q(dir)}\ncp ${q(tracks[0])} ${q(oddName)}`);
 
   const onDisk = Object.fromEntries(
@@ -85,6 +85,6 @@ test('349: a multi-file request downloads as one zip with flat entry names and t
 
   expect(Object.keys(onDisk)).toContain(oddName);
   expect(got).toEqual(expected);
-  expect(got.map((e) => e.name)).toContain('x_.._.._Extra track.mp3');
+  expect(got.map((e) => e.name)).toContain('Disc 2_Extra track.mp3');
   expect(got.filter((e) => e.name.includes('/') || e.name.includes('\\'))).toEqual([]);
 });

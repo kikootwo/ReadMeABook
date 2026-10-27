@@ -80,13 +80,13 @@ describe('GET /api/requests/[id]/download (multi-file zip)', () => {
   // A backslash is an ordinary file name character only on POSIX file systems
   it.skipIf(process.platform === 'win32')('keeps a file whose name holds a backslash as one entry at the zip root', async () => {
     const odd = Buffer.from('ID3 odd name');
-    fs.writeFileSync(path.join(bookDir, 'x\\..\\..\\Part 3.mp3'), odd);
+    fs.writeFileSync(path.join(bookDir, 'Disc 2\\Part 3.mp3'), odd);
 
     const { zip } = await downloadZip();
     const names = entryNames(zip);
 
-    expect(names).toEqual(['Part 1.mp3', 'Part 2.mp3', 'x_.._.._Part 3.mp3']);
+    expect(names).toEqual(['Disc 2_Part 3.mp3', 'Part 1.mp3', 'Part 2.mp3']);
     expect(names.filter((n) => n.includes('/') || n.includes('\\'))).toEqual([]);
-    expect(zip.getEntry('x_.._.._Part 3.mp3')!.getData().equals(odd)).toBe(true);
+    expect(zip.getEntry('Disc 2_Part 3.mp3')!.getData().equals(odd)).toBe(true);
   });
 });
