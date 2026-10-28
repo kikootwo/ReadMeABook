@@ -14,7 +14,7 @@ import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
 import fs from 'fs';
 import path from 'path';
 import { ZipArchive } from 'archiver';
-import { PassThrough } from 'stream';
+import { PassThrough, Readable } from 'stream';
 
 const logger = RMABLogger.create('API.Download');
 
@@ -118,19 +118,12 @@ export async function GET(
       const stat = fs.statSync(filePath);
       const fileStream = fs.createReadStream(filePath);
 
-      const readableStream = new ReadableStream({
-        start(controller) {
-          fileStream.on('data', chunk => controller.enqueue(chunk));
-          fileStream.on('end', () => controller.close());
-          fileStream.on('error', err => {
-            logger.error('File stream error', { error: err.message });
-            controller.error(err);
-          });
-        },
-        cancel() {
-          fileStream.destroy();
-        },
+      fileStream.on('error', err => {
+        if (err.name !== 'AbortError') {
+          logger.error('File stream error', { error: err.message });
+        }
       });
+      const readableStream = Readable.toWeb(fileStream) as ReadableStream<Uint8Array>;
 
       return new NextResponse(readableStream, {
         headers: {

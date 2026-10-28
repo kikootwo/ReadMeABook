@@ -8,6 +8,7 @@ import { NextRequest } from 'next/server';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { Readable } from 'stream';
 import { createPrismaMock } from '../helpers/prisma';
 
 const prismaMock = createPrismaMock();
@@ -105,6 +106,55 @@ describe('GET /api/requests/[id]/download', () => {
 
     expect(response.status).toBe(200);
     expect(Buffer.from(await response.arrayBuffer()).equals(FILE_BYTES)).toBe(true);
+  });
+
+  it('does not read the whole file while the client is paused and closes on cancellation', async () => {
+    const filePath = path.join(bookDir, 'book.m4b');
+    const chunkSize = 64 * 1024;
+    const chunkCount = 64;
+    const totalSize = chunkSize * chunkCount;
+    const chunk = Buffer.alloc(chunkSize, 0x41);
+    fs.writeFileSync(filePath, Buffer.alloc(totalSize, 0x41));
+
+    let producedChunks = 0;
+    let fileStream: Readable | undefined;
+
+    try {
+      fileStream = new Readable({
+        highWaterMark: chunkSize,
+        read() {
+          if (producedChunks === chunkCount) {
+            this.push(null);
+            return;
+          }
+
+          producedChunks += 1;
+          this.push(Buffer.from(chunk));
+        },
+      });
+      vi.spyOn(fs, 'createReadStream').mockReturnValue(
+        fileStream as ReturnType<typeof fs.createReadStream>
+      );
+
+      const response = await callDownload(await linkFor());
+      expect(response.headers.get('content-length')).toBe(String(totalSize));
+      expect(response.body).not.toBeNull();
+
+      const reader = response.body!.getReader();
+      const firstChunk = await reader.read();
+      expect(firstChunk.done).toBe(false);
+      expect(Buffer.from(firstChunk.value!).equals(chunk)).toBe(true);
+
+      // Let the source respond to the queued demand without resuming the client.
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(producedChunks).toBeLessThan(chunkCount);
+
+      await reader.cancel();
+      expect(fileStream.destroyed).toBe(true);
+    } finally {
+      fileStream?.destroy();
+      fs.writeFileSync(filePath, FILE_BYTES);
+    }
   });
 
   const refusedAccounts: Array<[string, Account | null]> = [
