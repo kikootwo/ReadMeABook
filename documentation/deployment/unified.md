@@ -155,6 +155,12 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - PostgreSQL: priority 10 (starts first)
 - Redis: priority 20 (starts second)
 - App: priority 30 (starts last)
+**Shutdown (`docker stop` / restart / recreate):**
+- Supervisord stops in reverse priority: app → redis → postgresql; each gets `stopwaitsecs` before SIGKILL
+- PostgreSQL: `stopsignal=INT` (fast shutdown: ends client sessions, checkpoints, exits), `stopwaitsecs=60`
+- App, Redis: supervisord defaults (SIGTERM, `stopwaitsecs=10`)
+- Container needs `stop_grace_period` > sum of `stopwaitsecs` (10 + 10 + 60 = 80s); compose examples use `90s`. Docker's default 10s SIGKILLs everything mid-stop
+- Clean stop logs `received fast shutdown request`; next start has no `not properly shut down` line
 
 **Logs:** All services output to stdout/stderr (visible in `docker logs`)
 
@@ -167,6 +173,7 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 services:
   readmeabook:
     image: ghcr.io/kikootwo/readmeabook:latest
+    stop_grace_period: 90s   # see Shutdown; Docker's 10s default kills PostgreSQL mid-stop
     ports:
       - "3030:3030"
     volumes:
@@ -811,6 +818,12 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
 - Behaviour change: OpenSSL security level 2, see [TLS errors after upgrading to Node 24](#tls-errors-after-upgrading-to-node-24)
 - Expected log line: one `[DEP0169] DeprecationWarning: url.parse()` per process. Harmless: it comes from dependencies bundled into the server build (openid-client, follow-redirects), so Node treats them as app code; not suppressed on purpose
 - Guards added: system user IDs, Node/OpenSSL version line, `isBuiltin` for builtins
+
+**22. PostgreSQL killed on every container stop (crash recovery on each start)**
+- Symptom: every start after `docker stop` / restart / recreate logs `database system was not properly shut down; automatic recovery in progress`
+- Cause: `[program:postgresql]` used supervisord defaults: SIGTERM = PostgreSQL "smart" shutdown, which waits for all clients to disconnect, then SIGKILL after 10s. `app-start.sh` backgrounds `node server.js` and `wait`s; SIGTERM ends the wrapper but not node, so node's DB connections stay open and smart shutdown never finishes in time. Docker's default 10s grace kills the container anyway
+- Fix: `stopsignal=INT` + `stopwaitsecs=60` on `[program:postgresql]`; `stop_grace_period: 90s` in compose examples
+- Test: `tests/docker/supervisord-config.test.ts`
 
 ## Related
 

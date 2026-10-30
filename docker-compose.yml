@@ -6,6 +6,10 @@ services:
 #      dockerfile: dockerfile.unified
     container_name: readmeabook
     restart: unless-stopped
+    # Time for supervisord to stop the app, Redis and PostgreSQL cleanly before Docker
+    # sends SIGKILL (Docker's default is 10s). Keep it above the sum of all stopwaitsecs
+    # in docker/unified/supervisord.conf (worst case 10 + 10 + 60 = 80s).
+    stop_grace_period: 90s
     ports:
       - "3030:3030"
     volumes:
