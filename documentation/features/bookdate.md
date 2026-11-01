@@ -72,6 +72,7 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
   - **Auth:** `requireSetupIncompleteOrAdmin`. After setup: admin only (API tokens refused). During setup: no sign-in, built-in providers (openai/claude/gemini) with a caller-supplied key only
   - `provider: 'custom'`: admin only (403 otherwise)
   - `useSavedKey: true`: admin only (401 otherwise); refused (400) when `provider` differs from the saved provider; custom uses the saved `baseUrl`, ignoring any in the request
+  - OpenAI model list: GPT major version 4 or newer, excluding audio, realtime, transcription, TTS, search, Codex, and Pro variants. Uses model names as a heuristic, not a generation compatibility test
   - Custom model list: only entries with a string `id` (or bare strings) are returned, as `{id, name}` strings
   - Errors: `Failed to connect to custom provider (HTTP n)` (400), `Connected to the custom provider, but the response was not JSON` (400), `Could not connect to the custom provider` (500), `Connection test failed` (500). The remote response body goes to the server log only
 - GET `/api/bookdate/config` - Get global config (excluding API key) (All authenticated)

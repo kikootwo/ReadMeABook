@@ -252,9 +252,14 @@ async function testConnection(req: NextRequest, options: { callerIsAdmin: boolea
 
       const data = await response.json();
 
-      // Filter to relevant GPT models
+      // The models API has no capability metadata; exclude known incompatible variants.
       models = data.data
-        .filter((m: any) => m.id.startsWith('gpt-') && m.id.includes('4'))
+        .filter((m: any) => {
+          if (typeof m.id !== 'string') return false;
+          const majorVersion = Number(m.id.match(/^gpt-(\d+)/)?.[1]);
+          const specialized = /-(audio|realtime|transcribe|tts|search|codex|pro)(-|$)/.test(m.id);
+          return majorVersion >= 4 && !specialized;
+        })
         .map((m: any) => ({
           id: m.id,
           name: m.id,
