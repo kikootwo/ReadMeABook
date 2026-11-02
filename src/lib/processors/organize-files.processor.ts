@@ -8,7 +8,6 @@ import path from 'path';
 import { prisma } from '../db';
 import { getFileOrganizer } from '../utils/file-organizer';
 import { RMABLogger } from '../utils/logger';
-import { getLibraryService } from '../services/library';
 import { getConfigService } from '../services/config.service';
 import { getDownloadClientManager } from '../services/download-client-manager.service';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
@@ -30,6 +29,7 @@ import { addAutoBlock } from '../services/blocklist.service';
 import { updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { createAudibleDetailsLoader, readMetadataTaggingEnabled, resolveTagDetails } from './organize-tag-details';
 import { applyPostImportCategory } from './post-import-category';
+import { triggerScanAfterImport } from './post-import-scan';
 import { preferredEbookFile } from '../utils/import-inventory';
 import { findEbookOnDisk } from '../utils/ebook-on-disk';
 import { recordEbookPlacement } from '../utils/ebook-placement';
@@ -339,52 +339,9 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     await createEbookRequestIfEnabled(requestId, audiobook, request.userId, result.targetPath, logger);
 
     // Trigger filesystem scan if enabled (Plex or Audiobookshelf)
+    await triggerScanAfterImport('audiobook', logger);
+
     const configService = getConfigService();
-    const backendMode = await configService.getBackendMode();
-
-    const configKey = backendMode === 'audiobookshelf'
-      ? 'audiobookshelf.trigger_scan_after_import'
-      : 'plex.trigger_scan_after_import';
-
-    const scanEnabled = await configService.get(configKey);
-
-    if (scanEnabled === 'true') {
-      try {
-        // Get library service (returns PlexLibraryService or AudiobookshelfLibraryService)
-        const libraryService = await getLibraryService();
-
-        // Get configured library ID (backend-specific config)
-        const libraryId = backendMode === 'audiobookshelf'
-          ? await configService.get('audiobookshelf.library_id')
-          : await configService.get('plex_audiobook_library_id');
-
-        if (!libraryId) {
-          throw new Error('Library ID not configured');
-        }
-
-        // Trigger scan (implementation is backend-specific)
-        await libraryService.triggerLibraryScan(libraryId);
-
-        logger.info(
-          `Triggered ${backendMode} filesystem scan for library ${libraryId}`
-        );
-
-      } catch (error) {
-        // Log error but don't fail the job
-        logger.error(
-          `Failed to trigger filesystem scan: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          {
-            error: error instanceof Error ? error.stack : undefined,
-            backend: backendMode
-          }
-        );
-        // Continue - scheduled scans will eventually detect the book
-      }
-    } else {
-      logger.info(
-        `${backendMode} filesystem scan trigger disabled (relying on filesystem watcher)`
-      );
-    }
 
     // Cleanup downloads if configured (uses IDownloadClient.postProcess for client-specific cleanup)
     await cleanupDownloadAfterOrganize({
@@ -981,35 +938,10 @@ async function processEbookOrganization(
     logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
   });
 
-  // Trigger filesystem scan if enabled (same as audiobooks)
+  // Trigger filesystem scan if enabled (the ebook library on Audiobookshelf, when set)
+  await triggerScanAfterImport('ebook', logger);
+
   const configService = getConfigService();
-  const backendMode = await configService.getBackendMode();
-  const configKey = backendMode === 'audiobookshelf'
-    ? 'audiobookshelf.trigger_scan_after_import'
-    : 'plex.trigger_scan_after_import';
-  const scanEnabled = await configService.get(configKey);
-
-  logger.debug(`Ebook library scan check: backendMode=${backendMode}, configKey=${configKey}, scanEnabled=${scanEnabled}`);
-
-  if (scanEnabled === 'true') {
-    try {
-      const libraryService = await getLibraryService();
-      const libraryId = backendMode === 'audiobookshelf'
-        ? await configService.get('audiobookshelf.library_id')
-        : await configService.get('plex_audiobook_library_id');
-
-      if (libraryId) {
-        await libraryService.triggerLibraryScan(libraryId);
-        logger.info(`Triggered ${backendMode} filesystem scan for library ${libraryId}`);
-      } else {
-        logger.warn(`Library ID not configured for ${backendMode}, skipping scan`);
-      }
-    } catch (error) {
-      logger.error(`Failed to trigger filesystem scan: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  } else {
-    logger.debug(`Ebook library scan disabled (scanEnabled=${scanEnabled})`);
-  }
 
   // Remove a direct HTTP download file now that it is in the library
   if (!isIndexerDownload) {

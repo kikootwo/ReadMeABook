@@ -75,12 +75,13 @@ Result: Douglas Preston, Lincoln Child/Pendergast/01 - Relic/
 **Configuration:**
 - Plex: `plex.trigger_scan_after_import` (boolean, default: false)
 - Audiobookshelf: `audiobookshelf.trigger_scan_after_import` (boolean, default: false)
+- Audiobookshelf: `audiobookshelf.ebook_library_id` (optional) — library scanned after an ebook import; empty scans the audiobook library (for ebook templates that place ebooks outside the audiobook library's folders)
 
 **Flow:**
 1. Files organized to media directory
 2. Request status updated to `downloaded`
 3. Check config setting (backend-specific)
-4. If enabled: Call `ILibraryService.triggerLibraryScan(libraryId)`
+4. If enabled: Call `ILibraryService.triggerLibraryScan(libraryId)` via `triggerScanAfterImport(kind)` (`post-import-scan.ts`), shared by audiobook and ebook organize
 5. Media server scans filesystem (async operation)
 6. RMAB's scheduled check eventually detects new book
 7. Request status updates to `available`
