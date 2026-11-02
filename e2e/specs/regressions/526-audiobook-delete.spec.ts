@@ -140,7 +140,10 @@ test('526a audio + cover + the recorded epub: audio and cover go, the epub and i
 async function deleteFromTable(page: Page, title: string) {
   await page.goto('/admin');
   await page.getByPlaceholder('Search by title or author...').fill(title);
-  const row = page.locator('tr', { hasText: title }).first();
+  // The ebook request shares the title: only the audiobook request is the one to delete
+  await page.getByRole('combobox', { name: 'Filter by type' }).selectOption({ label: 'Audiobooks' });
+  await expect(page.locator('tbody tr', { hasText: title })).toHaveCount(1);
+  const row = page.locator('tbody tr', { hasText: title }).first();
   await row.getByTitle('Actions').click();
   await page.getByRole('menuitem', { name: 'Delete Request' }).click();
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
