@@ -59,16 +59,13 @@ export async function cancelUsenetDownload(
   if (deadline.passed()) return done('not_removed', 'cancel deadline passed before the delete');
 
   try {
-    if (client.clientType === 'nzbget') {
-      if (!client.deleteQueuedDownload) return done('not_removed', 'no queue-only delete');
-      const category = (await manager.getClientForProtocol('usenet'))?.category || 'readmeabook';
-      const deleted = await client.deleteQueuedDownload(clientId, { name: row.torrentName, category });
-      if (deleted === 'not_queued') return done('kept_finished', 'job left the queue');
-      if (deleted === 'mismatch') return done('kept_not_owned', 'queued job does not match');
-    } else {
-      // SABnzbd's delete is a queue delete (a finished job in history is not touched)
-      await client.deleteDownload(clientId, true);
-    }
+    // Queue only (a finished job in history is never touched); 'deleted' only when the client confirms it
+    if (!client.deleteQueuedDownload) return done('not_removed', 'no queue-only delete');
+    const category = (await manager.getClientForProtocol('usenet'))?.category || 'readmeabook';
+    const deleted = await client.deleteQueuedDownload(clientId, { name: row.torrentName, category });
+    if (deleted === 'not_queued') return done('kept_finished', 'job left the queue');
+    if (deleted === 'mismatch') return done('kept_not_owned', 'queued job does not match');
+    if (deleted === 'unconfirmed') return done('not_removed', `${clientName} did not confirm the delete`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.warn(`Could not remove job ${clientId} from ${clientName} for cancelled request ${requestId}: ${message}`);

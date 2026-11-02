@@ -126,8 +126,11 @@ export interface QueuedJobMatch {
   category?: string | null;
 }
 
-/** `not_queued`: the job left the queue (finished or moved to history); `mismatch`: not the job RMAB added */
-export type QueuedDeleteResult = 'deleted' | 'not_queued' | 'mismatch';
+/**
+ * `not_queued`: the job left the queue (finished or moved to history); `mismatch`: not the job RMAB added;
+ * `unconfirmed`: the client did not confirm the delete (SABnzbd still lists the job in its queue)
+ */
+export type QueuedDeleteResult = 'deleted' | 'not_queued' | 'mismatch' | 'unconfirmed';
 
 /** Options for adding a new download */
 export interface AddDownloadOptions {
@@ -267,8 +270,9 @@ export interface IDownloadClient {
   deleteDownload(id: string, deleteFiles?: boolean): Promise<void>;
 
   /**
-   * Cancel (NZBGet): delete a job with its files only while it is still in the queue, never
-   * from history, and only when its name or category matches what RMAB expects.
+   * Cancel (usenet): delete a job with its files only while it is still in the queue, never from
+   * history. NZBGet also requires its name or category to match what RMAB expects (it reuses ids);
+   * SABnzbd answers 'deleted' only when it confirms the delete.
    */
   deleteQueuedDownload?(id: string, expected: QueuedJobMatch): Promise<QueuedDeleteResult>;
 
