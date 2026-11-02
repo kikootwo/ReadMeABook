@@ -8,8 +8,13 @@ import type { NotificationPayload } from '@/lib/services/notification';
 
 const fetchMock = vi.hoisted(() => vi.fn());
 const loggerInfo = vi.hoisted(() => vi.fn());
+const findManyMock = vi.hoisted(() => vi.fn());
 
-vi.mock('@/lib/db', () => ({ prisma: {} }));
+vi.mock('@/lib/db', () => ({ prisma: { notificationBackend: { findMany: findManyMock } } }));
+
+vi.mock('@/lib/services/encryption.service', () => ({
+  getEncryptionService: () => ({ isEncryptedFormat: () => false, decrypt: (v: string) => v, encrypt: (v: string) => v }),
+}));
 
 vi.mock('@/lib/utils/logger', () => {
   const instance = { info: loggerInfo, warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -32,7 +37,7 @@ function payload(userName: string, event: NotificationPayload['event'] = 'reques
 
 async function send(config: Record<string, string>, userName: string) {
   const { AppriseProvider } = await import('@/lib/services/notification');
-  await new AppriseProvider().send(config, payload(userName));
+  return new AppriseProvider().send(config, payload(userName));
 }
 
 /** The tag the provider posted to Apprise (undefined when no tag key was sent) */
@@ -60,6 +65,10 @@ describe('Apprise Tag with {user}', () => {
 
     it('sends a tag without {user} even when there is no requester', async () => {
       expect(await tagFor('admin', '')).toBe('admin');
+    });
+
+    it('sends a tag with | and & but no {user} byte for byte', async () => {
+      expect(await tagFor('admin|family & kids', 'Jane Doe')).toBe('admin|family & kids');
     });
   });
 
@@ -105,6 +114,30 @@ describe('Apprise Tag with {user}', () => {
     it('drops a whole AND group whose {user} cannot be filled, so it never widens', async () => {
       expect(await tagFor('books user-{user}, admin', '')).toBe('admin');
     });
+
+    it('reads | as OR, the way apprise-api splits a tag', async () => {
+      expect(await tagFor('admin|user-{user}', 'Jane')).toBe('admin, user-jane');
+      vi.clearAllMocks();
+      expect(await tagFor('admin | user-{user}', 'Jane')).toBe('admin, user-jane');
+    });
+
+    it('reads & and + (with or without spaces) as AND', async () => {
+      expect(await tagFor('admin&user-{user}', 'Jane')).toBe('admin user-jane');
+      vi.clearAllMocks();
+      expect(await tagFor('admin + user-{user}', 'Jane')).toBe('admin user-jane');
+    });
+
+    it('keeps the other OR group when {user} is in a |-separated group with no requester', async () => {
+      expect(await tagFor('admin|user-{user}', '')).toBe('admin');
+    });
+
+    it('drops an &-joined AND group with no requester instead of widening it to admin', async () => {
+      expect(await tagFor('admin&user-{user}|owner', '')).toBe('owner');
+      vi.clearAllMocks();
+      expect(await send({ ...STATEFUL, tag: 'admin&user-{user}' }, '')).toEqual({ skipped: true, reason: expect.stringContaining('no requester') });
+      expect(await send({ ...STATEFUL, tag: 'admin + user-{user}' }, '')).toEqual({ skipped: true, reason: expect.stringContaining('no requester') });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 
   describe('no requester', () => {
@@ -120,18 +153,73 @@ describe('Apprise Tag with {user}', () => {
       expect(await tagFor('admin, user-{user}', '李明')).toBe('admin');
     });
 
-    it('does not send when nothing is left, and logs one info line', async () => {
-      await send({ ...STATEFUL, tag: 'user-{user}' }, '');
+    it('treats a name whose letters all drop out as no requester, not its digits', async () => {
+      expect(await tagFor('admin, user-{user}', 'Дочь 1')).toBe('admin');
+    });
+
+    it('keeps a name made only of digits, and the a-z part of a mixed-script name', async () => {
+      expect(await tagFor('user-{user}', '12345')).toBe('user-12345');
+      vi.clearAllMocks();
+      expect(await tagFor('user-{user}', '李明 Lee')).toBe('user-lee');
+    });
+
+    it('gives names that differ only in case, spaces or punctuation the same tag', async () => {
+      expect(await tagFor('user-{user}', 'Jane Doe')).toBe('user-jane-doe');
+      vi.clearAllMocks();
+      expect(await tagFor('user-{user}', 'jane.doe')).toBe('user-jane-doe');
+    });
+
+    it('does not send when nothing is left, and says why without the username', async () => {
+      const result = await send({ ...STATEFUL, tag: 'user-{user}' }, '');
       expect(fetchMock).not.toHaveBeenCalled();
-      expect(loggerInfo).toHaveBeenCalledTimes(1);
-      expect(loggerInfo.mock.calls[0][0]).toContain('{user}');
-      expect(loggerInfo.mock.calls[0][1]).toEqual({ event: 'request_available' });
+      expect(result).toEqual({ skipped: true, reason: expect.stringContaining('no requester') });
     });
 
     it('does not send when {user} would become the Apprise "all" tag', async () => {
-      await send({ ...STATEFUL, tag: '{user}' }, 'All');
-      await send({ ...STATEFUL, tag: '2:{user}' }, 'all');
+      for (const [tag, name] of [['{user}', 'All'], ['2:{user}', 'all'], ['{user}', 'All!'], ['{user}', 'ａｌｌ']]) {
+        const result = await send({ ...STATEFUL, tag }, name);
+        expect(result).toEqual({ skipped: true, reason: expect.stringContaining("'all'") });
+        expect(JSON.stringify(result)).not.toMatch(/All!|ａｌｌ/);
+      }
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('never lets a name become "all" through a | group: sends only to the other group', async () => {
+      for (const name of ['all', 'All!', 'ａｌｌ']) {
+        vi.clearAllMocks();
+        expect(await tagFor('admin|{user}', name)).toBe('admin');
+      }
+    });
+  });
+
+  describe('notification service log', () => {
+    const backend = { id: 'b1', name: 'Family Apprise', type: 'apprise', enabled: true, events: ['request_available'] };
+
+    async function sendThroughService(tag: string, userName: string) {
+      findManyMock.mockResolvedValue([{ ...backend, config: { ...STATEFUL, tag } }]);
+      const { NotificationService } = await import('@/lib/services/notification');
+      await new NotificationService().sendNotification(payload(userName));
+      return loggerInfo.mock.calls.map((c) => [String(c[0]), JSON.stringify(c[1] ?? {})].join(' '));
+    }
+
+    it('logs a skipped backend as skipped with the reason, not as succeeded', async () => {
+      const lines = await sendThroughService('user-{user}', '');
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(lines).toContainEqual(expect.stringContaining('0 succeeded, 1 skipped, 0 failed'));
+      expect(lines).toContainEqual(expect.stringMatching(/Skipped backend Family Apprise: .*no requester/));
+    });
+
+    it('says when the skip is because the name would mean every target, without the name', async () => {
+      const lines = await sendThroughService('{user}', 'ALL');
+      expect(lines).toContainEqual(expect.stringMatching(/Skipped backend Family Apprise: .*every Apprise target/));
+      expect(lines.join('\n')).not.toMatch(/ALL|apprise:8000|"family"/);
+    });
+
+    it('logs a backend that sent as succeeded', async () => {
+      const lines = await sendThroughService('user-{user}', 'Jane');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(lines).toContainEqual(expect.stringContaining('1 succeeded, 0 skipped, 0 failed'));
+      expect(lines.join('\n')).not.toContain('Skipped backend');
     });
   });
 
@@ -150,6 +238,8 @@ describe('Apprise Tag with {user}', () => {
       const field = new AppriseProvider().metadata.configFields.find((f) => f.name === 'tag');
       expect(field?.helpText).toContain('{user}');
       expect(field?.helpText).toContain('Config Key only');
+      expect(field?.helpText).toContain('lowercase with - for spaces and punctuation');
+      expect(field?.helpText).toContain('Jane Doe → jane-doe');
       expect(field?.placeholder).toContain('{user}');
     });
   });

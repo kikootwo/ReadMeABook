@@ -6,7 +6,7 @@
 import { getEncryptionService } from '../encryption.service';
 import { RMABLogger } from '../../utils/logger';
 import { prisma } from '../../db';
-import { INotificationProvider, MASKED_CONFIG_VALUE, NotificationPayload, ProviderMetadata } from './INotificationProvider';
+import { INotificationProvider, MASKED_CONFIG_VALUE, NotificationPayload, NotificationSkipped, ProviderMetadata } from './INotificationProvider';
 import { AppriseProvider } from './providers/apprise.provider';
 import { DiscordProvider } from './providers/discord.provider';
 import { NtfyProvider } from './providers/ntfy.provider';
@@ -81,18 +81,25 @@ export class NotificationService {
         )
       );
 
-      // Log results
-      const successful = results.filter((r) => r.status === 'fulfilled').length;
+      // Log results: a backend that deliberately sent nothing is skipped, not succeeded
+      const isSkip = (r: PromiseSettledResult<void | NotificationSkipped>) => r.status === 'fulfilled' && !!r.value?.skipped;
+      const skipped = results.filter(isSkip).length;
+      const successful = results.filter((r) => r.status === 'fulfilled').length - skipped;
       const failed = results.filter((r) => r.status === 'rejected').length;
 
-      logger.info(`Notification sent: ${successful} succeeded, ${failed} failed`, {
+      logger.info(`Notification sent: ${successful} succeeded, ${skipped} skipped, ${failed} failed`, {
         event: payload.event,
         requestId: payload.requestId,
       });
 
-      // Log individual failures
+      // Log individual skips and failures
       results.forEach((result, index) => {
-        if (result.status === 'rejected') {
+        if (result.status === 'fulfilled' && result.value?.skipped) {
+          logger.info(`Skipped backend ${backends[index].name}: ${result.value.reason}`, {
+            backend: backends[index].type,
+            event: payload.event,
+          });
+        } else if (result.status === 'rejected') {
           logger.error(`Failed to send to backend ${backends[index].name}`, {
             error: result.reason instanceof Error ? result.reason.message : String(result.reason),
             backend: backends[index].type,
@@ -116,7 +123,7 @@ export class NotificationService {
     type: string,
     config: any,
     payload: NotificationPayload
-  ): Promise<void> {
+  ): Promise<void | NotificationSkipped> {
     const provider = getProvider(type);
     if (!provider) {
       throw new Error(`Unsupported backend type: ${type}`);

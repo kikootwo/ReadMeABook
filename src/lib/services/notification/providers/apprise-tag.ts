@@ -15,27 +15,37 @@ const UNKNOWN_USER_NAME = 'unknown user';
 /** Apprise tags that select something other than the services tagged with them ("all" = every service) */
 const RESERVED_TAGS = new Set(['all']);
 
+/** apprise-api's own tag delimiters: OR between groups, AND between the terms of a group */
+const TAG_OR_DELIM_RE = /\s*[|,]\s*/;
+const TAG_AND_DELIM_RE = /[\s&+]+/;
+
+/** Why a `{user}` Tag sent nothing: no requester, or the requester's tag would select every target */
+export type AppriseTagSkipReason = 'no_requester' | 'reserved_tag';
+
 export type AppriseTagResolution =
   | { send: true; tag?: string }
-  | { send: false };
+  | { send: false; reason: AppriseTagSkipReason };
 
 /**
  * Tag-safe form of a username, matching Apprise's tag grammar `[a-z0-9][a-z0-9_-]*`:
  * lowercase, accents removed, every run of characters other than a-z, 0-9 and `_` becomes
  * one `-`, then `-` and `_` are trimmed from both ends. Never contains an Apprise separator
- * or operator (`,` `;` `[` `]` space `+` `:`).
+ * or operator (`,` `|` `;` `&` `+` `[` `]` space `:`).
  * "Jane Doe" → "jane-doe"; "José.O'Brien@example.com" → "jose-o-brien-example-com".
- * Returns '' for no requester (empty, or the "Unknown User" fallback) or a name with no a-z/0-9.
+ * Returns '' for no requester: empty, the "Unknown User" fallback, or a name with letters
+ * none of which survive ("李明" → '', "Дочь 1" → '' rather than "1", shared by every such name).
  */
 export function toAppriseUserTag(userName: string | null | undefined): string {
   if (typeof userName !== 'string') return '';
   if (userName.trim().toLowerCase() === UNKNOWN_USER_NAME) return '';
-  return userName
+  const tag = userName
     .normalize('NFKD')
     .toLowerCase()
     .replace(/\p{M}/gu, '')
     .replace(/[^a-z0-9_]+/g, '-')
     .replace(/^[-_]+|[-_]+$/g, '');
+  if (/\p{L}/u.test(userName) && !/[a-z]/.test(tag)) return '';
+  return tag;
 }
 
 /** True when an expanded term would make Apprise notify something other than a tag's services */
@@ -48,8 +58,9 @@ function isReservedTerm(term: string): boolean {
 /**
  * Resolve the configured Apprise tag for one notification.
  * - No `{user}` in the tag: returned exactly as configured (empty → no tag sent).
- * - `{user}`: the tag is read as Apprise reads it (`,` = OR between groups; space or `+` =
- *   AND within a group) and every `{user}` is replaced by `toAppriseUserTag(userName)`.
+ * - `{user}`: the tag is split as apprise-api splits it (OR groups on `,` or `|`; AND terms
+ *   on spaces, `&` or `+`), every `{user}` is replaced by `toAppriseUserTag(userName)`, and
+ *   the tag is rebuilt as `group, group` with `term term` inside, which Apprise reads the same.
  *   A group whose `{user}` cannot be filled (no requester, or it would become a reserved
  *   tag such as `all`) is dropped whole, so an AND group never widens.
  * - Every group dropped → `{ send: false }`: an untagged send would not reach the requester.
@@ -64,8 +75,8 @@ export function resolveAppriseTag(
   const userTag = toAppriseUserTag(userName);
   const groups: string[] = [];
 
-  for (const group of tag.split(',')) {
-    const terms = group.split(/[\s+]+/).filter(Boolean);
+  for (const group of tag.split(TAG_OR_DELIM_RE)) {
+    const terms = group.split(TAG_AND_DELIM_RE).filter(Boolean);
     if (terms.length === 0) continue;
 
     const expanded: string[] = [];
@@ -85,5 +96,6 @@ export function resolveAppriseTag(
     if (usable) groups.push(expanded.join(' '));
   }
 
-  return groups.length > 0 ? { send: true, tag: groups.join(', ') } : { send: false };
+  if (groups.length > 0) return { send: true, tag: groups.join(', ') };
+  return { send: false, reason: userTag ? 'reserved_tag' : 'no_requester' };
 }

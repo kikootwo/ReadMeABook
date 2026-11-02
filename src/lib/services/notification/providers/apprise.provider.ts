@@ -3,13 +3,16 @@
  * Documentation: documentation/backend/services/notifications.md
  */
 
-import { INotificationProvider, NotificationPayload, ProviderMetadata } from '../INotificationProvider';
+import { INotificationProvider, NotificationPayload, NotificationSkipped, ProviderMetadata } from '../INotificationProvider';
 import { getEventMeta, getEventTitle, type NotificationSeverity } from '@/lib/constants/notification-events';
 import { liftAppriseUrlCredentials, normalizeAppriseConfig, splitUrlCredentials } from './apprise-credentials';
-import { resolveAppriseTag } from './apprise-tag';
-import { RMABLogger } from '@/lib/utils/logger';
+import { resolveAppriseTag, type AppriseTagSkipReason } from './apprise-tag';
 
-const logger = RMABLogger.create('AppriseProvider');
+/** Log text for a {user} Tag that sent nothing (the service logs it; never the username) */
+const TAG_SKIP_REASONS: Record<AppriseTagSkipReason, string> = {
+  no_requester: 'the Tag uses {user} and this notification has no requester to fill it',
+  reserved_tag: "the Tag uses {user} and the requester's name would select every Apprise target ('all')",
+};
 
 export interface AppriseConfig {
   serverUrl: string;
@@ -45,7 +48,7 @@ export class AppriseProvider implements INotificationProvider {
       { name: 'basicAuthPassword', label: 'Basic Auth Password', type: 'password', required: false, helpText: 'Not used when an Auth Token is set (the token takes precedence).' },
       { name: 'urls', label: 'Notification URLs', type: 'password', required: false, placeholder: 'slack://token, discord://webhook_id/token, ...' },
       { name: 'configKey', label: 'Config Key', type: 'text', required: false, placeholder: 'Persistent configuration key' },
-      { name: 'tag', label: 'Tag', type: 'text', required: false, placeholder: 'e.g. admin, user-{user}', helpText: 'Config Key only. {user} = the user who made the request, so each user gets their own notifications (list their URLs under that tag in Apprise).' },
+      { name: 'tag', label: 'Tag', type: 'text', required: false, placeholder: 'e.g. admin, user-{user}', helpText: "Config Key only. {user} = the requester's name, lowercase with - for spaces and punctuation (Jane Doe → jane-doe). List their URLs under that tag." },
       { name: 'authToken', label: 'Auth Token', type: 'password', required: false, placeholder: 'Optional API auth token' },
     ],
   };
@@ -59,7 +62,7 @@ export class AppriseProvider implements INotificationProvider {
     return lifted ? { ...lifted, passwordField: 'basicAuthPassword' } : null;
   }
 
-  async send(config: Record<string, any>, payload: NotificationPayload): Promise<void> {
+  async send(config: Record<string, any>, payload: NotificationPayload): Promise<void | NotificationSkipped> {
     const appriseConfig = config as unknown as AppriseConfig;
     const meta = getEventMeta(payload.event);
     const { title, body } = this.formatMessage(payload);
@@ -96,8 +99,7 @@ export class AppriseProvider implements INotificationProvider {
       // {user} in the tag targets the requester; with no requester, an untagged send would not reach them
       const resolvedTag = resolveAppriseTag(appriseConfig.tag, payload.userName);
       if (!resolvedTag.send) {
-        logger.info('Apprise notification not sent: the Tag uses {user} and this notification has no requester to fill it', { event: payload.event });
-        return;
+        return { skipped: true, reason: TAG_SKIP_REASONS[resolvedTag.reason] };
       }
 
       const url = `${serverUrl}/notify/${appriseConfig.configKey}`;

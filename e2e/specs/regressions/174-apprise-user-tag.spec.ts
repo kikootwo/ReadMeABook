@@ -4,7 +4,8 @@
  *
  * No flags needed. Admin session from bootstrap's storage state:
  *   1  Settings > Notifications > Apprise opens the add form; the Tag field shows the {user} help
- *      text and the e.g. placeholder; Config Key "family" and Tag "admin, user-{user}" typed
+ *      text (the name rule and its Jane Doe example, at most 3 lines) and the e.g. placeholder;
+ *      Config Key "family" and Tag "admin, user-{user}" typed
  *   2  snapshots with the Tag field in view: 1280 px light, 375 px dark (`174/`)
  */
 
@@ -12,7 +13,7 @@ import { test, expect, type Browser } from '@playwright/test';
 import { evidencePath, writeEvidence } from '../../lib/harness';
 
 const DIR = '174';
-const HELP = 'Config Key only. {user} = the user who made the request';
+const HELP = "Config Key only. {user} = the requester's name, lowercase with - for spaces and punctuation (Jane Doe → jane-doe). List their URLs under that tag.";
 
 const VIEWS = [
   { name: 'apprise-tag-help', width: 1280, height: 800, dark: false },
@@ -44,7 +45,9 @@ test('#174: the Apprise Tag field explains {user}', async ({ browser }) => {
 
     const help = page.getByText(HELP);
     await expect(help).toBeVisible();
-    result[view.name] = { help: await help.textContent(), tag: await tagInput.inputValue() };
+    const lines = await help.evaluate((el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)));
+    result[view.name] = { help: await help.textContent(), lines, tag: await tagInput.inputValue() };
+    expect.soft(lines, `help text lines at ${view.width} px`).toBeLessThanOrEqual(3);
 
     await help.evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await page.waitForTimeout(300);
