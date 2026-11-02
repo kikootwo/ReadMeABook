@@ -76,7 +76,9 @@ test('#298 A: an interactive pick of a link published on the proxy address reach
     add = await waitFor('qBittorrent add after the pick', async () => qbitAdds(await fakeArr.requests(), since)[0], { timeoutMs: 60_000 }).catch(() => undefined);
     // The table as the admin sees it after the pick (the modal closes on success)
     await page.goto('/admin');
-    await page.locator('tr', { hasText: book.title }).first().getByText(/Downloading|Processing|Downloaded/).waitFor({ timeout: 30_000 }).catch(() => undefined);
+    const row = page.locator('tr', { hasText: book.title }).first();
+    await row.getByText(/Downloading|Processing|Downloaded/).waitFor({ timeout: 30_000 }).catch(() => undefined);
+    await row.evaluate((el) => el.scrollIntoView({ block: 'center' })).catch(() => undefined);
     await settled(page);
     await snap(page, DIR, 'pick-result');
   }
