@@ -70,8 +70,10 @@ function stopReport(k: number) {
 const status = (id: string) => psql(`select status from requests where id = ${sqlStr(id)}`);
 const organizeJobs = (id: string) =>
   psql(`select bull_job_id || ':' || status from jobs where request_id = ${sqlStr(id)} and type = 'organize_files' order by created_at`).split('\n').filter(Boolean);
+/** PIDs whose comm starts with `comm` (node shows as "next-server (v…", truncated to 15 chars) */
 const pids = (comm: string) =>
-  sh(`for d in /proc/[0-9]*; do c=$(cat "$d/comm" 2>/dev/null) || continue; [ "$c" = "${comm}" ] && echo "\${d#/proc/}"; done; true`).split(/\s+/).filter(Boolean);
+  sh(`for d in /proc/[0-9]*; do c=$(cat "$d/comm" 2>/dev/null) || continue; case "$c" in "${comm}"*) echo "\${d#/proc/}" ;; esac; done; true`).split(/\s+/).filter(Boolean);
+const NODE = 'next-server';
 const healthy = () => poll(() => sh('curl -sf --max-time 2 http://localhost:3030/api/health >/dev/null && echo ok || true') === 'ok', 120_000);
 
 /** Hold the next merge's ffmpeg (SIGSTOP) once it starts; its PID lands in /tmp/e2e-ffpid. */
@@ -142,10 +144,10 @@ test('#540 stop phases', async () => {
 
     // Crash: node SIGKILLed during a held merge
     const held = await requestHeld(rmab, 'asin-merge', 'artemis');
-    const nodeBefore = pids('node');
+    const nodeBefore = pids(NODE);
     sh(`for p in ${nodeBefore.join(' ')}; do kill -KILL "$p"; done`);
     const restarted = await poll(() => {
-      const now = pids('node');
+      const now = pids(NODE);
       return now.length > 0 && now.every((p) => !nodeBefore.includes(p)) ? now : null;
     }, 60_000, 1000);
     const ffmpegAfterCrash = pids('ffmpeg');
@@ -177,13 +179,13 @@ test('#540 stop phases', async () => {
 
     // E3: the held merge is released together with the stop, so it finishes inside the window
     const held = await requestHeld(rmab, 'asin-merge-tagged', 'phm');
-    const nodeBefore = pids('node');
+    const nodeBefore = pids(NODE);
     const wrapper = pids('app-start.sh');
     out.e3 = { ...held, wrapper };
     save();
     if (held.pid) sh(`kill -CONT ${held.pid}; kill -TERM ${wrapper.join(' ')}`);
     const restarted = await poll(() => {
-      const now = pids('node');
+      const now = pids(NODE);
       return now.length > 0 && now.every((p) => !nodeBefore.includes(p)) ? now : null;
     }, 60_000, 1000);
     await healthy();
