@@ -2,7 +2,7 @@
  * Component: E2E regression #497 across an upgrade (ebook requests imported before the placement record)
  * Documentation: documentation/testing/e2e-harness.md
  *
- * run.mjs --upgrade-from 1.2.11 --upgrade-specs 497-ebook-legacy runs this file on the release image
+ * run.mjs --upgrade-from 1.2.12 --upgrade-specs 497-ebook-legacy runs this file on the release image
  * (E2E_PHASE=upgrade-seed), then on the branch image on the same volumes (upgrade-verify).
  *   seed:   L1 an audiobook + a delivered ebook import (the release copies the epub, keeps no record);
  *           L2 an audiobook + the user's own epub in its folder + a failed ebook request (SQL);

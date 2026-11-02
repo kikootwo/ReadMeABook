@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { hidePlacementRecord } from '@/lib/services/request-detail-query';
 
 const logger = RMABLogger.create('API.Admin.Requests.PendingApproval');
 
@@ -38,7 +39,7 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json({
           success: true,
-          requests,
+          requests: requests.map((r) => hidePlacementRecord(r)),
           count: requests.length,
         });
       } catch (error) {

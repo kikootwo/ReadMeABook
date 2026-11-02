@@ -15,7 +15,7 @@ import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { canonicalPath, UnsafeDeleteError } from '../utils/delete-guard';
 import { assertSafeLibraryDelete, isStaleStoredFolder, type LibraryBook } from '../utils/library-delete-guard';
-import { otherRecordedPaths, planPlacedEbookDelete, readPlacements } from '../utils/ebook-placement';
+import { otherRecordedEntries, planPlacedEbookDelete, readPlacements } from '../utils/ebook-placement';
 import { sweepEmptyParents } from '../processors/organize-cleanup-guard';
 import { isPathBelowBoundary } from '../utils/cleanup-helpers';
 import { libraryRelativePath, normalizeRelPath } from '../utils/library-item-path';
@@ -23,8 +23,10 @@ import { libraryRelativePath, normalizeRelPath } from '../utils/library-item-pat
 const logger = RMABLogger.create('RequestDelete');
 
 const NO_FOLDER_REASON = 'RMAB has no stored folder for this book, so its library files were not removed';
-const LEGACY_EBOOK_REASON = 'this request was imported before RMAB kept a record of the ebook files it places, so no ebook file was removed';
-const EBOOK_ALREADY_THERE_REASON = 'the ebook was already in the library when this request imported it, so it was not removed';
+const NO_RECORD_WHY = 'it was imported before RMAB kept one, or the record could not be saved';
+const LEGACY_EBOOK_REASON = `RMAB has no record of the ebook files this request placed (${NO_RECORD_WHY}), so no ebook file was removed`;
+const EARLIER_IMPORT_REASON = `an earlier import of this request has no record (${NO_RECORD_WHY}), so its ebook file was not removed`;
+const EBOOK_ALREADY_THERE_REASON = 'RMAB has no record that this request placed the ebook (its import found it already in the library), so it was not removed';
 const UNREADABLE_RECORD_REASON = 'the placement record could not be read';
 
 export interface DeleteBook extends LibraryBook {
@@ -114,16 +116,18 @@ export async function removeEbookFiles(book: DeleteBook, request: EbookDeleteReq
     logger.info(`No ebook placement record for request ${request.id} ("${book.title}"); no ebook file removed`);
     return delivered ? { deleted: 0, keptReason: LEGACY_EBOOK_REASON } : { deleted: 0 };
   }
-  if (record.entries.length === 0 && record.unreadable === 0) {
+  if (record.entries.length === 0 && record.unreadable === 0 && !record.unrecordedEarlier) {
     logger.info(`Request ${request.id} placed no ebook file ("${book.title}": the library already had it); none removed`);
     return { deleted: 0, keptReason: EBOOK_ALREADY_THERE_REASON };
   }
 
-  const reasons: string[] = record.unreadable > 0 ? [UNREADABLE_RECORD_REASON] : [];
-  const otherPaths = record.entries.length > 0 ? await otherRecordedPaths(request.id) : new Set<string>();
+  const reasons: string[] = [];
+  if (record.unrecordedEarlier) reasons.push(EARLIER_IMPORT_REASON);
+  if (record.unreadable > 0) reasons.push(UNREADABLE_RECORD_REASON);
+  const others = record.entries.length > 0 ? await otherRecordedEntries(request.id) : [];
   let deleted = 0;
   for (const entry of record.entries) {
-    const decision = await planPlacedEbookDelete(entry, book, otherPaths);
+    const decision = await planPlacedEbookDelete(entry, book, others);
     if (decision.kind === 'kept') {
       reasons.push(decision.reason);
     } else if (decision.kind === 'gone') {
@@ -141,7 +145,8 @@ export async function removeEbookFiles(book: DeleteBook, request: EbookDeleteReq
     }
   }
   if (reasons.length === 0) return { deleted };
-  const keptReason = reasons.join('; ');
+  // Several entries can share one reason (e.g. two files in a folder that fails rule c): each shows once
+  const keptReason = [...new Set(reasons)].join('; ');
   logger.warn(`Keeping ebook file(s) of request ${request.id} ("${book.title}"): ${keptReason}`);
   return { deleted, keptReason };
 }

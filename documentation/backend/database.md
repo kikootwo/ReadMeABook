@@ -72,7 +72,7 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - `search_attempts`, `download_attempts`, `import_attempts`, `max_import_retries` (default 5)
 - `auto_rerequest_count` (Int, default 0) - Automatic re-requests after a failure with no new block (shelf sync / watched lists backoff step); user requests and retries reset it to 0. See [release-blocklist.md](../admin-features/release-blocklist.md#automatic-re-requests-409)
 - `last_search_at`, `last_import_at`, `created_at`, `updated_at`, `completed_at`
-- `placed_ebook_files` (Json, nullable) - Ebook requests: files this request's imports copied into the library, `[{ path, size, sha256, placedAt }]`; `[]` = imported but the file was already there; NULL = no record (pre-#497 or never imported). The request delete removes only these. See [request-deletion.md](../admin-features/request-deletion.md)
+- `placed_ebook_files` (Json, nullable) - Ebook requests: files this request's imports copied into the library, `[{ path, size, sha256, placedAt }]`; `[]` = imported but the file was already there; NULL = no record (pre-#497, a failed record write, or never imported); a first item `{ earlierImport: 'unrecorded' }` = the request delivered before its first recorded import. The request delete removes only these. Never in an API response. See [request-deletion.md](../admin-features/request-deletion.md)
 - Unique: `(user_id, audiobook_id)`
 - Indexes: `user_id`, `audiobook_id`, `status`, `created_at DESC`
 

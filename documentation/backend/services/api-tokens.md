@@ -46,7 +46,7 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 
 ## GET `/api/requests/:id`
 - Returns request including `audiobook`, `downloadHistory` (selected), and recent `jobs`.
-- Non-admin callers (owner sessions, user-role tokens): explicit field list `OWNER_REQUEST_DETAIL_SELECT` (`src/lib/services/request-detail-query.ts`) — omits `Request.selectedTorrent`, `DownloadHistory.magnetLink/torrentUrl/downloadPath`, `Audiobook.filePath`, `Job.payload/result/stackTrace`; remaining strings pass through `stripProwlarrKeyFromResults()`. Admins get the full include.
+- Non-admin callers (owner sessions, user-role tokens): explicit field list `OWNER_REQUEST_DETAIL_SELECT` (`src/lib/services/request-detail-query.ts`) — omits `Request.selectedTorrent`, `DownloadHistory.magnetLink/torrentUrl/downloadPath`, `Audiobook.filePath`, `Job.payload/result/stackTrace`; remaining strings pass through `stripProwlarrKeyFromResults()`. Admins get the full include, minus `Request.placedEbookFiles` (never returned by any request response: `GET /api/requests` list, `POST /api/requests` and this route included).
 - Ownership enforced: `requestRecord.userId === req.user.id || role === 'admin'` → otherwise 403.
 - Soft-deleted requests (`deletedAt != null`) return 404.
 - BigInt columns (`downloadHistory[].torrentSizeBytes`, `audiobook.fileSizeBytes`) go out as JSON numbers via `toJsonSafe()` (`src/lib/utils/json-safe.ts`).

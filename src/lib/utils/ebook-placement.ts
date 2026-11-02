@@ -7,13 +7,14 @@
  * placeFile copied the file ('copied'); 'identical', 'present' and 'differs'
  * mean the library already had it, so the import adds nothing (the field is then
  * at least []). NULL means no record (never imported, or imported before this
- * field existed). A request delete removes only recorded files, and only while
- * each is still the exact file RMAB placed (size + sha256) and its folder passes
- * library delete guard rules a-c.
+ * field existed). A record whose request had already delivered before its first
+ * recorded import starts with UNRECORDED_EARLIER_IMPORT. A request delete removes
+ * only recorded files, and only while each is still the exact file RMAB placed
+ * (size + sha256) and its folder passes library delete guard rules a-c.
  */
 
 import { createHash } from 'crypto';
-import { createReadStream } from 'fs';
+import { createReadStream, type BigIntStats } from 'fs';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { prisma } from '../db';
@@ -36,9 +37,18 @@ export interface PlacementRecordRead {
   entries: EbookPlacement[];
   /** Items that are not a well-formed entry: their file is never removed. */
   unreadable: number;
+  /** An earlier import of this request delivered with no record (before the field, or a failed write). */
+  unrecordedEarlier: boolean;
 }
 
+/** Marker for "this request delivered before its first recorded import": never a file to remove. */
+export const UNRECORDED_EARLIER_IMPORT = { earlierImport: 'unrecorded' } as const;
+
 const SHA256 = /^[0-9a-f]{64}$/;
+
+function isUnrecordedMarker(value: unknown): boolean {
+  return !!value && typeof value === 'object' && (value as { earlierImport?: unknown }).earlierImport === 'unrecorded';
+}
 
 function isPlacement(value: unknown): value is EbookPlacement {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -58,9 +68,10 @@ function isPlacement(value: unknown): value is EbookPlacement {
 /** The record as stored; null when there is none (SQL NULL and JSON null alike). */
 export function readPlacements(value: unknown): PlacementRecordRead | null {
   if (value === null || value === undefined) return null;
-  if (!Array.isArray(value)) return { entries: [], unreadable: 1 };
+  if (!Array.isArray(value)) return { entries: [], unreadable: 1, unrecordedEarlier: false };
+  const markers = value.filter(isUnrecordedMarker).length;
   const entries = value.filter(isPlacement);
-  return { entries, unreadable: value.length - entries.length };
+  return { entries, unreadable: value.length - entries.length - markers, unrecordedEarlier: markers > 0 };
 }
 
 async function sha256File(file: string): Promise<string> {
@@ -76,9 +87,14 @@ export async function placementEntry(file: string): Promise<EbookPlacement> {
   return { path: path.resolve(file), size: stat.size, sha256: await sha256File(file), placedAt: new Date().toISOString() };
 }
 
-/** Append `entry` to the stored value (same path: newest wins); anything stored is kept. */
-export function mergePlacements(stored: unknown, entry: EbookPlacement | null): unknown[] {
-  const existing = Array.isArray(stored) ? stored : stored === null || stored === undefined ? [] : [stored];
+/**
+ * Append `entry` to the stored value (same path: newest wins); anything stored is kept.
+ * No stored record but `unrecordedEarlier` (the request delivered before): the record
+ * starts with UNRECORDED_EARLIER_IMPORT.
+ */
+export function mergePlacements(stored: unknown, entry: EbookPlacement | null, unrecordedEarlier = false): unknown[] {
+  const none = stored === null || stored === undefined;
+  const existing = Array.isArray(stored) ? stored : none ? (unrecordedEarlier ? [{ ...UNRECORDED_EARLIER_IMPORT }] : []) : [stored];
   if (!entry) return existing;
   const samePath = (item: unknown) => !!item && typeof item === 'object' && (item as { path?: unknown }).path === entry.path;
   return [...existing.filter((item) => !samePath(item)), entry];
@@ -92,10 +108,12 @@ export function mergePlacements(stored: unknown, entry: EbookPlacement | null): 
 export async function recordEbookPlacement(requestId: string, record: PlacementRecord | undefined, logger: RMABLogger): Promise<void> {
   try {
     const entry = record?.status === 'copied' ? await placementEntry(record.target) : null;
-    const row = await prisma.request.findUnique({ where: { id: requestId }, select: { placedEbookFiles: true } });
+    const row = await prisma.request.findUnique({ where: { id: requestId }, select: { placedEbookFiles: true, completedAt: true } });
+    // completedAt is written after this record, so a value here is an earlier delivery
+    const unrecordedEarlier = (row?.placedEbookFiles === null || row?.placedEbookFiles === undefined) && !!row?.completedAt;
     await prisma.request.update({
       where: { id: requestId },
-      data: { placedEbookFiles: mergePlacements(row?.placedEbookFiles, entry) as object[] },
+      data: { placedEbookFiles: mergePlacements(row?.placedEbookFiles, entry, unrecordedEarlier) as object[] },
     });
     logger.info(
       entry
@@ -110,20 +128,35 @@ export async function recordEbookPlacement(requestId: string, record: PlacementR
 }
 
 /**
- * Library paths recorded by every other active request, of any book. A file two
+ * Entries recorded by every other active request, of any book. A file two
  * requests recorded stays until neither needs it. Only the ebook organize writes
  * records, so only ebook requests can hold one.
  */
-export async function otherRecordedPaths(requestId: string): Promise<Set<string>> {
+export async function otherRecordedEntries(requestId: string): Promise<EbookPlacement[]> {
   const rows = await prisma.request.findMany({
     where: { id: { not: requestId }, deletedAt: null, type: 'ebook' },
     select: { placedEbookFiles: true },
   });
-  const paths = new Set<string>();
-  for (const row of rows) {
-    for (const entry of readPlacements(row.placedEbookFiles)?.entries ?? []) paths.add(path.resolve(entry.path));
+  return rows.flatMap((row) => readPlacements(row.placedEbookFiles)?.entries ?? []);
+}
+
+/**
+ * Whether another request's entry is this very file: same sha256 and size, and its
+ * path reaches the same file (dev/ino), however that path is spelled (symlinked
+ * folder, another case on a case-insensitive mount). An error code when one could not be checked.
+ */
+async function recordedByAnother(file: BigIntStats, entry: EbookPlacement, others: EbookPlacement[]): Promise<boolean | string> {
+  for (const other of others) {
+    if (other.sha256 !== entry.sha256 || other.size !== entry.size) continue;
+    try {
+      const s = await fs.lstat(other.path, { bigint: true });
+      if (s.isFile() && s.dev === file.dev && s.ino === file.ino) return true;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? 'error';
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') return code;
+    }
   }
-  return paths;
+  return false;
 }
 
 export type PlacedFileDecision =
@@ -137,11 +170,9 @@ export type PlacedFileDecision =
 export async function planPlacedEbookDelete(
   entry: EbookPlacement,
   book: LibraryBook,
-  otherPaths: Set<string>
+  others: EbookPlacement[]
 ): Promise<PlacedFileDecision> {
   const name = path.basename(entry.path);
-  if (otherPaths.has(path.resolve(entry.path))) return { kind: 'kept', reason: `${name} is also the ebook of another request` };
-
   let safe;
   try {
     safe = await assertSafeLibraryDelete(path.dirname(entry.path), book, { evidence: false });
@@ -152,16 +183,20 @@ export async function planPlacedEbookDelete(
   if (!safe.exists) return { kind: 'gone' };
 
   const file = path.join(safe.canonicalPath, name);
+  let shared: boolean | string;
   try {
-    const stat = await fs.lstat(file);
+    const stat = await fs.lstat(file, { bigint: true });
     if (!stat.isFile()) return { kind: 'kept', reason: `${name} is no longer the file RMAB placed` };
-    if (stat.size !== entry.size || (await sha256File(file)) !== entry.sha256) {
+    if (Number(stat.size) !== entry.size || (await sha256File(file)) !== entry.sha256) {
       return { kind: 'kept', reason: `${name} changed since RMAB placed it` };
     }
+    shared = await recordedByAnother(stat, entry, others);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code ?? 'error';
     if (code === 'ENOENT' || code === 'ENOTDIR') return { kind: 'gone' };
     return { kind: 'kept', reason: `${name} could not be checked (${code})` };
   }
+  if (shared === true) return { kind: 'kept', reason: `${name} is also the ebook of another request` };
+  if (shared) return { kind: 'kept', reason: `${name} could not be compared with another request's record (${shared})` };
   return { kind: 'remove', file };
 }

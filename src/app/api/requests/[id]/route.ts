@@ -10,7 +10,7 @@ import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '@/lib/interfaces/download-client.interface';
 import { CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
-import { ADMIN_REQUEST_DETAIL_INCLUDE, OWNER_REQUEST_DETAIL_SELECT } from '@/lib/services/request-detail-query';
+import { ADMIN_REQUEST_DETAIL_INCLUDE, OWNER_REQUEST_DETAIL_SELECT, hidePlacementRecord } from '@/lib/services/request-detail-query';
 import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { toJsonSafe } from '@/lib/utils/json-safe';
@@ -62,7 +62,7 @@ export async function GET(
       // Sizes are BigInt columns, which JSON.stringify cannot serialize (#261)
       return NextResponse.json({
         success: true,
-        request: toJsonSafe(isAdmin ? requestRecord : await stripProwlarrKeyFromResults(requestRecord)),
+        request: toJsonSafe(isAdmin ? hidePlacementRecord(requestRecord) : await stripProwlarrKeyFromResults(requestRecord)),
       });
     } catch (error) {
       logger.error('Failed to get request', { error: error instanceof Error ? error.message : String(error) });
@@ -167,7 +167,7 @@ export async function PATCH(
 
         return NextResponse.json({
           success: true,
-          request: updated,
+          request: hidePlacementRecord(updated),
           message: 'Request cancelled successfully',
         });
       } else if (action === 'retry') {
@@ -335,7 +335,7 @@ export async function PATCH(
 
         return NextResponse.json({
           success: true,
-          request: updated,
+          request: hidePlacementRecord(updated),
           message: `Request retry initiated (${jobType})`,
         });
       }

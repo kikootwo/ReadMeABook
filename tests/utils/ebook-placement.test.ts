@@ -16,7 +16,7 @@ import { createPrismaMock } from '../helpers/prisma';
 const prismaMock = createPrismaMock();
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 
-const { mergePlacements, placementEntry, readPlacements, recordEbookPlacement, otherRecordedPaths } = await import('@/lib/utils/ebook-placement');
+const { mergePlacements, placementEntry, readPlacements, recordEbookPlacement, otherRecordedEntries, UNRECORDED_EARLIER_IMPORT } = await import('@/lib/utils/ebook-placement');
 
 const sha = (data: string) => createHash('sha256').update(data).digest('hex');
 const logger = { info: vi.fn(), warn: vi.fn() } as unknown as Parameters<typeof recordEbookPlacement>[2];
@@ -44,12 +44,12 @@ describe('readPlacements', () => {
   });
 
   it('[] is a record with no entries', () => {
-    expect(readPlacements([])).toEqual({ entries: [], unreadable: 0 });
+    expect(readPlacements([])).toEqual({ entries: [], unreadable: 0, unrecordedEarlier: false });
   });
 
   it('keeps well-formed entries and counts the rest', () => {
     const ok = good();
-    expect(readPlacements([ok, { ...ok, path: 'relative/Book.epub' }, 'x', null])).toEqual({ entries: [ok], unreadable: 3 });
+    expect(readPlacements([ok, { ...ok, path: 'relative/Book.epub' }, 'x', null])).toEqual({ entries: [ok], unreadable: 3, unrecordedEarlier: false });
   });
 
   it.each([
@@ -63,7 +63,7 @@ describe('readPlacements', () => {
     ['a negative size', { size: -1 }],
     ['an unsafe size', { size: 2 ** 53 }],
   ])('rejects %s', (_label, change) => {
-    expect(readPlacements([{ ...good(), ...change }])).toEqual({ entries: [], unreadable: 1 });
+    expect(readPlacements([{ ...good(), ...change }])).toEqual({ entries: [], unreadable: 1, unrecordedEarlier: false });
   });
 
   it('accepts every organizer ebook format, any case', () => {
@@ -72,8 +72,14 @@ describe('readPlacements', () => {
     }
   });
 
+  it('the earlier-import marker is neither an entry nor unreadable', () => {
+    const ok = good();
+    expect(readPlacements([{ ...UNRECORDED_EARLIER_IMPORT }, ok])).toEqual({ entries: [ok], unreadable: 0, unrecordedEarlier: true });
+    expect(readPlacements([{ ...UNRECORDED_EARLIER_IMPORT, path: ok.path }])?.entries).toEqual([]);
+  });
+
   it('a non-array value is one unreadable item', () => {
-    expect(readPlacements({ path: '/x.epub' })).toEqual({ entries: [], unreadable: 1 });
+    expect(readPlacements({ path: '/x.epub' })).toEqual({ entries: [], unreadable: 1, unrecordedEarlier: false });
   });
 });
 
@@ -104,6 +110,12 @@ describe('mergePlacements', () => {
     expect(mergePlacements([a, b], newer)).toEqual([b, newer]);
   });
 
+  it('NULL from a request that delivered before: the record starts with the earlier-import marker', () => {
+    expect(mergePlacements(null, a, true)).toEqual([UNRECORDED_EARLIER_IMPORT, a]);
+    expect(mergePlacements(undefined, null, true)).toEqual([UNRECORDED_EARLIER_IMPORT]);
+    expect(mergePlacements([], a, true)).toEqual([a]);
+  });
+
   it('keeps whatever was stored, readable or not', () => {
     expect(mergePlacements([a, 'junk'], b)).toEqual([a, 'junk', b]);
     expect(mergePlacements({ odd: true }, b)).toEqual([{ odd: true }, b]);
@@ -124,7 +136,7 @@ describe('recordEbookPlacement', () => {
 
     await recordEbookPlacement('req-1', record, logger);
 
-    expect(prismaMock.request.findUnique).toHaveBeenCalledWith({ where: { id: 'req-1' }, select: { placedEbookFiles: true } });
+    expect(prismaMock.request.findUnique).toHaveBeenCalledWith({ where: { id: 'req-1' }, select: { placedEbookFiles: true, completedAt: true } });
     expect(prismaMock.request.update).toHaveBeenCalledWith({
       where: { id: 'req-1' },
       data: { placedEbookFiles: [earlier, { path: record!.target, size: 6, sha256: sha('placed'), placedAt: expect.any(String) }] },
@@ -135,6 +147,26 @@ describe('recordEbookPlacement', () => {
     prismaMock.request.findUnique.mockResolvedValue({ placedEbookFiles: null });
 
     await recordEbookPlacement('req-1', placed(status), logger);
+
+    expect(prismaMock.request.update).toHaveBeenCalledWith({ where: { id: 'req-1' }, data: { placedEbookFiles: [] } });
+  });
+
+  it('no record yet but an earlier delivery (completedAt set before this import): the marker goes first', async () => {
+    prismaMock.request.findUnique.mockResolvedValue({ placedEbookFiles: null, completedAt: new Date('2026-01-01T00:00:00Z') });
+    const record = placed('copied');
+
+    await recordEbookPlacement('req-1', record, logger);
+
+    expect(prismaMock.request.update).toHaveBeenCalledWith({
+      where: { id: 'req-1' },
+      data: { placedEbookFiles: [UNRECORDED_EARLIER_IMPORT, expect.objectContaining({ path: record!.target })] },
+    });
+  });
+
+  it('a record that exists is never marked, whatever completedAt says', async () => {
+    prismaMock.request.findUnique.mockResolvedValue({ placedEbookFiles: [], completedAt: new Date('2026-01-01T00:00:00Z') });
+
+    await recordEbookPlacement('req-1', placed('identical'), logger);
 
     expect(prismaMock.request.update).toHaveBeenCalledWith({ where: { id: 'req-1' }, data: { placedEbookFiles: [] } });
   });
@@ -157,14 +189,12 @@ describe('recordEbookPlacement', () => {
   });
 });
 
-describe('otherRecordedPaths', () => {
+describe('otherRecordedEntries', () => {
   it('collects readable entries of other active ebook requests, of any book', async () => {
     const entry = { path: path.join(root, 'A.epub'), size: 1, sha256: 'a'.repeat(64), placedAt: 't' };
     prismaMock.request.findMany.mockResolvedValue([{ placedEbookFiles: [entry, 'junk'] }, { placedEbookFiles: null }]);
 
-    const paths = await otherRecordedPaths('req-1');
-
-    expect([...paths]).toEqual([path.resolve(entry.path)]);
+    expect(await otherRecordedEntries('req-1')).toEqual([entry]);
     expect(prismaMock.request.findMany).toHaveBeenCalledWith({
       where: { id: { not: 'req-1' }, deletedAt: null, type: 'ebook' },
       select: { placedEbookFiles: true },

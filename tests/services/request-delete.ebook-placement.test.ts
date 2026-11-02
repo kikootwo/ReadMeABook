@@ -23,8 +23,11 @@ vi.mock('@/lib/services/audiobookshelf/api', () => absMock);
 
 const { deleteRequest } = await import('@/lib/services/request-delete.service');
 
-const LEGACY = 'this request was imported before RMAB kept a record of the ebook files it places, so no ebook file was removed';
-const ALREADY_THERE = 'the ebook was already in the library when this request imported it, so it was not removed';
+const NO_RECORD_WHY = 'it was imported before RMAB kept one, or the record could not be saved';
+const LEGACY = `RMAB has no record of the ebook files this request placed (${NO_RECORD_WHY}), so no ebook file was removed`;
+const EARLIER = `an earlier import of this request has no record (${NO_RECORD_WHY}), so its ebook file was not removed`;
+const ALREADY_THERE = 'RMAB has no record that this request placed the ebook (its import found it already in the library), so it was not removed';
+const MARKER = { earlierImport: 'unrecorded' };
 
 let lib: Library;
 let otherBooks: Array<{ id: string; title: string; filePath: string | null }>;
@@ -216,5 +219,81 @@ describe('#497: an ebook request delete removes only the ebook file that request
 
     expect(result.filesKeptReason).toBe('it is also the folder of "Second"');
     expect(fs.existsSync(path.join(dir, 'Book.epub'))).toBe(true);
+  });
+});
+
+describe('#497: "another request recorded this file" means the same file, not the same spelling', () => {
+  /** Book.epub in a real title folder, and a second spelling of that folder (a symlinked folder). */
+  function twoSpellings() {
+    const dir = imported(lib.media, 'Author/Book', ['Book.m4b'], ['Book.epub']);
+    const alias = path.join(lib.media, 'Alias', 'Book');
+    fs.mkdirSync(path.dirname(alias), { recursive: true });
+    fs.symlinkSync(dir, alias, 'junction');
+    const entry = entryFor(path.join(dir, 'Book.epub'));
+    return { dir, entry, aliasEntry: { ...entry, path: path.join(alias, 'Book.epub') } };
+  }
+
+  it.each(['the other request', 'this request'])('keeps the file when %s recorded it through a symlinked folder', async (via) => {
+    const { dir, entry, aliasEntry } = twoSpellings();
+    otherRecords = [{ placedEbookFiles: [via === 'the other request' ? aliasEntry : entry] }];
+    load(ebookRequest(book(dir), { placedEbookFiles: [via === 'the other request' ? entry : aliasEntry] }));
+
+    const result = await deleteRequest('req-1', 'admin-1');
+
+    expect(result.filesKeptReason).toBe('Book.epub is also the ebook of another request');
+    expect(fs.existsSync(path.join(dir, 'Book.epub'))).toBe(true);
+  });
+
+  it('a stale record of another request at the same path (other bytes) does not keep this file', async () => {
+    const dir = imported(lib.media, 'Author/Book', ['Book.m4b'], ['Book.epub']);
+    const entry = entryFor(path.join(dir, 'Book.epub'));
+    otherRecords = [{ placedEbookFiles: [{ ...entry, sha256: 'a'.repeat(64) }] }];
+    load(ebookRequest(book(dir), { placedEbookFiles: [entry] }));
+
+    const result = await deleteRequest('req-1', 'admin-1');
+
+    expect(result.filesDeleted).toBe(true);
+    expect(result.filesKeptReason).toBeUndefined();
+    expect(fs.existsSync(path.join(dir, 'Book.epub'))).toBe(false);
+  });
+});
+
+describe('#497: kept reasons', () => {
+  it('a request delivered before its first record (a pre-upgrade import, then a Manual Import of another format): the new file goes, the old one stays, with the reason', async () => {
+    const dir = imported(lib.media, 'Author/Book', ['Book.m4b'], ['Book.pdf', 'Book.epub']);
+    load(ebookRequest(book(dir), { placedEbookFiles: [MARKER, entryFor(path.join(dir, 'Book.epub'))] }));
+
+    const result = await deleteRequest('req-1', 'admin-1');
+
+    expect(result.filesDeleted).toBe(true);
+    expect(result.filesKeptReason).toBe(EARLIER);
+    expect(fs.readdirSync(dir).sort()).toEqual(['Book.m4b', 'Book.pdf', 'cover.jpg']);
+  });
+
+  it('a re-import of a pre-upgrade request that found its file already there keeps it with the earlier-import reason', async () => {
+    const dir = imported(lib.media, 'Author/Book', ['Book.m4b'], ['Book.epub']);
+    const before = snapshot(lib.media);
+    load(ebookRequest(book(dir), { placedEbookFiles: [MARKER] }));
+
+    const result = await deleteRequest('req-1', 'admin-1');
+
+    expect(result.filesDeleted).toBe(false);
+    expect(result.filesKeptReason).toBe(EARLIER);
+    expect(snapshot(lib.media)).toEqual(before);
+  });
+
+  it('two recorded files kept for the same reason: the reason shows once', async () => {
+    const dir = path.join(lib.media, 'Ebooks');
+    write(path.join(dir, 'Book.epub'));
+    write(path.join(dir, 'Book.pdf'));
+    otherBooks = [{ id: 'book-2', title: 'Second', filePath: dir }];
+    load(ebookRequest(book(dir, { filesHash: null }), {
+      placedEbookFiles: [entryFor(path.join(dir, 'Book.epub')), entryFor(path.join(dir, 'Book.pdf'))],
+    }));
+
+    const result = await deleteRequest('req-1', 'admin-1');
+
+    expect(result.filesKeptReason).toBe('it is also the folder of "Second"');
+    expect(fs.readdirSync(dir).sort()).toEqual(['Book.epub', 'Book.pdf']);
   });
 });

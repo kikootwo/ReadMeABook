@@ -5,8 +5,8 @@
 
 import { asApp, psql, q, sh, sqlStr } from './library-delete-helpers';
 
-export const LEGACY_REASON = 'this request was imported before RMAB kept a record of the ebook files it places, so no ebook file was removed';
-export const ALREADY_THERE_REASON = 'the ebook was already in the library when this request imported it, so it was not removed';
+export const LEGACY_REASON = 'RMAB has no record of the ebook files this request placed (it was imported before RMAB kept one, or the record could not be saved), so no ebook file was removed';
+export const ALREADY_THERE_REASON = 'RMAB has no record that this request placed the ebook (its import found it already in the library), so it was not removed';
 
 export function hasPlacedColumn(): boolean {
   return psql(`select count(*) from information_schema.columns where table_name = 'requests' and column_name = 'placed_ebook_files'`) === '1';
