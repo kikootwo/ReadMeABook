@@ -3,8 +3,8 @@
  * Documentation: documentation/admin-features/request-deletion.md
  *
  * Removes what a deleted request put in the library, behind the library
- * delete guard: the audiobook's stored folder (audiobook requests) or ebook
- * files in it (ebook requests). Backend items (Audiobookshelf, Plex) are
+ * delete guard: the audiobook's stored folder (audiobook requests) or the ebook
+ * files the request's imports recorded (ebook requests). Backend items (Audiobookshelf, Plex) are
  * deleted only after RMAB removed the folder itself, and only when the item's
  * files lived inside that folder; ABS is never asked to delete files.
  */
@@ -14,7 +14,8 @@ import * as path from 'path';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { canonicalPath, UnsafeDeleteError } from '../utils/delete-guard';
-import { assertSafeLibraryDelete, isStaleStoredFolder, planEbookDelete, type LibraryBook } from '../utils/library-delete-guard';
+import { assertSafeLibraryDelete, isStaleStoredFolder, type LibraryBook } from '../utils/library-delete-guard';
+import { otherRecordedEntries, planPlacedEbookDelete, readPlacements } from '../utils/ebook-placement';
 import { sweepEmptyParents } from '../processors/organize-cleanup-guard';
 import { isPathBelowBoundary } from '../utils/cleanup-helpers';
 import { libraryRelativePath, normalizeRelPath } from '../utils/library-item-path';
@@ -22,6 +23,11 @@ import { libraryRelativePath, normalizeRelPath } from '../utils/library-item-pat
 const logger = RMABLogger.create('RequestDelete');
 
 const NO_FOLDER_REASON = 'RMAB has no stored folder for this book, so its library files were not removed';
+const NO_RECORD_WHY = 'it was imported before RMAB kept one, or the record could not be saved';
+const LEGACY_EBOOK_REASON = `RMAB has no record of the ebook files this request placed (${NO_RECORD_WHY}), so no ebook file was removed`;
+const EARLIER_IMPORT_REASON = `an earlier import of this request has no record (${NO_RECORD_WHY}), so its ebook file was not removed`;
+const EBOOK_ALREADY_THERE_REASON = 'RMAB has no record that this request placed the ebook (its import found it already in the library), so it was not removed';
+const UNREADABLE_RECORD_REASON = 'the placement record could not be read';
 
 export interface DeleteBook extends LibraryBook {
   title: string;
@@ -90,34 +96,59 @@ export async function removeAudiobookFolder(book: DeleteBook): Promise<LibraryFi
   return { kind: 'removed', folder: safe.canonicalPath, mediaDir: safe.roots.mediaDir };
 }
 
-/** D2: unlink the ebook files the guard allows (never a sweep of a shared folder). */
-export async function removeEbookFiles(book: DeleteBook): Promise<{ deleted: number; keptReason?: string }> {
-  if (!book.filePath) {
-    logger.warn(`Skipping ebook file deletion for "${book.title}": no stored file path`);
-    return { deleted: 0 };
+/** The ebook request fields the D2 delete reads (scalars deleteRequest already loads). */
+export interface EbookDeleteRequest {
+  id: string;
+  status: string;
+  completedAt: Date | null;
+  placedEbookFiles: unknown;
+}
+
+/**
+ * D2 (#497): unlink only the ebook files this request's imports placed
+ * (Request.placedEbookFiles), each only while it is still the exact file RMAB
+ * placed and its folder passes rules a-c. No record removes nothing.
+ */
+export async function removeEbookFiles(book: DeleteBook, request: EbookDeleteRequest): Promise<{ deleted: number; keptReason?: string }> {
+  const record = readPlacements(request.placedEbookFiles);
+  if (!record) {
+    const delivered = request.status === 'downloaded' || !!request.completedAt;
+    logger.info(`No ebook placement record for request ${request.id} ("${book.title}"); no ebook file removed`);
+    return delivered ? { deleted: 0, keptReason: LEGACY_EBOOK_REASON } : { deleted: 0 };
   }
-  let files: string[];
-  try {
-    files = await planEbookDelete(book.filePath, book);
-  } catch (error) {
-    const reason = refusal(error);
-    logger.warn(`Keeping ebook files in ${book.filePath} for "${book.title}": ${reason}`);
-    return { deleted: 0, keptReason: reason };
+  if (record.entries.length === 0 && record.unreadable === 0 && !record.unrecordedEarlier) {
+    logger.info(`Request ${request.id} placed no ebook file ("${book.title}": the library already had it); none removed`);
+    return { deleted: 0, keptReason: EBOOK_ALREADY_THERE_REASON };
   }
+
+  const reasons: string[] = [];
+  if (record.unrecordedEarlier) reasons.push(EARLIER_IMPORT_REASON);
+  if (record.unreadable > 0) reasons.push(UNREADABLE_RECORD_REASON);
+  const others = record.entries.length > 0 ? await otherRecordedEntries(request.id) : [];
   let deleted = 0;
-  for (const file of files) {
-    try {
-      await fs.unlink(file);
-      logger.info(`Deleted ebook file: ${path.basename(file)}`);
-      deleted++;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code ?? 'error';
-      const why = code === 'EACCES' || code === 'EPERM' ? 'permission denied' : code;
-      return { deleted, keptReason: `${path.basename(file)} could not be removed (${why})` };
+  for (const entry of record.entries) {
+    const decision = await planPlacedEbookDelete(entry, book, others);
+    if (decision.kind === 'kept') {
+      reasons.push(decision.reason);
+    } else if (decision.kind === 'gone') {
+      logger.info(`Recorded ebook file already gone: ${entry.path}`);
+    } else {
+      try {
+        await fs.unlink(decision.file);
+        logger.info(`Deleted ebook file: ${decision.file}`);
+        deleted++;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code ?? 'error';
+        const why = code === 'EACCES' || code === 'EPERM' ? 'permission denied' : code;
+        reasons.push(`${path.basename(decision.file)} could not be removed (${why})`);
+      }
     }
   }
-  logger.info(`Deleted ${deleted} ebook file(s) from: ${book.filePath}`);
-  return { deleted };
+  if (reasons.length === 0) return { deleted };
+  // Several entries can share one reason (e.g. two files in a folder that fails rule c): each shows once
+  const keptReason = [...new Set(reasons)].join('; ');
+  logger.warn(`Keeping ebook file(s) of request ${request.id} ("${book.title}"): ${keptReason}`);
+  return { deleted, keptReason };
 }
 
 /** True when `candidate` equals or sits inside the canonical `folder`. */

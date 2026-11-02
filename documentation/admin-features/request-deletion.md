@@ -48,6 +48,8 @@ model Request {
 
 **Unique Constraint:** Removed from schema, enforced in application code
 
+**Ebook placement record (#497):** `placedEbookFiles Json? @map("placed_ebook_files")` on Request: the ebook files the request's imports copied (D2 below). Nullable, no default (added by `prisma db push`; existing rows NULL)
+
 ### Deletion Logic Flow
 
 **Service:** `src/lib/services/request-delete.service.ts`; download handling in `src/lib/services/request-delete-download.ts` (`cleanUpRequestDownload()`, never throws)
@@ -122,7 +124,20 @@ model Request {
    - Stale record: the stored folder is gone AND outside the current `media_dir` (library moved): nothing removed or protected; the delete clears only `filePath`/`filesHash`/`fileFormat` (no backend call, records and status kept; message says so), a replace goes on
    - `rm` failure: kept (`the folder was partly removed (permission denied); remove the rest manually`); `fs.rm` stops at the first error, so earlier files are gone; backend and row untouched
    - After removal: empty parents swept up to the nearest root (`sweepEmptyParents`)
-   - **Ebook requests (D2):** rules a-c on `filePath`, then unlink every ebook file directly in it if the folder passes the evidence rule, or the only one if it holds exactly one; otherwise kept (`it holds N ebook files and is not provably this book's folder (...)`). A shared `{author}` or flat `Ebooks` folder fails rule c when another book points at it. Never a sweep of other books' ebooks
+   - **Ebook requests (D2, #497):** only the files the request's imports recorded in `Request.placedEbookFiles` (`[{ path, size, sha256, placedAt }]`, `src/lib/utils/ebook-placement.ts`); status and the rest of the folder never count. `Audiobook.filePath` is not read. Per entry, in order (kept reasons joined `; `, each reason once):
+     | Check | Kept reason |
+     |-------|-------------|
+     | entry well-formed: absolute path, no NUL, ebook extension (`isEbookFile`), safe-integer size ≥ 0, 64-hex sha256 (non-array value = one bad entry) | `the placement record could not be read` |
+     | rules a-c on the file's folder (`assertSafeLibraryDelete(dir, book, { evidence: false })`; symlinked folder: target + link location) | rule a-c reasons above |
+     | `lstat` regular file (not a symlink/folder) | `<name> is no longer the file RMAB placed` |
+     | size and sha256 match the entry | `<name> changed since RMAB placed it` |
+     | not the same file as an entry of another active (`deletedAt null`) ebook request, any book: same sha256 + size and its path reaches the same file (`lstat` dev/ino, so a symlinked folder or another spelling of the folder counts; a stale entry with other bytes does not) | `<name> is also the ebook of another request` (that lstat fails other than ENOENT/ENOTDIR: `<name> could not be compared with another request's record (<code>)`) |
+     | `unlink` | `<name> could not be removed (<why>)` |
+   - File or its folder already gone (library mounted): nothing, no reason
+   - No record: SQL NULL or JSON null (imported before the field, a record write that failed, or never imported). Kept reason only when the request ever delivered (`status = 'downloaded'` or `completedAt`): `RMAB has no record of the ebook files this request placed (it was imported before RMAB kept one, or the record could not be saved), so no ebook file was removed`; otherwise none (`Request deleted successfully`)
+   - `[]` (the import found the file already in the library: `identical`/`present`/`differs`): `RMAB has no record that this request placed the ebook (its import found it already in the library), so it was not removed`
+   - Earlier-import marker `{ "earlierImport": "unrecorded" }` (first item; `recordEbookPlacement` writes it when the stored value is NULL but `completedAt` is already set, i.e. the request delivered before: a pre-upgrade import or a failed record write, then a re-import such as Manual Import): never removable; adds `an earlier import of this request has no record (it was imported before RMAB kept one, or the record could not be saved), so its ebook file was not removed`; the recorded entries after it are still removed
+   - Never a folder sweep: a flat `Ebooks`/shelf folder loses only the recorded file (foreign ebooks stay); a folder another book stores still fails rule c
    - Not handled (needs a separate ebook location, PR2): an ebook in a separate folder (custom `ebook_path_template`) is not removed by the audiobook delete
 
 4. **Files kept: library left exactly as it is**
@@ -305,6 +320,20 @@ where: {
 - **Issue:** `select-torrent`, `interactive-search`, `manual-search` and `fetch-ebook` (`/api/requests/[id]/`) and admin approve/deny (`/api/admin/requests/[id]/approve`) loaded the request by id only, so a deleted request could still start a download or a search
 - **Fix:** each loads with `deletedAt: null` (as `select-ebook`/`interactive-search-ebook` do since #463); a deleted request answers that route's usual "Request not found" 404
 
+**8. Ebook Request Delete Removed the User's Own Ebook (#497)**
+- **Issue:** every ebook request delete (any status, e.g. a `failed` one that never downloaded) unlinked the only ebook in `Audiobook.filePath`, or every ebook there when the folder passed the audio evidence rule: the user's own epub beside an imported audiobook went
+- **Cause:** nothing recorded which file an ebook import placed; `planEbookDelete` guessed from the folder
+- **Fix:** the ebook organize records the file it copied (`Request.placedEbookFiles`, only for placeFile `copied`); the delete removes only recorded, unchanged files behind rules a-c (D2 above). `planEbookDelete` removed
+- **Responses:** the record holds absolute library paths and is read only by the delete: every response that returns a request row leaves it out, for admins too (`hidePlacementRecord()`/`hideStoredPick()` in `src/lib/services/request-detail-query.ts`; `GET /api/requests` sets it `undefined` as it does `audiobook.filePath`)
+- **Limits** (none removes more than before #497; all but the second keep the file):
+  - Ebook requests imported before this version have no record: their delete removes no ebook file (reason shown; remove by hand). A crash between the copy and the record write, or a failed record write, leaves that file unrecorded (kept)
+  - Another active ebook request on the same book whose import found this file already there (`[]`) does not hold it: deleting the request that placed it removes it, and the other request still shows `downloaded` (as before #497)
+  - A delete while the request's import is still running: the file that import places afterwards is not recorded on a live request, so RMAB never removes it
+  - Two organizes of one request at once (e.g. a Manual Import while a stalled job re-runs) can lose one entry: that file is kept
+  - A flat ebook shelf stored by two books (`ebook_path_template = Ebooks`): rule c keeps every recorded file there (`it is also the folder of "<title>"`)
+  - After `media_dir` moves, recorded paths under the old location fail rule a (`it is outside the media library (...)`) and are kept
+  - The ebook's own folder (custom `ebook_path_template`) is left empty after its only file goes (no empty-parent sweep)
+
 ## File Structure
 
 ```
@@ -314,7 +343,8 @@ Backend:
 - src/lib/services/request-delete-download.ts (download in the client: remove / keep seeding / leave alone)
 - src/lib/utils/torrent-ownership.ts (whether RMAB added the torrent)
 - src/lib/services/request-delete-files.ts (library files, backend items, plex_library records)
-- src/lib/utils/library-delete-guard.ts (assertSafeLibraryDelete, planEbookDelete)
+- src/lib/utils/library-delete-guard.ts (assertSafeLibraryDelete)
+- src/lib/utils/ebook-placement.ts (Request.placedEbookFiles: record write, read, per-file delete checks)
 - src/lib/services/replace-library-content.ts (replace with no active request)
 - src/app/api/admin/requests/[id]/route.ts (DELETE endpoint)
 - src/lib/processors/cleanup-seeded-torrents.processor.ts (orphaned cleanup)

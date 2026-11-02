@@ -14,6 +14,7 @@ import { buildEbookDownloadName } from '@/lib/utils/ebook-download-name';
 import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { hidePlacementRecord } from '@/lib/services/request-detail-query';
 
 const logger = RMABLogger.create('API.Admin.Requests.Approve');
 
@@ -219,7 +220,7 @@ export async function POST(
               message: adminSelectedTorrent
                 ? 'Request approved and download started with admin-selected torrent'
                 : 'Request approved and download started with pre-selected torrent',
-              request: updatedRequest,
+              request: hidePlacementRecord(updatedRequest),
             });
           } else {
             // No pre-selected torrent - use automatic search
@@ -293,7 +294,7 @@ export async function POST(
                 ? `The user's selected release could not be used (${droppedPickReason}). ${searchMessage} instead.`
                 : searchMessage,
               ...(droppedPickReason ? { selectionDropped: droppedPickReason } : {}),
-              request: updatedRequest,
+              request: hidePlacementRecord(updatedRequest),
             });
           }
         } else {
@@ -322,7 +323,7 @@ export async function POST(
           return NextResponse.json({
             success: true,
             message: 'Request denied',
-            request: updatedRequest,
+            request: hidePlacementRecord(updatedRequest),
           });
         }
       } catch (error) {

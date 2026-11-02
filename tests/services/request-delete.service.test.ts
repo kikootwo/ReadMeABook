@@ -40,7 +40,7 @@ vi.mock('@/lib/services/audiobookshelf/api', () => ({
 }));
 
 // The library delete guard has its own real-filesystem tests; here it allows every folder
-const guardMock = vi.hoisted(() => ({ assertSafeLibraryDelete: vi.fn(), planEbookDelete: vi.fn(), isStaleStoredFolder: vi.fn(async () => false) }));
+const guardMock = vi.hoisted(() => ({ assertSafeLibraryDelete: vi.fn(), isStaleStoredFolder: vi.fn(async () => false) }));
 vi.mock('@/lib/utils/library-delete-guard', () => guardMock);
 vi.mock('@/lib/processors/organize-cleanup-guard', () => ({ sweepEmptyParents: vi.fn(async () => undefined) }));
 const canonical = (p: string) => path.resolve(p).replace(/\\/g, '/');

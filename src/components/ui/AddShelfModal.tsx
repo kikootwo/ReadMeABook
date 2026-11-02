@@ -12,7 +12,12 @@ import { Button } from './Button';
 import { useAddGoodreadsShelf } from '@/lib/hooks/useGoodreadsShelves';
 import { useAddHardcoverShelf } from '@/lib/hooks/useHardcoverShelves';
 import { HardcoverForm } from './HardcoverForm';
-import { GOODREADS_RSS_URL_ERROR, toGoodreadsRssUrl } from '@/lib/utils/goodreads-rss-url';
+import {
+  GOODREADS_FEEDS_ENDED_ADD_MESSAGE,
+  GOODREADS_RSS_URL_ERROR,
+  toGoodreadsRssUrl,
+} from '@/lib/utils/goodreads-rss-url';
+import { GoodreadsFeedEndedNotice } from '@/components/profile/GoodreadsFeedEndedNotice';
 
 interface AddShelfModalProps {
   isOpen: boolean;
@@ -158,6 +163,11 @@ export function AddShelfModal({ isOpen, onClose }: AddShelfModalProps) {
             </>
           )}
         </div>
+
+        {/* Goodreads feeds are gone (#514): say so before submitting; the error alert says it after */}
+        {provider === 'goodreads' && currentError !== GOODREADS_FEEDS_ENDED_ADD_MESSAGE && (
+          <GoodreadsFeedEndedNotice message={GOODREADS_FEEDS_ENDED_ADD_MESSAGE} />
+        )}
 
         {/* Success Alert */}
         {success && (

@@ -28,6 +28,7 @@ import {
   getSlowDownloadLinks,
 } from '@/lib/services/ebook-scraper';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { trimTrailingSlashes } from '@/lib/utils/url';
 
 const logger = RMABLogger.create('API.Audiobooks.InteractiveSearchEbook');
 
@@ -379,7 +380,7 @@ async function searchAnnasArchiveForInteractive(
     indexer: "Anna's Archive",
     publishDate: new Date(),
     downloadUrl: slowLinks[0],
-    infoUrl: `${baseUrl}/md5/${md5}`,
+    infoUrl: `${trimTrailingSlashes(baseUrl)}/md5/${md5}`,
 
     score,
     finalScore: score,

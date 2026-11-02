@@ -154,7 +154,7 @@ interface ScheduledJob {
 **Implementation:**
 1. Fetch 200 popular + 200 new releases (multi-page scraping)
 2. Download and cache cover thumbnails locally (stored in `/app/cache/thumbnails`)
-3. Wipe and re-populate `AudibleCacheCategory` entries with reserved IDs (`__popular__`, `__new_releases__`) and user-configured category IDs
+3. Wipe and re-populate `AudibleCacheCategory` entries with reserved IDs (`__popular__`, `__new_releases__`) and user-configured category IDs; a section whose fetch returns 0 books keeps its previous entries (warning logged, not counted in `categoriesSynced`). Category scrapes with 0 books fall back to the catalog API ([home-sections.md](../../features/home-sections.md#refresh-processor-unified-storage))
 4. Upsert book metadata in `AudibleCache`, ranked entries in `AudibleCacheCategory`
 5. Record sync timestamp (`lastAudibleSync`)
 6. Clean up unused thumbnails (removes covers for audiobooks no longer in cache)
@@ -172,6 +172,7 @@ interface ScheduledJob {
 - ✅ Default alert() popups → toast notifications
 - ✅ No UI for editing schedules → added edit modal
 - ✅ Audible data not persisting → saves to database
+- ✅ One failed nightly Audible refresh (storefront 503 through every retry) emptied home sections (#507) → a fetch with 0 books keeps the section's previous entries and isn't counted as synced; empty category scrapes fall back to the catalog API ([audible.md](../../integrations/audible.md#fixed-issues))
 - ✅ Download progress logging ~500x/s → 10s delay
 - ✅ Requests failing permanently (no torrents) → retry system with 'awaiting_search'
 - ✅ Requests failing permanently (no files) → retry system with max 5 retries + 'warn' status

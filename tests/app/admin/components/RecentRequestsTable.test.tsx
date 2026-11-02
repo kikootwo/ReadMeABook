@@ -7,8 +7,8 @@
 
 import React from 'react';
 import path from 'path';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fetchWithAuthMock = vi.hoisted(() => vi.fn());
 const authenticatedFetcherMock = vi.hoisted(() => vi.fn());
@@ -192,6 +192,103 @@ describe('RecentRequestsTable', () => {
     // Check for status and user dropdowns via their options
     expect(screen.getByRole('option', { name: 'All Statuses' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'All Users' })).toBeInTheDocument();
+  });
+
+  describe('type filter', () => {
+    const lastRequestsUrl = () =>
+      useSWRMock.mock.calls
+        .map(([url]) => url as string)
+        .filter((url) => url.startsWith('/api/admin/requests?'))
+        .at(-1) ?? '';
+    const typeSelect = () => screen.getByRole('combobox', { name: 'Filter by type' });
+
+    beforeEach(() => {
+      useSWRMock.mockClear();
+      window.history.replaceState(null, '', '/admin');
+    });
+
+    afterEach(() => {
+      window.history.replaceState(null, '', '/');
+    });
+
+    it('offers All Types, Audiobooks and Ebooks even with the ebook sidecar off', () => {
+      render(<RecentRequestsTable ebookSidecarEnabled={false} />);
+
+      const options = Array.from(typeSelect().querySelectorAll('option')).map((o) => [o.value, o.textContent]);
+      expect(options).toEqual([
+        ['all', 'All Types'],
+        ['audiobook', 'Audiobooks'],
+        ['ebook', 'Ebooks'],
+      ]);
+      expect(typeSelect()).toHaveValue('all');
+      expect(lastRequestsUrl()).toContain('&type=all&');
+      expect(screen.queryByRole('button', { name: /Clear/ })).not.toBeInTheDocument();
+    });
+
+    it('sends the chosen type, resets to page 1 and syncs the page URL', () => {
+      window.history.replaceState(null, '', '/admin?page=3');
+      render(<RecentRequestsTable />);
+      expect(lastRequestsUrl()).toContain('page=3&');
+
+      fireEvent.change(typeSelect(), { target: { value: 'ebook' } });
+
+      expect(lastRequestsUrl()).toContain('page=1&');
+      expect(lastRequestsUrl()).toContain('&type=ebook&');
+      expect(window.location.search).toBe('?type=ebook');
+
+      fireEvent.change(typeSelect(), { target: { value: 'all' } });
+
+      expect(lastRequestsUrl()).toContain('&type=all&');
+      expect(window.location.search).toBe('');
+    });
+
+    it('reads the type from the page URL and follows back/forward', () => {
+      window.history.replaceState(null, '', '/admin?type=audiobook');
+      render(<RecentRequestsTable />);
+      expect(typeSelect()).toHaveValue('audiobook');
+      expect(lastRequestsUrl()).toContain('&type=audiobook&');
+
+      window.history.replaceState(null, '', '/admin?type=ebook');
+      act(() => {
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+
+      expect(typeSelect()).toHaveValue('ebook');
+      expect(lastRequestsUrl()).toContain('&type=ebook&');
+    });
+
+    it('counts toward Clear, which resets it to All Types', () => {
+      render(<RecentRequestsTable />);
+
+      fireEvent.change(typeSelect(), { target: { value: 'audiobook' } });
+      fireEvent.click(screen.getByRole('button', { name: /Clear/ }));
+
+      expect(typeSelect()).toHaveValue('all');
+      expect(lastRequestsUrl()).toContain('&type=all&');
+      expect(window.location.search).toBe('');
+      expect(screen.queryByRole('button', { name: /Clear/ })).not.toBeInTheDocument();
+    });
+
+    it('encodes the filters so a crafted page URL cannot add API params', () => {
+      const crafted = {
+        type: 'ebook&userId=x',
+        status: 'failed&sortBy=title',
+        userId: 'u1&type=audiobook',
+        sortBy: 'title&status=failed',
+        sortOrder: 'asc&pageSize=100',
+      };
+      window.history.replaceState(null, '', `/admin?${new URLSearchParams(crafted).toString()}`);
+      render(<RecentRequestsTable />);
+
+      const url = lastRequestsUrl();
+      expect(url).toContain('&type=ebook%26userId%3Dx&');
+      expect(url).toContain('&status=failed%26sortBy%3Dtitle&');
+      const params = new URLSearchParams(url.split('?')[1]);
+      for (const [key, value] of Object.entries(crafted)) {
+        expect(params.getAll(key), key).toEqual([value]);
+      }
+      expect(params.getAll('pageSize')).toEqual(['25']);
+    });
   });
 
   it('deletes a request and refreshes caches', async () => {

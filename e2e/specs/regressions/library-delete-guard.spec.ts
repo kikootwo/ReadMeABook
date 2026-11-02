@@ -7,7 +7,7 @@
  * deletes a request through DELETE /api/admin/requests/<id> (or the admin table, E-h) and checks
  * /media by sha256, the ABS item, the book row and the API's filesKeptReason.
  * Cases: E-a..E-h (plan), R1 ABS second copy, R3 coerced .m4a, R4 re-run organize, R5 flat ebook
- * folder with foreign ebooks, R6 removal failure (EACCES), R7 media volume not mounted (emptied),
+ * folder with foreign ebooks (only the recorded RMAB ebook goes, #497), R6 removal failure (EACCES), R7 media volume not mounted (emptied),
  * E-g2 replace after a refused delete. Plex mode: library-delete-plex.spec.ts.
  */
 
@@ -264,7 +264,7 @@ test('R4 a re-run organize of the same source (files already in place): delete r
   finish(c);
 });
 
-test('R5 ebook delete in a flat folder holding one RMAB ebook and foreign ebooks: refused; every ebook stays', async () => {
+test('R5 ebook delete in a flat folder holding one RMAB ebook and foreign ebooks: only the RMAB ebook goes (#497)', async () => {
   const c = new Case('R5-flat-folder-foreign-ebooks');
   const rmab = await Rmab.loginAdmin();
   const b = await importedBook(c, rmab, 'r5', 'Guard Book Lima', 'Guard Author Lima', 'B0LDGTRL01');
@@ -274,11 +274,14 @@ test('R5 ebook delete in a flat folder holding one RMAB ebook and foreign ebooks
   setConfig('ebook_path_template', 'Shelf');
   genEbook(`${SRC}/r5-ebook`, 'Lima.epub');
   const ebookReq = await importEbook(c, b.audiobookId, `${SRC}/r5-ebook`);
-  const before = mediaShas();
+  const lima = `${shelf}/Lima.epub`;
+  c.check('Lima.epub placed in the shelf', exists(lima), 'control');
+  const before = mediaShas([lima]);
 
   const res = await deleteRequest(c, rmab, ebookReq, 'delete-ebook');
-  expectKept(c, 'delete-ebook', res, 'holds 3 ebook files');
-  c.check('/media unchanged (all three ebooks, the audio folder)', sameShas(before, mediaShas()), 'safety');
+  c.check('delete-ebook: filesDeleted true, no filesKeptReason', res.details.filesDeleted === true && !res.details.filesKeptReason, 'safety', JSON.stringify(res.details));
+  c.check('Lima.epub (placed by this request) removed', !exists(lima), 'safety');
+  c.check('everything else under /media unchanged (Calibre One and Two, the audio folder)', sameShas(before, mediaShas()), 'safety');
   finish(c);
 });
 

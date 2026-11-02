@@ -248,6 +248,10 @@ model Request {
   // Ebook requests are created automatically when an audiobook is organized (if ebook downloads enabled)
   type             String    @default("audiobook") // 'audiobook' | 'ebook'
   parentRequestId  String?   @map("parent_request_id") // Links ebook request to originating audiobook request
+  // Ebook files this request put in the library (#497): [{ path, size, sha256, placedAt }], written only when
+  // the import copied the file (placeFile 'copied'); [] when the import found it already there. NULL = no record
+  // (imported before this field existed, or never imported). A request delete removes only these files.
+  placedEbookFiles Json?     @map("placed_ebook_files")
 
   // Soft delete support
   deletedAt DateTime? @map("deleted_at")

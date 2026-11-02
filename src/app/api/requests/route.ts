@@ -12,6 +12,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { createRequestForUser } from '@/lib/services/request-creator.service';
 import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { hidePlacementRecord } from '@/lib/services/request-detail-query';
 
 const logger = RMABLogger.create('API.Requests');
 
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        request: result.request,
+        request: hidePlacementRecord(result.request),
       }, { status: 201 });
     } catch (error) {
       logger.error('Failed to create request', { error: errorForLog(error) });
@@ -192,7 +193,8 @@ export async function GET(request: NextRequest) {
         const audiobook = r.audiobook ? { ...r.audiobook, filePath: undefined } : r.audiobook;
         // Stored release picks are internal (they can carry source credentials); admins only
         const selectedTorrent = isAdmin ? r.selectedTorrent : undefined;
-        return { ...r, selectedTorrent, audiobook, downloadAvailable };
+        // The ebook placement record (absolute library paths, #497) is for the request delete only
+        return { ...r, selectedTorrent, audiobook, downloadAvailable, placedEbookFiles: undefined };
       });
 
       // ── Accurate counts per group (always scoped to ownership/type filter) ──
