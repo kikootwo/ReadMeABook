@@ -10,6 +10,18 @@ import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.BookDate.TestConnection');
 
+// OpenAI's models list carries no capability metadata, so chat models are picked by name.
+// Excluded families don't work with BookDate's Chat Completions call: audio, realtime,
+// transcription and TTS models, search models, and the Responses-only Codex and Pro models.
+const OPENAI_EXCLUDED_FAMILY = /-(audio|realtime|transcribe|tts|search|codex|pro)(-|$)/;
+
+/** True for a GPT model BookDate can offer: `gpt-N...` with N >= 4, not an excluded family. */
+function isBookDateOpenAIModel(id: unknown): id is string {
+  if (typeof id !== 'string') return false;
+  const major = /^gpt-(\d+)/.exec(id);
+  return major !== null && Number(major[1]) >= 4 && !OPENAI_EXCLUDED_FAMILY.test(id);
+}
+
 // Fetch available Claude models from the Anthropic API
 async function fetchClaudeModels(apiKey: string): Promise<{ id: string; name: string }[]> {
   const allModels: { id: string; name: string }[] = [];
@@ -252,9 +264,8 @@ async function testConnection(req: NextRequest, options: { callerIsAdmin: boolea
 
       const data = await response.json();
 
-      // Filter to relevant GPT models
       models = data.data
-        .filter((m: any) => m.id.startsWith('gpt-') && m.id.includes('4'))
+        .filter((m: any) => isBookDateOpenAIModel(m?.id))
         .map((m: any) => ({
           id: m.id,
           name: m.id,
