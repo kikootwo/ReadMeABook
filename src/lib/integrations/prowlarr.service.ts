@@ -11,6 +11,7 @@ import { TorrentResult } from '../utils/ranking-algorithm';
 import { RMABLogger } from '../utils/logger';
 import { urlForLog } from '../utils/prowlarr-url';
 import { fallbackTitles, hasUsableResult, searchQueries } from './prowlarr-query-variations';
+import { newSearchStats, searchErrorMessage, type SearchStats } from '../utils/indexer-search-failures';
 
 // Module-level logger
 const logger = RMABLogger.create('Prowlarr');
@@ -236,12 +237,15 @@ export class ProwlarrService {
    * without punctuation inside its words, then without its subtitle, each as "variation author"
    * then "variation", stopping at the first query that names the title. Skipped for an exact
    * title (custom search terms) and when every first-pass query failed.
+   * `stats` (optional out-param): every query sent and every one that failed, so callers can tell
+   * "nothing found" from "the search failed" (#522).
    */
   async searchWithVariations(
     title: string,
     author: string,
     filters?: SearchFilters,
-    options: SearchVariationOptions = {}
+    options: SearchVariationOptions = {},
+    stats: SearchStats = newSearchStats()
   ): Promise<TorrentResult[]> {
     const allResults: TorrentResult[] = [];
     const sent: string[] = [];
@@ -249,6 +253,7 @@ export class ProwlarrService {
 
     const run = async (query: string): Promise<TorrentResult[]> => {
       sent.push(query);
+      stats.queriesSent++;
       try {
         const results = await this.search(query, filters);
         logger.info(`Query "${query}" returned ${results.length} results`);
@@ -257,7 +262,9 @@ export class ProwlarrService {
         return results;
       } catch (error) {
         logger.error(`Query "${query}" failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        // Continue with other queries even if one fails
+        // Continue with other queries even if one fails; the caller sees the failure in stats
+        stats.queriesFailed++;
+        stats.failures.push({ query, message: searchErrorMessage(error) });
         return [];
       }
     };

@@ -204,6 +204,9 @@ export function handleProwlarr(state, req, res, url) {
       const status = nextStatus(scenario.search?.statuses, scenario.searchCalls - 1);
       if (status !== 200) return sendJson(res, status, { error: `scenario status ${status}` });
       const query = url.searchParams.get('query');
+      // search.queryStatuses [{contains, status}]: a query holding `contains` (case-insensitive) gets `status` (#522)
+      const byQuery = (scenario.search?.queryStatuses || []).find((r) => String(query || '').toLowerCase().includes(String(r.contains).toLowerCase()));
+      if (byQuery) return sendJson(res, byQuery.status, { error: `scenario query status ${byQuery.status}` });
       const type = url.searchParams.get('type') || 'search';
       if (!SEARCH_TYPES.has(type)) return sendJson(res, 400, { error: `unsupported search type ${type}` });
       const indexerIds = url.searchParams.getAll('indexerIds').map(Number);
