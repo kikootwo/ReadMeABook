@@ -152,7 +152,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
 
 **Pre-filters (dropped before scoring, `rankTorrents`)**
 - **< 20 MB:** always dropped (ebooks, samples)
-- **DRM (`.aa`/`.aax`):** always dropped (`isDrmFormat`): unplayable without the requester's Audible activation bytes. `aax` matches as a whole token anywhere; `aa` only as `.aa` or `[AA]`/`(AA)` (a bare "AA" is an author initialism)
+- **DRM (`.aa`/`.aax`):** always dropped (`isDrmFormat`): encrypted for the Audible account that bought them (the uploader's), no decryption in RMAB, not audio to Audiobookshelf. `aax` matches as a whole token anywhere; `aa` only as `.aa` or `[AA]`/`(AA)` (a bare "AA" is an author initialism)
 - **Size floor (`minMBPerMinute`, opt-in):** with a known runtime, drops results under `minMBPerMinute` MB per minute. No runtime: no change
 - **Who sets it:** only automatic search (`search-indexers.processor.ts`), with `AUTO_SEARCH_MIN_MB_PER_MINUTE = 0.15` (about 21 kbps). Every automatic path (request create, approve, watched lists, RSS, retries, admin re-search) runs through that processor. Interactive search (`requests/[id]/interactive-search`, `audiobooks/search-torrents`) doesn't set it, so it still lists undersized results
 - **Why 0.15:** one file of a multi-file Usenet post (57 MB for a 1182-min book, 0.05 MB/min) scored over 50 and was grabbed as the whole book; a complete 0.21 MB/min release must still pass

@@ -143,8 +143,8 @@ export class RankingAlgorithm {
     } = options;
     // Filter out files < 20 MB (likely ebooks/samples), and, when a floor is set and the
     // runtime is known, results too small for the runtime (one file of a multi-file post).
-    // DRM-protected releases (.aa/.aax) are dropped too: undecryptable without the
-    // requester's own Audible activation bytes, so never worth grabbing.
+    // DRM-protected releases (.aa/.aax) are dropped too: locked to the Audible account
+    // that bought them, so nothing downstream can play them.
     const runtime = audiobook.durationMinutes;
     const floorMB = minMBPerMinute !== undefined && runtime !== undefined && runtime > 0
       ? minMBPerMinute * runtime
@@ -637,9 +637,10 @@ export class RankingAlgorithm {
 
   /**
    * Detect DRM-protected releases (Audible .aa/.aax) from the torrent title.
-   * These can't be decrypted without the requester's own Audible activation
-   * bytes, so a torrent-sourced copy is unplayable in any media server —
-   * reject it before download rather than grabbing dead weight.
+   * They're encrypted for the Audible account that bought them (the uploader's),
+   * so the requester's own activation bytes can't unlock them either. RMAB can't
+   * decrypt them and Audiobookshelf doesn't recognise them as audio, so reject
+   * them before download rather than grabbing dead weight.
    * `aax` counts as a whole token anywhere (`.aax`, `[AAX]`, `- AAX -`). A bare
    * `aa` is a common initialism ("AA Milne"), so it only counts as a file
    * extension (`.aa`) or a bracketed tag (`[AA]`, `(AA)`).
