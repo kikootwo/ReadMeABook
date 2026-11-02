@@ -264,7 +264,7 @@ describe('registerShutdownHandlers', () => {
     registerShutdownHandlers({});
 
     expect(on).not.toHaveBeenCalledWith('SIGTERM', expect.anything());
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('NEXT_MANUAL_SIG_HANDLE is not "true"'));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('NEXT_MANUAL_SIG_HANDLE is not set'));
   });
 
   it('installs SIGTERM and SIGINT handlers once per process when it is set', () => {
@@ -272,7 +272,7 @@ describe('registerShutdownHandlers', () => {
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
     registerShutdownHandlers({ NEXT_MANUAL_SIG_HANDLE: 'true' });
-    registerShutdownHandlers({ NEXT_MANUAL_SIG_HANDLE: 'true' });
+    registerShutdownHandlers({ NEXT_MANUAL_SIG_HANDLE: '1' }); // any value turns Next's handlers off
 
     const signals = on.mock.calls.map(([event]) => event);
     expect(signals.filter((s) => s === 'SIGTERM')).toHaveLength(1);

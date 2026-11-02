@@ -179,8 +179,9 @@ function consoleLog(level: Level, message: string): void {
 
 /** Install the SIGTERM/SIGINT handlers once per process (called from register()). */
 export function registerShutdownHandlers(env: Record<string, string | undefined> = process.env): void {
-  if (env.NEXT_MANUAL_SIG_HANDLE !== 'true') {
-    consoleLog('info', 'NEXT_MANUAL_SIG_HANDLE is not "true": Next.js handles SIGTERM and exits without waiting for running jobs');
+  // Same test as Next's start-server (any non-empty value turns its handlers off)
+  if (!env.NEXT_MANUAL_SIG_HANDLE) {
+    consoleLog('info', 'NEXT_MANUAL_SIG_HANDLE is not set: Next.js handles SIGTERM and exits without waiting for running jobs');
     return;
   }
   oncePerProcess('shutdown-coordinator', () => {
