@@ -7,7 +7,8 @@
  * `downloaded` request whose book RMAB delivered (folder on record) is first linked to the library
  * item that holds that folder (request-library-link, #284). The link never writes the book's
  * ASIN or metadata. Both paths complete the request with a compare-and-set (the link: only from
- * `downloaded`; the ASIN match: from any non-terminal status), so two jobs in the same window
+ * `downloaded`; the ASIN match: from any non-terminal status, recording one matched while
+ * awaiting approval in `approvalBypassedBy`, #232), so two jobs in the same window
  * (full scan, recently-added checks) notify once, and only the winner writes the book's item id.
  * An ASIN match never overwrites a link made in the same run, and an item linked or ASIN-matched
  * earlier in the run is not handed to a later book. Ebook requests are never matched (they end at
@@ -16,6 +17,7 @@
 
 import { prisma } from '@/lib/db';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
+import { approvalBypassMark } from '@/lib/constants/request-statuses';
 import type { RMABLogger } from '@/lib/utils/logger';
 import type { LibraryItem } from './ILibraryService';
 import {
@@ -42,6 +44,8 @@ export interface MatchRequestsResult {
 
 /** Statuses a request is matched from; a request in any other status was completed meanwhile. */
 const MATCHABLE_STATUS = { notIn: ['available', 'cancelled', 'denied'] };
+/** The ASIN match's guard for a request loaded in an approved status (not awaiting approval). */
+const APPROVED_MATCHABLE_STATUS = { notIn: ['available', 'cancelled', 'denied', 'awaiting_approval'] };
 
 type MatchableRequest = Awaited<ReturnType<typeof loadMatchableRequests>>[number];
 
@@ -139,10 +143,14 @@ async function matchByAsin(request: MatchableRequest, backendMode: string, keepI
     (originalStatus !== 'downloaded' ? ` (was '${originalStatus}')` : '')
   );
 
-  // Update request to available and clear any error state, unless another job already did
+  // Update request to available and clear any error state, unless another job already did. A
+  // request matched while awaiting approval is recorded as completed without approval; the guard
+  // and the record follow the loaded status, so a request approved (or sent back to approval)
+  // since loading is left for the next run.
+  const bypass = approvalBypassMark('asin_match', originalStatus);
   const { count } = await prisma.request.updateMany({
-    where: { id: request.id, status: MATCHABLE_STATUS },
-    data: AVAILABLE_DATA(),
+    where: { id: request.id, status: bypass ? originalStatus : APPROVED_MATCHABLE_STATUS },
+    data: { ...AVAILABLE_DATA(), ...(bypass ? { approvalBypassedBy: bypass } : {}) },
   });
   if (count !== 1) {
     logger.debug(`Request ${request.id} was completed by another job; no second notification`);

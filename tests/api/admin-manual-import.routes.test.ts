@@ -212,7 +212,7 @@ describe('Admin manual-import route', () => {
       status: 'pending', series: 'Series', year: 2020,
     });
     prismaMock.request.findFirst.mockResolvedValueOnce({ id: 'req-old', status: 'failed', autoRerequestCount: 4 });
-    prismaMock.request.update.mockResolvedValueOnce({ id: 'req-old' });
+    prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 });
 
     const { POST } = await import('@/app/api/admin/manual-import/route');
     const request = {
@@ -223,8 +223,8 @@ describe('Admin manual-import route', () => {
 
     expect(response.status).toBe(200);
     expect(prismaMock.request.create).not.toHaveBeenCalled();
-    expect(prismaMock.request.update).toHaveBeenCalledWith({
-      where: { id: 'req-old' },
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+      where: { id: 'req-old', status: 'failed' },
       data: expect.objectContaining({ status: 'processing', autoRerequestCount: 0 }),
     });
   });

@@ -43,6 +43,8 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 **POST /api/admin/bulk-import/execute**
 - Body: `{ imports: Array<{ folderPath: string, asin: string }> }`
 - Creates audiobook records + requests, queues organize_files jobs
+- Recycles the book's newest audiobook request of **any** user (`failed`/`warn`/`cancelled`/`denied`/`pending`/`awaiting_search`/`awaiting_approval`/`downloaded`/`available`), else creates one for the admin. Guarded on the exact status that was read: a row that changed meanwhile -> that item `{ success: false, error: 'Request changed while importing; try again' }`, no job queued, other items continue (#232)
+- Recycling another user's `awaiting_approval`, `denied` or `cancelled` request sets `Request.approvalBypassedBy = bulk_import:<status>` (status, notifications and delivery unchanged); the importing admin's own request is never recorded. See [database.md](../backend/database.md#requests)
 - Returns: `{ success, results[], summary: { total, succeeded, failed } }`
 
 ## SSE Event Types

@@ -13,6 +13,7 @@ import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { AUDIO_EXTENSIONS } from '@/lib/constants/audio-formats';
+import { approvalBypassMark } from '@/lib/constants/request-statuses';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { readJsonBody, BULK_IMPORT_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
 
@@ -222,8 +223,13 @@ export async function POST(request: NextRequest) {
                 existingRequest.status === 'downloaded' ||
                 existingRequest.status === 'available'
               ) {
-                await prisma.request.update({
-                  where: { id: existingRequest.id },
+                // Another user's unapproved request is recorded as completed without approval
+                // (the importing admin's own request never is)
+                const bypass = existingRequest.userId !== userId
+                  ? approvalBypassMark('bulk_import', existingRequest.status)
+                  : null;
+                const { count } = await prisma.request.updateMany({
+                  where: { id: existingRequest.id, status: existingRequest.status }, // unchanged since it was read
                   data: {
                     status: 'processing',
                     progress: 100,
@@ -231,8 +237,13 @@ export async function POST(request: NextRequest) {
                     importAttempts: 0,
                     autoRerequestCount: 0, // a bulk import restarts the automatic re-request backoff
                     updatedAt: new Date(),
+                    ...(bypass ? { approvalBypassedBy: bypass } : {}),
                   },
                 });
+                if (count !== 1) {
+                  results.push({ folderPath, asin, success: false, error: 'Request changed while importing; try again' });
+                  continue;
+                }
                 requestId = existingRequest.id;
               } else {
                 const newReq = await prisma.request.create({

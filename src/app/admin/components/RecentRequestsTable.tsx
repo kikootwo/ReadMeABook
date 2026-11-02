@@ -388,6 +388,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       }
       const result = await response.json().catch(() => null);
       const filesKeptReason: string | undefined = result?.details?.filesKeptReason;
+      const folderKept = !!result?.details?.folderKept;
 
       // Refresh the requests list
       await mutate(apiUrl);
@@ -398,6 +399,9 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       setSelectedRequest(null);
       if (filesKeptReason) {
         toast.warning(`Request deleted; files kept: ${filesKeptReason}`, 10000);
+      } else if (folderKept) {
+        // The audio went; the book folder stays with what it still holds (#526)
+        toast.warning(result.message, 10000);
       } else {
         toast.success('Request deleted successfully');
       }

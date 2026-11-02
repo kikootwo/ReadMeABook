@@ -113,6 +113,18 @@ test('upgrade-verify: branch image keeps requests, logins and decryptable secret
   } else {
     test.info().annotations.push({ type: 'skipped-check', description: `new_releases_since: ${EXEC_BRIDGE_SKIP}` });
   }
+  // #232: the startup schema sync added requests.approval_bypassed_by (nullable), NULL on every
+  // seeded row. Required, never skipped: without the exec bridge this check fails.
+  expect(execBridgeAvailable(), `approval_bypassed_by: ${EXEC_BRIDGE_SKIP}`).toBe(true);
+  {
+    const column = psql("select is_nullable from information_schema.columns where table_name = 'requests' and column_name = 'approval_bypassed_by'");
+    const rows = psql('select count(*) from requests');
+    const set = psql('select count(*) from requests where approval_bypassed_by is not null');
+    writeEvidence('upgrade/232-approval-bypassed-by.json', { column, rows, set });
+    expect(column, 'requests.approval_bypassed_by exists, nullable').toBe('YES');
+    expect(Number(rows), 'seeded requests').toBeGreaterThanOrEqual(3);
+    expect(set, 'approval_bypassed_by NULL on every seeded row').toBe('0');
+  }
 
   const search = await rmab.post<any>(`/api/requests/${failed.id}/interactive-search`, {});
   writeEvidence('upgrade/interactive-search.json', search);

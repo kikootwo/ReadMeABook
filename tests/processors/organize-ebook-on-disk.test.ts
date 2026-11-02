@@ -134,6 +134,21 @@ describe('automatic ebook request after an audiobook import', () => {
     expect(jobQueueMock.addSearchEbookJob).toHaveBeenCalledWith('ebook-new', expect.objectContaining({ id: 'a1' }));
   });
 
+  it('creates no second ebook request when the book already has one with another or no parent (#526)', async () => {
+    const dir = await bookFolder(['01.mp3']);
+    // The ebook request that outlived a deleted audiobook request: parentRequestId null, same book
+    prismaMock.request.findFirst.mockImplementation(async (args: { where?: Record<string, unknown> }) => {
+      const where = args?.where ?? {};
+      return where.type === 'ebook' && where.audiobookId === 'a1' && where.deletedAt === null && !('parentRequestId' in where)
+        ? { id: 'ebook-survivor', type: 'ebook', parentRequestId: null }
+        : null;
+    });
+    await organizeInto(dir);
+
+    expect(ebookCreates()).toHaveLength(0);
+    expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
+  });
+
   it('creates the ebook request and fetches when the folder is missing (as before)', async () => {
     await organizeInto(path.join(root, 'gone'));
 

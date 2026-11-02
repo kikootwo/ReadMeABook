@@ -103,4 +103,44 @@ describe('replaceAudiobook with the library delete guard', () => {
     expect(jobQueueMock.addDownloadJob).toHaveBeenCalled();
     expect(prismaMock.reportedIssue.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'replaced' }) }));
   });
+
+  // The delete pointed the book's stored path at the ebook folder of a delivered ebook request that stays (#526)
+  const ebookRequests = (rows: Array<Record<string, unknown>>) =>
+    prismaMock.request.findMany.mockImplementation(async (args: { where?: Record<string, unknown> }) =>
+      args?.where?.audiobookId === 'book-1' && args.where.type === 'ebook' && args.where.deletedAt === null ? rows : []);
+
+  it.each([
+    ['downloaded, with a placement record', { status: 'downloaded', completedAt: new Date(), placedEbookFiles: [{ path: '/media/Author/Book/Book.epub' }] }],
+    ['downloaded before records were kept', { status: 'downloaded', completedAt: new Date(), placedEbookFiles: null }],
+  ])('keeps the stored path and format when a delivered ebook request remains (%s)', async (_label, ebook) => {
+    ebookRequests([{ id: 'ebook-1', ...ebook }]);
+    prismaMock.request.create.mockResolvedValue({ id: 'req-new', audiobook, user: { id: 'admin-1' } });
+
+    await replaceAudiobook('issue-1', 'admin-1', { guid: 't' });
+
+    const data = prismaMock.audiobook.update.mock.calls[0][0].data;
+    expect(data).toMatchObject({ status: 'requested', absItemId: null, plexGuid: null, filesHash: null, fileSizeBytes: null });
+    expect(data).not.toHaveProperty('filePath');
+    expect(data).not.toHaveProperty('fileFormat');
+    expect(jobQueueMock.addDownloadJob).toHaveBeenCalled();
+  });
+
+  it('clears the stored path as before when the delete itself failed, even with a delivered ebook request', async () => {
+    ebookRequests([{ id: 'ebook-1', status: 'downloaded', completedAt: new Date(), placedEbookFiles: null }]);
+    deleteRequestMock.mockResolvedValue({ success: false, filesDeleted: false, error: 'db down' });
+    prismaMock.request.create.mockResolvedValue({ id: 'req-new', audiobook, user: { id: 'admin-1' } });
+
+    await replaceAudiobook('issue-1', 'admin-1', { guid: 't' });
+
+    expect(prismaMock.audiobook.update.mock.calls[0][0].data).toMatchObject({ filePath: null, fileFormat: null });
+  });
+
+  it('clears the stored path when the remaining ebook request has not delivered', async () => {
+    ebookRequests([{ id: 'ebook-1', status: 'searching', completedAt: null, placedEbookFiles: null }]);
+    prismaMock.request.create.mockResolvedValue({ id: 'req-new', audiobook, user: { id: 'admin-1' } });
+
+    await replaceAudiobook('issue-1', 'admin-1', { guid: 't' });
+
+    expect(prismaMock.audiobook.update.mock.calls[0][0].data).toMatchObject({ filePath: null, fileFormat: null, filesHash: null });
+  });
 });
