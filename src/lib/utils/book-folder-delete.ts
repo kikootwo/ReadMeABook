@@ -30,6 +30,8 @@ export interface KeptFile {
 }
 
 export const NO_RECORD_WHY = 'RMAB has no record that it placed it';
+/** cover.jpg and junk that would have gone, kept only because something else stays beside them. */
+export const KEPT_WITH_OTHERS_WHY = 'kept with the other files';
 /** A label only: never a delete input. */
 export const OTHER_REQUEST_EBOOK_WHY = 'ebook of another request';
 const WRITING_WHY = 'an import is still writing it';
@@ -105,7 +107,7 @@ export async function planBookFolderDelete(
   plan.alone = blocking.length === 0;
   const coverAndJunkKept = plan.alone
     ? []
-    : [...plan.coverAndJunk.files, ...plan.coverAndJunk.dirs.map((d) => `${d.name}/`)].map((name) => ({ name, why: NO_RECORD_WHY }));
+    : [...plan.coverAndJunk.files, ...plan.coverAndJunk.dirs.map((d) => `${d.name}/`)].map((name) => ({ name, why: KEPT_WITH_OTHERS_WHY }));
   plan.kept = [...labels, ...blocking, ...coverAndJunkKept].sort((a, b) => a.name.localeCompare(b.name));
   return { plan };
 }
@@ -122,8 +124,11 @@ async function isRecordedHere(dir: string, name: string, recorded: ReadonlyArray
 export type BookFolderResult =
   /** Nothing removed, or the audio only partly: the library stays as it is. */
   | { kind: 'kept'; reason: string }
-  /** The audio is gone; `folderRemoved` false means the folder stays, holding `kept`. */
-  | { kind: 'removed'; folderRemoved: boolean; removed: number; kept: KeptFile[] };
+  /**
+   * The audio is gone; `folderRemoved` false means the folder stays, holding `kept`.
+   * `folderError`: the folder's own rmdir failed (not ENOTEMPTY), e.g. `could not be removed (EBUSY)`.
+   */
+  | { kind: 'removed'; folderRemoved: boolean; removed: number; kept: KeptFile[]; folderError?: string };
 
 async function unlinkOne(file: string): Promise<string | null> {
   try {
@@ -173,36 +178,37 @@ export async function removeBookFolderFiles(
     }
   }
 
-  const folderRemoved = await removeIfEmpty(dir, kept);
-  return { kind: 'removed', folderRemoved, removed, kept };
+  const folder = await removeIfEmpty(dir, kept);
+  return { kind: 'removed', folderRemoved: folder.removed, removed, kept, ...(folder.error && { folderError: folder.error }) };
 }
 
 /**
  * rmdir `dir` when nothing is left; every rmdir error is ignored (a non-ENOTEMPTY
- * one is listed). Names found that are not in `kept` yet (new since the plan) are
- * added as unrecorded. True when the folder is gone.
+ * one is returned as `error`, never listed as content). Names found that are not in
+ * `kept` yet (new since the plan) are added as unrecorded. `removed`: the folder is gone.
  */
-async function removeIfEmpty(dir: string, kept: KeptFile[]): Promise<boolean> {
+async function removeIfEmpty(dir: string, kept: KeptFile[]): Promise<{ removed: boolean; error?: string }> {
   let left: string[];
+  let error: string | undefined;
   try {
     left = await fs.readdir(dir);
-  } catch (error) {
-    return errorCode(error) === 'ENOENT';
+  } catch (readError) {
+    return { removed: errorCode(readError) === 'ENOENT' };
   }
   if (left.length === 0) {
     try {
       await fs.rmdir(dir);
-      return true;
-    } catch (error) {
-      const code = errorCode(error);
-      if (code === 'ENOENT') return true;
-      if (code !== 'ENOTEMPTY' && code !== 'EEXIST') kept.push({ name: `${path.basename(dir)}/`, why: couldNotRemove(code) });
+      return { removed: true };
+    } catch (rmdirError) {
+      const code = errorCode(rmdirError);
+      if (code === 'ENOENT') return { removed: true };
+      if (code !== 'ENOTEMPTY' && code !== 'EEXIST') error = couldNotRemove(code);
       left = await fs.readdir(dir).catch(() => []);
     }
   }
   const listed = new Set(kept.map((k) => k.name.replace(/\/$/, '')));
   for (const name of left) if (!listed.has(name)) kept.push({ name, why: NO_RECORD_WHY });
-  return false;
+  return { removed: false, ...(error && { error }) };
 }
 
 /**

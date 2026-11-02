@@ -32,9 +32,10 @@ export interface DeleteRequestResult {
   filesKeptReason?: string;
   /**
    * Set when an audiobook delete removed the audio but the book folder stays (#526):
-   * what it still holds and why (first 20, `more` for the rest).
+   * what it still holds and why (first 20, `more` for the rest); `error` when the
+   * emptied folder itself could not be removed (e.g. `could not be removed (EBUSY)`).
    */
-  folderKept?: { folder: string; files: KeptFile[]; more: number };
+  folderKept?: { folder: string; files: KeptFile[]; more: number; error?: string };
   /** Torrents left in the client because another active request still uses them. */
   torrentsKeptShared: number;
   /** Torrents left in the client because RMAB did not add them (it never removes those). */
@@ -56,7 +57,6 @@ export interface DeleteRequestResult {
  *    - If incomplete download, or every set limit met: delete torrent + files,
  *      unless another active request still uses the torrent
  *    - Otherwise: keep in the client for the cleanup job
- * 3. Delete the stored title folder, only when the library delete guard allows it
  * 3. Remove what the import placed in the stored folder (its audio; cover and junk
  *    only when nothing else is left; the folder only when empty, #526), only when the
  *    library delete guard allows it; folderKept lists what stayed
@@ -161,8 +161,14 @@ export async function deleteRequest(
       children = await findChildRequests(requestId, book.id);
     }
     const kept = outcome?.kind === 'removed' && outcome.kept?.length ? outcome.kept : null;
-    const folderKept = kept && outcome && outcome.kind === 'removed'
-      ? { folder: outcome.folder, files: kept.slice(0, 20), more: Math.max(0, kept.length - 20) }
+    const folderError = outcome?.kind === 'removed' ? outcome.folderError : undefined;
+    const folderKept = (kept || folderError) && outcome && outcome.kind === 'removed'
+      ? {
+        folder: outcome.folder,
+        files: (kept ?? []).slice(0, 20),
+        more: Math.max(0, (kept?.length ?? 0) - 20),
+        ...(folderError && { error: folderError }),
+      }
       : undefined;
     // A delivered ebook request that stays: the book keeps its ebook's folder and format (as an ebook import leaves it)
     const survivor = children.survivorFolder;
@@ -236,7 +242,9 @@ export async function deleteRequest(
           ? 'Request deleted; its stored folder no longer exists outside the current media library, nothing was removed'
           : kept
             ? `Request deleted; the book folder stays because it still holds: ${describeKept(kept)}`
-            : 'Request deleted successfully',
+            : folderError
+              ? `Request deleted; the emptied book folder ${folderError}`
+              : 'Request deleted successfully',
       filesDeleted,
       ...(filesKeptReason && { filesKeptReason }),
       ...(folderKept && { folderKept }),

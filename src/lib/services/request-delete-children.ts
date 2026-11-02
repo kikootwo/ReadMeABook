@@ -8,7 +8,8 @@
  * import leaves (organize-files.processor.ts, ebook branch). Undelivered children
  * are soft-deleted with the audiobook request, as before. An ebook request delete
  * that removed the book's stored folder clears the stored path, so after both
- * deletes, in either order, nothing points at a removed folder.
+ * deletes, in either order, nothing points at a removed folder. A later audiobook
+ * import of the book links the surviving ebook request to the new request.
  */
 
 import * as fs from 'fs/promises';
@@ -62,6 +63,8 @@ export async function findChildRequests(requestId: string, audiobookId: string):
         ],
       },
       select: { id: true, type: true, status: true, completedAt: true, placedEbookFiles: true },
+      // Newest first: the survivor folder is the newest delivered child's recorded ebook still on disk
+      orderBy: { createdAt: 'desc' },
     })) ?? [];
     const result: ChildRequests = { ...none, delivered: [], undelivered: [] };
     for (const child of rows) {
@@ -98,6 +101,57 @@ export async function keepDeliveredChildren(children: ChildRequests, adminUserId
     }
   } catch (error) {
     logger.error('Error updating child requests', { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+/**
+ * A new audiobook import of the book (organize-files.processor.ts): link the newest
+ * parentless active ebook request of the book (one that outlived an earlier audiobook
+ * request delete) to `requestId`, so the fetch-ebook, select-ebook and
+ * interactive-search-ebook routes find it by parent instead of opening a second one.
+ * Skipped when `requestId` already has an ebook request. Compare-and-set on
+ * `parentRequestId: null`: of two imports, only one claims it. Returns the relinked id. Never throws.
+ */
+export async function relinkParentlessEbookRequest(requestId: string, audiobookId: string): Promise<string | null> {
+  try {
+    const own = await prisma.request.findFirst({
+      where: { parentRequestId: requestId, type: 'ebook', deletedAt: null },
+      select: { id: true },
+    });
+    if (own) return null;
+    const parentless = await prisma.request.findFirst({
+      where: { audiobookId, type: 'ebook', parentRequestId: null, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (!parentless) return null;
+    const claimed = await prisma.request.updateMany({
+      where: { id: parentless.id, parentRequestId: null, deletedAt: null },
+      data: { parentRequestId: requestId },
+    });
+    if (claimed.count === 0) {
+      logger.info(`Ebook request ${parentless.id} was linked to another request meanwhile; left as it is`);
+      return null;
+    }
+    logger.info(`Linked ebook request ${parentless.id} (no parent) to audiobook request ${requestId}`);
+    return parentless.id;
+  } catch (error) {
+    logger.error(`Error linking a parentless ebook request to ${requestId}`, { error: error instanceof Error ? error.message : String(error) });
+    return null;
+  }
+}
+
+/** True when an active ebook request of the book delivered its ebook. Never throws (false on error). */
+export async function hasDeliveredEbookRequest(audiobookId: string): Promise<boolean> {
+  try {
+    const rows: ChildRow[] = (await prisma.request.findMany({
+      where: { audiobookId, type: 'ebook', deletedAt: null },
+      select: { id: true, status: true, completedAt: true, placedEbookFiles: true },
+    })) ?? [];
+    return rows.some(isDelivered);
+  } catch (error) {
+    logger.error(`Error loading the ebook requests of book ${audiobookId}`, { error: error instanceof Error ? error.message : String(error) });
+    return false;
   }
 }
 

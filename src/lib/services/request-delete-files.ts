@@ -42,8 +42,9 @@ export type LibraryFilesOutcome =
   /**
    * RMAB removed the book's audio ('removed') or found the folder already gone ('gone'); `folder` is canonical.
    * `kept`: the folder stays because it still holds these (files of another request, or with no record).
+   * `folderError`: the emptied folder's own rmdir failed (not ENOTEMPTY), e.g. `could not be removed (EBUSY)`.
    */
-  | { kind: 'removed' | 'gone'; folder: string; mediaDir: string; kept?: KeptFile[] }
+  | { kind: 'removed' | 'gone'; folder: string; mediaDir: string; kept?: KeptFile[]; folderError?: string }
   /** No stored folder and no library linkage: nothing in the library belongs to this request. */
   | { kind: 'none' }
   /** The stored folder no longer exists and lies outside media_dir (e.g. the library moved): a stale record. */
@@ -109,10 +110,21 @@ export async function removeAudiobookFolder(book: DeleteBook): Promise<LibraryFi
     await sweepParents(safe.canonicalPath, safe.roots);
     return { kind: 'removed', folder: safe.canonicalPath, mediaDir: safe.roots.mediaDir };
   }
-  logger.info(
-    `Removed ${result.removed} file(s) from ${safe.canonicalPath} for "${book.title}"; the folder stays: ${describeKept(result.kept, result.kept.length)}`
-  );
-  return { kind: 'removed', folder: safe.canonicalPath, mediaDir: safe.roots.mediaDir, kept: result.kept };
+  if (result.folderError) {
+    logger.warn(`Removed ${result.removed} file(s) from ${safe.canonicalPath} for "${book.title}"; the emptied folder ${result.folderError}`);
+  }
+  if (result.kept.length > 0) {
+    logger.info(
+      `Removed ${result.removed} file(s) from ${safe.canonicalPath} for "${book.title}"; the folder stays: ${describeKept(result.kept, result.kept.length)}`
+    );
+  }
+  return {
+    kind: 'removed',
+    folder: safe.canonicalPath,
+    mediaDir: safe.roots.mediaDir,
+    kept: result.kept,
+    ...(result.folderError && { folderError: result.folderError }),
+  };
 }
 
 /** `a (why), b (why)`, at most `limit` entries, then `and N more`. */
@@ -181,7 +193,7 @@ export async function removeEbookFiles(
       }
     }
   }
-  const removedFolders = await removeEmptiedFolders(emptied, reasons);
+  const removedFolders = await removeEmptiedFolders(emptied);
   const folders = removedFolders.length > 0 ? { removedFolders } : {};
   if (reasons.length === 0) return { deleted, ...folders };
   // Several entries can share one reason (e.g. two files in a folder that fails rule c): each shows once
@@ -194,16 +206,17 @@ export async function removeEbookFiles(
  * D2's empty-folder step (#526): each folder this delete unlinked a file from goes
  * when nothing but the junk list is left, only when the recorded folder is itself
  * a real folder (not a link) at the canonical path rules a-c passed on; then empty
- * parents are swept. Returns the canonical folders removed.
+ * parents are swept. Returns the canonical folders removed. A failed rmdir is only
+ * logged: the recorded files are gone, so it is not "files kept".
  */
-async function removeEmptiedFolders(emptied: Map<string, string>, reasons: string[]): Promise<string[]> {
+async function removeEmptiedFolders(emptied: Map<string, string>): Promise<string[]> {
   const removed: string[] = [];
   for (const [checkedDir, recordedDir] of emptied) {
     const entry = await fs.lstat(recordedDir).catch(() => null);
     const folder = await canonicalPath(checkedDir).catch(() => null);
     if (!folder || !entry?.isDirectory() || (await canonicalPath(recordedDir).catch(() => null)) !== folder) continue;
     const result = await removeFolderIfOnlyJunk(folder);
-    if (result.error) reasons.push(`the folder ${path.basename(folder)} ${result.error}`);
+    if (result.error) logger.warn(`The emptied ebook folder ${folder} ${result.error}; it stays`);
     if (!result.removed) continue;
     logger.info(`Deleted the emptied ebook folder: ${folder}`);
     removed.push(folder);

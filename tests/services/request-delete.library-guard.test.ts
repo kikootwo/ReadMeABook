@@ -222,12 +222,12 @@ describe('deleteRequest (audiobook): stored folder behind the guard', () => {
     expect(result.filesKeptReason).toBeUndefined();
   });
 
-  it('a book folder rmdir error (EBUSY, a mount point) is ignored and listed; the audio is gone', async () => {
+  it('a book folder rmdir error (EBUSY, a mount point) is reported as the folder error, not as its content; the audio is gone', async () => {
     const dir = imported('Author/Book');
     rmState.rmdirError = Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
     request(book(dir));
     const result = await deleteRequest('req-1', 'admin-1');
-    expect(result).toMatchObject({ filesDeleted: true, folderKept: { files: [{ name: 'Book/', why: 'could not be removed (EBUSY)' }] } });
+    expect(result).toMatchObject({ filesDeleted: true, message: 'Request deleted; the emptied book folder could not be removed (EBUSY)', folderKept: { files: [], more: 0, error: 'could not be removed (EBUSY)' } });
     expect(result.filesKeptReason).toBeUndefined();
     expect(fs.readdirSync(dir)).toEqual([]);
   });

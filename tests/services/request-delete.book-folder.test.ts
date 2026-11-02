@@ -26,10 +26,12 @@ const { deleteRequest } = await import('@/lib/services/request-delete.service');
 
 const NO_RECORD = 'RMAB has no record that it placed it';
 const OTHER_EBOOK = 'ebook of another request';
+/** cover.jpg (and junk) kept only because something else stays beside it. */
+const WITH_OTHERS = 'kept with the other files';
 
 let lib: Library;
 /** Active ebook requests: the D1 label lookup, the child lookup (OR) and D2's other-records lookup. */
-let ebookRows: Array<{ id: string; type: string; status: string; completedAt: Date | null; placedEbookFiles: unknown; parentRequestId: string | null }>;
+let ebookRows: Array<{ id: string; type: string; status: string; completedAt: Date | null; placedEbookFiles: unknown; parentRequestId: string | null; createdAt?: Date }>;
 
 function audiobookRequest(audiobook: ReturnType<typeof book>) {
   prismaMock.request.findFirst.mockResolvedValue({ id: 'req-1', type: 'audiobook', audiobook, downloadHistory: [] });
@@ -41,7 +43,7 @@ function audioBook(dir: string, overrides: Record<string, unknown> = {}) {
 
 /** A delivered ebook request of the book whose record holds `file`. */
 function deliveredEbook(file: string, id = 'ebook-1') {
-  const row = { id, type: 'ebook', status: 'downloaded', completedAt: new Date(), placedEbookFiles: [entryFor(file)], parentRequestId: 'req-1' };
+  const row: (typeof ebookRows)[number] = { id, type: 'ebook', status: 'downloaded', completedAt: new Date(), placedEbookFiles: [entryFor(file)], parentRequestId: 'req-1' };
   ebookRows.push(row);
   return row;
 }
@@ -60,9 +62,11 @@ beforeEach(() => {
     return null;
   });
   prismaMock.audiobook.findMany.mockResolvedValue([]);
-  prismaMock.request.findMany.mockImplementation(async ({ where }: { where: { id?: { not: string } } }) =>
-    ebookRows.filter((r) => !where?.id || r.id !== where.id.not)
-  );
+  prismaMock.request.findMany.mockImplementation(async ({ where, orderBy }: { where: { id?: { not: string } }; orderBy?: { createdAt?: string } }) => {
+    const rows = ebookRows.filter((r) => !where?.id || r.id !== where.id.not);
+    const time = (r: { createdAt?: Date }) => r.createdAt?.getTime() ?? 0;
+    return orderBy?.createdAt === 'desc' ? [...rows].sort((a, b) => time(b) - time(a)) : rows;
+  });
   prismaMock.plexLibrary.deleteMany.mockResolvedValue({ count: 1 });
   prismaMock.plexLibrary.findMany.mockResolvedValue([]);
   configServiceMock.getBackendMode.mockResolvedValue('audiobookshelf');
@@ -99,6 +103,21 @@ describe('deleteRequest (audiobook, #526): what leaves the book folder', () => {
     });
   });
 
+  it('two delivered ebook requests in different folders: the book keeps the folder and format of the newest one', async () => {
+    const dir = imported(lib.media, 'Author/Book');
+    // An older parentless survivor of an earlier delete, first in the table, in its own ebook folder
+    const older = deliveredEbook(write(path.join(lib.media, 'Ebooks', 'Book', 'Book.azw3'), 'old'), 'ebook-old');
+    Object.assign(older, { parentRequestId: null, createdAt: new Date(Date.UTC(2026, 0, 1)) });
+    const newer = deliveredEbook(write(path.join(dir, 'Book.epub'), 'new'), 'ebook-new');
+    newer.createdAt = new Date(Date.UTC(2026, 5, 1));
+    audiobookRequest(audioBook(dir));
+
+    await deleteRequest('req-1', 'admin-1');
+
+    expect(bookUpdate().data).toMatchObject({ filePath: dir, fileFormat: 'epub', filesHash: null });
+    expect(fs.readFileSync(path.join(lib.media, 'Ebooks', 'Book', 'Book.azw3'), 'utf8')).toBe('old');
+  });
+
   it('a user file beside it: the cover stays too, both listed', async () => {
     const dir = imported(lib.media, 'Author/Book', ['Book.m4b'], ['notes.txt']);
     const epub = write(path.join(dir, 'Book.epub'), 'epub bytes');
@@ -110,7 +129,7 @@ describe('deleteRequest (audiobook, #526): what leaves the book folder', () => {
     expect(fs.readdirSync(dir).sort()).toEqual(['Book.epub', 'cover.jpg', 'notes.txt']);
     expect(result.folderKept?.files).toEqual([
       { name: 'Book.epub', why: OTHER_EBOOK },
-      { name: 'cover.jpg', why: NO_RECORD },
+      { name: 'cover.jpg', why: WITH_OTHERS },
       { name: 'notes.txt', why: NO_RECORD },
     ]);
   });
@@ -142,7 +161,7 @@ describe('deleteRequest (audiobook, #526): what leaves the book folder', () => {
     expect(fs.lstatSync(path.join(dir, '@eaDir', 'link')).isSymbolicLink()).toBe(true);
     expect(result.folderKept?.files).toEqual([
       { name: '@eaDir/', why: `${NO_RECORD} (it holds a link)` },
-      { name: 'cover.jpg', why: NO_RECORD },
+      { name: 'cover.jpg', why: WITH_OTHERS },
     ]);
   });
 
@@ -154,7 +173,7 @@ describe('deleteRequest (audiobook, #526): what leaves the book folder', () => {
     const result = await deleteRequest('req-1', 'admin-1');
 
     expect(fs.readdirSync(dir).sort()).toEqual(['Book.epub', 'cover.jpg']);
-    expect(result.folderKept?.files).toEqual([{ name: 'Book.epub', why: NO_RECORD }, { name: 'cover.jpg', why: NO_RECORD }]);
+    expect(result.folderKept?.files).toEqual([{ name: 'Book.epub', why: NO_RECORD }, { name: 'cover.jpg', why: WITH_OTHERS }]);
     // Delivered, so it stays; its file has no record, so the book row is cleared as before
     expect(prismaMock.request.updateMany).toHaveBeenCalledWith({ where: { id: { in: ['ebook-1'] } }, data: { parentRequestId: null } });
     expect(bookUpdate().data).toMatchObject({ filePath: null, fileFormat: null });
@@ -168,7 +187,7 @@ describe('deleteRequest (audiobook, #526): what leaves the book folder', () => {
     const result = await deleteRequest('req-1', 'admin-1');
 
     expect(fs.readFileSync(path.join(dir, 'extras', 'map.pdf'), 'utf8')).toBe('pdf');
-    expect(result.folderKept?.files).toEqual([{ name: 'cover.jpg', why: NO_RECORD }, { name: 'extras/', why: NO_RECORD }]);
+    expect(result.folderKept?.files).toEqual([{ name: 'cover.jpg', why: WITH_OTHERS }, { name: 'extras/', why: NO_RECORD }]);
   });
 
   it('a stale partial copy goes, a fresh one stays (an import is still writing it)', async () => {
@@ -185,7 +204,7 @@ describe('deleteRequest (audiobook, #526): what leaves the book folder', () => {
     audiobookRequest(audioBook(again));
     expect((await deleteRequest('req-1', 'admin-1')).folderKept?.files).toEqual([
       { name: '.rmab-partial-0123456789ab-feedface.part', why: 'an import is still writing it' },
-      { name: 'cover.jpg', why: NO_RECORD },
+      { name: 'cover.jpg', why: WITH_OTHERS },
     ]);
   });
 
