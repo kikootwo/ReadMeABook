@@ -102,6 +102,9 @@ Detection now uses a **permissive heuristic** instead of strict filename pattern
 2. **From metadata:** Use embedded title tag (only if chapter-specific)
    - Automatically detects if title metadata is the book title (appears in >80% of files)
    - Skips metadata that matches the book title to avoid "every chapter named the same"
+   - Preserves embedded numbered chapter labels, including case and zero padding (`Chapter 01`, `CHAPTER 10`)
+   - Introduction example: `Intro & Dedication`, `Chapter 1`, `Chapter 2` stay unchanged; the introduction does not shift chapter numbers
+   - Generic `Track N`, bare numbers, and `Part N` still use fallback numbering
 3. **Fallback numbering:** "Chapter 1", "Chapter 2" if no name found
 
 **Book Title Detection (NEW):**

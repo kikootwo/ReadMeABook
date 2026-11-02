@@ -181,12 +181,12 @@ describe('chapter merger', () => {
     expect(ordered[1].chapterTitle).toBe('Middle');
   });
 
-  it('falls back to chapter numbers when metadata title is the book title', async () => {
+  it.each(['Book Title', 'Chapter 10'])('falls back to chapter numbers when metadata title %s is the book title', async (title) => {
     const files = ['/tmp/01.mp3', '/tmp/02.mp3', '/tmp/03.mp3'];
     const probeMap: Record<string, { duration: number; bitrate: number; track: number; title: string }> = {
-      '/tmp/01.mp3': { duration: 60, bitrate: 128000, track: 1, title: 'Book Title' },
-      '/tmp/02.mp3': { duration: 60, bitrate: 128000, track: 2, title: 'Book Title' },
-      '/tmp/03.mp3': { duration: 60, bitrate: 128000, track: 3, title: 'Book Title' },
+      '/tmp/01.mp3': { duration: 60, bitrate: 128000, track: 1, title },
+      '/tmp/02.mp3': { duration: 60, bitrate: 128000, track: 2, title },
+      '/tmp/03.mp3': { duration: 60, bitrate: 128000, track: 3, title },
     };
 
     mockExecImplementation((_command, args) => {
@@ -209,6 +209,28 @@ describe('chapter merger', () => {
 
     expect(ordered[0].chapterTitle).toBe('Chapter 1');
     expect(ordered[1].chapterTitle).toBe('Chapter 2');
+  });
+
+  it('keeps filename priority and generic fallbacks beside embedded numbered chapters', async () => {
+    const files = ['/tmp/01 - Opening.mp3', '/tmp/02.mp3', '/tmp/03.mp3', '/tmp/04.mp3', '/tmp/05.mp3', '/tmp/Chapter 99.mp3'];
+    const titles = ['Chapter 10', undefined, 'Track 10', '10', 'Part 10', 'Chapter 11'];
+    mockExecImplementation((_command, args) => {
+      const index = files.indexOf(args[args.length - 1]);
+      return {
+        stdout: JSON.stringify({
+          format: {
+            duration: '60',
+            tags: { track: `${index + 1}/6`, title: titles[index] },
+          },
+        }),
+      };
+    });
+
+    const chapters = await analyzeChapterFiles(files);
+
+    expect(chapters.map((chapter) => chapter.chapterTitle)).toEqual([
+      'Opening', 'Chapter 2', 'Chapter 3', 'Chapter 4', 'Chapter 5', 'Chapter 11',
+    ]);
   });
 
   it('uses filename order when track numbers are not sequential', async () => {
@@ -290,13 +312,13 @@ describe('chapter merger', () => {
     expect(result.error).toContain('No chapters');
   });
 
-  it('merges chapters and returns success details', async () => {
+  it.each([
+    ['Chapter 1', 'Chapter 2'],
+    ['Chapter 01', 'CHAPTER 10'],
+  ])('preserves embedded %s and %s after an introduction through merging', async (first, second) => {
     const outputPath = '/tmp/output.m4b';
-
-    const chapters = [
-      { path: '/tmp/one.mp3', filename: 'one.mp3', duration: 60000, bitrate: 128, chapterTitle: 'One' },
-      { path: '/tmp/two.mp3', filename: 'two.mp3', duration: 60000, bitrate: 128, chapterTitle: 'Two' },
-    ];
+    const files = [1, 2, 3].map((n) => `/tmp/Project Hail Mary (0${n}).mp3`);
+    const titles = ['Intro & Dedication', first, second];
 
     fsMock.access.mockResolvedValue(undefined);
     fsMock.mkdir.mockResolvedValue(undefined);
@@ -309,16 +331,17 @@ describe('chapter merger', () => {
       return { size: 500 * 1024 };
     });
 
-    mockExecImplementation((command) => {
+    mockExecImplementation((command, args) => {
       if (command.startsWith('ffmpeg -encoders')) {
         return { stdout: 'aac encoder' };
       }
       if (command.startsWith('ffprobe')) {
+        const index = files.indexOf(args[args.length - 1]);
         const payload = {
           format: {
-            duration: '120',
+            duration: index >= 0 ? '60' : '180',
             bit_rate: '128000',
-            tags: {},
+            tags: index >= 0 ? { track: `${index + 1}/3`, title: titles[index] } : {},
           },
         };
         return { stdout: JSON.stringify(payload) };
@@ -331,6 +354,12 @@ describe('chapter merger', () => {
 
     spawnMock.mockReturnValue(createSpawnProcess(0));
 
+    const chapters = await analyzeChapterFiles([files[2], files[0], files[1]]);
+    expect(chapters.map((chapter) => chapter.path)).toEqual(files);
+    expect(chapters.map((chapter) => chapter.chapterTitle)).toEqual(titles);
+    const kept = await analyzeChapterFiles(files, undefined, true);
+    expect(kept.map((chapter) => chapter.chapterTitle)).toEqual(titles);
+
     const result = await mergeChapters(chapters, {
       title: 'Book',
       author: 'Author',
@@ -338,8 +367,15 @@ describe('chapter merger', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.chapterCount).toBe(2);
-    expect(result.totalDuration).toBe(120000);
+    expect(result.chapterCount).toBe(3);
+    expect(result.totalDuration).toBe(180000);
+    expect(fsMock.writeFile).toHaveBeenCalledWith(
+      expect.any(String),
+      ';FFMETADATA1\n' +
+      '\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=60000\ntitle=Intro & Dedication\n' +
+      `\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=60000\nEND=120000\ntitle=${first}\n` +
+      `\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=120000\nEND=180000\ntitle=${second}\n`
+    );
     expect(spawnMock).toHaveBeenCalled();
   });
 

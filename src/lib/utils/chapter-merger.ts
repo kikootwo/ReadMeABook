@@ -33,10 +33,12 @@ const CHAPTER_PATTERNS = [
   /track\s*(\d+)/i,           // "Track 1.mp3"
 ];
 
+const NUMBERED_CHAPTER_TITLE_PATTERN = /^chapter\s*\d+$/i;
+
 // Generic title patterns to ignore when extracting chapter names
 const GENERIC_TITLE_PATTERNS = [
   /^track\s*\d+$/i,
-  /^chapter\s*\d+$/i,
+  NUMBERED_CHAPTER_TITLE_PATTERN,
   /^\d+$/,
   /^part\s*\d+$/i,
 ];
@@ -243,8 +245,9 @@ function getChapterTitle(file: ChapterFile, index: number): string {
     return extracted;
   }
 
-  // Priority 2: Title metadata (only if meaningful AND not the book title)
-  if (file.titleMetadata && !file.titleIsBookTitle && !isGenericTitle(file.titleMetadata)) {
+  // Priority 2: Title metadata (preserve embedded chapter numbers, but not the book title)
+  if (file.titleMetadata && !file.titleIsBookTitle &&
+      (NUMBERED_CHAPTER_TITLE_PATTERN.test(file.titleMetadata.trim()) || !isGenericTitle(file.titleMetadata))) {
     return file.titleMetadata;
   }
 
