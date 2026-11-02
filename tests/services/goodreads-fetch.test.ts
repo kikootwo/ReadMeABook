@@ -116,6 +116,25 @@ describe('fetchAndValidateRss', () => {
     await expect(fetchFeed('https://www.goodreads.com/review/list_rss/1')).rejects.toThrow(/without a redirect target/);
   });
 
+  it.each([404, 410])('turns an HTTP %i from Goodreads into GoodreadsFeedEndedError (#514)', async (status) => {
+    axiosGet.mockResolvedValueOnce({ status, data: 'Not Found', headers: {} });
+    const { GoodreadsFeedEndedError } = await import('@/lib/utils/goodreads-rss-url');
+
+    const result = fetchFeed('https://www.goodreads.com/review/list_rss/1?shelf=read');
+    await expect(result).rejects.toBeInstanceOf(GoodreadsFeedEndedError);
+    await expect(result).rejects.toMatchObject({ status });
+    expect(axiosGet).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets axios hand back a 404/410 instead of throwing a generic error, but not other failures', async () => {
+    axiosGet.mockResolvedValueOnce(ok());
+    await fetchFeed('https://www.goodreads.com/review/list_rss/1');
+
+    const { validateStatus } = axiosGet.mock.calls[0][1];
+    expect([200, 302, 404, 410].map(validateStatus)).toEqual([true, true, true, true]);
+    expect([400, 403, 429, 500, 503].map(validateStatus)).toEqual([false, false, false, false, false]);
+  });
+
   it.each([
     'http://10.0.0.1/goodreads.com/review/list_rss/1',
     'https://evilgoodreads.com/review/list_rss/1',
@@ -148,5 +167,53 @@ describe('processGoodreadsShelves', () => {
     expect(stats.shelvesProcessed).toBe(0);
     expect(axiosGet).not.toHaveBeenCalled();
     expect(shelfUpdate).not.toHaveBeenCalled();
+  });
+
+  describe('when Goodreads no longer serves the feeds (#514)', () => {
+    const shelf = (n: number) => ({
+      id: `s${n}`, name: `Shelf ${n}`, autoRequest: true,
+      rssUrl: `https://www.goodreads.com/review/list_rss/${n}?shelf=to-read`,
+      user: { id: 'u1', plexUsername: 'reader' },
+    });
+    const jobLog = () => ({ info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() });
+    const ended = /Goodreads no longer serves shelf RSS feeds/;
+
+    async function syncWith(log: ReturnType<typeof jobLog>) {
+      const { processGoodreadsShelves } = await import('@/lib/services/goodreads-sync.service');
+      return processGoodreadsShelves(log as any);
+    }
+
+    it('logs one warning for the run, not one error per shelf', async () => {
+      shelfFindMany.mockResolvedValue([shelf(1), shelf(2), shelf(3)]);
+      axiosGet.mockResolvedValue({ status: 404, data: 'Not Found', headers: {} });
+      const log = jobLog();
+      const stats = await syncWith(log);
+
+      expect(axiosGet).toHaveBeenCalledTimes(3);
+      expect(log.warn).toHaveBeenCalledTimes(1);
+      expect(log.warn.mock.calls[0][0]).toMatch(ended);
+      expect(log.warn.mock.calls[0][0]).toContain('3 shelf(s) skipped');
+      expect(log.error).not.toHaveBeenCalled();
+      expect(stats.errors).toBe(3);
+      expect(stats.shelvesProcessed).toBe(0);
+      expect(shelfUpdate).not.toHaveBeenCalled();
+    });
+
+    it('still logs other fetch failures per shelf', async () => {
+      shelfFindMany.mockResolvedValue([shelf(1), shelf(2)]);
+      axiosGet.mockImplementation(async (url: string) => {
+        if (url.includes('/list_rss/2')) throw new Error('timeout of 15000ms exceeded');
+        return { status: 404, data: 'Not Found', headers: {} };
+      });
+      const log = jobLog();
+      const stats = await syncWith(log);
+
+      expect(log.warn).toHaveBeenCalledTimes(1);
+      expect(log.warn.mock.calls[0][0]).toContain('1 shelf(s) skipped');
+      expect(log.error).toHaveBeenCalledTimes(1);
+      expect(log.error.mock.calls[0][0]).toContain('Shelf 2');
+      expect(log.error.mock.calls[0][0]).toContain('timeout');
+      expect(stats.errors).toBe(2);
+    });
   });
 });

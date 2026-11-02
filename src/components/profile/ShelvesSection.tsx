@@ -19,6 +19,7 @@ import { usePreferences } from '@/contexts/PreferencesContext';
 import { cn } from '@/lib/utils/cn';
 import { Modal } from '@/components/ui/Modal';
 import { ManageShelfModal } from '@/components/ui/ManageShelfModal';
+import { GoodreadsFeedEndedNotice } from '@/components/profile/GoodreadsFeedEndedNotice';
 import { ShelfBook } from '@/lib/hooks/useGoodreadsShelves';
 
 function formatRelativeTime(dateStr: string | null): string {
@@ -393,6 +394,7 @@ function ShelfCard({
               )}
             </span>
           </div>
+          {shelf.type === 'goodreads' && <GoodreadsFeedEndedNotice />}
         </div>
 
         {/* Delete action */}
