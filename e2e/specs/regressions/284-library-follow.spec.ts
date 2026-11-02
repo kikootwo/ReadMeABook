@@ -160,7 +160,8 @@ test('#325a: a delivered request follows the ASIN Audiobookshelf holds now', asy
     form.append('cover', new Blob([new Uint8Array(await generatedCover(browser, color, label))], { type: 'image/jpeg' }), `cover-${label}.jpg`);
     const res = await fetch(`${urls.abs()}/api/items/${item.id}/cover`, { method: 'POST', headers: absAuth, body: form });
     expect(res.ok, `precondition: ABS took cover ${label} (${res.status})`).toBe(true);
-    const served = await fetch(`${urls.abs()}/api/items/${item.id}/cover`, { headers: absAuth });
+    // ABS picks the cover format from Accept (a bare */* gets webp); ask as RMAB's axios download does.
+    const served = await fetch(`${urls.abs()}/api/items/${item.id}/cover`, { headers: { ...absAuth, Accept: 'application/json, text/plain, */*' } });
     expect(served.ok, `precondition: ABS serves cover ${label}`).toBe(true);
     return sha256(await served.arrayBuffer());
   };
