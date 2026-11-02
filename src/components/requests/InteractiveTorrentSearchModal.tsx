@@ -28,6 +28,7 @@ import { useReplaceWithTorrent } from '@/lib/hooks/useReportedIssues';
 import { Audiobook } from '@/lib/hooks/useAudiobooks';
 import { fetchWithAuth } from '@/lib/utils/api';
 import { normalizeReleaseKey } from '@/lib/utils/release-key';
+import { SearchFailureNotice } from './SearchFailureNotice';
 
 interface BlockedReleaseLookup {
   /** normalized release key → reason text */
@@ -112,22 +113,22 @@ export function InteractiveTorrentSearchModal({
   onConfirm,
 }: InteractiveTorrentSearchModalProps) {
   // Hooks for existing audiobook request flow
-  const { searchTorrents: searchByRequestId, isLoading: isSearchingByRequest, error: searchByRequestError } = useInteractiveSearch();
+  const { searchTorrents: searchByRequestId, isLoading: isSearchingByRequest, error: searchByRequestError, searchFailures: byRequestFailures } = useInteractiveSearch();
   const { selectTorrent, isLoading: isSelectingTorrent, error: selectTorrentError } = useSelectTorrent();
 
   // Hook for reported issue replacement flow
   const { replaceWithTorrent, isLoading: isReplacing, error: replaceError } = useReplaceWithTorrent();
 
   // Hooks for new audiobook flow
-  const { searchTorrents: searchByAudiobook, isLoading: isSearchingByAudiobook, error: searchByAudiobookError } = useSearchTorrents();
+  const { searchTorrents: searchByAudiobook, isLoading: isSearchingByAudiobook, error: searchByAudiobookError, searchFailures: byAudiobookFailures } = useSearchTorrents();
   const { requestWithTorrent, isLoading: isRequestingWithTorrent, error: requestWithTorrentError } = useRequestWithTorrent();
 
   // Hooks for ebook flow (request ID-based - admin)
-  const { searchEbooks, isLoading: isSearchingEbooks, error: searchEbooksError } = useInteractiveSearchEbook();
+  const { searchEbooks, isLoading: isSearchingEbooks, error: searchEbooksError, searchFailures: ebookFailures } = useInteractiveSearchEbook();
   const { selectEbook, isLoading: isSelectingEbook, error: selectEbookError } = useSelectEbook();
 
   // Hooks for ebook flow (ASIN-based - user)
-  const { searchEbooks: searchEbooksByAsin, isLoading: isSearchingEbooksByAsin, error: searchEbooksByAsinError } = useInteractiveSearchEbookByAsin();
+  const { searchEbooks: searchEbooksByAsin, isLoading: isSearchingEbooksByAsin, error: searchEbooksByAsinError, searchFailures: ebookByAsinFailures } = useInteractiveSearchEbookByAsin();
   const { selectEbook: selectEbookByAsin, isLoading: isSelectingEbookByAsin, error: selectEbookByAsinError } = useSelectEbookByAsin();
 
   const [results, setResults] = useState<(RankedTorrent & { qualityScore?: number; source?: string; ebookFormat?: string })[]>([]);
@@ -174,6 +175,11 @@ export function InteractiveTorrentSearchModal({
       : (hasRequestId
           ? (searchByRequestError || selectTorrentError)
           : (searchByAudiobookError || requestWithTorrentError));
+
+  // Some or all indexer searches failed (#522): shown instead of a bare "nothing found"
+  const searchFailures = isEbookMode
+    ? (useAsinMode ? ebookByAsinFailures : ebookFailures)
+    : (hasRequestId ? byRequestFailures : byAudiobookFailures);
 
   // Mount tracking for portal
   useEffect(() => { setMounted(true); }, []);
@@ -424,8 +430,13 @@ export function InteractiveTorrentSearchModal({
               </div>
             )}
 
+            {/* Indexer search failures: above the results, or in place of the empty state */}
+            {!isSearching && searchFailures && (
+              <SearchFailureNotice failures={searchFailures} onRetry={results.length === 0 ? performSearch : undefined} />
+            )}
+
             {/* Empty State */}
-            {!isSearching && results.length === 0 && !error && (
+            {!isSearching && results.length === 0 && !error && !searchFailures && (
               <div className="flex flex-col items-center justify-center py-14">
                 <div className="w-14 h-14 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-3">
                   <svg className="w-7 h-7 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">

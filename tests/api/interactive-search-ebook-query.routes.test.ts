@@ -85,7 +85,7 @@ describe('interactive ebook search sends title + author to indexers', () => {
       expect((await response.json()).searchTitle).toBe(expectedTitle);
       expect(prowlarrMock.search).not.toHaveBeenCalled();
       expect(prowlarrMock.searchWithVariations).toHaveBeenCalledTimes(1);
-      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith(expectedTitle, 'Db Author', EXPECTED_FILTERS, { exactTitle });
+      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith(expectedTitle, 'Db Author', EXPECTED_FILTERS, { exactTitle }, expect.any(Object));
     });
   });
 
@@ -110,7 +110,7 @@ describe('interactive ebook search sends title + author to indexers', () => {
       expect((await response.json()).searchTitle).toBe(expectedTitle);
       expect(prowlarrMock.search).not.toHaveBeenCalled();
       expect(prowlarrMock.searchWithVariations).toHaveBeenCalledTimes(1);
-      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith(expectedTitle, 'Real Author', EXPECTED_FILTERS, { exactTitle });
+      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith(expectedTitle, 'Real Author', EXPECTED_FILTERS, { exactTitle }, expect.any(Object));
     });
   });
 });
