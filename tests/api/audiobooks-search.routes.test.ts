@@ -113,8 +113,9 @@ describe('Audiobooks search torrents route', () => {
     expect(payload.success).toBe(true);
     expect(payload.results[0].rank).toBe(1);
     expect(rankTorrentsMock).toHaveBeenCalled();
-    // Interactive search shows undersized releases too: only automatic search sets the size floor
+    // Interactive search shows undersized and Audible DRM releases too: only automatic search drops them
     expect(rankTorrentsMock.mock.calls[0][2]).not.toHaveProperty('minMBPerMinute');
+    expect(rankTorrentsMock.mock.calls[0][2]).not.toHaveProperty('rejectDrm');
   });
 
   it('ranks all candidates before returning the top 100 with truncation metadata', async () => {

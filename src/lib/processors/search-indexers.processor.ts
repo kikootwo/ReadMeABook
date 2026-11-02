@@ -7,6 +7,7 @@ import { SearchIndexersPayload, getJobQueueService } from '../services/job-queue
 import { prisma } from '../db';
 import { getProwlarrService } from '../integrations/prowlarr.service';
 import { getRankingAlgorithm, AUTO_SEARCH_MIN_MB_PER_MINUTE } from '../utils/ranking-algorithm';
+import { drmReleaseMarker } from '../utils/drm-release';
 import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer-grouping';
 import { RMABLogger } from '../utils/logger';
 import { getLanguageForRegion } from '../constants/language-config';
@@ -183,6 +184,15 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     if (seriesPart) {
       logger.info(`Series position: ${series ? `"${series}" ` : ''}#${seriesPart}, releases naming another book are skipped`);
     }
+    // rejectDrm: automatic only, a release marked as Audible DRM can't be played (#518)
+    let drmRejected = 0;
+    for (const result of searchResults) {
+      const marker = drmReleaseMarker(result.title);
+      if (marker) {
+        drmRejected++;
+        logger.info(`Skipping "${result.title}" (${result.indexer}): Audible DRM release (${marker}), can't be played`);
+      }
+    }
     const rankedResults = ranker.rankTorrents(searchResults, {
       title: effectiveSearchTitle,
       author: audiobook.author,
@@ -196,13 +206,14 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       stopWords: langConfig.stopWords,
       characterReplacements: langConfig.characterReplacements,
       minMBPerMinute: AUTO_SEARCH_MIN_MB_PER_MINUTE,  // Automatic only; interactive lists everything
+      rejectDrm: true,  // Automatic only; interactive lists everything
     });
 
-    // Log filter results (the floor applies only when the runtime is known)
-    const postFilterCount = rankedResults.length;
-    if (postFilterCount < preFilterCount) {
+    // Log size filter results (the floor applies only when the runtime is known); DRM rejects are logged above
+    const sizeFilteredCount = preFilterCount - drmRejected - rankedResults.length;
+    if (sizeFilteredCount > 0) {
       const floorNote = durationMinutes ? ` or < ${AUTO_SEARCH_MIN_MB_PER_MINUTE} MB/min` : '';
-      logger.info(`Filtered out ${preFilterCount - postFilterCount} results < ${sizeMBThreshold} MB${floorNote}`);
+      logger.info(`Filtered out ${sizeFilteredCount} results < ${sizeMBThreshold} MB${floorNote}`);
     }
 
     // Dual threshold filtering:
