@@ -90,7 +90,7 @@ export async function routeInteraction(interaction: Interaction): Promise<void> 
       } else if (decoded.kind === 'status_page') {
         await handleStatusPage(interaction, decoded.page, decoded.scopeAll);
       } else if (decoded.kind === 'delete_page') {
-        await handleDeletePage(interaction, decoded.page, decoded.scopeAll);
+        await handleDeletePage(interaction, decoded.page);
       } else if (decoded.kind === 'delete_confirm') {
         await handleDeleteConfirm(interaction, decoded.requestId);
       } else if (decoded.kind === 'delete_cancel') {

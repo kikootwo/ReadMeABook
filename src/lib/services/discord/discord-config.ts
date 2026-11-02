@@ -19,7 +19,6 @@ export const DISCORD_CONFIG_KEYS = {
   adminNotifyChannelId: 'discord.admin_notify_channel_id',
   requestCardMode: 'discord.request_card_mode',
   requesterRoleId: 'discord.requester_role_id',
-  deletePermission: 'discord.delete_permission',
 } as const;
 
 /** How the persistent, auto-updating request card is delivered to the requester. */
@@ -32,18 +31,6 @@ export function asRequestCardMode(value: string | null | undefined): RequestCard
   return REQUEST_CARD_MODES.includes(value as RequestCardMode)
     ? (value as RequestCardMode)
     : 'public';
-}
-
-/** Who may use the /delete command. */
-export type DeletePermission = 'anyone_any' | 'own_only' | 'admin_only' | 'disabled';
-
-const DELETE_PERMISSIONS: readonly DeletePermission[] = ['anyone_any', 'own_only', 'admin_only', 'disabled'];
-
-/** Coerce an arbitrary stored value into a valid DeletePermission (defaults to 'own_only'). */
-export function asDeletePermission(value: string | null | undefined): DeletePermission {
-  return DELETE_PERMISSIONS.includes(value as DeletePermission)
-    ? (value as DeletePermission)
-    : 'own_only';
 }
 
 export interface DiscordConfig {
@@ -60,8 +47,6 @@ export interface DiscordConfig {
   requestCardMode: RequestCardMode;
   /** Optional role that gates who may make requests. Blank = any linked user. Admins always bypass. */
   requesterRoleId: string | null;
-  /** Who may use the /delete command. */
-  deletePermission: DeletePermission;
 }
 
 /**
@@ -78,7 +63,6 @@ export async function getDiscordConfig(): Promise<DiscordConfig> {
     DISCORD_CONFIG_KEYS.adminNotifyChannelId,
     DISCORD_CONFIG_KEYS.requestCardMode,
     DISCORD_CONFIG_KEYS.requesterRoleId,
-    DISCORD_CONFIG_KEYS.deletePermission,
   ]);
 
   return {
@@ -90,7 +74,6 @@ export async function getDiscordConfig(): Promise<DiscordConfig> {
     adminNotifyChannelId: values[DISCORD_CONFIG_KEYS.adminNotifyChannelId] || null,
     requestCardMode: asRequestCardMode(values[DISCORD_CONFIG_KEYS.requestCardMode]),
     requesterRoleId: values[DISCORD_CONFIG_KEYS.requesterRoleId] || null,
-    deletePermission: asDeletePermission(values[DISCORD_CONFIG_KEYS.deletePermission]),
   };
 }
 

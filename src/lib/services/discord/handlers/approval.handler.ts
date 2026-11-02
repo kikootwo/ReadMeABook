@@ -16,7 +16,7 @@ import {
 } from 'discord.js';
 import { prisma } from '@/lib/db';
 import { processRequestApproval, type ApprovalAction } from '@/lib/services/request-approval.service';
-import { deleteRequest } from '@/lib/services/request-delete.service';
+import { cancelRequest } from '@/lib/services/request-cancel.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { getDiscordConfig, getApprovalChannelId } from '../discord-config';
 import { resolveRmabUser } from '../discord-user.resolver';
@@ -180,8 +180,9 @@ export async function handleApprovalButton(
 
 /**
  * Handle the "Cancel Request" button on a live request card. Authorized for the original requester
- * or any admin (RMAB admin / admin role). Cancels via the shared deleteRequest service (stops
- * search/download, handles seeding) and re-renders the card(s) to the cancelled state.
+ * or any admin (RMAB admin / admin role). Cancels via the shared cancelRequest service (status →
+ * 'cancelled', background jobs stop; nothing is deleted) and re-renders the card(s) to the
+ * cancelled state.
  */
 export async function handleCancelRequestButton(
   interaction: ButtonInteraction,
@@ -226,10 +227,8 @@ export async function handleCancelRequestButton(
     return;
   }
 
-  // Record the RMAB user id as the actor; null when an admin-role holder has no linked account so we
-  // never persist a non-RMAB identifier as deletedBy. The Discord id is passed separately purely to
-  // attribute the "Cancelled by" mention.
-  const result = await deleteRequest(requestId, rmabUserId ?? null, interaction.user.id);
+  // The Discord id attributes the "Cancelled by" mention on a pending approval message.
+  const result = await cancelRequest(requestId, { userId: rmabUserId ?? null, discordUserId: interaction.user.id });
   logger.info('Request cancelled via Discord', {
     ...actorMeta(interaction.user, rmabUserId),
     requestId,
@@ -244,7 +243,7 @@ export async function handleCancelRequestButton(
     return;
   }
 
-  // The card and approval-embed rewrites now live inside deleteRequest, so every deletion path
-  // (Web UI, /status, /delete) converges on the same cleanup.
+  // The card and approval-embed rewrites live inside cancelRequest, so every cancel path
+  // (Web UI, card button, /status) converges on the same cleanup.
 }
 

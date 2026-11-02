@@ -7,9 +7,8 @@
  */
 
 import { PermissionFlagsBits, SlashCommandBuilder, type SlashCommandOptionsOnlyBuilder } from 'discord.js';
-import type { DeletePermission } from './discord-config';
 
-export function buildCommandDefinitions(deletePermission: DeletePermission) {
+export function buildCommandDefinitions() {
   const commands: (SlashCommandBuilder | SlashCommandOptionsOnlyBuilder)[] = [
     new SlashCommandBuilder()
       .setName('request')
@@ -36,17 +35,15 @@ export function buildCommandDefinitions(deletePermission: DeletePermission) {
       .setDescription('See the status of your outstanding requests'),
   ];
 
-  if (deletePermission !== 'disabled') {
-    const del = new SlashCommandBuilder()
+  // Deleting removes library files, so /delete is for RMAB admins only (re-checked by the handler).
+  // Hidden from non-administrators by default; a server can grant it to an admin role under
+  // Server Settings → Integrations. Everyone else cancels instead (/status or the card's button).
+  commands.push(
+    new SlashCommandBuilder()
       .setName('delete')
-      .setDescription('Remove one of your requests from ReadMeABook');
-
-    if (deletePermission === 'admin_only') {
-      del.setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
-    }
-
-    commands.push(del);
-  }
+      .setDescription('Admins: delete a request and its files from ReadMeABook')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  );
 
   return commands.map((command) => command.toJSON());
 }

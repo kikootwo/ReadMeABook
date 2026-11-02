@@ -57,21 +57,21 @@ describe('PUT /api/admin/settings/discord', () => {
     expect(response.status).toBe(200);
     expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
     // Every plain key goes through the transaction, not as loose sequential statements.
-    expect(prismaMock.$transaction.mock.calls[0][0]).toHaveLength(8);
+    expect(prismaMock.$transaction.mock.calls[0][0]).toHaveLength(7);
   });
 
   it('includes the encrypted bot token in the same transaction', async () => {
     await put(body({ botToken: 'secret-token' }));
 
     expect(encryptionMock.encrypt).toHaveBeenCalledWith('secret-token');
-    expect(prismaMock.$transaction.mock.calls[0][0]).toHaveLength(9);
+    expect(prismaMock.$transaction.mock.calls[0][0]).toHaveLength(8);
   });
 
   it('leaves a masked bot token untouched', async () => {
     await put(body({ botToken: '••••••••' }));
 
     expect(encryptionMock.encrypt).not.toHaveBeenCalled();
-    expect(prismaMock.$transaction.mock.calls[0][0]).toHaveLength(8);
+    expect(prismaMock.$transaction.mock.calls[0][0]).toHaveLength(7);
   });
 
   it('does not restart the bot when the transaction fails', async () => {

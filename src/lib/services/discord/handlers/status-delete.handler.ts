@@ -2,8 +2,9 @@
  * Component: Discord Status & Delete Handlers
  * Documentation: documentation/integrations/discord-bot.md
  *
- * /status lists the invoker's outstanding requests (admins see all). /delete lets the invoker
- * remove one of their requests (admins can remove any) via the shared deleteRequest service.
+ * /status lists the invoker's outstanding requests (admins see all) and lets them cancel their own
+ * (admins: any) via the shared cancelRequest service. /delete is for RMAB admins only: it removes a
+ * request and its files via the shared deleteRequest service.
  */
 
 import type {
@@ -13,15 +14,14 @@ import type {
 } from 'discord.js';
 import { prisma } from '@/lib/db';
 import { deleteRequest } from '@/lib/services/request-delete.service';
+import { cancelRequest } from '@/lib/services/request-cancel.service';
 import { RMABLogger } from '@/lib/utils/logger';
-import { getDiscordConfig } from '../discord-config';
 import { resolveRmabUser, type ResolvedDiscordUser } from '../discord-user.resolver';
 import {
   actorMeta,
   fetchDeletableRequests,
   fetchDeletePreviewItem,
   fetchOutstandingRequests,
-  getRequestOwner,
 } from '../discord-helpers';
 import {
   buildDeleteConfirmButtons,
@@ -109,7 +109,7 @@ export async function handleStatusCancel(
     return;
   }
 
-  const result = await deleteRequest(requestId, resolved.user.id, interaction.user.id);
+  const result = await cancelRequest(requestId, { userId: resolved.user.id, discordUserId: interaction.user.id });
   logger.info('Request cancelled via /status', { ...meta, requestId, success: result.success });
 
   if (!result.success) {
@@ -117,7 +117,7 @@ export async function handleStatusCancel(
     return;
   }
 
-  // Card + approval-embed rewrites are handled inside deleteRequest for every surface.
+  // Card + approval-embed rewrites are handled inside cancelRequest for every surface.
 
   const effectiveScope = resolved.isAdmin && scopeAll;
   const items = await fetchOutstandingRequests(resolved.user.id, effectiveScope);
@@ -125,21 +125,15 @@ export async function handleStatusCancel(
   await interaction.editReply({ embeds, components });
 }
 
-/** /delete: present a dropdown of removable requests, gated by deletePermission config. */
+/** Shown to non-admins: deleting removes library files, so users cancel instead. */
+const DELETE_ADMIN_ONLY_MESSAGE =
+  'Only admins can delete requests. To cancel one of your own, use /status or the Cancel button on its request card.';
+
+/** /delete: present a dropdown of removable requests (RMAB admins only; they see every request). */
 export async function handleDeleteCommand(
   interaction: ChatInputCommandInteraction
 ): Promise<void> {
   await interaction.deferReply({ ephemeral: true });
-
-  const config = await getDiscordConfig();
-  const perm = config.deletePermission;
-
-  if (perm === 'disabled') {
-    await interaction.editReply({
-      embeds: [errorEmbed('The /delete command is disabled by the server administrator.')],
-    });
-    return;
-  }
 
   const resolved = await resolveRmabUser(interaction.user.id);
   if (!resolved) {
@@ -147,41 +141,22 @@ export async function handleDeleteCommand(
     return;
   }
 
-  if (perm === 'admin_only' && !resolved.isAdmin) {
-    await interaction.editReply({
-      embeds: [errorEmbed('Only admins can use /delete on this server.')],
-    });
+  if (!resolved.isAdmin) {
+    await interaction.editReply({ embeds: [errorEmbed(DELETE_ADMIN_ONLY_MESSAGE)] });
     return;
   }
 
-  // anyone_any: admins see all, non-admins see all too
-  // own_only: admins see all, non-admins see only their own
-  // admin_only: only admins reach here (checked above), always see all
-  const scopeAll = resolved.isAdmin || perm === 'anyone_any';
-
-  const items = await fetchDeletableRequests(resolved.user.id, scopeAll);
-  const { embeds, components } = buildDeletePage(items, scopeAll, 0);
+  const items = await fetchDeletableRequests(resolved.user.id, true);
+  const { embeds, components } = buildDeletePage(items, true, 0);
   await interaction.editReply({ embeds, components });
 }
 
 /** Pagination button for /delete. */
 export async function handleDeletePage(
   interaction: ButtonInteraction,
-  page: number,
-  scopeAll: boolean
+  page: number
 ): Promise<void> {
   await interaction.deferUpdate();
-
-  const config = await getDiscordConfig();
-  const perm = config.deletePermission;
-
-  if (perm === 'disabled') {
-    await interaction.editReply({
-      embeds: [errorEmbed('The /delete command is disabled by the server administrator.')],
-      components: [],
-    });
-    return;
-  }
 
   const resolved = await resolveRmabUser(interaction.user.id);
   if (!resolved) {
@@ -189,71 +164,41 @@ export async function handleDeletePage(
     return;
   }
 
-  if (perm === 'admin_only' && !resolved.isAdmin) {
-    await interaction.editReply({
-      embeds: [errorEmbed('Only admins can use /delete on this server.')],
-      components: [],
-    });
+  if (!resolved.isAdmin) {
+    await interaction.editReply({ embeds: [errorEmbed(DELETE_ADMIN_ONLY_MESSAGE)], components: [] });
     return;
   }
 
-  const effectiveScope = resolved.isAdmin || perm === 'anyone_any';
-  const items = await fetchDeletableRequests(resolved.user.id, effectiveScope);
-  const { embeds, components } = buildDeletePage(items, effectiveScope, page);
+  const items = await fetchDeletableRequests(resolved.user.id, true);
+  const { embeds, components } = buildDeletePage(items, true, page);
   await interaction.editReply({ embeds, components });
 }
 
 /**
- * Shared gate for the /delete select + confirm interactions: enforces the deletePermission config
- * and (for non-admins, unless anyone_any) ownership of the target request. Replies with the
- * appropriate error and returns null when the actor isn't authorized.
+ * Shared gate for the /delete select + confirm interactions: the actor must be a linked RMAB admin.
+ * Re-checked on every click because the customIds are untrusted. Replies with the error and
+ * returns null when the actor isn't authorized.
  */
 async function authorizeDelete(
   interaction: StringSelectMenuInteraction | ButtonInteraction,
   requestId: string
-): Promise<{ resolved: ResolvedDiscordUser; scopeAll: boolean } | null> {
-  const config = await getDiscordConfig();
-  const perm = config.deletePermission;
-
-  if (perm === 'disabled') {
-    await interaction.editReply({
-      embeds: [errorEmbed('The /delete command is disabled by the server administrator.')],
-      components: [],
-    });
-    return null;
-  }
-
+): Promise<{ resolved: ResolvedDiscordUser } | null> {
   const resolved = await resolveRmabUser(interaction.user.id);
   if (!resolved) {
     await interaction.editReply({ embeds: [notLinkedEmbed()], components: [] });
     return null;
   }
 
-  if (perm === 'admin_only' && !resolved.isAdmin) {
-    await interaction.editReply({
-      embeds: [errorEmbed('Only admins can use /delete on this server.')],
-      components: [],
+  if (!resolved.isAdmin) {
+    await interaction.editReply({ embeds: [errorEmbed(DELETE_ADMIN_ONLY_MESSAGE)], components: [] });
+    logger.warn('Blocked non-admin delete attempt', {
+      ...actorMeta(interaction.user, resolved.user.id),
+      requestId,
     });
     return null;
   }
 
-  // Ownership check: anyone_any skips it for non-admins; own_only enforces it.
-  if (!resolved.isAdmin && perm !== 'anyone_any') {
-    const ownerId = await getRequestOwner(requestId);
-    if (ownerId !== resolved.user.id) {
-      await interaction.editReply({
-        embeds: [errorEmbed('You can only delete your own requests.')],
-        components: [],
-      });
-      logger.warn('Blocked cross-user delete attempt', {
-        ...actorMeta(interaction.user, resolved.user.id),
-        requestId,
-      });
-      return null;
-    }
-  }
-
-  return { resolved, scopeAll: resolved.isAdmin || perm === 'anyone_any' };
+  return { resolved };
 }
 
 /**
@@ -272,7 +217,7 @@ export async function handleDeleteSelect(
 
   // Re-fetch the deletable set so the dropdown persists (letting the user pick a different title)
   // and to recover the requester name shown to admins.
-  const items = await fetchDeletableRequests(auth.resolved.user.id, auth.scopeAll);
+  const items = await fetchDeletableRequests(auth.resolved.user.id, true);
   const requestedBy = items.find((i) => i.id === requestId)?.requestedBy ?? null;
 
   const previewItem = await fetchDeletePreviewItem(requestId, requestedBy);

@@ -123,7 +123,7 @@ export async function memberHasRole(
 
 /**
  * Fetch deletable requests for the /delete dropdown. Includes completed (available/downloaded)
- * requests in addition to outstanding ones. Scoping controlled by deletePermission config.
+ * requests in addition to outstanding ones. Admin-only: /delete lists every user's requests.
  */
 export async function fetchDeletableRequests(
   rmabUserId: string,

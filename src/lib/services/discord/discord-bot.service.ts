@@ -176,7 +176,7 @@ class DiscordBotService {
 
     const { REST, Routes } = await import('discord.js');
     const { buildCommandDefinitions } = await import('./command-definitions');
-    const commands = buildCommandDefinitions(config.deletePermission);
+    const commands = buildCommandDefinitions();
     const rest = new REST({ version: '10' }).setToken(config.botToken);
     await rest.put(Routes.applicationGuildCommands(applicationId, config.guildId), {
       body: commands,

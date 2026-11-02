@@ -9,6 +9,7 @@
 
 import { EmbedBuilder } from 'discord.js';
 import type { AudibleAudiobook } from '@/lib/integrations/audible.service';
+import { CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
 import type { MediaType } from '../custom-id';
 
 // Severity colors (match src/lib/services/notification/providers/discord.provider.ts)
@@ -222,22 +223,9 @@ export function formatFileSize(bytes?: number | null): string | null {
 // Request status → footer / color / cancellability (shared by card + lists)
 // ============================================================================
 
-/** Statuses where the request is still in flight and a Cancel button should be offered. */
-const CANCELLABLE_STATUSES = new Set([
-  'pending',
-  'awaiting_approval',
-  'awaiting_search',
-  'awaiting_release',
-  'searching',
-  'downloading',
-  'processing',
-  'awaiting_import',
-  'warn',
-]);
-
-/** Whether a request in this status can still be cancelled (search/download not yet complete). */
+/** Whether a Cancel button should be offered: the same statuses the cancel service accepts. */
 export function isCancellableStatus(status: string): boolean {
-  return CANCELLABLE_STATUSES.has(status);
+  return (CANCELLABLE_STATUSES as readonly string[]).includes(status);
 }
 
 /**

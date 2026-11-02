@@ -267,10 +267,24 @@ where: {
 24. ✅ **Discord bot disabled or unreachable** - Discord sync is gated on a live client and never
     throws, so deletion succeeds regardless
 
+## Cancel vs Delete
+
+| | Cancel | Delete |
+|---|---|---|
+| Who | Requester (own) or admin | Admin only (web, API, Discord `/delete`) |
+| Entry points | `PATCH /api/requests/:id {action:'cancel'}`, Discord card Cancel button, `/status` menu | `DELETE /api/admin/requests/:id`, Discord `/delete` |
+| Effect | `status → 'cancelled'` (+ `selectedTorrent` cleared if awaiting approval), `request_cancelled` notification | Soft delete + files, library item, download cleanup (below) |
+| Files / download | Untouched; guarded jobs stop ([jobs.md](../backend/services/jobs.md)) | Removed per the rules below |
+
+- Shared service: `cancelRequest(id, actor)` / `cancelLoadedRequest(record, actor)` in [request-cancel.service.ts](../../src/lib/services/request-cancel.service.ts); allowed statuses = `CANCELLABLE_STATUSES` (`src/lib/constants/request-statuses.ts`). Authorization stays with the caller.
+- Returns `{ success: true, request }` or `{ success: false, reason: 'not_found' | 'not_cancellable', message }` (route → 400 ValidationError).
+
 ## Discord Convergence
 
-`deleteRequest()` rewrites the Discord surfaces itself, so every deletion path converges — Web UI
-admin route, `/status`, `/delete`, and the reported-issue cleanup.
+`deleteRequest()` and `cancelRequest()` rewrite the Discord surfaces themselves via the shared
+`syncDiscordOnCancel()` ([discord-cancel-sync.ts](../../src/lib/services/discord/discord-cancel-sync.ts)),
+so every path converges — Web UI cancel, Web UI admin route, the Discord Cancel button, `/status`,
+`/delete`, and the reported-issue cleanup.
 
 - `editRequestCards(requestId, 'cancelled')` — soft delete leaves `status` untouched, so the
   cancelled render is forced.

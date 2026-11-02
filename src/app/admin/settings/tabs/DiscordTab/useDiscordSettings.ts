@@ -43,7 +43,6 @@ const EMPTY: DiscordSettings = {
   adminNotifyChannelId: '',
   requestCardMode: 'public',
   requesterRoleId: '',
-  deletePermission: 'own_only',
 };
 
 export function useDiscordSettings() {

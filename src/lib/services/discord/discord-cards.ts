@@ -384,6 +384,10 @@ export async function reconcileApprovalMessage(requestId: string): Promise<void>
     await applyDecisionToApprovalMessage(requestId, 'deny', null);
     return;
   }
+  if (request.status === 'cancelled') {
+    await cancelApprovalMessage(requestId, null);
+    return;
+  }
   if (request.status !== 'awaiting_approval') {
     // pending / downloading / onwards all mean it was approved.
     await applyDecisionToApprovalMessage(requestId, 'approve', null);

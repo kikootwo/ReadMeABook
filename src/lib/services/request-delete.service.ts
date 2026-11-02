@@ -15,6 +15,7 @@ import {
   removeEbookFiles,
 } from './request-delete-files';
 import { cleanUpRequestDownload, emptyDownloadCleanupCounts } from './request-delete-download';
+import { syncDiscordOnCancel } from './discord/discord-cancel-sync';
 
 const logger = RMABLogger.create('RequestDelete');
 
@@ -32,56 +33,6 @@ export interface DeleteRequestResult {
   /** Torrents left in the client because RMAB did not add them (it never removes those). */
   torrentsKeptNotOwned: number;
   error?: string;
-}
-
-/**
- * Rewrite the Discord surfaces for a request that has just been deleted: force the live request
- * card to its cancelled render and strip the Approve/Deny buttons from any pending approval embed.
- *
- * Lives here rather than in each caller so every deletion path converges -- the Web UI
- * admin route, Discord /status and /delete, and the reported-issue cleanup. Previously a web-side
- * delete left a live "Cancel Request" button and, worse, a live approval embed whose Approve button
- * still worked against the deleted request.
- *
- * Gated on a running bot and dynamically imported so discord.js stays unloaded when the bot is
- * disabled. Never throws: a Discord failure must not fail the deletion.
- */
-async function syncDiscordOnDelete(
-  requestId: string,
-  wasAwaitingApproval: boolean,
-  actorUserId: string | null,
-  actorDiscordUserId?: string | null
-): Promise<void> {
-  try {
-    const { getDiscordBotService } = await import('./discord/discord-bot.service');
-    if (!getDiscordBotService().getClient()) {
-      logger.info(`Skipping Discord sync for deleted request ${requestId}: bot not running`);
-      return;
-    }
-
-    const { editRequestCards, cancelApprovalMessage } = await import('./discord/discord-cards');
-
-    // Soft delete leaves `status` untouched, so the cancelled render has to be forced.
-    await editRequestCards(requestId, 'cancelled');
-
-    if (wasAwaitingApproval) {
-      // Prefer the Discord actor from the interaction; otherwise fall back to the deleting user's
-      // linked Discord account, and accept no attribution at all when neither exists.
-      let mentionId = actorDiscordUserId ?? null;
-      if (!mentionId && actorUserId) {
-        const actor = await prisma.user.findUnique({
-          where: { id: actorUserId },
-          select: { discordUserId: true },
-        });
-        mentionId = actor?.discordUserId ?? null;
-      }
-      await cancelApprovalMessage(requestId, mentionId);
-    }
-  } catch (error) {
-    logger.warn(`Could not sync Discord surfaces for deleted request ${requestId}`, {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
 }
 
 /**
@@ -292,7 +243,7 @@ export async function deleteRequest(
     );
 
     // 7. Converge the Discord surfaces so no deletion path leaves live buttons behind.
-    await syncDiscordOnDelete(
+    await syncDiscordOnCancel(
       requestId,
       request.status === 'awaiting_approval',
       adminUserId,

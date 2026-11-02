@@ -110,7 +110,7 @@ export function applyApprovalCancellation(
 ): EmbedBuilder {
   const builder = EmbedBuilder.from(existing).setColor(COLOR.error).setTitle('🚫 Request Cancelled');
 
-  // Deletions from the Web UI have no Discord actor, and the RMAB user may have no
+  // Cancels and deletions from the Web UI have no Discord actor, and the RMAB user may have no
   // linked account, so omit the field rather than rendering a broken `<@null>` mention.
   return cancelledByDiscordId
     ? builder.addFields({ name: 'Cancelled by', value: `<@${cancelledByDiscordId}>`, inline: true })

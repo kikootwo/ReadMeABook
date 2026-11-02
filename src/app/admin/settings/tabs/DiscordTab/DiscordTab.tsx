@@ -299,40 +299,23 @@ export function DiscordTab() {
         </p>
       </div>
 
-      {/* Delete permission */}
+      {/* /delete is admin-only */}
       <div className="space-y-1">
-        <label
-          htmlFor="discord-delete-perm"
-          className="block text-sm font-medium text-gray-900 dark:text-gray-100"
-        >
-          /delete command permissions
-        </label>
-        <select
-          id="discord-delete-perm"
-          value={settings.deletePermission}
-          onChange={(e) =>
-            update('deletePermission', e.target.value as DiscordSettings['deletePermission'])
-          }
-          className="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
-        >
-          <option value="own_only">Users can delete their own requests (default)</option>
-          <option value="anyone_any">Anyone can delete any request</option>
-          <option value="admin_only">Only admins can use /delete</option>
-          <option value="disabled">Disable /delete entirely</option>
-        </select>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Controls who can use the <code>/delete</code> command and which requests they can remove.
-          Admins always have full access unless the command is disabled entirely.
+        <p className="block text-sm font-medium text-gray-900 dark:text-gray-100">
+          /delete command
         </p>
-        {settings.deletePermission === 'admin_only' && (
-          <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
-            <strong>Note:</strong> This hides <code>/delete</code> from non-administrators in
-            Discord. If your admins don&apos;t have Discord&apos;s built-in Administrator permission,
-            they&apos;ll need a per-command exception: <strong>Server Settings → Integrations →{' '}
-            {botName} → /delete</strong>, then add the admin role or specific users who should have
-            access.
-          </div>
-        )}
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Only RMAB admins (a linked Discord account) can delete requests, since deleting removes the
+          files. Everyone else can cancel their own requests from <code>/status</code> or the Cancel
+          button on the request card.
+        </p>
+        <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
+          <strong>Note:</strong> <code>/delete</code> is hidden from non-administrators in Discord.
+          If your admins don&apos;t have Discord&apos;s built-in Administrator permission, they&apos;ll
+          need a per-command exception: <strong>Server Settings → Integrations →{' '}
+          {botName} → /delete</strong>, then add the admin role or specific users who should have
+          access.
+        </div>
       </div>
 
       {/* Save */}

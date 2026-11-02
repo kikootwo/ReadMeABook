@@ -31,14 +31,17 @@ describe('request cancellability', () => {
       'awaiting_approval',
       'searching',
       'downloading',
-      'processing',
+      'awaiting_search',
+      'awaiting_release',
     ]) {
       expect(isCancellableStatus(status)).toBe(true);
     }
   });
 
   it('disallows cancelling once terminal', () => {
-    for (const status of ['available', 'downloaded', 'denied', 'cancelled', 'failed']) {
+    // Matches the server's CANCELLABLE_STATUSES: once a download is being imported it can no
+    // longer be cancelled, only deleted by an admin.
+    for (const status of ['available', 'downloaded', 'denied', 'cancelled', 'failed', 'processing', 'awaiting_import', 'warn']) {
       expect(isCancellableStatus(status)).toBe(false);
     }
   });
