@@ -210,6 +210,7 @@
 **"Why is ABS matching the wrong book?"** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md) (file hash prevents false positives)
 **"How do I customize my home page?"** → [features/home-sections.md](features/home-sections.md)
 **"How do Audible categories work?"** → [features/home-sections.md](features/home-sections.md)
+**"Why does a home section still show its old books after a refresh?"** → [features/home-sections.md](features/home-sections.md#refresh-processor-unified-storage) (a fetch with no books keeps the previous list; empty category scrapes fall back to the catalog API, [integrations/audible.md](integrations/audible.md#nightly-refresh-html--htmlclient-baseurl-wwwaudibletld))
 **"How do I add category sections to the home page?"** → [features/home-sections.md](features/home-sections.md)
 **"Does a deleted user's shelf or watched list still create requests?"** → No (#504): [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#deleted-users-504), [features/watched-lists.md](features/watched-lists.md), [backend/services/scheduler.md](backend/services/scheduler.md) (find_missing_ebooks)
 **"How do Goodreads shelves work?"** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md)

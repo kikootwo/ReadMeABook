@@ -29,14 +29,15 @@ Users customize their home page by adding/removing/reordering sections. Each sec
 - All section data stored in `AudibleCacheCategory` with reserved IDs: `__popular__` and `__new_releases__` for built-in sections
 - Popular/new-releases use same wipe-and-populate pattern as user categories
 - After built-in sections, collects distinct categoryIds from `UserHomeSection`, capped at `MAX_REFRESHED_CATEGORIES` = 30 per run, stalest first (`selectCategoriesToRefresh()`): never stored, then oldest `AudibleCacheCategory.lastSyncedAt` (one `groupBy` `_max`, only when over the cap), then most users, then id (a refresh that stores no books counts as never stored). A refreshed id moves to the back, so every category refreshes within ceil(N / 30) runs and a newly added one on the next run. Over-cap ids are logged (warn), not wiped, and keep their previous data; result carries `categoriesSkipped`
-- Per section: wipe `AudibleCacheCategory` rows, scrape, upsert `AudibleCache` metadata, insert ranked category entries
+- Per section: scrape, wipe `AudibleCacheCategory` rows, upsert `AudibleCache` metadata, insert ranked category entries
+- Fetch returned 0 books (failed or empty scrape, counted before the language filter) → previous rows kept, one warning (`Section <id>: the fetch returned no books, its previous list was kept`), category not counted in `categoriesSynced`. A genuinely empty category keeps its last list. Rows that the language filter all leaves out still replace the old ones
 - Batch cooldown between sections (10-20s random)
 - Language filter on: rows whose `.languageLabel` names another language are not saved; unlabelled rows kept ([audible-language-filter.md](../integrations/audible-language-filter.md))
 - Constants exported from `audible-refresh.processor.ts`: `POPULAR_CATEGORY_ID`, `NEW_RELEASES_CATEGORY_ID`
 
 ## AudibleService Methods
 - `getCategories()`: one catalog request, `/1.0/catalog/categories?categories_num_levels=2`, parsed by `parseCatalogCategories()` (`src/lib/integrations/audible-categories.ts`) into `{id, name, subcategories: {id, name, parentId}[]}[]`. Ids come from the region's catalog (never hardcoded). One sub-category id can sit under two parents (e.g. True Crime); it is kept under both, each with that parent's name for it
-- `getCategoryBooks(categoryId, limit)`: Scrapes `/search?node={id}&pageSize=50&sort=popularity-rank`, up to 200 results
+- `getCategoryBooks(categoryId, limit)`: Scrapes `/search?node={id}&pageSize=50&sort=popularity-rank`, up to 200 results; 0 books → catalog API bestsellers for the category, region language only ([audible.md](../integrations/audible.md#nightly-refresh-html--htmlclient-baseurl-wwwaudibletld))
 
 ## Frontend
 - **Hooks:** `useHomeSections()`, `useCategoryAudiobooks()`, `useAudibleCategories()` in `src/lib/hooks/useHomeSections.ts`
@@ -51,20 +52,21 @@ Users customize their home page by adding/removing/reordering sections. Each sec
 - Category picker scraped live (no categories table)
 - Top-level categories and their direct sub-categories (two levels)
 - At most 30 distinct categories refreshed per run
-- Wipe-and-re-scrape per category during refresh
+- Wipe-and-re-scrape per category during refresh, skipped when the fetch returns nothing (last list kept)
 - Deduplication of categories across users before scraping
-- If category disappears, user sees empty section
+- If a category disappears or returns nothing, the section keeps its last stored list; a category never stored shows an empty section
 - 10-color palette assigned by sort order
 
 ## Files
 - Schema: `prisma/schema.prisma` (UserHomeSection, AudibleCacheCategory)
 - Migration: `prisma/migrations/20260306000000_add_home_sections/migration.sql`
-- Service: `src/lib/integrations/audible.service.ts` (getCategories, getCategoryBooks), `src/lib/integrations/audible-categories.ts` (parser)
+- Service: `src/lib/integrations/audible.service.ts` (getCategories, getCategoryBooks), `src/lib/integrations/audible-categories.ts` (parser), `src/lib/integrations/audible-category-fallback.ts` (catalog fallback)
 - Processor: `src/lib/processors/audible-refresh.processor.ts`
 - API Routes: `src/app/api/user/home-sections/route.ts`, `src/app/api/audible/categories/route.ts`, `src/app/api/audiobooks/category/[categoryId]/route.ts`
 - Hooks: `src/lib/hooks/useHomeSections.ts`
 - Components: `src/components/home/HomeSectionConfigModal.tsx`, `src/components/home/CategoryPicker.tsx`, `src/components/home/HomeSection.tsx`
-- Tests: `tests/api/home-sections.routes.test.ts`, `tests/api/audible-categories.route.test.ts`, `tests/processors/audible-refresh.processor.test.ts`, `tests/processors/audible-refresh.category-cap.test.ts`, `tests/integrations/audible-categories*.test.ts`, `tests/components/home/HomeSectionConfigModal.test.tsx`; fixtures `tests/fixtures/audible-catalog/us-categories-*.json`
+- Tests: `tests/api/home-sections.routes.test.ts`, `tests/api/audible-categories.route.test.ts`, `tests/processors/audible-refresh.processor.test.ts`, `tests/processors/audible-refresh.category-cap.test.ts`, `tests/processors/audible-refresh-language.test.ts`, `tests/integrations/audible-categories*.test.ts`, `tests/integrations/audible-category-fallback.test.ts`, `tests/components/home/HomeSectionConfigModal.test.tsx`; fixtures `tests/fixtures/audible-catalog/us-categories-*.json`
 
 ## Fixed Issues
+- **#507:** one failed nightly refresh (storefront 503 through every retry) emptied a category section until a later good night; the refresh wiped rows before checking the fetch. Now a fetch with no books keeps the previous rows and isn't counted as synced, and an empty category scrape falls back to the catalog API
 - **#309:** picker listed only top-level categories, so sub-categories such as Horror (under Literature & Fiction) could not be added. Now fetched with `categories_num_levels=2` (still one request) and pickable under their parent; refresh capped at 30 categories per run, stalest first so over-cap ones rotate in
