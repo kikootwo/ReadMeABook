@@ -14,6 +14,7 @@ import { AdjustSearchTermsModal } from './AdjustSearchTermsModal';
 import { useSmartDropdownPosition } from '@/hooks/useSmartDropdownPosition';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
+import { cancelConfirmText } from '@/lib/utils/cancel-confirm-text';
 
 export interface RequestActionsDropdownProps {
   request: {
@@ -551,7 +552,7 @@ export function RequestActionsDropdown({
         message={
           isAwaitingApproval
             ? `"${request.title}" is pending admin approval and will be withdrawn. The user can request it again later.`
-            : `Cancel "${request.title}"? RMAB stops this request's download and removes what it downloaded so far, unless another request still uses it. A download that already finished may stay in the download client to seed.`
+            : `Cancel "${request.title}"? ${cancelConfirmText(request.status, request.type)}`
         }
         confirmText={isAwaitingApproval ? 'Withdraw request' : 'Cancel request'}
         cancelText="Keep request"

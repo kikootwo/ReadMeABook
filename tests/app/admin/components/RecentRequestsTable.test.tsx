@@ -405,6 +405,20 @@ describe('RecentRequestsTable', () => {
     });
   });
 
+  it.each(['retry_later', 'not_removed'])('a cancel whose download was not removed (%s) is a warning toast', async (download) => {
+    const message = 'Request cancelled. Its download was not removed from qBittorrent yet; RMAB tries again on its next seeding cleanup.';
+    fetchWithAuthMock.mockResolvedValue({ ok: true, json: async () => ({ success: true, download, message }) });
+
+    render(<RecentRequestsTable />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel Trigger' }));
+
+    await waitFor(() => {
+      expect(toastMock.warning).toHaveBeenCalledWith(message);
+    });
+    expect(toastMock.success).not.toHaveBeenCalled();
+  });
+
   it('shows pagination info', () => {
     const { container } = render(<RecentRequestsTable />);
 
