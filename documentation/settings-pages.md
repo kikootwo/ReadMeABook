@@ -225,14 +225,17 @@ src/app/admin/settings/
 **Configuration:**
 - Plex: `plex.trigger_scan_after_import` (boolean, default: false)
 - Audiobookshelf: `audiobookshelf.trigger_scan_after_import` (boolean, default: false)
+- Audiobookshelf: `audiobookshelf.ebook_library_id` (string, default: empty = audiobook library) — library scanned after an ebook import
 
 **UI:**
 - Checkbox toggle in both Plex and Audiobookshelf settings tabs
+- Audiobookshelf: "Ebook Library" dropdown under the checkbox, shown while it is on ("Same as audiobook library" = empty)
 - Default: Unchecked (disabled)
 - Help text: "Only enable this if you have [Plex/Audiobookshelf]'s filesystem watcher (automatic scanning) disabled. Most users should leave this disabled and rely on [Plex/Audiobookshelf]'s built-in automatic detection."
 
 **Behavior:**
 - When enabled: After `organize_files` job completes, RMAB triggers filesystem scan in media server
+- Library scanned: audiobook import → audiobook library; ebook import → Audiobookshelf ebook library when set, else audiobook library (Plex: always the audiobook library)
 - When disabled: User relies on media server's filesystem watcher or manual scans
 - Error handling: Scan failures logged but don't fail organize job (graceful degradation)
 
