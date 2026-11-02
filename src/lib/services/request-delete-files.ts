@@ -16,7 +16,8 @@ import { RMABLogger } from '../utils/logger';
 import { canonicalPath, UnsafeDeleteError } from '../utils/delete-guard';
 import { assertSafeLibraryDelete, isStaleStoredFolder, planEbookDelete, type LibraryBook } from '../utils/library-delete-guard';
 import { sweepEmptyParents } from '../processors/organize-cleanup-guard';
-import { isPathBelowBoundary, normalizePath } from '../utils/cleanup-helpers';
+import { isPathBelowBoundary } from '../utils/cleanup-helpers';
+import { libraryRelativePath, normalizeRelPath } from '../utils/library-item-path';
 
 const logger = RMABLogger.create('RequestDelete');
 
@@ -134,9 +135,9 @@ async function isInsideFolder(candidate: string, folder: string): Promise<boolea
 async function absItemInside(item: { path?: string; relPath?: string }, folder: string, mediaDir: string): Promise<boolean> {
   if (item.path && (await isInsideFolder(item.path, folder))) return true;
   if (!item.relPath) return false;
-  const relFolder = normalizePath(path.posix.relative(await canonicalPath(mediaDir), folder));
-  const rel = normalizePath(item.relPath).replace(/^\/+/, '');
-  return !!relFolder && !relFolder.startsWith('..') && (rel === relFolder || rel.startsWith(`${relFolder}/`));
+  const relFolder = await libraryRelativePath(folder, mediaDir);
+  const rel = normalizeRelPath(item.relPath);
+  return !!relFolder && (rel === relFolder || rel.startsWith(`${relFolder}/`));
 }
 
 type ConfigReader = { get(key: string): Promise<string | null> };

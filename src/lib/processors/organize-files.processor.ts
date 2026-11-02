@@ -31,6 +31,7 @@ import { updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { createAudibleDetailsLoader, readMetadataTaggingEnabled, resolveTagDetails } from './organize-tag-details';
 import { applyPostImportCategory } from './post-import-category';
 import { preferredEbookFile } from '../utils/import-inventory';
+import { findEbookOnDisk } from '../utils/ebook-on-disk';
 
 /**
  * Process organize files job
@@ -1051,7 +1052,8 @@ async function processEbookOrganization(
 
 /**
  * Create ebook request if ebook downloads are enabled
- * Called after audiobook organization completes
+ * Called after audiobook organization completes. Skipped when the book folder
+ * (targetPath) already holds an ebook file (#313).
  *
  * Supports two ebook sources:
  * - Anna's Archive (ebook_annas_archive_enabled) - Currently implemented
@@ -1103,6 +1105,13 @@ async function createEbookRequestIfEnabled(
 
     if (existingEbookRequest) {
       logger.info(`Ebook request already exists for parent ${parentRequestId}: ${existingEbookRequest.id}`);
+      return;
+    }
+
+    // An ebook the user already put in the book folder: nothing to fetch (#313)
+    const ebookOnDisk = await findEbookOnDisk(targetPath, audiobook.id, logger);
+    if (ebookOnDisk) {
+      logger.info(`Book folder already holds an ebook (${ebookOnDisk}), skipping automatic ebook request`);
       return;
     }
 

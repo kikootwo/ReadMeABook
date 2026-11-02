@@ -37,6 +37,11 @@ import {
   type CatalogSeriesEntry,
 } from './audible-series-fill';
 import { isLanguageFilterOn, type SearchLanguageFilterInfo } from './audible-language-filter';
+import {
+  CATALOG_CATEGORY_LEVELS,
+  parseCatalogCategories,
+  type AudibleCategoryNode,
+} from './audible-categories';
 
 const logger = RMABLogger.create('Audible');
 
@@ -142,10 +147,6 @@ interface CatalogProductsResponse {
 
 interface CatalogProductResponse {
   product: CatalogProduct;
-}
-
-interface CatalogCategoriesResponse {
-  categories?: Array<{ id: string; name: string }>;
 }
 
 function mapCatalogProduct(product: CatalogProduct): AudibleAudiobook {
@@ -832,7 +833,11 @@ export class AudibleService {
     }
   }
 
-  async getCategories(): Promise<{ id: string; name: string }[]> {
+  /**
+   * Top-level categories, each with its sub-categories, from one catalog request
+   * (`categories_num_levels=2`).
+   */
+  async getCategories(): Promise<AudibleCategoryNode[]> {
     await this.initialize();
 
     logger.info('Fetching Audible categories...');
@@ -840,18 +845,15 @@ export class AudibleService {
     try {
       const { data: response } = await this.fetchWithRetry(
         '/1.0/catalog/categories',
-        {},
+        { params: { categories_num_levels: CATALOG_CATEGORY_LEVELS } },
         5,
         this.apiClient,
       );
 
-      const envelope: CatalogCategoriesResponse = response.data;
-      const categories = (envelope.categories ?? []).map((c) => ({
-        id: c.id,
-        name: c.name,
-      }));
+      const categories = parseCatalogCategories(response.data);
+      const subCount = categories.reduce((n, c) => n + c.subcategories.length, 0);
 
-      logger.info(`Found ${categories.length} top-level categories`);
+      logger.info(`Found ${categories.length} top-level categories, ${subCount} sub-categories`);
       return categories;
     } catch (error) {
       logger.error('Failed to fetch categories', {

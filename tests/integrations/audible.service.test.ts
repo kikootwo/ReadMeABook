@@ -1442,7 +1442,7 @@ describe('AudibleService', () => {
 
       expect(apiClientMock.get).toHaveBeenCalledWith('/1.0/catalog/categories', expect.anything());
       expect(categories).toHaveLength(2);
-      expect(categories[0]).toEqual({ id: '18685580011', name: 'Science Fiction & Fantasy' });
+      expect(categories[0]).toEqual({ id: '18685580011', name: 'Science Fiction & Fantasy', subcategories: [] });
     });
 
     it('returns empty array when categories field is missing', async () => {

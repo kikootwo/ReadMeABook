@@ -12,6 +12,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { prisma } from '@/lib/db';
 import { Prisma } from '@/generated/prisma/client';
 import { RMABLogger } from '@/lib/utils/logger';
+import { SYNC_USER_SELECT, withoutDeletedUsers } from '@/lib/utils/deleted-user-skip';
 import { GOODREADS_RSS_URL_HINT, isGoodreadsHttpsUrl, toGoodreadsRssUrl } from '@/lib/utils/goodreads-rss-url';
 import {
   ShelfBook,
@@ -163,13 +164,15 @@ export async function processGoodreadsShelves(
   if (options.shelfId) whereClause.id = options.shelfId;
   if (options.userId) whereClause.userId = options.userId;
 
-  const shelves = await prisma.goodreadsShelf.findMany({
+  const found = await prisma.goodreadsShelf.findMany({
     where: whereClause,
-    include: { user: { select: { id: true, plexUsername: true } } },
+    include: { user: { select: SYNC_USER_SELECT } },
   });
+  // A deleted user's shelves get no fetch, lookup, request or write (#504)
+  const shelves = withoutDeletedUsers(found, 'Goodreads shelf(s)', log);
 
   if (shelves.length === 0) {
-    log.info(options.shelfId ? 'Shelf not found' : 'No Goodreads shelves configured, skipping');
+    if (found.length === 0) log.info(options.shelfId ? 'Shelf not found' : 'No Goodreads shelves configured, skipping');
     return stats;
   }
 
