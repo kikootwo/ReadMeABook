@@ -2,7 +2,7 @@
  * Component: Home Section Configuration Modal
  * Documentation: documentation/features/home-sections.md
  *
- * Allows users to add/remove/reorder home page sections.
+ * Allows users to add/remove/reorder home page sections (Audible categories and sub-categories).
  * Drag-and-drop on desktop, up/down arrows on mobile. Auto-save with debounce.
  */
 
@@ -19,6 +19,7 @@ import {
 } from '@heroicons/react/24/outline';
 import type { HomeSection, AudibleCategory } from '@/lib/hooks/useHomeSections';
 import { authenticatedFetcher } from '@/lib/utils/api';
+import { CategoryPicker } from './CategoryPicker';
 
 const MAX_SECTIONS = 10;
 
@@ -104,7 +105,7 @@ export function HomeSectionConfigModal({ isOpen, onClose, sections, onSave }: Pr
   }, [categories.length]);
 
   const addCategory = useCallback(
-    (cat: AudibleCategory) => {
+    (cat: { id: string; name: string }) => {
       if (localSections.length >= MAX_SECTIONS) return;
       // Prevent duplicate
       if (localSections.some((s) => s.sectionType === 'category' && s.categoryId === cat.id)) return;
@@ -309,31 +310,14 @@ export function HomeSectionConfigModal({ isOpen, onClose, sections, onSave }: Pr
             </button>
           </div>
 
-          {/* Category picker */}
+          {/* Category picker: top-level categories, each expandable to its sub-categories */}
           {showCategoryPicker && (
-            <div className="max-h-48 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-              {categories.length === 0 ? (
-                <div className="px-4 py-3 text-sm text-gray-500">No categories found.</div>
-              ) : (
-                categories
-                  .filter((c) => !existingCategoryIds.has(c.id))
-                  .map((cat) => (
-                    <button
-                      key={cat.id}
-                      onClick={() => addCategory(cat)}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors border-b border-gray-100 dark:border-gray-700/50 last:border-0"
-                    >
-                      {cat.name}
-                    </button>
-                  ))
-              )}
-              <button
-                onClick={() => setShowCategoryPicker(false)}
-                className="w-full px-4 py-2 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
+            <CategoryPicker
+              categories={categories}
+              existingIds={existingCategoryIds}
+              onPick={addCategory}
+              onCancel={() => setShowCategoryPicker(false)}
+            />
           )}
         </div>
       </div>

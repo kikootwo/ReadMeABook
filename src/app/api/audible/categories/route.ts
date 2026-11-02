@@ -2,7 +2,7 @@
  * Component: Audible Categories API Route
  * Documentation: documentation/features/home-sections.md
  *
- * Live scrape of top-level Audible categories for the home section config modal.
+ * Live Audible catalog categories (top level + sub-categories) for the home section config modal.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -13,7 +13,9 @@ const logger = RMABLogger.create('API.Audible.Categories');
 
 /**
  * GET /api/audible/categories
- * Returns top-level Audible categories scraped live from audible.com/categories
+ * Returns Audible's top-level categories, each with its sub-categories:
+ * { categories: [{ id, name, subcategories: [{ id, name, parentId }] }] }
+ * One catalog request per call (/1.0/catalog/categories?categories_num_levels=2).
  */
 export async function GET(request: NextRequest) {
   return requireAuth(request, async (_req: AuthenticatedRequest) => {
