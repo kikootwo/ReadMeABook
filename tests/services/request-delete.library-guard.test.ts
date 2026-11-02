@@ -208,21 +208,16 @@ describe('deleteRequest (audiobook): stored folder behind the guard', () => {
     const dir = imported('Author/Book', ['Part 1.m4b', 'Part 2.m4b']);
     Object.assign(rmState, { error: Object.assign(new Error('EPERM'), { code: 'EPERM' }), at: 2 });
     request(book(dir, { filesHash: generateFilesHash(['Part 1.m4b', 'Part 2.m4b']) }));
-
     const result = await deleteRequest('req-1', 'admin-1');
-
     expect(result.filesKeptReason).toBe('the folder was partly removed (permission denied); remove the rest manually');
     expect(fs.readdirSync(dir).length).toBe(2);
     expectLibraryUntouched();
   });
 
   it('an audio file already gone at unlink (ENOENT) counts as removed', async () => {
-    const dir = imported('Author/Book');
+    request(book(imported('Author/Book')));
     rmState.error = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-    request(book(dir));
-
     const result = await deleteRequest('req-1', 'admin-1');
-
     expect(result).toMatchObject({ filesDeleted: true, message: 'Request deleted successfully' });
     expect(result.filesKeptReason).toBeUndefined();
   });
@@ -231,12 +226,9 @@ describe('deleteRequest (audiobook): stored folder behind the guard', () => {
     const dir = imported('Author/Book');
     rmState.rmdirError = Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
     request(book(dir));
-
     const result = await deleteRequest('req-1', 'admin-1');
-
-    expect(result.filesDeleted).toBe(true);
+    expect(result).toMatchObject({ filesDeleted: true, folderKept: { files: [{ name: 'Book/', why: 'could not be removed (EBUSY)' }] } });
     expect(result.filesKeptReason).toBeUndefined();
-    expect(result.folderKept?.files).toEqual([{ name: 'Book/', why: 'could not be removed (EBUSY)' }]);
     expect(fs.readdirSync(dir)).toEqual([]);
   });
 
