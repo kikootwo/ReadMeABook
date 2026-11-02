@@ -111,6 +111,8 @@ beforeEach(() => {
   requests = [];
   prismaMock.request.findMany.mockImplementation(async (args: FindManyArgs) => {
     const where = args?.where ?? {};
+    // The cancelled-download pass (its own tests) finds no candidates here
+    if (where.AND?.some((c) => (c as { status?: string }).status === 'cancelled')) return [];
     if (where.AND) {
       // The page query: one page, every fixture with a completed selected row, in the order given
       return where.AND.some((c) => c.id?.gt) ? [] : requests
