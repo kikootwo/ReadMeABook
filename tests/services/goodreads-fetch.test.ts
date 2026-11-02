@@ -180,7 +180,7 @@ describe('processGoodreadsShelves', () => {
 
     async function syncWith(log: ReturnType<typeof jobLog>) {
       const { processGoodreadsShelves } = await import('@/lib/services/goodreads-sync.service');
-      return processGoodreadsShelves(log as any);
+      return processGoodreadsShelves(log as unknown as Parameters<typeof processGoodreadsShelves>[0]);
     }
 
     it('logs one warning for the run, not one error per shelf', async () => {
