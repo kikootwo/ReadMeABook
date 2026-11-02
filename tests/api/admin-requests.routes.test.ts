@@ -141,6 +141,28 @@ describe('Admin requests routes', () => {
     );
   });
 
+  it.each(['audiobook', 'ebook'])('filters requests by type %s', async (type) => {
+    prismaMock.request.count.mockResolvedValueOnce(0);
+    prismaMock.request.findMany.mockResolvedValueOnce([]);
+
+    const { GET } = await import('@/app/api/admin/requests/route');
+    await GET({ url: `http://localhost/api/admin/requests?type=${type}` } as any);
+
+    expect(prismaMock.request.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ type }) })
+    );
+  });
+
+  it.each(['all', 'podcast'])('does not filter by type for %s', async (type) => {
+    prismaMock.request.count.mockResolvedValueOnce(0);
+    prismaMock.request.findMany.mockResolvedValueOnce([]);
+
+    const { GET } = await import('@/app/api/admin/requests/route');
+    await GET({ url: `http://localhost/api/admin/requests?type=${type}` } as any);
+
+    expect(prismaMock.request.findMany.mock.calls[0][0].where).not.toHaveProperty('type');
+  });
+
   it('filters requests by userId', async () => {
     prismaMock.request.count.mockResolvedValueOnce(1);
     prismaMock.request.findMany.mockResolvedValueOnce([

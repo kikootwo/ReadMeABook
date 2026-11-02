@@ -192,6 +192,23 @@ describe('RecentRequestsTable', () => {
     // Check for status and user dropdowns via their options
     expect(screen.getByRole('option', { name: 'All Statuses' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'All Users' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'All Types' })).toBeInTheDocument();
+  });
+
+  it('filters by request type, and Clear resets it', () => {
+    render(<RecentRequestsTable />);
+    const lastRequestsUrl = () =>
+      useSWRMock.mock.calls.map(([url]) => url as string).filter((url) => url.includes('/api/admin/requests?')).at(-1);
+
+    expect(lastRequestsUrl()).toContain('type=all');
+
+    fireEvent.change(screen.getByDisplayValue('All Types'), { target: { value: 'ebook' } });
+    expect(lastRequestsUrl()).toContain('type=ebook');
+    expect(lastRequestsUrl()).toContain('page=1');
+
+    fireEvent.click(screen.getByRole('button', { name: /Clear/ }));
+    expect(lastRequestsUrl()).toContain('type=all');
+    expect(screen.getByDisplayValue('All Types')).toBeInTheDocument();
   });
 
   it('deletes a request and refreshes caches', async () => {
