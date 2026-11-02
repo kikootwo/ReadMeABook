@@ -29,6 +29,9 @@ const ASINS = Object.values(BOOKS).map((b) => sqlStr(b.asin)).join(', ');
 
 type Row = { title: string; type: string };
 
+/** By attribute, not role: with `size` set for the capture the select is a listbox, not a combobox. */
+const TYPE_SELECT = 'select[aria-label="Filter by type"]';
+
 function cleanup() {
   psql(
     `begin;
@@ -60,7 +63,7 @@ async function pickType(page: Page, value: string): Promise<{ url: string; rows:
   const answer = page.waitForResponse(
     (r) => r.url().includes('/api/admin/requests?') && new URL(r.url()).searchParams.get('type') === value
   );
-  await page.getByRole('combobox', { name: 'Filter by type' }).selectOption(value);
+  await page.locator(TYPE_SELECT).selectOption(value);
   const res = await answer;
   const body = (await res.json()) as { requests: Row[] };
   return { url: res.url(), rows: body.requests.map((r) => ({ title: r.title, type: r.type })) };
@@ -76,8 +79,8 @@ test('519: the Type filter lists only audiobook or only ebook requests, follows 
 
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/admin');
-  const select = page.getByRole('combobox', { name: 'Filter by type' });
-  await expect(select).toHaveValue('all');
+  await expect(page.getByRole('combobox', { name: 'Filter by type' })).toHaveValue('all');
+  const select = page.locator(TYPE_SELECT);
   const table = page.locator('table', { hasText: BOOKS.ebook.title });
   await expect(table.getByText(BOOKS.audiobook.title)).toBeVisible();
   await expect(table.getByText(BOOKS.ebook.title)).toBeVisible();
@@ -92,10 +95,11 @@ test('519: the Type filter lists only audiobook or only ebook requests, follows 
   // The select expanded in place for the capture, then put back
   await select.scrollIntoViewIfNeeded();
   await page.evaluate(() => window.scrollBy(0, -120));
-  await select.evaluate((el) => ((el as HTMLSelectElement).size = 3));
   await select.focus();
+  await select.evaluate((el) => ((el as HTMLSelectElement).size = 3));
   await snap(page, '519', 'type-dropdown-open');
   await select.evaluate((el) => (el as HTMLSelectElement).removeAttribute('size'));
+  await expect(page.getByRole('combobox', { name: 'Filter by type' })).toHaveValue('all');
 
   // Ebooks
   const ebooks = await pickType(page, 'ebook');
