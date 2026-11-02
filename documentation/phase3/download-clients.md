@@ -235,7 +235,7 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 - Anna's Archive picks: only `md5` (32 hex) is trusted; links rebuilt with `getSlowDownloadLinks(md5, ebook_sidecar_base_url, flaresolverr)`; client `downloadUrl(s)` ignored
 - Search responses (`search-torrents`, `requests/[id]/interactive-search`, both `interactive-search-ebook`): `stripProwlarrKeyFromResults()` removes any `apikey=<configured key>` on any origin from every string field (fetcher restores it for Prowlarr hops)
 - Interactive search permission (`denyWithoutInteractiveSearchAccess`, `src/lib/middleware/interactive-search-access.ts`) enforced on all search + pick routes above (user routes) → 403
-- Visibility: when a search's results carry proxy links on another origin, `prowlarr.service.ts` logs one info line per search: `Prowlarr published download links on <scheme://host:port>; using the configured address <origin> instead` (origin only, no path/query/key)
+- Visibility: when a search's results carry proxy links on another origin, `prowlarr.service.ts` logs one info line per Prowlarr query (a request search runs several): `Prowlarr published download links on <scheme://host:port>; using the configured address <origin> instead` (origin only, no path/query/key)
 
 ### Migration
 **Auto-migration** from legacy single-client config to new JSON array format on first access:
