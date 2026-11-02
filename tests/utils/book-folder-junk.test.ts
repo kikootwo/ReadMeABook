@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { isJunkDirName, isJunkFileName, JUNK_MAX_ENTRIES, planJunkDir, removeJunkDir } from '@/lib/utils/book-folder-junk';
+import { isJunkDirName, isJunkFileName, JUNK_MAX_ENTRIES, planJunkDir, releaseJunkDir, removeJunkDir } from '@/lib/utils/book-folder-junk';
 import { planBookFolderDelete, removeFolderIfOnlyJunk } from '@/lib/utils/book-folder-delete';
 import { generateFilesHash } from '@/lib/utils/files-hash';
 import { canonicalPath } from '@/lib/utils/delete-guard';
@@ -84,15 +84,34 @@ describe('planJunkDir / removeJunkDir: the limited walk', () => {
     expect('plan' in (await planJunkDir(dir))).toBe(true);
   });
 
-  it('stops when a walked folder was swapped before removal', async () => {
+  // Deleted then made again: Linux hands the new folder the freed inode number unless the walk holds the old one open
+  it.each([
+    ['deleted and made again', (sub: string) => fs.rmSync(sub, { recursive: true })],
+    ['moved aside and replaced', (sub: string) => fs.renameSync(sub, path.join(root, 'old-sub'))],
+  ])('stops when a walked folder was %s before removal', async (_label, swapOut) => {
+    const dir = path.join(root, '@eaDir');
+    const sub = path.join(dir, 'sub');
+    write(path.join(sub, 'thumb.jpg'));
+    const walked = (await planJunkDir(dir)) as { plan: Parameters<typeof removeJunkDir>[0] };
+    expect(walked.plan.nodes.map((n) => path.basename(n.dir))).toEqual(['sub', '@eaDir']);
+    swapOut(sub);
+    write(path.join(sub, 'thumb.jpg'), 'new');
+
+    expect(await removeJunkDir(walked.plan)).toBe('changed');
+    expect(fs.readFileSync(path.join(sub, 'thumb.jpg'), 'utf8')).toBe('new');
+    expect(fs.existsSync(dir)).toBe(true);
+  });
+
+  it('a plan released without removing (twice) removes nothing', async () => {
     const dir = path.join(root, '@eaDir');
     write(path.join(dir, 'sub', 'thumb.jpg'));
     const walked = (await planJunkDir(dir)) as { plan: Parameters<typeof removeJunkDir>[0] };
-    fs.rmSync(path.join(dir, 'sub'), { recursive: true });
-    write(path.join(dir, 'sub', 'thumb.jpg'));
+    await releaseJunkDir(walked.plan);
+    await releaseJunkDir(walked.plan);
 
-    expect(await removeJunkDir(walked.plan)).toBe('changed');
     expect(fs.existsSync(path.join(dir, 'sub', 'thumb.jpg'))).toBe(true);
+    fs.rmSync(dir, { recursive: true });
+    expect(fs.existsSync(dir)).toBe(false);
   });
 });
 

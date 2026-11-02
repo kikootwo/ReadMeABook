@@ -7,10 +7,13 @@
  * ebook requests (those stay). Junk folders (`@eaDir`, `.@__thumb`) go through a
  * limited walk: lstat only, links never followed, and the whole folder is kept
  * (nothing in it removed) on any link, special file, audio or ebook file, depth
- * over JUNK_MAX_DEPTH or more than JUNK_MAX_ENTRIES entries.
+ * over JUNK_MAX_DEPTH or more than JUNK_MAX_ENTRIES entries. Each walked folder
+ * stays open from the walk until its own rmdir, so no folder made in the meantime
+ * can reuse its inode number (Linux reuses a freed one at once).
  */
 
 import * as fs from 'fs/promises';
+import type { FileHandle } from 'fs/promises';
 import * as path from 'path';
 import { isAudioFile, isEbookFile } from './import-inventory';
 
@@ -33,12 +36,17 @@ export function isJunkDirName(name: string): boolean {
 
 interface JunkNode {
   dir: string;
-  dev: number;
-  ino: number;
+  /** Open from the walk until this folder's rmdir: its inode number cannot be reused meanwhile. */
+  handle: FileHandle;
+  dev: bigint;
+  ino: bigint;
   files: string[];
 }
 
-/** A junk folder the walk accepted: folders deepest first, each with the files directly in it. */
+/**
+ * A junk folder the walk accepted: folders deepest first, each with the files directly in it.
+ * It holds the folders open: removeJunkDir or releaseJunkDir must be called on it.
+ */
 export interface JunkDirPlan {
   root: string;
   nodes: JunkNode[];
@@ -46,14 +54,20 @@ export interface JunkDirPlan {
 
 class Refusal extends Error {}
 
-/** Walk a junk folder; `why` when anything in it means it must stay whole. */
+/** Walk a junk folder; `why` when anything in it means it must stay whole (nothing is left open then). */
 export async function planJunkDir(root: string): Promise<{ plan: JunkDirPlan } | { why: string }> {
   const nodes: JunkNode[] = [];
+  const opened: FileHandle[] = [];
   let count = 0;
 
   async function walk(dir: string, depth: number): Promise<void> {
-    const stat = await fs.lstat(dir);
+    const stat = await fs.lstat(dir, { bigint: true });
     if (!stat.isDirectory()) throw new Refusal('it is not a folder');
+    // open follows links: the handle must be the folder lstat saw
+    const handle = await fs.open(dir, 'r');
+    opened.push(handle);
+    const held = await handle.stat({ bigint: true });
+    if (held.dev !== stat.dev || held.ino !== stat.ino) throw new Refusal('it changed while it was checked');
     let entries;
     try {
       entries = await fs.readdir(dir);
@@ -77,40 +91,56 @@ export async function planJunkDir(root: string): Promise<{ plan: JunkDirPlan } |
         files.push(full);
       }
     }
-    nodes.push({ dir, dev: stat.dev, ino: stat.ino, files });
+    nodes.push({ dir, handle, dev: stat.dev, ino: stat.ino, files });
   }
 
   try {
     await walk(root, 0);
   } catch (error) {
+    await closeAll(opened);
     if (error instanceof Refusal) return { why: error.message };
     return { why: `it could not be checked (${(error as NodeJS.ErrnoException).code ?? 'error'})` };
   }
   return { plan: { root, nodes } };
 }
 
+async function closeAll(handles: FileHandle[]): Promise<void> {
+  await Promise.all(handles.map((handle) => handle.close().catch(() => undefined)));
+}
+
+/** Close the folders a plan holds open without removing anything (safe to call more than once). */
+export async function releaseJunkDir(plan: JunkDirPlan): Promise<void> {
+  await closeAll(plan.nodes.map((node) => node.handle));
+}
+
 /**
  * Remove a walked junk folder one entry at a time, deepest first. Each folder is
- * checked to still be the same folder (lstat dev/ino) before its files are
- * unlinked; a file that is no longer a regular file, or a folder that changed,
- * stops the removal there. rmdir errors are ignored (a later rmdir up the tree
- * then fails too). Returns the first error code, or null.
+ * checked to still be the same folder (lstat dev/ino, held open since the walk)
+ * before its files are unlinked; a file that is no longer a regular file, or a
+ * folder that changed, stops the removal there. rmdir errors are ignored (a later
+ * rmdir up the tree then fails too). Releases the plan. Returns the first error code, or null.
  */
 export async function removeJunkDir(plan: JunkDirPlan): Promise<string | null> {
-  for (const node of plan.nodes) {
-    const now = await fs.lstat(node.dir).catch(() => null);
-    if (!now || !now.isDirectory() || now.dev !== node.dev || now.ino !== node.ino) return 'changed';
-    for (const file of node.files) {
-      try {
-        const entry = await fs.lstat(file);
-        if (!entry.isFile()) return 'changed';
-        await fs.unlink(file);
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code ?? 'error';
-        if (code !== 'ENOENT') return code;
+  try {
+    for (const node of plan.nodes) {
+      const now = await fs.lstat(node.dir, { bigint: true }).catch(() => null);
+      if (!now || !now.isDirectory() || now.dev !== node.dev || now.ino !== node.ino) return 'changed';
+      for (const file of node.files) {
+        try {
+          const entry = await fs.lstat(file);
+          if (!entry.isFile()) return 'changed';
+          await fs.unlink(file);
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code ?? 'error';
+          if (code !== 'ENOENT') return code;
+        }
       }
+      // Closed before its rmdir: on Windows an open folder can linger until closed
+      await node.handle.close().catch(() => undefined);
+      await fs.rmdir(node.dir).catch(() => undefined);
     }
-    await fs.rmdir(node.dir).catch(() => undefined);
+    return null;
+  } finally {
+    await releaseJunkDir(plan);
   }
-  return null;
 }

@@ -21,7 +21,7 @@ import { canonicalPath } from './delete-guard';
 import { PARTIAL_FILE_PATTERN } from './copy-file';
 import { generateFilesHash } from './files-hash';
 import { isAudioFile, isEbookFile } from './import-inventory';
-import { isJunkDirName, isJunkFileName, planJunkDir, removeJunkDir, type JunkDirPlan } from './book-folder-junk';
+import { isJunkDirName, isJunkFileName, planJunkDir, releaseJunkDir, removeJunkDir, type JunkDirPlan } from './book-folder-junk';
 
 export interface KeptFile {
   /** Name inside the book folder; folders end with `/`. */
@@ -57,6 +57,7 @@ export interface BookFolderPlan {
  * Decide what D1 removes from `dir` (canonical). `recorded` are the entries of
  * active ebook requests (any book): a file of this folder that one of them names
  * stays, labelled, and does not keep the cover. A refusal means nothing is removed.
+ * A plan holds its junk folders open: pass it to releaseBookFolderPlan when done.
  */
 export async function planBookFolderDelete(
   dir: string,
@@ -77,32 +78,37 @@ export async function planBookFolderDelete(
   const labels: KeptFile[] = [];
   const blocking: KeptFile[] = [];
   const now = Date.now();
-  for (const entry of entries) {
-    if (audio.includes(entry.name)) continue;
-    const full = path.join(dir, entry.name);
-    let stat;
-    try {
-      stat = await fs.lstat(full);
-    } catch (error) {
-      if (errorCode(error) === 'ENOENT') continue;
-      blocking.push({ name: entry.name, why: `could not be checked (${errorCode(error)})` });
-      continue;
+  try {
+    for (const entry of entries) {
+      if (audio.includes(entry.name)) continue;
+      const full = path.join(dir, entry.name);
+      let stat;
+      try {
+        stat = await fs.lstat(full);
+      } catch (error) {
+        if (errorCode(error) === 'ENOENT') continue;
+        blocking.push({ name: entry.name, why: `could not be checked (${errorCode(error)})` });
+        continue;
+      }
+      const folderName = stat.isDirectory() ? `${entry.name}/` : entry.name;
+      if (stat.isFile() && PARTIAL_FILE_PATTERN.test(entry.name)) {
+        if (now - stat.mtimeMs > STALE_PARTIAL_MS) plan.partials.push(entry.name);
+        else blocking.push({ name: entry.name, why: WRITING_WHY });
+      } else if (stat.isFile() && (entry.name === 'cover.jpg' || isJunkFileName(entry.name))) {
+        plan.coverAndJunk.files.push(entry.name);
+      } else if (stat.isDirectory() && isJunkDirName(entry.name)) {
+        const walked = await planJunkDir(full);
+        if ('plan' in walked) plan.coverAndJunk.dirs.push({ name: entry.name, plan: walked.plan });
+        else blocking.push({ name: folderName, why: `${NO_RECORD_WHY} (${walked.why})` });
+      } else if (stat.isFile() && isEbookFile(entry.name) && (await isRecordedHere(dir, entry.name, recorded))) {
+        labels.push({ name: entry.name, why: OTHER_REQUEST_EBOOK_WHY });
+      } else {
+        blocking.push({ name: folderName, why: NO_RECORD_WHY });
+      }
     }
-    const folderName = stat.isDirectory() ? `${entry.name}/` : entry.name;
-    if (stat.isFile() && PARTIAL_FILE_PATTERN.test(entry.name)) {
-      if (now - stat.mtimeMs > STALE_PARTIAL_MS) plan.partials.push(entry.name);
-      else blocking.push({ name: entry.name, why: WRITING_WHY });
-    } else if (stat.isFile() && (entry.name === 'cover.jpg' || isJunkFileName(entry.name))) {
-      plan.coverAndJunk.files.push(entry.name);
-    } else if (stat.isDirectory() && isJunkDirName(entry.name)) {
-      const walked = await planJunkDir(full);
-      if ('plan' in walked) plan.coverAndJunk.dirs.push({ name: entry.name, plan: walked.plan });
-      else blocking.push({ name: folderName, why: `${NO_RECORD_WHY} (${walked.why})` });
-    } else if (stat.isFile() && isEbookFile(entry.name) && (await isRecordedHere(dir, entry.name, recorded))) {
-      labels.push({ name: entry.name, why: OTHER_REQUEST_EBOOK_WHY });
-    } else {
-      blocking.push({ name: folderName, why: NO_RECORD_WHY });
-    }
+  } catch (error) {
+    await releaseBookFolderPlan(plan);
+    throw error;
   }
   plan.alone = blocking.length === 0;
   const coverAndJunkKept = plan.alone
@@ -110,6 +116,11 @@ export async function planBookFolderDelete(
     : [...plan.coverAndJunk.files, ...plan.coverAndJunk.dirs.map((d) => `${d.name}/`)].map((name) => ({ name, why: KEPT_WITH_OTHERS_WHY }));
   plan.kept = [...labels, ...blocking, ...coverAndJunkKept].sort((a, b) => a.name.localeCompare(b.name));
   return { plan };
+}
+
+/** Close the junk folders a plan holds open (safe after removeJunkDir released them). */
+export async function releaseBookFolderPlan(plan: BookFolderPlan): Promise<void> {
+  await Promise.all(plan.coverAndJunk.dirs.map((d) => releaseJunkDir(d.plan)));
 }
 
 /** True when an active ebook request recorded `dir/name` (its folder canonicalized: same spelling rules as D2). */
@@ -148,8 +159,14 @@ export async function removeBookFolderFiles(
 ): Promise<BookFolderResult> {
   const planned = await planBookFolderDelete(dir, filesHash, recorded);
   if ('refused' in planned) return { kind: 'kept', reason: planned.refused };
-  const { plan } = planned;
+  try {
+    return await runBookFolderPlan(dir, planned.plan);
+  } finally {
+    await releaseBookFolderPlan(planned.plan);
+  }
+}
 
+async function runBookFolderPlan(dir: string, plan: BookFolderPlan): Promise<BookFolderResult> {
   let removed = 0;
   for (const name of plan.audio) {
     const code = await unlinkOne(path.join(dir, name));
@@ -226,22 +243,26 @@ export async function removeFolderIfOnlyJunk(dir: string): Promise<{ removed: bo
   }
   const files: string[] = [];
   const dirs: JunkDirPlan[] = [];
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
-    const stat = await fs.lstat(full).catch(() => null);
-    if (!stat) return { removed: false };
-    if (stat.isFile() && isJunkFileName(entry.name)) {
-      files.push(full);
-    } else if (stat.isDirectory() && isJunkDirName(entry.name)) {
-      const walked = await planJunkDir(full);
-      if (!('plan' in walked)) return { removed: false };
-      dirs.push(walked.plan);
-    } else {
-      return { removed: false };
+  try {
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      const stat = await fs.lstat(full).catch(() => null);
+      if (!stat) return { removed: false };
+      if (stat.isFile() && isJunkFileName(entry.name)) {
+        files.push(full);
+      } else if (stat.isDirectory() && isJunkDirName(entry.name)) {
+        const walked = await planJunkDir(full);
+        if (!('plan' in walked)) return { removed: false };
+        dirs.push(walked.plan);
+      } else {
+        return { removed: false };
+      }
     }
+    for (const file of files) if (await unlinkOne(file)) return { removed: false };
+    for (const junk of dirs) if (await removeJunkDir(junk)) return { removed: false };
+  } finally {
+    await Promise.all(dirs.map((junk) => releaseJunkDir(junk)));
   }
-  for (const file of files) if (await unlinkOne(file)) return { removed: false };
-  for (const junk of dirs) if (await removeJunkDir(junk)) return { removed: false };
   try {
     await fs.rmdir(dir);
     return { removed: true };
