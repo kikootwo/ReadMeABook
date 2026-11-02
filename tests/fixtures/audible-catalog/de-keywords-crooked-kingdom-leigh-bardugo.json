@@ -1,0 +1,641 @@
+{
+  "total_results": 20,
+  "products": [
+    {
+      "asin": "B01M0V8Y6C",
+      "title": "Crooked Kingdom",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Leigh Bardugo",
+          "asin": "B005ZZ8XQS"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Roger Clark"
+        },
+        {
+          "name": "Jay Snyder"
+        },
+        {
+          "name": "Elizabeth Evans"
+        },
+        {
+          "name": "Fred Berman"
+        },
+        {
+          "name": "Brandon Rubin"
+        },
+        {
+          "name": "Kevin T. Collins"
+        },
+        {
+          "name": "Lauren Fortgang",
+          "asin": "B0C9M82BHV"
+        },
+        {
+          "name": "Peter Ganim",
+          "asin": "B0C9M6MKDP"
+        }
+      ],
+      "runtime_length_min": 1078,
+      "release_date": "2016-09-27",
+      "series": [
+        {
+          "asin": "B01LYJREEP",
+          "title": "Six of Crows",
+          "sequence": "2"
+        }
+      ],
+      "publisher_name": "Audible Studios"
+    },
+    {
+      "asin": "B015TB1JOK",
+      "title": "Six of Crows",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Leigh Bardugo",
+          "asin": "B005ZZ8XQS"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Jay Snyder"
+        },
+        {
+          "name": "Brandon Rubin"
+        },
+        {
+          "name": "Fred Berman"
+        },
+        {
+          "name": "Lauren Fortgang",
+          "asin": "B0C9M82BHV"
+        },
+        {
+          "name": "Roger Clark"
+        },
+        {
+          "name": "Elizabeth Evans"
+        },
+        {
+          "name": "Tristan Morris",
+          "asin": "B0C9MCCKMS"
+        }
+      ],
+      "runtime_length_min": 904,
+      "release_date": "2015-09-29",
+      "series": [
+        {
+          "asin": "B01LYJREEP",
+          "title": "Six of Crows",
+          "sequence": "1"
+        }
+      ],
+      "publisher_name": "Audible Studios"
+    },
+    {
+      "asin": "3732453316",
+      "title": "King of Scars - Thron aus Asche und Gold",
+      "subtitle": "Die King-of-Scars-Dilogie 1",
+      "language": "german",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Leigh Bardugo",
+          "asin": "B005ZZ8XQS"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Robert Frank"
+        }
+      ],
+      "runtime_length_min": 1096,
+      "release_date": "2019-08-21",
+      "series": [
+        {
+          "asin": "B09GF38XFN",
+          "title": "Die King-of-Scars-Dilogie",
+          "sequence": "1"
+        }
+      ],
+      "publisher_name": "Argon Verlag"
+    },
+    {
+      "asin": "3732417514",
+      "title": "King of Scars - Thron aus Asche und Gold",
+      "subtitle": "Die King-of-Scars-Dilogie 1",
+      "language": "german",
+      "content_type": "Product",
+      "format_type": "abridged",
+      "authors": [
+        {
+          "name": "Leigh Bardugo",
+          "asin": "B005ZZ8XQS"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Robert Frank"
+        }
+      ],
+      "runtime_length_min": 1028,
+      "release_date": "2019-08-28",
+      "publisher_name": "Argon Verlag"
+    },
+    {
+      "asin": "B0HBCTD4LK",
+      "title": "Crown of Crimson and Crows",
+      "subtitle": "Blood Bound, Book 1",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Tessa Hale",
+          "asin": "B0971SXBVB"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Vanessa Moyen"
+        },
+        {
+          "name": "Jason Clarke"
+        },
+        {
+          "name": "Shane East"
+        },
+        {
+          "name": "Connor Crais"
+        },
+        {
+          "name": "Anthony Palmini"
+        },
+        {
+          "name": "Samantha Brentmoor"
+        },
+        {
+          "name": "James Cassidy"
+        }
+      ],
+      "runtime_length_min": 644,
+      "release_date": "2026-09-01",
+      "series": [
+        {
+          "asin": "B0H5BB5Y5P",
+          "title": "Blood Bound",
+          "sequence": "1"
+        }
+      ],
+      "publisher_name": "Tessa Hale"
+    },
+    {
+      "asin": "B01L7WQJAY",
+      "title": "Master of Crows",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Grace Draven",
+          "asin": "B005E9VYRK"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Jay Britton"
+        }
+      ],
+      "runtime_length_min": 756,
+      "release_date": "2016-09-01",
+      "publisher_name": "Grace Draven"
+    },
+    {
+      "asin": "B0FKQRFFD2",
+      "title": "Daughter of Crows",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Mark Lawrence",
+          "asin": "B004HNAQOQ"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Olivia Dowd"
+        }
+      ],
+      "runtime_length_min": 870,
+      "release_date": "2026-03-24",
+      "series": [
+        {
+          "asin": "B0FKTNS2VY",
+          "title": "The Academy of Kindness",
+          "sequence": "1"
+        }
+      ],
+      "publisher_name": "Penguin Audio"
+    },
+    {
+      "asin": "B0D42CND1J",
+      "title": "Kingdom of Crows 1: House of Beating Wings",
+      "language": "german",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Olivia Wildenstein"
+        },
+        {
+          "name": "Lara Krüger - translator"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Jodie Ahlborn"
+        },
+        {
+          "name": "Johannes Klaußner"
+        }
+      ],
+      "runtime_length_min": 1085,
+      "release_date": "2024-05-23",
+      "series": [
+        {
+          "asin": "B0D8BMX7G1",
+          "title": "Kingdom of Crows",
+          "sequence": "1"
+        }
+      ],
+      "publisher_name": "Silberfisch"
+    },
+    {
+      "asin": "B0D8BKHB5J",
+      "title": "Kingdom of Crows 2: House of Pounding Hearts",
+      "language": "german",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Olivia Wildenstein",
+          "asin": "B01BC74BK4"
+        },
+        {
+          "name": "Gerda Maria Pum - translator"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Johannes Klaußner"
+        },
+        {
+          "name": "Jodie Ahlborn"
+        }
+      ],
+      "runtime_length_min": 995,
+      "release_date": "2024-09-13",
+      "series": [
+        {
+          "asin": "B0D8BMX7G1",
+          "title": "Kingdom of Crows",
+          "sequence": "2"
+        }
+      ],
+      "publisher_name": "Silberfisch"
+    },
+    {
+      "asin": "B0DMSHQ7DF",
+      "title": "Kingdom of Crows 3: House of Striking Oaths",
+      "subtitle": "Der Fantasy Romance-Erfolg endlich auf Deutsch",
+      "language": "german",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Olivia Wildenstein"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Johannes Klaußner"
+        },
+        {
+          "name": "Jodie Ahlborn"
+        }
+      ],
+      "runtime_length_min": 1144,
+      "release_date": "2025-08-01",
+      "series": [
+        {
+          "asin": "B0D8BMX7G1",
+          "title": "Kingdom of Crows",
+          "sequence": "3"
+        }
+      ],
+      "publisher_name": "Silberfisch"
+    },
+    {
+      "asin": "B09MY92DFD",
+      "title": "Crooked Shadows",
+      "subtitle": "Whitethorn Agency Series, Book 2",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "M.A. Grant",
+          "asin": "B00DOEZHSE"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "John Solo"
+        }
+      ],
+      "runtime_length_min": 485,
+      "release_date": "2021-12-21",
+      "series": [
+        {
+          "asin": "B09G2ZX7MK",
+          "title": "Whitethorn Agency",
+          "sequence": "2"
+        }
+      ],
+      "publisher_name": "Tantor Media"
+    },
+    {
+      "asin": "B0GHNQFCPZ",
+      "title": "A Kingdom of Shadows",
+      "subtitle": "Solaris und Crello, Band 2",
+      "language": "german",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Rina Vasquez",
+          "asin": "B0B7PZZBBK"
+        },
+        {
+          "name": "Andreas Heckmann - Übersetzer"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Lydia Herms"
+        }
+      ],
+      "runtime_length_min": 756,
+      "release_date": "2026-01-19",
+      "series": [
+        {
+          "asin": "B0GHR5DZPT",
+          "title": "Solaris und Crello",
+          "sequence": "2"
+        }
+      ],
+      "publisher_name": "reverie"
+    },
+    {
+      "asin": "0449808866",
+      "title": "The King of Crows",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Libba Bray",
+          "asin": "B001IGQHL6"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "January LaVoy"
+        }
+      ],
+      "runtime_length_min": 1340,
+      "release_date": "2020-02-04",
+      "series": [
+        {
+          "asin": "B014GQH286",
+          "title": "The Diviners",
+          "sequence": "4"
+        }
+      ],
+      "publisher_name": "Listening Library"
+    },
+    {
+      "asin": "B09QMTHJ2W",
+      "title": "Shadows and Crows",
+      "subtitle": "The Lost, Book 2",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Peter Nealen",
+          "asin": "B00A8JBYDU"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Mark Boyett"
+        }
+      ],
+      "runtime_length_min": 644,
+      "release_date": "2022-03-01",
+      "series": [
+        {
+          "asin": "B09PY7SGVL",
+          "title": "The Lost",
+          "sequence": "2"
+        }
+      ],
+      "publisher_name": "WarGate Books"
+    },
+    {
+      "asin": "B0B19146F9",
+      "title": "Crooked Paradise: The Complete Series",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Eva Chance",
+          "asin": "B08YXQXJJY"
+        },
+        {
+          "name": "Harlow King"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Ava Lucas"
+        },
+        {
+          "name": "J.F. Harding"
+        }
+      ],
+      "runtime_length_min": 2102,
+      "release_date": "2022-06-11",
+      "series": [
+        {
+          "asin": "B09FDGQLK1",
+          "title": "Crooked Paradise",
+          "sequence": "1-4"
+        }
+      ],
+      "publisher_name": "Eva Chance"
+    },
+    {
+      "asin": "B07F6GN31Z",
+      "title": "Shadow of Thorns",
+      "subtitle": "Midnight's Crown Series, Book 2",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Ripley Proserpina",
+          "asin": "B01M7O0SZO"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Stephanie Wyles"
+        }
+      ],
+      "runtime_length_min": 491,
+      "release_date": "2018-07-18",
+      "series": [
+        {
+          "asin": "B07BQSLT3W",
+          "title": "Midnight's Crown",
+          "sequence": "2"
+        }
+      ],
+      "publisher_name": "Tantor Media"
+    },
+    {
+      "asin": "1549142259",
+      "title": "Crooked River",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Douglas Preston",
+          "asin": "B0H123WY81"
+        },
+        {
+          "name": "Lincoln Child",
+          "asin": "B000APYNUI"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Jefferson Mays"
+        }
+      ],
+      "runtime_length_min": 781,
+      "release_date": "2020-02-04",
+      "series": [
+        {
+          "asin": "B01H4PUZDK",
+          "title": "Agent Pendergast",
+          "sequence": "19"
+        },
+        {
+          "asin": "B075F7VCV2",
+          "title": "Agent Pendergast Series (abridged)",
+          "sequence": "19"
+        }
+      ],
+      "publisher_name": "Grand Central Publishing"
+    },
+    {
+      "asin": "B09N9ZTYQX",
+      "title": "Crooked Crows",
+      "subtitle": "Boys of Briar Hall, Book 1",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Elena Lawson",
+          "asin": "B07F2R23SJ"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Bridget Bordeaux"
+        },
+        {
+          "name": "Jake Bordeaux"
+        }
+      ],
+      "runtime_length_min": 455,
+      "release_date": "2021-12-09",
+      "series": [
+        {
+          "asin": "B09NBRQTBN",
+          "title": "Boys of Briar Hall",
+          "sequence": "1"
+        }
+      ],
+      "publisher_name": "Petal and Thorn Books"
+    },
+    {
+      "asin": "B074TM8DM1",
+      "title": "All the Crooked Saints",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Maggie Stiefvater",
+          "asin": "B001JSBZZ6"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Thom Rivera"
+        }
+      ],
+      "runtime_length_min": 549,
+      "release_date": "2017-10-10",
+      "publisher_name": "Scholastic Audio Books"
+    },
+    {
+      "asin": "0008468109",
+      "title": "Kingdom of Shadows",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Barbara Erskine",
+          "asin": "B000APCGAW"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Charlie Norfolk"
+        }
+      ],
+      "runtime_length_min": 1851,
+      "release_date": "2021-07-01",
+      "publisher_name": "HarperCollins"
+    }
+  ]
+}

@@ -120,6 +120,17 @@ describe('ConfigurationService', () => {
     expect(region).toBe(DEFAULT_AUDIBLE_REGION);
   });
 
+  it.each([
+    ['absent', false, null],
+    ['"false"', false, { key: 'audible.language_filter', value: 'false', encrypted: false }],
+    ['"true"', true, { key: 'audible.language_filter', value: 'true', encrypted: false }],
+  ])('reads the Audible language filter: key %s -> %s', async (_label, expected, row) => {
+    prismaMock.configuration.findUnique.mockResolvedValue(row);
+
+    const { ConfigurationService } = await import('@/lib/services/config.service');
+    expect(await new ConfigurationService().getAudibleLanguageFilter()).toBe(expected);
+  });
+
   it('returns decrypted values for a category', async () => {
     prismaMock.configuration.findMany.mockResolvedValue([
       {

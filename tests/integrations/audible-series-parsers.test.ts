@@ -342,6 +342,10 @@ const fakeAudible = vi.hoisted(() => ({
 vi.mock('@/lib/integrations/audible.service', () => ({
   getAudibleService: () => fakeAudible,
 }));
+// The admin language filter (#259) is off here
+vi.mock('@/lib/services/config.service', () => ({
+  getConfigService: () => ({ getAudibleLanguageFilter: async () => false }),
+}));
 
 function italianModernPage(): string {
   const json = JSON.stringify({

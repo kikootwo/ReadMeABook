@@ -268,6 +268,11 @@ export class ConfigurationService {
     return (region as AudibleRegion) || DEFAULT_AUDIBLE_REGION;
   }
 
+  /** The admin Audible language filter (#259): on only when the key is 'true' (absent = off) */
+  async getAudibleLanguageFilter(): Promise<boolean> {
+    return (await this.get('audible.language_filter')) === 'true';
+  }
+
   /**
    * Clear the cache for a specific key or all keys
    */

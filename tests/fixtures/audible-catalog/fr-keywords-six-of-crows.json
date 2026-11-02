@@ -1,0 +1,1306 @@
+{
+  "total_results": 64,
+  "products": [
+    {
+      "asin": "B015TBBHBU",
+      "title": "Six of Crows",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Leigh Bardugo",
+          "asin": "B005ZZ8XQS"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Jay Snyder"
+        },
+        {
+          "name": "Brandon Rubin"
+        },
+        {
+          "name": "Fred Berman"
+        },
+        {
+          "name": "Lauren Fortgang",
+          "asin": "B0C9M82BHV"
+        },
+        {
+          "name": "Roger Clark"
+        },
+        {
+          "name": "Elizabeth Evans"
+        },
+        {
+          "name": "Tristan Morris",
+          "asin": "B0C9MCCKMS"
+        }
+      ],
+      "runtime_length_min": 904,
+      "release_date": "2015-09-29",
+      "series": [
+        {
+          "asin": "B01LZIU9DN",
+          "title": "Six of Crows",
+          "sequence": "1"
+        }
+      ],
+      "publisher_name": "Audible Studios"
+    },
+    {
+      "asin": "B01LXXS9LA",
+      "title": "Crooked Kingdom",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Leigh Bardugo",
+          "asin": "B005ZZ8XQS"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Roger Clark"
+        },
+        {
+          "name": "Jay Snyder"
+        },
+        {
+          "name": "Elizabeth Evans"
+        },
+        {
+          "name": "Fred Berman"
+        },
+        {
+          "name": "Brandon Rubin"
+        },
+        {
+          "name": "Kevin T. Collins"
+        },
+        {
+          "name": "Lauren Fortgang",
+          "asin": "B0C9M82BHV"
+        },
+        {
+          "name": "Peter Ganim",
+          "asin": "B0C9M6MKDP"
+        }
+      ],
+      "runtime_length_min": 1078,
+      "release_date": "2016-09-27",
+      "series": [
+        {
+          "asin": "B01LZIU9DN",
+          "title": "Six of Crows",
+          "sequence": "2"
+        }
+      ],
+      "publisher_name": "Audible Studios"
+    },
+    {
+      "asin": "B0DLGXG41F",
+      "title": "Silo. Tome 1 - 1 & 2",
+      "language": "french",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Hugh Howey",
+          "asin": "B002RX4S5Q"
+        },
+        {
+          "name": "Yoann Gentric - traducteur"
+        },
+        {
+          "name": "Laure Manceau"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Bertrand Pazos"
+        }
+      ],
+      "runtime_length_min": 1048,
+      "release_date": "2024-11-06",
+      "series": [
+        {
+          "asin": "B0CSKP2KBG",
+          "title": "Silo",
+          "sequence": "Tome 1 - 1 & 2"
+        }
+      ],
+      "publisher_name": "Actes Sud Audio"
+    },
+    {
+      "asin": "B0CN3X5WLQ",
+      "title": "Six ans à t'attendre",
+      "language": "french",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Delphine Giraud",
+          "asin": "B07G3GXLZ5"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Sophie Ostria"
+        }
+      ],
+      "runtime_length_min": 576,
+      "release_date": "2023-11-23",
+      "publisher_name": "Editions Theleme"
+    },
+    {
+      "asin": "B0151GHE5Q",
+      "title": "Si c'est un homme suivi d'un entretien inédit avec Raphaël Enthoven",
+      "language": "french",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Primo Levi",
+          "asin": "B001IQZ8J8"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Raphaël Enthoven"
+        }
+      ],
+      "runtime_length_min": 454,
+      "release_date": "2015-09-09",
+      "publisher_name": "Audiolib"
+    },
+    {
+      "asin": "B0GS6KXP71",
+      "title": "Le sixième sens",
+      "language": "french",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "José Rodrigues Dos Santos"
+        },
+        {
+          "name": "Catherine Leterrier - traducteur"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Philippe Allard"
+        }
+      ],
+      "runtime_length_min": 921,
+      "release_date": "2026-04-09",
+      "publisher_name": "Lizzie"
+    },
+    {
+      "asin": "B09GVYP4HY",
+      "title": "Le Silmarillion",
+      "language": "french",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "John Ronald Reuel Tolkien",
+          "asin": "B000ARC6KA"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Thierry Janssen"
+        }
+      ],
+      "runtime_length_min": 927,
+      "release_date": "2021-10-14",
+      "publisher_name": "Audiolib"
+    },
+    {
+      "asin": "B0CKV3B4M6",
+      "title": "Sick Boys",
+      "subtitle": "A Spine Ridge University Standalone",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Clarissa Wild",
+          "asin": "B00DTOEUAU"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Corvin King"
+        },
+        {
+          "name": "Desireé Ketchum"
+        }
+      ],
+      "runtime_length_min": 1029,
+      "release_date": "2023-11-14",
+      "series": [
+        {
+          "asin": "B0CLN7L1LZ",
+          "title": "Spine Ridge University",
+          "sequence": ""
+        }
+      ],
+      "publisher_name": "Podium Audio"
+    },
+    {
+      "asin": "B0D8M2NMD5",
+      "title": "Seis de cuervos [Six of Crows]",
+      "subtitle": "Six of Crows 1",
+      "language": "spanish",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Leigh Bardugo",
+          "asin": "B005ZZ8XQS"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Sharon López"
+        },
+        {
+          "name": "Albert Cortés"
+        },
+        {
+          "name": "Estela Benita"
+        },
+        {
+          "name": "Chema Agulló"
+        },
+        {
+          "name": "Pedro M. Sánchez"
+        },
+        {
+          "name": "Carlos Urrutia"
+        },
+        {
+          "name": "Juanma Martínez"
+        },
+        {
+          "name": "Fernando Cea"
+        }
+      ],
+      "runtime_length_min": 1045,
+      "release_date": "2024-07-16",
+      "series": [
+        {
+          "asin": "B0D6ZTJBFY",
+          "title": "Seis de Cuervos [Six of Crows]",
+          "sequence": "1"
+        }
+      ],
+      "publisher_name": "BookaVivo"
+    },
+    {
+      "asin": "B00IGI222C",
+      "title": "Murder of Crows",
+      "subtitle": "A Novel of the Others",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Anne Bishop",
+          "asin": "B001IGV1EO"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Alexandra Harris"
+        }
+      ],
+      "runtime_length_min": 853,
+      "release_date": "2014-03-04",
+      "series": [
+        {
+          "asin": "B01AKPF7WA",
+          "title": "The Others (Bishop)",
+          "sequence": "2"
+        }
+      ],
+      "publisher_name": "Penguin Audio"
+    },
+    {
+      "asin": "B07LHC24PJ",
+      "title": "Ninth House",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Leigh Bardugo",
+          "asin": "B005ZZ8XQS"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Lauren Fortgang"
+        },
+        {
+          "name": "Michael David Axtell"
+        }
+      ],
+      "runtime_length_min": 982,
+      "release_date": "2019-10-08",
+      "series": [
+        {
+          "asin": "B07Z6NCYCZ",
+          "title": "Ninth House",
+          "sequence": "1"
+        }
+      ],
+      "publisher_name": "Macmillan Audio"
+    },
+    {
+      "asin": "B00FXY8JVK",
+      "title": "The Blood Crows",
+      "subtitle": "Cato & Macro: Book 12",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Simon Scarrow",
+          "asin": "B001H6NAYY"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Jonathan Keeble"
+        }
+      ],
+      "runtime_length_min": 834,
+      "release_date": "2013-10-24",
+      "series": [
+        {
+          "asin": "B019PI3BBM",
+          "title": "Eagles of the Empire",
+          "sequence": "12"
+        }
+      ],
+      "publisher_name": "Headline"
+    },
+    {
+      "asin": "B0HBCVP53M",
+      "title": "Crown of Crimson and Crows",
+      "subtitle": "Blood Bound, Book 1",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Tessa Hale",
+          "asin": "B0971SXBVB"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Vanessa Moyen"
+        },
+        {
+          "name": "Jason Clarke"
+        },
+        {
+          "name": "Shane East"
+        },
+        {
+          "name": "Connor Crais"
+        },
+        {
+          "name": "Anthony Palmini"
+        },
+        {
+          "name": "Samantha Brentmoor"
+        },
+        {
+          "name": "James Cassidy"
+        }
+      ],
+      "runtime_length_min": 644,
+      "release_date": "2026-09-01",
+      "series": [
+        {
+          "asin": "B0H5B5PQGY",
+          "title": "Blood Bound",
+          "sequence": "1"
+        }
+      ],
+      "publisher_name": "Tessa Hale"
+    },
+    {
+      "asin": "B075SDPXCN",
+      "title": "An Enchantment of Ravens",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Margaret Rogerson",
+          "asin": "B073CW6NV8"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Julia Whelan"
+        }
+      ],
+      "runtime_length_min": 525,
+      "release_date": "2017-09-26",
+      "publisher_name": "Simon & Schuster Audio"
+    },
+    {
+      "asin": "B0HP3MWVWN",
+      "title": "Missions - Pastor Len Crow - Sun. AM Sep 6 2026",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 43,
+      "release_date": "2026-09-06"
+    },
+    {
+      "asin": "B0D6WTXWXJ",
+      "title": "Reino de ladrones [Kingdom of Thieves]",
+      "subtitle": "Six of Crows, Book 2",
+      "language": "spanish",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Leigh Bardugo",
+          "asin": "B005ZZ8XQS"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Estela Benito"
+        },
+        {
+          "name": "Albert Cortés"
+        },
+        {
+          "name": "Chema Agulló"
+        },
+        {
+          "name": "Sharon Lopez"
+        },
+        {
+          "name": "Pedro M. Sánchez"
+        },
+        {
+          "name": "Juanma Martínez"
+        },
+        {
+          "name": "Fernando Cea"
+        }
+      ],
+      "runtime_length_min": 1233,
+      "release_date": "2024-06-20",
+      "series": [
+        {
+          "asin": "B0D6ZTJBFY",
+          "title": "Seis de Cuervos [Six of Crows]",
+          "sequence": "2"
+        }
+      ],
+      "publisher_name": "BookaVivo"
+    },
+    {
+      "asin": "B076C132CN",
+      "title": "Prince of Crows",
+      "subtitle": "The Horus Heresy Series",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Aaron Dembski-Bowden",
+          "asin": "B003E3G0UE"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Jonathan Keeble"
+        }
+      ],
+      "runtime_length_min": 205,
+      "release_date": "2017-10-11",
+      "series": [
+        {
+          "asin": "B07FYKRSHX",
+          "title": "The Horus Heresy",
+          "sequence": ""
+        }
+      ],
+      "publisher_name": "Black Library"
+    },
+    {
+      "asin": "1797134191",
+      "title": "Among Thieves",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "M. J. Kuhn",
+          "asin": "B08XR1K2L9"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Zoe Mills"
+        }
+      ],
+      "runtime_length_min": 600,
+      "release_date": "2021-09-07",
+      "series": [
+        {
+          "asin": "B0BRMBKQZZ",
+          "title": "Thieves",
+          "sequence": "1"
+        }
+      ],
+      "publisher_name": "Simon & Schuster Audio"
+    },
+    {
+      "asin": "B0FKQBL5LM",
+      "title": "Daughter of Crows",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Mark Lawrence",
+          "asin": "B004HNAQOQ"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Olivia Dowd"
+        }
+      ],
+      "runtime_length_min": 870,
+      "release_date": "2026-03-24",
+      "series": [
+        {
+          "asin": "B0FKTNVS7J",
+          "title": "The Academy of Kindness",
+          "sequence": "1"
+        }
+      ],
+      "publisher_name": "Penguin Audio"
+    },
+    {
+      "asin": "1839942401",
+      "title": "There's a Werewolf in My Tent!",
+      "subtitle": "Baby Aliens, Book 6",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pamela Butchart",
+          "asin": "B00K6LNU8C"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Susan Calman"
+        }
+      ],
+      "runtime_length_min": 123,
+      "release_date": "2020-07-23",
+      "series": [
+        {
+          "asin": "B0DWTD9M26",
+          "title": "Baby Aliens",
+          "sequence": "6"
+        }
+      ],
+      "publisher_name": "Nosy Crow"
+    },
+    {
+      "asin": "B00E3GAFYS",
+      "title": "The Bunnicula Collection: Books 4-7 Part 2",
+      "subtitle": "Nighty-Nightmare; Return to the Howliday Inn; Bunnicula Strikes Again!; Bunnicula Meets Edgar Allan Crow",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "James Howe"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Victor Garber"
+        }
+      ],
+      "runtime_length_min": 553,
+      "release_date": "2013-08-16",
+      "publisher_name": "Listening Library"
+    },
+    {
+      "asin": "B00E3GAEXK",
+      "title": "The Bunnicula Collection: Books 4-7 Part 1",
+      "subtitle": "Nighty-Nightmare; Return to the Howliday Inn; Bunnicula Strikes Again!; Bunnicula Meets Edgar Allan Crow",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "James Howe"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Victor Garber"
+        }
+      ],
+      "runtime_length_min": 553,
+      "release_date": "2013-08-16",
+      "publisher_name": "Listening Library"
+    },
+    {
+      "asin": "B0HN37WC14",
+      "title": "Ep. 430 | SPORTS EQUINOX! 49ers 6-1 Into the Bye, Valks Game 5, World Series Game 3, Michael's & Fredo's",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 76,
+      "release_date": "2026-10-27"
+    },
+    {
+      "asin": "8726069008",
+      "title": "Kragens kald",
+      "subtitle": "Six of Crows 1",
+      "language": "danish",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Leigh Bardugo"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Thomas Jacob Clausen"
+        }
+      ],
+      "runtime_length_min": 975,
+      "release_date": "2019-10-02",
+      "publisher_name": "Lindhardt og Ringhof"
+    },
+    {
+      "asin": "B0F54QH419",
+      "title": "Six Minutes to Winter",
+      "subtitle": "Nuclear War and How to Avoid It",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Mark Lynas",
+          "asin": "B001JAQ4KA"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Tom Lawrence"
+        }
+      ],
+      "runtime_length_min": 621,
+      "release_date": "2025-05-08",
+      "publisher_name": "Bloomsbury Sigma"
+    },
+    {
+      "asin": "B0BBHCCWPD",
+      "title": "Strange & Unusual",
+      "subtitle": "Battle Crows MC, Book 6",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Lani Lynn Vale",
+          "asin": "B00IOX7R3S"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Tor Thom"
+        },
+        {
+          "name": "Melissa Moran"
+        }
+      ],
+      "runtime_length_min": 339,
+      "release_date": "2022-08-22",
+      "series": [
+        {
+          "asin": "B09QRPSVJ4",
+          "title": "Battle Crows MC",
+          "sequence": "6"
+        }
+      ],
+      "publisher_name": "Dixie Wardens, INC"
+    },
+    {
+      "asin": "8726069016",
+      "title": "Det korrupte rige",
+      "subtitle": "Six of Crows 2",
+      "language": "danish",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Leigh Bardugo"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Thomas Jacob Clausen"
+        }
+      ],
+      "runtime_length_min": 1253,
+      "release_date": "2019-10-07",
+      "publisher_name": "CarlsenPuls"
+    },
+    {
+      "asin": "B0B83SK3N2",
+      "title": "I Wish I’d Known This",
+      "subtitle": "6 Career-Accelerating Secrets for Women Leaders",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Brenda Wensil",
+          "asin": "B09Z732J2Z"
+        },
+        {
+          "name": "Kathryn Heath",
+          "asin": "B0056YYM68"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Anna Crowe"
+        }
+      ],
+      "runtime_length_min": 300,
+      "release_date": "2022-08-01",
+      "publisher_name": "Berrett-Koehler Publishers"
+    },
+    {
+      "asin": "B0GZXCZ2X8",
+      "title": "The Fox and the Crow",
+      "subtitle": "A Classic Aesop's Fable for Children Age 4-8 (A Teapot Full of Tales)",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Alice Louise Meredith",
+          "asin": "B0GV68HVL9"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Alice Louise Meredith"
+        }
+      ],
+      "runtime_length_min": 3,
+      "release_date": "2026-05-08",
+      "publisher_name": "Meredith Publishing"
+    },
+    {
+      "asin": "B0FTPS1YDV",
+      "title": "Lethal Passage",
+      "subtitle": "A Zombie Survival Military Thriller Series (The Grave Diggers, Book 6)",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Chris Fritschi",
+          "asin": "B006TELNPC"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Matthew Crow"
+        }
+      ],
+      "runtime_length_min": 509,
+      "release_date": "2025-10-03",
+      "series": [
+        {
+          "asin": "B0DTTQTLCV",
+          "title": "The Grave Diggers",
+          "sequence": "6"
+        }
+      ],
+      "publisher_name": "Chris Fritschi"
+    },
+    {
+      "asin": "B0HN79DPSJ",
+      "title": "Rep. Jason Crow: Accountability and the Aftermath of January 6",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 26,
+      "release_date": "2021-05-05"
+    },
+    {
+      "asin": "B0HNR3LBHK",
+      "title": "Ep. 426 | DWIGHT HICKS LIVE! NINERS 6_0! Week 7 Prep , World Series Set",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 91,
+      "release_date": "2026-10-21"
+    },
+    {
+      "asin": "B0HNN4TL3S",
+      "title": "Ep. 425 | POSTGAME LIVE! 49ERS BEAT COMMANDERS TO GO 6-0! WEIRD GAME, EVANS HURT + NFL Week 6",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 85,
+      "release_date": "2026-10-20"
+    },
+    {
+      "asin": "B09LDD15CC",
+      "title": "The Shadow Wing",
+      "subtitle": "Crow Investigations Book 6",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Sarah Painter",
+          "asin": "B00CWYQ25E"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Kate Rawson"
+        }
+      ],
+      "runtime_length_min": 455,
+      "release_date": "2021-11-18",
+      "series": [
+        {
+          "asin": "B0824X52H1",
+          "title": "Crow Investigations",
+          "sequence": "6"
+        }
+      ],
+      "publisher_name": "QUEST from W. F. Howes Ltd"
+    },
+    {
+      "asin": "B0BKTZN12F",
+      "title": "Alex",
+      "subtitle": "Savage Crows MC, Book 6",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "T.O. Smith",
+          "asin": "B06XX348DZ"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "William R. Keeton"
+        }
+      ],
+      "runtime_length_min": 219,
+      "release_date": "2022-11-01",
+      "series": [
+        {
+          "asin": "B09MDHCT2R",
+          "title": "Savage Crows MC",
+          "sequence": "6"
+        }
+      ],
+      "publisher_name": "T.O. Smith"
+    },
+    {
+      "asin": "B0HM46PQB4",
+      "title": "[Hour 1 - October 6, 2026] Greg & The Morning Buzz: Roadkill Ranks Russell Crowe & Strange Things People Pretend to Like",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 41,
+      "release_date": "2026-10-06"
+    },
+    {
+      "asin": "B0HLDGZMGP",
+      "title": "Ep. 422 | EAT IT SNELL! 49ERS WEEK 6 PREP! Bums in Trouble, Dubs News...KP??",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 90,
+      "release_date": "2026-10-15"
+    },
+    {
+      "asin": "B00E3GAE30",
+      "title": "The Bunnicula Collection: Books 4-7",
+      "subtitle": "Nighty-Nightmare; Return to Howliday Inn; Bunnicula Strikes Again!; Bunnicula Meets Edgar Allan Crow",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "James Howe"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Victor Garber"
+        },
+        {
+          "name": "Patrick Mulvihill"
+        }
+      ],
+      "runtime_length_min": 553,
+      "release_date": "2013-08-16",
+      "series": [
+        {
+          "asin": "B014WU7QIW",
+          "title": "Bunnicula and Friends",
+          "sequence": "4-7"
+        }
+      ],
+      "publisher_name": "Listening Library"
+    },
+    {
+      "asin": "B0FPSQD697",
+      "title": "Investigation of a Journalist",
+      "subtitle": "Harbored in Crow’s Nest, Book 6",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Danielle Grandinetti",
+          "asin": "B01BEU1602"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Dr. Jo Gonsalves"
+        }
+      ],
+      "runtime_length_min": 459,
+      "release_date": "2025-09-05",
+      "series": [
+        {
+          "asin": "B0CZ9JF9NM",
+          "title": "Harbored in Crow’s Nest",
+          "sequence": "6"
+        }
+      ],
+      "publisher_name": "Hearth Spot Press"
+    },
+    {
+      "asin": "B0H9BH3CJF",
+      "title": "Undead Armageddon",
+      "subtitle": "A Zombie Apocalypse Thriller (Undead Apocalypse, Book 6)",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Matthew Doggett",
+          "asin": "B0GZY8MZDP"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Matthew Crow"
+        }
+      ],
+      "runtime_length_min": 537,
+      "release_date": "2026-07-20",
+      "series": [
+        {
+          "asin": "B0DY2X7SXN",
+          "title": "Undead Apocalypse",
+          "sequence": "6"
+        }
+      ],
+      "publisher_name": "Matthew Doggett"
+    },
+    {
+      "asin": "B09D6H2WHF",
+      "title": "Apocalypse, Zombie",
+      "subtitle": "Guardians of the Apocalypse, Book 6",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Jeff Thomson",
+          "asin": "B07BBL72YD"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Matthew Crow"
+        }
+      ],
+      "runtime_length_min": 298,
+      "release_date": "2021-08-20",
+      "series": [
+        {
+          "asin": "B08FQZ5LV5",
+          "title": "Guardians of the Apocalypse",
+          "sequence": "6"
+        }
+      ],
+      "publisher_name": "Jeff Thomson"
+    },
+    {
+      "asin": "B0DCWN6321",
+      "title": "Cranky, Crabby Crow (Saves the World)",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Corey R. Tabor",
+          "asin": "B01N40WEE2"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Mark Sanderlin"
+        }
+      ],
+      "runtime_length_min": 5,
+      "release_date": "2025-05-06",
+      "publisher_name": "Greenwillow Books"
+    },
+    {
+      "asin": "B07KY28BG4",
+      "title": "Outside the Lines",
+      "subtitle": "Forensic Handwriting Series, Book 6",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Sheila Lowe",
+          "asin": "B001ITYGXE"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Anna Crowe"
+        }
+      ],
+      "runtime_length_min": 520,
+      "release_date": "2018-11-29",
+      "series": [
+        {
+          "asin": "B07DPWTNHX",
+          "title": "Claudia Rose",
+          "sequence": "6"
+        }
+      ],
+      "publisher_name": "Sheila Lowe"
+    },
+    {
+      "asin": "B0BG6FJ7XG",
+      "title": "Dead Meat: Day 6",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Nick Clausen",
+          "asin": "B07NC5X94M"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Matthew Crow"
+        }
+      ],
+      "runtime_length_min": 274,
+      "release_date": "2022-09-24",
+      "series": [
+        {
+          "asin": "B09MRNH9XB",
+          "title": "Dead Meat",
+          "sequence": "6"
+        }
+      ],
+      "publisher_name": "Audiobooks Unleashed"
+    },
+    {
+      "asin": "B00VS9226W",
+      "title": "Perception",
+      "subtitle": "A Club Destiny Novel, Book 6",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Nicole Edwards",
+          "asin": "B009WCMX9I"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Brianna Bronte"
+        },
+        {
+          "name": "Dash Greyhelm"
+        },
+        {
+          "name": "Jay Crow"
+        },
+        {
+          "name": "Jack DuPont"
+        }
+      ],
+      "runtime_length_min": 733,
+      "release_date": "2015-04-08",
+      "series": [
+        {
+          "asin": "B09MJ9D9B1",
+          "title": "Club Destiny",
+          "sequence": "6"
+        }
+      ],
+      "publisher_name": "Blackstone Audio, Inc."
+    },
+    {
+      "asin": "B09VLGNZXB",
+      "title": "Outlaws of the Zombie Apocalypse Call Center",
+      "subtitle": "The Zombie Apocalypse Call Center Series, Book 6",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Taylor Ellwood",
+          "asin": "B002BM4MRW"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Matthew Crow"
+        },
+        {
+          "name": "Lauren B. Leigh"
+        }
+      ],
+      "runtime_length_min": 345,
+      "release_date": "2022-03-15",
+      "series": [
+        {
+          "asin": "B08WRM6Q28",
+          "title": "Zombie Apocalypse Call Center",
+          "sequence": "6"
+        }
+      ],
+      "publisher_name": "Taylor Ellwood"
+    },
+    {
+      "asin": "B0GT1TVZ89",
+      "title": "Live or Die",
+      "subtitle": "Zombies Ate the Neighbors (The Dead Rise Series, Book 6)",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Mike Evans",
+          "asin": "B00IQ9Z75A"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Matthew Crow"
+        }
+      ],
+      "runtime_length_min": 188,
+      "release_date": "2026-03-19",
+      "series": [
+        {
+          "asin": "B0FGHYTQ4X",
+          "title": "The Dead Rise Series",
+          "sequence": "6"
+        }
+      ],
+      "publisher_name": "Mike Evans"
+    },
+    {
+      "asin": "B0GVV23VW1",
+      "title": "Zombies Ate the Neighbors: The Dead Rise Series (Books 1-6)",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Mike Evans",
+          "asin": "B00IQ9Z75A"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Matthew Crow"
+        }
+      ],
+      "runtime_length_min": 1024,
+      "release_date": "2026-04-03",
+      "series": [
+        {
+          "asin": "B0FGHYTQ4X",
+          "title": "The Dead Rise Series",
+          "sequence": "1-6"
+        }
+      ],
+      "publisher_name": "Mike Evans"
+    },
+    {
+      "asin": "B0F3L32YP4",
+      "title": "The Lost Legion",
+      "subtitle": "An Archaeological Thriller (Jack Reilly, Book 6)",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Matt James",
+          "asin": "B010GDUME4"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Matthew Crow"
+        }
+      ],
+      "runtime_length_min": 609,
+      "release_date": "2025-04-04",
+      "publisher_name": "Severed Press"
+    },
+    {
+      "asin": "B0F9N2J7CP",
+      "title": "PMP Episode 80 | Dubs Game 6 Prep, Weekly Music Picks & More",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 64,
+      "release_date": "2025-05-02"
+    }
+  ]
+}

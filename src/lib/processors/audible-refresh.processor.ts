@@ -9,6 +9,9 @@
 
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
+import { getLanguageForRegion, partitionByLanguage } from '../constants/language-config';
+import { isLanguageFilterOn } from '../integrations/audible-language-filter';
+import type { AudibleRegion } from '../types/audible';
 
 /** Reserved category IDs for built-in home sections */
 export const POPULAR_CATEGORY_ID = '__popular__';
@@ -78,16 +81,17 @@ export async function processAudibleRefresh(payload: AudibleRefreshPayload): Pro
 
   try {
     const syncTime = new Date();
+    const inLanguage = await languageFilterForRows(() => audibleService.getRegion(), logger);
 
     // Fetch popular and new releases - 200 items each
-    const popular = await audibleService.getPopularAudiobooks(200);
+    const popular = inLanguage(await audibleService.getPopularAudiobooks(200), 'popular');
 
     // Batch cooldown between popular and new releases to reduce detection
     const batchCooldownMs = 15000 + Math.floor(Math.random() * 15000);
     logger.info(`Batch cooldown: waiting ${Math.round(batchCooldownMs / 1000)}s before fetching new releases...`);
     await new Promise(resolve => setTimeout(resolve, batchCooldownMs));
 
-    const newReleases = await audibleService.getNewReleases(200);
+    const newReleases = inLanguage(await audibleService.getNewReleases(200), 'new releases');
 
     logger.info(`Fetched ${popular.length} popular, ${newReleases.length} new releases from Audible`);
 
@@ -137,7 +141,7 @@ export async function processAudibleRefresh(payload: AudibleRefreshPayload): Pro
             await new Promise(resolve => setTimeout(resolve, catCooldownMs));
 
             // Scrape category books
-            const books = await audibleService.getCategoryBooks(catId, 200);
+            const books = inLanguage(await audibleService.getCategoryBooks(catId, 200), `category ${catId}`);
             logger.info(`Category ${catId}: fetched ${books.length} books`);
 
             const saved = await persistSectionBooks(
@@ -179,6 +183,23 @@ export async function processAudibleRefresh(payload: AudibleRefreshPayload): Pro
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     throw error;
   }
+}
+
+/**
+ * The admin language filter for the home rows: storefront rows carry a "Language:" label,
+ * so rows listed in another language are left out (rows without one are kept). Off: as is.
+ */
+async function languageFilterForRows(
+  region: () => AudibleRegion,
+  logger: ReturnType<typeof RMABLogger.forJob>,
+): Promise<<T extends { language?: string }>(books: T[], section: string) => T[]> {
+  if (!(await isLanguageFilterOn())) return (books) => books;
+  // The region is read per section: the service only loads it on its first fetch
+  return (books, section) => {
+    const { kept, hidden } = partitionByLanguage(books, (book) => book.language, getLanguageForRegion(region()));
+    if (hidden.length > 0) logger.info(`Language filter: ${hidden.length} ${section} rows in other languages left out`);
+    return kept;
+  };
 }
 
 /**

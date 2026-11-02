@@ -57,6 +57,7 @@
 - **Series page dual layout (modern/legacy A/B)** → [integrations/audible.md](integrations/audible.md#series-page-dual-layout)
 - **Series search (catalog API, ranking, book counts, error state)** → [integrations/audible-series-search.md](integrations/audible-series-search.md)
 - **Audible regions, language configs, adding a region, changing region** → [integrations/audible.md](integrations/audible.md#region-configuration)
+- **Audible language filter (admin setting, hidden counts, BookDate/shelf sync single pick)** → [integrations/audible-language-filter.md](integrations/audible-language-filter.md)
 
 ## E-book Support (First-Class)
 - **First-class ebook requests, separate tracking** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
@@ -218,4 +219,5 @@
 **"How are books in CD1/Disc 1 folders imported and ordered?"** → [features/multi-disc-folders.md](features/multi-disc-folders.md)
 **"Why is a series page blank / showing no books, then fine after a refresh?"** → [integrations/audible.md](integrations/audible.md#series-page-dual-layout) (Audible A/B-serves two layouts; parsers handle both)
 **"Why is a book's series line missing, or a request saved without a series?"** → [integrations/audible.md](integrations/audible.md#fixed-issues) (series fill from the Audible catalog when Audnexus has none; 15 min pause after a catalog outage (429, 401/403, 5xx, timeout, network), 24 h cache)
+**"Why does search say 'N in other languages hidden', or did a BookDate / shelf book get no match?"** → [integrations/audible-language-filter.md](integrations/audible-language-filter.md) (admin language filter: other-language editions hidden, translated titles become no-match)
 **"Why does series search say it couldn't get results from Audible, or show series without a rating or book count?"** → [integrations/audible-series-search.md](integrations/audible-series-search.md) (catalog keyword + batch calls, 502 when Audible doesn't answer, counts only from the catalog, no series rating on search cards)

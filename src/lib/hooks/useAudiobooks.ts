@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import useSWR from 'swr';
 import useSWRInfinite from 'swr/infinite';
 import { authenticatedFetcher } from '@/lib/utils/api';
@@ -106,20 +106,43 @@ export function useSearch(query: string) {
   const isLoadingInitial = !data && !error && !!query;
   const isLoadingMore = !!(data && typeof data[size - 1] === 'undefined' && isValidating);
 
+  // Admin language filter on (the response carries hiddenCount): a page can hold no
+  // results while Audible has more. Load past it without a click, at most
+  // MAX_AUTO_PAGE_LOADS pages in a row per query or click; then the Load more bar shows.
+  const lastPage = data?.[data.length - 1];
+  const filterLanguage: string | undefined = data?.find(page => page?.filterLanguage)?.filterLanguage;
+  const hiddenCount = data ? data.reduce((sum, page) => sum + (page?.hiddenCount ?? 0), 0) : 0;
+  // Pages the user asked for: page 1 of the query, plus each click. The rest were automatic.
+  const [userPages, setUserPages] = useState({ query, pages: 1 });
+  const autoCount = size - (userPages.query === query ? userPages.pages : 1);
+  const emptyPageWithMore = !!(lastPage?.hasMore && lastPage.hiddenCount !== undefined && (lastPage.results?.length ?? 0) === 0 && !error);
+  const skippingEmptyPage = emptyPageWithMore && autoCount < MAX_AUTO_PAGE_LOADS;
+  const loadedPages = data?.length ?? 0;
+  useEffect(() => {
+    if (skippingEmptyPage && loadedPages === size && !isValidating) setSize(loadedPages + 1);
+  }, [skippingEmptyPage, loadedPages, size, isValidating, setSize]);
+
   const loadMore = useCallback(() => {
+    setUserPages({ query, pages: size + 1 });
     setSize(prev => prev + 1);
-  }, [setSize]);
+  }, [query, size, setSize]);
 
   return {
     results,
     totalResults,
     hasMore,
     isLoading: isLoadingInitial,
-    isLoadingMore,
+    isLoadingMore: isLoadingMore || skippingEmptyPage,
     loadMore,
     error,
+    /** Set only while the admin language filter is on */
+    filterLanguage,
+    hiddenCount,
   };
 }
+
+/** Pages loaded in a row, without a click, past pages the language filter emptied */
+export const MAX_AUTO_PAGE_LOADS = 4;
 
 export function useAudiobookDetails(asin: string | null) {
   const endpoint = asin ? `/api/audiobooks/${asin}` : null;

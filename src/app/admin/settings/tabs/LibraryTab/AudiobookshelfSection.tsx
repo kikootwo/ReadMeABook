@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Settings, ABSLibrary } from '../../lib/types';
 import { AUDIBLE_REGIONS } from '@/lib/types/audible';
+import { AudibleLanguageFilterOption } from './AudibleLanguageFilterOption';
 
 interface AudiobookshelfSectionProps {
   settings: Settings;
@@ -199,6 +200,7 @@ export function AudiobookshelfSection({
           Select the Audible region that matches your metadata engine (Audnexus/Audible Agent)
           configuration in Audiobookshelf. This ensures accurate book matching and metadata.
         </p>
+        <AudibleLanguageFilterOption settings={settings} onChange={onChange} />
       </div>
 
       <div className="border-t border-gray-200 dark:border-gray-700 pt-6">

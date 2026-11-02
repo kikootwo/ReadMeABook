@@ -7,6 +7,7 @@ import { prisma } from '@/lib/db';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { getConfigService } from '@/lib/services/config.service';
 import { AudibleService } from '@/lib/integrations/audible.service';
+import { pickSearchMatch } from '@/lib/integrations/audible-language-filter';
 import { getPlexService } from '@/lib/integrations/plex.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { RMABLogger } from '@/lib/utils/logger';
@@ -930,8 +931,13 @@ export async function matchToAudnexus(
       return null;
     }
 
-    // Take the first result (best match)
-    const firstResult = searchResults.results[0];
+    // The first result (best match); with the language filter on and the first result in
+    // another language, the first later one in the region's language whose title matches
+    const firstResult = pickSearchMatch(searchResults, title);
+    if (!firstResult) {
+      logger.warn(`No Audible result in the region's language matches "${title}" by ${author}`);
+      return null;
+    }
     logger.info(`Found on Audible: "${firstResult.title}" (ASIN: ${firstResult.asin})`);
 
     // Step 3: Use ASIN to fetch full details from Audnexus (or Audible as fallback)

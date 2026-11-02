@@ -6,7 +6,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
-import { searchForSeries, SeriesSearchUnavailableError } from '@/lib/integrations/audible-series';
+import { searchSeries, SeriesSearchUnavailableError } from '@/lib/integrations/audible-series';
+import { LANGUAGE_DISPLAY_NAMES } from '@/lib/constants/language-config';
 
 const logger = RMABLogger.create('API.Series.Search');
 
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest) {
 
       logger.info(`Searching series: "${query}"`);
 
-      const series = await searchForSeries(query.trim());
+      const { series, languageFilter } = await searchSeries(query.trim());
 
       logger.info(`Series search complete: "${query}" -> ${series.length} results`);
 
@@ -36,6 +37,11 @@ export async function GET(request: NextRequest) {
         success: true,
         series,
         query: query.trim(),
+        // Only while the admin language filter is on
+        ...(languageFilter && {
+          hiddenCount: languageFilter.hiddenCount,
+          filterLanguage: LANGUAGE_DISPLAY_NAMES[languageFilter.language],
+        }),
       });
     } catch (error) {
       if (error instanceof SeriesSearchUnavailableError) {

@@ -26,6 +26,7 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 - **Generic folder detection:** disc/part folder names ([multi-disc-folders.md](multi-disc-folders.md)) + `(cd|disc|disk|part|vol|volume) N` with any number of digits (`isGenericFolderName`) — skipped as search terms
 - **Author/narrator dedup:** Splits on `,;& ` delimiters, removes names appearing in both fields
 - **Scan depth:** Max 10 levels recursion
+- **Language filter:** never applied; scan text searches pass `ignoreLanguageFilter: true` ([audible-language-filter.md](../integrations/audible-language-filter.md))
 - **Rate limiting:** 1.5s delay between Audible searches (same as existing scraping rate limit)
 - **Library check:** Uses `findPlexMatch()` for ASIN-based availability detection
 - **Import:** Reuses existing `organize_files` job queue (same as manual import)

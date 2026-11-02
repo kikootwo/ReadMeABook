@@ -108,7 +108,7 @@ Configurable Audible region for accurate metadata matching across international 
 |---|---|---|---|---|---|
 | `it` | `italiano` | `Di:` / `Letto da:` | `Durata:` | `5 ore e 54 min` (`1 ora`) | `italiano`, `italian` |
 
-- `keepsLanguage(language, config)`: accepted language, or no language at all (never treated as foreign). Series search ranks by it; the shared rule for a language filter.
+- `keepsLanguage(language, config)`: accepted language, or no language at all (never treated as foreign). Series search ranks by it; `partitionByLanguage` applies it for the admin language filter ([audible-language-filter.md](audible-language-filter.md)).
 - Italian labels (author, narrator, length, language `Lingua:`, release date `Data di pubblicazione:`) were read off audible.it bestsellers, new releases, category search and series pages. `ratingPatterns` / `ratingTextSelector` (`su 5`) and promo `descriptionExcludePatterns` are inferred; no current code path reads them.
 - Hour pattern `(\d+)\s*or[ae]\b` requires a word end, so `3 orecchie` is not read as hours.
 

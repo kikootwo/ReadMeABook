@@ -158,6 +158,7 @@ src/app/admin/settings/
 - Supported regions: any key of `AUDIBLE_REGIONS` (see [integrations/audible.md](integrations/audible.md#region-configuration))
 - UI: Dropdown selector in Library tab (both Plex and Audiobookshelf settings), built from `AUDIBLE_REGIONS`; non-English regions show ` *` + amber warning
 - No validation required (immediate save)
+- **Language filter:** checkbox `Only show books in {Language}` under the region (`audible.language_filter`, off by default), saved with the region ([audible-language-filter.md](integrations/audible-language-filter.md))
 
 **Why It Matters:**
 - Each Audible region uses different ASINs for the same audiobook
@@ -329,7 +330,7 @@ src/app/admin/settings/
 
 **PUT /api/admin/settings/audible**
 - Updates Audible region
-- Body: `{ region: string }` (any key of `AUDIBLE_REGIONS`, see [integrations/audible.md](integrations/audible.md#region-configuration))
+- Body: `{ region: string, languageFilter?: boolean }` (any key of `AUDIBLE_REGIONS`, see [integrations/audible.md](integrations/audible.md#region-configuration)); non-boolean `languageFilter` → 400 before any write
 - Unknown region → 400 listing valid codes; success clears config cache, re-inits AudibleService, queues `audible_refresh` (job errors logged, not returned)
 
 **PUT /api/admin/settings/prowlarr/indexers**

@@ -31,6 +31,7 @@ Users customize their home page by adding/removing/reordering sections. Each sec
 - After built-in sections, collects distinct categoryIds from `UserHomeSection`, capped at `MAX_REFRESHED_CATEGORIES` = 30 per run, stalest first (`selectCategoriesToRefresh()`): never stored, then oldest `AudibleCacheCategory.lastSyncedAt` (one `groupBy` `_max`, only when over the cap), then most users, then id (a refresh that stores no books counts as never stored). A refreshed id moves to the back, so every category refreshes within ceil(N / 30) runs and a newly added one on the next run. Over-cap ids are logged (warn), not wiped, and keep their previous data; result carries `categoriesSkipped`
 - Per section: wipe `AudibleCacheCategory` rows, scrape, upsert `AudibleCache` metadata, insert ranked category entries
 - Batch cooldown between sections (10-20s random)
+- Language filter on: rows whose `.languageLabel` names another language are not saved; unlabelled rows kept ([audible-language-filter.md](../integrations/audible-language-filter.md))
 - Constants exported from `audible-refresh.processor.ts`: `POPULAR_CATEGORY_ID`, `NEW_RELEASES_CATEGORY_ID`
 
 ## AudibleService Methods

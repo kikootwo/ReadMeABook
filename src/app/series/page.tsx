@@ -10,6 +10,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { Header } from '@/components/layout/Header';
 import { SeriesGrid } from '@/components/series/SeriesGrid';
 import { SeriesSearchError } from '@/components/series/SeriesSearchError';
+import { LanguageHiddenNote } from '@/components/ui/LanguageHiddenNote';
 import { useSeriesSearch } from '@/lib/hooks/useSeries';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { CardSizeControls } from '@/components/ui/CardSizeControls';
@@ -42,7 +43,7 @@ function SeriesPageContent() {
   }, [query, router]);
 
   const searchedQuery = debouncedQuery.trim();
-  const { series, isLoading, error, hasData, retry } = useSeriesSearch(searchedQuery);
+  const { series, isLoading, error, hasData, retry, filterLanguage, hiddenCount } = useSeriesSearch(searchedQuery);
   // The query whose Try again the user pressed: focus returns to the button once if it
   // fails again. Editing the query or showing that failure clears it, so a cached error
   // never pulls focus out of the search box.
@@ -150,6 +151,8 @@ function SeriesPageContent() {
                 </div>
               </div>
 
+              {!showError && !isLoading && <LanguageHiddenNote hiddenCount={hiddenCount} />}
+
               {/* Series Grid, or why the search failed */}
               {showError ? (
                 <SeriesSearchError
@@ -162,7 +165,11 @@ function SeriesPageContent() {
                 <SeriesGrid
                   series={series}
                   isLoading={!!isLoading}
-                  emptyMessage={`No series found for "${searchedQuery}"`}
+                  emptyMessage={
+                    filterLanguage && hiddenCount > 0
+                      ? `No series in ${filterLanguage} for "${searchedQuery}"`
+                      : `No series found for "${searchedQuery}"`
+                  }
                   cardSize={cardSize}
                   squareCovers={squareCovers}
                 />

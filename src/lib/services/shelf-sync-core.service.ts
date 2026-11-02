@@ -9,6 +9,7 @@
 
 import { prisma } from '@/lib/db';
 import { getAudibleService } from '@/lib/integrations/audible.service';
+import { pickSearchMatch } from '@/lib/integrations/audible-language-filter';
 import { createRequestForUser } from '@/lib/services/request-creator.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { BookMapping } from '@/generated/prisma';
@@ -206,15 +207,19 @@ async function performAudibleLookup(
     log.info(`Searching Audible for: "${fullQuery}"`);
 
     let searchResult = await audibleService.search(fullQuery);
-    let firstResult = searchResult.results[0];
+    // With the language filter on and the first result in another language: the first
+    // later result in the region's language whose title matches
+    let firstResult = pickSearchMatch(searchResult, book.title);
 
-    if (!firstResult?.asin) {
+    // Retry only when the search found nothing, as before: not when the language filter
+    // hid results or none of them matched
+    if (!searchResult.results[0]?.asin && !searchResult.languageFilter?.hiddenCount) {
       const cleanTitle = book.title.replace(/\s*\(.*\)\s*$/, '').trim();
       if (cleanTitle !== book.title) {
         const cleanQuery = `${cleanTitle} ${book.author}`;
         log.info(`No results with full title, retrying without series info: "${cleanQuery}"`);
         searchResult = await audibleService.search(cleanQuery);
-        firstResult = searchResult.results[0];
+        firstResult = pickSearchMatch(searchResult, book.title);
       }
     }
 

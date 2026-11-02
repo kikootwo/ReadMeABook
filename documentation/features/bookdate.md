@@ -167,7 +167,7 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
    - Request: 20 recommendations (expect ~10 after filtering)
 
 3. **Post-Processing:**
-   - Match to Audnexus (database cache first, API fallback)
+   - Match to Audnexus (database cache first, API fallback); with the language filter on and the first result in another language, the API pick needs an explicitly accepted language and title share >= 0.8, else no match ([audible-language-filter.md](../integrations/audible-language-filter.md))
    - Filter: Already in library (uses centralized audiobook-matcher.ts - same as homepage), already requested, already swiped
    - Two-stage library filtering:
      - Stage 1: Fuzzy match with AI-provided title/author (before Audnexus)

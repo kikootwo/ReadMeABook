@@ -75,7 +75,7 @@ export const API_TOKEN_ENDPOINT_DOCS: readonly EndpointDoc[] = [
     path: '/api/audiobooks/search',
     title: 'Search audiobooks',
     description:
-      'Search Audible for audiobooks by title or author. Query params: `q` (required), `page` (optional). Returns enriched results including per-user request and library availability status.',
+      'Search Audible for audiobooks by title or author. Query params: `q` (required), `page` (optional). Returns enriched results including per-user request and library availability status. While the admin language filter is on, each page also carries `hiddenCount` (results in other languages left out) and `filterLanguage`, and a page can be empty with `hasMore: true`: keep paging while `hasMore` is true.',
     requiresAdmin: false,
   },
   {

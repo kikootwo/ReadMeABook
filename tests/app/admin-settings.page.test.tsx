@@ -76,6 +76,8 @@ const settingsFixture = {
   backendMode: 'plex',
   hasLocalUsers: true,
   audibleRegion: 'us',
+
+  audibleLanguageFilter: false,
   plex: { url: '', token: '', libraryId: '', triggerScanAfterImport: false },
   audiobookshelf: { serverUrl: '', apiToken: '', libraryId: '', triggerScanAfterImport: false },
   oidc: {

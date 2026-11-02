@@ -12,6 +12,7 @@ import { AudibleRegion, AUDIBLE_REGIONS, DEFAULT_AUDIBLE_REGION } from '../types
 import {
   getLanguageForRegion,
   isAcceptedLanguage,
+  partitionByLanguage,
   stripPrefixes,
   buildContainsSelector,
   type LanguageConfig,
@@ -35,6 +36,7 @@ import {
   type CatalogFetchProfile,
   type CatalogSeriesEntry,
 } from './audible-series-fill';
+import { isLanguageFilterOn, type SearchLanguageFilterInfo } from './audible-language-filter';
 import {
   CATALOG_CATEGORY_LEVELS,
   parseCatalogCategories,
@@ -87,6 +89,8 @@ export interface AudibleSearchResult {
   totalResults: number;
   page: number;
   hasMore: boolean;
+  /** Only while the admin language filter is on */
+  languageFilter?: SearchLanguageFilterInfo;
 }
 
 export interface AuthorBooksResult {
@@ -198,6 +202,11 @@ function mapCatalogProduct(product: CatalogProduct): AudibleAudiobook {
     formatType: product.format_type ?? undefined,
     publisherName: product.publisher_name ?? undefined,
   };
+}
+
+/** A storefront row's language, from its "Language: English" label (#259), or undefined */
+function rowLanguage(labelText: string): string | undefined {
+  return labelText.replace(/\s+/g, ' ').trim().replace(/^[^:]*:\s*/, '') || undefined;
 }
 
 /**
@@ -538,7 +547,12 @@ export class AudibleService {
     return audiobooks;
   }
 
-  async search(query: string, page: number = 1): Promise<AudibleSearchResult> {
+  /** Applies the admin language filter; bulk import opts out with `ignoreLanguageFilter` */
+  async search(
+    query: string,
+    page: number = 1,
+    { ignoreLanguageFilter = false }: { ignoreLanguageFilter?: boolean } = {},
+  ): Promise<AudibleSearchResult> {
     await this.initialize();
 
     try {
@@ -562,20 +576,33 @@ export class AudibleService {
       const products = envelope.products ?? [];
       const totalResults = envelope.total_results ?? 0;
 
-      const results = products.map(mapCatalogProduct);
+      const langConfig = this.getLangConfig();
+      const filterOn = !ignoreLanguageFilter && (await isLanguageFilterOn());
+      const { kept, hidden } = filterOn
+        ? partitionByLanguage(products, (p) => p.language, langConfig)
+        : { kept: products, hidden: [] };
+      const results = kept.map(mapCatalogProduct);
 
-      logger.info(` Found ${results.length} results for "${query}"`);
+      logger.info(` Found ${results.length} results for "${query}"${hidden.length ? ` (${hidden.length} in other languages hidden)` : ''}`);
 
+      // From the raw page: a page whose books were all hidden is not the last one
       return {
         query,
         results,
         totalResults,
         page,
         hasMore:
-          results.length > 0 &&
+          products.length > 0 &&
           (totalResults > 0
             ? totalResults > page * AUDIBLE_PAGE_SIZE
-            : results.length >= AUDIBLE_PAGE_SIZE),
+            : products.length >= AUDIBLE_PAGE_SIZE),
+        ...(filterOn && {
+          languageFilter: {
+            language: langConfig.code,
+            hiddenCount: hidden.length,
+            firstResultHidden: products.length > 0 && hidden[0] === products[0],
+          },
+        }),
       };
     } catch (error) {
       logger.error('Search failed', {
@@ -956,6 +983,7 @@ export class AudibleService {
 
       const ratingText = $el.find('.ratingsLabel').text().trim();
       const rating = ratingText ? parseFloat(ratingText.split(' ')[0]) : undefined;
+      const language = rowLanguage($el.find('.languageLabel').first().text());
 
       audiobooks.push({
         asin,
@@ -965,6 +993,7 @@ export class AudibleService {
         narrator: stripPrefixes(narratorText, langConfig.scraping.narratorPrefixes),
         coverArtUrl: coverArtUrl.replace(/\._.*_\./, '._SL500_.'),
         rating,
+        ...(language && { language }),
       });
 
       foundOnPage++;
@@ -1026,6 +1055,7 @@ export class AudibleService {
         $el.find('.ratingsLabel').text().trim() ||
         $el.find('.a-icon-star span').first().text().trim();
       const rating = ratingText ? parseFloat(ratingText.split(' ')[0]) : undefined;
+      const language = rowLanguage($el.find('.languageLabel').first().text());
 
       audiobooks.push({
         asin,
@@ -1036,6 +1066,7 @@ export class AudibleService {
         coverArtUrl: coverArtUrl.replace(/\._.*_\./, '._SL500_.'),
         durationMinutes,
         rating,
+        ...(language && { language }),
       });
 
       foundOnPage++;

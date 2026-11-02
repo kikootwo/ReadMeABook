@@ -42,6 +42,8 @@ const settingsFixture = {
   backendMode: 'plex',
   hasLocalUsers: true,
   audibleRegion: 'us',
+
+  audibleLanguageFilter: false,
   prowlarr: { url: 'http://old-prowlarr:9696', apiKey: '••••••••' },
   indexerOptions: { skipUnreleased: true },
 };
