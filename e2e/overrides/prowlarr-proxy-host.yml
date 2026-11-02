@@ -1,0 +1,9 @@
+# Component: E2E compose override "prowlarr-proxy-host" (#298): fake Prowlarr publishes its download links on 127.0.0.1
+# Documentation: documentation/testing/e2e-harness.md
+# Use: npm run e2e -- ... --overrides prowlarr-proxy-host   (untainted runs only)
+# Like a Prowlarr behind a reverse proxy that rewrites Host: the links name an address RMAB can't reach,
+# while RMAB is configured with http://fake-arr:9696. Tracker links keep TRACKER_HOST.
+services:
+  fake-arr:
+    environment:
+      PUBLIC_HOST: 127.0.0.1

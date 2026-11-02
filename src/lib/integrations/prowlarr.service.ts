@@ -9,7 +9,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
 import { TorrentResult } from '../utils/ranking-algorithm';
 import { RMABLogger } from '../utils/logger';
-import { urlForLog } from '../utils/prowlarr-url';
+import { foreignProxyLinkOrigins, parseProwlarrBase, urlForLog } from '../utils/prowlarr-url';
 import { fallbackTitles, hasUsableResult, searchQueries } from './prowlarr-query-variations';
 import { newSearchStats, searchErrorMessage, type SearchStats } from '../utils/indexer-search-failures';
 
@@ -200,6 +200,7 @@ export class ProwlarrService {
           return transformed;
         })
         .filter((result: TorrentResult | null) => result !== null) as TorrentResult[];
+      this.logForeignProxyLinks(results);
 
       // Filter by protocol based on configured download client
       let filtered = await this.filterByProtocol(results);
@@ -227,6 +228,15 @@ export class ProwlarrService {
       throw new Error(
         `Failed to search Prowlarr: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
+    }
+  }
+
+  /** One line per search when Prowlarr published its download links on another address (a proxy rewriting Host). */
+  private logForeignProxyLinks(results: TorrentResult[]): void {
+    const base = parseProwlarrBase(this.baseUrl);
+    const origins = foreignProxyLinkOrigins(results.map((r) => r.downloadUrl), base);
+    if (base && origins.length > 0) {
+      logger.info(`Prowlarr published download links on ${origins.join(', ')}; using the configured address ${base.origin} instead`);
     }
   }
 
