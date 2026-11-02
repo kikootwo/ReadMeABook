@@ -1,5 +1,5 @@
 /**
- * URL Utilities for OAuth and Redirects
+ * URL Utilities for OAuth, Redirects and joining configured base URLs
  * Documentation: documentation/backend/services/environment.md
  */
 
@@ -74,4 +74,12 @@ export function getCallbackUrl(path: string): string {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
 
   return `${baseUrl}${normalizedPath}`;
+}
+
+/**
+ * Remove every trailing slash from a configured base URL so a path can be
+ * appended with a single '/'. 'http://host:8191//' -> 'http://host:8191'.
+ */
+export function trimTrailingSlashes(url: string): string {
+  return url.replace(/\/+$/, '');
 }

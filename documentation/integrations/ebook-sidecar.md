@@ -293,6 +293,8 @@ Categories are configured per-indexer via the tabbed interface in the Edit Index
 
 **4. Auto-grab re-fetched an ebook the user already put next to the audiobook (#313, part b)** - neither the post-import auto-grab nor `find_missing_ebooks` looked at the book folder, so a book with a user-placed ebook got an ebook request after import and a nightly retry after each failure. Fixed: both check the folder first (see On-Disk Check); a lone PDF or a folder another book also stores does not count. Bulk-importing standalone ebooks (#313 part a) is not covered
 
+**5. A FlareSolverr URL ending in `/` failed (#236)** - the endpoint was built as `${flaresolverrUrl}/v1`, so `http://host:8191/` became `http://host:8191//v1`. Fixed: trailing slashes are trimmed when the URL is used (`trimTrailingSlashes` in `src/lib/utils/url.ts`) for page fetches and the settings connection test; the Anna's Archive base URL is trimmed the same way for search, `/md5/` and slow-link URLs and the interactive-search info link. Saved values are not rewritten
+
 ## Limitations
 
 1. Title search may return wrong book for common titles
