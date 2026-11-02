@@ -54,7 +54,7 @@ Users customize their home page by adding/removing/reordering sections. Each sec
 - At most 30 distinct categories refreshed per run
 - Wipe-and-re-scrape per category during refresh, skipped when the fetch returns nothing (last list kept)
 - Deduplication of categories across users before scraping
-- If category disappears, user sees empty section
+- If a category disappears or returns nothing, the section keeps its last stored list; a category never stored shows an empty section
 - 10-color palette assigned by sort order
 
 ## Files
