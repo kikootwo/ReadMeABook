@@ -321,6 +321,27 @@ describe('Admin requests routes', () => {
     expect(payload.details).toMatchObject({ filesDeleted: false, filesKeptReason: 'folder contents changed since import' });
   });
 
+  it('returns what the book folder still holds when it stays (#526)', async () => {
+    const folderKept = { folder: '/media/Author/Book', files: [{ name: 'Book.epub', why: 'ebook of another request' }], more: 0 };
+    deleteRequestMock.mockResolvedValueOnce({
+      success: true,
+      message: 'Request deleted; the book folder stays because it still holds: Book.epub (ebook of another request)',
+      filesDeleted: true,
+      torrentsRemoved: 0,
+      torrentsKeptSeeding: 0,
+      torrentsKeptUnlimited: 0,
+      folderKept,
+    });
+
+    const { DELETE } = await import('@/app/api/admin/requests/[id]/route');
+    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-1' }) });
+    const payload = await response.json();
+
+    expect(payload.message).toBe('Request deleted; the book folder stays because it still holds: Book.epub (ebook of another request)');
+    expect(payload.details).toMatchObject({ filesDeleted: true, folderKept });
+    expect(payload.details.filesKeptReason).toBeUndefined();
+  });
+
   it('returns 401 when admin user is missing', async () => {
     authRequest.user = null;
 

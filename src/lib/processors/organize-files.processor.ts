@@ -1098,17 +1098,18 @@ async function createEbookRequestIfEnabled(
 
     // At least one source is enabled - proceed with ebook request creation
 
-    // Check if an ebook request already exists for this parent
+    // Any active ebook request on this book counts, linked or not: one that outlived a
+    // deleted audiobook request (#526) must not get a second one beside it
     const existingEbookRequest = await prisma.request.findFirst({
       where: {
-        parentRequestId,
+        audiobookId: audiobook.id,
         type: 'ebook',
         deletedAt: null,
       },
     });
 
     if (existingEbookRequest) {
-      logger.info(`Ebook request already exists for parent ${parentRequestId}: ${existingEbookRequest.id}`);
+      logger.info(`Ebook request already exists for this book: ${existingEbookRequest.id}`);
       return;
     }
 

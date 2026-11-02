@@ -470,3 +470,20 @@ describe('processFindMissingEbooks — return shape', () => {
     );
   });
 });
+
+describe('processFindMissingEbooks: the ebook request is looked up by book (#526)', () => {
+  it('counts any active ebook request on the book, linked to this request or not (one that outlived a deleted audiobook request)', async () => {
+    prismaMock.$queryRaw.mockResolvedValue([]);
+
+    const { processFindMissingEbooks } = await import('@/lib/processors/find-missing-ebooks.processor');
+    await processFindMissingEbooks({ jobId: 'job-526' });
+
+    const sql = (prismaMock.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join('?').replace(/\s+/g, ' ');
+    const lateral = sql.slice(sql.indexOf('LEFT JOIN LATERAL'), sql.indexOf(') e ON TRUE'));
+    expect(lateral).toContain('WHERE audiobook_id = p.audiobook_id');
+    expect(lateral).toContain("AND type = 'ebook' AND deleted_at IS NULL");
+    expect(lateral).not.toMatch(/WHERE parent_request_id = p\.id/);
+    // This request's own child still comes first when it has one
+    expect(lateral).toContain('ORDER BY (parent_request_id = p.id) DESC NULLS LAST, created_at DESC');
+  });
+});
