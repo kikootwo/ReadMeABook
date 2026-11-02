@@ -107,8 +107,8 @@ async function releaseClaim(
  * its Approve/Deny buttons), refresh the requester's live request card, and DM them the outcome.
  *
  * Lives here rather than in the Discord button handler so every surface converges -- the Web UI
- * Deny button and API-token decisions previously left the approval embed live and notified nobody,
- * which is what made a stale embed clickable long after the decision was made.
+ * Deny button previously left the approval embed live and notified nobody, which is what made a
+ * stale embed clickable long after the decision was made.
  *
  * Gated on a running bot and dynamically imported so discord.js stays unloaded when the bot is
  * disabled. Never throws: a Discord failure must not fail the decision.
