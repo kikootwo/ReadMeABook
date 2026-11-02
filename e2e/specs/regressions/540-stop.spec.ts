@@ -94,7 +94,7 @@ done
 EOS
 setsid bash /tmp/e2e-hold.sh '${skip}' >/dev/null 2>&1 </dev/null &`);
 }
-const heldPid = () => poll(() => sh('cat /tmp/e2e-ffpid 2>/dev/null || true'), 240_000, 1000);
+const heldPid = () => poll(() => sh('cat /tmp/e2e-ffpid 2>/dev/null || true').trim(), 240_000, 1000);
 
 async function requestHeld(rmab: Rmab, scenario: string, key: 'martian' | 'artemis' | 'phm') {
   await fakeArr.scenario(scenario);
@@ -108,6 +108,7 @@ async function requestHeld(rmab: Rmab, scenario: string, key: 'martian' | 'artem
 test('#540 stop phases', async () => {
   const rmab = await Rmab.loginAdmin();
   const out: Record<string, unknown> = { phase };
+  const save = () => writeEvidence(`540/${phase}.json`, out); // after each step, so a failure keeps what was read
 
   if (phase === 'stop-0') {
     setConfig('chapter_merging_enabled', 'true');
@@ -117,6 +118,7 @@ test('#540 stop phases', async () => {
 
   if (phase === 'stop-1') {
     out.e1 = stopReport(1);
+    save();
     const held = await requestHeld(rmab, 'stop-merge-martian', 'martian');
     out.martian = { ...held, status: status(held.id), jobs: organizeJobs(held.id) };
     expect(held.pid, 'martian merge held').toBeTruthy();
@@ -124,6 +126,7 @@ test('#540 stop phases', async () => {
 
   if (phase === 'stop-2') {
     out.e2 = stopReport(2);
+    save();
     const martian = psql(`select r.id from requests r join audiobooks a on a.id = r.audiobook_id where a.audible_asin = 'B082BHJMFF' and r.deleted_at is null`);
     const done = await poll(() => (['downloaded', 'available'].includes(status(martian)) ? status(martian) : null), 240_000);
     out.e2Recovery = {
@@ -134,6 +137,8 @@ test('#540 stop phases', async () => {
       partials: sh("find /media -name '.rmab-partial-*' 2>/dev/null | head; true"),
       library: sh("find /media/audiobooks -type f 2>/dev/null | sort | head -40; true"),
     };
+
+    save();
 
     // Crash: node SIGKILLed during a held merge
     const held = await requestHeld(rmab, 'asin-merge', 'artemis');
@@ -148,6 +153,7 @@ test('#540 stop phases', async () => {
       ...held, nodeBefore, nodeAfter: restarted, ffmpegAfterCrash, healthy: await healthy(),
       wrapperLines: lines(stackLogsSync('rmab'), /\[App\] (node exited|ERROR|Ending leftover)/).slice(-4),
     };
+    save();
     // Second cut: hold the rerun (after Bull's stall check, 30-60 s), then the harness stops the container
     holdNextMerge();
     const rerun = await heldPid();
@@ -158,12 +164,14 @@ test('#540 stop phases', async () => {
 
   if (phase === 'stop-3') {
     out.e2b = stopReport(3);
+    save();
     const artemis = psql(`select r.id from requests r join audiobooks a on a.id = r.audiobook_id where a.audible_asin = 'B072R1CY4P' and r.deleted_at is null`);
     const reset = await poll(() => (status(artemis) !== 'processing' ? status(artemis) : null), 150_000);
     const resetMessage = psql(`select coalesce(error_message, '') from requests where id = ${sqlStr(artemis)}`);
     if (reset === 'awaiting_import') await rmab.triggerScheduledJob('retry_failed_imports');
     const imported = await poll(() => (['downloaded', 'available'].includes(status(artemis)) ? status(artemis) : null), 180_000);
     out.e4 = { statusAfterSecondCut: reset ?? 'processing (unchanged after 150 s)', resetMessage, imported, final: status(artemis), jobs: organizeJobs(artemis) };
+    save();
     expect.soft(reset, 'request cut twice is reset').toBe('awaiting_import');
     expect.soft(imported, 'retried import completes').toBeTruthy();
 
@@ -171,7 +179,9 @@ test('#540 stop phases', async () => {
     const held = await requestHeld(rmab, 'asin-merge-tagged', 'phm');
     const nodeBefore = pids('node');
     const wrapper = pids('app-start.sh');
-    sh(`kill -CONT ${held.pid}; kill -TERM ${wrapper.join(' ')}`);
+    out.e3 = { ...held, wrapper };
+    save();
+    if (held.pid) sh(`kill -CONT ${held.pid}; kill -TERM ${wrapper.join(' ')}`);
     const restarted = await poll(() => {
       const now = pids('node');
       return now.length > 0 && now.every((p) => !nodeBefore.includes(p)) ? now : null;
@@ -192,7 +202,7 @@ test('#540 stop phases', async () => {
     expect.soft(stalled, 'not rerun after the restart').toEqual([0]);
   }
 
-  writeEvidence(`540/${phase}.json`, out);
+  save();
 
   // Checks on values already written
   const e = (out.e1 ?? out.e2 ?? out.e2b) as ReturnType<typeof stopReport> | undefined;
