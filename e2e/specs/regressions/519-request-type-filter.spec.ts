@@ -73,13 +73,22 @@ const titlesOf = (rows: Row[]) => rows.map((r) => r.title);
 
 type Box = { x: number; y: number; width: number; height: number };
 
+/** Scroll so the Request Management heading and filter card sit just below the sticky page header. */
+async function frameFilters(page: Page) {
+  await page.getByPlaceholder('Search by title or author...').evaluate((input) => {
+    const card = input.closest('.overflow-hidden') ?? input;
+    const header = document.querySelector('div.sticky');
+    const below = (header ? header.getBoundingClientRect().bottom : 0) + 64;
+    window.scrollBy(0, card.getBoundingClientRect().top - below);
+  });
+}
+
 /** Clear sits fully inside the filter card and the search box keeps a usable width; frames the row for the shot. */
 async function checkFilterRow(page: Page) {
   const search = page.getByPlaceholder('Search by title or author...');
   const clear = page.getByRole('button', { name: 'Clear', exact: true });
   const card = search.locator('xpath=ancestor::div[contains(concat(" ", @class, " "), " overflow-hidden ")][1]');
-  await search.scrollIntoViewIfNeeded();
-  await page.evaluate(() => window.scrollBy(0, -120));
+  await frameFilters(page);
   await expect(clear).toBeVisible();
   const [s, c, k] = (await Promise.all([search.boundingBox(), clear.boundingBox(), card.boundingBox()])) as Box[];
   expect(c.x, 'Clear starts inside the card').toBeGreaterThanOrEqual(k.x);
@@ -121,6 +130,7 @@ test('519: the Type filter lists only audiobook or only ebook requests, follows 
   await expect(table.getByText(BOOKS.ebook.title)).toBeVisible();
   await expect(table.getByText(BOOKS.audiobook.title)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Clear', exact: true })).toBeVisible();
+  await frameFilters(page);
   await snap(page, '519', 'type-ebooks');
 
   // Narrow widths with Clear shown: the row wraps (680) or stacks (375), nothing clipped by the card
