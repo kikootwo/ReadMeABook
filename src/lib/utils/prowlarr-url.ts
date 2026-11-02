@@ -96,14 +96,39 @@ export function isProwlarrDownloadUrl(url: string, base: ProwlarrBase | null): b
   );
 }
 
+/** `/{indexerId}/download` of a link on the configured host and port, under the configured base path, or null. */
+function configuredSuffix(parsed: URL, base: ProwlarrBase): string | null {
+  if (parsed.hostname.toLowerCase() !== base.hostname) return null;
+  const portsMatch = effectivePort(parsed) === base.port || (parsed.port === '' && base.defaultPort);
+  return portsMatch ? downloadSuffix(parsed, base) : null;
+}
+
+const PROXY_LINK_PATH_PATTERN = /\/(\d+)\/download$/i;
+
+/**
+ * `/{indexerId}/download` of a Prowlarr proxy link on any host: the path ends in
+ * `/{digits}/download` and the query has a non-empty `link` parameter. Null otherwise.
+ */
+function proxyLinkSuffix(parsed: URL): string | null {
+  const match = PROXY_LINK_PATH_PATTERN.exec(parsed.pathname);
+  if (!match || !parsed.searchParams.get('link')) return null;
+  return `/${match[1]}/download`;
+}
+
 /**
  * Map a link Prowlarr published onto the configured base, or null if it is not a
- * Prowlarr download link. Same host name required (case-insensitive); a scheme
- * difference (TLS proxy without X-Forwarded-Proto) or default-port difference and
- * base-path case are tolerated; any credentials in the candidate are discarded.
- * The result uses the configured scheme, port and base path. Configured
- * credentials (`user:pass@`) are added only with `withCredentials` — at fetch
- * time — so they are never stored with a pick, a download record or a job.
+ * Prowlarr download link. The result always points at the configured scheme, host,
+ * port and base path; only the `/{indexerId}/download` step, query and fragment are
+ * kept, and any credentials in the link are discarded.
+ * - Link on the configured host name (case-insensitive) and port, under the
+ *   configured base path: accepted (scheme and default-port differences, as from a
+ *   TLS proxy without X-Forwarded-Proto, and base-path case are tolerated).
+ * - Any other http(s) link is accepted only as a Prowlarr proxy link
+ *   (`.../{digits}/download?link=...`): Prowlarr builds these from the Host header it
+ *   received, so behind a reverse proxy they can name an address RMAB can't reach.
+ *   The link's own host, port and path prefix are dropped, never fetched.
+ * Configured credentials (`user:pass@`) are added only with `withCredentials` (at
+ * fetch time), so they are never stored with a pick, a download record or a job.
  */
 export function toConfiguredProwlarrUrl(
   url: string,
@@ -112,13 +137,25 @@ export function toConfiguredProwlarrUrl(
 ): string | null {
   if (!base) return null;
   const parsed = parseHttpUrl(url);
-  if (!parsed || parsed.hostname.toLowerCase() !== base.hostname) return null;
-  const portsMatch = effectivePort(parsed) === base.port || (parsed.port === '' && base.defaultPort);
-  if (!portsMatch) return null;
-  const suffix = downloadSuffix(parsed, base);
+  if (!parsed) return null;
+  const suffix = configuredSuffix(parsed, base) ?? proxyLinkSuffix(parsed);
   if (!suffix) return null;
   const userinfo = options.withCredentials ? base.userinfo : '';
   return `${base.protocol}//${userinfo}${base.host}${base.basePath}${suffix}${parsed.search}${parsed.hash}`;
+}
+
+/**
+ * Origins (`scheme://host[:port]`, no path, query or credentials) of Prowlarr proxy
+ * links that do not point at the configured Prowlarr, for one log line per search.
+ */
+export function foreignProxyLinkOrigins(urls: Array<string | undefined>, base: ProwlarrBase | null): string[] {
+  if (!base) return [];
+  const origins = new Set<string>();
+  for (const url of urls) {
+    const parsed = url ? parseHttpUrl(url) : null;
+    if (parsed && !configuredSuffix(parsed, base) && proxyLinkSuffix(parsed)) origins.add(parsed.origin);
+  }
+  return [...origins];
 }
 
 const MAGNET_PATTERN = /^magnet:\?[^\s]+$/i;

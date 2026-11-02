@@ -81,7 +81,25 @@ describe('POST /api/admin/requests/[id]/retry-download', () => {
     }));
   });
 
+  it('re-adds a stored Prowlarr link from an old address on the configured Prowlarr URL (#298)', async () => {
+    clientMock.getDownload.mockResolvedValue(null);
+    const { POST } = await import('@/app/api/admin/requests/[id]/retry-download/route');
+    const response = await POST({} as any, { params: Promise.resolve({ id: 'req-1' }) });
+
+    expect(response.status).toBe(200);
+    expect(jobQueueMock.addDownloadJob).toHaveBeenCalledWith(
+      'req-1',
+      expect.anything(),
+      expect.objectContaining({ downloadUrl: 'http://prowlarr-new:9696/1/download?link=abc' }),
+    );
+  });
+
   it('rejects re-adding a stored link that is not a Prowlarr download link or magnet', async () => {
+    prismaMock.downloadHistory.findFirst.mockResolvedValue({
+      id: 'dh-1', magnetLink: 'http://prowlarr-old:9696/1/download', downloadClient: 'qbittorrent', downloadClientId: 'hash-1',
+      torrentName: 'Release', indexerName: 'Indexer', indexerId: 1, torrentSizeBytes: null,
+      seeders: null, leechers: null, torrentHash: 'hash-1', torrentUrl: null,
+    });
     clientMock.getDownload.mockResolvedValue(null);
     const { POST } = await import('@/app/api/admin/requests/[id]/retry-download/route');
     const response = await POST({} as any, { params: Promise.resolve({ id: 'req-1' }) });
