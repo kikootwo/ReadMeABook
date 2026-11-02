@@ -12,7 +12,7 @@ import { test, expect, type Browser } from '@playwright/test';
 import { evidencePath, writeEvidence } from '../../lib/harness';
 
 const DIR = '174';
-const HELP = 'Optional, Config Key only. {user} = the user who made the request';
+const HELP = 'Config Key only. {user} = the user who made the request';
 
 const VIEWS = [
   { name: 'apprise-tag-help', width: 1280, height: 800, dark: false },

@@ -45,7 +45,7 @@ export class AppriseProvider implements INotificationProvider {
       { name: 'basicAuthPassword', label: 'Basic Auth Password', type: 'password', required: false, helpText: 'Not used when an Auth Token is set (the token takes precedence).' },
       { name: 'urls', label: 'Notification URLs', type: 'password', required: false, placeholder: 'slack://token, discord://webhook_id/token, ...' },
       { name: 'configKey', label: 'Config Key', type: 'text', required: false, placeholder: 'Persistent configuration key' },
-      { name: 'tag', label: 'Tag', type: 'text', required: false, placeholder: 'e.g. admin, user-{user}', helpText: 'Optional, Config Key only. {user} = the user who made the request, so each user gets their own notifications (list their URLs under that tag in Apprise).' },
+      { name: 'tag', label: 'Tag', type: 'text', required: false, placeholder: 'e.g. admin, user-{user}', helpText: 'Config Key only. {user} = the user who made the request, so each user gets their own notifications (list their URLs under that tag in Apprise).' },
       { name: 'authToken', label: 'Auth Token', type: 'password', required: false, placeholder: 'Optional API auth token' },
     ],
   };
