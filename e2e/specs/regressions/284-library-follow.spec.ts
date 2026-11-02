@@ -54,7 +54,14 @@ async function session(browser: Browser, width: number, height: number, dark: bo
     baseURL: process.env.E2E_BASE_URL, viewport: { width, height }, colorScheme: dark ? 'dark' : 'light',
     storageState: evidencePath('storage-state.json'),
   });
-  return { ctx, page: await ctx.newPage() };
+  const page = await ctx.newPage();
+  /** Shots wait for finite CSS transitions/animations (the cards fade in) to finish. */
+  const settled = async (dir: string, name: string) => {
+    await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity));
+    await page.waitForTimeout(300);
+    await snap(page, dir, name);
+  };
+  return { ctx, page, settled };
 }
 
 test('#325a: a delivered request follows the ASIN Audiobookshelf holds now', async ({ browser }) => {
@@ -151,7 +158,7 @@ test('#325a: a delivered request follows the ASIN Audiobookshelf holds now', asy
   // RMAB's own Audible calls are refused under abs-fake-metadata; the point is which ASIN the modal asks for.
   const asked: string[] = [];
   {
-    const { ctx, page } = await session(browser, 1280, 900, false);
+    const { ctx, page, settled } = await session(browser, 1280, 900, false);
     await page.route(/\/api\/audiobooks\/[A-Z0-9]{10}$/, async (route) => {
       const asin = route.request().url().split('/').pop()!;
       asked.push(asin);
@@ -161,23 +168,22 @@ test('#325a: a delivered request follows the ASIN Audiobookshelf holds now', asy
     });
     await page.goto('/requests');
     await expect(page.getByRole('heading', { name: artemis.title }).first()).toBeVisible({ timeout: 30_000 });
-    await snap(page, DIR, 'card-1280-light');
+    await settled(DIR, 'card-1280-light');
     await page.getByRole('button', { name: artemis.title }).first().click();
     await expect(page.getByText(martian.title).first()).toBeVisible({ timeout: 15_000 });
-    await page.waitForTimeout(500);
-    await snap(page, DIR, 'modal-requested');
+    await settled(DIR, 'modal-requested');
     await page.goto('/admin');
     const row = page.getByText(artemis.title).first();
     await row.scrollIntoViewIfNeeded();
     await expect(row).toBeVisible({ timeout: 30_000 });
-    await snap(page, DIR, 'admin-row');
+    await settled(DIR, 'admin-row');
     await ctx.close();
   }
   {
-    const { ctx, page } = await session(browser, 375, 812, true);
+    const { ctx, page, settled } = await session(browser, 375, 812, true);
     await page.goto('/requests');
     await expect(page.getByRole('heading', { name: artemis.title }).first()).toBeVisible({ timeout: 30_000 });
-    await snap(page, DIR, 'card-375-dark');
+    await settled(DIR, 'card-375-dark');
     await ctx.close();
   }
 
