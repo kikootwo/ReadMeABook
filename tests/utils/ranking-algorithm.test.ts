@@ -962,6 +962,89 @@ describe('ranking-algorithm', () => {
     });
   });
 
+  describe('DRM Format Rejection', () => {
+    it('rejects .aax releases before scoring', () => {
+      const drm = { ...baseTorrent, guid: 'drm', title: 'Great Book - Author Name [AAX]' };
+      const clean = { ...baseTorrent, guid: 'clean', title: 'Great Book - Author Name [M4B]' };
+
+      const ranked = rankTorrents(
+        [drm, clean],
+        { title: 'Great Book', author: 'Author Name' }
+      );
+
+      expect(ranked).toHaveLength(1);
+      expect(ranked[0].guid).toBe('clean');
+    });
+
+    it('rejects a bare AAX tag even when title and author match', () => {
+      // Was a must-accept case in ranking-match-gates (#459); DRM releases are now dropped
+      const drm = { ...baseTorrent, guid: 'drm', title: 'Frank Herbert - Dune AAX' };
+
+      const ranked = rankTorrents(
+        [drm],
+        { title: 'Dune', author: 'Frank Herbert' }
+      );
+
+      expect(ranked).toHaveLength(0);
+    });
+
+    it('rejects .aa releases before scoring', () => {
+      const drm = { ...baseTorrent, guid: 'drm', title: 'Great Book - Author Name [AA]' };
+
+      const ranked = rankTorrents(
+        [drm],
+        { title: 'Great Book', author: 'Author Name' }
+      );
+
+      expect(ranked).toHaveLength(0);
+    });
+
+    it('is case-insensitive and matches dotted extensions', () => {
+      const drm = { ...baseTorrent, guid: 'drm', title: 'great.book.author.name.aax' };
+
+      const ranked = rankTorrents(
+        [drm],
+        { title: 'Great Book', author: 'Author Name' }
+      );
+
+      expect(ranked).toHaveLength(0);
+    });
+
+    it('does not false-positive on ordinary words containing "aa"', () => {
+      const clean = { ...baseTorrent, guid: 'clean', title: 'Isaac and the Aardvark - Author Name [M4B]' };
+
+      const ranked = rankTorrents(
+        [clean],
+        { title: 'Isaac and the Aardvark', author: 'Author Name' }
+      );
+
+      expect(ranked).toHaveLength(1);
+      expect(ranked[0].guid).toBe('clean');
+    });
+
+    it('does not treat a bare "AA" initialism as a DRM marker', () => {
+      const clean = { ...baseTorrent, guid: 'clean', title: 'Winnie-the-Pooh - AA Milne [M4B]' };
+
+      const ranked = rankTorrents(
+        [clean],
+        { title: 'Winnie-the-Pooh', author: 'AA Milne' }
+      );
+
+      expect(ranked).toHaveLength(1);
+    });
+
+    it('rejects a dotted .aa file extension', () => {
+      const drm = { ...baseTorrent, guid: 'drm', title: 'Great Book - Author Name.aa' };
+
+      const ranked = rankTorrents(
+        [drm],
+        { title: 'Great Book', author: 'Author Name' }
+      );
+
+      expect(ranked).toHaveLength(0);
+    });
+  });
+
   describe('Author Presence Check (Automatic Mode)', () => {
     const algorithm = new RankingAlgorithm();
 

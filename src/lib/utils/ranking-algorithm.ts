@@ -142,14 +142,16 @@ export class RankingAlgorithm {
       minMBPerMinute,
     } = options;
     // Filter out files < 20 MB (likely ebooks/samples), and, when a floor is set and the
-    // runtime is known, results too small for the runtime (one file of a multi-file post)
+    // runtime is known, results too small for the runtime (one file of a multi-file post).
+    // DRM-protected releases (.aa/.aax) are dropped too: undecryptable without the
+    // requester's own Audible activation bytes, so never worth grabbing.
     const runtime = audiobook.durationMinutes;
     const floorMB = minMBPerMinute !== undefined && runtime !== undefined && runtime > 0
       ? minMBPerMinute * runtime
       : 0;
     const filteredTorrents = torrents.filter((torrent) => {
       const sizeMB = torrent.size / (1024 * 1024);
-      return sizeMB >= 20 && sizeMB >= floorMB;
+      return sizeMB >= 20 && sizeMB >= floorMB && !this.isDrmFormat(torrent);
     });
 
     const ranked = filteredTorrents.map((torrent) => {
@@ -631,6 +633,19 @@ export class RankingAlgorithm {
     }
 
     return Math.min(60, titleScore + authorScore);
+  }
+
+  /**
+   * Detect DRM-protected releases (Audible .aa/.aax) from the torrent title.
+   * These can't be decrypted without the requester's own Audible activation
+   * bytes, so a torrent-sourced copy is unplayable in any media server —
+   * reject it before download rather than grabbing dead weight.
+   * `aax` counts as a whole token anywhere (`.aax`, `[AAX]`, `- AAX -`). A bare
+   * `aa` is a common initialism ("AA Milne"), so it only counts as a file
+   * extension (`.aa`) or a bracketed tag (`[AA]`, `(AA)`).
+   */
+  private isDrmFormat(torrent: TorrentResult): boolean {
+    return /(^|[^a-z0-9])aax($|[^a-z0-9])|\.aa($|[^a-z0-9])|[[(]aa[\])]/i.test(torrent.title);
   }
 
   /**
