@@ -4,6 +4,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SearchStats } from '@/lib/utils/indexer-search-failures';
 
 let authRequest: any;
 
@@ -180,7 +181,7 @@ describe('Audiobooks search torrents route', () => {
       .mockResolvedValueOnce(JSON.stringify([{ id: 1, name: 'Indexer', protocol: 'torrent', priority: 10 }]))
       .mockResolvedValueOnce(null);
     groupIndexersMock.mockReturnValue({ groups: [{ categories: [3030], indexerIds: [1] }], skippedIndexers: [] });
-    prowlarrMock.searchWithVariations.mockImplementation(async (_t: string, _a: string, _f: unknown, _o: unknown, stats: any) => {
+    prowlarrMock.searchWithVariations.mockImplementation(async (_t: string, _a: string, _f: unknown, _o: unknown, stats: SearchStats) => {
       stats.queriesSent += 2;
       stats.queriesFailed += 2;
       stats.failures.push(
