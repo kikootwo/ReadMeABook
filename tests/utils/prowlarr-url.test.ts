@@ -87,7 +87,7 @@ describe('toConfiguredProwlarrUrl', () => {
     ['http://other.example/12/api?link=L', base, null],
     ['ftp://other.example/12/download?link=L', base, null],
     ['magnet:?xt=urn:btih:abc', base, null],
-  ])('%s → %s', (url, b, expected) => {
+  ])('maps %s (case %#)', (url, b, expected) => {
     expect(toConfiguredProwlarrUrl(url, b)).toBe(expected);
   });
 
