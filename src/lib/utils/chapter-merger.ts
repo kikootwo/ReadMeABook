@@ -15,6 +15,7 @@ import { checkMergedOutput, measureChapterContent, sameDecodedFormat, verifyMerg
 import { RMABLogger } from './logger';
 import { CHAPTER_MERGE_FORMATS } from '../constants/audio-formats';
 import { ffmpegRemuxTimeoutMs } from './metadata-tagger';
+import { movieTimescaleArgs } from './mp4-movie-timescale';
 
 // Media tools run via execFile/spawn with argv arrays (never a shell): file
 // names come from downloads and import folders and are untrusted.
@@ -713,6 +714,7 @@ export async function mergeChapters(
     }
 
     // Add critical flags for reliability and performance
+    args.push(...(await movieTimescaleArgs())); // Chapter-safe movie timescale (#511): a long chapter overflows ffmpeg 9's default
     args.push('-movflags', '+faststart'); // CRITICAL: Move moov atom to beginning (fixes slow playback)
     args.push('-fflags', '+genpts'); // Regenerate presentation timestamps (fixes timing issues)
     args.push('-avoid_negative_ts', 'make_zero'); // Handle negative timestamps

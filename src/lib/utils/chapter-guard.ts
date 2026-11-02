@@ -2,8 +2,10 @@
  * Component: Tagged Copy Chapter Guard (#511)
  * Documentation: documentation/phase3/file-organization.md
  *
- * ffmpeg 9.x's mov muxer can write zero-length chapters when the tagging remux
- * copies an embedded cover next to the chapter track it rebuilds. The tagged
+ * ffmpeg 9.x's mov muxer took the LCM of every stream's time base as the movie
+ * timescale, which overflowed long chapters (dropped or zero-length), above all
+ * next to a cover; mp4-movie-timescale.ts now pins it to 1000. This guard stays
+ * as the safety net for the next muxer change. The tagged
  * copy must hold the source's chapter table: same count, same titles in order,
  * each start and end within CHAPTER_TOLERANCE_S. ffprobe runs via execFile with
  * an argv list (no shell) and a timeout.
