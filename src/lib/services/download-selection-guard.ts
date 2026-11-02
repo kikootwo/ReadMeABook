@@ -3,7 +3,8 @@
  * Documentation: documentation/phase3/download-clients.md
  *
  * - Torrent/NZB selections: downloadUrl must be a magnet URI or a Prowlarr
- *   proxy-download URL (`/{indexerId}/download`) on the configured Prowlarr origin.
+ *   proxy-download URL (`/{indexerId}/download`), always rewritten onto the
+ *   configured Prowlarr origin and base path.
  * - Anna's Archive selections: only the md5 is trusted; links are rebuilt server-side.
  * - Search responses: the Prowlarr API key is stripped (by value) before leaving the server.
  */
@@ -26,7 +27,7 @@ export const SOURCE_UNAVAILABLE_MESSAGE = "Couldn't reach Anna's Archive to prep
 
 /**
  * Accept a magnet as-is, or a Prowlarr download link rewritten onto the configured
- * Prowlarr base (scheme, port, credentials); anything else is rejected.
+ * Prowlarr base (see `toConfiguredProwlarrUrl`); anything else is rejected.
  */
 export async function checkClientDownloadUrl(url: unknown): Promise<GuardResult<string>> {
   if (typeof url !== 'string' || url.trim() === '') return { ok: false, error: 'Download URL is required' };

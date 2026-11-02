@@ -5,11 +5,13 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  foreignProxyLinkOrigins,
   isMagnetUri,
   isProwlarrDownloadUrl,
   parseProwlarrBase,
   urlForLog,
   stripApiKey,
+  toConfiguredProwlarrUrl,
   withApiKeyParam,
 } from '@/lib/utils/prowlarr-url';
 
@@ -55,6 +57,77 @@ describe('isProwlarrDownloadUrl', () => {
 
   it('is false without a configured base', () => {
     expect(isProwlarrDownloadUrl('http://prowlarr:9696/1/download', null)).toBe(false);
+  });
+});
+
+describe('toConfiguredProwlarrUrl', () => {
+  const base = parseProwlarrBase('http://prowlarr:9696');
+  const withPath = parseProwlarrBase('https://admin:pw@media.example:8443/prowlarr/');
+  const ipv6 = parseProwlarrBase('http://[fd00::5]:9696/p');
+
+  it.each([
+    // Links on the configured address keep today's rules (no link= needed)
+    ['http://prowlarr:9696/12/download', base, 'http://prowlarr:9696/12/download'],
+    ['https://prowlarr/12/download?x=1', base, null],
+    // Proxy links on any host are rebuilt on the configured base
+    ['https://127.0.0.1:9663/12/download?link=L&file=B', base, 'http://prowlarr:9696/12/download?link=L&file=B'],
+    ['http://prowlarr:9697/12/download?link=L', base, 'http://prowlarr:9696/12/download?link=L'],
+    ['http://u:p@other.example/12/download?link=L', base, 'http://prowlarr:9696/12/download?link=L'],
+    ['http://other.example/a/b/12/DOWNLOAD?link=L#f', base, 'http://prowlarr:9696/12/download?link=L#f'],
+    ['http://other.example/12/download?link=L', withPath, 'https://media.example:8443/prowlarr/12/download?link=L'],
+    ['http://media.example:8443/12/download?link=L', withPath, 'https://media.example:8443/prowlarr/12/download?link=L'],
+    ['http://127.0.0.1:9663/p/12/download?link=L', ipv6, 'http://[fd00::5]:9696/p/12/download?link=L'],
+    // Not proxy links
+    ['http://other.example/12/download', base, null],
+    ['http://other.example/12/download?link=', base, null],
+    ['http://other.example/12/download?file=B', base, null],
+    ['http://other.example/12/download/x?link=L', base, null],
+    ['http://other.example/download?link=L', base, null],
+    ['http://other.example/abc/download?link=L', base, null],
+    ['http://other.example/12/api?link=L', base, null],
+    ['ftp://other.example/12/download?link=L', base, null],
+    ['magnet:?xt=urn:btih:abc', base, null],
+  ])('%s → %s', (url, b, expected) => {
+    expect(toConfiguredProwlarrUrl(url, b)).toBe(expected);
+  });
+
+  it('adds configured credentials only with withCredentials', () => {
+    const link = 'https://127.0.0.1:9663/12/download?link=L';
+    expect(toConfiguredProwlarrUrl(link, withPath)).toBe('https://media.example:8443/prowlarr/12/download?link=L');
+    expect(toConfiguredProwlarrUrl(link, withPath, { withCredentials: true })).toBe(
+      'https://admin:pw@media.example:8443/prowlarr/12/download?link=L'
+    );
+  });
+
+  it('is null without a configured base', () => {
+    expect(toConfiguredProwlarrUrl('http://other.example/12/download?link=L', null)).toBeNull();
+  });
+
+  it('gets the key only after the rewrite: the published link stays foreign, the rewritten one matches', () => {
+    const published = 'https://127.0.0.1:9663/otherapp/12/download?link=L';
+    const rewritten = toConfiguredProwlarrUrl(published, base)!;
+    expect(isProwlarrDownloadUrl(published, base)).toBe(false);
+    expect(isProwlarrDownloadUrl(rewritten, base)).toBe(true);
+  });
+});
+
+describe('foreignProxyLinkOrigins', () => {
+  const base = parseProwlarrBase('http://prowlarr:9696');
+
+  it('names each foreign proxy-link origin once, without path, query or credentials', () => {
+    expect(foreignProxyLinkOrigins([
+      'https://u:p@127.0.0.1:9663/12/download?link=L&apikey=SECRET',
+      'https://127.0.0.1:9663/13/download?link=M',
+      'http://prowlarr:9696/14/download?link=N',
+      'magnet:?xt=urn:btih:abc',
+      'http://tracker.example/file.torrent',
+      undefined,
+    ], base)).toEqual(['https://127.0.0.1:9663']);
+  });
+
+  it('is empty when every link is on the configured address or there is no base', () => {
+    expect(foreignProxyLinkOrigins(['http://prowlarr:9696/1/download?link=L'], base)).toEqual([]);
+    expect(foreignProxyLinkOrigins(['https://127.0.0.1:9663/1/download?link=L'], null)).toEqual([]);
   });
 });
 
