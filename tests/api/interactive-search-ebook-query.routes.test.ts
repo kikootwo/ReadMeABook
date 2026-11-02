@@ -9,9 +9,11 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
+import type { SearchStats } from '@/lib/utils/indexer-search-failures';
 
 const prismaMock = createPrismaMock();
 const prowlarrMock = vi.hoisted(() => ({ search: vi.fn(), searchWithVariations: vi.fn() }));
+const regionMock = vi.hoisted(() => vi.fn());
 
 const CONFIG: Record<string, string> = {
   ebook_annas_archive_enabled: 'false',
@@ -34,7 +36,7 @@ vi.mock('@/lib/middleware/interactive-search-access', () => ({
 vi.mock('@/lib/services/config.service', () => ({
   getConfigService: () => ({
     get: async (key: string) => CONFIG[key] ?? null,
-    getAudibleRegion: async () => 'us',
+    getAudibleRegion: regionMock,
   }),
 }));
 vi.mock('@/lib/integrations/prowlarr.service', () => ({ getProwlarrService: async () => prowlarrMock }));
@@ -63,6 +65,7 @@ describe('interactive ebook search sends title + author to indexers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prowlarrMock.searchWithVariations.mockResolvedValue([]);
+    regionMock.mockResolvedValue('us');
   });
 
   describe('POST /api/audiobooks/[asin]/interactive-search-ebook', () => {
@@ -85,7 +88,7 @@ describe('interactive ebook search sends title + author to indexers', () => {
       expect((await response.json()).searchTitle).toBe(expectedTitle);
       expect(prowlarrMock.search).not.toHaveBeenCalled();
       expect(prowlarrMock.searchWithVariations).toHaveBeenCalledTimes(1);
-      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith(expectedTitle, 'Db Author', EXPECTED_FILTERS, { exactTitle });
+      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith(expectedTitle, 'Db Author', EXPECTED_FILTERS, { exactTitle }, expect.any(Object));
     });
   });
 
@@ -110,7 +113,63 @@ describe('interactive ebook search sends title + author to indexers', () => {
       expect((await response.json()).searchTitle).toBe(expectedTitle);
       expect(prowlarrMock.search).not.toHaveBeenCalled();
       expect(prowlarrMock.searchWithVariations).toHaveBeenCalledTimes(1);
-      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith(expectedTitle, 'Real Author', EXPECTED_FILTERS, { exactTitle });
+      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith(expectedTitle, 'Real Author', EXPECTED_FILTERS, { exactTitle }, expect.any(Object));
+    });
+  });
+
+  // #522: a failed search is counted once, even when the run throws after its groups were counted
+  describe.each([
+    ['POST /api/requests/[id]/interactive-search-ebook', async (body: Record<string, unknown>) => {
+      prismaMock.request.findFirst.mockResolvedValue({
+        id: 'req-1', type: 'ebook', status: 'failed',
+        audiobook: { id: 'ab-1', audibleAsin: null, title: 'Real Title', author: 'Real Author' },
+      });
+      const { POST } = await import('@/app/api/requests/[id]/interactive-search-ebook/route');
+      return POST(makeRequest(body), { params: Promise.resolve({ id: 'req-1' }) });
+    }],
+    ['POST /api/audiobooks/[asin]/interactive-search-ebook', async (body: Record<string, unknown>) => {
+      prismaMock.audiobook.findFirst.mockResolvedValue({ id: 'ab-1', audibleAsin: 'B000000001', title: 'Db Title', author: 'Db Author' });
+      prismaMock.request.findFirst.mockResolvedValue(null);
+      const { POST } = await import('@/app/api/audiobooks/[asin]/interactive-search-ebook/route');
+      return POST(makeRequest(body), { params: Promise.resolve({ asin: 'B000000001' }) });
+    }],
+  ])('%s: searchFailures', (_route, post) => {
+    const oneOfTwoFailed = async (_t: string, _a: string, _f: unknown, _o: unknown, stats: SearchStats) => {
+      stats.queriesSent += 2;
+      stats.queriesFailed += 1;
+      stats.failures.push({ query: 'Title Author', message: 'Request failed with status code 400' });
+      return [{ guid: 'g-1', title: 'Some Release', size: 1024, seeders: 1, indexer: 'Indexer', indexerId: 1 }];
+    };
+
+    it('a group with a failed query: the count is in the response', async () => {
+      prowlarrMock.searchWithVariations.mockImplementation(oneOfTwoFailed);
+
+      const body = await (await post({})).json();
+
+      expect(body.searchFailures).toEqual({ failed: 1, total: 2, errors: ['Request failed with status code 400'] });
+    });
+
+    it('the run throws after its groups were counted (in ranking): not counted a second time', async () => {
+      regionMock.mockResolvedValueOnce('us').mockRejectedValueOnce(new Error('ranking broke'));
+      prowlarrMock.searchWithVariations.mockImplementation(oneOfTwoFailed);
+
+      const body = await (await post({})).json();
+
+      expect(prowlarrMock.searchWithVariations).toHaveBeenCalledTimes(1);
+      expect(body.searchFailures).toEqual({ failed: 1, total: 2, errors: ['Request failed with status code 400'] });
+    });
+
+    it('the run throws before any group searched: one failed search', async () => {
+      const saved = CONFIG.prowlarr_indexers;
+      CONFIG.prowlarr_indexers = 'not json';
+      try {
+        const body = await (await post({})).json();
+
+        expect(prowlarrMock.searchWithVariations).not.toHaveBeenCalled();
+        expect(body.searchFailures).toMatchObject({ failed: 1, total: 1 });
+      } finally {
+        CONFIG.prowlarr_indexers = saved;
+      }
     });
   });
 });

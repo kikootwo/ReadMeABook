@@ -124,6 +124,18 @@ test('prowlarr: key required; results are Prowlarr-shaped with apikey/link/file 
   assert.equal(good.categories[0].id, 3030);
 });
 
+test('prowlarr: search.queryStatuses answers a matching query with its status, others normally (#522)', async () => {
+  await loadDef({
+    name: 'query-status-522',
+    book: 'phm',
+    search: { queryStatuses: [{ contains: 'test author', status: 400 }] },
+    releases: [{ id: 'good', title: '{{author}} - {{title}} [M4B]', fixture: 'phm-m4b' }],
+  });
+  const url = (q) => `${base('prowlarr')}/api/v1/search?query=${encodeURIComponent(q)}&type=search`;
+  assert.equal((await fetch(url('Fixture Book One Test Author'), { headers: { 'X-Api-Key': KEY } })).status, 400);
+  assert.equal((await search('Fixture Book One')).length, 1);
+});
+
 test('prowlarr: RSS feed is torznab XML with links', async () => {
   const res = await fetch(`${base('prowlarr')}/1/api?apikey=${KEY}&t=search&cat=3030`);
   const xml = await res.text();

@@ -9,6 +9,7 @@ import { prisma } from '@/lib/db';
 import { getProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { rankTorrents } from '@/lib/utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '@/lib/utils/indexer-grouping';
+import { addGroupSearch, logSearchSummary, newSearchStats, recordFailure, searchFailureSummary } from '@/lib/utils/indexer-search-failures';
 import { getLanguageForRegion } from '@/lib/constants/language-config';
 import type { AudibleRegion } from '@/lib/types/audible';
 import { RMABLogger } from '@/lib/utils/logger';
@@ -140,24 +141,30 @@ export async function POST(
       // Search Prowlarr for each group and combine results
       const prowlarr = await getProwlarrService();
       const allResults = [];
+      const searchStats = newSearchStats(); // failed searches are reported, not taken for "nothing found" (#522)
 
       for (let i = 0; i < groups.length; i++) {
         const group = groups[i];
         logger.debug(`Searching group ${i + 1}/${groups.length}: ${getGroupDescription(group)}`);
+        const groupStats = newSearchStats();
 
         try {
           const groupResults = await prowlarr.searchWithVariations(searchTitle, searchAuthor, {
             categories: group.categories,
             indexerIds: group.indexerIds,
-          }, { exactTitle: Boolean(customTitle || requestRecord.customSearchTerms) }); // custom terms: sent as given (#316)
+          }, { exactTitle: Boolean(customTitle || requestRecord.customSearchTerms) }, groupStats); // custom terms: sent as given (#316)
 
           logger.debug(`Group ${i + 1} returned ${groupResults.length} results`);
           allResults.push(...groupResults);
         } catch (error) {
           logger.error(`Group ${i + 1} search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          recordFailure(groupStats, '(whole group)', error);
           // Continue with other groups even if one fails
         }
+        addGroupSearch(searchStats, groupStats, getGroupDescription(group), logger);
       }
+      logSearchSummary(logger, searchStats);
+      const searchFailures = searchFailureSummary(searchStats);
 
       const results = allResults;
       logger.info(`Found ${results.length} total results from ${groups.length} group${groups.length > 1 ? 's' : ''}`, { requestId: id });
@@ -165,6 +172,7 @@ export async function POST(
       if (results.length === 0) {
         return NextResponse.json({
           success: true,
+          searchFailures,
           results: [],
           truncated: false,
           rawCount: 0,
@@ -259,6 +267,7 @@ export async function POST(
 
       return NextResponse.json({
         success: true,
+        searchFailures,
         results: await stripProwlarrKeyFromResults(resultsWithRank),
         truncated,
         rawCount: results.length,
