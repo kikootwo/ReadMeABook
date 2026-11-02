@@ -24,6 +24,13 @@ Provides template variable substitution, validation, and preview generation for 
 - `{series}` - Series name (optional)
 - `{seriesPart}` - Series part or position (optional)
 
+### Formats
+
+- `{seriesPart:00}`, `{seriesPart:000}`, `{seriesPart:0000}` pad a numeric part to 2, 3 or 4 digits: `1` → `01`, `1.5` → `01.5`, `1-3` → `01-03`, `100` → `100`
+- Other shapes (`Book 1`, `1a`, `1, 2`) are left as they are; an empty part is removed like `{seriesPart}`
+- Works in conditional blocks: `{Book seriesPart:00 - }`
+- Only `seriesPart` takes a format; the validators reject any other (`{seriesPart:x}`, `{year:00}`)
+
 ## API Reference
 
 ### `substituteTemplate(template: string, variables: TemplateVariables): string`

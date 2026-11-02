@@ -16,6 +16,14 @@ Target directory read from database config `media_dir` (configurable in setup wi
 - `{primaryAuthor}`: first entry of `author`, split on `,` `;` `&` (the bulk import set), skipping entries that sanitize to nothing; derived in `src/lib/utils/path-template-variables.ts`. `and` does not split. A comma always splits, so `Martin Luther King, Jr.` gives `Martin Luther King` and `Tolkien, J.R.R.` gives `Tolkien`. Role text stays (`Birgit Schmitz - Übersetzer`). No usable entry → empty, like an empty `{narrator}`
 - Paths are built at organize time only: a template change applies to books organized afterward. Existing folders are not moved; re-importing a book after a change lands it in the new folder
 
+**Formats (`{seriesPart:00}`, #250):**
+- `{seriesPart:00}`, `{seriesPart:000}`, `{seriesPart:0000}` pad the part to 2, 3 or 4 digits. Only `seriesPart` takes a format
+- Pads only a number (`1`, `1.5`) or a range with `-` (`1-3`, `1 - 3`): each integer part gets leading zeros, digits are never cut, the separator stays as written. `1`→`01`, `1.5`→`01.5`, `10`→`10`, `100`→`100`, `1-3`→`01-03`. Other shapes stay as they are (`Book 1`, `1a`, `1, 2`, `-1`, an en dash range). Empty → removed, like `{seriesPart}`
+- Plain or in a conditional block: `{Book seriesPart:00 - }` → `Book 01 - `
+- Grammar: brace content is one reference (`name` or `name:format`; the format is the letters and digits after `:`) or a conditional block (literal text + references). Both validators reject any other format (`{seriesPart:x}`, `{seriesPart:0}`, `{year:00}`) with `Unsupported format: {...}`. A `:` with no letter or digit after it (`{seriesPart:}`, `{Part: seriesPart}`) is still `Invalid characters found: :`
+- Resolver: only brace content with a supported format takes the format path (`usesFormat`, `resolveFormattedBlock` in `src/lib/utils/path-template-variables.ts`); order per value is trim → pad → sanitize. Every other brace resolves exactly as before, including a saved invalid template (`{seriesPart:x}` → `1:x`, `{seriesPart:year}` → `1:2006`)
+- Unchanged output for every other template is pinned by `tests/lib/utils/path-template.golden.test.ts` (fixture captured before formats)
+
 **Examples:**
 ```
 Template: {author}/{title} {asin}
@@ -29,6 +37,9 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 
 Template: {primaryAuthor}/{title}   (author "Douglas Preston, Lincoln Child")
 Result: Douglas Preston/Relic/
+
+Template: {author}/{series}/{seriesPart:00} - {title}
+Result: Douglas Preston, Lincoln Child/Pendergast/01 - Relic/
 ```
 
 **Legacy behavior (hardcoded):**
