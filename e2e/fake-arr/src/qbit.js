@@ -6,7 +6,8 @@
  * torrents/categories :555, createCategory :566, editCategory :588, add (urls) :354, add (multipart) :523,
  * info :632/:675, pause :696, resume :723, delete :750, files :780, setCategory :821.
  * A duplicate add answers "Fails." like qBittorrent 4.6 (nothing new was added); seedTorrent() puts a
- * torrent in the client before RMAB sees it (a takeover, #423).
+ * torrent in the client before RMAB sees it (a takeover, #423). armQbitFault() makes the next
+ * `count` torrents/delete calls answer an HTTP error without deleting anything (#228).
  */
 
 import { randomBytes } from 'node:crypto';
@@ -111,6 +112,13 @@ export async function handleQbit(state, req, res, url, recordEntry) {
 
   if (!state.qbitSessions.has(cookieSid(req))) return sendText(res, 403, 'Forbidden');
 
+  const fault = state.qbitFaults.get(route);
+  if (fault && fault.remaining > 0) {
+    fault.remaining -= 1;
+    recordEntry.fault = fault.status;
+    return sendText(res, fault.status, 'Internal Server Error');
+  }
+
   switch (route) {
     case '/auth/logout':
       state.qbitSessions.delete(cookieSid(req));
@@ -208,6 +216,21 @@ export function seedTorrent(state, { release: releaseId, addedAgoSec = 172800, c
   record.job.startedAt = added * 1000;
   materialize(state, record.job);
   return { hash: record.hash, name: record.name, savePath: record.savePath, contentPath: record.job.contentPath, addedOn: record.addedOn, completionOn: record.completionOn };
+}
+
+/** Only torrents/delete can be faulted: a failing torrents/info would make RMAB treat the torrent as gone. */
+const FAULTABLE = new Set(['/torrents/delete']);
+
+export function armQbitFault(state, { path = 'torrents/delete', status = 500, count = 1 }) {
+  const parts = String(path).split('/').filter(Boolean);
+  if (parts[0] === 'api' && parts[1] === 'v2') parts.splice(0, 2);
+  const route = `/${parts.join('/')}`;
+  if (!FAULTABLE.has(route)) throw new Error(`qbit-fault supports only ${[...FAULTABLE].join(', ')}`);
+  const code = Number(status);
+  if (!Number.isInteger(code) || code < 400 || code > 599) throw new Error('qbit-fault status must be 400-599');
+  const remaining = Math.max(0, Math.floor(Number(count)));
+  state.qbitFaults.set(route, { status: code, remaining });
+  return { path: route, status: code, remaining };
 }
 
 function selectTorrents(state, hashes) {
