@@ -1,0 +1,232 @@
+/**
+ * Component: E2E regression #325a / #284 part B (a delivered request follows the library's current ASIN)
+ * Documentation: documentation/testing/e2e-harness.md
+ *
+ * Run with: --offline-fixtures --overrides abs-fake-metadata (ABS gets fake Audible/Audnexus answers;
+ * RMAB's own provider calls are refused; every title is made up). Schedules off, as in 284-library-link.
+ * 1. Deliver martian X (B082BHJMFF), real ABS scan, real ABS rematch to artemis Y (B072R1CY4P), ONE
+ *    plex_library_scan: `available`, library_asin Y, the requested fields unchanged in SQL; the request
+ *    list, admin list and detail show artemis with `audibleAsin`/`asin` X and `libraryAsin` Y. Screenshots.
+ *    The card's details modal asks for X. "Get ebook" (X) creates no audiobooks row.
+ * 2. Rematch to phm Z (B08G9PRS1K), one scan: library_asin Z.
+ * 3. Ownership: POST /api/requests X and Z → 409; request-with-torrent X → 409 AlreadyAvailable.
+ * 4. Rematch back to X, one scan: library_asin null.
+ * After each scan: audiobook request count and search jobs unchanged. Values read first, then expect.soft,
+ * so a run on main (no column) shows every value.
+ */
+
+import { test, expect, type Browser } from '@playwright/test';
+import { Abs, authState, ctl, evidencePath, execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rmab, snap, stackExecSync, stackLogsSync, urls, waitFor, writeEvidence } from '../../lib/harness';
+import { dbNow, markJobs, MEDIA, psql, sqlStr, waitOrganized } from './242-helpers';
+
+test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
+
+const SCHEDULES = ['plex_recently_added_check', 'plex_library_scan', 'audible_refresh'];
+const SCAN_TYPES = `('scan_plex','plex_library_scan')`;
+const FAKE_PROXY = 'http://fake-arr:9898';
+const DIR = '284b';
+
+type FixtureBook = { asin: string; title: string; author: string; narrator: string };
+
+const printenv = (service: string, name: string) => {
+  try {
+    return stackExecSync(service, ['printenv', name]).trim();
+  } catch {
+    return '';
+  }
+};
+
+/** psql trims, so multi-column reads join with '|' (an empty first column would shift a tab split). */
+const bookRow = (requestId: string) => {
+  const [status, absItemId, libraryAsin, audibleAsin, title, author, narrator, series, year, filePath] = psql(
+    `select concat_ws('|', r.status, coalesce(a.abs_item_id,''), coalesce(a.library_asin,''), coalesce(a.audible_asin,''), a.title, a.author, coalesce(a.narrator,''), coalesce(a.series,''), coalesce(a.year::text,''), coalesce(a.file_path,'')) from requests r join audiobooks a on a.id = r.audiobook_id where r.id = ${sqlStr(requestId)}`
+  ).split('|');
+  return { status, absItemId, libraryAsin, audibleAsin, title, author, narrator, series, year, filePath };
+};
+const counts = () => ({
+  audiobookRequests: Number(psql(`select count(*) from requests where type = 'audiobook' and deleted_at is null`)),
+  audiobooks: Number(psql('select count(*) from audiobooks')),
+  searchJobs: Number(psql(`select count(*) from jobs where type = 'search_indexers'`)),
+});
+
+async function session(browser: Browser, width: number, height: number, dark: boolean) {
+  const ctx = await browser.newContext({
+    baseURL: process.env.E2E_BASE_URL, viewport: { width, height }, colorScheme: dark ? 'dark' : 'light',
+    storageState: evidencePath('storage-state.json'),
+  });
+  return { ctx, page: await ctx.newPage() };
+}
+
+test('#325a: a delivered request follows the ASIN Audiobookshelf holds now', async ({ browser }) => {
+  test.setTimeout(1_500_000);
+  for (const service of ['abs', 'rmab']) {
+    expect(printenv(service, 'HTTPS_PROXY'), `${service} must run with --overrides abs-fake-metadata`).toBe(FAKE_PROXY);
+  }
+  const index = JSON.parse(stackExecSync('fake-arr', ['cat', '/fixtures/index.json']));
+  const [martian, artemis, phm] = (['martian', 'artemis', 'phm'] as const).map((k) => index.books[k] as FixtureBook);
+  expect(martian.asin).toBe('B082BHJMFF');
+  expect(artemis.asin).toBe('B072R1CY4P');
+  expect(phm.asin).toBe('B08G9PRS1K');
+  expect(martian.title, 'run with --offline-fixtures').toMatch(/^Fixture Book /);
+
+  // 0. Schedules off; wait out the boot burst (as 284-library-link).
+  const rmab = await Rmab.loginAdmin();
+  const { jobs } = await rmab.get<{ jobs: { id: string; type: string }[] }>('/api/admin/jobs');
+  for (const type of SCHEDULES) {
+    const job = jobs.find((j) => j.type === type);
+    expect((await rmab.raw('PUT', `/api/admin/jobs/${job!.id}`, { enabled: false })).status, `disable ${type}`).toBe(200);
+  }
+  let lastOverdue = -1;
+  let changedAt = Date.now();
+  await waitFor('RMAB startup jobs settled', async () => {
+    const logs = stackLogsSync('rmab');
+    const overdue = (logs.match(/is overdue, triggering now/g) || []).length;
+    if (overdue !== lastOverdue) {
+      lastOverdue = overdue;
+      changedAt = Date.now();
+    }
+    const refresh = [/\[AudibleRefresh\] Starting Audible data refresh/g, /\[AudibleRefresh\] (Cleanup complete|Error:)/g].map((r) => (logs.match(r) || []).length);
+    const scans = [/\[ScanLibrary\] Scanning library/g, /\[ScanLibrary\] (Matched \d+\/\d+ requests|Error:)/g].map((r) => (logs.match(r) || []).length);
+    return Date.now() - changedAt > 20_000 && refresh[1] >= refresh[0] && scans[1] >= scans[0] ? true : null;
+  }, { timeoutMs: 420_000, intervalMs: 3_000 });
+
+  // 1a. Deliver martian (X) for real up to `downloaded`.
+  const def = {
+    name: 'library-follow-325a', description: 'One mp3 torrent for book martian (generated tones).', book: 'martian',
+    indexers: [{ id: 1, name: 'E2E Torrents', protocol: 'torrent', priority: 25 }],
+    releases: [{ id: 'good', title: '{{author}} - {{title}} (Unabridged) [MP3 64kbps]', sizeMB: 420, seeders: 60, fixture: 'martian-mp3' }],
+  };
+  expect((await ctl('/scenario', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ definition: def }) })).status).toBe(200);
+  const idx = await rmab.get<{ indexers: unknown[]; flagConfigs: unknown[] }>('/api/admin/settings/prowlarr/indexers');
+  expect((await rmab.raw('PUT', '/api/admin/settings/prowlarr/indexers', { indexers: idx.indexers, flagConfigs: idx.flagConfigs })).ok).toBe(true);
+  const since = markJobs();
+  const requestId = (await rmab.requestBook((await fakeArr.books()).martian)).request.id;
+  await waitFor('request downloaded', async () => ['downloaded', 'available', 'failed'].includes(psql(`select status from requests where id = ${sqlStr(requestId)}`)), { timeoutMs: 420_000, intervalMs: 3_000 });
+  await waitOrganized(since, requestId);
+  const delivered = bookRow(requestId);
+  expect(delivered.status, 'precondition: delivered').toBe('downloaded');
+  const rel = delivered.filePath.slice(MEDIA.length + 1);
+
+  // 1b. Real ABS scan adds the folder; real ABS rematches go through the fake metadata.
+  const abs = await Abs.login();
+  const libraryId = authState().absLibraryId;
+  expect((await fetch(`${urls.abs()}/api/libraries/${libraryId}/scan`, { method: 'POST', headers: { Authorization: `Bearer ${abs.token}` } })).ok).toBe(true);
+  const item = await waitFor('ABS item for RMAB folder', async () =>
+    (await abs.libraryItems(libraryId)).find((i) => String(i.relPath || '').replace(/\/+$/, '') === rel) || null, { timeoutMs: 180_000, intervalMs: 2_000 });
+  const rematch = async (asin: string) => {
+    await abs.req('POST', `/api/items/${item.id}/match`, { provider: 'audible', asin, overrideDefaults: true, overrideDetails: true });
+    const now = (await abs.req('GET', `/api/items/${item.id}`)).media?.metadata?.asin || '';
+    expect(now, `precondition: the ABS item now holds ${asin}`).toBe(asin);
+  };
+  const oneScan = async (label: string) => {
+    const before = counts();
+    const t0 = dbNow();
+    await rmab.triggerScheduledJob('plex_library_scan');
+    const status = await waitFor(`scan ${label}`, async () => {
+      const s = psql(`select status from jobs where type in ${SCAN_TYPES} and created_at > ${sqlStr(t0)}::timestamp order by created_at desc limit 1`);
+      return s === 'completed' || s === 'failed' ? s : null;
+    }, { timeoutMs: 300_000, intervalMs: 2_000 });
+    const after = counts();
+    const row = bookRow(requestId);
+    writeEvidence(`${DIR}/scan-${label}.json`, { status, before, after, row });
+    expect.soft(status, `scan ${label}`).toBe('completed');
+    expect.soft(after, `scan ${label}: no request, book or search job created`).toEqual(before);
+    return row;
+  };
+  const requested = { audibleAsin: martian.asin, title: delivered.title, author: delivered.author, narrator: delivered.narrator, series: delivered.series, year: delivered.year };
+  await rematch(artemis.asin);
+  const s1 = await oneScan('1-artemis');
+
+  // 1c. API views.
+  const list = await rmab.get<{ requests: { id: string; audiobook: Record<string, unknown> }[] }>('/api/requests?limit=100');
+  const listed = list.requests.find((r) => r.id === requestId)?.audiobook ?? {};
+  const admin = await rmab.get<{ requests: Record<string, unknown>[] }>('/api/admin/requests?pageSize=100');
+  const adminRow = admin.requests.find((r) => r.requestId === requestId) ?? {};
+  const adminSearch = await rmab.get<{ requests: Record<string, unknown>[] }>(`/api/admin/requests?search=${encodeURIComponent(artemis.title)}`);
+  const detail = (await rmab.get<{ request: { audiobook: Record<string, unknown> } }>(`/api/requests/${requestId}`)).request.audiobook;
+  const followLog = (stackLogsSync('rmab').match(/Following Audiobookshelf: "[^"]*" library ASIN \S+ -> \S+/g) || []);
+  writeEvidence(`${DIR}/step1.json`, { s1, requested, listed, adminRow, adminSearchIds: adminSearch.requests.map((r) => r.requestId), detail, followLog });
+
+  // 1d. Screenshots (before Get ebook adds an ebook card). The modal's details response is a labelled replay:
+  // RMAB's own Audible calls are refused under abs-fake-metadata; the point is which ASIN the modal asks for.
+  const asked: string[] = [];
+  {
+    const { ctx, page } = await session(browser, 1280, 900, false);
+    await page.route(/\/api\/audiobooks\/[A-Z0-9]{10}$/, async (route) => {
+      const asin = route.request().url().split('/').pop()!;
+      asked.push(asin);
+      const book = asin === martian.asin ? martian : asin === artemis.asin ? artemis : null;
+      if (!book) return route.fulfill({ status: 404, json: { error: 'NotFound' } });
+      await route.fulfill({ json: { success: true, audibleBaseUrl: 'https://www.audible.com', audiobook: { ...book, description: '(replayed details, e2e)', coverArtUrl: null, durationMinutes: 600 } } });
+    });
+    await page.goto('/requests');
+    await expect(page.getByRole('heading', { name: artemis.title }).first()).toBeVisible({ timeout: 30_000 });
+    await snap(page, DIR, 'card-1280-light');
+    await page.getByRole('button', { name: artemis.title }).first().click();
+    await expect(page.getByText(martian.title).first()).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(500);
+    await snap(page, DIR, 'modal-requested');
+    await page.goto('/admin');
+    const row = page.getByText(artemis.title).first();
+    await row.scrollIntoViewIfNeeded();
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await snap(page, DIR, 'admin-row');
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await session(browser, 375, 812, true);
+    await page.goto('/requests');
+    await expect(page.getByRole('heading', { name: artemis.title }).first()).toBeVisible({ timeout: 30_000 });
+    await snap(page, DIR, 'card-375-dark');
+    await ctx.close();
+  }
+
+  // 1e. "Get ebook" from the modal keys on X: it must not create a Y audiobooks row.
+  const booksBefore = counts().audiobooks;
+  const ebook = await rmab.raw('POST', `/api/audiobooks/${martian.asin}/fetch-ebook`, {});
+  const ebookBody = await ebook.json().catch(() => null);
+  await new Promise((resolve) => setTimeout(resolve, 10_000)); // any ebook request and its search job land before step 2 counts
+  const booksAfterEbook = counts().audiobooks;
+  const yRows = Number(psql(`select count(*) from audiobooks where audible_asin = ${sqlStr(artemis.asin)}`));
+  writeEvidence(`${DIR}/fetch-ebook.json`, { status: ebook.status, body: ebookBody, booksBefore, booksAfterEbook, yRows });
+
+  // 2. Rematch to phm (Z), one scan.
+  await rematch(phm.asin);
+  const s2 = await oneScan('2-phm');
+
+  // 3. Ownership: X and Z stay owned.
+  const post = async (book: FixtureBook) => {
+    const res = await rmab.raw('POST', '/api/requests', { audiobook: { asin: book.asin, title: book.title, author: book.author, narrator: book.narrator } });
+    return { status: res.status, body: await res.json().catch(() => null) };
+  };
+  const ownedBefore = counts();
+  const postX = await post(martian);
+  const postZ = await post(phm);
+  const torrentRes = await rmab.raw('POST', '/api/audiobooks/request-with-torrent', {
+    audiobook: { asin: martian.asin, title: martian.title, author: martian.author },
+    torrent: { guid: 'e2e-325a', title: `${martian.author} - ${martian.title}`, size: 1000, indexer: 'E2E Torrents', downloadUrl: 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567', publishDate: new Date().toISOString() },
+  });
+  const torrent = { status: torrentRes.status, body: await torrentRes.json().catch(() => null) };
+  const ownedAfter = counts();
+  writeEvidence(`${DIR}/ownership.json`, { postX, postZ, torrent, ownedBefore, ownedAfter });
+
+  // 4. Back to X, one scan.
+  await rematch(martian.asin);
+  const s4 = await oneScan('4-martian');
+
+  expect.soft(s1, 'step 1 SQL').toMatchObject({ status: 'available', absItemId: item.id, libraryAsin: artemis.asin, ...requested });
+  expect.soft(listed, 'GET /api/requests').toMatchObject({ audibleAsin: martian.asin, libraryAsin: artemis.asin, title: artemis.title });
+  expect.soft(adminRow, 'admin list').toMatchObject({ asin: martian.asin, libraryAsin: artemis.asin, title: artemis.title });
+  expect.soft(adminSearch.requests.map((r) => r.requestId), 'admin search by the library title').toContain(requestId);
+  expect.soft(detail, 'GET /api/requests/:id').toMatchObject({ audibleAsin: martian.asin, libraryAsin: artemis.asin, title: artemis.title });
+  expect.soft(followLog, 'follow log line').toContain(`Following Audiobookshelf: "${delivered.title}" library ASIN ${martian.asin} -> ${artemis.asin}`);
+  expect.soft(asked, 'the card modal asked for the requested ASIN only').toEqual([martian.asin]);
+  expect.soft(booksAfterEbook, 'Get ebook created no audiobooks row').toBe(booksBefore);
+  expect.soft(yRows, 'no row for the library ASIN').toBe(0);
+  expect.soft(s2, 'step 2').toMatchObject({ status: 'available', libraryAsin: phm.asin, ...requested });
+  expect.soft(followLog.length, 'one follow so far').toBeGreaterThan(0);
+  expect.soft([postX.status, postZ.status, torrent.status], 'X, Z, request-with-torrent X refused').toEqual([409, 409, 409]);
+  expect.soft(torrent.body?.error, 'request-with-torrent').toBe('AlreadyAvailable');
+  expect.soft(ownedAfter, 'no request or search job from the ownership checks').toEqual(ownedBefore);
+  expect(s4, 'step 4: back to the requested ASIN clears it').toMatchObject({ status: 'available', libraryAsin: '', ...requested });
+});

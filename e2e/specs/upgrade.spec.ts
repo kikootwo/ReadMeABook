@@ -19,6 +19,9 @@ const WATCH = { authorAsin: 'B0E2EUPGAU', authorName: 'Pellam Ostrowyne', series
 
 test.skip(phase !== 'upgrade-seed' && phase !== 'upgrade-verify', 'upgrade spec only runs via run.mjs --upgrade-from');
 
+/** What a request card shows of its book (#325a: unchanged until a library scan follows it). */
+const shownBook = (a: { title?: string; author?: string; narrator?: string | null; coverArtUrl?: string | null } | undefined) => ({ title: a?.title, author: a?.author, narrator: a?.narrator ?? null, coverArtUrl: a?.coverArtUrl ?? null });
+
 test('upgrade-seed: seed requests on the release image', async () => {
   test.skip(phase !== 'upgrade-seed');
   const rmab = await Rmab.loginAdmin();
@@ -35,6 +38,7 @@ test('upgrade-seed: seed requests on the release image', async () => {
   await rmab.post('/api/user/watched-series', { seriesAsin: WATCH.seriesAsin, seriesTitle: WATCH.seriesTitle });
   writeEvidence('upgrade/before.json', {
     statuses: Object.fromEntries(requests.requests.map((r) => [r.audiobook?.audibleAsin, r.status])),
+    shown: Object.fromEntries(requests.requests.map((r) => [r.audiobook?.audibleAsin, shownBook(r.audiobook)])),
     health: await (await fetch(`${urls.rmab()}/api/health`)).json().catch(() => null),
   });
 });
@@ -53,6 +57,23 @@ test('upgrade-verify: branch image keeps requests, logins and decryptable secret
   for (const r of requests.requests) {
     const was = before.statuses[r.audiobook?.audibleAsin];
     if (was === 'failed' || was === 'available') expect.soft(r.status, `status of ${r.audiobook?.title}`).toBe(was);
+  }
+
+  // #325a: the startup schema sync added audiobooks.library_asin (nullable), null on every row, and
+  // every request shows its book exactly as before (the overlay needs a value only a scan writes).
+  const shownAfter = Object.fromEntries(requests.requests.map((r) => [r.audiobook?.audibleAsin, shownBook(r.audiobook)]));
+  writeEvidence('upgrade/325a-shown.json', { before: before.shown, after: shownAfter, libraryAsins: requests.requests.map((r) => r.audiobook?.libraryAsin ?? null) });
+  expect.soft(shownAfter, 'request cards show their books as before').toEqual(before.shown);
+  expect.soft(requests.requests.map((r) => r.audiobook?.libraryAsin ?? null), 'effective libraryAsin null').toEqual(requests.requests.map(() => null));
+  if (execBridgeAvailable()) {
+    const column = psql("select is_nullable from information_schema.columns where table_name = 'audiobooks' and column_name = 'library_asin'");
+    const set = psql('select count(*) from audiobooks where library_asin is not null');
+    const rows = psql("select concat_ws('|', (select count(*) from requests), (select count(*) from audiobooks))");
+    writeEvidence('upgrade/325a-column.json', { column, set, rows });
+    expect(column, 'audiobooks.library_asin exists, nullable').toBe('YES');
+    expect(set, 'library_asin null on every seeded row').toBe('0');
+  } else {
+    test.info().annotations.push({ type: 'skipped-check', description: `library_asin: ${EXEC_BRIDGE_SKIP}` });
   }
 
   // Encrypted settings still decrypt: an interactive search needs the stored Prowlarr key, and
