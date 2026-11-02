@@ -8,6 +8,7 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { Prisma } from '@/generated/prisma';
+import { loadLinkedRows, withLibraryDisplay } from '@/lib/services/library/library-display';
 
 const logger = RMABLogger.create('API.Admin.Requests');
 
@@ -69,14 +70,20 @@ export async function GET(request: NextRequest) {
           where.userId = userId;
         }
 
-        // Search by title or author
+        // Search by title or author: the requested ones, or (a followed audiobook request, #325a)
+        // the linked library item's. The title sort stays on the requested title.
         if (search) {
-          where.audiobook = {
-            OR: [
-              { title: { contains: search, mode: 'insensitive' } },
-              { author: { contains: search, mode: 'insensitive' } },
-            ],
-          };
+          const text = { contains: search, mode: 'insensitive' as const };
+          const requested: Prisma.RequestWhereInput = { audiobook: { OR: [{ title: text }, { author: text }] } };
+          const library = await prisma.plexLibrary.findMany({
+            where: { OR: [{ title: text }, { author: text }] },
+            select: { plexGuid: true },
+            take: 500,
+          });
+          where.OR = library.length === 0 ? [requested] : [requested, {
+            type: 'audiobook',
+            audiobook: { libraryAsin: { not: null }, absItemId: { in: library.map((r) => r.plexGuid) } },
+          }];
         }
 
         // Build orderBy clause
@@ -114,6 +121,8 @@ export async function GET(request: NextRequest) {
                 title: true,
                 author: true,
                 audibleAsin: true,
+                absItemId: true,
+                libraryAsin: true,
               },
             },
             user: {
@@ -142,24 +151,30 @@ export async function GET(request: NextRequest) {
           take: pageSize,
         });
 
-        // Format response
-        const formatted = requests.map((request) => ({
-          requestId: request.id,
-          title: request.audiobook.title,
-          author: request.audiobook.author,
-          asin: request.audiobook.audibleAsin || null,
-          status: request.status,
-          type: request.type || 'audiobook', // Include request type for UI display
-          userId: request.user.id,
-          user: request.user.plexUsername,
-          createdAt: request.createdAt,
-          completedAt: request.completedAt,
-          errorMessage: request.errorMessage,
-          torrentUrl: request.downloadHistory[0]?.torrentUrl || null,
-          downloadAttempts: request.downloadAttempts,
-          customSearchTerms: request.customSearchTerms || null,
-          blockedCount: request._count?.blockedReleases ?? 0,
-        }));
+        // Format response. Title and author follow the library (#325a); `asin` stays the requested
+        // one (View details and its actions key on it), `libraryAsin` is the effective library ASIN.
+        const rows = await loadLinkedRows(requests.map((r) => r.audiobook));
+        const formatted = requests.map((request) => {
+          const shown = withLibraryDisplay(request.audiobook, rows, request.type);
+          return {
+            requestId: request.id,
+            title: shown.title,
+            author: shown.author,
+            asin: request.audiobook.audibleAsin || null,
+            libraryAsin: shown.libraryAsin,
+            status: request.status,
+            type: request.type || 'audiobook', // Include request type for UI display
+            userId: request.user.id,
+            user: request.user.plexUsername,
+            createdAt: request.createdAt,
+            completedAt: request.completedAt,
+            errorMessage: request.errorMessage,
+            torrentUrl: request.downloadHistory[0]?.torrentUrl || null,
+            downloadAttempts: request.downloadAttempts,
+            customSearchTerms: request.customSearchTerms || null,
+            blockedCount: request._count?.blockedReleases ?? 0,
+          };
+        });
 
         return NextResponse.json({
           requests: formatted,

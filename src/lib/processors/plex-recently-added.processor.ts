@@ -11,6 +11,7 @@ import { getLibraryService } from '../services/library';
 import { getThumbnailCacheService } from '../services/thumbnail-cache.service';
 import { createLibraryRowUnlessPresent } from './library-row-insert';
 import { matchRequestsToLibrary } from '../services/library/match-requests';
+import { followLibraryAsins } from '../services/library/follow-library-asin';
 
 export interface PlexRecentlyAddedPayload {
   jobId?: string;
@@ -197,6 +198,7 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
     // Note: Ebook requests don't match to Plex/ABS library - they stop at 'downloaded' status
     const matching = await matchRequestsToLibrary({ backendMode, libraryId, listedItems: recentItems, logger });
     const matchedDownloads = matching.matched;
+    await followLibraryAsins(backendMode, logger); // ABS: delivered requests show the item's current ASIN (#325a)
 
     logger.info(`Complete: ${newCount} new, ${updatedCount} updated, ${matchedDownloads} matched requests`);
 

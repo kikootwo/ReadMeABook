@@ -6,9 +6,13 @@
  * internal job/download data: Job.payload/result/stackTrace,
  * DownloadHistory.magnetLink/torrentUrl/downloadPath, Audiobook.filePath and
  * Request.selectedTorrent. Request.placedEbookFiles is left out for every caller.
+ * Both shapes go through withRequestLibraryDisplay: a followed audiobook request (#325a) shows
+ * the linked library item's title, author, narrator and cover, and `audiobook.libraryAsin` is the
+ * effective value (null when the overlay does not apply).
  */
 
 import type { Prisma } from '@/generated/prisma/client';
+import { loadLinkedRows, withLibraryDisplay, type DisplayAudiobook } from '@/lib/services/library/library-display';
 
 const LATEST_SELECTED_DOWNLOAD = { where: { selected: true }, take: 1 } as const;
 const RECENT_JOBS = { orderBy: { createdAt: 'desc' }, take: 5 } as const;
@@ -63,6 +67,7 @@ export const OWNER_REQUEST_DETAIL_SELECT = {
       plexGuid: true,
       plexLibraryId: true,
       absItemId: true,
+      libraryAsin: true, // effective value, set by withRequestLibraryDisplay
       filesHash: true,
       createdAt: true,
       updatedAt: true,
@@ -131,4 +136,16 @@ export function hideStoredPick<T>(record: T, role: string | undefined): T {
 export function hidePlacementRecord<T>(record: T): T {
   if (!record || typeof record !== 'object') return record;
   return { ...record, placedEbookFiles: undefined };
+}
+
+/**
+ * The detail as shown (#325a): the library overlay on the audiobook of an audiobook request, and
+ * the effective `audiobook.libraryAsin`. `audibleAsin`, series, year and description stay as requested.
+ */
+export async function withRequestLibraryDisplay<R extends { type?: string | null; audiobook?: DisplayAudiobook | null }>(
+  record: R | null
+): Promise<R | null> {
+  if (!record?.audiobook) return record;
+  const rows = await loadLinkedRows([record.audiobook]);
+  return { ...record, audiobook: withLibraryDisplay(record.audiobook, rows, record.type) };
 }

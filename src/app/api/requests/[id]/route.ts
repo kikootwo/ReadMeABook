@@ -10,7 +10,7 @@ import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '@/lib/interfaces/download-client.interface';
 import { CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
-import { ADMIN_REQUEST_DETAIL_INCLUDE, OWNER_REQUEST_DETAIL_SELECT, hidePlacementRecord } from '@/lib/services/request-detail-query';
+import { ADMIN_REQUEST_DETAIL_INCLUDE, OWNER_REQUEST_DETAIL_SELECT, hidePlacementRecord, withRequestLibraryDisplay } from '@/lib/services/request-detail-query';
 import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { toJsonSafe } from '@/lib/utils/json-safe';
@@ -40,9 +40,9 @@ export async function GET(
       const where = { id, deletedAt: null }; // Only show active requests
 
       // Non-admins (owners, API tokens) get an explicit field list without internal job/download data
-      const requestRecord = isAdmin
+      const requestRecord = await withRequestLibraryDisplay(isAdmin // + the library overlay (#325a)
         ? await prisma.request.findFirst({ where, include: ADMIN_REQUEST_DETAIL_INCLUDE })
-        : await prisma.request.findFirst({ where, select: OWNER_REQUEST_DETAIL_SELECT });
+        : await prisma.request.findFirst({ where, select: OWNER_REQUEST_DETAIL_SELECT }));
 
       if (!requestRecord) {
         return NextResponse.json(

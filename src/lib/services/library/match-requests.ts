@@ -84,10 +84,14 @@ const AVAILABLE_DATA = () => ({
   updatedAt: new Date(),
 });
 
-/** The book's library item id, written only by the job whose compare-and-set won. */
+/**
+ * The book's library item id, written only by the job whose compare-and-set won. A new ABS item
+ * starts with no library ASIN; the follow after the match fills it in the same run (#325a).
+ */
 async function recordItem(audiobookId: string, data: { absItemId: string } | { plexGuid: string }, logger: RMABLogger): Promise<void> {
+  const item = 'absItemId' in data ? { ...data, libraryAsin: null } : data;
   try {
-    await prisma.audiobook.update({ where: { id: audiobookId }, data: { ...data, updatedAt: new Date() } });
+    await prisma.audiobook.update({ where: { id: audiobookId }, data: { ...item, updatedAt: new Date() } });
   } catch (error) {
     logger.error(`Library item id of book ${audiobookId} not saved: ${error instanceof Error ? error.message : String(error)}`);
   }

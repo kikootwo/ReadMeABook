@@ -230,6 +230,7 @@ describe('Admin requests routes', () => {
         downloadHistory: [],
       },
     ]);
+    prismaMock.plexLibrary.findMany.mockResolvedValueOnce([]); // no library title matches
 
     const mockRequest = {
       url: 'http://localhost/api/admin/requests?search=Harry',
@@ -241,6 +242,10 @@ describe('Admin requests routes', () => {
 
     expect(payload.requests).toHaveLength(1);
     expect(payload.requests[0].title).toBe('Harry Potter');
+    const text = { contains: 'Harry', mode: 'insensitive' };
+    expect(prismaMock.request.findMany.mock.calls[0][0].where.OR).toEqual([
+      { audiobook: { OR: [{ title: text }, { author: text }] } },
+    ]);
   });
 
   it('paginates requests correctly', async () => {

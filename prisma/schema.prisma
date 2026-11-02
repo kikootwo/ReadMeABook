@@ -196,6 +196,9 @@ model Audiobook {
 
   // Audiobookshelf integration (alternative to Plex)
   absItemId String? @map("abs_item_id") // Audiobookshelf item ID
+  // ASIN of that item when Audiobookshelf matched it to another edition (#325a). Written only by the
+  // library scans (follow-library-asin.ts); shown on request cards and lists. Ownership never reads it.
+  libraryAsin String? @map("library_asin")
 
   // File hash for accurate library matching (SHA256 of sorted audio filenames)
   filesHash String? @map("files_hash") @db.Text

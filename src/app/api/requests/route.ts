@@ -13,6 +13,7 @@ import { createRequestForUser } from '@/lib/services/request-creator.service';
 import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { hidePlacementRecord } from '@/lib/services/request-detail-query';
+import { withLibraryDisplayAll } from '@/lib/services/library/library-display';
 
 const logger = RMABLogger.create('API.Requests');
 
@@ -187,7 +188,8 @@ export async function GET(request: NextRequest) {
       const page = hasNextPage ? requests.slice(0, limit) : requests;
       const nextCursor = hasNextPage ? page[page.length - 1].id : null;
 
-      const enriched = page.map(r => {
+      // A followed audiobook request shows the linked library item (#325a); one query per page
+      const enriched = (await withLibraryDisplayAll(page)).map(r => {
         const isCompleted = COMPLETED_STATUSES.includes(r.status as typeof COMPLETED_STATUSES[number]);
         const downloadAvailable = isCompleted && !!r.audiobook?.filePath;
         const audiobook = r.audiobook ? { ...r.audiobook, filePath: undefined } : r.audiobook;

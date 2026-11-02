@@ -15,6 +15,7 @@ import { RMABLogger } from '../utils/logger';
 import { resetRequestsAfterLibraryRemoval } from './library-removal';
 import { createLibraryRowUnlessPresent } from './library-row-insert';
 import { matchRequestsToLibrary } from '../services/library/match-requests';
+import { followLibraryAsins } from '../services/library/follow-library-asin';
 
 /**
  * Process library scan job
@@ -251,17 +252,10 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
 
           // Reset audiobook records and their requests
           for (const audiobook of linkedAudiobooks) {
-            // Clear library linkage
-            const updateData: any = {
-              status: 'requested',
-              plexGuid: null,
-              absItemId: null,
-              updatedAt: new Date(),
-            };
-
+            // Clear library linkage (and the library ASIN followed from that item, #325a)
             await prisma.audiobook.update({
               where: { id: audiobook.id },
-              data: updateData,
+              data: { status: 'requested', plexGuid: null, absItemId: null, libraryAsin: null, updatedAt: new Date() },
             });
 
             audiobooksReset++;
@@ -341,6 +335,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
             status: 'requested',
             plexGuid: null,
             absItemId: null,
+            libraryAsin: null,
             updatedAt: new Date(),
           },
         });
@@ -362,6 +357,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
 
     // 6. Match non-terminal audiobook requests (ASIN; ABS: delivered books by path/hash). Ebooks stop at 'downloaded'
     const matching = await matchRequestsToLibrary({ backendMode, libraryId: targetLibraryId, listedItems: libraryItems, logger });
+    await followLibraryAsins(backendMode, logger); // ABS: delivered requests show the item's current ASIN (#325a)
 
     logger.info(`Matched ${matching.matched}/${matching.total} requests`, {
       totalScanned: libraryItems.length,
