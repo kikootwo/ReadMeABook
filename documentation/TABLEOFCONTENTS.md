@@ -80,6 +80,7 @@
 - **.torrent/.nzb fetch, redirects, Prowlarr key scoping, user-picked release validation** → [phase3/download-clients.md](phase3/download-clients.md#source-fetch--prowlarr-key-scoping)
 - **qBittorrent integration (torrents)** → [phase3/qbittorrent.md](phase3/qbittorrent.md)
 - **qBittorrent torrent IDs (hybrid v1+v2 torrents, base32 magnets)** → [phase3/qbittorrent.md](phase3/qbittorrent.md)
+- **qBittorrent finished in the incomplete folder (30 s relocation grace, "didn't move it" warning, writable save path, #520)** → [phase3/qbittorrent.md](phase3/qbittorrent.md#completion--relocation-grace)
 - **SABnzbd integration (Usenet/NZB)** → [phase3/sabnzbd.md](phase3/sabnzbd.md)
 - **SABnzbd duplicate NZBs, retried adds after a timeout** → [phase3/sabnzbd.md](phase3/sabnzbd.md#duplicate-nzbs-and-retried-adds-329)
 - **File organization, seeding** → [phase3/file-organization.md](phase3/file-organization.md)

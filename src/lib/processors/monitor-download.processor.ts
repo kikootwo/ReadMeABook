@@ -72,6 +72,11 @@ const MAX_POLL_INTERVAL = 300;
  * enough to survive a Docker restart, service update, or transient network outage.
  */
 const MAX_CONNECTION_FAILURES = 30;
+/**
+ * Checks of a finished torrent still outside its save path: 5 re-checks at
+ * 2, 4, 6, 8, 10 s (30 s grace), then organize from where the files are (#520).
+ */
+const MAX_PATH_WAIT = 6;
 
 /**
  * Compute next poll delay with exponential backoff for stalled downloads.
@@ -160,6 +165,8 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
       // Normalize BOTH operands so the boundary test is separator-agnostic — Windows
       // clients report backslash paths, which a forward-slash prefix never matches (#209).
       // "Relocated" means downloadPath is equal to, or a child of, savePath.
+      // Only qBittorrent reports savePath. A real move shows as its `moving` state
+      // (mapped to `downloading`), so this grace only bridges "finished" -> "moving" (#520).
       if (info.savePath && downloadPath) {
         const normalizedSave = PathMapper.normalizePath(info.savePath);
         const normalizedDownload = PathMapper.normalizePath(downloadPath);
@@ -167,10 +174,9 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
           || normalizedDownload.startsWith(normalizedSave + '/');
         if (!isRelocated) {
           const waitCount = (prevPathWaitCount ?? 0) + 1;
-          const MAX_PATH_WAIT = 30; // Give up after ~5 minutes
 
           if (waitCount < MAX_PATH_WAIT) {
-            const delay = Math.min(10, waitCount * 2); // 2s, 4s, 6s... up to 10s
+            const delay = Math.min(10, waitCount * 2); // 2, 4, 6, 8, 10 s
             logger.info(`Download path still in temp location, waiting for relocation (${waitCount}/${MAX_PATH_WAIT})`, {
               downloadPath, savePath: info.savePath,
             });
@@ -184,7 +190,11 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
             return { success: true, completed: false, message: 'Waiting for file relocation', pathWaitCount: waitCount };
           }
 
-          logger.warn(`Download path still in temp location after ${waitCount} checks, proceeding with organization`);
+          logger.warn(
+            `qBittorrent finished the download but didn't move it from ${downloadPath} to the save path ` +
+            `${info.savePath}; RMAB is organizing it from the incomplete folder. Check that qBittorrent can write ` +
+            `to that save path (RMAB's download directory, after remote path mapping).`
+          );
         }
       }
 
