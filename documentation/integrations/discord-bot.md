@@ -7,9 +7,9 @@ A persistent discord.js gateway bot lets linked users request and manage titles 
 
 ## Transport
 - **discord.js gateway** (persistent WebSocket), NOT an HTTP interactions endpoint. No public URL/signature needed.
-- Singleton started once at app init: `getDiscordBotService().start()` in [src/app/api/init/route.ts](../../src/app/api/init/route.ts) — same process as Bull workers. Idempotent; gated on config.
+- Singleton started once from the normal startup path: `runInit()` in [src/lib/startup/app-init.ts](../../src/lib/startup/app-init.ts) calls `getDiscordBotService().start()` after `scheduler.start()` (instrumentation → `POST /api/init` → `runAppInitOnce()`; see [scheduler.md](../backend/services/scheduler.md#startup-initialization)) — same process as Bull workers. Idempotent; gated on config; a bot failure is logged and never fails startup.
 - Server-only: `discord.js` in `serverExternalPackages` + client-alias `false` in [next.config.ts](../../next.config.ts). Never import the bot from client components.
-- **Lazy-loaded:** `discord.js` and the command/router modules are pulled via dynamic `import()` inside `start()`/`registerCommands()` — never at module scope (`Client` is a type-only import, erased at build). When the bot is **disabled**, importing the service (e.g. from `/api/init`) loads **nothing** from discord.js → zero runtime footprint until enabled.
+- **Lazy-loaded:** `discord.js` and the command/router modules are pulled via dynamic `import()` inside `start()`/`registerCommands()` — never at module scope (`Client` is a type-only import, erased at build). When the bot is **disabled**, importing the service (e.g. from `app-init.ts`) loads **nothing** from discord.js → zero runtime footprint until enabled.
 - **Single-guild** assumption: commands registered guild-scoped (instant propagation) for the configured `guildId`.
 
 ## Config (category `discord`, Configuration table)

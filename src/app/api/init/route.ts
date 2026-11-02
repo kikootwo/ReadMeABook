@@ -11,7 +11,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { STARTUP_TOKEN_HEADER } from '@/lib/constants/startup';
 import { isStartupSecret } from '@/lib/startup/startup-secret';
 import { runAppInitOnce } from '@/lib/startup/app-init';
-import { getDiscordBotService } from '@/lib/services/discord/discord-bot.service';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,11 +20,6 @@ export async function POST(request: NextRequest) {
   }
 
   const outcome = await runAppInitOnce();
-
-  // Start the Discord bot if configured + enabled (gated internally; never throws into init)
-  if (outcome === 'initialized') {
-    await getDiscordBotService().start();
-  }
 
   if (outcome === 'initialized' || outcome === 'already-initialized') {
     return NextResponse.json({ success: true, alreadyInitialized: outcome === 'already-initialized' });
