@@ -24,7 +24,7 @@ const execFileP = promisify(execFile);
 
 interface Chapter { title: string; start: number; end: number }
 
-/** The critic's trailing-long case: every chapter after the first short one is over 487 s. */
+/** Trailing-long case: every chapter after the first short one is over 487 s. */
 const TRAILING_LONG: Chapter[] = [
   { title: 'One', start: 0, end: 100 },
   { title: 'Two', start: 100, end: 700 },
