@@ -90,6 +90,7 @@ Service uses singleton pattern for performance. When settings change (via admin 
 - Uses both `createCategory` and `editCategory` APIs for reliability
 - Remote path mapping applied after `customPath` resolution (outgoing: local → remote)
 - Adds send `autoTMM=true`, no `savepath` (category path applies in any default mode); if the category can't be ensured: `autoTMM=false` + `savepath` (#326, `placementFields()`)
+- Since v1.2.12 the category save path (RMAB's download directory, after remote path mapping) must be writable by qBittorrent, even when its default mode is Manual. With "Keep incomplete torrents in" set, qBittorrent moves a finished torrent there; if it can't, the files stay in the incomplete folder (see [Completion & Relocation Grace](#completion--relocation-grace))
 
 **Why Both Create and Edit:**
 1. Create: Ensures category exists (idempotent, won't fail if exists)
@@ -101,6 +102,16 @@ This prevents issues where category retains old save path after user changes `do
 - If `customPath` is set (e.g., `torrents`), category save path becomes `/downloads/torrents`
 - Remote path mapping applies to the resolved path: `reverseTransform(/downloads/torrents)` → remote equivalent
 - See [download-clients.md](./download-clients.md#per-client-custom-download-path) for details
+
+## Completion & Relocation Grace
+
+`monitor-download.processor.ts`, on `completed`/`seeding` when the client reports `savePath` (qBittorrent only):
+- **Relocated** (`content_path` equal to or under `save_path`, separator-agnostic, #209) → organize at once
+- **Moving:** qBittorrent state `moving` maps to `downloading` → normal polling, no path wait counted
+- **Not relocated:** grace of 5 re-checks at 2, 4, 6, 8, 10 s (30 s; `MAX_PATH_WAIT = 6`, payload `pathWaitCount`); it only bridges the gap between "finished" and `moving`
+- **Grace exhausted** → one `warn`, then organize from `content_path` (remote path mapping applied) as usual:
+  `qBittorrent finished the download but didn't move it from <downloadPath> to the save path <savePath>; RMAB is organizing it from the incomplete folder. Check that qBittorrent can write to that save path (RMAB's download directory, after remote path mapping).`
+- Other clients (no `savePath`) organize at once
 
 ## Remote Path Mapping
 
@@ -280,6 +291,7 @@ type TorrentState =
 **18. Magnet at a later redirect hop (#298)** - Only the first `Location` was checked; later hops went through axios, which cannot follow `magnet:`. Fixed by the shared fetcher (`download-source.ts`): every hop checked, relative redirects resolved, Prowlarr key sent only to Prowlarr download hops (see [download-clients.md](./download-clients.md#source-fetch--prowlarr-key-scoping))
 **19. Hybrid torrents and base32 magnets tracked under the wrong hash (#422)** - qBittorrent's ID for a hybrid is its truncated v2 hash; RMAB used v1 (5.2 adds reported failed, older versions never found) and kept base32 magnet hashes as base32. Fixed (`qbittorrent-ids.ts`): stored `downloadClientId` = qBittorrent's confirmed ID (5.2 receipt; after `Ok.` the v2 ID if listed, else v1); `torrentHash` = v1; every add checks the full list first (fail closed). Old rows (v1 of a hybrid, base32) resolve through the unfiltered lookup, no rewrite, and the ownership check (#423) decides on what they find. So deleting or retrying an old failed request now reaches the torrent it resolves to, with its files, when the ownership window owns it (24 h before the grab for v1.2.11 rows, 15 min before to 5 min after for older rows): RMAB's own, or, for a duplicate recorded on qBittorrent 4.4 (4.5-5.1: mismatched `btmh` only), a user's hybrid (see Critical Issues)
 **20. Category save path ignored in Manual mode (#326)** - Adds sent the category but no `savepath` and no `autoTMM`, so with qBittorrent's default Torrent Management Mode set to Manual the torrent went to the global default folder and the import failed. Fixed: adds send `autoTMM=true` (no `savepath`, the "incomplete downloads" folder still applies); when `ensureCategory()` fails, `autoTMM=false` + `savepath` = resolved download path. Needs qBittorrent 4.1.5+ (Web API 2.2.0; 4.1.0 to 4.1.4 ignore `autoTMM`). Automatic mode: a post-import category or a later category path change can make qBittorrent move the files (its "When Torrent Category changed" / "When Category Save Path changed" settings)
+**21. Finished download waited ~5 min in the incomplete folder (#520)** - When qBittorrent finished a torrent but never moved it from its incomplete folder to the save path (save path not writable from its side), the monitor checked 30 times (about 5 min) and then imported with a log line that didn't say why. Fixed: 30 s grace (5 re-checks), then a `warn` naming both paths and the save path to fix, then the import runs from the incomplete folder as before (see [Completion & Relocation Grace](#completion--relocation-grace))
 
 ## Tech Stack
 

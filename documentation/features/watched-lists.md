@@ -26,6 +26,7 @@ Series routes are identical with `seriesAsin`, `seriesTitle`, response key `seri
 ## Sync Flow (`src/lib/services/watched-lists.service.ts`)
 - Job `check_watched_lists`: daily `0 0 * * *` (scheduler) + targeted run on POST (`addCheckWatchedItemJob(userId, seriesAsin?, authorAsin?)`).
 - **Targeted run (#429):** a run with `seriesAsin` runs only the series pass for that series; with `authorAsin` only the author pass. It never re-checks the user's other watched lists. Scheduled runs (no ASIN) run both passes.
+- **Deleted users (#504):** watches whose user is soft-deleted (`User.deletedAt` set) are dropped right after the load (`withoutDeletedUsers()`, `src/lib/utils/deleted-user-skip.ts`): no scrape, no request, no `lastCheckedAt` write, also on a run scoped to that user. A series or author watched only by deleted users is not scraped. One info line per pass when any are skipped: `Skipped N watched series|authors whose user is deleted`. Rows and existing requests are kept.
 - Grouped by ASIN: one scan per series/author serves all its watchers; 2 s between series/authors.
 - **Series:** `scrapeSeriesPage()` pages up to 200 books (series order, no early stop; the scraper has no newest-first order) → dedup → per watcher `booksForWatch()` → requests.
   - **Limit:** a series with more than 200 books is only checked through its first 200 in series order, so a new-only watch can miss its newest books; such a run logs one warning per series (only when it has a new-only watcher).

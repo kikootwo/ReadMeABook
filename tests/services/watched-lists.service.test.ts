@@ -468,7 +468,7 @@ describe('processWatchedLists', () => {
     // Should have passed both userId and seriesAsin to the Prisma query
     expect(prismaMock.watchedSeries.findMany).toHaveBeenCalledWith({
       where: { userId: 'user-1', seriesAsin: 'B001SERIES1' },
-      include: { user: { select: { id: true, plexUsername: true } } },
+      include: { user: { select: { id: true, plexUsername: true, deletedAt: true } } },
     });
 
     expect(stats.seriesChecked).toBe(1);
@@ -519,7 +519,7 @@ describe('processWatchedLists', () => {
     // Should have passed both userId and authorAsin to the Prisma query
     expect(prismaMock.watchedAuthor.findMany).toHaveBeenCalledWith({
       where: { userId: 'user-1', authorAsin: 'B001AUTH001' },
-      include: { user: { select: { id: true, plexUsername: true } } },
+      include: { user: { select: { id: true, plexUsername: true, deletedAt: true } } },
     });
 
     expect(stats.authorsChecked).toBe(1);
@@ -575,7 +575,7 @@ describe('processWatchedLists', () => {
     // Series should be filtered by seriesAsin
     expect(prismaMock.watchedSeries.findMany).toHaveBeenCalledWith({
       where: { userId: 'user-1', seriesAsin: 'B001SERIES1' },
-      include: { user: { select: { id: true, plexUsername: true } } },
+      include: { user: { select: { id: true, plexUsername: true, deletedAt: true } } },
     });
 
     // The author pass doesn't run at all: no query, no scan

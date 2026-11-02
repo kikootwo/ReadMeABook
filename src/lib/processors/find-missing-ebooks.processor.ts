@@ -112,7 +112,8 @@ export async function processFindMissingEbooks(payload: FindMissingEbooksPayload
 
     // Anti-join: most-recent non-deleted ebook child per in-scope audiobook.
     // Broad form — branch fully in JS so per-skip counters and log lines are
-    // observable. LIMIT is the per-run scan cap.
+    // observable. LIMIT is the per-run scan cap. A deleted user's requests are
+    // left out here, so they get no ebook request and use no slot of the cap (#504).
     const candidates = await prisma.$queryRaw<CandidateRow[]>`
       SELECT
         p.id                  AS parent_request_id,
@@ -128,6 +129,7 @@ export async function processFindMissingEbooks(payload: FindMissingEbooksPayload
         e.ebook_auto_retry_count AS ebook_auto_retry_count
       FROM requests p
       JOIN audiobooks a ON a.id = p.audiobook_id
+      JOIN users u ON u.id = p.user_id
       LEFT JOIN LATERAL (
         SELECT id, status, ebook_auto_retry_count
         FROM requests
@@ -140,6 +142,7 @@ export async function processFindMissingEbooks(payload: FindMissingEbooksPayload
       WHERE p.status IN ('downloaded', 'available')
         AND (p.type IS NULL OR p.type <> 'ebook')
         AND p.deleted_at IS NULL
+        AND u.deleted_at IS NULL
       ORDER BY p.created_at DESC
       LIMIT ${PER_RUN_LIMIT}
     `;

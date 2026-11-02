@@ -100,6 +100,7 @@ Library scans (full and incremental) now check **all non-terminal requests** for
 3. Next library scan (manual trigger or scheduled recently-added check)
 4. Request auto-matches and marks as 'available'
 5. Error messages and retry counters cleared
+- Audiobookshelf only (#284): a `downloaded` request RMAB delivered links to the ABS item that holds its folder (path, else files hash) before the ASIN match, so a different ABS ASIN no longer leaves it stuck; Plex keeps ASIN-only matching. Both paths complete the request with a compare-and-set (one notification). See [file-hash-matching.md](../fixes/file-hash-matching.md)
 
 **State Cleanup on Match:**
 - errorMessage → null

@@ -248,7 +248,8 @@ describe('processPlexRecentlyAddedCheck', () => {
       author: 'Author A',
     });
     prismaMock.audiobook.update.mockResolvedValue({});
-    prismaMock.request.update.mockResolvedValue({});
+    // The match completes the request with a compare-and-set: one row for this request id
+    prismaMock.request.updateMany.mockImplementation(async (a: { where: { id?: string } }) => ({ count: a.where.id ? 1 : 0 }));
 
     const { processPlexRecentlyAddedCheck } = await import('@/lib/processors/plex-recently-added.processor');
     const result = await processPlexRecentlyAddedCheck({ jobId: 'job-3' });
@@ -259,8 +260,9 @@ describe('processPlexRecentlyAddedCheck', () => {
         data: expect.objectContaining({ absItemId: 'abs-item-1' }),
       })
     );
-    expect(prismaMock.request.update).toHaveBeenCalledWith(
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: { id: 'req-1', status: { notIn: ['available', 'cancelled', 'denied'] } },
         data: expect.objectContaining({ status: 'available' }),
       })
     );

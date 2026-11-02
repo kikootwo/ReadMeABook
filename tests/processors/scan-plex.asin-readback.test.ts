@@ -150,13 +150,15 @@ describe('ASIN read-back after the Audiobookshelf match (#287)', () => {
   it('full scan: a downloaded request for the matched ASIN goes available in the same scan', async () => {
     stubAbs(MATCHED);
     prismaMock.request.findMany.mockResolvedValue([downloadedRequest()]);
+    // The match completes the request with a compare-and-set: one row for this request id
+    prismaMock.request.updateMany.mockImplementation(async (a: { where: { id?: string } }) => ({ count: a.where.id ? 1 : 0 }));
     const { processScanPlex } = await import('@/lib/processors/scan-plex.processor');
 
     const result = await processScanPlex({ jobId: 'job-2' } as any);
 
     expect(result.matchedDownloads).toBe(1);
-    expect(prismaMock.request.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'req-1' },
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'req-1', status: { notIn: ['available', 'cancelled', 'denied'] } },
       data: expect.objectContaining({ status: 'available' }),
     }));
   });

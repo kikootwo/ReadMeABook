@@ -37,7 +37,7 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - `id` (UUID PK), `plex_guid` (unique, external ID from Plex or Audiobookshelf), `plex_rating_key`
 - `title`, `author`, `narrator`, `summary`, `duration` (BigInt, milliseconds), `year`, `user_rating` (0-10 scale)
 - **Universal identifiers:** `asin` (Audible ASIN), `isbn` (ISBN-10 or ISBN-13)
-- `file_path`, `thumb_url`, `cached_library_cover_path` (local cached cover path), `plex_library_id`, `added_at`
+- `file_path` (ABS: the item's folder as ABS sees it, `item.path`, written by both scan jobs, read by the delivered-request link #284; Plex: null), `thumb_url`, `cached_library_cover_path` (local cached cover path), `plex_library_id`, `added_at`
 - `last_scanned_at`, `created_at`, `updated_at`
 - Indexes: `plex_guid`, `title`, `author`, `plex_library_id`, `asin`, `isbn`
 - **Purpose:** Universal library cache for both Plex and Audiobookshelf backends
