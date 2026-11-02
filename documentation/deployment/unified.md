@@ -163,13 +163,23 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 ## Shutdown Sequence
 
 - `docker stop` sends SIGTERM to supervisord (PID 1), which stops programs one at a time in reverse priority: app (30) → redis (20) → postgresql (10), waiting up to each program's `stopwaitsecs` (default 10 s) before SIGKILL
-- **postgresql:** `stopsignal=INT` (fast shutdown: ends open sessions, writes a checkpoint, exits) + `stopwaitsecs=60` (`docker/unified/supervisord.conf`). The default SIGTERM is smart shutdown, which waits for every client; node is not stopped by `app-start.sh` and keeps its connections, so PostgreSQL was SIGKILLed at 10 s and every start ran crash recovery
-- **app, redis:** default SIGTERM, 10 s
-- **Grace period:** worst case 10 + 10 + 60 = 80 s; published value 90 s. A normal stop takes ~2 s, inside Docker's default 10 s, so the image alone fixes it; the grace period is headroom (slow checkpoint on NAS storage)
+- **app:** SIGTERM to `app-start.sh`, which forwards it to node and waits (trap + re-wait loop that survives `set -e`). `stopwaitsecs=10` + `killasgroup=true`: at 10 s supervisord SIGKILLs the whole group (wrapper, node, ffmpeg). No `stopasgroup`: it would SIGTERM a running ffmpeg at t=0 and fail its import
+- **node (`src/lib/startup/shutdown-coordinator.ts`, limits in `src/lib/constants/shutdown.ts`):** `app-start.sh` exports `NEXT_MANUAL_SIG_HANDLE=true`, so Next.js leaves SIGTERM/SIGINT to the coordinator (registered from `src/instrumentation.ts`). t = time since the signal:
+  1. t=0: process "stopping" flag (a job queue created now starts no workers); HTTP `server.close()` (server captured from the first request via `diagnostics_channel` `http.server.request.start`, then unsubscribed; not captured → warn, sockets close at exit); Bull local pause without waiting
+  2. Until 3.5 s: running jobs (`whenCurrentJobsFinished`) and open requests finish; then `closeAllConnections()`
+  3. Nothing running → queue `close()` (0.5 s). Jobs still running → each logged `left for retry on next start`, queue not closed (a job finishing in the last moments can still record itself); they stay active in Redis and rerun after the restart through Bull's stall check (30-60 s after start)
+  4. Job-row writes from the queue's `completed`/`failed` handlers flushed (0.5 s); Prisma `$disconnect()` + the queue's Redis client (0.5 s)
+  5. `[Shutdown] Done in N ms (finished X, left Y for retry)`, exit 0. Hard deadline 5 s: exit 1
+- **After node exits:** the wrapper logs `[App] node exited (status N)`, SIGTERMs its own process group (only after `kill -0` shows node gone), SIGKILLs what is left after 1 s (an ffmpeg mid-merge), exits with node's status. Also on a crash: supervisord's autorestart then reruns the job; its `reaped unknown pid` log line for the ended ffmpeg is expected
+- **Blocked event loop:** the 5 s deadline is a timer and can't fire; supervisord's 10 s SIGKILL ends the group, which lands with Docker's default 10 s kill, so PostgreSQL is then SIGKILLed too (crash recovery on the next start). Only with a long grace period does PostgreSQL still stop cleanly
+- **Bare metal / `next start` without the env:** Next.js handles the signal and exits without waiting for jobs (one `[Shutdown]` line at start says so). Set `NEXT_MANUAL_SIG_HANDLE=true` to use the coordinator
+- **postgresql:** `stopsignal=INT` (fast shutdown: ends open sessions, writes a checkpoint, exits) + `stopwaitsecs=60` (`docker/unified/supervisord.conf`). The default SIGTERM is smart shutdown, which waits for every client
+- **redis:** default SIGTERM, 10 s
+- **Grace period:** worst case 10 + 10 + 60 = 80 s; published value 90 s. Idle stop ~2 s, with a job running ~7 s (5 s node + Redis + PostgreSQL), inside Docker's and Unraid's default 10 s; the grace period is headroom (slow checkpoint on NAS storage)
   - Compose: `stop_grace_period: 90s` | `docker run`: `--stop-timeout 90`
   - Unraid: every stop Unraid starts (Stop button, update, array stop) uses its global Docker Stop Timeout (Settings > Docker, default 10 s), not a per-container value. A normal stop fits in that; raise it for headroom
 - **Stop during startup:** until the entrypoint hands over to supervisord (first seconds of a start), PID 1 is bash and ignores SIGTERM, so Docker waits the full grace period (90 s with the setting, 10 s without) and then kills. Same outcome as before, only slower
-- **Clean stop logs:** `received fast shutdown request` … `database system is shut down`; the next start has no `database system was not properly shut down` / `automatic recovery in progress`
+- **Clean stop logs:** `[Shutdown] SIGTERM received` → `[Shutdown] Done in …` → `[App] node exited (status 0)` → `stopped: app` → redis → `received fast shutdown request` … `database system is shut down`, no `terminating connection due to administrator command`; the next start has no `database system was not properly shut down` / `automatic recovery in progress`
 - **After updating from an older image:** the first start may still show one recovery. That was the old image's stop, not the new one
 - **External PostgreSQL** (`USE_EXTERNAL_POSTGRES=true`): the program is `exec sleep infinity`; SIGINT ends it like SIGTERM did
 
@@ -835,6 +845,11 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
 - Cause: supervisord stopped PostgreSQL with SIGTERM (smart shutdown), which waits for clients; node (orphaned by `app-start.sh`) kept its connections, so supervisord SIGKILLed PostgreSQL at its 10 s default
 - Fix (idea + first version: PR #512, drwho725): `[program:postgresql]` `stopsignal=INT` (fast shutdown) + `stopwaitsecs=60`; `stop_grace_period: 90s` in both compose files, the README and the examples above. See [Shutdown Sequence](#shutdown-sequence)
 - Test: `tests/docker/supervisord-config.test.ts` (signal, wait, `exec` in `postgres-start.sh`, grace period > summed `stopwaitsecs`)
+
+**23. Node orphaned on every container stop; running job cut at once (#540)**
+- Symptom: supervisord's SIGTERM reached only `app-start.sh`; node kept running until the group was killed, and Next's own handler (when it did get a signal) exited as soon as HTTP drained, before the job queue closed. Prisma never disconnected
+- Fix: wrapper trap + forward + re-wait; node shutdown coordinator with a fixed 5 s budget (see [Shutdown Sequence](#shutdown-sequence)); `killasgroup=true`; leftover group members ended after node exits. Job cut twice (stall limit) → request reset, see [jobs.md](../backend/services/jobs.md#shutdown-and-cut-jobs)
+- Test: `tests/lib/startup/shutdown-coordinator.test.ts`, `tests/docker/supervisord-config.test.ts` (`killasgroup`, no `stopasgroup`, `stopwaitsecs` ≥ deadline + 3 s, trap before node starts, every `wait` safe under `set -e`)
 
 ## Related
 
