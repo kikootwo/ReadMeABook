@@ -50,6 +50,11 @@ Accepts provider-agnostic book list + context, performs:
 5. **Cover enrichment** — Queries `audibleCache` for cached covers, builds `/api/cache/thumbnails/` URLs
 6. **Shelf metadata update** — Writes `lastSyncAt`, `bookCount`, top 8 books as JSON to `coverUrls`
 
+### Deleted Users (#504)
+- Both providers drop shelves whose user is soft-deleted (`User.deletedAt` set) right after the load (`withoutDeletedUsers()`, `src/lib/utils/deleted-user-skip.ts`): no feed/list fetch, no Audible lookup, no request, no shelf write. Also for a `userId`- or `shelfId`-scoped run
+- One info line per provider when any are skipped: `Skipped N Goodreads shelf(s)|Hardcover list(s) whose user is deleted`
+- Rows and existing requests are kept (a user delete is a soft delete)
+
 ### Constants
 - `DEFAULT_MAX_LOOKUPS_PER_SHELF` = 10 (per scheduled cycle; 0 = unlimited for manual triggers)
 - `NO_MATCH_RETRY_DAYS` = 7

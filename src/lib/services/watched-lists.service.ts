@@ -15,6 +15,7 @@ import { createRequestForUser } from '@/lib/services/request-creator.service';
 import { getSiblingAsins } from '@/lib/services/works.service';
 import { booksForWatch, dedupeAndPersist, delay, scanAuthorLegs } from '@/lib/services/watched-lists-releases';
 import { RMABLogger } from '@/lib/utils/logger';
+import { SYNC_USER_SELECT, withoutDeletedUsers } from '@/lib/utils/deleted-user-skip';
 
 const logger = RMABLogger.create('WatchedLists');
 
@@ -97,10 +98,12 @@ async function processAllWatchedSeries(
   const whereClause: any = {};
   if (options.userId) whereClause.userId = options.userId;
   if (options.seriesAsin) whereClause.seriesAsin = options.seriesAsin;
-  const watchedSeries = await prisma.watchedSeries.findMany({
-    where: whereClause,
-    include: { user: { select: { id: true, plexUsername: true } } },
-  });
+  // A deleted user's watches get no scrape, request or write (#504)
+  const watchedSeries = withoutDeletedUsers(
+    await prisma.watchedSeries.findMany({ where: whereClause, include: { user: { select: SYNC_USER_SELECT } } }),
+    'watched series',
+    log
+  );
 
   if (watchedSeries.length === 0) {
     log.info('No watched series to process');
@@ -203,10 +206,12 @@ async function processAllWatchedAuthors(
   const whereClause: any = {};
   if (options.userId) whereClause.userId = options.userId;
   if (options.authorAsin) whereClause.authorAsin = options.authorAsin;
-  const watchedAuthors = await prisma.watchedAuthor.findMany({
-    where: whereClause,
-    include: { user: { select: { id: true, plexUsername: true } } },
-  });
+  // A deleted user's watches get no scrape, request or write (#504)
+  const watchedAuthors = withoutDeletedUsers(
+    await prisma.watchedAuthor.findMany({ where: whereClause, include: { user: { select: SYNC_USER_SELECT } } }),
+    'watched authors',
+    log
+  );
 
   if (watchedAuthors.length === 0) {
     log.info('No watched authors to process');
