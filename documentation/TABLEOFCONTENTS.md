@@ -90,6 +90,7 @@
 - **Custom M4B tags (ASIN, publisher, subtitle, language as iTunes freeform `----` atoms), tagged MP4 faststart** → [phase3/file-organization.md](phase3/file-organization.md#mp4-freeform-tags)
 - **Tagging changed an M4B's chapters (zero-length chapters, cover + chapters, ffmpeg 9.0.2), chapter guard (#511)** → [phase3/file-organization.md](phase3/file-organization.md#chapter-guard-511)
 - **Chapter merging (auto-merge to M4B)** → [features/chapter-merging.md](features/chapter-merging.md)
+- **Merged chapter names: embedded "Chapter N" tags kept after an intro, repeated tags fall back to numbering (#509)** → [features/chapter-merging.md](features/chapter-merging.md#fixed-issues)
 - **Multi-disc (CD1/Disc 1) folders: disc names, import order, disc/track tags, Manual/Bulk Import, in-place stop** → [features/multi-disc-folders.md](features/multi-disc-folders.md)
 
 ## Background Jobs
