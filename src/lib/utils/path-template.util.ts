@@ -2,11 +2,11 @@
  * Path Template Engine Utility
  * Documentation: documentation/phase3/file-organization.md
  *
- * Provides template variable substitution, validation, and preview generation
- * for audiobook file organization paths.
+ * Template variable substitution, validation and previews for organization paths.
  */
 
 import { capFilenameBytes, capGraphemeUnits, capPathComponents } from './path-component';
+import { variableValue } from './path-template-variables';
 
 /**
  * Template variables for path substitution
@@ -32,7 +32,7 @@ export interface ValidationResult {
 /**
  * Supported template variable names
  */
-const VALID_VARIABLES = ['author', 'title', 'narrator', 'asin', 'year', 'series', 'seriesPart'];
+const VALID_VARIABLES = ['author', 'primaryAuthor', 'title', 'narrator', 'asin', 'year', 'series', 'seriesPart'];
 
 /**
  * Invalid file path characters (outside of template variables)
@@ -122,7 +122,7 @@ function resolveConditionalBlocks(
 
     // Check if all found variables have non-empty values
     const allPresent = foundVars.every(varName => {
-      const value = variables[varName as keyof TemplateVariables];
+      const value = variableValue(variables, varName, sanitizePath);
       return value !== undefined && value !== null && String(value).trim() !== '';
     });
 
@@ -135,7 +135,7 @@ function resolveConditionalBlocks(
     let result = content;
     const sortedVars = [...foundVars].sort((a, b) => b.length - a.length);
     for (const varName of sortedVars) {
-      const value = variables[varName as keyof TemplateVariables];
+      const value = variableValue(variables, varName, sanitizePath);
       const sanitizedValue = sanitizePath(String(value).trim());
       const regex = new RegExp(`(?<![a-zA-Z0-9])${varName}(?![a-zA-Z0-9])`, 'g');
       result = result.replace(regex, sanitizedValue);
@@ -148,7 +148,7 @@ function resolveConditionalBlocks(
 /**
  * Substitute template variables with actual values
  *
- * Supported variables: {author}, {title}, {narrator}, {asin}
+ * Supported variables: VALID_VARIABLES ({primaryAuthor} is derived from author)
  * - Handles missing/null variables gracefully (omits them)
  * - Applies path sanitization to all substituted values
  * - Removes multiple consecutive spaces after substitution
@@ -181,7 +181,7 @@ export function substituteTemplate(
 
   // Substitute each variable
   for (const key of VALID_VARIABLES) {
-    const value = variables[key as keyof TemplateVariables];
+    const value = variableValue(variables, key, sanitizePath);
     const regex = new RegExp(`\\{${key}\\}`, 'g');
 
     if (value !== undefined && value !== null) {
