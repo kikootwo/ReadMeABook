@@ -10,7 +10,7 @@
  * Audiobooks is the converse; Clear returns to All Types (no `type` in the URL, both rows back).
  * The API ignores an unknown type. Evidence (519/): `type-dropdown-open.jpg` (the select expanded
  * with `size=3` for the capture, as headless Chromium never paints a native select popup),
- * `type-ebooks.jpg`, `type-audiobooks.jpg`, and `519/result.json`.
+ * `type-ebooks.jpg`, and `519/result.json`.
  */
 
 import { test, expect, type Page } from '@playwright/test';
@@ -130,7 +130,6 @@ test('519: the Type filter lists only audiobook or only ebook requests, follows 
   const audiobookTable = page.locator('table', { hasText: BOOKS.audiobook.title });
   await expect(audiobookTable.getByText(BOOKS.audiobook.title)).toBeVisible();
   await expect(audiobookTable.getByText(BOOKS.ebook.title)).toHaveCount(0);
-  await snap(page, '519', 'type-audiobooks');
 
   // Clear: All Types, no type in the page URL, both rows back
   await page.getByRole('button', { name: 'Clear', exact: true }).click();
