@@ -7,6 +7,9 @@ services:
       dockerfile: dockerfile.unified
     container_name: readmeabook-local
     restart: unless-stopped
+    # Room for supervisord to stop the app, Redis and PostgreSQL in turn. Keep it above
+    # the 80 s worst case set by the stopwaitsecs values in docker/unified/supervisord.conf.
+    stop_grace_period: 90s
     ports:
       - "3030:3030"
     volumes:
