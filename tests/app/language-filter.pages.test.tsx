@@ -171,7 +171,7 @@ describe('series detail page', () => {
     await detailPage(detail([{ asin: 'B0EN000001' }, { asin: 'B0EN000002' }], { hiddenCount: 18, filterLanguage: 'English' }));
 
     await waitFor(() => expect(screen.getByText('18 in other languages hidden')).toBeInTheDocument());
-    expect(screen.queryByText(/of 120/)).not.toBeInTheDocument();
+    expect(screen.queryAllByText(/of 120/)).toHaveLength(0);
     expect(screen.getByText('(2 titles)')).toBeInTheDocument();
     expect(screen.getByText('2 books loaded')).toBeInTheDocument();
   });
