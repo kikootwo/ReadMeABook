@@ -38,7 +38,7 @@ Syncs user-subscribed Hardcover lists via their GraphQL API, resolves books to A
 - Status IDs: 1=Want to Read, 2=Currently Reading, 3=Read, 4=Did Not Finish
 
 ## Sync Flow
-1. Fetch shelves from DB (all or specific `shelfId`)
+1. Fetch shelves from DB (all or specific `shelfId`); drop those whose user is deleted (#504, [goodreads-sync.md](goodreads-sync.md#deleted-users-504))
 2. Decrypt API token (encryption service)
 3. Fetch books from Hardcover GraphQL API
 4. Delegate to `processShelfBooks()` in shelf-sync-core (Audible lookup, request creation, cover enrichment)

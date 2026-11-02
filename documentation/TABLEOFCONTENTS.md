@@ -204,6 +204,7 @@
 **"How do I customize my home page?"** → [features/home-sections.md](features/home-sections.md)
 **"How do Audible categories work?"** → [features/home-sections.md](features/home-sections.md)
 **"How do I add category sections to the home page?"** → [features/home-sections.md](features/home-sections.md)
+**"Does a deleted user's shelf or watched list still create requests?"** → No (#504): [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#deleted-users-504), [features/watched-lists.md](features/watched-lists.md), [backend/services/scheduler.md](backend/services/scheduler.md) (find_missing_ebooks)
 **"How do Goodreads shelves work?"** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md)
 **"How do Hardcover shelves work?"** → [backend/services/hardcover-sync.md](backend/services/hardcover-sync.md)
 **"How do I add a new shelf provider?"** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#adding-a-new-provider)
