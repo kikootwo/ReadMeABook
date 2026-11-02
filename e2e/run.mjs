@@ -161,8 +161,9 @@ async function upgradeFlow(ctx, image) {
   // Phase 2: branch image on the same volumes.
   up(ctx, image, { generatedSecrets: true });
   const beforeFile = path.join(ctx.evidence, 'upgrade', 'before.json'); // written by upgrade.spec.ts
-  const statuses = fs.existsSync(beforeFile) ? JSON.parse(fs.readFileSync(beforeFile, 'utf8')).statuses : {};
-  status = await playwright(ctx, specs, 'upgrade-verify', { E2E_UPGRADE_BEFORE: JSON.stringify({ statuses }) });
+  const seeded = fs.existsSync(beforeFile) ? JSON.parse(fs.readFileSync(beforeFile, 'utf8')) : {};
+  // statuses: kept statuses; shown: what each request card showed (#325a)
+  status = await playwright(ctx, specs, 'upgrade-verify', { E2E_UPGRADE_BEFORE: JSON.stringify({ statuses: seeded.statuses ?? {}, shown: seeded.shown ?? {} }) });
   const after = tableRowCounts(ctx);
   fs.writeFileSync(path.join(ctx.evidence, 'upgrade', 'after-counts.json'), JSON.stringify(after, null, 2));
   const problems = compareUpgradeCounts(before, after);

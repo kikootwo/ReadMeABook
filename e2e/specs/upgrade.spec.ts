@@ -9,8 +9,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import fs from 'node:fs';
-import { env, evidencePath, writeEvidence, waitFor, fakeArr, snap, urls, loginAdminUi, Rmab, execBridgeAvailable, EXEC_BRIDGE_SKIP } from '../lib/harness';
+import { env, writeEvidence, waitFor, fakeArr, snap, urls, loginAdminUi, Rmab, execBridgeAvailable, EXEC_BRIDGE_SKIP } from '../lib/harness';
 import { psql, sqlStr } from './regressions/242-helpers';
 
 const phase = process.env.E2E_PHASE;
@@ -62,8 +61,7 @@ test('upgrade-verify: branch image keeps requests, logins and decryptable secret
 
   // #325a: the startup schema sync added audiobooks.library_asin (nullable), null on every row, and
   // every request shows its book exactly as before (the overlay needs a value only a scan writes).
-  // run.mjs hands over only the statuses; the seed phase's before.json sits in the same evidence folder
-  const shownBefore = JSON.parse(fs.readFileSync(evidencePath('upgrade', 'before.json'), 'utf8')).shown;
+  const shownBefore = before.shown;
   const shownAfter = Object.fromEntries(requests.requests.map((r) => [r.audiobook?.audibleAsin, shownBook(r.audiobook)]));
   writeEvidence('upgrade/325a-shown.json', { before: shownBefore, after: shownAfter, libraryAsins: requests.requests.map((r) => r.audiobook?.libraryAsin ?? null) });
   expect.soft(shownAfter, 'request cards show their books as before').toEqual(shownBefore);
