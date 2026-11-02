@@ -168,7 +168,7 @@ export async function handleApprovalButton(
   }
 
   // The approval message rewrite, card refresh, and requester DM all happen inside
-  // processRequestApproval now, so every surface (Web UI, API token, buttons) converges on the same
+  // processRequestApproval now, so every surface (Web UI, buttons) converges on the same
   // result. Nothing message-specific is done here.
   const pastTense = action === 'approve' ? 'approved' : 'denied';
   logger.info(`Request ${pastTense} via Discord`, {

@@ -67,7 +67,7 @@ Allows admins to review and approve/deny user requests before they are processed
 - **Discord sync:** every successful decision calls `syncDiscordOnDecision()`, which rewrites the
   Discord approval message to decided (removing its buttons), refreshes the requester's request
   card, and DMs them the outcome. It lives in this service rather than the Discord button handler so
-  **all** surfaces converge — the Web UI Deny button and API-token decisions included. Gated on a
+  **all** surfaces converge — the Web UI Approve/Deny buttons included. Gated on a
   running bot, dynamically imported, and never throws. See
   [discord-bot.md](../integrations/discord-bot.md).
 

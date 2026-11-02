@@ -24,12 +24,9 @@ Static `rmab_`-prefixed tokens act with the owner's full user-level permissions 
 | GET | `/api/requests` | List requests | | |
 | POST | `/api/requests` | Create request | ✓ | |
 | GET | `/api/requests/:id` | Get request by ID | | |
-| DELETE | `/api/requests/:id` | Delete request | ✓ | |
 | GET | `/api/admin/metrics` | System metrics | | ✓ |
 | GET | `/api/admin/downloads/active` | Active downloads | | ✓ |
 | GET | `/api/admin/requests/recent` | Recent requests | | ✓ |
-| GET | `/api/admin/requests/pending-approval` | Pending approvals | | ✓ |
-| POST | `/api/admin/requests/:id/approve` | Approve or deny request | ✓ | ✓ |
 
 Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS`, `API_TOKEN_ENDPOINT_DOCS`).
 
@@ -56,24 +53,6 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 
 ## Fixed Issues
 - **#261 GET `/api/requests/:id` 500 `FetchError` for any request with a selected download:** `NextResponse.json` threw `Do not know how to serialize a BigInt` on `DownloadHistory.torrentSizeBytes`. Fix: response passes through `toJsonSafe()` (BigInt → number; Dates/Decimals untouched). Other routes `select` around the BigInt columns or convert with `Number()`; routes with a full `audiobook` include carry `fileSizeBytes`, which nothing writes yet (always null), so they serialize today.
-
-## DELETE `/api/requests/:id` (Write)
-
-- Soft-deletes a request with cascading cleanup: removes media files from disk, deletes the library item from Audiobookshelf/Plex, and handles download client torrents/NZBs respecting seeding configuration.
-- Ownership enforced: `requestRecord.userId === req.user.id || role === 'admin'` → otherwise 403.
-- Soft-deleted requests (`deletedAt != null`) return 404.
-- Response: `200 { success: true, message, details: { filesDeleted, torrentsRemoved, torrentsKeptSeeding, torrentsKeptUnlimited } }`
-- The request can be re-created after deletion (soft delete preserves audit trail).
-
-## GET `/api/admin/requests/pending-approval` (admin)
-- Returns requests in `awaiting_approval` with audiobook metadata + requester info (id, Plex username, avatar).
-- Handler (`src/app/api/admin/requests/pending-approval/route.ts`) enforces `requireAdmin` → admin-owned token required.
-
-## POST `/api/admin/requests/:id/approve` (Write, admin)
-- Body: `{ "action": "approve" | "deny" }`.
-- Approve → status `pending` + search job queued, or `downloading` if a release was pre-selected; deny → status `denied`.
-- Handler (`src/app/api/admin/requests/[id]/approve/route.ts`) enforces `requireAdmin` → admin-owned token required.
-- Returns `400` if the request is not in `awaiting_approval`, `404` if not found.
 
 ## GET `/api/audiobooks/search`
 - Auth is optional (route never calls `requireAuth`). An API token counts only on allowlisted endpoints (this one is listed); elsewhere `getOptionalAuthUser` treats it as no caller.
@@ -104,7 +83,7 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 ## Tests
 - `tests/constants/api-tokens.test.ts` — matcher: positive matches, negative matches, sub-route exclusion, method case-insensitivity, allowlist/docs parity.
 - `tests/middleware/auth.middleware.test.ts` — middleware token auth path, allowlist enforcement (incl. dynamic ID match), sibling-route blocking, `getOptionalAuthUser`.
-- `tests/api/requests-id.route.test.ts` — owner GET 200, cross-user GET 403, admin DELETE any, user DELETE own, cross-user DELETE 403.
+- `tests/api/requests-id.route.test.ts` — owner GET 200, cross-user GET 403.
 - `tests/api/requests-id.bigint.route.test.ts` — owner/admin GET 200 with BigInt sizes as numbers (#261).
 - `tests/utils/json-safe.test.ts` — `toJsonSafe()` BigInt conversion, Date/Decimal passthrough.
 

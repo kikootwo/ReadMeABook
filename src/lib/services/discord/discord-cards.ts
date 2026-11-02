@@ -270,7 +270,7 @@ export async function cancelApprovalMessage(
 /**
  * Rewrite the admin approval message to reflect a decision (approve/deny) and drop the Approve/Deny
  * buttons. Works from the stored message ref rather than an interaction, so a decision made in the
- * Web UI or via an API token updates Discord exactly like a button click does.
+ * Web UI updates Discord exactly like a button click does.
  *
  * Best-effort; logs why it skipped rather than failing silently.
  */

@@ -87,7 +87,7 @@ export function applyApprovalDecision(
     .setColor(approved ? COLOR.success : COLOR.error)
     .setTitle(approved ? '✅ Request Approved' : '🚫 Request Denied');
 
-  // A decision made from the Web UI or an API token has no Discord actor, and the RMAB user may
+  // A decision made from the Web UI has no Discord actor, and the RMAB user may
   // have no linked account, so omit the field rather than rendering a broken `<@null>` mention.
   // Mentions don't render in embed titles, so the acting user goes in a field value as <@id>.
   return decidedByDiscordId
