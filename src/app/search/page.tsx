@@ -41,6 +41,11 @@ export default function SearchPage() {
   // "No results"). Read before hide-available, which empties the list for its own reason.
   const awaitingMore = !!filterLanguage && results.length === 0 && (hasMore || isLoadingMore);
   const languageEmpty = !!filterLanguage && hiddenCount > 0 && results.length === 0;
+  // Filter on, hide-available hid every loaded result, Audible has more: the bar, not "No results found"
+  const allLoadedAvailable = !!filterLanguage && results.length > 0 && filteredResults.length === 0 && hasMore;
+  const barEmptyText = awaitingMore
+    ? `No results in ${filterLanguage} so far`
+    : allLoadedAvailable ? 'All results so far are already available' : undefined;
 
   const handleSearch = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -146,7 +151,7 @@ export default function SearchPage() {
             <LanguageHiddenNote hiddenCount={hiddenCount} />
 
             {/* Results Grid */}
-            {!(awaitingMore && !isLoadingMore) && (
+            {!(awaitingMore && !isLoadingMore) && !allLoadedAvailable && (
               <AudiobookGrid
                 audiobooks={filteredResults}
                 isLoading={isLoading || awaitingMore}
@@ -161,7 +166,7 @@ export default function SearchPage() {
             )}
 
             {/* Load More Bar */}
-            {(filteredResults.length > 0 || awaitingMore) && (
+            {(filteredResults.length > 0 || barEmptyText) && (
               <LoadMoreBar
                 loadedCount={filteredResults.length}
                 totalCount={totalResults}
@@ -169,7 +174,7 @@ export default function SearchPage() {
                 isLoading={isLoadingMore}
                 onLoadMore={loadMore}
                 itemLabel="results"
-                emptyText={awaitingMore ? `No results in ${filterLanguage} so far` : undefined}
+                emptyText={barEmptyText}
               />
             )}
           </div>

@@ -53,6 +53,11 @@ export default function SeriesDetailPage({
   const loadedBooks = series?.books.length ?? 0;
   const awaitingMore = !!filterLanguage && loadedBooks === 0 && hasMore;
   const languageEmpty = !!filterLanguage && hiddenCount > 0 && loadedBooks === 0;
+  // Filter on, hide-available hid every loaded book, Audible has more: the bar, not "No books found"
+  const allLoadedAvailable = !!filterLanguage && loadedBooks > 0 && filteredBooks.length === 0 && hasMore;
+  const barEmptyText = awaitingMore
+    ? `No books in ${filterLanguage} so far`
+    : allLoadedAvailable ? 'All books so far are already available' : undefined;
   // Audible's series total counts other-language books too: not shown while the filter is on
   const totalBooks = !filterLanguage && series && series.bookCount > 0 ? series.bookCount : undefined;
 
@@ -135,7 +140,7 @@ export default function SeriesDetailPage({
               <LanguageHiddenNote hiddenCount={hiddenCount} />
 
               {/* Books Grid (language filter on with nothing shown yet and more pages: the bar only) */}
-              {!awaitingMore && (
+              {!barEmptyText && (
                 <AudiobookGrid
                   audiobooks={filteredBooks}
                   isLoading={seriesLoading}
@@ -150,14 +155,14 @@ export default function SeriesDetailPage({
               )}
 
               {/* Load More Bar */}
-              {(filteredBooks.length > 0 || awaitingMore) && (
+              {(filteredBooks.length > 0 || barEmptyText) && (
                 <LoadMoreBar
                   loadedCount={filteredBooks.length}
                   totalCount={totalBooks}
                   hasMore={hasMore}
                   isLoading={isLoadingMore}
                   onLoadMore={loadMore}
-                  emptyText={awaitingMore ? `No books in ${filterLanguage} so far` : undefined}
+                  emptyText={barEmptyText}
                 />
               )}
             </div>

@@ -47,7 +47,7 @@ One setting (Library tab, Plex and Audiobookshelf) that keeps Audible results in
 - Search, series detail: 0 visible with `hasMore` → `LanguageHiddenNote` ("N in other languages hidden") + `LoadMoreBar` with `emptyText` (`No results in {Language} so far` / `No books in {Language} so far`).
 - Empty and done: `No results in {Language} for "q"`, `No books in {Language} found for {title}`, `/series`: `No series in {Language} for "q"`.
 - `hiddenCount` on search and series detail is summed over loaded pages.
-- "Nothing in the language yet" (bar, language empty messages) reads the list before hide-available; when hide-available empties it, the usual `No results found` / `No books found` shows.
+- "Nothing in the language yet" (bar, language empty messages) reads the list before hide-available. When hide-available empties a loaded list and `hasMore`: grid hidden, `LoadMoreBar` with `All results so far are already available` / `All books so far are already available` (no `No results found` / `No books found` while more pages exist). Off: as main.
 - Series detail, on: header and bar count the books shown (`2 titles`, `2 books loaded`); Audible's `bookCount` (all languages) is not shown there.
 
 ## Limits

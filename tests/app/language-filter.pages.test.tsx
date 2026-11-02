@@ -88,16 +88,39 @@ describe('search page', () => {
     expect(screen.getByRole('button', { name: 'Load more' })).toBeInTheDocument();
   });
 
-  it('on, with hide-available emptying a page of kept results: "No results found", not the language bar', async () => {
+  it('on, with hide-available emptying the kept results and more pages: the Load more bar, not "No results found"', async () => {
     api.hideAvailable = true;
-    api.fetcher = async () => ({ success: true, results: inLibrary('B0OWNED', 12), totalResults: 12, hasMore: true, hiddenCount: 38, filterLanguage: 'German' });
+    api.fetcher = async () => ({ success: true, results: inLibrary('B0OWNED', 3), totalResults: 3, hasMore: true, hiddenCount: 47, filterLanguage: 'German' });
+
+    await search('owned');
+
+    await waitFor(() => expect(screen.getByText('47 in other languages hidden')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeInTheDocument();
+    expect(screen.getByText('All results so far are already available')).toBeInTheDocument();
+    expect(screen.queryByText(/No results found/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No results in German/)).not.toBeInTheDocument();
+  });
+
+  it('on, with hide-available emptying the kept results and no more pages: "No results found", not the language message', async () => {
+    api.hideAvailable = true;
+    api.fetcher = async () => ({ success: true, results: inLibrary('B0OWNED', 12), totalResults: 12, hasMore: false, hiddenCount: 38, filterLanguage: 'German' });
 
     await search('owned');
 
     await waitFor(() => expect(screen.getByText('38 in other languages hidden')).toBeInTheDocument());
-    expect(screen.queryByText('No results in German so far')).not.toBeInTheDocument();
     expect(screen.queryByText(/No results in German/)).not.toBeInTheDocument();
     expect(screen.getByText('No results found for "owned"')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
+  });
+
+  it('off, with hide-available emptying the results and more pages: "No results found" and no bar, as before', async () => {
+    api.hideAvailable = true;
+    api.fetcher = async () => ({ success: true, results: inLibrary('B0OWNED', 3), totalResults: 3, hasMore: true });
+
+    await search('owned');
+
+    await waitFor(() => expect(screen.getByText('No results found for "owned"')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
   });
 
   it('off: no hidden line, and an empty answer says "No results found"', async () => {
@@ -193,13 +216,23 @@ describe('series detail page', () => {
     expect(screen.getByText('No books found for Saga')).toBeInTheDocument();
   });
 
-  it('on, with hide-available and more pages: no "so far" bar while English books are loaded', async () => {
+  it('on, with hide-available emptying the kept books and more pages: the Load more bar, not "No books found"', async () => {
     api.hideAvailable = true;
-    await detailPage(detail(inLibrary('B0OWNED', 6), { hiddenCount: 4, filterLanguage: 'English' }));
+    await detailPage(detail(inLibrary('B0OWNED', 6), { hiddenCount: 44, filterLanguage: 'English' }));
 
-    await waitFor(() => expect(screen.getByText('4 in other languages hidden')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('44 in other languages hidden')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeInTheDocument();
+    expect(screen.getByText('All books so far are already available')).toBeInTheDocument();
     expect(screen.queryByText('No books in English so far')).not.toBeInTheDocument();
-    expect(screen.getByText('No books found for Saga')).toBeInTheDocument();
+    expect(screen.queryByText(/No books found/)).not.toBeInTheDocument();
+  });
+
+  it('off, with hide-available emptying the books and more pages: "No books found" and no bar, as before', async () => {
+    api.hideAvailable = true;
+    await detailPage(detail(inLibrary('B0OWNED', 6), {}));
+
+    await waitFor(() => expect(screen.getByText('No books found for Saga')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
   });
 
   it('off: a page with no books shows the empty message and no bar, as before', async () => {

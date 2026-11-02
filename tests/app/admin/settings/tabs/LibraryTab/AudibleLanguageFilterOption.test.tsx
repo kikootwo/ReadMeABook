@@ -44,8 +44,10 @@ describe('AudibleLanguageFilterOption', () => {
     render(<AudibleLanguageFilterOption settings={settings({})} onChange={() => {}} />);
 
     const help = screen.getByRole('checkbox').closest('label')?.textContent?.replace(/\s+/g, ' ');
-    expect(help).toContain('Search, series and the home page rows hide other-language editions');
-    expect(help).toContain('show how many they hid; books with no language listed still show.');
+    expect(help).toContain('Search and series hide other-language editions and show how many they hid;');
+    expect(help).toContain('the home page rows leave them out from their next refresh.');
+    expect(help).not.toContain('home page rows hide');
+    expect(help).toContain('Books with no language listed still show.');
     expect(help).toContain('BookDate, shelf sync and watched series skip other-language editions and request nothing for them.');
     expect(help).not.toContain('are kept');
     expect(screen.getByText(/Bulk import and requests made from a book page are not affected/)).toBeInTheDocument();
