@@ -4,7 +4,7 @@
  *
  * Deletes seeded failed requests from the admin Recent Requests table:
  *   1  375 px, dark: the DELETE reply is fulfilled with a filesKeptReason, so the table raises its
- *      real two-line warning toast over the sticky page header
+ *      real two-line warning toast over the admin page header
  *   2  1280 px, dark: plain delete, real success toast
  *   3  1280 px, light: plain delete, real success toast (light colours unchanged)
  * Each shot records the toast's computed background alpha and the text/background contrast (the
