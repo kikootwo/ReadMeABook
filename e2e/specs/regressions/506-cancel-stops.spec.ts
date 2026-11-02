@@ -98,7 +98,8 @@ test('506 a cancel stops the download, removes what it fetched, and the cleanup 
     const before = await lastSeq();
     const { ctx, page, settle } = await session(browser, { width: 1280, height: 800, dark: false });
     await page.goto('/admin');
-    const row = page.locator('tr', { hasText: books.phm.title }).first();
+    // The Request Management table (the active-downloads table above it lists the title too, without actions)
+    const row = page.locator('tr', { hasText: books.phm.title }).filter({ has: page.getByTitle('Actions') }).first();
     await row.getByTitle('Actions').click();
     await page.getByRole('menuitem', { name: 'Cancel Request' }).click();
     const heading = page.getByRole('heading', { name: 'Cancel request' });
