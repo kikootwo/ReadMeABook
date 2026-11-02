@@ -105,6 +105,35 @@ function genM4bChapters(bin, dir, def, book) {
   return [file];
 }
 
+/**
+ * #511: an m4b with an attached cover and chapters over 487 s (22.05 kHz AAC silence, ~16 kB/s).
+ * `def.chapters`: [[title, seconds], ...]. Tags are not the book's (the spec tells the tagged copy
+ * from the source by them). Audio and mux are separate runs; the mux pins the timescale (as ffmpeg 8).
+ */
+function genM4bCoverChapters(bin, dir, def, book) {
+  const file = `${safeName(book.title)}.m4b`;
+  const audio = path.join(dir, '.audio.m4a');
+  const cover = path.join(dir, '.cover.jpg');
+  const metaFile = path.join(dir, '.chapters.txt');
+  const total = def.chapters.reduce((s, [, sec]) => s + sec, 0);
+  ffmpeg(bin, ['-f', 'lavfi', '-i', 'anullsrc=r=22050:cl=mono', '-t', String(total), '-c:a', 'aac', '-b:a', '16k', audio]);
+  ffmpeg(bin, ['-f', 'lavfi', '-i', 'color=c=red:s=64x64:d=1', '-frames:v', '1', cover]);
+  const meta = [';FFMETADATA1', 'title=Fixture Source Title', 'album=Fixture Source Title', 'artist=Fixture Source Author', 'album_artist=Fixture Source Author'];
+  let start = 0;
+  for (const [title, sec] of def.chapters) {
+    meta.push('[CHAPTER]', 'TIMEBASE=1/1000', `START=${start * 1000}`, `END=${(start + sec) * 1000}`, `title=${title}`);
+    start += sec;
+  }
+  fs.writeFileSync(metaFile, `${meta.join('\n')}\n`);
+  ffmpeg(bin, [
+    '-i', audio, '-i', cover, '-i', metaFile,
+    '-map', '0:a', '-map', '1:v', '-map_metadata', '2', '-map_chapters', '2', '-c', 'copy', '-disposition:v:0', 'attached_pic',
+    '-movie_timescale', '1000', '-f', 'mp4', path.join(dir, file),
+  ]);
+  for (const f of [audio, cover, metaFile]) fs.rmSync(f);
+  return [file];
+}
+
 function genWrong(dir) {
   fs.writeFileSync(path.join(dir, 'readme.txt'), 'Not an audiobook. fake-arr wrong-files fixture.\n');
   fs.writeFileSync(path.join(dir, 'sample.nfo'), 'Release notes for a fixture that contains no audio.\n');
@@ -129,6 +158,7 @@ export async function generate({ out, manifest, metadata, ffmpeg: bin }) {
     let files;
     if (def.kind === 'mp3-multi') files = genMp3Multi(bin, dir, def, book);
     else if (def.kind === 'm4b-chapters') files = genM4bChapters(bin, dir, def, book);
+    else if (def.kind === 'm4b-cover-chapters') files = genM4bCoverChapters(bin, dir, def, book);
     else if (def.kind === 'wrong') files = genWrong(dir);
     else throw new Error(`fixture ${id}: unknown kind ${def.kind}`);
     fixtures[id] = {
