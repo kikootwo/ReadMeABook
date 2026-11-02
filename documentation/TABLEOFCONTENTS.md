@@ -145,6 +145,7 @@
 - **Docker Compose setup (multi-container)** → [deployment/docker.md](deployment/docker.md)
 - **Unified container (all-in-one)** → [deployment/unified.md](deployment/unified.md)
 - **Image build stages, runtime image contents, Prisma CLI in the image, build guards** → [deployment/unified.md](deployment/unified.md#dockerfile-structure)
+- **Container stop, PostgreSQL clean shutdown, stop_grace_period ("database system was not properly shut down")** → [deployment/unified.md](deployment/unified.md#shutdown-sequence)
 - **Environment variables, volumes** → [deployment/docker.md](deployment/docker.md)
 - **TLS errors after upgrading to Node 24 (`dh key too small`, `EE certificate key too weak`, `Issuer.discover() failed.`, SABnzbd/NZBGet "SSL/TLS certificate error")** → [deployment/unified.md](deployment/unified.md#tls-errors-after-upgrading-to-node-24)
 - **Volume mapping (download clients)** → [deployment/volume-mapping.md](deployment/volume-mapping.md)
@@ -226,4 +227,5 @@
 **"Why is a series page blank / showing no books, then fine after a refresh?"** → [integrations/audible.md](integrations/audible.md#series-page-dual-layout) (Audible A/B-serves two layouts; parsers handle both)
 **"Why is a book's series line missing, or a request saved without a series?"** → [integrations/audible.md](integrations/audible.md#fixed-issues) (series fill from the Audible catalog when Audnexus has none; 15 min pause after a catalog outage (429, 401/403, 5xx, timeout, network), 24 h cache)
 **"Why does search say 'N in other languages hidden', or did a BookDate / shelf book get no match?"** → [integrations/audible-language-filter.md](integrations/audible-language-filter.md) (admin language filter: other-language editions hidden, translated titles become no-match)
+**"Why does a request or interactive search say 'N of M indexer searches failed'?"** → [phase3/prowlarr.md](phase3/prowlarr.md#failed-searches-522) (failed Prowlarr queries counted, warn lines in System Logs, `searchFailures` in interactive responses)
 **"Why does series search say it couldn't get results from Audible, or show series without a rating or book count?"** → [integrations/audible-series-search.md](integrations/audible-series-search.md) (catalog keyword + batch calls, 502 when Audible doesn't answer, counts only from the catalog, no series rating on search cards)

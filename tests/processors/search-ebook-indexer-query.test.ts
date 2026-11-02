@@ -87,7 +87,7 @@ describe('processSearchEbook indexer search query', () => {
       indexerIds: [1],
       minSeeders: 0,
       maxResults: 100,
-    });
+    }, undefined, expect.any(Object));
     expect(result.success).toBe(true);
     expect(jobQueueMock.addDownloadJob).toHaveBeenCalledWith(
       'req-9',
@@ -111,7 +111,9 @@ describe('processSearchEbook indexer search query', () => {
     expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith(
       'Custom Terms',
       'Real Author',
-      expect.objectContaining({ categories: [7020], indexerIds: [1] })
+      expect.objectContaining({ categories: [7020], indexerIds: [1] }),
+      undefined,
+      expect.any(Object)
     );
   });
 });

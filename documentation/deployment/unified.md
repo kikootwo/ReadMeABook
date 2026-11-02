@@ -160,6 +160,19 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 
 **Logs:** All services output to stdout/stderr (visible in `docker logs`)
 
+## Shutdown Sequence
+
+- `docker stop` sends SIGTERM to supervisord (PID 1), which stops programs one at a time in reverse priority: app (30) → redis (20) → postgresql (10), waiting up to each program's `stopwaitsecs` (default 10 s) before SIGKILL
+- **postgresql:** `stopsignal=INT` (fast shutdown: ends open sessions, writes a checkpoint, exits) + `stopwaitsecs=60` (`docker/unified/supervisord.conf`). The default SIGTERM is smart shutdown, which waits for every client; node is not stopped by `app-start.sh` and keeps its connections, so PostgreSQL was SIGKILLed at 10 s and every start ran crash recovery
+- **app, redis:** default SIGTERM, 10 s
+- **Grace period:** worst case 10 + 10 + 60 = 80 s; published value 90 s. A normal stop takes ~2 s, inside Docker's default 10 s, so the image alone fixes it; the grace period is headroom (slow checkpoint on NAS storage)
+  - Compose: `stop_grace_period: 90s` | `docker run`: `--stop-timeout 90`
+  - Unraid: every stop Unraid starts (Stop button, update, array stop) uses its global Docker Stop Timeout (Settings > Docker, default 10 s), not a per-container value. A normal stop fits in that; raise it for headroom
+- **Stop during startup:** until the entrypoint hands over to supervisord (first seconds of a start), PID 1 is bash and ignores SIGTERM, so Docker waits the full grace period (90 s with the setting, 10 s without) and then kills. Same outcome as before, only slower
+- **Clean stop logs:** `received fast shutdown request` … `database system is shut down`; the next start has no `database system was not properly shut down` / `automatic recovery in progress`
+- **After updating from an older image:** the first start may still show one recovery. That was the old image's stop, not the new one
+- **External PostgreSQL** (`USE_EXTERNAL_POSTGRES=true`): the program is `exec sleep infinity`; SIGINT ends it like SIGTERM did
+
 ## Deployment
 
 ### Production (Pre-built Image)
@@ -169,6 +182,7 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 services:
   readmeabook:
     image: ghcr.io/kikootwo/readmeabook:latest
+    stop_grace_period: 90s   # lets PostgreSQL shut down cleanly (see Shutdown Sequence)
     ports:
       - "3030:3030"
     volumes:
@@ -221,6 +235,7 @@ docker compose -f docker-compose.local.yml down
 ```bash
 docker run -d \
   --name readmeabook \
+  --stop-timeout 90 \
   -p 3030:3030 \
   -e PUID=1000 \
   -e PGID=1000 \
@@ -298,6 +313,7 @@ PostgreSQL requires that the database cluster owner have a specific username ("p
 services:
   readmeabook:
     image: ghcr.io/kikootwo/readmeabook:latest
+    stop_grace_period: 90s   # lets PostgreSQL shut down cleanly (see Shutdown Sequence)
     environment:
       PUID: 1000  # Your user ID
       PGID: 1000  # Your group ID
@@ -813,6 +829,12 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
 - Behaviour change: OpenSSL security level 2, see [TLS errors after upgrading to Node 24](#tls-errors-after-upgrading-to-node-24)
 - Expected log line: one `[DEP0169] DeprecationWarning: url.parse()` per process. Harmless: it comes from dependencies bundled into the server build (openid-client, follow-redirects), so Node treats them as app code; not suppressed on purpose
 - Guards added: system user IDs, Node/OpenSSL version line, `isBuiltin` for builtins
+
+**22. PostgreSQL killed on every container stop (crash recovery on each start)**
+- Symptom: every stop, restart or update; next start logs `database system was not properly shut down; automatic recovery in progress`
+- Cause: supervisord stopped PostgreSQL with SIGTERM (smart shutdown), which waits for clients; node (orphaned by `app-start.sh`) kept its connections, so supervisord SIGKILLed PostgreSQL at its 10 s default
+- Fix (idea + first version: PR #512, drwho725): `[program:postgresql]` `stopsignal=INT` (fast shutdown) + `stopwaitsecs=60`; `stop_grace_period: 90s` in both compose files, the README and the examples above. See [Shutdown Sequence](#shutdown-sequence)
+- Test: `tests/docker/supervisord-config.test.ts` (signal, wait, `exec` in `postgres-start.sh`, grace period > summed `stopwaitsecs`)
 
 ## Related
 

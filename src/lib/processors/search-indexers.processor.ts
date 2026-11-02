@@ -12,6 +12,7 @@ import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer
 import { RMABLogger } from '../utils/logger';
 import { getLanguageForRegion } from '../constants/language-config';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
+import { addGroupSearch, logSearchSummary, newSearchStats, noResultsMessage, recordFailure } from '../utils/indexer-search-failures';
 import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import type { AudibleRegion } from '../types/audible';
 
@@ -96,25 +97,30 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
 
     // Search Prowlarr for each group and combine results
     const allResults = [];
+    const searchStats = newSearchStats(); // failed searches are reported, not taken for "nothing found" (#522)
 
     for (let i = 0; i < groups.length; i++) {
       const group = groups[i];
       logger.info(`Searching group ${i + 1}/${groups.length}: ${getGroupDescription(group)}`);
+      const groupStats = newSearchStats();
 
       try {
         const groupResults = await prowlarr.searchWithVariations(effectiveSearchTitle, audiobook.author, {
           categories: group.categories,
           indexerIds: group.indexerIds,
           minSeeders: 1, // Only torrents with at least 1 seeder
-        }, { exactTitle: Boolean(requestRecord?.customSearchTerms) }); // custom terms: sent as given (#316)
+        }, { exactTitle: Boolean(requestRecord?.customSearchTerms) }, groupStats); // custom terms: sent as given (#316)
 
         logger.info(`Group ${i + 1} returned ${groupResults.length} results`);
         allResults.push(...groupResults);
       } catch (error) {
         logger.error(`Group ${i + 1} search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        recordFailure(groupStats, '(whole group)', error);
         // Continue with other groups even if one fails
       }
+      addGroupSearch(searchStats, groupStats, getGroupDescription(group), logger);
     }
+    logSearchSummary(logger, searchStats);
 
     const preBlocklistCount = allResults.length;
     const { kept: searchResults, blockedCount } = await filterBlockedResults(requestId, allResults);
@@ -130,7 +136,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       const allBlocked = blockedCount > 0 && preBlocklistCount > 0;
       const errorMessage = allBlocked
         ? `No usable releases — ${preBlocklistCount} candidates tried, all blocked`
-        : 'No torrents/nzbs found. Will retry automatically.';
+        : noResultsMessage('No torrents/nzbs found', searchStats);
 
       logger.warn(`${errorMessage} for request ${requestId}, marking as awaiting_search`);
 
@@ -243,7 +249,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
 
       if (!(await updateRequestUnlessStopped(requestId, {
         status: 'awaiting_search',
-        errorMessage: 'No quality matches found. Will retry automatically.',
+        errorMessage: noResultsMessage('No quality matches found', searchStats),
         lastSearchAt: new Date(),
       }))) {
         logger.info(`Request ${requestId} was cancelled or deleted during the search, not re-queued`);
