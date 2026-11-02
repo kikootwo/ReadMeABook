@@ -12,12 +12,13 @@
  *   - item ASIN is the requested one again → library_asin cleared
  *   - no item row, or its ASIN is empty or not ASIN-shaped (an ISBN) → nothing written
  * Every write is a compare-and-set on (id, absItemId, libraryAsin): a lost race writes nothing.
- * A book that is no longer linked (request delete, replace) keeps nothing: the run clears it.
+ * A book that is no longer linked (request delete, replace) keeps nothing: a full run clears it.
+ * `itemIds` (the recently-added check) limits the run to books linked to those items, no sweep.
  */
 
 import { prisma } from '@/lib/db';
 import type { RMABLogger } from '@/lib/utils/logger';
-import { ASIN_PATTERN } from '@/lib/services/audiobookshelf/match-missing-asins';
+import { asinShaped, sameAsin } from '@/lib/utils/asin';
 
 export interface FollowLibraryAsinResult {
   /** linked books with a live available audiobook request */
@@ -30,9 +31,6 @@ export interface FollowLibraryAsinResult {
   unlinked: number;
 }
 
-const sameAsin = (a: string | null | undefined, b: string | null | undefined) =>
-  !!a && !!b && a.toUpperCase() === b.toUpperCase();
-
 /**
  * The library ASIN to store for a linked book: a value to write (null = clear), or undefined
  * when nothing changes. A missing or invalid item ASIN never blanks a stored one.
@@ -42,27 +40,35 @@ export function nextLibraryAsin(
   current: string | null | undefined,
   itemAsin: string | null | undefined
 ): string | null | undefined {
-  const asin = itemAsin?.trim();
-  if (!asin || !ASIN_PATTERN.test(asin)) return undefined;
+  const asin = asinShaped(itemAsin);
+  if (!asin) return undefined;
   if (sameAsin(asin, audibleAsin)) return current ? null : undefined;
   if (sameAsin(asin, current)) return undefined;
   return asin;
 }
 
-export async function followLibraryAsins(backendMode: string, logger: RMABLogger): Promise<FollowLibraryAsinResult> {
+export async function followLibraryAsins(
+  backendMode: string,
+  logger: RMABLogger,
+  options: { itemIds?: string[] } = {}
+): Promise<FollowLibraryAsinResult> {
   const result: FollowLibraryAsinResult = { considered: 0, followed: 0, cleared: 0, unlinked: 0 };
   if (backendMode !== 'audiobookshelf') return result;
+  const { itemIds } = options;
+  if (itemIds && itemIds.length === 0) return result;
 
   try {
-    const { count } = await prisma.audiobook.updateMany({
-      where: { absItemId: null, libraryAsin: { not: null } },
-      data: { libraryAsin: null, updatedAt: new Date() },
-    });
-    result.unlinked = count;
+    if (!itemIds) {
+      const { count } = await prisma.audiobook.updateMany({
+        where: { absItemId: null, libraryAsin: { not: null } },
+        data: { libraryAsin: null, updatedAt: new Date() },
+      });
+      result.unlinked = count;
+    }
 
     const books = await prisma.audiobook.findMany({
       where: {
-        absItemId: { not: null },
+        absItemId: itemIds ? { in: itemIds } : { not: null },
         requests: { some: { type: 'audiobook', status: 'available', deletedAt: null } },
       },
       select: { id: true, title: true, audibleAsin: true, libraryAsin: true, absItemId: true },

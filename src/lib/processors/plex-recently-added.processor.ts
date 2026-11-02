@@ -12,6 +12,7 @@ import { getThumbnailCacheService } from '../services/thumbnail-cache.service';
 import { createLibraryRowUnlessPresent } from './library-row-insert';
 import { matchRequestsToLibrary } from '../services/library/match-requests';
 import { followLibraryAsins } from '../services/library/follow-library-asin';
+import { cacheLibraryCover } from '../services/library/library-cover';
 
 export interface PlexRecentlyAddedPayload {
   jobId?: string;
@@ -119,23 +120,13 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
         });
 
         if (insert.created) {
-          // Cache library cover (synchronous with smart skip-if-exists logic)
-          if (item.coverUrl && item.externalId) {
-            const cachedPath = await thumbnailCacheService.cacheLibraryThumbnail(
-              item.externalId,
-              item.coverUrl,
-              coverCachingParams.backendBaseUrl,
-              coverCachingParams.authToken,
-              coverCachingParams.backendMode
-            );
-
-            // Update database with cached path if successful
-            if (cachedPath) {
-              await prisma.plexLibrary.update({
-                where: { id: insert.row.id },
-                data: { cachedLibraryCoverPath: cachedPath },
-              });
-            }
+          // Cache library cover (synchronous with smart skip-if-exists logic; ABS: named by ASIN, #325a)
+          const cover = await cacheLibraryCover(thumbnailCacheService, coverCachingParams, item, null);
+          if (cover) {
+            await prisma.plexLibrary.update({
+              where: { id: insert.row.id },
+              data: { cachedLibraryCoverPath: cover },
+            });
           }
 
           newCount++;
@@ -165,23 +156,13 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
         },
       });
 
-      // Cache library cover (synchronous with smart skip-if-exists logic)
-      if (item.coverUrl && item.externalId) {
-        const cachedPath = await thumbnailCacheService.cacheLibraryThumbnail(
-          item.externalId,
-          item.coverUrl,
-          coverCachingParams.backendBaseUrl,
-          coverCachingParams.authToken,
-          coverCachingParams.backendMode
-        );
-
-        // Update database with cached path if successful
-        if (cachedPath) {
-          await prisma.plexLibrary.update({
-            where: { id: existing.id },
-            data: { cachedLibraryCoverPath: cachedPath },
-          });
-        }
+      // Cache library cover (skip-if-exists; ABS: a changed item ASIN fetches it again, #325a)
+      const cover = await cacheLibraryCover(thumbnailCacheService, coverCachingParams, item, existing);
+      if (cover !== undefined) {
+        await prisma.plexLibrary.update({
+          where: { id: existing.id },
+          data: { cachedLibraryCoverPath: cover },
+        });
       }
 
       updatedCount++;
@@ -198,7 +179,8 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
     // Note: Ebook requests don't match to Plex/ABS library - they stop at 'downloaded' status
     const matching = await matchRequestsToLibrary({ backendMode, libraryId, listedItems: recentItems, logger });
     const matchedDownloads = matching.matched;
-    await followLibraryAsins(backendMode, logger); // ABS: delivered requests show the item's current ASIN (#325a)
+    // ABS: delivered requests linked to these items show the item's current ASIN (#325a)
+    await followLibraryAsins(backendMode, logger, { itemIds: recentItems.map((i) => i.externalId).filter(Boolean) });
 
     logger.info(`Complete: ${newCount} new, ${updatedCount} updated, ${matchedDownloads} matched requests`);
 

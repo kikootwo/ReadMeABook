@@ -174,7 +174,7 @@ export async function GET(request: NextRequest) {
       const requests = await prisma.request.findMany({
         where,
         include: {
-          audiobook: true,
+          audiobook: { omit: { libraryAsin: false } }, // read by the library overlay (#325a)
           user: {
             select: { id: true, plexUsername: true },
           },

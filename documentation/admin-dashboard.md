@@ -29,12 +29,13 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - Query params: `page`, `pageSize` (10|25|50|100), `search`, `status`, `type` (`audiobook`|`ebook`), `userId`, `sortBy`, `sortOrder`
 - Returns: `requests[]`, `total`, `page`, `pageSize`, `totalPages`
 - Sorting: createdAt (default), completedAt, title, user, status
-- Filtering: by status, by type, by user, text search (title/author: the requested ones, or the linked library item's for a followed audiobook request, #325a)
-- Rows: `title`/`author` follow the library for a followed audiobook request; `asin` stays the requested ASIN (View details uses it); `libraryAsin` is the effective library ASIN or null. The title sort stays on the requested title.
+- Filtering: by status, by type, by user, text search (title/author: the requested ones, or in Audiobookshelf mode the linked library item's for a followed `available` audiobook request, #325a)
+- Rows: `title`/`author`/`asin` are the requested ones (every row action, both interactive search modals and Adjust Search Terms use them); `displayTitle`/`displayAuthor` are the shown ones (the library's edition for a followed request, else the same); `libraryAsin` is the effective library ASIN or null. The table shows `displayTitle ?? title`. The title sort stays on the requested title.
 - `type`: allowlist (`VALID_TYPES`); `all`, missing or any other value = no type filter (never reaches Prisma)
 
 **GET /api/admin/requests/recent** (Legacy)
 - Request ID, title, user, status, created/completed dates
+- `title`/`author` requested, `displayTitle`/`displayAuthor` shown, `libraryAsin` effective: as the list above (#325a)
 - Limited to 50 entries, no filtering
 
 **GET /api/admin/requests/pending-approval**

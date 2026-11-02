@@ -12,10 +12,8 @@ import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { generateFilesHash } from '@/lib/utils/files-hash';
 import type { LibraryItem } from '@/lib/services/library/ILibraryService';
+import { ASIN_PATTERN } from '@/lib/utils/asin';
 import { getABSItem, triggerABSItemMatch, type ABSMatchOutcome } from './api';
-
-/** Audible ASINs are 10 alphanumerics (B0..., or ISBN-10 style digits for some titles). */
-export const ASIN_PATTERN = /^[A-Z0-9]{10}$/i;
 
 export interface MatchMissingAsinsResult {
   /** Items listed without an ASIN (the ones a match was attempted for) */

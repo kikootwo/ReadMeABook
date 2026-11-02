@@ -135,6 +135,27 @@ describe('followLibraryAsins', () => {
     expect(log.error).toHaveBeenCalledWith(expect.stringContaining('db down'));
   });
 
+  it('itemIds (the recently-added check): only books linked to those items, and no unlinked sweep', async () => {
+    seed(null, Y);
+    const result = await followLibraryAsins('audiobookshelf', log as never, { itemIds: ['abs-1', 'abs-7'] });
+
+    expect(prismaMock.audiobook.findMany.mock.calls[0][0].where).toEqual({
+      absItemId: { in: ['abs-1', 'abs-7'] },
+      requests: { some: { type: 'audiobook', status: 'available', deletedAt: null } },
+    });
+    expect(prismaMock.audiobook.updateMany.mock.calls.map((c) => c[0])).toEqual([{
+      where: { id: 'ab-1', absItemId: 'abs-1', libraryAsin: null },
+      data: { libraryAsin: Y, updatedAt: expect.any(Date) },
+    }]);
+    expect(result).toMatchObject({ considered: 1, followed: 1, unlinked: 0 });
+  });
+
+  it('itemIds empty: no prisma call', async () => {
+    await followLibraryAsins('audiobookshelf', log as never, { itemIds: [] });
+    expect(prismaMock.audiobook.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.audiobook.findMany).not.toHaveBeenCalled();
+  });
+
   it('Plex mode makes no prisma call', async () => {
     const result = await followLibraryAsins('plex', log as never);
     expect(result).toEqual({ considered: 0, followed: 0, cleared: 0, unlinked: 0 });

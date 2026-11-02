@@ -40,9 +40,9 @@ export async function GET(
       const where = { id, deletedAt: null }; // Only show active requests
 
       // Non-admins (owners, API tokens) get an explicit field list without internal job/download data
-      const requestRecord = await withRequestLibraryDisplay(isAdmin // + the library overlay (#325a)
+      const requestRecord = isAdmin
         ? await prisma.request.findFirst({ where, include: ADMIN_REQUEST_DETAIL_INCLUDE })
-        : await prisma.request.findFirst({ where, select: OWNER_REQUEST_DETAIL_SELECT }));
+        : await prisma.request.findFirst({ where, select: OWNER_REQUEST_DETAIL_SELECT });
 
       if (!requestRecord) {
         return NextResponse.json(
@@ -59,10 +59,13 @@ export async function GET(
         );
       }
 
+      // A followed request shows the library's edition (#325a); applied after the ownership check
+      const shown = await withRequestLibraryDisplay(requestRecord);
+
       // Sizes are BigInt columns, which JSON.stringify cannot serialize (#261)
       return NextResponse.json({
         success: true,
-        request: toJsonSafe(isAdmin ? hidePlacementRecord(requestRecord) : await stripProwlarrKeyFromResults(requestRecord)),
+        request: toJsonSafe(isAdmin ? hidePlacementRecord(shown) : await stripProwlarrKeyFromResults(shown)),
       });
     } catch (error) {
       logger.error('Failed to get request', { error: error instanceof Error ? error.message : String(error) });

@@ -9,6 +9,7 @@ import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { Prisma } from '@/generated/prisma';
 import { loadLinkedRows, withLibraryDisplay } from '@/lib/services/library/library-display';
+import { getConfigService } from '@/lib/services/config.service';
 
 const logger = RMABLogger.create('API.Admin.Requests');
 
@@ -20,6 +21,29 @@ const VALID_TYPES = ['audiobook', 'ebook'] as const;
 type SortField = (typeof VALID_SORT_FIELDS)[number];
 type SortOrder = (typeof VALID_SORT_ORDERS)[number];
 type RequestType = (typeof VALID_TYPES)[number];
+
+/**
+ * Audiobookshelf only (#325a): ids of the library items followed by an available audiobook request
+ * whose title or author matches. Plex mode never follows, so no query runs there.
+ */
+async function followedItemsMatching(text: Prisma.StringFilter): Promise<string[]> {
+  if ((await getConfigService().getBackendMode()) !== 'audiobookshelf') return [];
+  const followed = await prisma.audiobook.findMany({
+    where: {
+      libraryAsin: { not: null },
+      absItemId: { not: null },
+      requests: { some: { type: 'audiobook', status: 'available', deletedAt: null } },
+    },
+    select: { absItemId: true },
+  });
+  if (followed.length === 0) return [];
+  const rows = await prisma.plexLibrary.findMany({
+    where: { plexGuid: { in: followed.map((b) => b.absItemId!) }, OR: [{ title: text }, { author: text }] },
+    select: { plexGuid: true },
+    orderBy: { plexGuid: 'asc' },
+  });
+  return rows.map((r) => r.plexGuid);
+}
 
 export async function GET(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
@@ -75,14 +99,11 @@ export async function GET(request: NextRequest) {
         if (search) {
           const text = { contains: search, mode: 'insensitive' as const };
           const requested: Prisma.RequestWhereInput = { audiobook: { OR: [{ title: text }, { author: text }] } };
-          const library = await prisma.plexLibrary.findMany({
-            where: { OR: [{ title: text }, { author: text }] },
-            select: { plexGuid: true },
-            take: 500,
-          });
-          where.OR = library.length === 0 ? [requested] : [requested, {
+          const items = await followedItemsMatching(text);
+          where.OR = items.length === 0 ? [requested] : [requested, {
             type: 'audiobook',
-            audiobook: { libraryAsin: { not: null }, absItemId: { in: library.map((r) => r.plexGuid) } },
+            status: 'available',
+            audiobook: { libraryAsin: { not: null }, absItemId: { in: items } },
           }];
         }
 
@@ -151,15 +172,18 @@ export async function GET(request: NextRequest) {
           take: pageSize,
         });
 
-        // Format response. Title and author follow the library (#325a); `asin` stays the requested
-        // one (View details and its actions key on it), `libraryAsin` is the effective library ASIN.
-        const rows = await loadLinkedRows(requests.map((r) => r.audiobook));
+        // Format response. `title`/`author`/`asin` stay the requested ones (every row action and
+        // View details use them); `displayTitle`/`displayAuthor` follow the library (#325a) and
+        // `libraryAsin` is the effective library ASIN.
+        const rows = await loadLinkedRows(requests);
         const formatted = requests.map((request) => {
-          const shown = withLibraryDisplay(request.audiobook, rows, request.type);
+          const shown = withLibraryDisplay(request.audiobook, rows, request);
           return {
             requestId: request.id,
-            title: shown.title,
-            author: shown.author,
+            title: request.audiobook.title,
+            author: request.audiobook.author,
+            displayTitle: shown.title,
+            displayAuthor: shown.author,
             asin: request.audiobook.audibleAsin || null,
             libraryAsin: shown.libraryAsin,
             status: request.status,

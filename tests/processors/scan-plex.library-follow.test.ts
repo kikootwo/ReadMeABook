@@ -25,7 +25,7 @@ const configMock = vi.hoisted(() => ({
   get: vi.fn(),
   getAudibleRegion: vi.fn(),
 }));
-const thumbnailCacheServiceMock = vi.hoisted(() => ({ cacheLibraryThumbnail: vi.fn() }));
+const thumbnailCacheServiceMock = vi.hoisted(() => ({ cacheLibraryThumbnail: vi.fn(), deleteLibraryThumbnail: vi.fn() }));
 const jobQueueMock = vi.hoisted(() => ({ addNotificationJob: vi.fn() }));
 const fetchMock = vi.hoisted(() => vi.fn());
 
@@ -169,10 +169,69 @@ describe('a delivered request follows the ASIN of its Audiobookshelf item (#325a
     request().deletedAt = new Date(); // the request delete soft-deletes and clears the item id
     listed(Y);
     const { processPlexRecentlyAddedCheck } = await import('@/lib/processors/plex-recently-added.processor');
+    const { processScanPlex } = await import('@/lib/processors/scan-plex.processor');
 
-    await processPlexRecentlyAddedCheck({ jobId: 'job-10' });
+    await processPlexRecentlyAddedCheck({ jobId: 'job-10' }); // scoped to the items it listed: no sweep
+    expect(book()).toMatchObject({ absItemId: null, libraryAsin: Y });
 
+    await processScanPlex({ jobId: 'job-10b' });
     expect(book()).toMatchObject({ absItemId: null, libraryAsin: null });
+  });
+
+  it('recently-added check: follows only books linked to the items it listed', async () => {
+    seedDelivered('available');
+    Object.assign(book(), { absItemId: 'abs-1' });
+    db.plex.push({ id: 'row-1', plexGuid: 'abs-1', asin: Y, filePath: `/audiobooks/${FOLDER}` });
+    db.plex.push({ id: 'row-9', plexGuid: 'abs-9', asin: Z, filePath: '/audiobooks/Other/Book' });
+    db.audiobooks.push({ ...book(), id: 'ab-9', audibleAsin: 'B0OTHER009', absItemId: 'abs-9', filePath: `${MEDIA}/Other/Book` });
+    db.requests.push({ ...request(), id: 'req-9', audiobookId: 'ab-9' });
+    listed(Y);
+    const { processPlexRecentlyAddedCheck } = await import('@/lib/processors/plex-recently-added.processor');
+
+    await processPlexRecentlyAddedCheck({ jobId: 'job-12' });
+
+    expect(book().libraryAsin).toBe(Y);
+    expect(db.audiobooks.find((a) => a.id === 'ab-9')?.libraryAsin).toBeNull();
+  });
+
+  it('a re-link to the same item keeps the library ASIN, even when the item lists no ASIN', async () => {
+    seedDelivered();
+    Object.assign(book(), { absItemId: 'abs-1', libraryAsin: Y });
+    libraryServiceMock.getRecentlyAdded.mockResolvedValue([{ ...item(''), asin: undefined }]);
+    const { processPlexRecentlyAddedCheck } = await import('@/lib/processors/plex-recently-added.processor');
+
+    await processPlexRecentlyAddedCheck({ jobId: 'job-13' });
+
+    expect(request().status).toBe('available');
+    expect(book()).toMatchObject({ absItemId: 'abs-1', libraryAsin: Y, audibleAsin: X });
+  });
+
+  it('the cached library cover is fetched again under a new name when the item ASIN changes, and reused otherwise', async () => {
+    seedDelivered();
+    const cover = (asin: string) => `/app/cache/library/0123456789abcdef-${asin}.jpg`;
+    thumbnailCacheServiceMock.cacheLibraryThumbnail.mockImplementation(async (...args: unknown[]) =>
+      cover((args[5] as { variant: string }).variant));
+    const withCover = (asin: string) => [{ ...item(asin), coverUrl: '/api/items/abs-1/cover' }];
+    const { processScanPlex } = await import('@/lib/processors/scan-plex.processor');
+    const { processPlexRecentlyAddedCheck } = await import('@/lib/processors/plex-recently-added.processor');
+
+    libraryServiceMock.getLibraryItems.mockResolvedValue(withCover(Y));
+    await processScanPlex({ jobId: 'job-14' });
+    expect(db.plex[0].cachedLibraryCoverPath).toBe(cover(Y));
+    expect(thumbnailCacheServiceMock.cacheLibraryThumbnail.mock.calls[0][5]).toEqual({ variant: Y, refresh: false });
+
+    thumbnailCacheServiceMock.cacheLibraryThumbnail.mockClear();
+    await processScanPlex({ jobId: 'job-15' }); // unchanged
+    expect(thumbnailCacheServiceMock.cacheLibraryThumbnail.mock.calls[0][5]).toEqual({ variant: Y, refresh: false });
+    expect(thumbnailCacheServiceMock.deleteLibraryThumbnail).not.toHaveBeenCalled();
+
+    libraryServiceMock.getRecentlyAdded.mockResolvedValue(withCover(Z));
+    thumbnailCacheServiceMock.cacheLibraryThumbnail.mockClear();
+    await processPlexRecentlyAddedCheck({ jobId: 'job-16' }); // rematched
+    expect(thumbnailCacheServiceMock.cacheLibraryThumbnail.mock.calls[0][5]).toEqual({ variant: Z, refresh: true });
+    expect(thumbnailCacheServiceMock.deleteLibraryThumbnail).toHaveBeenCalledWith(cover(Y));
+    expect(db.plex[0].cachedLibraryCoverPath).toBe(cover(Z));
+    expect(book().libraryAsin).toBe(Z);
   });
 
   it('a re-link to another item starts with no library ASIN until that item has one', async () => {
