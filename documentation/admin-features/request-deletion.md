@@ -325,7 +325,7 @@ where: {
 - **Cause:** nothing recorded which file an ebook import placed; `planEbookDelete` guessed from the folder
 - **Fix:** the ebook organize records the file it copied (`Request.placedEbookFiles`, only for placeFile `copied`); the delete removes only recorded, unchanged files behind rules a-c (D2 above). `planEbookDelete` removed
 - **Responses:** the record holds absolute library paths and is read only by the delete: every response that returns a request row leaves it out, for admins too (`hidePlacementRecord()`/`hideStoredPick()` in `src/lib/services/request-detail-query.ts`; `GET /api/requests` sets it `undefined` as it does `audiobook.filePath`)
-- **Limits** (each keeps a file; none removes more):
+- **Limits** (none removes more than before #497; all but the second keep the file):
   - Ebook requests imported before this version have no record: their delete removes no ebook file (reason shown; remove by hand). A crash between the copy and the record write, or a failed record write, leaves that file unrecorded (kept)
   - Another active ebook request on the same book whose import found this file already there (`[]`) does not hold it: deleting the request that placed it removes it, and the other request still shows `downloaded` (as before #497)
   - A delete while the request's import is still running: the file that import places afterwards is not recorded on a live request, so RMAB never removes it
