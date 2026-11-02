@@ -75,7 +75,7 @@ async function deleteFromTable(page: Page, title: string): Promise<Locator> {
   const row = page.locator('tr', { hasText: title });
   await expect(row).toBeVisible({ timeout: 30_000 });
   await row.locator('button[title="Actions"]').click();
-  await page.getByRole('button', { name: 'Delete Request' }).click();
+  await page.getByRole('menuitem', { name: 'Delete Request' }).click();
   await page.getByRole('button', { name: 'Delete', exact: true }).click();
   const toast = page.locator('div.fixed.top-4.right-4 > div').first();
   await expect(toast).toBeVisible();
