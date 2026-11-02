@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { hidePlacementRecord } from '@/lib/services/request-detail-query';
 
 const logger = RMABLogger.create('API.Admin.ReportedIssues.Replace');
 
@@ -65,7 +66,7 @@ export async function POST(
 
         return NextResponse.json({
           success: true,
-          request: result.request,
+          request: hidePlacementRecord(result.request),
         });
       } catch (error) {
         if (error instanceof z.ZodError) {

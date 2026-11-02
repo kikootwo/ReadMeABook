@@ -160,7 +160,7 @@ Ebook torrent ranking uses unified algorithm with ebook-specific scoring:
 ## Delete Behavior
 
 **Ebook deletion is different from audiobook deletion:**
-- Only deletes ebook files (`.epub`, `.pdf`, `.mobi`, etc.)
+- Deletes only the ebook files this request's imports placed (`Request.placedEbookFiles`, written by the ebook organize for a `copied` file), each only while unchanged (size + sha256) and in a folder the library delete guard allows (#497). A user's own ebook in the book folder is never removed. No record (imported before the field, or the file was already there): nothing removed, the admin sees why. See [request-deletion.md](../admin-features/request-deletion.md) D2
 - Does NOT delete the title folder (audiobook files remain)
 - Does NOT delete from backend library (Plex/ABS)
 - Does NOT clear audiobook availability linkage

@@ -32,6 +32,7 @@ import { createAudibleDetailsLoader, readMetadataTaggingEnabled, resolveTagDetai
 import { applyPostImportCategory } from './post-import-category';
 import { preferredEbookFile } from '../utils/import-inventory';
 import { findEbookOnDisk } from '../utils/ebook-on-disk';
+import { recordEbookPlacement } from '../utils/ebook-placement';
 
 /**
  * Process organize files job
@@ -926,6 +927,9 @@ async function processEbookOrganization(
   }
 
   logger.info(`Successfully moved ebook to ${result.targetPath}`);
+
+  // #497: record the ebook file this import placed (only a 'copied' file is RMAB's); never throws
+  await recordEbookPlacement(requestId, result.record, logger);
 
   // The organizer reads a temp copy when the Kindle fix ran; the original is epubFilePath
   const importedFile = fixedEpubPath ? epubFilePath : result.sourceFile;

@@ -57,7 +57,9 @@ export interface DeleteRequestResult {
  *
  * Logic (ebook requests):
  * 1. Check if request exists and is not already deleted
- * 2. Delete ebook files only, when the guard allows it (leave audiobook files intact)
+ * 2. Delete only the ebook files this request's imports recorded (Request.placedEbookFiles),
+ *    each still unchanged and in a folder the guard allows (audiobook files never touched).
+ *    No record: nothing removed (filesKeptReason says why for a delivered request)
  * 3. Soft delete request (set deletedAt, deletedBy)
  * Note: No backend library deletion or audiobook linkage clearing for ebooks
  */
@@ -127,13 +129,13 @@ export async function deleteRequest(
 
     // 3. Library files, behind the library delete guard
     // Audiobooks: the stored folder, only when it provably holds this import
-    // Ebooks: ebook files in it (leave audiobook files intact), never a shared-folder sweep
+    // Ebooks: only the ebook files this request's imports placed (#497), never a folder sweep
     const book = request.audiobook;
     let filesDeleted = false;
     let filesKeptReason: string | undefined;
     let outcome: LibraryFilesOutcome | null = null;
     if (isEbook) {
-      const ebook = await removeEbookFiles(book);
+      const ebook = await removeEbookFiles(book, request);
       filesDeleted = ebook.deleted > 0;
       filesKeptReason = ebook.keptReason;
     } else {
