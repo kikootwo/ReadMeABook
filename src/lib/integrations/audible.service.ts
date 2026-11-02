@@ -42,6 +42,7 @@ import {
   parseCatalogCategories,
   type AudibleCategoryNode,
 } from './audible-categories';
+import { CATEGORY_FALLBACK_PATH, fetchCategoryBooksFromCatalog } from './audible-category-fallback';
 
 const logger = RMABLogger.create('Audible');
 
@@ -866,7 +867,9 @@ export class AudibleService {
   /**
    * Category audiobooks from Audible's HTML /search?node=<categoryId> page,
    * sorted by popularity-rank. Uses HTML scraping (not the catalog API) so
-   * results match Audible's curated category-storefront ordering.
+   * results match Audible's curated category-storefront ordering. When the
+   * storefront yields no books (empty page, or every retry failed), falls back
+   * to the catalog API's bestsellers for the category (audible-category-fallback.ts).
    */
   async getCategoryBooks(categoryId: string, limit: number = 200): Promise<AudibleAudiobook[]> {
     await this.initialize();
@@ -924,7 +927,22 @@ export class AudibleService {
     logger.info(
       `Category ${categoryId}: collected ${audiobooks.length} books across ${page - 1} pages`,
     );
-    return audiobooks;
+    if (audiobooks.length > 0) return audiobooks;
+
+    return fetchCategoryBooksFromCatalog<CatalogProduct, AudibleAudiobook>(categoryId, limit, {
+      fetchProducts: async (params) => {
+        const { data: response } = await this.fetchWithRetry(
+          CATEGORY_FALLBACK_PATH,
+          { params: { ...params, response_groups: CATALOG_RESPONSE_GROUPS } },
+          5,
+          this.apiClient,
+        );
+        return response.data as CatalogProductsResponse;
+      },
+      mapProduct: mapCatalogProduct,
+      langConfig: this.getLangConfig(),
+      pageSize: AUDIBLE_PAGE_SIZE,
+    });
   }
 
   private getLangConfig(): LanguageConfig {

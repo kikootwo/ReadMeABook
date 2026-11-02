@@ -106,7 +106,10 @@ describe('processAudibleRefresh category cap (#309)', () => {
     audibleServiceMock.getPopularAudiobooks.mockResolvedValue([]);
     audibleServiceMock.getNewReleases.mockResolvedValue([]);
     audibleServiceMock.getCategoryBooks.mockReset();
-    audibleServiceMock.getCategoryBooks.mockResolvedValue([]);
+    // One book each: a fetch that returns none keeps the old rows and isn't counted as synced
+    audibleServiceMock.getCategoryBooks.mockImplementation(async (id: string) => [
+      { asin: `B-${id}`, title: `Book of ${id}`, author: 'A' },
+    ]);
     thumbnailCacheMock.cleanupUnusedThumbnails.mockResolvedValue(0);
     prismaMock.audibleCacheCategory.deleteMany.mockReset();
     prismaMock.audibleCacheCategory.deleteMany.mockResolvedValue({ count: 0 });

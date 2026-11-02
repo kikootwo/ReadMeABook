@@ -12,7 +12,7 @@ Audiobook metadata for discovery, search, and detail pages. Split by access patt
 
 ## Architecture
 
-- **Curated HTML (refresh job only):** the three methods called solely by `audible-refresh.processor.ts` (`getPopularAudiobooks`, `getNewReleases`, `getCategoryBooks`) scrape Audible's storefront HTML to inherit editorial curation. Beefed-up retry/backoff knobs (12 retries, 3-min jittered cap) handle 503 storms patiently on the nightly job without slowing healthy users.
+- **Curated HTML (refresh job only):** the three methods called solely by `audible-refresh.processor.ts` (`getPopularAudiobooks`, `getNewReleases`, `getCategoryBooks`) scrape Audible's storefront HTML to inherit editorial curation. Beefed-up retry/backoff knobs (12 retries, 3-min jittered cap) handle 503 storms patiently on the nightly job without slowing healthy users. Storefront yields 0 books for a category (empty page, or every retry failed) → `getCategoryBooks` falls back to the catalog API (`audible-category-fallback.ts`, below). A section whose fetch returns nothing keeps its previous list (see [home-sections.md](../features/home-sections.md#refresh-processor-unified-storage)).
 - **JSON catalog API (real-time):** `search`, `searchByAuthorAsin`, `getCategories` (categories listing), and `fetchAudibleDetailsFromApi` (per-ASIN fallback); series search (`audible-series-search.ts`, [own doc](./audible-series-search.md)). Same endpoint used by the official Audible mobile apps. No authentication, no API key, no user credentials, no special headers.
 - **Audnexus (per-ASIN):** `getAudiobookDetails` and `getRuntime` prefer Audnexus, with catalog API fallback for `getAudiobookDetails`.
 - **Series fill** (`audible-series-fill.ts`, `SeriesFill`, one per service): Audnexus result without a series → `series`/`seriesPart`/`seriesAsin` from `/1.0/catalog/products/{asin}` (same region), only when the chosen entry has a non-empty title, all three or none; every other field stays Audnexus. `getAudiobookDetails(asin, { fillSeries: false })` skips it (bulk-import scan, BookDate `matchToAudnexus`, organize tag lookup when the series is stored).
@@ -27,8 +27,17 @@ Audiobook metadata for discovery, search, and detail pages. Split by access patt
 | Popular | `/adblbestsellers` | `pageSize=50`, `page=<n>` (omitted on first page) |
 | New releases | `/newreleases` | `pageSize=50`, `page=<n>` (omitted on first page) |
 | Category books | `/search` | `node=<categoryId>&pageSize=50&sort=popularity-rank&page=<n>` |
+| Category books, fallback (`apiClient`) | `/1.0/catalog/products` | `category_id=<categoryId>&products_sort_by=BestSellers&num_results=50&page=<n>` (0-based) + `CATALOG_RESPONSE_GROUPS` |
 
 Parsed via cheerio. Selectors: `.productListItem` (popular/new releases), `.s-result-item, .productListItem` (categories).
+
+**Category fallback** (`fetchCategoryBooksFromCatalog`, `src/lib/integrations/audible-category-fallback.ts`):
+- Runs only when the storefront scrape collected 0 books; works for any category id, top-level or sub-category.
+- `fetchWithRetry` on `apiClient` (5 retries), rows mapped by `mapCatalogProduct` (carry `language`).
+- Region language, always (as `searchByAuthorAsin`): a product is kept only when its `language` is one of the region's `acceptedLanguageValues`; other languages and no language (mostly podcasts) are left out.
+- Admin language filter (#259): applied afterwards by the refresh processor, the same as on storefront rows. Fallback rows always pass it (their language is the region's), so on and off save the same rows.
+- Up to `ceil(limit / 50) * 2` pages (filtering drops part of each page); stops at the limit or a page shorter than 50; ASINs deduped.
+- A failed catalog page ends the fallback with what earlier pages collected (`[]` if the first fails); logged.
 
 ### Real-time (JSON catalog API — `apiClient`, baseURL `api.audible.<tld>`)
 
@@ -144,6 +153,7 @@ Configurable Audible region for accurate metadata matching across international 
 - Service: `src/lib/integrations/audible.service.ts`
 - Series detail (HTML): `src/lib/integrations/audible-series.ts` (fetch/orchestration), `src/lib/integrations/audible-series-parsers.ts` (Cheerio parsing)
 - Series search (catalog API): `src/lib/integrations/audible-series-search.ts`, `audible-series-rank.ts`
+- Category fallback (catalog API): `src/lib/integrations/audible-category-fallback.ts`
 - Config: `src/lib/services/config.service.ts`
 - API: `src/app/api/admin/settings/audible/route.ts`
 
@@ -334,6 +344,12 @@ interface AuthorBooksResult {
 - PostgreSQL (`audible_cache`, `audible_cache_categories`)
 
 ## Fixed Issues
+
+**Home sections emptied by one failed nightly refresh (#507, 2026-11-02)**
+- **Problem:** After a night when the storefront answered `Request failed (503)` through all 12 retries, the job logged `fetched 0 books` and the category section showed "No audiobooks yet" until a later good night.
+- **Root cause:** `persistSectionBooks` deleted a section's rows before checking that the fetch returned anything, and counted the category as synced. The storefront's 503s are intermittent; nothing in the request was shown to cause them.
+- **Fix:** A fetch with 0 books (before the language filter) keeps the section's previous rows, logs one warning naming the section, and isn't counted in `categoriesSynced` (popular, new releases and categories). `getCategoryBooks` falls back to the catalog API's bestsellers for the category when the storefront yields 0 books. A category that is genuinely empty keeps its last list.
+- **Location:** `src/lib/processors/audible-refresh.processor.ts`, `src/lib/integrations/audible-category-fallback.ts` (new), `audible.service.ts`; tests `tests/processors/audible-refresh.processor.test.ts`, `tests/processors/audible-refresh-language.test.ts`, `tests/integrations/audible-category-fallback.test.ts`.
 
 **Author pages missing books (#310 part 1, 2026-10-27)**
 - **Problem:** Author pages (e.g. J.R.R. Tolkien) and entire-catalog watched authors stopped before the end of the author's catalog.

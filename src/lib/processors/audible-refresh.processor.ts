@@ -84,25 +84,27 @@ export async function processAudibleRefresh(payload: AudibleRefreshPayload): Pro
     const inLanguage = await languageFilterForRows(() => audibleService.getRegion(), logger);
 
     // Fetch popular and new releases - 200 items each
-    const popular = inLanguage(await audibleService.getPopularAudiobooks(200), 'popular');
+    const popularFetched = await audibleService.getPopularAudiobooks(200);
+    const popular = inLanguage(popularFetched, 'popular');
 
     // Batch cooldown between popular and new releases to reduce detection
     const batchCooldownMs = 15000 + Math.floor(Math.random() * 15000);
     logger.info(`Batch cooldown: waiting ${Math.round(batchCooldownMs / 1000)}s before fetching new releases...`);
     await new Promise(resolve => setTimeout(resolve, batchCooldownMs));
 
-    const newReleases = inLanguage(await audibleService.getNewReleases(200), 'new releases');
+    const newReleasesFetched = await audibleService.getNewReleases(200);
+    const newReleases = inLanguage(newReleasesFetched, 'new releases');
 
     logger.info(`Fetched ${popular.length} popular, ${newReleases.length} new releases from Audible`);
 
     // Persist popular audiobooks via AudibleCacheCategory
-    const popularSaved = await persistSectionBooks(
-      popular, POPULAR_CATEGORY_ID, syncTime, thumbnailCache, logger, 'popular audiobook'
+    const { saved: popularSaved } = await persistSectionBooks(
+      popular, popularFetched.length, POPULAR_CATEGORY_ID, syncTime, thumbnailCache, logger, 'popular audiobook'
     );
 
     // Persist new releases via AudibleCacheCategory
-    const newReleasesSaved = await persistSectionBooks(
-      newReleases, NEW_RELEASES_CATEGORY_ID, syncTime, thumbnailCache, logger, 'new release'
+    const { saved: newReleasesSaved } = await persistSectionBooks(
+      newReleases, newReleasesFetched.length, NEW_RELEASES_CATEGORY_ID, syncTime, thumbnailCache, logger, 'new release'
     );
 
     logger.info(`Saved ${popularSaved} popular and ${newReleasesSaved} new releases`);
@@ -141,15 +143,19 @@ export async function processAudibleRefresh(payload: AudibleRefreshPayload): Pro
             await new Promise(resolve => setTimeout(resolve, catCooldownMs));
 
             // Scrape category books
-            const books = inLanguage(await audibleService.getCategoryBooks(catId, 200), `category ${catId}`);
+            const fetched = await audibleService.getCategoryBooks(catId, 200);
+            const books = inLanguage(fetched, `category ${catId}`);
             logger.info(`Category ${catId}: fetched ${books.length} books`);
 
-            const saved = await persistSectionBooks(
-              books, catId, syncTime, thumbnailCache, logger, 'category book'
+            const { saved, keptPrevious } = await persistSectionBooks(
+              books, fetched.length, catId, syncTime, thumbnailCache, logger, 'category book'
             );
 
-            categoriesSynced++;
-            logger.info(`Category ${catId}: saved ${saved} entries`);
+            // A fetch that returned nothing kept the previous list: not synced
+            if (!keptPrevious) {
+              categoriesSynced++;
+              logger.info(`Category ${catId}: saved ${saved} entries`);
+            }
           } catch (error) {
             logger.error(`Failed to refresh category ${catId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
           }
@@ -205,16 +211,24 @@ async function languageFilterForRows(
 /**
  * Wipe previous entries for a category, upsert book metadata into AudibleCache,
  * and insert ranked entries into AudibleCacheCategory.
- * Returns the number of books successfully saved.
+ * `fetchedCount` is the scrape's size before the language filter: 0 means the fetch
+ * failed or found nothing (scrapers return [] then), so the previous entries are kept.
+ * A fetch whose rows the language filter all left out still replaces them.
  */
 async function persistSectionBooks(
   books: any[],
+  fetchedCount: number,
   categoryId: string,
   syncTime: Date,
   thumbnailCache: { cacheThumbnail: (asin: string, url: string) => Promise<string | null> },
   logger: ReturnType<typeof RMABLogger.forJob>,
   labelForErrors: string,
-): Promise<number> {
+): Promise<{ saved: number; keptPrevious: boolean }> {
+  if (fetchedCount === 0) {
+    logger.warn(`Section ${categoryId}: the fetch returned no books, its previous list was kept`);
+    return { saved: 0, keptPrevious: true };
+  }
+
   // Defensive dedup: the (asin, categoryId) unique constraint means a duplicate ASIN
   // in `books` crashes the second .create() with P2002. The HTML parser already dedupes
   // per page and across pages against the cumulative accumulator, but a warn-on-fire
@@ -304,5 +318,5 @@ async function persistSectionBooks(
     }
   }
 
-  return saved;
+  return { saved, keptPrevious: false };
 }
