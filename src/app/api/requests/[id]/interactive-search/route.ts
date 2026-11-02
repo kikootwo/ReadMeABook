@@ -82,6 +82,14 @@ export async function POST(
         );
       }
 
+      // A denied request stays denied: only an admin can search releases for it
+      if (requestRecord.status === 'denied' && req.user.role !== 'admin') {
+        return NextResponse.json(
+          { error: 'RequestDenied', message: 'This request was denied by an admin. You cannot search for releases for it.' },
+          { status: 403 }
+        );
+      }
+
       // Check interactive search access permission
       const accessDenied = await denyWithoutInteractiveSearchAccess(req.user.id);
       if (accessDenied) return accessDenied;

@@ -262,7 +262,7 @@ describe('processPlexRecentlyAddedCheck', () => {
     );
     expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'req-1', status: { notIn: ['available', 'cancelled', 'denied'] } },
+        where: { id: 'req-1', status: { notIn: ['available', 'cancelled', 'denied', 'awaiting_approval'] } },
         data: expect.objectContaining({ status: 'available' }),
       })
     );

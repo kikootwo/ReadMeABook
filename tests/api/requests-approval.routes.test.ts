@@ -558,7 +558,7 @@ describe('Request Approval Workflow', () => {
       expect(payload.message).toContain('approved');
       expect(prismaMock.request.update).toHaveBeenCalledWith({
         where: { id: 'req-1' },
-        data: { status: 'pending' },
+        data: { status: 'pending', approvalBypassedBy: null },
         include: {
           audiobook: true,
           user: {
