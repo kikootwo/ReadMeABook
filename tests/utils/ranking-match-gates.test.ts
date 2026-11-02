@@ -128,7 +128,7 @@ describe('automatic search: right books still clear the threshold', () => {
     ['ordinal edition', 'Frank Herbert - Dune 40th Anniversary Edition [M4B]', ...DUNE],
     ['retail', 'Frank.Herbert.Dune.Retail.M4B', ...DUNE],
     ['narrator after the title', 'Frank Herbert Dune Scott Brick 2007 MP3', ...DUNE],
-    ['aax', 'Frank Herbert - Dune AAX', ...DUNE],
+    ['aax, a bare word and not a DRM marker (#518)', 'Frank Herbert - Dune AAX', ...DUNE],
     ['leading bracket tag', '[M4B] Dune - Frank Herbert', ...DUNE],
     ['leading parenthesis tag', '(Audiobook) Dune by Frank Herbert', ...DUNE],
     ['number right before an occurrence', 'Dune Chronicles 01 Dune Frank Herbert M4B', ...DUNE],

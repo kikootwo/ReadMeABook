@@ -5,6 +5,7 @@
 
 import { compareTwoStrings } from 'string-similarity';
 import { matchesByInitials } from './author-initials';
+import { drmReleaseMarker } from './drm-release';
 import {
   apostropheEndingWords, foldForMatching, FULLWIDTH_RE, fromFullwidth, hasNonLatinLetter, hasUnspacedScript, isWordInTitle,
   keepUnrequestedApostrophes, normalizeForMatching, splitSubtitle,
@@ -54,6 +55,7 @@ export interface RankTorrentsOptions {
   stopWords?: string[];                      // Language-specific stop words for matching
   characterReplacements?: Record<string, string>;  // Language-specific char replacements (e.g. ß→ss)
   minMBPerMinute?: number;                   // Size floor when runtime is known (opt-in; automatic search only)
+  rejectDrm?: boolean;                       // Drop Audible DRM releases (opt-in; automatic search only)
 }
 
 /** Size floor for automatic search, about 21 kbps: drops a single file of a multi-file post (#311) */
@@ -140,15 +142,18 @@ export class RankingAlgorithm {
       stopWords,
       characterReplacements,
       minMBPerMinute,
+      rejectDrm = false,
     } = options;
     // Filter out files < 20 MB (likely ebooks/samples), and, when a floor is set and the
-    // runtime is known, results too small for the runtime (one file of a multi-file post)
+    // runtime is known, results too small for the runtime (one file of a multi-file post).
+    // With rejectDrm, also releases marked as Audible DRM (.aax, [AAX]): the requester can't play them
     const runtime = audiobook.durationMinutes;
     const floorMB = minMBPerMinute !== undefined && runtime !== undefined && runtime > 0
       ? minMBPerMinute * runtime
       : 0;
     const filteredTorrents = torrents.filter((torrent) => {
       const sizeMB = torrent.size / (1024 * 1024);
+      if (rejectDrm && drmReleaseMarker(torrent.title) !== null) return false;
       return sizeMB >= 20 && sizeMB >= floorMB;
     });
 
