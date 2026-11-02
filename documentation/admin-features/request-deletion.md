@@ -294,8 +294,7 @@ so every path converges — Web UI cancel, Web UI admin route, the Discord Cance
   unloaded when the bot is disabled. Best-effort: failures are logged, never surfaced.
 
 **Signature:** `deleteRequest(requestId, adminUserId, actorDiscordUserId?)`. The optional third
-argument attributes the "Cancelled by" mention for Discord-initiated deletes (including admin-role
-holders with no linked RMAB account); other callers fall back to the deleting user's linked
+argument attributes the "Cancelled by" mention for Discord-initiated deletes; other callers fall back to the deleting user's linked
 `discordUserId`, and the field is omitted entirely when neither exists.
 
 ## Fixed Issues ✅

@@ -64,9 +64,7 @@ export interface DeleteRequestResult {
  */
 export async function deleteRequest(
   requestId: string,
-  // RMAB user ID of the actor, recorded as `deletedBy`. Pass null when the actor has no linked RMAB
-  // account (e.g. a Discord admin-role holder) so a non-user identifier is never stored as deletedBy.
-  adminUserId: string | null,
+  adminUserId: string,
   // Discord ID of the acting user when the deletion originated in Discord. Used only to attribute
   // the "Cancelled by" mention on the approval embed; Web UI deletions omit it and
   // fall back to the deleting user's linked Discord account.

@@ -100,24 +100,6 @@ describe('Discord sync on approve/deny', () => {
     );
   });
 
-  it('uses the raw Discord id for an admin-role holder with no RMAB account', async () => {
-    const { processRequestApproval } = await loadService();
-
-    await processRequestApproval({
-      requestId: 'req-1',
-      action: 'deny',
-      adminUserId: 'discord:99887766',
-    });
-
-    expect(cardsMock.applyDecisionToApprovalMessage).toHaveBeenCalledWith(
-      'req-1',
-      'deny',
-      '99887766'
-    );
-    // No RMAB user lookup for a non-RMAB actor.
-    expect(prismaMock.user.findUnique).not.toHaveBeenCalled();
-  });
-
   it('does no Discord work when the bot is not running', async () => {
     botMock.getClient.mockReturnValue(null);
     const { processRequestApproval } = await loadService();

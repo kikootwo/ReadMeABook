@@ -88,25 +88,16 @@ export async function postApprovalRequest(
   }
 }
 
-/** Whether the clicking member is authorized to approve/deny (RMAB admin or holds the admin role). */
+/**
+ * Whether the clicking Discord user may approve/deny: their Discord account must be linked to an
+ * RMAB admin. The admin role only decides who gets pinged; holding it grants no authority, since a
+ * Discord role is handed out outside RMAB.
+ */
 async function isAuthorizedApprover(
   interaction: ButtonInteraction
 ): Promise<{ authorized: boolean; rmabUserId?: string }> {
-  const config = await getDiscordConfig();
-
   const resolved = await resolveRmabUser(interaction.user.id);
-  if (resolved?.isAdmin) {
-    return { authorized: true, rmabUserId: resolved.user.id };
-  }
-
-  // Fall back to Discord role check
-  if (config.adminRoleId && interaction.inCachedGuild()) {
-    if (interaction.member.roles.cache.has(config.adminRoleId)) {
-      return { authorized: true, rmabUserId: resolved?.user.id };
-    }
-  }
-
-  return { authorized: false, rmabUserId: resolved?.user.id };
+  return { authorized: !!resolved?.isAdmin, rmabUserId: resolved?.user.id };
 }
 
 /** Build a disabled copy of the Approve/Deny row to lock the message after a decision. */
@@ -125,7 +116,7 @@ export async function handleApprovalButton(
 ): Promise<void> {
   const { authorized, rmabUserId } = await isAuthorizedApprover(interaction);
 
-  if (!authorized) {
+  if (!authorized || !rmabUserId) {
     await interaction.reply({
       embeds: [errorEmbed('You do not have permission to approve or deny requests.')],
       ephemeral: true,
@@ -143,7 +134,7 @@ export async function handleApprovalButton(
   const result = await processRequestApproval({
     requestId,
     action,
-    adminUserId: rmabUserId ?? `discord:${interaction.user.id}`,
+    adminUserId: rmabUserId,
   });
 
   if (!result.success) {
@@ -180,7 +171,7 @@ export async function handleApprovalButton(
 
 /**
  * Handle the "Cancel Request" button on a live request card. Authorized for the original requester
- * or any admin (RMAB admin / admin role). Cancels via the shared cancelRequest service (status →
+ * or a Discord user linked to an RMAB admin. Cancels via the shared cancelRequest service (status →
  * 'cancelled', background jobs stop; nothing is deleted) and re-renders the card(s) to the
  * cancelled state.
  */
@@ -205,15 +196,11 @@ export async function handleCancelRequestButton(
     return;
   }
 
-  // Authorize: the original requester, or an admin (RMAB admin / admin role).
+  // Authorize: the original requester, or a Discord user linked to an RMAB admin (a role alone
+  // isn't enough).
   const resolved = await resolveRmabUser(interaction.user.id);
-  let authorized = !!resolved && resolved.user.id === request.userId;
-  let rmabUserId = resolved?.user.id;
-  if (!authorized) {
-    const adminCheck = await isAuthorizedApprover(interaction);
-    authorized = adminCheck.authorized;
-    rmabUserId = rmabUserId ?? adminCheck.rmabUserId;
-  }
+  const rmabUserId = resolved?.user.id;
+  const authorized = !!resolved && (resolved.user.id === request.userId || resolved.isAdmin);
 
   if (!authorized) {
     await interaction.followUp({
@@ -228,7 +215,7 @@ export async function handleCancelRequestButton(
   }
 
   // The Discord id attributes the "Cancelled by" mention on a pending approval message.
-  const result = await cancelRequest(requestId, { userId: rmabUserId ?? null, discordUserId: interaction.user.id });
+  const result = await cancelRequest(requestId, { userId: resolved.user.id, discordUserId: interaction.user.id });
   logger.info('Request cancelled via Discord', {
     ...actorMeta(interaction.user, rmabUserId),
     requestId,

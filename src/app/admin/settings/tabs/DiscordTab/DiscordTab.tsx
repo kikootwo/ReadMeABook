@@ -232,7 +232,7 @@ export function DiscordTab() {
         label="Admin Role ID"
         value={settings.adminRoleId}
         onChange={(e) => update('adminRoleId', e.target.value)}
-        placeholder="Role pinged for approvals (and allowed to approve/deny)"
+        placeholder="Role pinged for approvals (approving needs a linked RMAB admin)"
         helperText={resolvedHint(resolvedNames?.role)}
       />
       <Input

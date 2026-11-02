@@ -39,7 +39,7 @@ export interface DiscordConfig {
   guildId: string | null;
   /** Channel where /request requests post their admin-approval embeds. */
   requestChannelId: string | null;
-  /** Role pinged for approvals; also grants Approve/Deny button authority. */
+  /** Role pinged for approvals. Grants no authority: approving needs a Discord user linked to an RMAB admin. */
   adminRoleId: string | null;
   /** Optional separate channel for admin approval pings (falls back to requestChannelId). */
   adminNotifyChannelId: string | null;

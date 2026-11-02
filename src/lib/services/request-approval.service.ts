@@ -125,19 +125,13 @@ async function syncDiscordOnDecision(
       return;
     }
 
-    // The Discord handler passes `discord:<id>` when an admin-role holder has no linked RMAB
-    // account; otherwise resolve the deciding user's linked Discord account. Either may be absent,
-    // in which case the decision renders without a "by" mention.
-    let mentionId: string | null = null;
-    if (adminUserId.startsWith('discord:')) {
-      mentionId = adminUserId.slice('discord:'.length);
-    } else {
-      const actor = await prisma.user.findUnique({
-        where: { id: adminUserId },
-        select: { discordUserId: true },
-      });
-      mentionId = actor?.discordUserId ?? null;
-    }
+    // Mention the deciding admin's linked Discord account; a Web UI admin may have none, in which
+    // case the decision renders without a "by" mention.
+    const actor = await prisma.user.findUnique({
+      where: { id: adminUserId },
+      select: { discordUserId: true },
+    });
+    const mentionId = actor?.discordUserId ?? null;
 
     const { applyDecisionToApprovalMessage, editRequestCards, notifyRequesterOfDecision } =
       await import('./discord/discord-cards');

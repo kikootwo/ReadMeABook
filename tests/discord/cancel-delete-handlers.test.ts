@@ -4,7 +4,9 @@
  *
  * Non-admins may cancel their own requests from Discord but never delete: the card's Cancel button
  * and the /status menu go through cancelRequest (nothing removed), and /delete is for linked RMAB
- * admins only, re-checked on every click since customIds are untrusted.
+ * admins only, re-checked on every click since customIds are untrusted. Approving, or cancelling
+ * someone else's request, needs a Discord user linked to an RMAB admin: the admin role alone is
+ * only used for pings.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +16,7 @@ const prismaMock = createPrismaMock();
 const cancelRequestMock = vi.hoisted(() => vi.fn());
 const deleteRequestMock = vi.hoisted(() => vi.fn());
 const resolveRmabUserMock = vi.hoisted(() => vi.fn());
+const processRequestApprovalMock = vi.hoisted(() => vi.fn());
 const helpersMock = vi.hoisted(() => ({
   actorMeta: vi.fn(() => ({})),
   fetchOutstandingRequests: vi.fn(async () => []),
@@ -24,10 +27,10 @@ const helpersMock = vi.hoisted(() => ({
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/services/request-cancel.service', () => ({ cancelRequest: cancelRequestMock }));
 vi.mock('@/lib/services/request-delete.service', () => ({ deleteRequest: deleteRequestMock }));
-vi.mock('@/lib/services/request-approval.service', () => ({ processRequestApproval: vi.fn() }));
+vi.mock('@/lib/services/request-approval.service', () => ({ processRequestApproval: processRequestApprovalMock }));
 vi.mock('@/lib/services/discord/discord-user.resolver', () => ({ resolveRmabUser: resolveRmabUserMock }));
 vi.mock('@/lib/services/discord/discord-config', () => ({
-  getDiscordConfig: vi.fn(async () => ({ adminRoleId: null })),
+  getDiscordConfig: vi.fn(async () => ({ adminRoleId: 'admin-role' })),
   getApprovalChannelId: vi.fn(),
 }));
 vi.mock('@/lib/services/discord/discord-cards', () => ({
@@ -53,7 +56,10 @@ function interaction(extra: Record<string, unknown> = {}) {
     deferReply: vi.fn(),
     editReply: vi.fn(),
     followUp: vi.fn(),
-    inCachedGuild: () => false,
+    reply: vi.fn(),
+    // Every clicking member holds the configured admin role; it must not grant anything.
+    inCachedGuild: () => true,
+    member: { roles: { cache: { has: (id: string) => id === 'admin-role' } } },
     ...extra,
   } as any;
 }
@@ -93,6 +99,60 @@ describe('Discord cancel and delete', () => {
       await handleCancelRequestButton(i, 'req-1');
 
       expect(embedText(i.followUp)).toContain('Cannot cancel request with status: processing');
+    });
+  });
+
+  describe('admin role grants no authority', () => {
+    it('refuses Approve from a role holder who is not a linked RMAB admin', async () => {
+      resolveRmabUserMock.mockResolvedValue(otherUser);
+      const { handleApprovalButton } = await import('@/lib/services/discord/handlers/approval.handler');
+      const i = interaction();
+
+      await handleApprovalButton(i, 'approve', 'req-1');
+
+      expect(processRequestApprovalMock).not.toHaveBeenCalled();
+      expect(embedText(i.reply)).toContain('You do not have permission');
+    });
+
+    it('refuses Approve from a role holder with no linked RMAB account at all', async () => {
+      resolveRmabUserMock.mockResolvedValue(null);
+      const { handleApprovalButton } = await import('@/lib/services/discord/handlers/approval.handler');
+
+      await handleApprovalButton(interaction(), 'approve', 'req-1');
+
+      expect(processRequestApprovalMock).not.toHaveBeenCalled();
+    });
+
+    it('lets a linked RMAB admin approve, attributed to their RMAB account', async () => {
+      resolveRmabUserMock.mockResolvedValue(admin);
+      processRequestApprovalMock.mockResolvedValue({ success: true, message: 'ok', request: {} });
+      const { handleApprovalButton } = await import('@/lib/services/discord/handlers/approval.handler');
+
+      await handleApprovalButton(interaction(), 'approve', 'req-1');
+
+      expect(processRequestApprovalMock).toHaveBeenCalledWith({
+        requestId: 'req-1',
+        action: 'approve',
+        adminUserId: 'admin-1',
+      });
+    });
+
+    it('refuses cancelling someone else\'s request from a role holder', async () => {
+      resolveRmabUserMock.mockResolvedValue(otherUser);
+      const { handleCancelRequestButton } = await import('@/lib/services/discord/handlers/approval.handler');
+
+      await handleCancelRequestButton(interaction(), 'req-1');
+
+      expect(cancelRequestMock).not.toHaveBeenCalled();
+    });
+
+    it('lets a linked RMAB admin cancel any request', async () => {
+      resolveRmabUserMock.mockResolvedValue(admin);
+      const { handleCancelRequestButton } = await import('@/lib/services/discord/handlers/approval.handler');
+
+      await handleCancelRequestButton(interaction(), 'req-1');
+
+      expect(cancelRequestMock).toHaveBeenCalledWith('req-1', { userId: 'admin-1', discordUserId: 'discord-1' });
     });
   });
 
