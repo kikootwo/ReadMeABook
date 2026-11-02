@@ -20,7 +20,7 @@ const programs = sections.filter((s) => s.startsWith('[program:'));
 const postgresql = programs.find((s) => s.startsWith('[program:postgresql]')) ?? '';
 
 const stopWaitSecs = (section: string): number | undefined => {
-  const m = section.match(/^stopwaitsecs=(\d+)$/m);
+  const m = section.match(/^stopwaitsecs\s*=\s*(\d+)\s*$/m);
   return m ? Number(m[1]) : undefined;
 };
 
@@ -30,7 +30,7 @@ const worstCaseStop = programs.reduce((sum, s) => sum + (stopWaitSecs(s) ?? 10),
 describe('Unified container stop settings', () => {
   it(`${SUPERVISORD}: postgresql stops with SIGINT (fast shutdown)`, () => {
     expect(postgresql, `${SUPERVISORD}: no [program:postgresql] section`).not.toBe('');
-    expect(postgresql).toMatch(/^stopsignal=INT$/m);
+    expect(postgresql).toMatch(/^stopsignal\s*=\s*INT\s*$/m);
   });
 
   it(`${SUPERVISORD}: postgresql gets at least 30 s to finish its checkpoint`, () => {

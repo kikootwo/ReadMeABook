@@ -313,6 +313,7 @@ PostgreSQL requires that the database cluster owner have a specific username ("p
 services:
   readmeabook:
     image: ghcr.io/kikootwo/readmeabook:latest
+    stop_grace_period: 90s   # lets PostgreSQL shut down cleanly (see Shutdown Sequence)
     environment:
       PUID: 1000  # Your user ID
       PGID: 1000  # Your group ID
