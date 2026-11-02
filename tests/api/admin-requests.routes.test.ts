@@ -334,7 +334,7 @@ describe('Admin requests routes', () => {
     });
 
     const { DELETE } = await import('@/app/api/admin/requests/[id]/route');
-    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-1' }) });
+    const response = await DELETE({} as never, { params: Promise.resolve({ id: 'req-1' }) });
     const payload = await response.json();
 
     expect(payload.message).toBe('Request deleted; the book folder stays because it still holds: Book.epub (ebook of another request)');
