@@ -29,12 +29,15 @@ export async function openPathsTab(page: Page) {
   await expect(page.getByText('Audiobook Organization Template', { exact: true })).toBeVisible();
 }
 
-/** Select-all + Backspace, then type the template key by key. Returns the preview lines. */
+/**
+ * Select all, then type the template key by key over the selection. Returns the preview lines.
+ * (Not select-all + Backspace: an emptied field shows the default `{author}/{title} {asin}` again,
+ * so typing after a Backspace appends to the default.)
+ */
 export async function typeTemplate(page: Page, template: string): Promise<string[]> {
   const input = audiobookTemplateInput(page);
   await input.click();
   await page.keyboard.press('ControlOrMeta+a');
-  await page.keyboard.press('Backspace');
   await input.pressSequentially(template, { delay: 15 });
   await expect(input).toHaveValue(template);
   const preview = previewBox(page);
