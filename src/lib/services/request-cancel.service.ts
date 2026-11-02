@@ -2,7 +2,7 @@
  * Component: Request Cancel Service
  * Documentation: documentation/admin-features/request-cancel.md
  *
- * The one cancel path (web UI, admin table, API tokens, Discord). Authorization stays with the
+ * The one cancel path (web UI, admin table, API tokens). Authorization stays with the
  * caller. Order: one conditional write flips the status (committed before any client call), the
  * notification is queued, then the download step runs inline under a deadline and never throws.
  */
@@ -29,6 +29,12 @@ export interface CancellableRequest {
 /** `admin`: messages may name the download client and another request sharing the download */
 export type CancelAudience = 'admin' | 'owner';
 
+/**
+ * The `download` value a caller sees. Owners get `kept` for `kept_shared` and `kept_not_owned`, so
+ * they can't tell that another request (maybe another user's) uses the download.
+ */
+export type CancelDownloadReport = CancelDownloadOutcome | 'kept';
+
 export interface CancelOptions {
   audience: CancelAudience;
   /** Tests only */
@@ -39,7 +45,7 @@ export type CancelResult =
   | {
       success: true;
       request: { id: string; status: 'cancelled'; cancelledAt: Date | null };
-      download: CancelDownloadOutcome;
+      download: CancelDownloadReport;
       message: string;
       /** A second cancel of an already-cancelled request */
       alreadyCancelled?: boolean;
@@ -109,9 +115,13 @@ export async function cancelLoadedRequest(record: CancellableRequest, options: C
   return {
     success: true,
     request: { id: record.id, status: 'cancelled', cancelledAt },
-    download: step.outcome,
+    download: reportedOutcome(step.outcome, options.audience),
     message: cancelMessage(step.outcome, options.audience, step.clientName),
   };
+}
+
+export function reportedOutcome(outcome: CancelDownloadOutcome, audience: CancelAudience): CancelDownloadReport {
+  return audience === 'owner' && (outcome === 'kept_shared' || outcome === 'kept_not_owned') ? 'kept' : outcome;
 }
 
 async function alreadyCancelledOr(requestId: string, status: string): Promise<CancelResult> {
@@ -139,10 +149,11 @@ export function cancelMessage(outcome: CancelDownloadOutcome, audience: CancelAu
       return admin
         ? `Request cancelled. Its finished download stays in ${client}: its indexer has no seeding limit.`
         : 'Request cancelled. Its finished download stays in the download client to seed.';
+    // Owners get one message for both (as for the `kept` value)
     case 'kept_shared':
       return admin
         ? `Request cancelled. Its download stays in ${client}: another request still uses it.`
-        : 'Request cancelled. Its download stays in the download client for now.';
+        : 'Request cancelled. Its download stays in the download client.';
     case 'kept_not_owned':
       return admin
         ? `Request cancelled. Its download stays in ${client}: RMAB did not add it.`

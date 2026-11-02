@@ -5,6 +5,11 @@
  * Centralized API token constants used across authentication middleware and token routes.
  */
 
+import { CANCELLABLE_STATUSES } from './request-statuses';
+
+/** "a, b or c": the statuses a request can be cancelled from, for the cancel route's description */
+const CANCELLABLE_LIST = `${CANCELLABLE_STATUSES.slice(0, -1).join(', ')} or ${CANCELLABLE_STATUSES[CANCELLABLE_STATUSES.length - 1]}`;
+
 /** Prefix prepended to all generated API tokens for identification */
 export const API_TOKEN_PREFIX = 'rmab_';
 
@@ -109,7 +114,7 @@ export const API_TOKEN_ENDPOINT_DOCS: readonly EndpointDoc[] = [
     path: '/api/requests/:id/cancel',
     title: 'Cancel request',
     description:
-      'Cancels a request that is still pending, awaiting approval, searching or downloading. RMAB stops its download and removes what it downloaded so far, unless another request still uses it; a download that already finished may stay in the download client to seed. Never deletes files from the library. Returns the request id, status and cancel time, a `download` outcome (removed, kept_seeding, kept_unlimited, kept_shared, kept_not_owned, kept_finished, retry_later, not_removed, none) and a message. Users may only cancel requests they own; admins may cancel any.',
+      `Cancels a request whose status is ${CANCELLABLE_LIST}. RMAB stops its download and removes what it downloaded so far, unless another request still uses it; a download that already finished may stay in the download client to seed. Never deletes files from the library. Returns the request id, status and cancel time, a \`download\` outcome (removed, kept_seeding, kept_unlimited, kept_shared, kept_not_owned, kept_finished, retry_later, not_removed, none; a non-admin caller gets kept in place of kept_shared and kept_not_owned) and a message. Users may only cancel requests they own; admins may cancel any.`,
     requiresAdmin: false,
     isWrite: true,
   },

@@ -95,7 +95,8 @@ describe('POST /api/requests/:id/cancel', () => {
       torrentHash: 'h', downloadClientId: 'h', addedByRmab: false, createdAt: new Date(), nzbId: null,
     });
     const { body } = await post();
-    expect(body.download).toBe('kept_not_owned');
+    // An owner gets `kept`, not which kind of keep (#228 review)
+    expect(body.download).toBe('kept');
     expect(body.message).not.toMatch(/qBittorrent/);
   });
 

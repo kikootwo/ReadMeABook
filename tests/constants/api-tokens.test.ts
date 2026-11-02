@@ -62,6 +62,14 @@ describe('isEndpointAllowed', () => {
       expect(isEndpointAllowed('DELETE', '/api/admin/requests/abc')).toBe(false);
     });
 
+    it('the cancel route\'s description names every cancellable status and the owner `kept` value', async () => {
+      const { API_TOKEN_ENDPOINT_DOCS } = await import('@/lib/constants/api-tokens');
+      const { CANCELLABLE_STATUSES } = await import('@/lib/constants/request-statuses');
+      const doc = API_TOKEN_ENDPOINT_DOCS.find((d) => d.method === 'POST' && d.path === '/api/requests/:id/cancel');
+      for (const status of CANCELLABLE_STATUSES) expect(doc?.description).toContain(status);
+      expect(doc?.description).toContain('gets kept in place of kept_shared and kept_not_owned');
+    });
+
     it('rejects partial / extended paths', () => {
       expect(isEndpointAllowed('GET', '/api/request')).toBe(false);
       expect(isEndpointAllowed('GET', '/api/requests/')).toBe(false);

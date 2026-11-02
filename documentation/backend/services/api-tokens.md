@@ -57,8 +57,8 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 
 ## POST `/api/requests/:id/cancel` (Write, #228)
 - Route: `src/app/api/requests/[id]/cancel/route.ts` → `cancelLoadedRequest()` ([request-cancel.md](../../admin-features/request-cancel.md)).
-- Owner, or effective role admin (a token acts with its owner's current role); 403 otherwise; 404 missing or soft-deleted; 400 status not cancellable.
-- `200 { success, request: {id, status, cancelledAt}, download, message }`: no `selectedTorrent`, no download internals. Non-admin messages never name the client or a sharing request.
+- Owner, or effective role admin (a token acts with its owner's current role); 403 otherwise; 404 missing or soft-deleted; 400 status not in `CANCELLABLE_STATUSES` (`pending`, `searching`, `downloading`, `awaiting_search`, `awaiting_approval`, `awaiting_release`; `cancelled` = idempotent 200).
+- `200 { success, request: {id, status, cancelledAt}, download, message }`: no `selectedTorrent`, no download internals. Non-admin messages never name the client or a sharing request, and non-admins get `download: 'kept'` for `kept_shared` / `kept_not_owned`.
 - Stops RMAB's own partial download; a finished one may stay to seed; never deletes library files.
 - `PATCH`/`DELETE /api/requests/:id` are NOT on the allowlist. The raw `DELETE /api/requests/:id` handler was removed (405); admin delete is `DELETE /api/admin/requests/:id` (JWT only).
 

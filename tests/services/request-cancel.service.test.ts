@@ -109,6 +109,25 @@ describe('cancelLoadedRequest', () => {
     expect(await cancel()).toEqual({ success: false, reason: 'not_found' });
   });
 
+  it.each(['kept_shared', 'kept_not_owned'] as const)('%s: an owner gets `kept`, an admin the detailed value', async (outcome) => {
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    stepMock.handleCancelledDownload.mockResolvedValue({ outcome, clientName: 'qBittorrent', detail: '' });
+
+    const owner = await cancel(record(), 'owner');
+    expect(owner).toMatchObject({ success: true, download: 'kept', message: 'Request cancelled. Its download stays in the download client.' });
+
+    const admin = await cancel(record(), 'admin');
+    expect(admin).toMatchObject({ success: true, download: outcome });
+    expect(admin.success && admin.message).toMatch(/qBittorrent/);
+  });
+
+  it('every other outcome reaches an owner unchanged', async () => {
+    const { reportedOutcome } = await import('@/lib/services/request-cancel.service');
+    for (const outcome of ['removed', 'kept_seeding', 'kept_unlimited', 'kept_finished', 'retry_later', 'not_removed', 'none'] as const) {
+      expect(reportedOutcome(outcome, 'owner')).toBe(outcome);
+    }
+  });
+
   it('a notification failure does not fail the cancel', async () => {
     prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 });
     jobQueueMock.addNotificationJob.mockRejectedValueOnce(new Error('redis down'));
