@@ -166,7 +166,7 @@ Ebook torrent ranking uses unified algorithm with ebook-specific scoring:
 - Does NOT clear audiobook availability linkage
 - Soft-deletes the ebook request record
 
-**Audiobook request delete (#526):** removes its audio (cover and junk only when nothing else is left), never the ebook request's recorded file (listed as `ebook of another request`). A delivered ebook request stays, unlinked (`parentRequestId = null`), and the book keeps that ebook's folder and format; undelivered ebook requests are soft-deleted with it. The automatic ebook request and `find_missing_ebooks` check for an active ebook request by book (`audiobookId`), so a surviving one gets no duplicate. See [request-deletion.md](../admin-features/request-deletion.md) D1
+**Audiobook request delete (#526):** removes its audio (cover and junk only when nothing else is left), never the ebook request's recorded file (listed as `ebook of another request`). A delivered ebook request stays, unlinked (`parentRequestId = null`), and the book keeps that ebook's folder and format; undelivered ebook requests are soft-deleted with it. The automatic ebook request and `find_missing_ebooks` check for an active ebook request by book (`audiobookId`), so a surviving one gets no duplicate; the book's next audiobook import links it to the new audiobook request (compare-and-set on `parentRequestId: null`), so Fetch e-book, select-ebook and interactive search on that request find it by parent and create none. The by-book check also sees other users' ebook requests on the book. See [request-deletion.md](../admin-features/request-deletion.md) D1
 - Torrents left to seed (respects seeding limits)
 
 ## UI Representation

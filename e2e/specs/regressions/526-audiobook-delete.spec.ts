@@ -28,6 +28,7 @@ test.describe.configure({ mode: 'default' });
 const SRC = '/downloads/manual/e2e-526';
 const OTHER_EBOOK = 'ebook of another request';
 const NO_RECORD = 'RMAB has no record that it placed it';
+const WITH_OTHERS = 'kept with the other files';
 
 interface FolderKept { folder: string; files: Array<{ name: string; why: string }>; more: number }
 
@@ -93,7 +94,7 @@ test('526a audio + cover + the recorded epub: audio and cover go, the epub and i
   c.save('book-row-after-audiobook-delete.json', row);
   c.check(`book row: the ebook's folder and format, no hash, requested (${JSON.stringify(row)})`, row.filePath === b.folder && row.fileFormat === 'epub' && !row.filesHash && row.status === 'requested' && !row.absItemId, 'safety');
 
-  // The ebook request still works: listed as downloadable, the download serves the epub, select-ebook finds no missing parent
+  // The ebook request still works: listed as downloadable, the download serves the epub, select-ebook finds it (no missing parent)
   const list = await (await rmab.raw('GET', '/api/requests?limit=100&type=ebook')).json();
   const listed = (list.requests || []).find((r: { id: string }) => r.id === b.ebookId);
   c.check(`GET /api/requests: downloadAvailable true (${listed?.downloadAvailable})`, listed?.downloadAvailable === true, 'safety');
@@ -107,7 +108,11 @@ test('526a audio + cover + the recorded epub: audio and cover go, the epub and i
   });
   const pickBody = await pick.json().catch(() => ({}));
   c.save('select-ebook-response.json', { status: pick.status, body: pickBody });
-  c.check(`select-ebook does not answer "parent not found" (HTTP ${pick.status} ${JSON.stringify(pickBody)})`, pick.status !== 404, 'safety');
+  c.check(
+    `select-ebook answers 400 "already exists", not "parent not found" (HTTP ${pick.status} ${JSON.stringify(pickBody)})`,
+    pick.status === 400 && String(pickBody.error ?? '').includes('already exists'),
+    'safety',
+  );
 
   // A library scan after the delete: ABS sees only an ebook; the book stays requested, nothing relinks it
   const absApi = await Abs.login();
@@ -163,7 +168,7 @@ test('526b a user file beside it: the cover stays too; the admin table warns wit
   await page.emulateMedia({ colorScheme: 'light' });
   await loginAdminUi(page);
   await deleteFromTable(page, 'Scoped Delete Bravo');
-  const text = `Request deleted; the book folder stays because it still holds: Book.epub (${OTHER_EBOOK}), cover.jpg (${NO_RECORD}), notes.txt (${NO_RECORD})`;
+  const text = `Request deleted; the book folder stays because it still holds: Book.epub (${OTHER_EBOOK}), cover.jpg (${WITH_OTHERS}), notes.txt (${NO_RECORD})`;
   const toast = page.getByText(text);
   await expect(toast).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(600);
