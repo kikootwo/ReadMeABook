@@ -7,6 +7,7 @@
 
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
+import { EreaderDevicesSection } from './EreaderDevicesSection';
 
 interface UserPermissionsUser {
   id: string;
@@ -18,6 +19,7 @@ interface UserPermissionsUser {
   interactiveSearchAccess: boolean | null;
   downloadAccess: boolean | null;
   hasLoginToken: boolean;
+  ereaderDeviceNames?: string[] | null;
 }
 
 interface UserPermissionsModalProps {
@@ -32,6 +34,7 @@ interface UserPermissionsModalProps {
   onToggleInteractiveSearch: (user: UserPermissionsUser, newValue: boolean) => void;
   onToggleDownloadAccess: (user: UserPermissionsUser, newValue: boolean) => void;
   onToggleToken: (user: UserPermissionsUser, newValue: boolean) => void;
+  onChangeEreaderDevices: (user: UserPermissionsUser, deviceNames: string[]) => void;
 }
 
 interface PermissionToggleProps {
@@ -172,6 +175,7 @@ export function UserPermissionsModal({
   onToggleInteractiveSearch,
   onToggleDownloadAccess,
   onToggleToken,
+  onChangeEreaderDevices,
 }: UserPermissionsModalProps) {
   if (!user) return null;
 
@@ -289,6 +293,11 @@ export function UserPermissionsModal({
             />
           </div>
         </div>
+
+        <EreaderDevicesSection
+          selected={user.ereaderDeviceNames ?? []}
+          onChange={(deviceNames) => onChangeEreaderDevices(user, deviceNames)}
+        />
       </div>
     </Modal>
   );

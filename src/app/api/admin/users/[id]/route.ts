@@ -29,7 +29,7 @@ export async function PUT(
         const bodyResult = await readJsonBody(request);
         if (!bodyResult.ok) return bodyResult.response;
         const body = bodyResult.data;
-        const { role, autoApproveRequests, interactiveSearchAccess, downloadAccess } = body;
+        const { role, autoApproveRequests, interactiveSearchAccess, downloadAccess, ereaderDeviceNames } = body;
 
         // Validate role
         if (!role || (role !== 'user' && role !== 'admin')) {
@@ -63,11 +63,15 @@ export async function PUT(
           );
         }
 
-        // Prevent user from demoting themselves
-        if (req.user && id === req.user.sub) {
+        // Validate ereaderDeviceNames (optional): an array of ABS e-reader device names; null clears
+        if (
+          ereaderDeviceNames !== undefined &&
+          ereaderDeviceNames !== null &&
+          (!Array.isArray(ereaderDeviceNames) || ereaderDeviceNames.some((name: unknown) => typeof name !== 'string'))
+        ) {
           return NextResponse.json(
-            { error: 'You cannot change your own role' },
-            { status: 403 }
+            { error: 'Invalid ereaderDeviceNames. Must be an array of strings or null' },
+            { status: 400 }
           );
         }
 
@@ -100,6 +104,15 @@ export async function PUT(
 
         // Detect if role is being changed
         const isRoleChange = targetUser.role !== role;
+
+        // Prevent a user from changing their own role. Compared against the target's current DB role,
+        // so other self-updates (e.g. an admin choosing their own e-reader devices) still work.
+        if (req.user && id === req.user.sub && isRoleChange) {
+          return NextResponse.json(
+            { error: 'You cannot change your own role' },
+            { status: 403 }
+          );
+        }
 
         // Prevent changing setup admin role (only if role is actually being changed)
         if (targetUser.isSetupAdmin && isRoleChange && role !== 'admin') {
@@ -138,7 +151,7 @@ export async function PUT(
         }
 
         // Prepare update data
-        const updateData: { role: string; autoApproveRequests?: boolean | null; interactiveSearchAccess?: boolean | null; downloadAccess?: boolean | null } = { role };
+        const updateData: { role: string; autoApproveRequests?: boolean | null; interactiveSearchAccess?: boolean | null; downloadAccess?: boolean | null; ereaderDeviceNames?: string[] } = { role };
         if (autoApproveRequests !== undefined) {
           updateData.autoApproveRequests = autoApproveRequests;
         }
@@ -147,6 +160,10 @@ export async function PUT(
         }
         if (downloadAccess !== undefined) {
           updateData.downloadAccess = downloadAccess;
+        }
+        if (ereaderDeviceNames !== undefined) {
+          // Store [] for "none" rather than JSON null
+          updateData.ereaderDeviceNames = [...new Set<string>(ereaderDeviceNames ?? [])];
         }
 
         // Update user
@@ -160,6 +177,7 @@ export async function PUT(
             autoApproveRequests: true,
             interactiveSearchAccess: true,
             downloadAccess: true,
+            ereaderDeviceNames: true,
           },
         });
 

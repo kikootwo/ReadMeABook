@@ -170,6 +170,8 @@ export async function GET(request: NextRequest) {
         autoGrabEnabled: configMap.get('ebook_auto_grab_enabled') !== 'false',
         // Kindle compatibility fixes: default false
         kindleFixEnabled: configMap.get('ebook_kindle_fix_enabled') === 'true',
+        // E-reader delivery (Audiobookshelf only): default false
+        ereaderAutoSendEnabled: configMap.get('ebook_ereader_auto_send_enabled') === 'true',
       },
       general: {
         appName: configMap.get('app_name') || 'ReadMeABook',

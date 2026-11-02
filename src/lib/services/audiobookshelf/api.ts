@@ -35,6 +35,8 @@ interface ABSRequestOptions {
   body?: any;
   /** Abort the request after this many ms (default: Node fetch's own 300 s headers timeout) */
   timeoutMs?: number;
+  /** Don't parse a body: for endpoints that answer with plain text (e.g. send-ebook-to-device's "OK") */
+  skipResponseBody?: boolean;
 }
 
 /**
@@ -65,6 +67,7 @@ export async function absRequest<T>(endpoint: string, options: ABSRequestOptions
     throw new ABSApiError(response.status, response.statusText);
   }
 
+  if (options.skipResponseBody) return undefined as T;
   return response.json();
 }
 

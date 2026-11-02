@@ -15,6 +15,7 @@ import { createPrismaMock } from '../helpers/prisma';
 const prismaMock = createPrismaMock();
 const organizerMock = vi.hoisted(() => ({ organize: vi.fn(), organizeEbook: vi.fn() }));
 const jobQueueMock = vi.hoisted(() => ({ addNotificationJob: vi.fn(() => Promise.resolve()) }));
+const queueEreaderDeliveryMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const configMock = vi.hoisted(() => ({ getBackendMode: vi.fn(), get: vi.fn() }));
 
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
@@ -22,6 +23,7 @@ vi.mock('@/lib/utils/file-organizer', () => ({ getFileOrganizer: () => organizer
 vi.mock('@/lib/services/library', () => ({ getLibraryService: () => ({ triggerLibraryScan: vi.fn() }) }));
 vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => configMock }));
 vi.mock('@/lib/services/job-queue.service', () => ({ getJobQueueService: () => jobQueueMock }));
+vi.mock('@/lib/services/ereader-delivery.service', () => ({ queueEreaderDelivery: queueEreaderDeliveryMock }));
 vi.mock('@/lib/services/download-client-manager.service', () => ({
   getDownloadClientManager: () => ({
     getAllClients: async () => [],
@@ -111,6 +113,8 @@ describe('ebook manual import organize', () => {
       where: { id: 'req-eb' },
       data: expect.objectContaining({ status: 'downloaded' }),
     });
+    // The organized ebook goes on to its requesters' e-readers (the helper checks the setting)
+    expect(queueEreaderDeliveryMock).toHaveBeenCalledWith('req-eb', expect.anything());
   });
 
   it('of several selected ebook files imports the preferred format (epub first)', async () => {

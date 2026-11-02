@@ -4,6 +4,7 @@
  */
 
 import { OrganizeFilesPayload, getJobQueueService } from '../services/job-queue.service';
+import { queueEreaderDelivery } from '../services/ereader-delivery.service';
 import path from 'path';
 import { prisma } from '../db';
 import { getFileOrganizer } from '../utils/file-organizer';
@@ -963,6 +964,9 @@ async function processEbookOrganization(
   await triggerScanAfterImport('ebook', logger);
 
   const configService = getConfigService();
+
+  // Email the ebook to its requesters' e-reader devices (Audiobookshelf only, when enabled)
+  await queueEreaderDelivery(requestId, logger);
 
   // Remove a direct HTTP download file now that it is in the library
   if (!isIndexerDownload) {

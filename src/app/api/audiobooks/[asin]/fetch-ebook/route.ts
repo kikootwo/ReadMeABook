@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
+import { DELIVERABLE_EBOOK_STATUSES, queueEreaderDelivery } from '@/lib/services/ereader-delivery.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { RMABLogger } from '@/lib/utils/logger';
@@ -174,6 +175,10 @@ export async function POST(
       if (existingEbookRequest) {
         // If in active status, block
         if (ACTIVE_EBOOK_STATUSES.includes(existingEbookRequest.status)) {
+          // Already in the library: send it to this user's e-reader devices
+          if (DELIVERABLE_EBOOK_STATUSES.includes(existingEbookRequest.status)) {
+            await queueEreaderDelivery(existingEbookRequest.id, logger, { userIds: [req.user.id], delaySeconds: 0 });
+          }
           return NextResponse.json({
             success: false,
             message: `E-book request already exists (status: ${existingEbookRequest.status})`,

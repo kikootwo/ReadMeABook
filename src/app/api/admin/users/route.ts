@@ -49,6 +49,7 @@ export async function GET(request: NextRequest) {
             interactiveSearchAccess: true,
             downloadAccess: true,
             discordUserId: true,
+            ereaderDeviceNames: true,
             loginTokenHash: true,
             _count: {
               select: {

@@ -18,13 +18,14 @@ import type { EbookSettings } from '../../lib/types';
 
 interface EbookTabProps {
   ebook: EbookSettings;
+  backendMode?: 'plex' | 'audiobookshelf';
   onChange: (ebook: EbookSettings) => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
   markAsSaved: () => void;
 }
 
-export function EbookTab({ ebook, onChange, onSuccess, onError, markAsSaved }: EbookTabProps) {
+export function EbookTab({ ebook, backendMode, onChange, onSuccess, onError, markAsSaved }: EbookTabProps) {
   const {
     saving,
     testingFlaresolverr,
@@ -276,6 +277,32 @@ export function EbookTab({ ebook, onChange, onSuccess, onError, markAsSaved }: E
                     Apply compatibility fixes before organizing EPUB files. Fixes encoding declarations,
                     broken hyperlinks, invalid language tags, and orphaned image elements that can
                     cause Kindle import failures.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* E-reader delivery - Audiobookshelf only (it sends through ABS's email settings) */}
+            {backendMode === 'audiobookshelf' && (
+              <div className="flex items-start gap-4 pt-2 border-t border-gray-200 dark:border-gray-700 mt-4">
+                <input
+                  type="checkbox"
+                  id="ereader-auto-send-enabled"
+                  checked={ebook.ereaderAutoSendEnabled ?? false}
+                  onChange={(e) => updateEbook('ereaderAutoSendEnabled', e.target.checked)}
+                  className="mt-1 h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <div className="flex-1">
+                  <label
+                    htmlFor="ereader-auto-send-enabled"
+                    className="block text-sm font-medium text-gray-900 dark:text-gray-100 cursor-pointer"
+                  >
+                    Send ebooks to e-readers
+                  </label>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                    Email each new ebook to the e-reader devices of everyone who requested the book, through
+                    Audiobookshelf. Set up email and e-reader devices in Audiobookshelf (Settings → Email), then
+                    choose each user's devices in Admin → Users.
                   </p>
                 </div>
               </div>
