@@ -235,6 +235,7 @@ model Request {
   importAttempts   Int       @default(0) @map("import_attempts")
   maxImportRetries Int       @default(5) @map("max_import_retries")
   ebookAutoRetryCount Int?   @map("ebook_auto_retry_count")
+  autoRerequestCount Int     @default(0) @map("auto_rerequest_count") // Automatic re-requests after a failure with no new block (backoff step); user requests and retries reset it to 0
   lastSearchAt     DateTime? @map("last_search_at")
   customSearchTerms String?  @map("custom_search_terms") @db.Text
   lastImportAt     DateTime? @map("last_import_at")
@@ -325,7 +326,10 @@ model DownloadHistory {
   downloadClient   String?   @map("download_client") // qbittorrent, sabnzbd, direct (HTTP download for ebooks)
   downloadClientId String?   @map("download_client_id")
   downloadStatus   String?   @map("download_status")
-  // Status values: queued, downloading, completed, failed, stalled
+  // Status values: queued, downloading, completed, failed, stalled, removed (gone from the client)
+  // true = RMAB's add created the torrent; false = it was already in the client (never removed
+  // or changed by RMAB); null = recorded before this field existed (resolved from the client's added time)
+  addedByRmab      Boolean?  @map("added_by_rmab")
   downloadError    String?   @map("download_error") @db.Text
   downloadPath     String?   @map("download_path") @db.Text
   startedAt        DateTime? @map("started_at")
@@ -690,6 +694,7 @@ model WatchedSeries {
   seriesTitle   String    @map("series_title")
   coverArtUrl   String?   @map("cover_art_url") @db.Text
   lastCheckedAt DateTime? @map("last_checked_at")
+  newReleasesSince DateTime? @map("new_releases_since") // null = entire catalog; set = only books released from this day on
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
@@ -709,6 +714,7 @@ model WatchedAuthor {
   authorName    String    @map("author_name")
   coverArtUrl   String?   @map("cover_art_url") @db.Text
   lastCheckedAt DateTime? @map("last_checked_at")
+  newReleasesSince DateTime? @map("new_releases_since") // null = entire catalog; set = only books released from this day on
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 

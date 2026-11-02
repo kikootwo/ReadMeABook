@@ -64,8 +64,10 @@ export async function GET(request: NextRequest) {
         },
       }),
 
-      // Total users
-      prisma.user.count(),
+      // Total users (same filter as the Users page: soft-deleted users excluded)
+      prisma.user.count({
+        where: { deletedAt: null },
+      }),
     ]);
 
     // Check system health

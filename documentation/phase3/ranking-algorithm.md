@@ -1,36 +1,10 @@
 # Intelligent Ranking Algorithm
 
 **Status:** ✅ Implemented | Comprehensive edge case test coverage
-**Tests:** tests/utils/ranking-algorithm.test.ts (80+ test cases)
+**Tests:** tests/utils/ranking-algorithm.test.ts, ranking-non-latin.test.ts, ranking-match-gates.test.ts, ranking-oracle-223.test.ts, match-gates.test.ts, match-normalize.test.ts, ranking-size-floor.test.ts, ranking-series-part.test.ts, ranking-size-score.test.ts, ranking-subtitle-split.test.ts, tests/processors/search-indexers-non-latin.test.ts, search-indexers-size-floor.test.ts, search-indexers-series-part.test.ts
+**Automatic-search gates (#223):** [match-gates.md](match-gates.md): one-word titles, required numbers, author whole words, volume conflict (title, plus the catalog series part in automatic search, #330)
 
 Evaluates and scores torrents to automatically select best audiobook download.
-
-## Test Coverage
-
-**Comprehensive edge case testing includes:**
-- ✅ Parenthetical/bracketed content handling (4 tests)
-- ✅ Structured metadata prefix validation (5 tests)
-- ✅ Suffix validation (5 tests)
-- ✅ Multi-author handling (6 tests)
-- ✅ Bonus modifiers (indexer priority + flags, 7 tests)
-- ✅ Tiebreaker sorting (2 tests)
-- ✅ Word coverage edge cases (4 tests)
-- ✅ Format detection (5 tests)
-- ✅ **Author presence check (10 tests)**
-- ✅ **Context-aware filtering (3 tests)**
-- ✅ **API compatibility (2 tests)**
-- ✅ **CamelCase and punctuation separator handling (7 tests)**
-
-**Tested edge cases prevent regressions from previous tweaks:**
-- "We Are Legion (We Are Bob)" matching with/without subtitle
-- "This Inevitable Ruin Dungeon Crawler Carl" NOT matching "Dungeon Crawler Carl"
-- "The Housemaid's Secret" NOT matching "The Housemaid"
-- Multiple author splitting and role filtering
-- Flag bonus stacking and case-insensitive matching
-- Tiebreaker sorting by publish date
-- **"Project Hail Mary" (no author) NOT matching when Andy Weir required (automatic mode)**
-- **All results shown in interactive mode regardless of author**
-- **Middle initials, name order, and role filtering for author matching**
 
 ## Scoring Criteria (100 points max)
 
@@ -40,8 +14,16 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - All titles and author names are normalized before matching
 - **CamelCase splitting:** `"TheCorrespondent"` → `"the correspondent"`
 - **Punctuation to spaces:** `"Twelve.Months-Jim"` → `"twelve months jim"`
-- **Preserves apostrophes:** `"O'Brien"` remains `"o'brien"`
+- **Apostrophes fold** (`foldApostrophes`, #466): `' ’ ‘ ‛` count as one; before an English ending (`s t d m ll re ve`) dropped, else a space. `Ender's` → `enders` (matches `Enders.Game`), `L'intruse` → `l intruse` (matches `L.Intruse`), `O'Brien` → `o brien`. Same in `foldForMatching`, so Stage 2 marker lookups agree. **Release side** (`keepUnrequestedApostrophes`, run first in `scoreMatch` and in the Prowlarr fallback check): a release word with an apostrophe ending folds only when the request writes that word with one (`apostropheEndingWords`); otherwise the apostrophe stays as `ꞌ` (U+A78C, a Latin letter), so the word stays whole and matches no plain word, as before #316. `The Lover's Dictionary` does not match "The Lovers"; `Enders.Game` and `Ender's Game` match "Ender's Game"; G3 author names allow a trailing `ꞌs` like `'s`
 - Handles common indexer naming patterns (NZB, torrent scene releases)
+- **Every script kept** (`src/lib/utils/match-normalize.ts`): letters, marks and digits of any script survive (`\p{L}\p{M}\p{N}`); everything else becomes a space
+- **Other consumers:** Bulk Import grouping keys (`src/lib/utils/bulk-import-keys.ts`) are built with `normalizeForMatching`, so a change here shifts which files group as one book ([bulk-import.md](../features/bulk-import.md)); keys drop every non-letter, so the apostrophe fold leaves them unchanged. Series search match share (`src/lib/integrations/audible-series-rank.ts`): apostrophe titles now match either spelling (`enders game` → "Ender's Game" 0.5 → 1)
+- **Folds:** accents (NFD, drop U+0300–036F, NFC; Greek tonos and Cyrillic ё/й fold too), Greek ς→σ, fullwidth ASCII → ASCII, `ø→o æ→ae œ→oe ß→ss ł→l đ ð→d þ→th ı→i ħ→h`; emoji presentation selectors (U+FE00–FE0F, U+E0100–E01EF, keycap U+20E3) dropped
+- **CJK/Thai next to ASCII** gets a space: `哈利波特与魔法石Harry` → `哈利波特与魔法石 harry`, `三体2` → `三体 2`, `ラブストーリー2` → `ラブストーリー 2` (Script_Extensions, so shared marks like `ー` count)
+- **Accepted changes vs. before #424 (Latin):** ø now behaves like ö, so `Bjørn` no longer matches `Bjoern` (`Björn`/`Bjoern` never did); non-ASCII letters or digits in a Latin title (π, µ, α, ², º, ʻ) are now part of it, so `The Joy of π` no longer matches `The Joy of Pi`
+- **Known limits, fail closed:** spacing that differs inside a name (`村上 春樹` vs `村上春樹`; Korean names written without spaces vs with them); Simplified vs Traditional (`刘`/`劉`); Arabic/Persian letter variants (hamza forms `أ إ آ`/`ا`, taa marbuta `ة`/`ه`, `ی ک`/`ي ك`); vowel marks (Arabic harakat, Hebrew niqqud) must match exactly; halfwidth katakana, Roman-numeral (`Ⅲ`) and ligature (`ﬁ`) characters are not folded; no transliteration (`村上春樹` doesn't match `Haruki Murakami`); initials in non-Latin scripts don't join (`А. С. Пушкин` vs `АС Пушкин`)
+- **Known limits, score lower:** a bilingual release with the non-Latin title first (`Гарри Поттер … / Harry Potter …`) still matches a Latin request but loses the complete-title bonus; CJK title markers `「」` don't earn that bonus; a one-character title (`心`) often lands under the automatic threshold unless the release name is plain (`夏目漱石 - 心`)
+- **Known limit, too loose:** a 2-character CJK title inside the author's name (`春樹` / `村上春樹`) passes coverage; the author gate and scoring limit the impact
 
 **Examples of normalization:**
 - `"VirginaEvans TheCorrespondent"` → `"virgina evans the correspondent"`
@@ -52,26 +34,39 @@ Evaluates and scores torrents to automatically select best audiobook download.
 
 **Stage 1: Word Coverage Filter (MANDATORY)**
 - Extracts significant words from request (filters stop words: "the", "a", "an", "of", "on", "in", "at", "by", "for")
-- **Parenthetical/bracketed content is optional**: Content in () [] {} treated as subtitle (may be omitted from torrents)
+- **Parenthetical/bracketed content is optional**: Content in () [] {} 【】 (and fullwidth （）［］｛｝, folded first) treated as subtitle (may be omitted from torrents); so is text after the first subtitle split (`splitSubtitle`, `match-normalize.ts`): `:` or `：`, a dash with spaces on both sides (` - ` ` – ` ` — `), or `. ` after a number or a word of 4+ letters (#466). Not a split: a hyphen inside a word (`Spider-Man`), initials and short abbreviations (`A. J.`, `Mr. Mercedes`), `prof capt corp dept bros hrsg`
+  - "Primal Hunter 1. Une aventure de LitRPG" → Required: ["primal", "hunter", "1"], Optional: ["une", "aventure", "litrpg"]
+  - A bare number right before the split (`:`, ` - ` or `. `) is the series position, read by G4a/G4c ([match-gates.md](match-gates.md)). Left out of the 80% coverage count only when the release carries half or more of the subtitle words; otherwise (and when it is the only required word, or the release names another position: G4c conflict) it counts as missing. So `Zogarth - The Primal Hunter [M4B]` (often book 1) scores 0 for "The Primal Hunter 3: A LitRPG Adventure", as on main
+  - A dash or dot split still tries the full title without brackets first, so "Die Tribute von Panem 1. Tödliche Spiele (ungekürzt)" vs `Die Tribute von Panem 1. Tödliche Spiele - Suzanne Collins` stays 60
   - "We Are Legion (We Are Bob)" → Required: ["we", "are", "legion"], Optional: ["bob"]
   - "Title [Series Name]" → Required: ["title"], Optional: ["series", "name"]
   - "Book Title {Extra Info}" → Required: ["book", "title"], Optional: ["extra", "info"]
 - Calculates coverage: % of **required** words found in torrent title
 - **Hard requirement: 80%+ coverage of required words or automatic 0 score**
+- Numbers fold for coverage (`01` = `1`, one to twenty, `t01`); automatic mode also requires every number of the required title (G4a, [match-gates.md](match-gates.md))
+- **Scripts without spaces** (Han, kana, Thai, Lao, Khmer, Myanmar): a required word of 2+ characters counts if it appears anywhere in the release name (`刘慈欣三体全集` covers `三体`); a 1-character word must be a whole word; all other words need an exact word
+- **Fail closed:** a title that normalizes to nothing scores 0; a required part that normalizes to nothing (`★ (Star Stories)`) uses the whole title's words
 
 **Stage 1.5: Author Presence Check (CONTEXT-AWARE)**
 - **Automatic mode (requireAuthor: true - default):** At least ONE author must be present with high confidence
 - **Interactive mode (requireAuthor: false):** Check disabled, all results shown to user
 - **High confidence = any of:**
-  1. Exact substring match: "dennis e. taylor" in torrent
+  1. Whole words: "dennis e. taylor" in torrent; `'s`/`s`, glued (`leechild`) allowed; substring only for unspaced-script names, CJK and Thai (G3)
   2. High fuzzy similarity (≥ 0.85): handles spacing/punctuation
-  3. Core components present: First name + Last name within 30 chars
+  3. Core components present: First name + Last name as whole words within 30 chars
+  4. Initials match: runs of 2+ single letters collapsed on both sides, then matched as whole words (`src/lib/utils/author-initials.ts`)
+     - ✅ "TJ Klune" ↔ "T J Klune", "J D Robb" ↔ "JD Robb", "J.K. Rowling" ↔ "JK Rowling"
+     - ❌ "E. L. James" vs "Michael James", "A. J. Smith" vs "Raj Smith" (no partial-word match)
+     - Digits never join ("Book 1 T J Klune" → "book 1 tj klune"); a lone initial is untouched ("J. Smith" ≠ "John Smith")
+     - Pure OR on top of checks 1-3; never rejects anything they accept
+     - Known, accepted collision: any two-letter word right before the surname equals the same initials (a first name like "Al Smith" ↔ "A. L. Smith", or a word like "Possession as Byatt" ↔ "A. S. Byatt"); only matters when the title (80% coverage) and the surname also match
 - Handles variations:
   - Middle initials: "Dennis E. Taylor" ↔ "Dennis Taylor"
   - Name order: "Brandon Sanderson" ↔ "Sanderson, Brandon"
   - Multiple authors: Only ONE needs to match (OR logic)
-  - Filters roles: "translator", "narrator" ignored
+  - Filters roles: "translator", "narrator" ignored; names under 3 characters dropped unless in a non-Latin script (`金庸`, `한강` kept)
 - **If check fails in automatic mode → automatic 0 score**
+- An author that normalizes to nothing (emoji, punctuation) is ignored; none left → rejected in automatic mode
 - **Prevents wrong-author matches**: Stops "Project Hail Mary" (no author) from matching request for Andy Weir
 
 **Edge Cases - Coverage Examples:**
@@ -91,7 +86,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - **Tries full title first, then required title (without parentheses)** if no match
   - Example: "We Are Legion (We Are Bob)" tries both full title and "We Are Legion"
   - Handles torrents that include subtitle AND those that omit it
-- Complete title match requirements (both must be true):
+- Complete title match requirements (both must be true; markers are found in a folded copy of the release name that keeps punctuation, `foldForMatching`, so `Jo Nesbø - Snømannen [MP3]` counts):
   - **Acceptable prefix** (any of these):
     - No significant words before title (clean match)
     - Title preceded by metadata separator (` - `, `: `, `—`) — handles "Author - Series - 01 - Title"
@@ -99,6 +94,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
   - **Acceptable suffix**: Followed by metadata markers: " by", " [", " -", " (", " {", " :", "," or end of string
     - Also accepts author name in suffix (e.g., "Title AuthorName Year")
 - Complete match → 45 pts
+- `Title: Subtitle` counts as complete only when the subtitle agrees with the request's (G1). For a request split at ` - ` or `. `, a release ` - ` right after the main part counts only when what follows (up to the next marker) is the request's subtitle (G1 rule), an author, or only volume words and numbers (`dashNamesOtherSubtitle`): `Sherlock Holmes - Das Zeichen der Vier` for "Sherlock Holmes - Der Hund der Baskervilles" → fuzzy (40.7). A colon request keeps the plain ` - ` marker; one-word titles and volume conflicts: [match-gates.md](match-gates.md) (G4b, G4c)
 - Unstructured prefix (words without separators) → fuzzy similarity (partial credit)
 - Suffix continues with non-metadata → fuzzy similarity (partial credit)
 - No substring match → fuzzy similarity (best score from full or required title)
@@ -118,7 +114,7 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - ❌ "The Housemaid's Secret - Freida McFadden" → REJECTED for "The Housemaid" (suffix continues with "'s Secret")
 
 **Stage 3: Author Matching (0-15 pts)**
-- Exact substring match → proportional credit
+- Whole-word or initials match → proportional credit (G2, G3)
 - No exact match → fuzzy similarity (partial credit)
 - Splits authors on delimiters (comma, &, "and", " - ")
 - Filters out roles ("translator", "narrator")
@@ -147,6 +143,19 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - Formula: `Math.min(15, Math.log10(seeders + 1) * 6)`
 - 1 seeder: 0pts, 10 seeders: 6pts, 100 seeders: 12pts, 1000+: 15pts
 - Note: Usenet/NZB results without seeders get full 15 pts (centralized availability)
+
+**4. Size Quality (15 pts max, `scoreSize`)**
+- Formula: `Math.min(15, mbPerMin * 15)`, `mbPerMin = size in MiB / runtime minutes`; no runtime → 0 pts
+- Full points from 1.0 MB/min ≈ 140 kbps (1 MiB/min = 1,048,576 × 8 / 60 s ≈ 139.8 kbps), not 64 kbps as the old code comment said (#318)
+- 128 kbps (0.92 MB/min): 13.7 pts; 64 kbps (0.46 MB/min): 6.9 pts, about 8 pts below full; 32 kbps (0.23 MB/min): 3.4 pts
+- Notes (`generateNotes`): ≥ 1.5 MB/min premium, ≥ 1.0 high, ≥ 0.5 (about 70 kbps) standard, ≥ 0.3 (about 42 kbps) low, below that very low
+
+**Pre-filters (dropped before scoring, `rankTorrents`)**
+- **< 20 MB:** always dropped (ebooks, samples)
+- **Size floor (`minMBPerMinute`, opt-in):** with a known runtime, drops results under `minMBPerMinute` MB per minute. No runtime: no change
+- **Who sets it:** only automatic search (`search-indexers.processor.ts`), with `AUTO_SEARCH_MIN_MB_PER_MINUTE = 0.15` (about 21 kbps). Every automatic path (request create, approve, watched lists, RSS, retries, admin re-search) runs through that processor. Interactive search (`requests/[id]/interactive-search`, `audiobooks/search-torrents`) doesn't set it, so it still lists undersized results
+- **Why 0.15:** one file of a multi-file Usenet post (57 MB for a 1182-min book, 0.05 MB/min) scored over 50 and was grabbed as the whole book; a complete 0.21 MB/min release must still pass
+- **Log:** `Filtered out N results < 20 MB` gains `or < 0.15 MB/min` only when a runtime is known
 
 ## Bonus Points System
 
@@ -229,6 +238,13 @@ interface RankTorrentsOptions {
   indexerPriorities?: Map<number, number>;  // indexerId -> priority (1-25)
   flagConfigs?: IndexerFlagConfig[];        // Flag bonus configurations
   requireAuthor?: boolean;                  // Enforce author check (default: true)
+  minMBPerMinute?: number;                  // Size floor when runtime known (automatic search: 0.15)
+}
+
+interface AudiobookRequest {
+  title: string; author: string; narrator?: string;
+  durationMinutes?: number;                 // Size scoring and floor
+  series?: string; seriesPart?: string;     // Catalog series (#330): G4c volume conflict, automatic search only
 }
 
 interface BonusModifier {
@@ -323,7 +339,7 @@ Ebook ranking **reuses** the following from audiobook ranking:
 - < 5 MB: 15 pts (optimal for ebooks)
 - 5-15 MB: 10 pts (may have images)
 - 15-20 MB: 5 pts (large but acceptable)
-- > 20 MB: **Filtered out** (too large for ebooks)
+- > 20 MB (`EBOOK_MAX_SIZE_MB`): 0 pts; **filtered out** in automatic search (`enforceSizeCap`, default true), listed in interactive search (`enforceSizeCap: false`, #323)
 
 ### Ebook vs Audiobook Comparison
 
@@ -333,7 +349,7 @@ Ebook ranking **reuses** the following from audiobook ranking:
 | Format | 10 pts (M4B > M4A > MP3) | 10 pts (match = 10, else 0) |
 | Size | 15 pts (larger = better) | 15 pts (smaller = better) |
 | Seeders | 15 pts (reused) | 15 pts (reused) |
-| Size Filter | < 20 MB filtered | > 20 MB filtered |
+| Size Filter | < 20 MB filtered | > 20 MB filtered (automatic only) |
 
 ### Ebook Interface
 
@@ -348,6 +364,7 @@ interface RankEbookTorrentsOptions {
   indexerPriorities?: Map<number, number>;
   flagConfigs?: IndexerFlagConfig[];
   requireAuthor?: boolean;  // Default: true
+  enforceSizeCap?: boolean; // Default: true (skip > EBOOK_MAX_SIZE_MB = 20); interactive passes false
 }
 
 function rankEbookTorrents(
@@ -373,6 +390,17 @@ const ranked = rankEbookTorrents(prowlarrResults, {
 
 const bestEbook = ranked[0];  // Safe to auto-download
 ```
+
+## Fixed Issues
+- **#311 (single-file grabs):** automatic search grabbed one 57 MB chapter file of a 97-file Usenet post for a 1182-min book (score 79.7) and imported it as the book. Fixed by the size floor above; pinned in `tests/utils/ranking-size-floor.test.ts` and `tests/processors/search-indexers-size-floor.test.ts`
+- **#330 (wrong book in a series):** automatic search could grab `Azarinth Healer 03` for "Azarinth Healer: Book One": the title names no number, so G4c had nothing to compare. Fixed by passing the catalog `series`/`seriesPart` into G4c ([match-gates.md](match-gates.md)); pinned in `tests/utils/ranking-series-part.test.ts`, `tests/utils/match-gates.test.ts` and `tests/processors/search-indexers-series-part.test.ts`
+- **#323 (large ebooks hidden):** interactive ebook search dropped results > 20 MB, so a large PDF that was the only result showed nothing. Fixed by `enforceSizeCap` (automatic only); pinned in `tests/utils/ranking-ebook-size-cap.test.ts`, `tests/api/interactive-search-ebook-size-cap.routes.test.ts` and `tests/processors/search-ebook-size-cap.test.ts`
+- **#318 (size score comment):** the `scoreSize` comment called 1.0 MB/min "~64 kbps"; it is about 140 kbps, so a 64 kbps release gets 6.9/15. Comment and docs now describe the code; scoring unchanged (moving the baseline goes with the #223 threshold work, which kept it). Pinned in `tests/utils/ranking-size-score.test.ts`
+- **#466 (apostrophe rows):** `L.Intruse…` for "L'intruse", `Changer.L.Eau.Des.Fleurs…`, `Enders.Game…` for "Ender's Game" scored 0 at word coverage (the apostrophe was kept in the word). Fixed by the apostrophe fold; pinned in `tests/utils/ranking-match-gates.test.ts`
+- **#466 (subtitle rows):** `Primal.Hunter.T01…` for "Primal Hunter 1. Une aventure de LitRPG" and `C.Etait.Ca.Ou.Mourir…` for "C'était ça ou mourir - Prix du Roman FNAC 2026" scored 0: only brackets and `:` made a subtitle optional. Fixed by `splitSubtitle` (now 33.3 and 27.3, as the colon form); a release naming a different book after ` - ` (`Sherlock Holmes - Das Zeichen der Vier`) loses to the requested one. A release with neither the series position nor the subtitle (`Zogarth - The Primal Hunter` for "The Primal Hunter 3: …", any split) still scores 0. Pinned in `tests/utils/ranking-subtitle-split.test.ts`, `match-normalize.test.ts`, `match-gates.test.ts`
+- **Known limit (#466, shared with colon titles):** a different book after the series or author name in brackets, after a comma or `by`, or the series name alone (`Sherlock Holmes (Das Zeichen der Vier)`, `Sherlock Holmes, Das Zeichen der Vier`, `Arthur Conan Doyle - Sherlock Holmes`) ties the right release at 60 for "Sherlock Holmes - Der Hund der Baskervilles" or "Der Herr der Ringe. Die Gefährten"; the colon form does the same on main. Only a release ` - ` gets the different-subtitle check
+- **Known limit:** a release that splits an English ending (`Ender.s.Game`) misses `enders` (on main only a request with a curly `’` matched it)
+- **Known limit:** a request written without the apostrophe ("Enders Game") does not match `Ender’s Game` (as on main): a release possessive needs the apostrophe in the request, so "The Titans" never matches `The Titan's Curse`
 
 ## Tech Stack
 

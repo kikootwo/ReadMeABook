@@ -12,9 +12,12 @@ import { groupIndexersByCategories, getGroupDescription } from '@/lib/utils/inde
 import { getLanguageForRegion } from '@/lib/constants/language-config';
 import type { AudibleRegion } from '@/lib/types/audible';
 import { RMABLogger } from '@/lib/utils/logger';
-import { resolveInteractiveSearchAccess } from '@/lib/utils/permissions';
+import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
+import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.InteractiveSearch');
+const MAX_RANKED_RESULTS = 100;
 
 /**
  * POST /api/requests/[id]/interactive-search
@@ -39,14 +42,17 @@ export async function POST(
       // Parse optional request body
       let customTitle: string | undefined;
       try {
-        const body = await req.json();
+        const bodyResult = await readJsonBody(req);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         customTitle = body.customTitle;
       } catch (e) {
         // No body or invalid JSON - that's okay, customTitle will be undefined
       }
 
-      const requestRecord = await prisma.request.findUnique({
-        where: { id },
+      // A deleted request answers 404 for everyone
+      const requestRecord = await prisma.request.findFirst({
+        where: { id, deletedAt: null },
         include: {
           audiobook: true,
         },
@@ -76,16 +82,8 @@ export async function POST(
       }
 
       // Check interactive search access permission
-      const callingUser = await prisma.user.findUnique({
-        where: { id: req.user.id },
-        select: { role: true, interactiveSearchAccess: true },
-      });
-      if (!callingUser || !(await resolveInteractiveSearchAccess(callingUser.role, callingUser.interactiveSearchAccess))) {
-        return NextResponse.json(
-          { error: 'Forbidden', message: 'You do not have interactive search access. Contact your admin to enable this permission.' },
-          { status: 403 }
-        );
-      }
+      const accessDenied = await denyWithoutInteractiveSearchAccess(req.user.id);
+      if (accessDenied) return accessDenied;
 
       // Get enabled indexers from configuration
       const { getConfigService } = await import('@/lib/services/config.service');
@@ -151,8 +149,7 @@ export async function POST(
           const groupResults = await prowlarr.searchWithVariations(searchTitle, searchAuthor, {
             categories: group.categories,
             indexerIds: group.indexerIds,
-            maxResults: 100,
-          });
+          }, { exactTitle: Boolean(customTitle || requestRecord.customSearchTerms) }); // custom terms: sent as given (#316)
 
           logger.debug(`Group ${i + 1} returned ${groupResults.length} results`);
           allResults.push(...groupResults);
@@ -169,6 +166,8 @@ export async function POST(
         return NextResponse.json({
           success: true,
           results: [],
+          truncated: false,
+          rawCount: 0,
           message: 'No torrents/nzbs found',
         });
       }
@@ -214,6 +213,14 @@ export async function POST(
       // User can see scores and make their own decision
       logger.debug(`Ranked ${rankedResults.length} results (no threshold filter - user decides)`);
 
+      const truncated = rankedResults.length > MAX_RANKED_RESULTS;
+      const limitedRankedResults = rankedResults.slice(0, MAX_RANKED_RESULTS);
+      if (truncated) {
+        logger.info(`Interactive search truncated after ranking: returning top ${MAX_RANKED_RESULTS} of ${rankedResults.length} ranked results`, {
+          rawCount: results.length,
+        });
+      }
+
       // Log top 3 results with detailed score breakdown for debugging
       const top3 = rankedResults.slice(0, 3);
       if (top3.length > 0) {
@@ -245,16 +252,18 @@ export async function POST(
       }
 
       // Add rank position to each result
-      const resultsWithRank = rankedResults.map((result, index) => ({
+      const resultsWithRank = limitedRankedResults.map((result, index) => ({
         ...result,
         rank: index + 1,
       }));
 
       return NextResponse.json({
         success: true,
-        results: resultsWithRank,
-        message: rankedResults.length > 0
-          ? `Found ${rankedResults.length} results`
+        results: await stripProwlarrKeyFromResults(resultsWithRank),
+        truncated,
+        rawCount: results.length,
+        message: limitedRankedResults.length > 0
+          ? `Found ${limitedRankedResults.length} results`
           : 'No results found',
       });
     } catch (error) {

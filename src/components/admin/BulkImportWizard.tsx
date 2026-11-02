@@ -213,7 +213,7 @@ export function BulkImportWizard({ isOpen, onClose }: BulkImportWizardProps) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Import failed');
+        throw new Error(data.message || data.error || 'Import failed');
       }
 
       setImportResults(data);

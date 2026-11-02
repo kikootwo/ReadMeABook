@@ -5,7 +5,7 @@
 
 import type { SupportedLanguage } from '../constants/language-config';
 
-export type AudibleRegion = 'us' | 'ca' | 'uk' | 'au' | 'in' | 'de' | 'es' | 'fr';
+export type AudibleRegion = 'us' | 'ca' | 'uk' | 'au' | 'in' | 'de' | 'es' | 'fr' | 'it';
 
 export interface AudibleRegionConfig {
   code: AudibleRegion;
@@ -80,6 +80,14 @@ export const AUDIBLE_REGIONS: Record<AudibleRegion, AudibleRegionConfig> = {
     apiBaseUrl: 'https://api.audible.fr',
     audnexusParam: 'fr',
     language: 'fr',
+  },
+  it: {
+    code: 'it',
+    name: 'Italy',
+    baseUrl: 'https://www.audible.it',
+    apiBaseUrl: 'https://api.audible.it',
+    audnexusParam: 'it',
+    language: 'it',
   },
 };
 

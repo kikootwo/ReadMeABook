@@ -20,7 +20,7 @@ Multi-container Docker application using Docker Compose: Next.js app, PostgreSQL
 
 ## Dockerfile
 
-**Base:** node:20-alpine
+**Base:** no root `Dockerfile` ships any more (the multi-container `app` build below is legacy); the supported image is `dockerfile.unified` on `node:24-bookworm`, see [unified.md](unified.md)
 **Strategy:** Multi-stage (dependencies → builder → runner)
 
 **Features:**

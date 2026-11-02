@@ -198,6 +198,8 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
   // View Details modal state
   const [viewDetailsAsin, setViewDetailsAsin] = useState<string | null>(null);
   const [viewDetailsStatus, setViewDetailsStatus] = useState<string | null>(null);
+  const [viewDetailsRequestId, setViewDetailsRequestId] = useState<string | null>(null);
+  const [viewDetailsUserId, setViewDetailsUserId] = useState<string | null>(null);
 
   // Build API URL with current local filters
   const apiUrl = `/api/admin/requests?page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(debouncedSearch)}&status=${status}&userId=${userId}&sortBy=${sortBy}&sortOrder=${sortOrder}`;
@@ -328,9 +330,16 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
   const hasActiveFilters = debouncedSearch || status !== 'all' || userId;
 
   // Action handlers
-  const handleViewDetails = (asin: string, requestStatus?: string) => {
+  const handleViewDetails = (
+    asin: string,
+    requestStatus?: string,
+    requestId?: string,
+    userId?: string,
+  ) => {
     setViewDetailsAsin(asin);
     setViewDetailsStatus(requestStatus || null);
+    setViewDetailsRequestId(requestId || null);
+    setViewDetailsUserId(userId || null);
   };
 
   const handleDeleteClick = (requestId: string, title: string) => {
@@ -355,6 +364,8 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
         const errorData = await response.json();
         throw new Error(errorData.message || 'Failed to delete request');
       }
+      const result = await response.json().catch(() => null);
+      const filesKeptReason: string | undefined = result?.details?.filesKeptReason;
 
       // Refresh the requests list
       await mutate(apiUrl);
@@ -363,7 +374,11 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
 
       setShowDeleteConfirm(false);
       setSelectedRequest(null);
-      toast.success('Request deleted successfully');
+      if (filesKeptReason) {
+        toast.warning(`Request deleted; files kept: ${filesKeptReason}`, 10000);
+      } else {
+        toast.success('Request deleted successfully');
+      }
     } catch (error) {
       console.error('[Admin] Failed to delete request:', error);
       toast.error(`Failed to delete request: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -695,6 +710,11 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                             {request.errorMessage}
                           </div>
                         )}
+                        {request.errorMessage && (request.status === 'downloaded' || request.status === 'available') && (
+                          <div className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                            {request.errorMessage}
+                          </div>
+                        )}
                       </div>
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
@@ -728,7 +748,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                         onManualSearch={handleManualSearch}
                         onCancel={handleCancel}
                         onRetryDownload={handleRetryDownload}
-                        onViewDetails={(asin) => handleViewDetails(asin, request.status)}
+                        onViewDetails={(asin) => handleViewDetails(asin, request.status, request.requestId, request.userId)}
                         onFetchEbook={handleFetchEbook}
                         onSearchTermsUpdated={() => mutate(apiUrl)}
                         ebookSidecarEnabled={ebookSidecarEnabled}
@@ -884,9 +904,13 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
           onClose={() => {
             setViewDetailsAsin(null);
             setViewDetailsStatus(null);
+            setViewDetailsRequestId(null);
+            setViewDetailsUserId(null);
           }}
           isAvailable={viewDetailsStatus === 'available' || viewDetailsStatus === 'completed'}
           requestStatus={viewDetailsStatus}
+          requestId={viewDetailsRequestId}
+          requestedByUserId={viewDetailsUserId}
         />
       )}
     </div>

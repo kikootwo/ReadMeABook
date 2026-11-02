@@ -39,6 +39,10 @@ interface IndexerManagementProps {
   mode: 'wizard' | 'settings';
   initialIndexers?: SavedIndexerConfig[];
   onIndexersChange?: (indexers: SavedIndexerConfig[]) => void;
+  /** When set, adding/editing/removing is disabled and this note is shown (fetching stays available). */
+  lockedReason?: string;
+  /** Called after the available indexers were fetched from Prowlarr. */
+  onIndexersFetched?: () => void;
 }
 
 export function IndexerManagement({
@@ -47,6 +51,8 @@ export function IndexerManagement({
   mode,
   initialIndexers = [],
   onIndexersChange,
+  lockedReason,
+  onIndexersFetched,
 }: IndexerManagementProps) {
   const [fetchedIndexers, setFetchedIndexers] = useState<ProwlarrIndexer[]>([]);
   const [configuredIndexers, setConfiguredIndexers] = useState<SavedIndexerConfig[]>(initialIndexers);
@@ -109,6 +115,7 @@ export function IndexerManagement({
       }
 
       setFetchedIndexers(data.indexers || []);
+      onIndexersFetched?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch indexers');
       setFetchedIndexers([]);
@@ -208,6 +215,13 @@ export function IndexerManagement({
           </div>
         )}
 
+        {lockedReason && (
+          <div role="status" className="mb-4 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-sm text-amber-800 dark:text-amber-200">
+            {lockedReason}
+          </div>
+        )}
+
+        <fieldset disabled={!!lockedReason} className="m-0 min-w-0 border-0 p-0">
         {fetchedIndexers.length > 0 && (
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden max-h-64 overflow-y-auto">
             {fetchedIndexers.map((indexer) => (
@@ -228,10 +242,11 @@ export function IndexerManagement({
               : 'Enter Prowlarr URL and API key above, then fetch indexers.'}
           </div>
         )}
+        </fieldset>
       </div>
 
       {/* Section 2: Configured Indexers */}
-      <div>
+      <fieldset disabled={!!lockedReason} className="m-0 min-w-0 border-0 p-0">
         <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
           Configured Indexers ({configuredIndexers.length})
         </h3>
@@ -259,7 +274,7 @@ export function IndexerManagement({
             ))}
           </div>
         )}
-      </div>
+      </fieldset>
 
       {/* Config Modal */}
       {modalState.isOpen && modalState.indexer && (

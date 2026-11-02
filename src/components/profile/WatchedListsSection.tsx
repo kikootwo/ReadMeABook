@@ -3,7 +3,8 @@
  * Documentation: documentation/features/watched-lists.md
  *
  * Shows the user's watched series and watched authors on their profile page
- * with the ability to remove items.
+ * with each watch's mode (entire catalog / new releases only) and the ability to
+ * change it or remove the watch.
  */
 
 'use client';
@@ -14,6 +15,7 @@ import Image from 'next/image';
 import { useWatchedSeries, useDeleteWatchedSeries, WatchedSeriesItem } from '@/lib/hooks/useWatchedSeries';
 import { useWatchedAuthors, useDeleteWatchedAuthor, WatchedAuthorItem } from '@/lib/hooks/useWatchedAuthors';
 import { usePreferences } from '@/contexts/PreferencesContext';
+import { WatchModeControl } from './WatchModeControl';
 
 function formatRelativeTime(dateStr: string | null): string {
   if (!dateStr) return 'Never';
@@ -122,6 +124,7 @@ function WatchedSeriesCard({
         <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
           Last checked: {formatRelativeTime(item.lastCheckedAt)}
         </p>
+        <WatchModeControl kind="series" id={item.id} name={item.seriesTitle} newReleasesOnly={item.newReleasesOnly} newReleasesSince={item.newReleasesSince} />
       </div>
 
       {/* Delete */}
@@ -250,6 +253,7 @@ function WatchedAuthorCard({
           <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
             Last checked: {formatRelativeTime(item.lastCheckedAt)}
           </p>
+          <WatchModeControl kind="author" id={item.id} name={item.authorName} newReleasesOnly={item.newReleasesOnly} newReleasesSince={item.newReleasesSince} />
         </div>
       </div>
 

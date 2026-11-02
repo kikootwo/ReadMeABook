@@ -227,13 +227,10 @@ describe('DelugeService', () => {
     await expect(service.addDownload('')).rejects.toThrow('Invalid download URL');
   });
 
-  it('extracts info hash from magnet links', () => {
+  it('rejects a magnet link without an info hash before any RPC call', async () => {
     const service = new DelugeService('http://deluge', '', 'pass');
-    const hash = (service as any).extractHashFromMagnet(
-      'magnet:?xt=urn:btih:0123456789ABCDEF0123456789ABCDEF01234567'
-    );
-    expect(hash).toBe('0123456789abcdef0123456789abcdef01234567');
-    expect((service as any).extractHashFromMagnet('magnet:?xt=urn:btih:')).toBeNull();
+    await expect(service.addDownload('magnet:?xt=urn:btih:')).rejects.toThrow('Invalid magnet link');
+    expect(clientMock.post).not.toHaveBeenCalled();
   });
 
   it('adds magnet links successfully', async () => {
@@ -251,23 +248,23 @@ describe('DelugeService', () => {
     // Mock: label.set_torrent
     mockRpc(null);
 
-    const hash = await service.addDownload(
+    const result = await service.addDownload(
       'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'
     );
-    expect(hash).toBe('0123456789abcdef0123456789abcdef01234567');
+    expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: false, infoHash: '0123456789abcdef0123456789abcdef01234567' });
   });
 
-  it('skips adding duplicate magnet links', async () => {
+  it('reports a magnet already in Deluge as taken over and sends no add', async () => {
     const service = new DelugeService('http://deluge', '', 'pass');
     (service as any).sessionCookie = '_session_id=abc';
 
     // Mock: duplicate found
     mockRpc({ name: 'Existing Audiobook' });
 
-    const hash = await service.addDownload(
+    const result = await service.addDownload(
       'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'
     );
-    expect(hash).toBe('0123456789abcdef0123456789abcdef01234567');
+    expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: true, infoHash: '0123456789abcdef0123456789abcdef01234567' });
     // Only 1 RPC call (the duplicate check), no add call
     expect(clientMock.post).toHaveBeenCalledTimes(1);
   });
@@ -278,10 +275,26 @@ describe('DelugeService', () => {
 
     mockRpc({}); // not duplicate
     mockRpc(null, { message: 'rejected' }); // add returns null (failure)
+    mockRpc({}); // re-check after the rejection: still not there
 
     await expect(service.addDownload(
       'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'
     )).rejects.toThrow('Deluge rejected magnet link');
+  });
+
+  // #423: someone else added it between the pre-check and the add; Deluge rejects the duplicate
+  it('records a rejected duplicate add as taken over after one re-check', async () => {
+    const service = new DelugeService('http://deluge', '', 'pass');
+    (service as any).sessionCookie = '_session_id=abc';
+
+    mockRpc({}); // pre-check: not there
+    mockRpc(null, { message: 'Torrent already in session (0123).' });
+    mockRpc({ name: 'Theirs' }); // re-check: there now
+
+    const result = await service.addDownload('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567');
+    expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: true, infoHash: '0123456789abcdef0123456789abcdef01234567' });
+    // No seed-limit or label calls on someone else's torrent
+    expect(clientMock.post).toHaveBeenCalledTimes(3);
   });
 
   it('adds torrent files after parsing', async () => {
@@ -297,8 +310,8 @@ describe('DelugeService', () => {
     mockRpc(null); // label.add
     mockRpc(null); // label.set_torrent
 
-    const hash = await service.addDownload('http://example.com/file.torrent');
-    expect(hash).toBe('hash-1');
+    const result = await service.addDownload('http://example.com/file.torrent');
+    expect(result).toEqual({ id: 'hash-1', alreadyInClient: false, infoHash: 'hash-1' });
   });
 
   it('follows redirect to magnet link', async () => {
@@ -317,8 +330,8 @@ describe('DelugeService', () => {
     mockRpc(null); // label.add
     mockRpc(null); // label.set_torrent
 
-    const hash = await service.addDownload('http://example.com/file.torrent');
-    expect(hash).toBe('abcdef0123456789abcdef0123456789abcdef01');
+    const result = await service.addDownload('http://example.com/file.torrent');
+    expect(result).toEqual({ id: 'abcdef0123456789abcdef0123456789abcdef01', alreadyInClient: false, infoHash: 'abcdef0123456789abcdef0123456789abcdef01' });
   });
 
   it('throws for invalid redirect locations', async () => {

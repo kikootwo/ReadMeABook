@@ -8,8 +8,11 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { getConfigService } from '@/lib/services/config.service';
 import { getDownloadClientManager, invalidateDownloadClientManager } from '@/lib/services/download-client-manager.service';
 import { DownloadClientConfig } from '@/lib/services/download-client-manager.service';
-import { getEncryptionService } from '@/lib/services/encryption.service';
+import { serializeDownloadClients } from '@/lib/services/download-client-storage';
 import { RMABLogger } from '@/lib/utils/logger';
+import { MASKED_PASSWORD, resolveSecretForUrl } from '@/lib/utils/saved-credential';
+import { savedClientCredential } from '@/lib/services/saved-credentials.service';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Settings.DownloadClients.ID');
 
@@ -25,7 +28,9 @@ export async function PUT(
       try {
         // Await params in Next.js 15+
         const { id } = await params;
-        const body = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         const {
           name,
           enabled,
@@ -63,14 +68,28 @@ export async function PUT(
           );
         }
 
+        // Keeping the saved password/API key is only allowed for the saved URL
+        const nextUrl = url !== undefined ? url : existingClient.url;
+        const resolvedPassword = await resolveSecretForUrl({
+          kind: 'downloadClient',
+          url: nextUrl,
+          supplied: password,
+          acceptPasswordMask: true,
+          emptyMeansSaved: Boolean(existingClient.password),
+          loadSaved: () => savedClientCredential(existingClient),
+        });
+        if (!resolvedPassword.ok) {
+          return NextResponse.json({ error: resolvedPassword.error }, { status: 400 });
+        }
+
         // Build updated client (preserve fields not in request)
         const updatedClient: DownloadClientConfig = {
           ...existingClient,
           name: name !== undefined ? name : existingClient.name,
           enabled: enabled !== undefined ? enabled : existingClient.enabled,
-          url: url !== undefined ? url : existingClient.url,
+          url: nextUrl,
           username: username !== undefined ? username : existingClient.username,
-          password: password === '********' ? existingClient.password : (password || existingClient.password),
+          password: resolvedPassword.secret || existingClient.password,
           disableSSLVerify: disableSSLVerify !== undefined ? disableSSLVerify : existingClient.disableSSLVerify,
           remotePathMappingEnabled: remotePathMappingEnabled !== undefined ? remotePathMappingEnabled : existingClient.remotePathMappingEnabled,
           remotePath: remotePath !== undefined ? remotePath : existingClient.remotePath,
@@ -97,7 +116,7 @@ export async function PUT(
           (
             url !== undefined ||
             username !== undefined ||
-            (password && password !== '********') ||
+            (password && password !== MASKED_PASSWORD) ||
             disableSSLVerify !== undefined
           )
         ) {
@@ -110,15 +129,10 @@ export async function PUT(
           }
         }
 
-        // Update clients array and encrypt passwords before saving
+        // Update clients array; passwords are encrypted when serialised
         clients[clientIndex] = updatedClient;
-        const encryptionService = getEncryptionService();
-        const encryptedClients = clients.map(c => ({
-          ...c,
-          password: c.password ? encryptionService.encrypt(c.password) : '',
-        }));
         await config.setMany([
-          { key: 'download_clients', value: JSON.stringify(encryptedClients) },
+          { key: 'download_clients', value: serializeDownloadClients(clients) },
         ]);
 
         // Invalidate cache
@@ -130,7 +144,7 @@ export async function PUT(
           message: 'Download client updated successfully',
           client: {
             ...updatedClient,
-            password: '********',
+            password: MASKED_PASSWORD,
           },
         });
       } catch (error) {
@@ -171,15 +185,10 @@ export async function DELETE(
 
         const deletedClient = clients[clientIndex];
 
-        // Remove client from array and encrypt passwords before saving
+        // Remove client from array; passwords are encrypted when serialised
         const updatedClients = clients.filter(c => c.id !== id);
-        const encryptionService = getEncryptionService();
-        const encryptedClients = updatedClients.map(c => ({
-          ...c,
-          password: c.password ? encryptionService.encrypt(c.password) : '',
-        }));
         await config.setMany([
-          { key: 'download_clients', value: JSON.stringify(encryptedClients) },
+          { key: 'download_clients', value: serializeDownloadClients(updatedClients) },
         ]);
 
         // Invalidate cache

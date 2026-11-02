@@ -21,16 +21,12 @@ vi.mock('@/lib/services/config.service', () => ({
   getConfigService: () => configMock,
 }));
 
-// Mock credential migration service - passwords in tests are plaintext
-vi.mock('@/lib/services/credential-migration.service', () => ({
-  isEncryptedFormat: () => false, // Test passwords are plaintext
-}));
-
-// Mock encryption service
+// Mock encryption service: "enc-" marks ciphertext; most test passwords are plaintext
 vi.mock('@/lib/services/encryption.service', () => ({
   getEncryptionService: () => ({
     encrypt: (value: string) => `enc-${value}`,
     decrypt: (value: string) => value.replace('enc-', ''),
+    isEncryptedFormat: (value: string) => typeof value === 'string' && value.startsWith('enc-'),
   }),
 }));
 
@@ -516,7 +512,7 @@ describe('DownloadClientManager', () => {
       expect(result[0].username).toBe('admin');
       expect(result[0].password).toBe('password');
 
-      // Should have saved the migrated config
+      // Should have saved the migrated config, with the password encrypted
       expect(configMock.setMany).toHaveBeenCalledWith(
         expect.arrayContaining([
           expect.objectContaining({
@@ -525,6 +521,8 @@ describe('DownloadClientManager', () => {
           }),
         ])
       );
+      const saved = JSON.parse(configMock.setMany.mock.calls[0][0][0].value);
+      expect(saved[0].password).toBe('enc-password');
     });
 
     it('does not migrate when legacy config is incomplete', async () => {

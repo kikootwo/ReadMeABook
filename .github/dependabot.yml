@@ -1,0 +1,95 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    ignore:
+      # Prisma majors change the schema/migration engine and the generated client; upgrade by hand.
+      - dependency-name: "prisma"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@prisma/*"
+        update-types: ["version-update:semver-major"]
+      # jsdom 30+ needs Node ^22.22.2 || ^24.15.0 || >=26. CI and the image run Node 24, but the
+      # required host `npm test` (CLAUDE.md) still runs on Node 22.20 hosts. Remove once hosts are >= 22.22.2.
+      - dependency-name: "jsdom"
+        versions: [">=30"]
+      # @types/node must match the runtime major (Node 24 in CI and the image); move it with Node.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # openid-client 6 replaces the Issuer/Client API the OIDC sign-in uses (5 keeps it but has
+      # its own breaking changes); a major needs a migration of that code. Upgrade by hand.
+      - dependency-name: "openid-client"
+        update-types: ["version-update:semver-major"]
+      # A TypeScript major has to be checked against `next build` first, and PR CI only runs
+      # the unit tests (no type-check, no build). Upgrade by hand.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # zod 4 changes the schema API the request validation in src/ is written against (the unit
+      # tests fail on it); a major needs a migration of that code. Upgrade by hand.
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      # ioredis is the Redis client for the job queue (Bull uses this same copy) and the startup
+      # readiness check. PR CI mocks it and has no Redis, so a major can't be checked there. Upgrade by hand.
+      - dependency-name: "ioredis"
+        update-types: ["version-update:semver-major"]
+      # An eslint major has to be checked against eslint-config-next, and PR CI doesn't run the
+      # linter. Upgrade by hand.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      # vitest 5 fails this test suite. Closing a grouped PR doesn't stop Dependabot reopening
+      # it, so vitest majors are ignored here and moved by hand when there is a reason to.
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitest/*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      # Listed first: Dependabot puts a dependency in the FIRST group that matches,
+      # so prisma and @prisma/client always move together instead of splitting
+      # across npm-minor-patch and a separate PR.
+      prisma:
+        patterns:
+          - "prisma"
+          - "@prisma/*"
+      # vitest and its plugins (@vitest/coverage-v8) must share a major, so they move together.
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Dependabot's docker ecosystem picks up any file whose name contains
+  # "dockerfile" (case-insensitive), so dockerfile.unified in the repo root is found.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    ignore:
+      # The static-ffmpeg tag, its digest and FFMPEG_VERSION in dockerfile.unified
+      # must move together (the build's version guard fails otherwise), so bump it by hand.
+      - dependency-name: "mwader/static-ffmpeg"
+      # CI tests on Node 24; a new Node major needs CI, the image and the e2e Dockerfiles moved
+      # together (tests/docker/node-version-pins.test.ts fails on a partial bump).
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+    groups:
+      docker-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"

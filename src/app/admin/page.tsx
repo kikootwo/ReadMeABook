@@ -427,6 +427,8 @@ function PendingApprovalSection({ requests }: { requests: PendingApprovalRequest
           onClose={() => { setDetailsAsin(null); setDetailsRequestId(null); }}
           requestStatus="awaiting_approval"
           requestedByUsername={detailsRequest?.user.plexUsername ?? null}
+          requestId={detailsRequestId}
+          requestedByUserId={detailsRequest?.user.id ?? null}
           adminActions={
             <ApprovalActionButtons
               isLoading={loadingStates[detailsRequestId] || false}

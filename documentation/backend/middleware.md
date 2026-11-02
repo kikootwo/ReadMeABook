@@ -8,6 +8,7 @@ Edge runtime middleware intercepts all non-API requests to gate access until the
 ## Key Details
 - **Location:** `src/middleware.ts`
 - Skips: `/api/*`, `/_next/*`, `/static/*`, any path containing `.` (static assets)
+- Body copy: Next copies request bodies for middleware up to `experimental.proxyClientMaxBodySize` (`'64kb'` in `next.config.ts`; page routes take no body). See [validation.md](validation.md#request-size-limits)
 - Fetches `/api/setup/status` with header `x-middleware-request: true`
 - Redirects:
   - Setup incomplete → `/setup` (unless already there)

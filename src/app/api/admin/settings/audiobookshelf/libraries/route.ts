@@ -1,11 +1,12 @@
 /**
  * Audiobookshelf Libraries API
- * Documentation: documentation/features/audiobookshelf-integration.md
+ * Documentation: documentation/settings-pages.md
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
+import { describeFetchError, fetchErrorDetails } from '@/lib/utils/fetch-error';
 
 const logger = RMABLogger.create('API.ABSLibraries');
 
@@ -31,11 +32,20 @@ export async function GET(request: NextRequest) {
         }
 
         // Fetch libraries from Audiobookshelf
-        const response = await fetch(`${serverUrl.replace(/\/$/, '')}/api/libraries`, {
-          headers: {
-            'Authorization': `Bearer ${apiToken}`,
-          },
-        });
+        const librariesUrl = `${serverUrl.replace(/\/$/, '')}/api/libraries`;
+        let response: Response;
+        try {
+          response = await fetch(librariesUrl, {
+            headers: {
+              'Authorization': `Bearer ${apiToken}`,
+            },
+          });
+        } catch (error) {
+          // Node's fetch says only "fetch failed"; the reason is on error.cause
+          const reason = describeFetchError(error, librariesUrl, { service: 'Audiobookshelf', secrets: [apiToken] });
+          logger.error('Failed to fetch ABS libraries', { reason, ...fetchErrorDetails(error, librariesUrl, [apiToken]) });
+          return NextResponse.json({ error: reason }, { status: 500 });
+        }
 
         if (!response.ok) {
           return NextResponse.json(

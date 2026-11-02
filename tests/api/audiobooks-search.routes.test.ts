@@ -20,6 +20,10 @@ const rankTorrentsMock = vi.hoisted(() => vi.fn());
 const groupIndexersMock = vi.hoisted(() => vi.fn());
 const groupDescriptionMock = vi.hoisted(() => vi.fn(() => 'Group'));
 
+vi.mock('@/lib/db', () => ({
+  prisma: {},
+}));
+
 vi.mock('@/lib/middleware/auth', () => ({
   requireAuth: requireAuthMock,
 }));
@@ -39,6 +43,22 @@ vi.mock('@/lib/utils/ranking-algorithm', () => ({
 vi.mock('@/lib/utils/indexer-grouping', () => ({
   groupIndexersByCategories: groupIndexersMock,
   getGroupDescription: groupDescriptionMock,
+}));
+
+
+// Prowlarr connection used by the download-URL guard and key stripping
+vi.mock('@/lib/integrations/prowlarr-connection', () => ({
+  getProwlarrConnection: async () => ({
+    baseUrl: 'http://prowlarr:9696',
+    apiKey: 'test-prowlarr-key',
+    base: { origin: 'http://prowlarr:9696', protocol: 'http:', hostname: 'prowlarr', host: 'prowlarr:9696', port: '9696', defaultPort: false, userinfo: '', basePath: '' },
+  }),
+}));
+
+
+// Interactive search permission is covered by tests/api/interactive-search-access.test.ts
+vi.mock('@/lib/middleware/interactive-search-access', () => ({
+  denyWithoutInteractiveSearchAccess: async () => null,
 }));
 
 describe('Audiobooks search torrents route', () => {
@@ -93,6 +113,64 @@ describe('Audiobooks search torrents route', () => {
     expect(payload.success).toBe(true);
     expect(payload.results[0].rank).toBe(1);
     expect(rankTorrentsMock).toHaveBeenCalled();
+    // Interactive search shows undersized releases too: only automatic search sets the size floor
+    expect(rankTorrentsMock.mock.calls[0][2]).not.toHaveProperty('minMBPerMinute');
+  });
+
+  it('ranks all candidates before returning the top 100 with truncation metadata', async () => {
+    authRequest.json.mockResolvedValue({ title: 'Title', author: 'Author' });
+    configServiceMock.get
+      .mockResolvedValueOnce(JSON.stringify([{ id: 1, name: 'Indexer', protocol: 'torrent', priority: 10 }]))
+      .mockResolvedValueOnce(null);
+    groupIndexersMock.mockReturnValue({ groups: [{ categories: [3030], indexerIds: [1] }], skippedIndexers: [] });
+
+    const candidates = Array.from({ length: 101 }, (_, index) => ({
+      title: index === 100 ? 'Best result' : `Result ${index}`,
+      size: 100,
+      indexer: 'Indexer',
+      indexerId: 1,
+    }));
+    const rankedCandidates = [candidates[100], ...candidates.slice(0, 100)].map((result, index) => ({
+      ...result,
+      score: 100 - index,
+      breakdown: { matchScore: 50, formatScore: 0, sizeScore: 0, seederScore: 0, notes: [] },
+      bonusPoints: 0,
+      bonusModifiers: [],
+      finalScore: 100 - index,
+    }));
+    prowlarrMock.searchWithVariations.mockResolvedValue(candidates);
+    rankTorrentsMock.mockReturnValue(rankedCandidates);
+
+    const { POST } = await import('@/app/api/audiobooks/search-torrents/route');
+    const response = await POST({} as any);
+    const payload = await response.json();
+
+    expect(rankTorrentsMock.mock.calls[0][0]).toHaveLength(101);
+    expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith('Title', 'Author', {
+      categories: [3030],
+      indexerIds: [1],
+    }, { exactTitle: false });
+    expect(payload.results).toHaveLength(100);
+    expect(payload.results[0]).toEqual(expect.objectContaining({ title: 'Best result', rank: 1 }));
+    expect(payload.truncated).toBe(true);
+    expect(payload.rawCount).toBe(101);
+  });
+
+  it('sends a title the user edited as given, with no fallback queries (#316)', async () => {
+    authRequest.json.mockResolvedValue({ title: 'Custom Title', author: 'Author', exactTitle: true });
+    configServiceMock.get
+      .mockResolvedValueOnce(JSON.stringify([{ id: 1, name: 'Indexer', protocol: 'torrent', priority: 10 }]))
+      .mockResolvedValueOnce(null);
+    groupIndexersMock.mockReturnValue({ groups: [{ categories: [3030], indexerIds: [1] }], skippedIndexers: [] });
+    prowlarrMock.searchWithVariations.mockResolvedValue([]);
+
+    const { POST } = await import('@/app/api/audiobooks/search-torrents/route');
+    await POST({} as never);
+
+    expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith('Custom Title', 'Author', {
+      categories: [3030],
+      indexerIds: [1],
+    }, { exactTitle: true });
   });
 });
 

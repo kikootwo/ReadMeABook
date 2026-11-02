@@ -9,6 +9,12 @@ import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
 import { RMABLogger } from '@/lib/utils/logger';
 import { checkTokenLoginRateLimit } from '@/lib/utils/rateLimit';
 import crypto from 'crypto';
+import { readJsonBody, AUTH_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
+import {
+  getRegistrationRefusal,
+  PENDING_APPROVAL_MESSAGE,
+  REJECTED_ACCOUNT_ERROR,
+} from '@/lib/services/auth/local-account-status';
 
 const logger = RMABLogger.create('API.Auth.TokenLogin');
 
@@ -26,7 +32,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { token } = await request.json();
+    const bodyResult = await readJsonBody(request, { maxBytes: AUTH_JSON_BODY_LIMIT_BYTES });
+    if (!bodyResult.ok) return bodyResult.response;
+    const { token } = bodyResult.data;
 
     if (!token) {
       return NextResponse.json({ error: 'Missing token parameter' }, { status: 400 });
@@ -46,12 +54,28 @@ export async function POST(request: NextRequest) {
         plexEmail: true,
         avatarUrl: true,
         role: true,
+        registrationStatus: true,
       },
     });
 
     if (!user) {
       logger.warn('Token login failed - not found or user deleted');
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
+
+    // Same registration checks as the regular sign-in, same responses
+    const refusal = getRegistrationRefusal(user.registrationStatus);
+    if (refusal === 'pending_approval') {
+      logger.warn('Token login refused - account pending approval', { userId: user.id });
+      return NextResponse.json({
+        success: false,
+        pendingApproval: true,
+        message: PENDING_APPROVAL_MESSAGE,
+      });
+    }
+    if (refusal === 'rejected') {
+      logger.warn('Token login refused - account rejected', { userId: user.id });
+      return NextResponse.json({ error: REJECTED_ACCOUNT_ERROR }, { status: 401 });
     }
 
     await prisma.user.update({

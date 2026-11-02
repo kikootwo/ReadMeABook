@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { enrichAudiobooksWithMatches, getAvailableAsins } from '@/lib/utils/audiobook-matcher';
-import { getCurrentUser } from '@/lib/middleware/auth';
+import { getOptionalAuthUser } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
 import { annotateWithIgnoreStatus } from '@/lib/utils/ignored-audiobooks';
 import { POPULAR_CATEGORY_ID } from '@/lib/processors/audible-refresh.processor';
@@ -130,9 +130,8 @@ export async function GET(request: NextRequest) {
       })
       .filter(Boolean) as any[];
 
-    // Get current user (optional - for request status enrichment)
-    const currentUser = getCurrentUser(request);
-    const userId = currentUser?.sub || undefined;
+    // Optional caller: request details and ignore flags only for a checked account
+    const userId = (await getOptionalAuthUser(request))?.id;
 
     // Enrich with real-time Plex library matching and request status
     const enrichedAudiobooks = await enrichAudiobooksWithMatches(audibleBooks, userId);

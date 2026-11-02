@@ -46,6 +46,27 @@ describe('PathMapper', () => {
     ).toThrow('Local path cannot be empty');
   });
 
+  describe('normalizePath', () => {
+    it('converts backslashes to forward slashes (Windows clients)', () => {
+      expect(PathMapper.normalizePath('E:\\Torrents\\ReadMeABook\\Book.m4b'))
+        .toBe('E:/Torrents/ReadMeABook/Book.m4b');
+    });
+
+    it('normalizes mixed separators consistently', () => {
+      expect(PathMapper.normalizePath('E:\\Torrents/ReadMeABook\\Book'))
+        .toBe('E:/Torrents/ReadMeABook/Book');
+    });
+
+    it('strips trailing separators (both forms)', () => {
+      expect(PathMapper.normalizePath('E:\\Torrents\\ReadMeABook\\')).toBe('E:/Torrents/ReadMeABook');
+      expect(PathMapper.normalizePath('/downloads/readmeabook/')).toBe('/downloads/readmeabook');
+    });
+
+    it('collapses `..` segments and redundant separators', () => {
+      expect(PathMapper.normalizePath('/downloads//readmeabook/../Book')).toBe('/downloads/Book');
+    });
+  });
+
   describe('reverseTransform', () => {
     it('returns original path when mapping is disabled', () => {
       const result = PathMapper.reverseTransform('/downloads/Book', {

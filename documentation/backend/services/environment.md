@@ -51,10 +51,15 @@ environment:
 **Auto-generated on first run (Unified Container):**
 - `JWT_SECRET` - JWT access token signing key
 - `JWT_REFRESH_SECRET` - JWT refresh token signing key
-- `CONFIG_ENCRYPTION_KEY` - Config field encryption key (Plex tokens, etc.)
+- `CONFIG_ENCRYPTION_KEY` - Config field encryption key (Plex tokens, etc.) — **required** (app throws without it)
 - `POSTGRES_PASSWORD` - PostgreSQL password
 
 **Manual Override:** Set in docker-compose.yml before first run to use custom secrets.
+
+**Non-container installs (no entrypoint):**
+- `JWT_SECRET`/`JWT_REFRESH_SECRET` optional — if unset, derived from `CONFIG_ENCRYPTION_KEY` (HKDF-SHA256, see auth.md#jwt-signing-secrets)
+- `JWT_DOWNLOAD_SECRET` optional — default: resolved access secret + `-download`
+- No hardcoded fallback: neither JWT env vars nor `CONFIG_ENCRYPTION_KEY` → token sign/verify throw
 
 ## File Ownership (Unified Container)
 
@@ -63,7 +68,7 @@ environment:
 - `PGID` - Default: 1000 (your host group ID)
 
 **How It Works:**
-- PostgreSQL: UID 103, GID={PGID}
+- PostgreSQL: UID 102 (as shipped by 1.2.7 and later), GID={PGID}
 - Node/Redis: Fully remapped to PUID:PGID
 - See: documentation/deployment/unified.md
 
@@ -168,6 +173,18 @@ environment:
 3. Redirect URI: `https://your-domain.com/api/auth/oidc/callback`
 4. Save and retry login
 
+### Issue: "JWT_SECRET is not set and cannot be derived"
+
+**Cause:** Neither `JWT_SECRET`/`JWT_REFRESH_SECRET` nor `CONFIG_ENCRYPTION_KEY` in the environment (non-container install)
+
+**Fix:** Set `CONFIG_ENCRYPTION_KEY` (required anyway), or set both JWT secrets explicitly (`openssl rand -base64 32`)
+
+### Issue: All users logged out after upgrade (non-container installs)
+
+**Cause:** Expected once — built-in fallback JWT secrets removed (#297); secrets now derived from `CONFIG_ENCRYPTION_KEY`
+
+**Fix:** None needed; users log in again. Download links issued before upgrade must be regenerated.
+
 ## Environment Variable Reference
 
 | Variable | Required | Default | Description |
@@ -179,9 +196,10 @@ environment:
 | `POSTGRES_USER` | No | readmeabook | PostgreSQL username |
 | `POSTGRES_PASSWORD` | No | Auto-generated | PostgreSQL password |
 | `POSTGRES_DB` | No | readmeabook | PostgreSQL database name |
-| `JWT_SECRET` | No | Auto-generated | JWT signing secret |
-| `JWT_REFRESH_SECRET` | No | Auto-generated | Refresh token secret |
-| `CONFIG_ENCRYPTION_KEY` | No | Auto-generated | Config encryption key |
+| `JWT_SECRET` | No | Auto-generated (container), else derived from `CONFIG_ENCRYPTION_KEY` | JWT signing secret |
+| `JWT_REFRESH_SECRET` | No | Auto-generated (container), else derived from `CONFIG_ENCRYPTION_KEY` | Refresh token secret |
+| `JWT_DOWNLOAD_SECRET` | No | JWT secret + `-download` | Download link signing secret |
+| `CONFIG_ENCRYPTION_KEY` | Yes | Auto-generated (container) | Config encryption key; root for derived JWT secrets |
 | `PUID` | No | 1000 | Host user ID for file ownership |
 | `PGID` | No | 1000 | Host group ID for file ownership |
 | `PLEX_CLIENT_IDENTIFIER` | No | Auto-generated | Plex API client ID |

@@ -1,0 +1,10 @@
+{
+  "name": "transient-grab-503",
+  "description": "Regression #275: the top-ranked release's grab URL always returns HTTP 503; the second release is healthy. Fixed code falls through to B; pre-fix code never fetches B.",
+  "book": "martian",
+  "indexers": [{ "id": 1, "name": "E2E Torrents", "protocol": "torrent", "priority": 25 }],
+  "releases": [
+    { "id": "A", "title": "{{author}} - {{title}} (Unabridged) [M4B 64kbps]", "sizeMB": 310, "seeders": 150, "fixture": "martian-m4b", "grab": { "statuses": [503] } },
+    { "id": "B", "title": "{{author}} - {{title}} [MP3]", "sizeMB": 290, "seeders": 8, "fixture": "martian-mp3" }
+  ]
+}

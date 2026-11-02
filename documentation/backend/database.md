@@ -70,6 +70,7 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - `release_date` (Date, nullable) - Book release date snapshot from Audnexus at request creation; used by skip-unreleased-auto-search gate
 - `progress` (0-100), `priority`, `error_message`
 - `search_attempts`, `download_attempts`, `import_attempts`, `max_import_retries` (default 5)
+- `auto_rerequest_count` (Int, default 0) - Automatic re-requests after a failure with no new block (shelf sync / watched lists backoff step); user requests and retries reset it to 0. See [release-blocklist.md](../admin-features/release-blocklist.md#automatic-re-requests-409)
 - `last_search_at`, `last_import_at`, `created_at`, `updated_at`, `completed_at`
 - Unique: `(user_id, audiobook_id)`
 - Indexes: `user_id`, `audiobook_id`, `status`, `created_at DESC`
@@ -78,7 +79,8 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - `id` (UUID PK), `request_id` (FK), `indexer_name`, `torrent_name`, `torrent_hash`
 - `torrent_size_bytes`, `magnet_link`, `torrent_url`, `seeders`, `leechers`
 - `quality_score`, `selected` (bool), `download_client`, `download_client_id`
-- `download_status` ('queued'|'downloading'|'completed'|'failed'|'stalled')
+- `download_status` ('queued'|'downloading'|'completed'|'failed'|'stalled'|'removed'); `removed` = gone from the client (RMAB removed it, or the seeding cleanup's strict probe got a well-formed "not there"): no longer a cleanup candidate, never written back to `completed`
+- `added_by_rmab` (bool, nullable, no default, #423): `true` RMAB added the torrent; `false` it was already in the client (taken over: never removed or re-categorized); `NULL` row from before the column (judged by the client's added time, `resolveOwnership()` in `src/lib/utils/torrent-ownership.ts`). Usenet rows: `true`. Never filtered with a nullable-boolean WHERE (`<> false` drops NULLs in SQL)
 - `download_error`, `started_at`, `completed_at`, `created_at`
 - Indexes: `request_id`, `selected`, `created_at DESC`
 
@@ -126,9 +128,14 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - Unique: `(request_id, release_key)` - idempotency for concurrent auto-block writes
 - Indexes: `request_id`, `release_key`, `release_hash`, `created_at DESC`
 - **Purpose:** Per-request blocklist. Search processors filter their candidate set against this table so future searches skip releases that have already failed for the same request.
-- **Soft/hard delete:** Soft-delete (sets `requests.deleted_at`) does NOT cascade - blocklist entries survive. Hard-delete cascades and wipes entries.
+- **Soft/hard delete:** Soft-delete (sets `requests.deleted_at`) does NOT cascade - blocklist entries survive. Hard-delete cascades and wipes entries. A re-request of a failed/warn/cancelled request moves its entries to the new request in the same transaction before deleting it (`request-rerequest.ts`; `download_history_id` is then historical).
 - **Match rules:** Case-insensitive exact match on `release_key` OR exact match on `release_hash`.
 - **Service:** Single writer is `src/lib/services/blocklist.service.ts` (`addAutoBlock` is idempotent via upsert; never throws).
+
+### Watched_Series / Watched_Authors
+- `id` (UUID PK), `user_id` (FK → Users, CASCADE), `series_asin`/`author_asin`, `series_title`/`author_name`, `cover_art_url` (nullable), `last_checked_at` (nullable), `created_at`, `updated_at`
+- `new_releases_since` (DateTime, nullable) - null = request the entire catalog; set = request only books released from this day on (#302)
+- Unique: `(user_id, series_asin)` / `(user_id, author_asin)`. See [features/watched-lists.md](../features/watched-lists.md)
 
 ## Relationships
 

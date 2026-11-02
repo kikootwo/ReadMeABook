@@ -22,6 +22,7 @@ Free, open-source Usenet/NZB download client with comprehensive Web API. Industr
 **POST /api (multipart: mode=addfile, nzbfile={binary})** - Add NZB by file upload (RMAB downloads NZB from Prowlarr, uploads to SABnzbd)
 **GET /api?mode=queue&output=json&apikey={key}** - Get active downloads
 **GET /api?mode=history&limit=100&output=json&apikey={key}** - Get completed/failed downloads
+  - `search={term}` (`*` wildcard, case-insensitive), `nzo_ids={id,...}`, `archive=1` (4.3+: archived jobs only) via `queryHistory()`; older versions ignore unknown params, so results are always filtered again client-side
 **GET /api?mode=pause&value={nzbId}&output=json&apikey={key}** - Pause download
 **GET /api?mode=resume&value={nzbId}&output=json&apikey={key}** - Resume download
 **GET /api?mode=queue&name=delete&value={nzbId}&del_files={0|1}&output=json&apikey={key}** - Delete download from queue
@@ -149,7 +150,7 @@ interface SABnzbdConfig {
 **Key Difference:** SABnzbd returns NZB ID immediately (no extraction needed)
 
 **qBittorrent:**
-- Returns "Ok." without hash
+- Returns "Ok." without hash (5.2+: a JSON receipt, checked against our hash)
 - Requires parsing magnet link or .torrent file
 - Hash extraction needed for tracking
 
@@ -167,7 +168,7 @@ interface SABnzbdConfig {
 
 **Queue vs History:**
 - **Queue:** Active downloads (downloading, queued, paused)
-- **History:** Completed or failed downloads
+- **History:** Post-processing (Verifying, Repairing, Extracting, Moving, Running), then Completed or Failed
 
 **Monitoring Flow:**
 1. Check queue for NZB ID
@@ -181,8 +182,45 @@ interface SABnzbdConfig {
 - `Paused` → Manually paused
 - `Extracting/Unpacking` → Post-processing extraction
 - `Repairing/Verifying` → Post-processing par2 repair
-- `Completed` → Successfully downloaded and extracted
+- Queue item at 100% (any other status) → `extracting` (unified `processing`): the tail of file assembly (and direct unpack), not completion
+- History post-processing statuses → not completed; monitoring keeps polling
+- `Completed` (history) → Successfully downloaded and extracted; `storage` gives the download path
 - `Failed` → Download or post-processing failed
+
+## Duplicate NZBs and Retried Adds (#329)
+
+**Files:** `src/lib/integrations/sabnzbd-duplicates.ts` (lookup), `addNZBJob()` in `sabnzbd.service.ts`, fixtures `tests/fixtures/sabnzbd-duplicates.ts`
+
+**What `addfile` answers per "Detect duplicate downloads" mode** (`misc.no_dupes`, SABnzbd 4.0-5.x source). Duplicate = a non-failed history row (archived rows too) or a queued job with the same name (case-insensitive) or NZB md5. `nzo_ids` only ever names the new job:
+
+| Mode | Response | Left behind |
+|---|---|---|
+| 0 Off | `{status:true, nzo_ids:[new]}` | a second copy, downloading |
+| 1 Discard | `{status:false, nzo_ids:[]}` (no `error` key) | nothing |
+| 2 Pause | `{status:true, nzo_ids:[new]}` | new job `Paused` (label `DUPLICATE`) |
+| 3 Fail | `{status:true, nzo_ids:[new]}` | new history row `Failed`, `fail_message: "Duplicate NZB"` (localized) |
+| 4 Tag | `{status:true, nzo_ids:[new]}` | new job downloading (label `DUPLICATE`) |
+| 4.2+, copy already queued (any mode but Off/Tag) | `{status:true, nzo_ids:[new]}` | new job `Paused` |
+
+**Detection:** refused add without `error` text or without nzo_ids → lookup; accepted add → one queue call: new job `Paused`, or already in history (`nzo_ids` filter) and not `Completed` → lookup (excluding the new job). No existing job found → behaviour as before.
+
+**Lookup** (`findExistingJob`, names from `lookupNames`): a job named as the release title (`AddDownloadOptions.releaseTitle`, the indexer title the processor passes) or as the upload name (SABnzbd job name = upload name without `.nzb`), compared by letters/digits only, case-insensitive; same category; `Failed` rows skipped. The upload name counts only when specific (`isSpecificJobName`): not `download`, `api`, `nzb`, `get`, `getnzb`, `file(s)`, `index`, `fetch`, `release` or a bare number (the `download.nzb` fallback of a Prowlarr `/download` URL without Content-Disposition), and sharing a word (2+ letters/digits) with the release title. No names → no lookup → behaviour as before. Order: queue job not paused → history (`search`, then `archive=1`) → paused queue job.
+
+**Outcome** (`resolveExistingJob`):
+- Queued, downloading or post-processing → tracked as the request's download (`alreadyInClient: true` → `addedByRmab: false`)
+- Paused in the queue → `paused: true`; the processor resumes it only when a download row with that nzo_id and `addedByRmab: true` exists (RMAB added it earlier), otherwise tracks it paused with a warning
+- `Completed` and `storage` exists after `PathMapper.transform()` → tracked; the monitor's normal completion path imports it
+- `Completed`, files gone → `UnusableDownloadSourceError` with `blocklistReason: 'Already in SABnzbd, files gone'` → processor blocklists the release, tries the next ranked one
+- Pause mode: RMAB deletes its new paused copy (`del_files=1`); Fail mode: archives the new `Duplicate NZB` row (best effort)
+- Post-add check failing (SABnzbd unreachable) → the new job is tracked, as before
+
+**Retried add:** a timed-out `addfile` (axios `ECONNABORTED`/`ETIMEDOUT`) is transient, so Bull re-runs the whole `download_torrent` job (3 attempts, exponential backoff 2 s, `job-queue.service.ts`). On attempts after the first the processor passes `retry: true`; `addNZBJob` runs the same lookup after fetching the NZB and before uploading, and reuses a usable job instead of uploading a second copy (a finished job with files gone is not reused: the upload goes ahead). Admin retry-download is a fresh job (no `retry`).
+
+**Ownership:** a taken-over job (`addedByRmab: false`) is never deleted by request delete, and remove-after-processing keeps its files (`planDownloadCleanup` returns no plan). A retried add that reuses RMAB's own first upload is recorded the same way (kept: the safe side). Request delete keeps RMAB's own job while another active request tracks the same nzo_id (`otherActiveRequestsUsingNzb`, `torrentsKeptShared`).
+
+**Monitor:** `getNZB()` falls back to `history&nzo_ids={id}` (then `archive=1`) when the job is not in the queue or the newest 100 history rows.
+
+**Limits:** a duplicate matched only by md5 or by SABnzbd's NZB backup folder (different name), in another category, or only under a generic upload name, is not found → the old failure; Tag/Off download a second copy (user's setting).
 
 ## Remote Path Mapping
 
@@ -241,6 +279,8 @@ organizePath = PathMapper.transform(sabPath, config)
    - Applying `reverseTransform()` when setting category path (outgoing)
    - Applying `transform()` when processing completed downloads (incoming)
    - Using same `PathMapper` utility as qBittorrent for consistency
+**8. Requests failed at 100% before post-processing finished** - A queue item at 100% (the tail of file assembly, before SABnzbd moves the job to history for post-processing) mapped to `completed` with no storage path, so the monitor failed the request with "Download path not available". Fixed by mapping it to `extracting` in `getDownloadProgress()`; only a `Completed` history slot completes. Admin Retry treats `processing` as alive (`ALIVE_STATUSES` in `retry-download/route.ts`), so it resumes monitoring instead of re-adding the NZB.
+**9. Duplicate NZB failed the request; a timed-out add could be added twice (#329)** - Discard answered `status:false` (request failed), Fail mode's `Duplicate NZB` row failed it in the monitor, Pause mode left it stuck paused, and a Bull retry after an upload timeout uploaded a second copy. Fixed: the job SABnzbd already holds is tracked or imported, or the release is blocklisted and the next one tried; retries reuse the earlier job. See [Duplicate NZBs and Retried Adds](#duplicate-nzbs-and-retried-adds-329).
 
 ## Automatic Cleanup
 
@@ -303,6 +343,7 @@ organizePath = PathMapper.transform(sabPath, config)
 Prowlarr returns download URLs that point back to itself (proxy URLs like `http://prowlarr:9696/3/download?apikey=...&link=...`).
 RMAB downloads the NZB file content from that URL, then uploads it to SABnzbd via `mode=addfile` (multipart POST).
 This matches qBittorrent's pattern where RMAB downloads `.torrent` files and uploads the binary content.
+Fetch goes through the shared `fetchDownloadSource()` (redirects hop by hop, 30s hard deadline for the whole fetch, Prowlarr key only on Prowlarr download hops) — see [download-clients.md](./download-clients.md#source-fetch--prowlarr-key-scoping).
 
 **Result:** Download clients only need network access to RMAB. No direct Prowlarr connectivity required.
 

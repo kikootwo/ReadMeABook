@@ -77,6 +77,7 @@ API Docs: `/PlexMediaServerAPIDocs.json`
    - Searches entire `plex_library` table for matches
 4. Return summary (new, updated, matched downloads)
 
+**Concurrent inserts (#222):** both scan sites insert via `createLibraryRowUnlessPresent` (`src/lib/processors/library-row-insert.ts`); a unique `plex_guid` conflict (another job inserted the item after the lookup) updates that row instead of failing the job
 **Trigger:** Scheduled (every 5 minutes default), enabled by default
 **Benefits:** Lightweight polling for new items + comprehensive matching for downloaded requests
 **Note:** Requests transition: pending → searching → downloading → processing → downloaded → available (after detection)

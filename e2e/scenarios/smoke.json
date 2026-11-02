@@ -1,0 +1,10 @@
+{
+  "name": "smoke",
+  "description": "One good multi-file mp3 release for book 'phm' plus a low-ranked decoy; completes in ~4s.",
+  "book": "phm",
+  "indexers": [{ "id": 1, "name": "E2E Torrents", "protocol": "torrent", "priority": 25 }],
+  "releases": [
+    { "id": "good", "title": "{{author}} - {{title}} (Unabridged) [MP3 64kbps]", "sizeMB": 420, "seeders": 60, "fixture": "phm-mp3" },
+    { "id": "decoy", "title": "{{title}} Study Guide Sample", "sizeMB": 25, "seeders": 2, "fixture": "wrong-files" }
+  ]
+}

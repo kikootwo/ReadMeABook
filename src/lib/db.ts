@@ -4,6 +4,7 @@
  */
 
 import { PrismaClient } from '@/generated/prisma/client';
+import { oncePerProcess, processSingleton } from '@/lib/utils/process-singleton';
 
 /**
  * Append connection pool parameters to DATABASE_URL if not already present.
@@ -28,13 +29,8 @@ function getPooledDatabaseUrl(): string {
   return `${baseUrl}${separator}${params.join('&')}`;
 }
 
-// Prevent multiple instances of Prisma Client in development
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
-};
-
-export const prisma =
-  globalForPrisma.prisma ??
+// One Prisma Client per process (survives dev HMR and duplicate module evaluation)
+export const prisma = processSingleton('prisma', () =>
   new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
     datasources: {
@@ -42,13 +38,14 @@ export const prisma =
         url: getPooledDatabaseUrl(),
       },
     },
-  });
-
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+  })
+);
 
 // Graceful shutdown
-process.on('beforeExit', async () => {
-  await prisma.$disconnect();
+oncePerProcess('prisma-disconnect', () => {
+  process.on('beforeExit', async () => {
+    await prisma.$disconnect();
+  });
 });
 
 export default prisma;

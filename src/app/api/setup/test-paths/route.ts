@@ -9,6 +9,7 @@ import path from 'path';
 import { requireSetupIncompleteOrAdmin } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
 import { validateTemplate, generateMockPreviews } from '@/lib/utils/path-template.util';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Setup.TestPaths');
 
@@ -48,7 +49,9 @@ async function testPath(dirPath: string): Promise<boolean> {
 export async function POST(request: NextRequest) {
   return requireSetupIncompleteOrAdmin(request, async (req) => {
   try {
-    const { downloadDir, mediaDir, audiobookPathTemplate } = await req.json();
+    const bodyResult = await readJsonBody(req);
+    if (!bodyResult.ok) return bodyResult.response;
+    const { downloadDir, mediaDir, audiobookPathTemplate } = bodyResult.data;
 
     if (!downloadDir || !mediaDir) {
       return NextResponse.json(

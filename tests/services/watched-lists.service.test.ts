@@ -182,7 +182,7 @@ describe('processWatchedLists', () => {
     expect(stats.skippedOwned).toBe(1);
     expect(stats.requestsCreated).toBe(1);
     expect(mockCreateRequestForUser).toHaveBeenCalledTimes(1);
-    expect(mockCreateRequestForUser).toHaveBeenCalledWith('user-1', expect.objectContaining({ asin: 'B001BOOK02' }));
+    expect(mockCreateRequestForUser).toHaveBeenCalledWith('user-1', expect.objectContaining({ asin: 'B001BOOK02' }), { automatic: true });
   });
 
   it('processes watched authors and creates requests', async () => {
@@ -527,9 +527,7 @@ describe('processWatchedLists', () => {
   });
 
   it('skips authors when targeted for a specific series only', async () => {
-    // When seriesAsin is provided but no authorAsin, authors should still be queried
-    // but with no authorAsin filter (only userId), so they run normally.
-    // The key behavior: seriesAsin filter applies to series, not authors.
+    // A check for a just-watched series must not re-check the user's watched authors (#429)
     prismaMock.watchedSeries.findMany.mockResolvedValue([
       {
         id: 'ws-1',
@@ -542,7 +540,9 @@ describe('processWatchedLists', () => {
       },
     ]);
 
-    prismaMock.watchedAuthor.findMany.mockResolvedValue([]);
+    prismaMock.watchedAuthor.findMany.mockResolvedValue([
+      { id: 'wa-1', userId: 'user-1', authorAsin: 'B001AUTH001', authorName: 'Other Author', user: { id: 'user-1', plexUsername: 'testuser' } },
+    ]);
     prismaMock.watchedSeries.update.mockResolvedValue({});
 
     mockScrapeSeriesPage.mockResolvedValueOnce({
@@ -555,6 +555,7 @@ describe('processWatchedLists', () => {
       hasMore: false,
       page: 1,
     });
+    mockSearchByAuthorAsin.mockResolvedValue({ books: [{ asin: 'B001BOOK02', title: 'Other', author: 'Other Author' }], hasMore: false, page: 1, totalResults: 1 });
 
     mockDeduplicateAndCollectGroups.mockReturnValue({
       books: [
@@ -577,12 +578,9 @@ describe('processWatchedLists', () => {
       include: { user: { select: { id: true, plexUsername: true } } },
     });
 
-    // Authors query should only filter by userId (no authorAsin filter)
-    expect(prismaMock.watchedAuthor.findMany).toHaveBeenCalledWith({
-      where: { userId: 'user-1' },
-      include: { user: { select: { id: true, plexUsername: true } } },
-    });
-
-    expect(stats.seriesChecked).toBe(1);
+    // The author pass doesn't run at all: no query, no scan
+    expect(prismaMock.watchedAuthor.findMany).not.toHaveBeenCalled();
+    expect(mockSearchByAuthorAsin).not.toHaveBeenCalled();
+    expect(stats).toMatchObject({ seriesChecked: 1, authorsChecked: 0, requestsCreated: 1 });
   });
 });

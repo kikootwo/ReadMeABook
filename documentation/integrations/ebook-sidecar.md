@@ -20,22 +20,27 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
    - Uses FlareSolverr if configured (Cloudflare bypass)
 2. **Indexer Search** (if enabled, and no Anna's Archive result)
    - Searches Prowlarr with ebook categories (default: 7020)
+   - Query: `searchWithVariations(title, author)`, two queries per indexer group (`"title author"` then `"title"`, deduped), same as audiobooks. Automatic (`search_ebook`) and both interactive routes. Title override: `search_ebook` uses the request's custom search terms; the interactive routes use only `customTitle` from the body (not custom search terms). The author is always sent. See [prowlarr.md](../phase3/prowlarr.md#search-strategy)
    - Ranks using unified ranking algorithm with ebook-specific scoring
    - Downloads via qBittorrent (torrents) or SABnzbd (Usenet)
 3. **Both disabled** → Ebook downloads disabled entirely
 
 ### Flow (Anna's Archive)
 1. Audiobook organization completes
-2. Ebook request created automatically (if source enabled)
+2. Ebook request created automatically (if source enabled and the book folder holds no ebook yet, see On-Disk Check)
 3. `search_ebook` job searches Anna's Archive
 4. `start_direct_download` downloads via HTTP
 5. `organize_files` copies to audiobook folder
 6. Request marked as `downloaded` (terminal)
 7. "Available" notification sent
 
+**Request-based routes** (`POST /api/requests/[id]/interactive-search-ebook`, `.../select-ebook`): admin, or the request's owner (another user's request → 403; `select-ebook` takes only a user's own ebook request), interactive search access required; a deleted request → 404. Used by admin request rows and by My Requests ebook cards (Interactive Search on an own `pending`/`failed`/`awaiting_search` ebook request picks for that request, #281; other statuses search by ASIN). `select-ebook` restarts the ebook request (`failed`/`awaiting_search`/`pending`) instead of creating one; a non-admin who needs approval gets `awaiting_approval` with the pick stored (see [request-approval.md](../admin-features/request-approval.md#post-apirequestsidselect-ebook)). An ebook request with no parent audiobook request (book was already in the library) uses its own audiobook.
+
+**Interactive picks** (`POST /api/audiobooks/[asin]/select-ebook`, `requests/[id]/select-ebook`, admin approve): only the result's `md5` is used; download links are rebuilt server-side via `getSlowDownloadLinks(md5, ebook_sidecar_base_url, flaresolverr)` (`resolveAnnasArchiveLinks`, `src/lib/services/download-selection-guard.ts`). Indexer picks (`source: 'prowlarr'`) must be a magnet or Prowlarr download link. User route requires interactive search access.
+
 ### Flow (Indexer Search)
 1. Audiobook organization completes
-2. Ebook request created automatically (if source enabled)
+2. Ebook request created automatically (if source enabled and the book folder holds no ebook yet)
 3. `search_ebook` job searches indexers (if Anna's Archive failed/disabled)
 4. `download_torrent` job adds to qBittorrent/SABnzbd (reuses audiobook processor)
 5. `monitor_download` tracks progress
@@ -76,6 +81,13 @@ Ebooks are first-class citizens in RMAB, with their own request type, tracking, 
 
 A scheduled `find_missing_ebooks` job (daily midnight, enabled by default) backstops the auto-grab path for cases where it silently misses books (race conditions, transient indexer failures, requests created before sources were configured, books from Goodreads/Hardcover sync). Per run it scans up to 50 audiobook requests in `downloaded`/`available` status and triggers the existing ebook fetch flow for any audiobook missing a successful ebook companion. **Lifetime auto-retry cap: 5 per audiobook** — after 5 failed auto-attempts the job stops retrying that audiobook (admin Manual "Fetch Ebook" remains available). Counter is tracked in `Request.ebookAutoRetryCount` and is **processor-private**: manual Fetch Ebook routes never read, write, or reset it. Gated by `ebook_auto_grab_enabled` AND at least one source enabled; logs no-op runs honestly. See `documentation/backend/services/scheduler.md` for full details.
 
+### On-Disk Check (#313)
+- `findEbookOnDisk(Audiobook.filePath, audiobookId)` (`src/lib/utils/ebook-on-disk.ts`): name of an `EBOOK_EXTENSIONS` file (any case) at the top level of the book folder, or null. No recursion; dotfiles (`._x.epub`) ignored; no path, a missing/unreadable folder or a non-folder path → null (fetch as before), one debug line. Read-only
+- A `.pdf` alone does not count (audiobooks often ship a PDF booklet); any other ebook format does, with or without a PDF beside it
+- Shared folder: on a hit, one query reads the other `Audiobook` rows' `filePath`; if any stores the same folder (canonical path or same filesystem entry, as `library-delete-guard.ts` rule c; rows whose folder is gone skipped) → null, since the file may be that book's (e.g. an `{author}` template). A failed lookup → null
+- Used by the automatic paths only: auto-grab after an audiobook import (`createEbookRequestIfEnabled`, checks the organize `targetPath`) and `find_missing_ebooks` (before it would create or retry). A hit: no ebook request created, a `failed`/`warn` one not retried, nothing fetched, this run and every later one (`skippedOnDisk` counter). The user's file is never touched
+- Not checked: manual Fetch Ebook / Interactive Search / Manual Import (an admin can still fetch, e.g. another format), and re-searches of an existing in-flight ebook request (`retry_missing_torrents`, `monitor_rss_feeds`)
+
 ### Kindle EPUB Fix
 
 **Purpose:** Apply compatibility fixes to EPUB files before organizing, ensuring successful Kindle import.
@@ -89,9 +101,13 @@ A scheduled `find_missing_ebooks` job (daily midnight, enabled by default) backs
 **How It Works:**
 - Enabled via toggle in E-book Sidecar settings (only visible when EPUB format selected)
 - Applied during `organize_files` job, before copying to final location
-- Creates temp fixed file → organizes temp file → cleans up temp file
+- Creates temp fixed file (unique `kindle-fix-*` folder) → organizes temp file → cleans up temp file
 - Original download file stays intact (important for seeding torrents)
 - Non-blocking: if fix fails, continues with original file
+- **Read-back check** (`src/lib/utils/epub-verify.ts`): after `writeZip`, the copy is re-opened; entry names must match and every entry must read back (adm-zip CRC check) with the sha256 the fixer meant to write. On failure: temp copy deleted, warn log naming the entry (never content), `verificationFailed: true` → the original EPUB is imported and the request message is `Kindle fix could not be verified; original imported` (placed before any other import message, joined with `; `; see [file-organization.md](../phase3/file-organization.md))
+  - Any read error (damaged central directory/EOCD, bad CRC, corrupt deflate) counts as a failed check, never an unhandled error
+  - Temp folder: `fs.mkdtemp(<TEMP_DIR>/kindle-fix-)` per run (no collision between concurrent organize jobs); removed on every failure path, including a write error (e.g. ENOSPC)
+  - Memory: the in-memory source zip is out of scope (collectable) before the copy is re-read; the read-back loads the written file and hashes entries one at a time. Peak use is still a small multiple of the EPUB size (accepted)
 
 **Source:** Based on [kindle-epub-fix](https://github.com/innocenat/kindle-epub-fix)
 
@@ -136,7 +152,7 @@ Ebook torrent ranking uses unified algorithm with ebook-specific scoring:
 | **Seeder Count** | 15 pts | Logarithmic scaling (same as audiobooks) |
 
 **Filtering:**
-- Files > 20 MB are filtered out (too large for ebooks)
+- Automatic search skips files > `EBOOK_MAX_SIZE_MB` (20 MB, `ranking-algorithm.ts`); interactive search lists them (size score 0, note `Over 20 MB`) via `enforceSizeCap: false`. Anna's Archive results have no size cap
 - Dual threshold: base score >= 50 AND final score >= 50
 
 **Bonus System:** Same as audiobooks (indexer priority, flag bonuses)
@@ -203,9 +219,15 @@ Search: https://annas-archive.gl/search?q=Title+Author&ext=epub&lang=en
 
 **Pattern:** `[Title] - [Author].[format]`
 
-**Sanitization:**
-- Remove: `<>:"/\|?*`
-- Collapse spaces, trim, limit to 200 chars
+**Sanitization (Anna's Archive download name):**
+- Built by `buildEbookDownloadName(title, author, format)` (`src/lib/utils/ebook-download-name.ts`) at every `addStartDirectDownloadJob` caller: `search-ebook.processor.ts`, `ebook-selection.service.ts` (select-ebook routes), `api/admin/requests/[id]/approve`
+- Remove `<>:"/\|?*`, collapse spaces, trim (each part; no per-part length cap)
+- ≤255 UTF-8 bytes via `capTitleAuthorBytes` (`src/lib/utils/path-component.ts`): title cut first, author kept whole unless the title would get under half the room (then title keeps half, author the rest); ` - ` and `.format` kept whole; cut between characters
+- Room is kept for a 5-byte extension: the downloader swaps the queued extension for the found file's format, so a `.pdf`/`.fb2`/`.any` name is cut to 254 bytes
+- Downloader backstop (`sanitizeFilename`, `direct-download.processor.ts`): same cleanup, ≤255 bytes via `capFilenameBytes`, extension kept (no 200-char cap)
+- No suffix is written next to the download (no `.part`/`.tmp`/` (N)`), so the full 255 bytes are used. A name that fits is unchanged
+- Library (renaming off): the organizer cuts the source name to 200 UTF-16 units, stem only, so the extension is kept (see [File Organization](../phase3/file-organization.md#path-sanitization))
+- `downloadEbook()` (`ebook-scraper.ts`) is unused; its `sanitizeEbookFilename` applies the same rule after a 100-unit cap per part
 
 ## Error Handling
 
@@ -228,9 +250,12 @@ Search: https://annas-archive.gl/search?q=Title+Author&ext=epub&lang=en
 
 **Utils:**
 - `src/lib/utils/file-organizer.ts` (`organizeEbook` method)
+- `src/lib/utils/ebook-download-name.ts` (`buildEbookDownloadName`: queued download name)
 - `src/lib/utils/ranking-algorithm.ts` (`rankEbookTorrents` function)
 - `src/lib/utils/indexer-grouping.ts` (supports `'ebook'` type)
-- `src/lib/utils/epub-fixer.ts` (Kindle EPUB compatibility fixes)
+- `src/lib/utils/epub-fixer.ts` (Kindle EPUB fix: load, write, read-back)
+- `src/lib/utils/epub-fixes.ts` (the four content fixes)
+- `src/lib/utils/epub-verify.ts` (read-back check of the fixed copy)
 
 **UI:**
 - `src/components/requests/RequestCard.tsx` (ebook badge)
@@ -246,6 +271,9 @@ Search: https://annas-archive.gl/search?q=Title+Author&ext=epub&lang=en
 | PDF | `.pdf` | Sometimes |
 | MOBI | `.mobi` | Legacy |
 | AZW3 | `.azw3` | Sometimes |
+| AZW, FB2, CBZ, CBR | `.azw`, `.fb2`, `.cbz`, `.cbr` | Imported; not a preferred-format setting |
+
+- One list: `EBOOK_EXTENSIONS` (`src/lib/constants/audio-formats.ts`), in import preference order
 
 ## Indexer Categories
 
@@ -254,6 +282,16 @@ Indexer configuration supports separate category arrays for audiobooks and ebook
 - **Ebook Categories:** Default `[7020]` (Books/EBook)
 
 Categories are configured per-indexer via the tabbed interface in the Edit Indexer modal.
+
+## Fixed Issues ✅
+
+**1. Long non-Latin ebook names failed with ENAMETOOLONG (#474)** - `title (100 chars) - author (100 chars).format` reached ~408 bytes (Cyrillic) / ~608 (CJK); the raw `Title - Author.format` queued by the callers had no byte cap; the direct download 200-char cap could cut off the extension, and so could the organizer's 200-char cap in the library; the 100-unit slice could split an emoji. Fixed: byte cap on grapheme boundaries, title cut first, extension kept in downloads and library (see File Naming)
+
+**2. Ebooks over 20 MB hidden from interactive search (#323)** - `rankEbookTorrents` dropped indexer results > 20 MB in every mode, so a large PDF that was the only result showed nothing. Fixed: the cap (`EBOOK_MAX_SIZE_MB`) applies to automatic search only; both interactive routes pass `enforceSizeCap: false` and list the result with its size
+
+**3. Manual Import from an ebook request imported audio into the audiobook (#278)** - the details modal opened the audiobook Manual Import for an ebook card: audio only, and the book's audiobook request (even `available`) was recycled and re-organized. Fixed: an ebook card's Manual Import lists and accepts ebook files and creates or reuses the ebook request; the ebook organize branch imports the selected file (see [manual-import.md](../features/manual-import.md))
+
+**4. Auto-grab re-fetched an ebook the user already put next to the audiobook (#313, part b)** - neither the post-import auto-grab nor `find_missing_ebooks` looked at the book folder, so a book with a user-placed ebook got an ebook request after import and a nightly retry after each failure. Fixed: both check the folder first (see On-Disk Check); a lone PDF or a folder another book also stores does not count. Bulk-importing standalone ebooks (#313 part a) is not covered
 
 ## Limitations
 

@@ -41,6 +41,22 @@ vi.mock('@/lib/integrations/audible.service', () => ({
   getAudibleService: () => audibleServiceMock,
 }));
 
+
+// Prowlarr connection used by the download-URL guard and key stripping
+vi.mock('@/lib/integrations/prowlarr-connection', () => ({
+  getProwlarrConnection: async () => ({
+    baseUrl: 'http://prowlarr:9696',
+    apiKey: 'test-prowlarr-key',
+    base: { origin: 'http://prowlarr:9696', protocol: 'http:', hostname: 'prowlarr', host: 'prowlarr:9696', port: '9696', defaultPort: false, userinfo: '', basePath: '' },
+  }),
+}));
+
+
+// Interactive search permission is covered by tests/api/interactive-search-access.test.ts
+vi.mock('@/lib/middleware/interactive-search-access', () => ({
+  denyWithoutInteractiveSearchAccess: async () => null,
+}));
+
 describe('Notification Triggers - Integration Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -260,7 +276,7 @@ describe('Notification Triggers - Integration Tests', () => {
       };
       requireAuthMock.mockImplementation((_req: any, handler: any) => handler(adminRequest));
 
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-1',
         userId: 'user-1',
         audiobookId: 'audiobook-1',
@@ -319,7 +335,7 @@ describe('Notification Triggers - Integration Tests', () => {
     it('blocks interactive search when request awaiting approval', async () => {
       authRequest.json.mockResolvedValue({});
 
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-1',
         userId: 'user-1',
         audiobookId: 'audiobook-1',
@@ -350,7 +366,7 @@ describe('Notification Triggers - Integration Tests', () => {
         },
       });
 
-      prismaMock.request.findUnique.mockResolvedValue({
+      prismaMock.request.findFirst.mockResolvedValue({
         id: 'req-1',
         userId: 'user-1',
         audiobookId: 'audiobook-1',

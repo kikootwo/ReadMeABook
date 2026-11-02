@@ -158,7 +158,8 @@ export async function enrichAudiobookWithMatch(audiobook: AudiobookMatchInput & 
  * Processes in parallel for better performance.
  *
  * @param audiobooks - Audiobooks to enrich
- * @param userId - Optional user ID to check request status
+ * @param userId - Checked caller's id (`requireAuth` / `getOptionalAuthUser`). Request details
+ *   (status, ids, requester name) are added only when it is set; without it every book reports none.
  */
 export async function enrichAudiobooksWithMatches(
   audiobooks: Array<AudiobookMatchInput & Record<string, any>>,
@@ -234,11 +235,10 @@ export async function enrichAudiobooksWithMatches(
     });
   }
 
-  // Always enrich with request status (check ANY user's requests)
   const asins = audiobooks.map(book => book.asin);
 
-  // Get all audiobook records for these ASINs with ALL audiobook requests (not ebook requests)
-  const audiobookRecords = await prisma.audiobook.findMany({
+  // For a checked caller, add each book's latest active audiobook request (from ANY user)
+  const audiobookRecords = !userId ? [] : await prisma.audiobook.findMany({
     where: {
       audibleAsin: { in: asins },
     },

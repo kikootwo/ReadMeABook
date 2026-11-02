@@ -1,0 +1,450 @@
+/**
+ * Component: Audible Series Page Parser Tests
+ * Documentation: documentation/integrations/audible.md
+ *
+ * Audible A/B-serves two series-page layouts. Fixtures below mirror the real
+ * markup of each. The parity tests are the point: both layouts must yield the
+ * same books, cover, rating and description.
+ */
+
+import * as cheerio from 'cheerio';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  parseSeriesBooks,
+  parseSeriesDescription,
+  parseSeriesPageSummary,
+  parseSimilarSeries,
+} from '@/lib/integrations/audible-series-parsers';
+import { getLanguageForRegion } from '@/lib/constants/language-config';
+
+const LANG = getLanguageForRegion('us');
+
+const parseBooks = ($: cheerio.CheerioAPI) =>
+  parseSeriesBooks($, LANG.scraping.authorPrefixes, LANG.scraping.narratorPrefixes, LANG);
+
+// ---------------------------------------------------------------------------
+// Fixture data — one single-narrator and one multi-narrator title
+// ---------------------------------------------------------------------------
+
+interface FixtureBook {
+  asin: string;
+  title: string;
+  narrators: string[];
+  duration: string;
+  minutes: number;
+  rating: number;
+  releaseDate: string;
+}
+
+const AUTHOR = 'J.T. Wright';
+const AUTHOR_ASIN = 'B085Q425VB';
+const DESCRIPTION = 'The Infinite World: ever-changing and ever growing.';
+const TAGS = ['Epic Fantasy', 'Feel-Good'];
+const COVER_SRC = 'https://m.media-amazon.com/images/I/51mVFLRVLTL._SL175_.jpg';
+const COVER_EXPECTED = 'https://m.media-amazon.com/images/I/51mVFLRVLTL._SL500_.jpg';
+
+const BOOKS: FixtureBook[] = [
+  {
+    asin: '177424599X',
+    title: 'The Land of the Undying Lord',
+    narrators: ['Tim Campbell'],
+    duration: '16 hrs and 17 mins',
+    minutes: 977,
+    rating: 4.8,
+    releaseDate: '2020-10-20',
+  },
+  {
+    asin: 'B09VW5NBLS',
+    title: 'Brambles and Thorns',
+    narrators: ['Tim Campbell', 'Andrea Parsneau'],
+    duration: '19 hrs and 31 mins',
+    minutes: 1171,
+    rating: 4.7,
+    releaseDate: '2022-04-12',
+  },
+];
+
+/** "Listeners also enjoyed" carousel — present in BOTH layouts. */
+function similarSeriesCarousel(): string {
+  return `
+    <adbl-product-carousel id="SeriestoSeries">
+      <adbl-product-grid-item>
+        <div class="adbl-impression-emitted" data-asin="B0CGS1LPWJ"></div>
+        <adbl-collection-image><img src="https://m.media-amazon.com/images/I/other._SL175_.jpg" /></adbl-collection-image>
+        <adbl-metadata slot="title"><a href="/series/Hockey-Guys/B0CGS1LPWJ">Hockey Guys</a></adbl-metadata>
+        <adbl-metadata slot="child-count">3 titles</adbl-metadata>
+      </adbl-product-grid-item>
+    </adbl-product-carousel>`;
+}
+
+// ---------------------------------------------------------------------------
+// Modern layout fixture (<adbl-product-row> + embedded JSON)
+// ---------------------------------------------------------------------------
+
+function modernRow(book: FixtureBook, index: number, metadataJson?: string): string {
+  const json = metadataJson ?? JSON.stringify({
+    authors: [{ name: AUTHOR, url: `/author/JT-Wright/${AUTHOR_ASIN}` }],
+    narrators: book.narrators.map(n => ({ name: n, url: `/search?searchNarrator=${encodeURIComponent(n)}` })),
+    duration: book.duration,
+    language: 'English',
+    releaseDate: book.releaseDate,
+    rating: { value: book.rating, count: 4831 },
+  });
+
+  return `
+    <adbl-style-scope>
+      <adbl-product-row variant="catalog" series-header="Book ${index + 1}" placement="base">
+        <a href="/pd/slug-audiobook/${book.asin}" slot="image">
+          <adbl-product-image><img src="${COVER_SRC}" alt="${book.title}" loading="lazy" /></adbl-product-image>
+        </a>
+        <h3 slot="title"><a href="/pd/slug-audiobook/${book.asin}">${book.title}</a></h3>
+        <h4 slot="subtitle">The Infinite World, Book ${index + 1}</h4>
+        <adbl-sample-button slot="sample-button" data-asin="${book.asin}"></adbl-sample-button>
+        <script type="application/json">${json}</script>
+      </adbl-product-row>
+    </adbl-style-scope>`;
+}
+
+function makeModernPage(rows: string = BOOKS.map((b, i) => modernRow(b, i)).join('')): string {
+  return `<html><body>
+    <adbl-metadata-group size="xl">
+      <adbl-metadata slot="title"><h1>The Infinite World</h1></adbl-metadata>
+      <span slot="child"> ${BOOKS.length} books in series </span>
+      <adbl-star-rating slot="rating" value="5" count="13156" aria-label="13,156 ratings">
+        <noscript>13,156 ratings</noscript>
+      </adbl-star-rating>
+    </adbl-metadata-group>
+    <div id="series-about">
+      <adbl-text-block lines="2">
+        <h3 slot="title">The Land of the Undying Lord Publisher's summary</h3>
+        <p>${DESCRIPTION}</p>
+      </adbl-text-block>
+      <adbl-chip-group>
+        ${TAGS.map(t => `<adbl-chip href="/tag/theme/x" class="adbl_rec_tag related-tag">${t}</adbl-chip>`).join('')}
+      </adbl-chip-group>
+    </div>
+    <div id="series-titles">${rows}</div>
+    ${similarSeriesCarousel()}
+  </body></html>`;
+}
+
+// ---------------------------------------------------------------------------
+// Legacy layout fixture (<li class="productListItem">)
+// ---------------------------------------------------------------------------
+
+function legacyItem(book: FixtureBook): string {
+  const narratorLinks = book.narrators
+    .map(n => `<a href="/search?searchNarrator=${encodeURIComponent(n)}">${n}</a>`)
+    .join(', ');
+
+  return `
+    <li class="bc-list-item productListItem" data-asin="${book.asin}">
+      <div class="bc-container">
+        <img src="${COVER_SRC}" />
+        <h3 class="bc-heading"><a href="/pd/slug-audiobook/${book.asin}">${book.title}</a></h3>
+        <ul class="bc-list">
+          <li class="bc-list-item authorLabel"><a href="/author/JT-Wright/${AUTHOR_ASIN}">${AUTHOR}</a></li>
+          <li class="bc-list-item narratorLabel">Narrated by: ${narratorLinks}</li>
+          <li class="bc-list-item runtimeLabel">Length: ${book.duration}</li>
+        </ul>
+        <span class="ratingsLabel">${book.rating} out of 5</span>
+      </div>
+    </li>`;
+}
+
+function makeLegacyPage(items: string = BOOKS.map(legacyItem).join('')): string {
+  return `<html><body>
+    <h1>The Infinite World</h1>
+    <span class="bc-text">${BOOKS.length} books</span>
+    <div class="bc-review-stars" aria-label="5 out of 5 stars"></div>
+    <span class="series-rating bc-color-secondary">13,156 ratings</span>
+    <div class="bc-expander-content">${DESCRIPTION}</div>
+    ${TAGS.map(t => `<adbl-chip href="/tag/theme/x" class="adbl_rec_tag related-tag">${t}</adbl-chip>`).join('')}
+    <ul class="bc-list">${items}</ul>
+    ${similarSeriesCarousel()}
+  </body></html>`;
+}
+
+const modern$ = () => cheerio.load(makeModernPage());
+const legacy$ = () => cheerio.load(makeLegacyPage());
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('parseSeriesBooks', () => {
+  it('parses books from the modern adbl-product-row layout', () => {
+    const books = parseBooks(modern$());
+
+    expect(books).toHaveLength(2);
+    expect(books[0]).toMatchObject({
+      asin: '177424599X',
+      title: 'The Land of the Undying Lord',
+      author: AUTHOR,
+      authorAsin: AUTHOR_ASIN,
+      narrator: 'Tim Campbell',
+      coverArtUrl: COVER_EXPECTED,
+      rating: 4.8,
+      durationMinutes: 977,
+      releaseDate: '2020-10-20',
+      language: 'English',
+    });
+  });
+
+  it('parses books from the legacy productListItem layout', () => {
+    const books = parseBooks(legacy$());
+
+    expect(books).toHaveLength(2);
+    expect(books[0]).toMatchObject({
+      asin: '177424599X',
+      title: 'The Land of the Undying Lord',
+      author: AUTHOR,
+      authorAsin: AUTHOR_ASIN,
+      narrator: 'Tim Campbell',
+      coverArtUrl: COVER_EXPECTED,
+      rating: 4.8,
+      durationMinutes: 977,
+    });
+  });
+
+  it('yields identical core book data for both layouts', () => {
+    const core = (b: Record<string, unknown>) => ({
+      asin: b.asin,
+      title: b.title,
+      author: b.author,
+      authorAsin: b.authorAsin,
+      narrator: b.narrator,
+      coverArtUrl: b.coverArtUrl,
+      rating: b.rating,
+      durationMinutes: b.durationMinutes,
+    });
+
+    expect(parseBooks(modern$()).map(core)).toEqual(parseBooks(legacy$()).map(core));
+  });
+
+  it('captures every narrator of a multi-narrator production in both layouts', () => {
+    expect(parseBooks(modern$())[1].narrator).toBe('Tim Campbell, Andrea Parsneau');
+    expect(parseBooks(legacy$())[1].narrator).toBe('Tim Campbell, Andrea Parsneau');
+  });
+
+  it('still returns title, asin and cover when a row JSON blob is malformed', () => {
+    const $ = cheerio.load(makeModernPage(modernRow(BOOKS[0], 0, '{not valid json')));
+    const books = parseBooks($);
+
+    expect(books).toHaveLength(1);
+    expect(books[0]).toMatchObject({
+      asin: '177424599X',
+      title: 'The Land of the Undying Lord',
+      coverArtUrl: COVER_EXPECTED,
+    });
+    expect(books[0].durationMinutes).toBeUndefined();
+    expect(books[0].narrator).toBeUndefined();
+  });
+
+  it('ignores product rows inside a similar-series carousel', () => {
+    const $ = cheerio.load(`<html><body>
+      <adbl-product-carousel id="SeriestoSeries">${modernRow(BOOKS[0], 0)}</adbl-product-carousel>
+    </body></html>`);
+
+    expect(parseBooks($)).toEqual([]);
+  });
+
+  it('returns an empty array when the page has no book rows', () => {
+    expect(parseBooks(cheerio.load('<html><body><h1>The Infinite World</h1></body></html>'))).toEqual([]);
+  });
+});
+
+describe('parseSeriesPageSummary', () => {
+  it('parses header fields from the modern layout', () => {
+    expect(parseSeriesPageSummary(modern$(), 'B08L6182J8')).toEqual({
+      asin: 'B08L6182J8',
+      title: 'The Infinite World',
+      bookCount: 2,
+      rating: 5,
+      ratingCount: 13156,
+      tags: TAGS,
+      coverArtUrl: COVER_EXPECTED,
+    });
+  });
+
+  it('parses header fields from the legacy layout', () => {
+    expect(parseSeriesPageSummary(legacy$(), 'B08L6182J8')).toEqual({
+      asin: 'B08L6182J8',
+      title: 'The Infinite World',
+      bookCount: 2,
+      rating: 5,
+      ratingCount: 13156,
+      tags: TAGS,
+      coverArtUrl: COVER_EXPECTED,
+    });
+  });
+
+  it('never takes the book count from the similar-series carousel', () => {
+    // The carousel advertises "3 titles" for a different series.
+    expect(parseSeriesPageSummary(modern$(), 'B08L6182J8').bookCount).toBe(2);
+    expect(parseSeriesPageSummary(legacy$(), 'B08L6182J8').bookCount).toBe(2);
+  });
+
+  it('falls back to counting rendered rows when no header count exists', () => {
+    const $ = cheerio.load(`<html><body>
+      <h1>The Infinite World</h1>
+      <div id="series-titles">${BOOKS.map((b, i) => modernRow(b, i)).join('')}</div>
+    </body></html>`);
+
+    expect(parseSeriesPageSummary($, 'B08L6182J8').bookCount).toBe(2);
+  });
+});
+
+describe('parseSeriesDescription', () => {
+  it('reads the description from the modern adbl-text-block', () => {
+    expect(parseSeriesDescription(modern$())).toBe(DESCRIPTION);
+  });
+
+  it('reads the description from the legacy expander content', () => {
+    expect(parseSeriesDescription(legacy$())).toBe(DESCRIPTION);
+  });
+
+  it('returns undefined when no description is present', () => {
+    expect(parseSeriesDescription(cheerio.load('<html><body><h1>x</h1></body></html>'))).toBeUndefined();
+  });
+});
+
+describe('parseSimilarSeries', () => {
+  it('parses the SeriestoSeries carousel in both layouts', () => {
+    const expected = [{
+      asin: 'B0CGS1LPWJ',
+      title: 'Hockey Guys',
+      bookCount: 3,
+      coverArtUrl: 'https://m.media-amazon.com/images/I/other._SL500_.jpg',
+    }];
+
+    expect(parseSimilarSeries(modern$())).toEqual(expected);
+    expect(parseSimilarSeries(legacy$())).toEqual(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Italian (audible.it) fixtures: offline copies of the labels seen on
+// audible.it ("Serie:", "Di:", "Letto da:", "Durata: 5 ore e 54 min",
+// "15 Titoli in serie", "Vol. 1"). No network access.
+// ---------------------------------------------------------------------------
+
+const IT = getLanguageForRegion('it');
+const IT_SERIES_ASIN = 'B0DXFPLXR8';
+const IT_BOOK = { asin: 'B0IT000101', title: 'Il profumo della morte' };
+
+const fakeAudible = vi.hoisted(() => ({
+  getRegion: vi.fn(() => 'it'),
+  getBaseUrl: vi.fn(() => 'https://www.audible.it'),
+  fetch: vi.fn(),
+}));
+
+vi.mock('@/lib/integrations/audible.service', () => ({
+  getAudibleService: () => fakeAudible,
+}));
+
+function italianModernPage(): string {
+  const json = JSON.stringify({
+    authors: [{ name: 'Ibon Mart\u00edn', url: '/author/Ibon-Martin/B07D5ZJ1QK' }],
+    narrators: [{ name: 'Alessandro Parise' }],
+    duration: '5 ore e 54 min',
+    language: 'Italiano',
+    releaseDate: '2025-02-11',
+  });
+  return `<html><body>
+    <adbl-metadata-group size="xl">
+      <adbl-metadata slot="title"><h1>Un'indagine dell'ispettore \u00c1lex Cort\u00e9s</h1></adbl-metadata>
+      <span slot="child"> 15 Titoli in serie </span>
+    </adbl-metadata-group>
+    <div id="series-titles">
+      <adbl-product-row variant="catalog" series-header="Vol. 1" placement="base">
+        <a href="/pd/Il-profumo-della-morte-Audiolibri/${IT_BOOK.asin}" slot="image">
+          <adbl-product-image><img src="${COVER_SRC}" /></adbl-product-image>
+        </a>
+        <h3 slot="title"><a href="/pd/Il-profumo-della-morte-Audiolibri/${IT_BOOK.asin}">${IT_BOOK.title}</a></h3>
+        <script type="application/json">${json}</script>
+      </adbl-product-row>
+    </div>
+  </body></html>`;
+}
+
+function italianLegacyPage(): string {
+  return `<html><body>
+    <h1>Un'indagine dell'ispettore \u00c1lex Cort\u00e9s</h1>
+    <ul class="bc-list">
+      <li class="bc-list-item productListItem" data-asin="${IT_BOOK.asin}">
+        <img src="${COVER_SRC}" />
+        <h3 class="bc-heading"><a href="/pd/Il-profumo-della-morte-Audiolibri/${IT_BOOK.asin}">${IT_BOOK.title}</a></h3>
+        <ul class="bc-list">
+          <li class="bc-list-item authorLabel">Di: <a href="/author/Ibon-Martin/B07D5ZJ1QK">Ibon Mart\u00edn</a></li>
+          <li class="bc-list-item narratorLabel">Letto da: Alessandro Parise</li>
+          <li class="bc-list-item runtimeLabel">Durata: 5 ore e 54 min</li>
+        </ul>
+      </li>
+    </ul>
+  </body></html>`;
+}
+
+describe('Italian (audible.it) series pages', () => {
+  const expectedBook = {
+    asin: IT_BOOK.asin,
+    title: IT_BOOK.title,
+    author: 'Ibon Mart\u00edn',
+    authorAsin: 'B07D5ZJ1QK',
+    narrator: 'Alessandro Parise',
+    durationMinutes: 354,
+  };
+
+  it('parses the modern layout with an Italian duration', () => {
+    const books = parseSeriesBooks(cheerio.load(italianModernPage()), IT.scraping.authorPrefixes, IT.scraping.narratorPrefixes, IT);
+    expect(books).toHaveLength(1);
+    expect(books[0]).toMatchObject({ ...expectedBook, language: 'Italiano' });
+  });
+
+  it('parses the legacy layout, stripping "Letto da:" and reading "Durata:"', () => {
+    const books = parseSeriesBooks(cheerio.load(italianLegacyPage()), IT.scraping.authorPrefixes, IT.scraping.narratorPrefixes, IT);
+    expect(books).toHaveLength(1);
+    expect(books[0]).toMatchObject(expectedBook);
+  });
+
+  it('reads the book count from "15 Titoli in serie"', () => {
+    expect(parseSeriesPageSummary(cheerio.load(italianModernPage()), IT_SERIES_ASIN).bookCount).toBe(15);
+  });
+
+  it('scrapeSeriesPage parses Italian books through the region language config', async () => {
+    fakeAudible.fetch.mockResolvedValue({ data: { data: italianModernPage() } });
+    const { scrapeSeriesPage } = await import('@/lib/integrations/audible-series');
+
+    const detail = await scrapeSeriesPage(IT_SERIES_ASIN);
+
+    expect(detail?.books[0]).toMatchObject(expectedBook);
+    expect(detail?.audibleUrl).toBe(`https://www.audible.it/series/${IT_SERIES_ASIN}`);
+  });
+
+  it('searchForSeries finds an audible.it series through the catalog API', async () => {
+    const children = Array.from({ length: 15 }, (_, i) => ({
+      asin: `B0IT0001${String(i).padStart(2, '0')}`,
+      relationship_to_product: 'child',
+      relationship_type: 'series',
+    }));
+    const book = {
+      asin: IT_BOOK.asin,
+      title: IT_BOOK.title,
+      language: 'italian',
+      series: [{ asin: IT_SERIES_ASIN, title: "Un'indagine dell'ispettore \u00c1lex Cort\u00e9s", sequence: '1' }],
+    };
+    fakeAudible.fetch.mockImplementation(async (_path: string, config: { params: Record<string, unknown> }) => ({
+      data: { data: { products: config.params.asins ? [{ asin: IT_SERIES_ASIN, relationships: children }] : [book] } },
+    }));
+    const { searchForSeries } = await import('@/lib/integrations/audible-series');
+
+    const results = await searchForSeries('profumo della morte');
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      asin: IT_SERIES_ASIN,
+      bookCount: 15,
+      audibleUrl: `https://www.audible.it/series/${IT_SERIES_ASIN}`,
+    });
+  });
+});

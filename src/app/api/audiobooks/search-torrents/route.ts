@@ -13,14 +13,20 @@ import { groupIndexersByCategories, getGroupDescription } from '@/lib/utils/inde
 import { getLanguageForRegion } from '@/lib/constants/language-config';
 import type { AudibleRegion } from '@/lib/types/audible';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
+import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
+import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.AudiobookSearch');
+const MAX_RANKED_RESULTS = 100;
 
 const SearchSchema = z.object({
   title: z.string(),
   author: z.string(),
   asin: z.string().optional(), // Optional ASIN for runtime-based size scoring
+  exactTitle: z.boolean().optional(), // the user edited the title: sent as given, no fallback queries (#316)
 });
 
 /**
@@ -37,8 +43,13 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const body = await req.json();
-      const { title, author, asin } = SearchSchema.parse(body);
+      const accessDenied = await denyWithoutInteractiveSearchAccess(req.user.id);
+      if (accessDenied) return accessDenied;
+
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
+      const { title, author, asin, exactTitle } = SearchSchema.parse(body);
 
       // Get enabled indexers from configuration
       const { getConfigService } = await import('@/lib/services/config.service');
@@ -98,8 +109,7 @@ export async function POST(request: NextRequest) {
           const groupResults = await prowlarr.searchWithVariations(title, author, {
             categories: group.categories,
             indexerIds: group.indexerIds,
-            maxResults: 100, // Limit per group
-          });
+          }, { exactTitle: exactTitle === true });
 
           logger.debug(`Group ${i + 1} returned ${groupResults.length} results`);
           allResults.push(...groupResults);
@@ -116,6 +126,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           success: true,
           results: [],
+          truncated: false,
+          rawCount: 0,
           message: 'No torrents/nzbs found',
         });
       }
@@ -167,6 +179,14 @@ export async function POST(request: NextRequest) {
       // User can see scores and make their own decision
       logger.debug(`Ranked ${rankedResults.length} results (no threshold filter - user decides)`);
 
+      const truncated = rankedResults.length > MAX_RANKED_RESULTS;
+      const limitedRankedResults = rankedResults.slice(0, MAX_RANKED_RESULTS);
+      if (truncated) {
+        logger.info(`Audiobook search truncated after ranking: returning top ${MAX_RANKED_RESULTS} of ${rankedResults.length} ranked results`, {
+          rawCount: results.length,
+        });
+      }
+
       // Log top 3 results with detailed score breakdown for debugging
       const top3 = rankedResults.slice(0, 3);
       if (top3.length > 0) {
@@ -198,26 +218,28 @@ export async function POST(request: NextRequest) {
       }
 
       // Add rank position to each result
-      const resultsWithRank = rankedResults.map((result, index) => ({
+      const resultsWithRank = limitedRankedResults.map((result, index) => ({
         ...result,
         rank: index + 1,
       }));
 
       return NextResponse.json({
         success: true,
-        results: resultsWithRank,
-        message: rankedResults.length > 0
-          ? `Found ${rankedResults.length} results`
+        results: await stripProwlarrKeyFromResults(resultsWithRank),
+        truncated,
+        rawCount: results.length,
+        message: limitedRankedResults.length > 0
+          ? `Found ${limitedRankedResults.length} results`
           : 'No results found',
       });
     } catch (error) {
-      logger.error('Failed to search for torrents', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to search for torrents', { error: errorForLog(error) });
 
       if (error instanceof z.ZodError) {
         return NextResponse.json(
           {
             error: 'ValidationError',
-            details: error.errors,
+            details: zodIssueDetails(error),
           },
           { status: 400 }
         );

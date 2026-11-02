@@ -9,6 +9,8 @@ import { prisma } from '../db';
 import { TorrentResult } from '../utils/ranking-algorithm';
 import { DownloadClientType } from '../interfaces/download-client.interface';
 import { RMABLogger } from '../utils/logger';
+import { oncePerProcess, peekProcessSingleton, processSingleton } from '../utils/process-singleton';
+import { markRequestFailedUnlessStopped } from '../utils/request-stop-guard';
 import type { NotificationEvent } from '@/lib/constants/notification-events';
 
 const logger = RMABLogger.create('JobQueue');
@@ -59,6 +61,8 @@ export interface DownloadTorrentPayload extends JobPayload {
     author: string;
   };
   torrent: TorrentResult;
+  /** Ranked candidates after `torrent`, used when an upstream grab is rate-limited/unavailable. */
+  alternateTorrents?: TorrentResult[];
 }
 
 export interface MonitorDownloadPayload extends JobPayload {
@@ -79,6 +83,7 @@ export interface OrganizeFilesPayload extends JobPayload {
   targetPath?: string; // Optional - not used by processor (reads from database config)
   cleanupSource?: boolean; // If true, delete source files after successful import
   selectedFiles?: string[]; // If set, only import these specific files from downloadPath
+  downloadHistoryId?: string; // Set only for downloads RMAB completed; gates download cleanup (absent for manual/bulk import)
 }
 
 export interface ScanPlexPayload extends JobPayload {
@@ -199,6 +204,8 @@ export interface QueueStats {
 export class JobQueueService {
   private queue: Queue.Queue;
   private redis: Redis;
+  /** Schedule ids already warned about a missing scheduled_jobs row (one warning per id) */
+  private missingScheduleWarned = new Set<string>();
 
   constructor() {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
@@ -260,19 +267,18 @@ export class JobQueueService {
         const payload = job.data as MonitorDownloadPayload;
         logger.error(`MonitorDownload job permanently failed for request ${payload.requestId} after ${job.attemptsMade} attempts`);
 
-        // Update request status to failed (only happens after all retries exhausted)
+        // Update request status to failed (only happens after all retries exhausted).
+        // A cancelled or deleted request is left as it is.
         try {
-          await prisma.request.update({
-            where: { id: payload.requestId },
-            data: {
-              status: 'failed',
-              errorMessage: error.message || 'Failed to monitor download after multiple retries',
-              updatedAt: new Date(),
-            },
-          });
+          const marked = await markRequestFailedUnlessStopped(
+            payload.requestId,
+            error.message || 'Failed to monitor download after multiple retries'
+          );
 
-          // Update download history
-          if (payload.downloadHistoryId) {
+          if (!marked) {
+            logger.info(`Request ${payload.requestId} is cancelled or deleted, leaving it unchanged after monitor failure`);
+          } else if (payload.downloadHistoryId) {
+            // Update download history
             await prisma.downloadHistory.update({
               where: { id: payload.downloadHistoryId },
               data: {
@@ -294,14 +300,13 @@ export class JobQueueService {
         logger.error(`DownloadTorrent job permanently failed for request ${payload.requestId} after ${job.attemptsMade} attempts`);
 
         try {
-          await prisma.request.update({
-            where: { id: payload.requestId },
-            data: {
-              status: 'failed',
-              errorMessage: error.message || 'Failed to add download after multiple retries',
-              updatedAt: new Date(),
-            },
-          });
+          const marked = await markRequestFailedUnlessStopped(
+            payload.requestId,
+            error.message || 'Failed to add download after multiple retries'
+          );
+          if (!marked) {
+            logger.info(`Request ${payload.requestId} is cancelled or deleted, leaving it unchanged after download_torrent failure`);
+          }
         } catch (updateError) {
           logger.error('Failed to update request status after download_torrent failure', {
             error: updateError instanceof Error ? updateError.message : String(updateError),
@@ -337,7 +342,7 @@ export class JobQueueService {
     // Download torrent processor
     this.queue.process('download_torrent', 2, async (job: BullJob<DownloadTorrentPayload>) => {
       const { processDownloadTorrent } = await import('../processors/download-torrent.processor');
-      return await processDownloadTorrent(job.data);
+      return await processDownloadTorrent(job.data, { attemptsMade: job.attemptsMade });
     });
 
     // Monitor download processor
@@ -471,12 +476,7 @@ export class JobQueueService {
     if (existingJob) {
       // Update lastRun for the scheduled job if this is a timer-triggered job
       if (payload.scheduledJobId) {
-        await prisma.scheduledJob.update({
-          where: { id: payload.scheduledJobId },
-          data: { lastRun: new Date() },
-        }).catch(err => {
-          logger.error(`Failed to update lastRun for scheduled job ${payload.scheduledJobId}`, { error: err instanceof Error ? err.message : String(err) });
-        });
+        await this.recordScheduledRun(payload.scheduledJobId);
       }
       return { ...payload, jobId: existingJob.id };
     }
@@ -496,15 +496,33 @@ export class JobQueueService {
 
     // Update lastRun for the scheduled job if this is a timer-triggered job
     if (payload.scheduledJobId) {
-      await prisma.scheduledJob.update({
-        where: { id: payload.scheduledJobId },
-        data: { lastRun: new Date() },
-      }).catch(err => {
-        logger.error(`Failed to update lastRun for scheduled job ${payload.scheduledJobId}`, { error: err instanceof Error ? err.message : String(err) });
-      });
+      await this.recordScheduledRun(payload.scheduledJobId);
     }
 
     return { ...payload, jobId: dbJob.id };
+  }
+
+  /**
+   * Set lastRun on a timer-triggered job's schedule row. A row that no longer exists
+   * (repeatable job left in Redis after its row was deleted, #222) warns once per id;
+   * the scheduler removes such repeatable jobs at its next start.
+   */
+  private async recordScheduledRun(scheduledJobId: string): Promise<void> {
+    try {
+      await prisma.scheduledJob.update({
+        where: { id: scheduledJobId },
+        data: { lastRun: new Date() },
+      });
+    } catch (err) {
+      if (typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'P2025') {
+        if (!this.missingScheduleWarned.has(scheduledJobId)) {
+          this.missingScheduleWarned.add(scheduledJobId);
+          logger.warn(`Scheduled job ${scheduledJobId} no longer exists; its repeatable job will be removed at the next restart`);
+        }
+        return;
+      }
+      logger.error(`Failed to update lastRun for scheduled job ${scheduledJobId}`, { error: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   /**
@@ -610,7 +628,8 @@ export class JobQueueService {
   async addDownloadJob(
     requestId: string,
     audiobook: { id: string; title: string; author: string },
-    torrent: TorrentResult
+    torrent: TorrentResult,
+    alternateTorrents: TorrentResult[] = []
   ): Promise<string> {
     return await this.addJob(
       'download_torrent',
@@ -618,6 +637,7 @@ export class JobQueueService {
         requestId,
         audiobook,
         torrent,
+        alternateTorrents,
       } as DownloadTorrentPayload,
       {
         priority: 9, // High priority - download selected torrent
@@ -668,7 +688,8 @@ export class JobQueueService {
     downloadPath: string,
     targetPath?: string,
     cleanupSource?: boolean,
-    selectedFiles?: string[]
+    selectedFiles?: string[],
+    downloadHistoryId?: string
   ): Promise<string> {
     return await this.addJob(
       'organize_files',
@@ -679,6 +700,7 @@ export class JobQueueService {
         targetPath, // Not used by processor
         cleanupSource,
         selectedFiles,
+        downloadHistoryId,
       } as OrganizeFilesPayload,
       {
         priority: 8,
@@ -1167,25 +1189,33 @@ export class JobQueueService {
   /**
    * Get all repeatable jobs
    */
-  async getRepeatableJobs(): Promise<any[]> {
+  async getRepeatableJobs(): Promise<Queue.JobInformation[]> {
     return await this.queue.getRepeatableJobs();
+  }
+
+  /**
+   * Remove a repeatable job by its Bull key (from getRepeatableJobs)
+   */
+  async removeRepeatableJobByKey(key: string): Promise<void> {
+    await this.queue.removeRepeatableByKey(key);
   }
 }
 
-// Singleton instance
-let jobQueueService: JobQueueService | null = null;
+// Process-wide singleton: the constructor starts every processor, so it must
+// exist once per process even if this module is evaluated more than once.
+const JOB_QUEUE_SINGLETON = 'job-queue-service';
 
 export function getJobQueueService(): JobQueueService {
-  if (!jobQueueService) {
-    jobQueueService = new JobQueueService();
-  }
-  return jobQueueService;
+  return processSingleton(JOB_QUEUE_SINGLETON, () => new JobQueueService());
 }
 
 // Graceful shutdown
-process.on('SIGTERM', async () => {
-  if (jobQueueService) {
-    logger.info('Closing job queue...');
-    await jobQueueService.close();
-  }
+oncePerProcess('job-queue-sigterm', () => {
+  process.on('SIGTERM', async () => {
+    const jobQueueService = peekProcessSingleton<JobQueueService>(JOB_QUEUE_SINGLETON);
+    if (jobQueueService) {
+      logger.info('Closing job queue...');
+      await jobQueueService.close();
+    }
+  });
 });

@@ -45,6 +45,7 @@ Allows admins to review and approve/deny user requests before they are processed
 **Admin approval actions:**
 - **Approve:**
   - If request has `selectedTorrent` → Download that specific torrent (clear `selectedTorrent` field)
+  - Admin-provided and stored picks pass the same check as user picks (`guardTorrentSelection` / `guardEbookSelection`); Anna's Archive picks get links rebuilt from `md5`; an unusable admin-provided pick → 400 (request stays `awaiting_approval`); an unusable stored user pick, or an Anna's Archive pick with no links left, is cleared with a warning and approval falls back to the automatic search
   - If no `selectedTorrent` → Trigger automatic search job (status: 'pending')
   - Send approved notification
 - **Deny:** → Change status to 'denied', no further processing
@@ -63,6 +64,17 @@ Create request with pre-selected torrent (book detail page interactive search)
   "torrent": { /* selected torrent data */ }
 }
 ```
+
+**Existing requests (409, nothing created; checked in this order):**
+| Existing audiobook request | `error` | `message` |
+|---|---|---|
+| any user, `available` (or library match) | `AlreadyAvailable` | This audiobook is already in your library |
+| any user, `downloaded` / `downloading` / `processing` / `awaiting_import` | `BeingProcessed` | This audiobook is being processed and will be available soon |
+| any user, `awaiting_approval` | `AwaitingApproval` | A request for this audiobook is already awaiting admin approval |
+| own, any other status except failed/warn/cancelled | `DuplicateRequest` | You have already requested this audiobook |
+| another user, any other status except failed/warn/cancelled/denied | `AlreadyRequested` | This audiobook is already being requested by another user |
+- First-check replies carry `requestStatus`, `isOwnRequest`, `requestedBy`; an own failed/warn/cancelled request is replaced (#312)
+- To pick for an existing request use `select-torrent` / `select-ebook` (My Requests, search page and admin pass the request id, #281)
 
 **Approval Check:**
 - Checks approval requirements
@@ -121,6 +133,13 @@ Select torrent for existing request (request page interactive search)
   "message": "Torrent download initiated"
 }
 ```
+
+### POST /api/requests/[id]/select-ebook
+Apply an ebook pick to an ebook request, or to an available audiobook request's ebook (created if missing)
+
+**Auth:** Admin: any request. User: own ebook request only; interactive search access required. Another user's request, or a user's audiobook request → 403; unknown or deleted id (or deleted parent) → 404
+
+**Approval Check (non-admin):** `resolveAutoApprove()` (`src/lib/utils/permissions.ts`). If needed → ebook request `awaiting_approval`, pick stored in `selectedTorrent`, pending notification, `needsApproval: true`; else status `searching`, download starts, `request_approved` notification. Admins never need approval and get no notification.
 
 ### GET /api/admin/requests/pending-approval
 Fetch all requests with status 'awaiting_approval'
@@ -352,6 +371,11 @@ value: 'true' | 'false' (string)
   - Sends appropriate notifications (request_pending_approval or request_approved)
   - Only triggers search job if auto-approved
 - Files updated: `src/app/api/bookdate/swipe/route.ts:124-217`, `tests/api/bookdate.routes.test.ts:470-648`
+
+**2. Interactive Search from My Requests said "already requested" (#281, #291)**
+- Cause: `RequestCard` opened the details modal without the request id, so a pick went to `request-with-torrent` (create) and hit the duplicate check; ebook request routes were admin-only; `request-with-torrent` only recognised `downloaded`/`available` and never checked another user's open request
+- Fix: `RequestCard` passes `requestId`/`requestedByUserId`/`requestType`; `requests/[id]/interactive-search-ebook` + `select-ebook` allow the owner; `request-with-torrent` replies per status (table above) and refuses a second open request for the same book
+- Tests: `tests/api/request-with-torrent-existing-requests.routes.test.ts`, `tests/api/requests-pick-existing-request.routes.test.ts`
 
 ## Related
 - [Admin Dashboard](../admin-dashboard.md) - Dashboard UI features

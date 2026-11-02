@@ -7,8 +7,12 @@ import { getJobQueueService, ScanPlexPayload } from './job-queue.service';
 import { getNotificationService } from './notification';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
+import { processSingleton } from '../utils/process-singleton';
 
 const logger = RMABLogger.create('Scheduler');
+
+// Bull jobId of a schedule row's repeatable job is `${REPEAT_JOB_ID_PREFIX}${row.id}`
+const REPEAT_JOB_ID_PREFIX = 'scheduled-';
 
 // Legacy literal `name` values that older installs may still have in the DB.
 // Each entry maps an exact stale literal to its current neutral default,
@@ -71,6 +75,15 @@ export class SchedulerService {
       });
     }
 
+    // Then (serially) move credentials out of stored server URLs (Apprise userinfo)
+    try {
+      await getNotificationService().migrateStoredSecrets();
+    } catch (error) {
+      logger.error('Failed to migrate notification backend credentials (non-fatal)', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     // Clean up deprecated scheduled jobs
     await this.cleanupDeprecatedJobs();
 
@@ -82,6 +95,9 @@ export class SchedulerService {
 
     // Load and schedule all enabled jobs (works with whatever jobs exist in DB)
     await this.scheduleAllJobs();
+
+    // Remove repeatable jobs left in Redis for schedule rows that no longer exist
+    await this.removeOrphanedRepeatableJobs();
 
     // Check and trigger overdue jobs
     await this.triggerOverdueJobs();
@@ -263,6 +279,42 @@ export class SchedulerService {
   }
 
   /**
+   * Remove Bull repeatable jobs whose scheduled_jobs row is gone (#222), e.g. after a
+   * database reset that kept Redis. Such a job fires forever and fails its lastRun
+   * update. Only `scheduled-<id>` jobs are considered; those of existing rows (enabled
+   * or not) are never touched. Non-fatal.
+   */
+  private async removeOrphanedRepeatableJobs(): Promise<void> {
+    try {
+      const repeatables = await this.jobQueue.getRepeatableJobs();
+      const rows = await prisma.scheduledJob.findMany({ select: { id: true } });
+      const rowIds = new Set(rows.map((row) => row.id));
+      let removed = 0;
+
+      for (const repeatable of repeatables) {
+        const repeatId = repeatable.id ?? '';
+        if (!repeatId.startsWith(REPEAT_JOB_ID_PREFIX)) continue;
+        if (rowIds.has(repeatId.slice(REPEAT_JOB_ID_PREFIX.length))) continue;
+        try {
+          await this.jobQueue.removeRepeatableJobByKey(repeatable.key);
+          removed++;
+          logger.info(`Removed orphaned repeatable job ${repeatId} (${repeatable.name}, ${repeatable.cron}): its scheduled job no longer exists`);
+        } catch (error) {
+          logger.error(`Failed to remove orphaned repeatable job ${repeatId}`, {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      logger.info(`Repeatable job check: ${repeatables.length} found, ${removed} orphaned removed`);
+    } catch (error) {
+      logger.error('Failed to check for orphaned repeatable jobs (non-fatal)', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
    * Schedule a single job using Bull's repeatable jobs
    */
   private async scheduleJob(job: any): Promise<void> {
@@ -271,7 +323,7 @@ export class SchedulerService {
         job.type,
         { scheduledJobId: job.id },
         job.schedule,
-        `scheduled-${job.id}`
+        `${REPEAT_JOB_ID_PREFIX}${job.id}`
       );
       logger.info(`Job scheduled: ${job.name} (${job.schedule})`);
     } catch (error) {
@@ -288,7 +340,7 @@ export class SchedulerService {
       await this.jobQueue.removeRepeatableJob(
         job.type,
         job.schedule,
-        `scheduled-${job.id}`
+        `${REPEAT_JOB_ID_PREFIX}${job.id}`
       );
       logger.info(`Job unscheduled: ${job.name}`);
     } catch (error) {
@@ -730,11 +782,7 @@ export class SchedulerService {
 }
 
 // Singleton instance
-let schedulerService: SchedulerService | null = null;
-
 export function getSchedulerService(): SchedulerService {
-  if (!schedulerService) {
-    schedulerService = new SchedulerService();
-  }
-  return schedulerService;
+  // Process-wide singleton (shared even if this module is evaluated more than once)
+  return processSingleton('scheduler-service', () => new SchedulerService());
 }

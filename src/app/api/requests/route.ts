@@ -7,9 +7,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 import { createRequestForUser } from '@/lib/services/request-creator.service';
 import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Requests');
 
@@ -41,7 +43,9 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const body = await req.json();
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const { audiobook } = CreateRequestSchema.parse(body);
 
       const skipAutoSearch = req.nextUrl.searchParams.get('skipAutoSearch') === 'true';
@@ -75,13 +79,13 @@ export async function POST(request: NextRequest) {
         request: result.request,
       }, { status: 201 });
     } catch (error) {
-      logger.error('Failed to create request', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to create request', { error: errorForLog(error) });
 
       if (error instanceof z.ZodError) {
         return NextResponse.json(
           {
             error: 'ValidationError',
-            details: error.errors,
+            details: zodIssueDetails(error),
           },
           { status: 400 }
         );
@@ -186,7 +190,9 @@ export async function GET(request: NextRequest) {
         const isCompleted = COMPLETED_STATUSES.includes(r.status as typeof COMPLETED_STATUSES[number]);
         const downloadAvailable = isCompleted && !!r.audiobook?.filePath;
         const audiobook = r.audiobook ? { ...r.audiobook, filePath: undefined } : r.audiobook;
-        return { ...r, audiobook, downloadAvailable };
+        // Stored release picks are internal (they can carry source credentials); admins only
+        const selectedTorrent = isAdmin ? r.selectedTorrent : undefined;
+        return { ...r, selectedTorrent, audiobook, downloadAvailable };
       });
 
       // ── Accurate counts per group (always scoped to ownership/type filter) ──
@@ -224,7 +230,7 @@ export async function GET(request: NextRequest) {
         count: enriched.length,
       });
     } catch (error) {
-      logger.error('Failed to get requests', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to get requests', { error: errorForLog(error) });
       return NextResponse.json(
         { error: 'FetchError', message: 'Failed to fetch requests' },
         { status: 500 }

@@ -12,6 +12,8 @@ import type { BookDateModel } from '../../lib/types';
 export function useBookDateSettings() {
   const [provider, setProvider] = useState<string>('openai');
   const [apiKey, setApiKey] = useState<string>('');
+  // Custom provider only: save with no API key, clearing any saved one
+  const [clearApiKey, setClearApiKey] = useState<boolean>(false);
   const [model, setModel] = useState<string>('');
   const [baseUrl, setBaseUrl] = useState<string>('');
   const [enabled, setEnabled] = useState<boolean>(true);
@@ -143,6 +145,7 @@ export function useBookDateSettings() {
 
       if (provider === 'custom') {
         payload.baseUrl = baseUrl;
+        if (clearApiKey && !hasApiKey) payload.clearApiKey = true;
       }
 
       const response = await fetchWithAuth('/api/bookdate/config', {
@@ -160,6 +163,7 @@ export function useBookDateSettings() {
       onSuccess('BookDate configuration saved successfully!');
       setConfigured(true);
       setApiKey(''); // Clear API key from UI after save
+      setClearApiKey(false);
     } catch (error) {
       onError(error instanceof Error ? error.message : 'Failed to save configuration');
     } finally {
@@ -203,6 +207,7 @@ export function useBookDateSettings() {
     setProvider(newProvider);
     setModels([]);
     setBaseUrl('');
+    setClearApiKey(false);
   };
 
   useEffect(() => {
@@ -212,6 +217,7 @@ export function useBookDateSettings() {
   return {
     provider,
     apiKey,
+    clearApiKey,
     model,
     baseUrl,
     enabled,
@@ -222,6 +228,7 @@ export function useBookDateSettings() {
     clearingSwipes,
     setProvider: handleProviderChange,
     setApiKey,
+    setClearApiKey,
     setModel,
     setBaseUrl,
     setEnabled,

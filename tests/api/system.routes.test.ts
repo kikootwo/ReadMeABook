@@ -7,16 +7,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
 
 const prismaMock = createPrismaMock();
-const schedulerMock = vi.hoisted(() => ({
-  start: vi.fn(),
-}));
 
 vi.mock('@/lib/db', () => ({
   prisma: prismaMock,
-}));
-
-vi.mock('@/lib/services/scheduler.service', () => ({
-  getSchedulerService: () => schedulerMock,
 }));
 
 describe('System routes', () => {
@@ -44,16 +37,6 @@ describe('System routes', () => {
 
     expect(response.status).toBe(503);
     expect(payload.status).toBe('unhealthy');
-  });
-
-  it('initializes scheduler on init endpoint', async () => {
-    const { GET } = await import('@/app/api/init/route');
-
-    const response = await GET({} as any);
-    const payload = await response.json();
-
-    expect(payload.success).toBe(true);
-    expect(schedulerMock.start).toHaveBeenCalled();
   });
 
   it('returns version info from environment', async () => {

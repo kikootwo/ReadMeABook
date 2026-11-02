@@ -30,15 +30,36 @@ export async function processRetryMissingTorrents(payload: RetryMissingTorrentsP
     const configService = getConfigService();
     const skipUnreleasedSetting = (await configService.get('indexer.skip_unreleased')) !== 'false';
 
-    // Find all active requests in awaiting_search OR awaiting_release status
+    // Release dates are stored as date-only values. When the release gate is
+    // enabled, do not let still-future awaiting_release rows consume one of
+    // the limited retry slots; they become eligible automatically on release day.
+    const todayUtc = new Date();
+    todayUtc.setUTCHours(0, 0, 0, 0);
+
+    // Process never-searched requests first, then rotate through the least
+    // recently searched. Without an explicit order, PostgreSQL repeatedly
+    // returned the same physical first 50 rows and starved the rest forever.
     const requests = await prisma.request.findMany({
       where: {
-        status: { in: ['awaiting_search', 'awaiting_release'] },
         deletedAt: null,
+        ...(skipUnreleasedSetting
+          ? {
+              OR: [
+                { status: 'awaiting_search' },
+                { status: 'awaiting_release', releaseDate: null },
+                { status: 'awaiting_release', releaseDate: { lte: todayUtc } },
+              ],
+            }
+          : { status: { in: ['awaiting_search', 'awaiting_release'] } }),
       },
       include: {
         audiobook: true,
       },
+      orderBy: [
+        { lastSearchAt: { sort: 'asc', nulls: 'first' } },
+        { createdAt: 'asc' },
+        { id: 'asc' },
+      ],
       take: 50,
     });
 

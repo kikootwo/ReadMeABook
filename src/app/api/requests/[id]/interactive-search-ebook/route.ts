@@ -7,13 +7,15 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
+import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
+import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
 import { prisma } from '@/lib/db';
 import { getConfigService } from '@/lib/services/config.service';
 import { getProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { rankEbookTorrents, RankedEbookTorrent } from '@/lib/utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '@/lib/utils/indexer-grouping';
 import { RMABLogger } from '@/lib/utils/logger';
+import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { getLanguageForRegion } from '@/lib/constants/language-config';
 import type { AudibleRegion } from '@/lib/types/audible';
 import {
@@ -21,6 +23,7 @@ import {
   searchByTitle,
   getSlowDownloadLinks,
 } from '@/lib/services/ebook-scraper';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.InteractiveSearchEbook');
 
@@ -60,25 +63,53 @@ export interface EbookSearchResult {
   downloadUrls?: string[];
 }
 
+type SearchUser = NonNullable<AuthenticatedRequest['user']>;
+
+/** Runs the handler for a signed-in user with interactive search access (owner check is per request). */
+async function withSearchAccess(
+  req: AuthenticatedRequest,
+  handler: (user: SearchUser) => Promise<NextResponse>
+): Promise<NextResponse> {
+  if (!req.user) {
+    return NextResponse.json({ error: 'Unauthorized', message: 'User not authenticated' }, { status: 401 });
+  }
+  const accessDenied = await denyWithoutInteractiveSearchAccess(req.user.id);
+  if (accessDenied) return accessDenied;
+  return handler(req.user);
+}
+
+/**
+ * POST /api/requests/[id]/interactive-search-ebook
+ * Owner or admin. Searches ebook sources for an ebook request, or for an available audiobook request's ebook.
+ */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
-    return requireAdmin(req, async () => {
+    return withSearchAccess(req, async (user) => {
       try {
         const { id: parentRequestId } = await params;
-        const body = await request.json().catch(() => ({}));
+        const bodyResult = await readJsonBody(request, { fallback: {} });
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         const customTitle = body.customTitle as string | undefined;
 
-        // Get the request (can be audiobook parent or direct ebook request)
-        const requestRecord = await prisma.request.findUnique({
-          where: { id: parentRequestId },
+        // Get the request (can be audiobook parent or direct ebook request); a deleted one is 404
+        const requestRecord = await prisma.request.findFirst({
+          where: { id: parentRequestId, deletedAt: null },
           include: { audiobook: true },
         });
 
         if (!requestRecord) {
           return NextResponse.json({ error: 'Request not found' }, { status: 404 });
+        }
+
+        if (requestRecord.userId !== user.id && user.role !== 'admin') {
+          return NextResponse.json(
+            { error: 'Forbidden', message: 'You do not have access to this request' },
+            { status: 403 }
+          );
         }
 
         // Support two flows:
@@ -181,7 +212,8 @@ export async function POST(
             searchIndexersForInteractive(
               searchTitle,
               audiobook.author,
-              format
+              format,
+              Boolean(customTitle)
             ).catch((err) => {
               logger.error(`Indexer search failed: ${err.message}`);
               return null;
@@ -215,7 +247,7 @@ export async function POST(
         logger.info(`Found ${combinedResults.length} total ebook results`);
 
         return NextResponse.json({
-          results: combinedResults,
+          results: await stripProwlarrKeyFromResults(combinedResults),
           searchTitle,
           preferredFormat: format,
         });
@@ -318,7 +350,8 @@ async function searchAnnasArchiveForInteractive(
 async function searchIndexersForInteractive(
   title: string,
   author: string,
-  preferredFormat: string
+  preferredFormat: string,
+  exactTitle: boolean // a custom title: sent as given, no fallback queries (#316)
 ): Promise<EbookSearchResult[]> {
   const configService = getConfigService();
 
@@ -362,12 +395,13 @@ async function searchIndexersForInteractive(
 
   for (const group of groups) {
     try {
-      const groupResults = await prowlarr.search(title, {
+      // "title author" then "title", deduped (same as audiobook search)
+      const groupResults = await prowlarr.searchWithVariations(title, author, {
         categories: group.categories,
         indexerIds: group.indexerIds,
         minSeeders: 0,
         maxResults: 100,
-      });
+      }, { exactTitle });
       allResults.push(...groupResults);
     } catch (error) {
       logger.error(`Group search failed: ${error instanceof Error ? error.message : 'Unknown'}`);
@@ -394,6 +428,7 @@ async function searchIndexersForInteractive(
     indexerPriorities,
     flagConfigs,
     requireAuthor: false,
+    enforceSizeCap: false, // List oversized ebooks; the user decides (#323)
     stopWords: rankLangConfig.stopWords,
     characterReplacements: rankLangConfig.characterReplacements,
   });

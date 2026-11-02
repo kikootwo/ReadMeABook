@@ -146,6 +146,30 @@ describe('audiobook-matcher', () => {
     expect(results[1].isAvailable).toBe(false);
     expect(results[1].isRequested).toBe(false);
   });
+
+  it('adds no request details without a checked caller', async () => {
+    prismaMock.plexLibrary.findMany.mockResolvedValue([]);
+    prismaMock.audiobook.findMany.mockResolvedValue([
+      {
+        id: 'a1',
+        audibleAsin: 'ASIN1',
+        requests: [{ id: 'r1', status: 'downloading', userId: 'other-user', user: { plexUsername: 'OtherUser' } }],
+      },
+    ]);
+    prismaMock.reportedIssue.findMany.mockResolvedValue([]);
+
+    const { enrichAudiobooksWithMatches } = await import('@/lib/utils/audiobook-matcher');
+    const results = await enrichAudiobooksWithMatches([{ asin: 'ASIN1', title: 'Book One', author: 'Author One' }]);
+
+    expect(results[0]).toMatchObject({
+      isRequested: false,
+      requestStatus: null,
+      requestId: null,
+      requestedByUserId: null,
+      requestedByUsername: null,
+    });
+    expect(prismaMock.audiobook.findMany).not.toHaveBeenCalled();
+  });
 });
 
 

@@ -32,9 +32,9 @@ export async function GET() {
       const registrationEnabled = (await configService.get('auth.registration_enabled')) === 'true';
       const oidcProviderName = await configService.get('oidc.provider_name') || 'SSO';
 
-      // Check if any local users exist in database (for login form visibility)
+      // Check if any local users exist in database (for login form visibility); soft-deleted users can't sign in
       const hasLocalUsers = (await prisma.user.count({
-        where: { authProvider: 'local' }
+        where: { authProvider: 'local', deletedAt: null }
       })) > 0;
 
       const providers: string[] = [];
@@ -54,11 +54,12 @@ export async function GET() {
         automationEnabled,
       });
     } else {
-      // Plex mode - check if local admin exists (setup admin)
+      // Plex mode - check if local admin exists (setup admin); soft-deleted users can't sign in
       const hasLocalUsers = (await prisma.user.count({
         where: {
           plexId: { startsWith: 'local-' },
-          isSetupAdmin: true
+          isSetupAdmin: true,
+          deletedAt: null
         }
       })) > 0;
 

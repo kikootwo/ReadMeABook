@@ -9,6 +9,8 @@ import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.ShelvesSync');
 
@@ -28,7 +30,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
 
-      const body = await request.json().catch(() => ({}));
+      const bodyResult = await readJsonBody(request, { fallback: {} });
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const { shelfId, shelfType } = SyncSchema.parse(body);
 
       // Set lastSyncAt to null so the frontend SWR refresh catches the "Syncing..." state immediately
@@ -65,10 +69,10 @@ export async function POST(request: NextRequest) {
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return NextResponse.json({ error: 'ValidationError', details: error.errors }, { status: 400 });
+        return NextResponse.json({ error: 'ValidationError', details: zodIssueDetails(error) }, { status: 400 });
       }
       logger.error('Failed to trigger manual sync', {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorForLog(error),
       });
       return NextResponse.json(
         { error: 'Failed to trigger manual sync' },

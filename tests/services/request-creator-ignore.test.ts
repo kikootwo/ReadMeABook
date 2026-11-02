@@ -325,4 +325,29 @@ describe('createRequestForUser — release-date gate', () => {
     );
     expect(jobQueueAddSearchJob).toHaveBeenCalled();
   });
+
+  it('stores http(s) cover URLs from any host but drops other forms', async () => {
+    const { createRequestForUser } = await import('@/lib/services/request-creator.service');
+
+    await createRequestForUser(TEST_USER_ID, { ...TEST_AUDIOBOOK, coverArtUrl: 'file:///etc/passwd' });
+    expect(prismaMock.audiobook.create.mock.calls[0][0].data.coverArtUrl).toBeUndefined();
+
+    await createRequestForUser(TEST_USER_ID, { ...TEST_AUDIOBOOK, coverArtUrl: 'https://i.gr-assets.com/images/x.jpg' });
+    expect(prismaMock.audiobook.create.mock.calls[1][0].data.coverArtUrl).toBe('https://i.gr-assets.com/images/x.jpg');
+  });
+
+  it('upgrades a stored cover the library cannot use to an Audible one', async () => {
+    prismaMock.audiobook.findFirst.mockResolvedValue({
+      id: 'audiobook-1', audibleAsin: TEST_AUDIOBOOK.asin, title: TEST_AUDIOBOOK.title, author: TEST_AUDIOBOOK.author,
+      coverArtUrl: 'https://i.gr-assets.com/images/x.jpg',
+    });
+    prismaMock.audiobook.update.mockResolvedValue({ id: 'audiobook-1', title: TEST_AUDIOBOOK.title, author: TEST_AUDIOBOOK.author });
+
+    const { createRequestForUser } = await import('@/lib/services/request-creator.service');
+    await createRequestForUser(TEST_USER_ID, { ...TEST_AUDIOBOOK, coverArtUrl: 'https://m.media-amazon.com/images/I/x.jpg' });
+
+    expect(prismaMock.audiobook.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ coverArtUrl: 'https://m.media-amazon.com/images/I/x.jpg' }),
+    }));
+  });
 });

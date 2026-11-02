@@ -26,7 +26,7 @@ const createModelMock = (): PrismaModelMock => ({
   create: vi.fn(() => Promise.resolve({})),
   createMany: vi.fn(() => Promise.resolve({ count: 0 })),
   update: vi.fn(() => Promise.resolve({})),
-  updateMany: vi.fn(() => Promise.resolve({})),
+  updateMany: vi.fn(() => Promise.resolve({ count: 0 })),
   upsert: vi.fn(() => Promise.resolve({})),
   delete: vi.fn(() => Promise.resolve({})),
   deleteMany: vi.fn(() => Promise.resolve({})),

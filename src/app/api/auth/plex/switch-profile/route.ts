@@ -10,6 +10,8 @@ import { getAuthTokenCache } from '@/lib/services/auth-token-cache.service';
 import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { canSignInAsPlexIdentity } from '@/lib/services/auth/plex-identity';
+import { readJsonBody, AUTH_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.PlexSwitchProfile');
 
@@ -19,10 +21,21 @@ const logger = RMABLogger.create('API.PlexSwitchProfile');
  *
  * Authentication: Provide pinId in request body. The Plex token is
  * retrieved from server-side cache for security.
+ *
+ * Identity: the profile must be one of the account's Plex Home users (looked up with the
+ * cached token); its identity fields come from Plex.
  */
+
+const PROFILE_REFUSED = {
+  error: 'AccessDenied',
+  message: 'This profile cannot be used to sign in. Please restart the login process.',
+};
+
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const bodyResult = await readJsonBody(request, { maxBytes: AUTH_JSON_BODY_LIMIT_BYTES });
+    if (!bodyResult.ok) return bodyResult.response;
+    const body = bodyResult.data;
     const { userId, pin, pinId, profileInfo } = body;
 
     // Validate pinId is provided
@@ -65,10 +78,18 @@ export async function POST(request: NextRequest) {
     const plexService = getPlexService();
     const encryptionService = getEncryptionService();
 
+    // The selected profile must be one of this account's Plex Home users
+    const homeUsers = await plexService.getHomeUsers(mainAccountToken);
+    const homeUser = homeUsers.find((u) => String(u.id) === String(userId));
+    if (!homeUser) {
+      logger.warn('Profile switch refused: not a Plex Home user of this account');
+      return NextResponse.json(PROFILE_REFUSED, { status: 403 });
+    }
+
     // Switch to selected profile
     let profileToken: string;
     try {
-      const token = await plexService.switchHomeUser(userId, mainAccountToken, pin);
+      const token = await plexService.switchHomeUser(String(homeUser.id), mainAccountToken, pin);
       if (!token) {
         throw new Error('Failed to get profile token');
       }
@@ -86,25 +107,20 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    // Use profile info from request (already has all the info from home users list)
-    // or fall back to getUserInfo for main accounts
+    // Identity from Plex. The web client has always been keyed on the Home user's uuid; a
+    // client without profile details, or a Home entry without a uuid, on the account id that
+    // /users/account returns for the profile token.
     let profilePlexId: string;
     let profileUsername: string;
     let profileEmail: string | null;
     let profileThumb: string | null;
 
-    if (profileInfo && profileInfo.uuid) {
-      // Use provided profile info (from home users list - more reliable for managed users)
-      profilePlexId = profileInfo.uuid;
-      profileUsername = profileInfo.friendlyName || `User ${userId}`;
-      profileEmail = profileInfo.email || null;
-      profileThumb = profileInfo.thumb || null;
-      logger.debug('Using provided profile info', {
-        plexId: profilePlexId,
-        username: profileUsername,
-      });
+    if (profileInfo && homeUser.uuid) {
+      profilePlexId = homeUser.uuid;
+      profileUsername = homeUser.friendlyName || homeUser.title || homeUser.username || `User ${homeUser.id}`;
+      profileEmail = homeUser.email || null;
+      profileThumb = homeUser.thumb || null;
     } else {
-      // Fall back to getUserInfo (for main accounts without profile info)
       const profileUser = await plexService.getUserInfo(profileToken);
 
       if (!profileUser || !profileUser.id) {
@@ -119,16 +135,20 @@ export async function POST(request: NextRequest) {
       }
 
       profilePlexId = typeof profileUser.id === 'string' ? profileUser.id : profileUser.id.toString();
-      profileUsername = profileUser.username || `User ${userId}`;
+      profileUsername = profileUser.username || `User ${homeUser.id}`;
       profileEmail = profileUser.email || null;
       profileThumb = profileUser.thumb || null;
-      logger.debug('Using getUserInfo data', {
-        plexId: profilePlexId,
-        username: profileUsername,
-      });
     }
 
+    // The row written must belong to Plex sign-ins (and to this Home user)
+    if (!(await canSignInAsPlexIdentity(profilePlexId, { homeUserId: String(homeUser.id) }))) {
+      logger.warn('Profile switch refused', { homeUserId: homeUser.id });
+      return NextResponse.json(PROFILE_REFUSED, { status: 403 });
+    }
+    logger.debug('Using Plex profile identity', { plexId: profilePlexId, username: profileUsername });
+
     // Check if this is the first user (should be promoted to admin)
+    // Soft-deleted users count on purpose: a deleted account must never make the next sign-up an admin
     const userCount = await prisma.user.count();
     const isFirstUser = userCount === 0;
     const role = isFirstUser ? 'admin' : 'user';
@@ -143,7 +163,8 @@ export async function POST(request: NextRequest) {
         role,
         avatarUrl: profileThumb,
         authToken: encryptionService.encrypt(profileToken),
-        plexHomeUserId: userId, // Store the home user ID
+        authProvider: 'plex',
+        plexHomeUserId: String(homeUser.id), // Store the home user ID
         lastLoginAt: new Date(),
       },
       update: {
@@ -151,7 +172,8 @@ export async function POST(request: NextRequest) {
         plexEmail: profileEmail,
         avatarUrl: profileThumb,
         authToken: encryptionService.encrypt(profileToken),
-        plexHomeUserId: userId, // Update the home user ID
+        authProvider: 'plex',
+        plexHomeUserId: String(homeUser.id), // Update the home user ID
         lastLoginAt: new Date(),
       },
     });

@@ -14,6 +14,7 @@ import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { AUDIO_EXTENSIONS } from '@/lib/constants/audio-formats';
 import { getAudibleService } from '@/lib/integrations/audible.service';
+import { readJsonBody, BULK_IMPORT_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.BulkImport.Execute');
 
@@ -68,7 +69,9 @@ export async function POST(request: NextRequest) {
         const pathModule = await import('path');
         const fs = await import('fs/promises');
 
-        const body = await request.json();
+        const bodyResult = await readJsonBody(request, { maxBytes: BULK_IMPORT_JSON_BODY_LIMIT_BYTES });
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         const { imports } = body as { imports: ImportItem[] };
 
         if (!imports || !Array.isArray(imports) || imports.length === 0) {
@@ -226,6 +229,7 @@ export async function POST(request: NextRequest) {
                     progress: 100,
                     errorMessage: null,
                     importAttempts: 0,
+                    autoRerequestCount: 0, // a bulk import restarts the automatic re-request backoff
                     updatedAt: new Date(),
                   },
                 });

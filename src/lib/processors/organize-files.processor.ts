@@ -4,6 +4,7 @@
  */
 
 import { OrganizeFilesPayload, getJobQueueService } from '../services/job-queue.service';
+import path from 'path';
 import { prisma } from '../db';
 import { getFileOrganizer } from '../utils/file-organizer';
 import { RMABLogger } from '../utils/logger';
@@ -13,10 +14,24 @@ import { getDownloadClientManager } from '../services/download-client-manager.se
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import { generateFilesHash } from '../utils/files-hash';
+import { audioFileFormat, splitForeignAudio } from './organize-evidence';
 import { fixEpubForKindle, cleanupFixedEpub } from '../utils/epub-fixer';
-import { removeEmptyParentDirectories } from '../utils/cleanup-helpers';
+import { cleanupDirectDownloadSource, cleanupDownloadAfterOrganize, cleanupEbookSource, cleanupSourceAfterOrganize } from './organize-cleanup';
+import {
+  audioEvidence,
+  deleteMayFollow,
+  deleteMayFollowFor,
+  downloadCleanupKind,
+  ebookEvidence as buildEbookEvidence,
+  reportImportStatus,
+} from './organize-evidence';
 import { getAudibleService } from '../integrations/audible.service';
 import { addAutoBlock } from '../services/blocklist.service';
+import { updateRequestUnlessStopped } from '../utils/request-stop-guard';
+import { createAudibleDetailsLoader, readMetadataTaggingEnabled, resolveTagDetails } from './organize-tag-details';
+import { applyPostImportCategory } from './post-import-category';
+import { preferredEbookFile } from '../utils/import-inventory';
+import { findEbookOnDisk } from '../utils/ebook-on-disk';
 
 /**
  * Process organize files job
@@ -24,7 +39,7 @@ import { addAutoBlock } from '../services/blocklist.service';
  * Handles both audiobook and ebook request types with appropriate branching
  */
 export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promise<any> {
-  const { requestId, audiobookId, downloadPath, jobId, cleanupSource, selectedFiles } = payload;
+  const { requestId, audiobookId, downloadPath, jobId, cleanupSource, selectedFiles, downloadHistoryId } = payload;
 
   const logger = RMABLogger.forJob(jobId, 'OrganizeFiles');
 
@@ -53,15 +68,12 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     }
 
     // Continue with audiobook organization flow
-    // Update request status to processing
-    await prisma.request.update({
-      where: { id: requestId },
-      data: {
-        status: 'processing',
-        progress: 100, // Download is complete, now organizing
-        updatedAt: new Date(),
-      },
-    });
+    // Update request status to processing (download is complete, now organizing),
+    // unless the user cancelled or deleted it while this job waited in the queue
+    if (!(await updateRequestUnlessStopped(requestId, { status: 'processing', progress: 100 }))) {
+      logger.info(`Request ${requestId} is cancelled or deleted, not importing`);
+      return { success: true, message: 'Request cancelled or deleted, not imported', requestId };
+    }
 
     // Get audiobook details
     const audiobook = await prisma.audiobook.findUnique({
@@ -124,11 +136,13 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     let series = audiobook.series || undefined;
     let seriesPart = audiobook.seriesPart || undefined;
 
+    // At most one Audible details lookup per import, shared with the metadata tags below
+    const loadAudibleDetails = createAudibleDetailsLoader(audiobook.audibleAsin, { fillSeries: !series });
+
     if (audiobook.audibleAsin && !series) {
       try {
         logger.info(`Missing series data, fetching from Audnexus for ASIN: ${audiobook.audibleAsin}`);
-        const audibleService = getAudibleService();
-        const audnexusData = await audibleService.getAudiobookDetails(audiobook.audibleAsin);
+        const audnexusData = await loadAudibleDetails();
 
         if (audnexusData) {
           const updates: Record<string, any> = {};
@@ -136,12 +150,12 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
           if (audnexusData.series) {
             series = audnexusData.series;
             updates.series = series;
-            logger.info(`Got series "${series}" from Audnexus`);
+            logger.info(`Got series "${series}" from Audible`);
           }
           if (audnexusData.seriesPart) {
             seriesPart = audnexusData.seriesPart;
             updates.seriesPart = seriesPart;
-            logger.info(`Got seriesPart "${seriesPart}" from Audnexus`);
+            logger.info(`Got seriesPart "${seriesPart}" from Audible`);
           }
           if (audnexusData.seriesAsin) {
             updates.seriesAsin = audnexusData.seriesAsin;
@@ -177,8 +191,18 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
 
     logger.info(`Final metadata for path organization: year=${year || 'null'}, narrator=${narrator || 'null'}, series=${series || 'null'}, seriesPart=${seriesPart || 'null'}`);
 
+    // One read of the tagging switch: the tag details lookup and the organizer both use it
+    const metadataTaggingEnabled = await readMetadataTaggingEnabled(logger);
+    // Started now, awaited just before organize(): the setup below does not wait on Audible.
+    // The no-op handler keeps a rejection from going unhandled if that setup throws first.
+    const tagDetailsPending = resolveTagDetails(audiobook.description, loadAudibleDetails, metadataTaggingEnabled, logger);
+    tagDetailsPending.catch(() => undefined);
+
     // Get file organizer (reads media_dir from database config)
     const organizer = await getFileOrganizer();
+
+    // Byte-compare existing library files only when a delete will depend on it
+    const compareExisting = await deleteMayFollow(requestId, downloadPath, downloadHistoryId, cleanupSource);
 
     // Read path template from configuration
     const templateConfig = await prisma.configuration.findUnique({
@@ -198,6 +222,8 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       template: fileRenameTemplateConfig?.value || '{title}',
     };
 
+    const tagDetails = await tagDetailsPending;
+
     // Organize files (pass template, logger, and rename config to file organizer)
     const result = await organizer.organize(
       downloadPath,
@@ -210,11 +236,13 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
         year,
         series,
         seriesPart,
+        ...tagDetails,
       },
       template,
       jobId ? { jobId, context: 'FileOrganizer' } : undefined,
       renameConfig,
-      selectedFiles
+      selectedFiles,
+      { compareExisting, metadataTaggingEnabled, stopInPlaceDiscLayout: !downloadHistoryId && typeof cleanupSource === 'boolean' }
     );
 
     if (!result.success) {
@@ -228,37 +256,55 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     });
     const coercionEnabled = coercionConfig?.value !== 'false';
 
-    if (coercionEnabled && result.audioFiles.length > 0) {
+    // Files the library already held with different content ('differs') are not
+    // this import's: coercion never renames them and the hash leaves them out
+    const { owned: ownedAudio, foreign: foreignAudio } = splitForeignAudio(result.audioFiles, result.records);
+    let importedAudio = ownedAudio;
+
+    if (coercionEnabled && importedAudio.length > 0) {
       try {
-        const { coerceToPlexCompatible } = await import('../utils/format-coercion');
-        const coercion = await coerceToPlexCompatible(result.audioFiles, logger);
+        const { coerceToPlexCompatible, coercibleTargets } = await import('../utils/format-coercion');
+        // Only files holding this import's content are renamed; other library files are never
+        // touched. Every organized file still counts as an .m4a sibling.
+        const records = result.records ?? [];
+        const coercion = await coerceToPlexCompatible(result.audioFiles, coercibleTargets(records), logger);
         if (coercion.renamed.length > 0) {
           logger.info(`Plex format coercion: renamed ${coercion.renamed.length} file(s)`);
-          result.audioFiles = coercion.finalAudioFiles;
+          const renamedTo = new Map(coercion.renamed.map((r) => [r.from, r.to]));
+          importedAudio = importedAudio.map((file) => renamedTo.get(file) ?? file);
+          for (const record of records) {
+            record.target = renamedTo.get(record.target) ?? record.target;
+          }
         }
         coercion.warnings.forEach(w => logger.warn(`Plex format coercion: ${w}`));
       } catch (err) {
         logger.warn(`Plex format coercion failed (non-fatal): ${err instanceof Error ? err.message : 'unknown'}`);
       }
     }
+    result.audioFiles = [...importedAudio, ...foreignAudio];
 
-    // Generate hash from organized audio files for library matching
-    const filesHash = generateFilesHash(result.audioFiles);
+    // Hash of this import's audio, after coercion (library matching, and the
+    // evidence an admin delete checks before removing the folder)
+    const filesHash = generateFilesHash(importedAudio);
     if (filesHash) {
-      logger.info(`Generated files hash: ${filesHash.substring(0, 16)}... (${result.audioFiles.length} audio files)`);
+      logger.info(`Generated files hash: ${filesHash.substring(0, 16)}... (${importedAudio.length} audio files)`);
     }
 
-    // Update audiobook record with file path, hash, and status
+    // Update audiobook record with file path, hash, format, and status
     await prisma.audiobook.update({
       where: { id: audiobookId },
       data: {
         filePath: result.targetPath,
         filesHash: filesHash || null,
+        fileFormat: audioFileFormat(importedAudio.length > 0 ? importedAudio : result.audioFiles),
         status: 'completed',
         completedAt: new Date(),
         updatedAt: new Date(),
       },
     });
+
+    const evidence = audioEvidence(result);
+    const partialMessage = reportImportStatus(evidence, logger);
 
     // Update request to downloaded (green status, waiting for Plex scan)
     await prisma.request.update({
@@ -266,6 +312,7 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       data: {
         status: 'downloaded',
         progress: 100,
+        errorMessage: partialMessage,
         completedAt: new Date(),
         updatedAt: new Date(),
       },
@@ -339,11 +386,20 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
     }
 
     // Cleanup downloads if configured (uses IDownloadClient.postProcess for client-specific cleanup)
-    await cleanupDownloadAfterOrganize(requestId, downloadPath, configService, jobId, logger);
+    await cleanupDownloadAfterOrganize({
+      requestId,
+      downloadPath,
+      downloadHistoryId,
+      targetPath: result.targetPath,
+      evidence,
+      configService,
+      jobId,
+      logger,
+    });
 
     // Cleanup source files if requested (manual import feature)
     if (cleanupSource) {
-      await cleanupSourceAfterOrganize(downloadPath, configService, jobId, logger, selectedFiles);
+      await cleanupSourceAfterOrganize(downloadPath, result.targetPath, configService, jobId, logger, evidence, selectedFiles);
     }
 
     return {
@@ -360,17 +416,60 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
-    const errorMessage = error instanceof Error ? error.message : 'File organization failed';
+    const rawErrorMessage = error instanceof Error ? error.message : 'File organization failed';
+
+    // Manual imports pass cleanupSource true, bulk imports false; download jobs
+    // leave it unset (dropped from the JSON payload), including jobs queued
+    // before downloadHistoryId existed. A manual or bulk import's folder, file
+    // selection and cleanup choice exist only in this payload, and the import
+    // retry path would re-queue the request's last client download instead, so
+    // these fail once with a message telling the admin to re-run them.
+    const isManualImport = !downloadHistoryId && typeof cleanupSource === 'boolean';
+    const isClientDownload = !isManualImport;
+    const detail = rawErrorMessage
+      .replace(/^(File|Ebook) organization failed:\s*/, '')
+      .replace(/[.\s]+$/, '');
+    const errorMessage = isClientDownload
+      ? rawErrorMessage
+      : `Import from ${downloadPath} did not complete: ${detail}. Fix the folder and run the import again.`;
+
+    if (isManualImport) {
+      await prisma.request.update({
+        where: { id: requestId },
+        data: { status: 'failed', errorMessage, updatedAt: new Date() },
+      });
+
+      const failedRequest = await prisma.request.findUnique({
+        where: { id: requestId },
+        include: { audiobook: true, user: { select: { plexUsername: true } } },
+      });
+      if (failedRequest?.audiobook) {
+        await getJobQueueService().addNotificationJob(
+          'request_error',
+          failedRequest.id,
+          failedRequest.audiobook.title,
+          failedRequest.audiobook.author,
+          failedRequest.user?.plexUsername || 'Unknown User',
+          'Import did not complete. Check the selected folder and run the import again.'
+        ).catch((notifyError) => {
+          logger.error('Failed to queue notification', { error: notifyError instanceof Error ? notifyError.message : String(notifyError) });
+        });
+      }
+
+      // Returned, not thrown: a queue retry would re-run the import and send
+      // another notification for the same failure.
+      return { success: false, message: errorMessage, requestId };
+    }
 
     // Check if this is a retryable error (transient filesystem issues or no files found)
     // These errors may resolve on retry (e.g., files still being extracted, permissions being set)
     const isRetryableError =
-      errorMessage.includes('No audiobook files found') ||
-      errorMessage.includes('No ebook files found') ||  // Ebook equivalent of above
-      errorMessage.includes('ENOENT') || // File/directory not found
-      errorMessage.includes('no such file or directory') ||
-      errorMessage.includes('EACCES') || // Permission denied (might be temporary)
-      errorMessage.includes('EPERM');    // Operation not permitted (might be temporary)
+      rawErrorMessage.includes('No audiobook files found') ||
+      rawErrorMessage.includes('No ebook files found') ||  // Ebook equivalent of above
+      rawErrorMessage.includes('ENOENT') || // File/directory not found
+      rawErrorMessage.includes('no such file or directory') ||
+      rawErrorMessage.includes('EACCES') || // Permission denied (might be temporary)
+      rawErrorMessage.includes('EPERM');    // Operation not permitted (might be temporary)
 
     if (isRetryableError) {
       // Get current request to check retry count
@@ -577,19 +676,27 @@ async function processEbookOrganization(
   request: { id: string; userId: string; type: string; user: { plexUsername: string | null } },
   logger: RMABLogger
 ): Promise<any> {
-  const { requestId, audiobookId, downloadPath, jobId, cleanupSource } = payload;
+  const { requestId, audiobookId, downloadPath, jobId, cleanupSource, selectedFiles, downloadHistoryId } = payload;
 
   logger.info(`Processing ebook organization for request ${requestId}`);
 
-  // Update request status to processing
-  await prisma.request.update({
-    where: { id: requestId },
-    data: {
-      status: 'processing',
-      progress: 100,
-      updatedAt: new Date(),
-    },
-  });
+  // A Manual Import names the ebook files it selected in the folder: import the preferred
+  // one of those, not whatever a walk of the whole folder finds first (#278)
+  let ebookSource = downloadPath;
+  if (selectedFiles && selectedFiles.length > 0) {
+    const chosen = preferredEbookFile(selectedFiles);
+    if (!chosen) {
+      throw new Error('No ebook files found in download (none of the selected files is an ebook)');
+    }
+    ebookSource = path.join(downloadPath, chosen);
+    logger.info(`Importing the selected ebook file: ${chosen}`);
+  }
+
+  // Update request status to processing, unless it was cancelled or deleted meanwhile
+  if (!(await updateRequestUnlessStopped(requestId, { status: 'processing', progress: 100 }))) {
+    logger.info(`Request ${requestId} is cancelled or deleted, not importing`);
+    return { success: true, message: 'Request cancelled or deleted, not imported', requestId };
+  }
 
   // Get book details (works for both audiobooks and ebooks)
   const book = await prisma.audiobook.findUnique({
@@ -663,12 +770,12 @@ async function processEbookOrganization(
         if (audnexusData.series) {
           series = audnexusData.series;
           updates.series = series;
-          logger.info(`Got series "${series}" from Audnexus`);
+          logger.info(`Got series "${series}" from Audible`);
         }
         if (audnexusData.seriesPart) {
           seriesPart = audnexusData.seriesPart;
           updates.seriesPart = seriesPart;
-          logger.info(`Got seriesPart "${seriesPart}" from Audnexus`);
+          logger.info(`Got seriesPart "${seriesPart}" from Audible`);
         }
         if (audnexusData.seriesAsin) {
           updates.seriesAsin = audnexusData.seriesAsin;
@@ -702,11 +809,12 @@ async function processEbookOrganization(
 
   logger.info(`Final metadata for path organization: year=${year || 'null'}, narrator=${narrator || 'null'}, series=${series || 'null'}, seriesPart=${seriesPart || 'null'}`);
 
-  // Check if this is an indexer download (needs to keep source for seeding)
-  const downloadHistory = await prisma.downloadHistory.findFirst({
-    where: { requestId },
-    orderBy: { createdAt: 'desc' },
-  });
+  // Check if this is an indexer download (needs to keep source for seeding).
+  // Decided from the download that queued this job, never the request's newest
+  // row: a manual import has no download of its own.
+  const downloadHistory = downloadHistoryId
+    ? await prisma.downloadHistory.findUnique({ where: { id: downloadHistoryId } })
+    : null;
   const isIndexerDownload = downloadHistory?.downloadClient !== 'direct';
   logger.info(`Download source: ${downloadHistory?.downloadClient || 'unknown'} (indexer download: ${isIndexerDownload})`);
 
@@ -726,11 +834,13 @@ async function processEbookOrganization(
   }
 
   // Check if Kindle EPUB fix is needed
-  let effectiveDownloadPath = downloadPath;
+  let effectiveDownloadPath = ebookSource;
   let fixedEpubPath: string | null = null;
+  // Request note when a Kindle-fixed copy failed its read-back check (the original is imported)
+  let kindleFixNote: string | null = null;
 
   // Detect the actual EPUB file path (handles both single file and directory downloads)
-  const epubFilePath = await detectEpubFilePath(downloadPath);
+  const epubFilePath = await detectEpubFilePath(ebookSource);
 
   // Only apply Kindle fix for EPUB files when enabled
   if (epubFilePath) {
@@ -759,8 +869,11 @@ async function processEbookOrganization(
           logger.info(`Kindle fixes applied: encoding=${encodingFixes}, bodyIdLinks=${bodyIdLinkFixes}, language=${languageFix}, strayImages=${strayImgFixes}`);
         }
       } else {
-        // Fix failed - continue with original file
+        // Fix failed - continue with original file (its own placement is the import evidence)
         logger.warn(`Kindle EPUB fix failed: ${fixResult.error}. Continuing with original file.`);
+        if (fixResult.verificationFailed) {
+          kindleFixNote = 'Kindle fix could not be verified; original imported';
+        }
       }
     } else {
       logger.info('Kindle EPUB fix disabled - organizing original file');
@@ -779,6 +892,9 @@ async function processEbookOrganization(
     template: fileRenameTemplateConfig?.value || '{title}',
   };
 
+  // What download cleanup would do decides both the compare cost and the request message
+  const cleanupKind = await downloadCleanupKind(requestId, downloadPath, downloadHistoryId);
+
   // Organize ebook files (organizer will detect ebook type and skip audio-specific processing)
   // Pass all metadata that could be used in path templates (same as audiobooks)
   const result = await organizer.organizeEbook(
@@ -795,7 +911,8 @@ async function processEbookOrganization(
     template,
     jobId ? { jobId, context: 'FileOrganizer.Ebook' } : undefined,
     isIndexerDownload,
-    ebookRenameConfig
+    ebookRenameConfig,
+    { compareExisting: deleteMayFollowFor(cleanupKind, cleanupSource) }
   );
 
   // Clean up fixed EPUB temp file after organization (regardless of success)
@@ -809,6 +926,12 @@ async function processEbookOrganization(
   }
 
   logger.info(`Successfully moved ebook to ${result.targetPath}`);
+
+  // The organizer reads a temp copy when the Kindle fix ran; the original is epubFilePath
+  const importedFile = fixedEpubPath ? epubFilePath : result.sourceFile;
+  const ebookEvidence = await buildEbookEvidence(result, importedFile ?? undefined, downloadPath);
+  const ebookMessage = [kindleFixNote, reportImportStatus(ebookEvidence, logger, { folderRemovalPlanned: cleanupKind === 'indexer' })]
+    .filter(Boolean).join('; ') || null;
 
   // Update book record with file path
   await prisma.audiobook.update({
@@ -828,6 +951,7 @@ async function processEbookOrganization(
     data: {
       status: 'downloaded',
       progress: 100,
+      errorMessage: ebookMessage,
       completedAt: new Date(),
       updatedAt: new Date(),
     },
@@ -883,12 +1007,37 @@ async function processEbookOrganization(
     logger.debug(`Ebook library scan disabled (scanEnabled=${scanEnabled})`);
   }
 
-  // Cleanup downloads if configured (uses IDownloadClient.postProcess for client-specific cleanup)
-  await cleanupDownloadAfterOrganize(requestId, downloadPath, configService, jobId, logger);
+  // Remove a direct HTTP download file now that it is in the library
+  if (!isIndexerDownload) {
+    await cleanupDirectDownloadSource({
+      requestId,
+      downloadPath,
+      downloadHistoryId,
+      targetPath: result.targetPath,
+      evidence: ebookEvidence,
+      configService,
+      jobId,
+      logger,
+    });
+  }
 
-  // Cleanup source files if requested (manual import feature)
+  // Cleanup downloads if configured (uses IDownloadClient.postProcess for client-specific cleanup)
+  await cleanupDownloadAfterOrganize({
+    requestId,
+    downloadPath,
+    downloadHistoryId,
+    targetPath: result.targetPath,
+    evidence: ebookEvidence,
+    configService,
+    jobId,
+    logger,
+  });
+
+  // Cleanup source files if requested (manual import feature). Only the ebook
+  // file that was imported is removed, never the folder around it: an import
+  // folder can also hold an audiobook or other library content.
   if (cleanupSource) {
-    await cleanupSourceAfterOrganize(downloadPath, configService, jobId, logger);
+    await cleanupEbookSource(downloadPath, importedFile ?? undefined, result.targetPath, configService, jobId, logger, ebookEvidence);
   }
 
   return {
@@ -903,7 +1052,8 @@ async function processEbookOrganization(
 
 /**
  * Create ebook request if ebook downloads are enabled
- * Called after audiobook organization completes
+ * Called after audiobook organization completes. Skipped when the book folder
+ * (targetPath) already holds an ebook file (#313).
  *
  * Supports two ebook sources:
  * - Anna's Archive (ebook_annas_archive_enabled) - Currently implemented
@@ -958,6 +1108,13 @@ async function createEbookRequestIfEnabled(
       return;
     }
 
+    // An ebook the user already put in the book folder: nothing to fetch (#313)
+    const ebookOnDisk = await findEbookOnDisk(targetPath, audiobook.id, logger);
+    if (ebookOnDisk) {
+      logger.info(`Book folder already holds an ebook (${ebookOnDisk}), skipping automatic ebook request`);
+      return;
+    }
+
     logger.info(`Creating ebook request for "${audiobook.title}" (parent: ${parentRequestId})`);
 
     // Create new ebook request (auto-approved since parent was approved)
@@ -987,264 +1144,6 @@ async function createEbookRequestIfEnabled(
   } catch (error) {
     // Don't fail the main audiobook organization if ebook request creation fails
     logger.error(`Failed to create ebook request: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
-}
-
-// =========================================================================
-// POST-IMPORT CATEGORY
-// =========================================================================
-
-/**
- * Apply post-import category to the download client after successful import.
- * Only applies to torrent clients (qBittorrent/Transmission) when configured.
- * Non-fatal: logs a warning on failure but does not fail the job.
- */
-async function applyPostImportCategory(
-  requestId: string,
-  logger: RMABLogger
-): Promise<void> {
-  try {
-    // Get download history to find client type and download ID
-    const downloadHistory = await prisma.downloadHistory.findFirst({
-      where: { requestId },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (!downloadHistory?.downloadClientId || !downloadHistory?.downloadClient) {
-      return;
-    }
-
-    const clientType = downloadHistory.downloadClient as DownloadClientType;
-
-    // Only applies to torrent clients
-    const protocol = CLIENT_PROTOCOL_MAP[clientType];
-    if (protocol !== 'torrent') {
-      return;
-    }
-
-    // Get client config and check if postImportCategory is set
-    const configService = getConfigService();
-    const manager = getDownloadClientManager(configService);
-    const clients = await manager.getAllClients();
-    const clientConfig = clients.find(c => c.enabled && c.type === clientType);
-
-    if (!clientConfig?.postImportCategory) {
-      return;
-    }
-
-    logger.info(`Applying post-import category "${clientConfig.postImportCategory}" to download ${downloadHistory.downloadClientId}`);
-
-    const service = await manager.createClientFromConfig(clientConfig);
-    await service.setCategory(downloadHistory.downloadClientId, clientConfig.postImportCategory);
-
-    logger.info(`Post-import category applied successfully`);
-  } catch (error) {
-    logger.warn(`Failed to apply post-import category: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-// =========================================================================
-// DOWNLOAD CLEANUP
-// =========================================================================
-
-/**
- * Cleanup download files and archive from download client after successful organization.
- * Uses the IDownloadClient.postProcess() method for client-specific cleanup (e.g., SABnzbd archive).
- * Shared between audiobook and ebook organization flows.
- */
-async function cleanupDownloadAfterOrganize(
-  requestId: string,
-  downloadPath: string,
-  configService: any,
-  jobId: string | undefined,
-  logger: RMABLogger
-): Promise<void> {
-  try {
-    logger.info('Checking if cleanup is needed for this download');
-
-    // Get download history to find client ID and indexer
-    const downloadHistory = await prisma.downloadHistory.findFirst({
-      where: { requestId },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    logger.info(`Download history found: ${downloadHistory ? 'yes' : 'no'}`, {
-      hasDownloadClientId: !!downloadHistory?.downloadClientId,
-      hasIndexerId: !!downloadHistory?.indexerId,
-      downloadClient: downloadHistory?.downloadClient || 'none',
-    });
-
-    if (!downloadHistory?.indexerId || !downloadHistory?.downloadClientId) {
-      return;
-    }
-
-    // Get indexer configuration
-    const indexersConfig = await configService.get('prowlarr_indexers');
-    if (!indexersConfig) {
-      return;
-    }
-
-    const indexers: Array<{ id: number; protocol: string; removeAfterProcessing?: boolean }> = JSON.parse(indexersConfig);
-    const indexer = indexers.find(idx => idx.id === downloadHistory.indexerId);
-
-    logger.info(`Indexer found in config: ${indexer ? 'yes' : 'no'}`, {
-      indexerId: downloadHistory.indexerId,
-      protocol: indexer?.protocol || 'none',
-      removeAfterProcessing: indexer?.removeAfterProcessing ?? 'undefined',
-    });
-
-    // Check if this is a non-torrent indexer with cleanup enabled.
-    const isTorrentProtocol = indexer?.protocol?.toLowerCase() === 'torrent';
-
-    if (!indexer || isTorrentProtocol || !indexer.removeAfterProcessing) {
-      return;
-    }
-
-    logger.info(`Cleaning up download ${downloadHistory.downloadClientId} (cleanup enabled for indexer ${indexer.id})`);
-
-    // First, manually delete files from filesystem
-    if (downloadPath) {
-      logger.info(`Removing download files from filesystem: ${downloadPath}`);
-
-      const fs = await import('fs/promises');
-
-      try {
-        const stats = await fs.stat(downloadPath);
-
-        if (stats.isDirectory()) {
-          await fs.rm(downloadPath, { recursive: true, force: true });
-          logger.info(`Removed directory: ${downloadPath}`);
-        } else {
-          await fs.unlink(downloadPath);
-          logger.info(`Removed file: ${downloadPath}`);
-        }
-
-        // Clean up empty parent directories
-        const downloadDir = await configService.get('download_dir') || '/downloads';
-        const cleanupResult = await removeEmptyParentDirectories(downloadPath, {
-          boundaryPath: downloadDir,
-          logContext: jobId ? { jobId, context: 'CleanupParents' } : undefined,
-        });
-
-        if (cleanupResult.removedDirectories.length > 0) {
-          logger.info(`Cleaned up ${cleanupResult.removedDirectories.length} empty parent directories`);
-        }
-      } catch (fsError) {
-        if ((fsError as NodeJS.ErrnoException).code === 'ENOENT') {
-          logger.info(`Download path already deleted: ${downloadPath}`);
-        } else {
-          throw fsError;
-        }
-      }
-    } else {
-      logger.warn(`No download path available, skipping filesystem deletion`);
-    }
-
-    // Then use the download client interface for client-specific post-processing
-    // (e.g., usenet clients archive from history, torrent clients are a no-op)
-    const clientType = downloadHistory.downloadClient;
-    if (clientType && clientType !== 'direct') {
-      const manager = getDownloadClientManager(configService);
-      const protocol = CLIENT_PROTOCOL_MAP[clientType as DownloadClientType];
-      if (!protocol) {
-        logger.warn(`Unknown download client type: ${clientType}, skipping post-processing`);
-        return;
-      }
-      const client = await manager.getClientServiceForProtocol(protocol as 'torrent' | 'usenet');
-
-      if (client) {
-        await client.postProcess(downloadHistory.downloadClientId);
-        logger.info(`Successfully post-processed download ${downloadHistory.downloadClientId} via ${client.clientType}`);
-      }
-    }
-  } catch (error) {
-    // Log error but don't fail the job - cleanup is optional
-    logger.warn(
-      `Failed to cleanup download: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      {
-        error: error instanceof Error ? error.stack : undefined,
-      }
-    );
-  }
-}
-
-// =========================================================================
-// SOURCE FILE CLEANUP (MANUAL IMPORT)
-// =========================================================================
-
-/**
- * Delete source files after successful manual import.
- * Non-fatal: logs a warning on failure but does not fail the job.
- * Files are already safely copied to the media library at this point.
- */
-async function cleanupSourceAfterOrganize(
-  downloadPath: string,
-  configService: any,
-  jobId: string | undefined,
-  logger: RMABLogger,
-  selectedFiles?: string[]
-): Promise<void> {
-  try {
-    const fs = await import('fs/promises');
-    const pathModule = await import('path');
-
-    logger.info(`Cleaning up source files: ${downloadPath}`);
-
-    if (selectedFiles && selectedFiles.length > 0) {
-      // Only delete the specific files that were imported, not the entire directory
-      for (const fileName of selectedFiles) {
-        const filePath = pathModule.join(downloadPath, fileName);
-        try {
-          await fs.unlink(filePath);
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-            logger.warn(`Failed to delete source file: ${filePath}`);
-          }
-        }
-      }
-      logger.info(`Removed ${selectedFiles.length} selected source files from ${downloadPath}`);
-    } else {
-      // No file filter — delete entire source path (original behavior)
-      const stats = await fs.stat(downloadPath);
-      if (stats.isDirectory()) {
-        await fs.rm(downloadPath, { recursive: true, force: true });
-        logger.info(`Removed source directory: ${downloadPath}`);
-      } else {
-        await fs.unlink(downloadPath);
-        logger.info(`Removed source file: ${downloadPath}`);
-      }
-    }
-
-    // Determine boundary path based on download path prefix
-    const BOOKDROP_PATH = '/bookdrop';
-    const downloadDir = await configService.get('download_dir') || '/downloads';
-    const mediaDir = await configService.get('media_dir') || '/media';
-
-    let boundaryPath = downloadDir;
-    if (downloadPath.startsWith(BOOKDROP_PATH)) {
-      boundaryPath = BOOKDROP_PATH;
-    } else if (downloadPath.startsWith(mediaDir)) {
-      boundaryPath = mediaDir;
-    }
-
-    const cleanupResult = await removeEmptyParentDirectories(downloadPath, {
-      boundaryPath,
-      logContext: jobId ? { jobId, context: 'CleanupSourceParents' } : undefined,
-    });
-
-    if (cleanupResult.removedDirectories.length > 0) {
-      logger.info(`Cleaned up ${cleanupResult.removedDirectories.length} empty parent directories`);
-    }
-  } catch (error) {
-    // Non-fatal - files are already safely in the media library
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      logger.info(`Source path already deleted: ${downloadPath}`);
-    } else {
-      logger.warn(
-        `Failed to cleanup source files: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        { error: error instanceof Error ? error.stack : undefined }
-      );
-    }
   }
 }
 

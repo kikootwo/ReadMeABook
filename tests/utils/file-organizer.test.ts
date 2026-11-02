@@ -26,6 +26,7 @@ const axiosMock = vi.hoisted(() => ({
 const metadataMock = vi.hoisted(() => ({
   tagMultipleFiles: vi.fn(),
   checkFfmpegAvailable: vi.fn(),
+  addMp4FreeformTags: vi.fn(async () => ({ written: false })),
 }));
 
 const chapterMock = vi.hoisted(() => ({
@@ -72,6 +73,7 @@ const ebookMock = vi.hoisted(() => ({
 
 const copyFileMock = vi.hoisted(() => ({
   copyFile: vi.fn(),
+  isSameFile: vi.fn(async () => false),
 }));
 
 vi.mock('fs/promises', () => ({
@@ -81,12 +83,96 @@ vi.mock('fs/promises', () => ({
 
 vi.mock('@/lib/utils/copy-file', () => copyFileMock);
 
+// Placement is covered on the real filesystem in organize-copy.test.ts; here it
+// keeps the organizer's previous contract: an existing target (fs.access) is
+// kept, otherwise the file is copied, and a failed tagged copy falls back to
+// the original.
+const placementMock = vi.hoisted(() => {
+  const place = async (source: string, target: string, fileMode: number) => {
+    try {
+      await fsMock.access(source);
+    } catch {
+      return { status: 'failed' as const, target, reason: `Source file not found: ${source}` };
+    }
+    try {
+      await fsMock.access(target);
+      return { status: 'present' as const, target };
+    } catch {
+      // Not there yet
+    }
+    try {
+      await copyFileMock.copyFile(source, target);
+    } catch (error) {
+      return { status: 'failed' as const, target, reason: error instanceof Error ? error.message : String(error) };
+    }
+    const permissions = await applyFileMode(target, fileMode);
+    if (permissions.kind === 'missing') return { status: 'failed' as const, target, reason: permissions.reason };
+    return permissions.kind === 'refused'
+      ? { status: 'copied' as const, target, warning: permissions.warning }
+      : { status: 'copied' as const, target };
+  };
+  // The real applyFileMode (over the mocked fs/promises) is installed by the vi.mock factory below;
+  // a plain holder, so mock resets between tests leave it in place
+  const real: { applyFileMode?: (target: string, fileMode: number) => Promise<any> } = {};
+  const applyFileMode = (target: string, fileMode: number) => real.applyFileMode!(target, fileMode);
+  return {
+    real,
+    applyFileMode,
+    isVerifiedStatus: (status: string) => status === 'copied' || status === 'identical',
+    placeFile: vi.fn(async (source: string, target: string, options: { fileMode: number }) =>
+      place(source, target, options.fileMode)
+    ),
+    placeAudio: vi.fn(async (original: string, derivative: string | undefined, target: string, options: { fileMode: number }) => {
+      if (derivative) {
+        const tagged = await place(derivative, target, options.fileMode);
+        if (tagged.status !== 'failed') {
+          return { ...tagged, verified: tagged.status === 'copied', usedDerivative: true };
+        }
+        const fallback = await place(original, target, options.fileMode);
+        return {
+          ...fallback,
+          verified: fallback.status === 'copied',
+          usedDerivative: false,
+          reason: fallback.status === 'copied'
+            ? `Tagged copy failed (${tagged.reason}); original placed without metadata tags`
+            : fallback.reason,
+        };
+      }
+      const placed = await place(original, target, options.fileMode);
+      return { ...placed, verified: placed.status === 'copied', usedDerivative: false };
+    }),
+  };
+});
+vi.mock('@/lib/utils/organize-copy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/utils/organize-copy')>();
+  placementMock.real.applyFileMode = actual.applyFileMode;
+  return placementMock;
+});
+
+// Cover publishing is covered on the real filesystem in file-organizer.cover.test.ts;
+// here an existing cover (fs.access) is kept, otherwise it is copied or written and its mode applied.
+const coverMock = vi.hoisted(() => ({
+  hasCover: vi.fn(async (target: string) => fsMock.access(target).then(() => true, () => false)),
+  publishCover: vi.fn(async (target: string, content: { file?: string; data?: Buffer }, fileMode: number) => {
+    if (content.file) await copyFileMock.copyFile(content.file, target);
+    else await fsMock.writeFile(target, content.data);
+    const mode = await placementMock.applyFileMode(target, fileMode);
+    if (mode.kind === 'missing') throw new Error(mode.reason);
+    return mode.kind === 'refused' ? { outcome: 'written', warning: mode.warning } : { outcome: 'written' };
+  }),
+}));
+vi.mock('@/lib/utils/cover-placement', () => coverMock);
+
 vi.mock('axios', () => ({
   default: axiosMock,
   ...axiosMock,
 }));
 
-vi.mock('@/lib/utils/metadata-tagger', () => metadataMock);
+// The real freeform-tag builder (pure): the organizer's disk check and log come from what it would write
+vi.mock('@/lib/utils/metadata-tagger', async (importOriginal) => ({
+  ...metadataMock,
+  buildMp4FreeformTags: (await importOriginal<typeof import('@/lib/utils/metadata-tagger')>()).buildMp4FreeformTags,
+}));
 vi.mock('@/lib/utils/chapter-merger', () => chapterMock);
 vi.mock('@/lib/utils/logger', () => loggerMock);
 vi.mock('@/lib/db', () => ({
@@ -200,6 +286,187 @@ describe('file organizer', () => {
     expect(chapterMock.mergeChapters).toHaveBeenCalled();
   });
 
+  it.each([
+    ['a long Cyrillic title is cut to fit 255 bytes, keeping .m4b (#264)', 'Преступление и наказание '.repeat(10).trim(), false, null],
+    ['a title that fits keeps its name', 'Book: Title', false, 'Book Title.m4b'],
+    ['a title that fits keeps its name when tagged', 'Book: Title', true, 'Book Title.m4b'],
+    // The tagger writes `${name}.tmp` beside the merged file, so that copy must fit too
+    ['200 Cyrillic letters, tagged: the tagger copy fits (#264)', 'Ж'.repeat(200), true, null],
+    ['a 252-byte title, tagged: the tagger copy fits (#264)', 'Ж'.repeat(126), true, null],
+    ['a 250-byte title, untagged: no room reserved, name kept', 'Ж'.repeat(125), false, `${'Ж'.repeat(125)}.m4b`],
+  ])('chapter merge output name: %s', async (_label, title, tagging, expected) => {
+    configState.values.set('chapter_merging_enabled', 'true');
+    configState.values.set('metadata_tagging_enabled', tagging ? 'true' : 'false');
+    metadataMock.checkFfmpegAvailable.mockResolvedValue(false);
+    configState.values.set('ebook_sidecar_enabled', 'false');
+    chapterMock.detectChapterFiles.mockResolvedValue(true);
+    chapterMock.estimateOutputSize.mockResolvedValue(100);
+    chapterMock.checkDiskSpace.mockResolvedValue(1000);
+    chapterMock.analyzeChapterFiles.mockResolvedValue([
+      { path: '/downloads/book/disc1.mp3', filename: 'disc1.mp3', duration: 1000, chapterTitle: 'One' },
+    ]);
+    chapterMock.mergeChapters.mockResolvedValue({ success: false, error: 'merge failed' });
+    fsMock.access.mockImplementation(async (filePath: string) => {
+      if (path.normalize(filePath).startsWith(path.normalize('/downloads/book'))) return undefined;
+      throw new Error('missing');
+    });
+    fsMock.mkdir.mockResolvedValue(undefined);
+    copyFileMock.copyFile.mockResolvedValue(undefined);
+    fsMock.chmod.mockResolvedValue(undefined);
+
+    const organizer = new FileOrganizer('/media', '/tmp');
+    (organizer as unknown as { findAudiobookFiles: unknown }).findAudiobookFiles = vi.fn().mockResolvedValue({ audioFiles: ['disc1.mp3', 'disc2.mp3'], coverFile: undefined, isFile: false });
+    await organizer.organize('/downloads/book', { title, author: 'Author' }, '{author}/{title}');
+
+    const name = path.basename(chapterMock.mergeChapters.mock.calls[0][1].outputPath);
+    expect(Buffer.byteLength(name, 'utf8')).toBeLessThanOrEqual(255);
+    expect(name.endsWith('.m4b')).toBe(true);
+    if (tagging) expect(Buffer.byteLength(`${name}.tmp`, 'utf8')).toBeLessThanOrEqual(255);
+    if (expected) expect(name).toBe(expected);
+    else expect(title.startsWith(name.slice(0, -'.m4b'.length))).toBe(true);
+  });
+
+  describe('the one ASIN step (addMp4FreeformTags) on the file about to be placed', () => {
+    const BOOK = { title: 'Book', author: 'Author', asin: 'B0TESTASIN' };
+    const merged = path.join('/tmp', 'Book.m4b');
+
+    /** Two mp3 chapters merged to /tmp/Book.m4b (or not), tagging on/off; sources and temp files exist, targets don't. */
+    async function run(opts: { tagging: boolean; merge: boolean; available?: number; tagResult?: (files: string[]) => unknown[]; asin?: string; details?: Record<string, string> }) {
+      configState.values.set('chapter_merging_enabled', String(opts.merge));
+      configState.values.set('metadata_tagging_enabled', String(opts.tagging));
+      configState.values.set('ebook_sidecar_enabled', 'false');
+      chapterMock.detectChapterFiles.mockResolvedValue(true);
+      chapterMock.estimateOutputSize.mockResolvedValue(100);
+      chapterMock.checkDiskSpace.mockResolvedValue(opts.available ?? 1000);
+      chapterMock.analyzeChapterFiles.mockResolvedValue([
+        { path: '/downloads/book/disc1.mp3', filename: 'disc1.mp3', duration: 1000, chapterTitle: 'One' },
+        { path: '/downloads/book/disc2.mp3', filename: 'disc2.mp3', duration: 1000, chapterTitle: 'Two' },
+      ]);
+      chapterMock.mergeChapters.mockResolvedValue({ success: true, outputPath: merged, durationVerified: true });
+      metadataMock.checkFfmpegAvailable.mockResolvedValue(true);
+      metadataMock.tagMultipleFiles.mockImplementation(async (files: string[]) =>
+        opts.tagResult ? opts.tagResult(files) : files.map((f) => ({ success: true, filePath: f, taggedFilePath: `${f}.tmp` }))
+      );
+      fsMock.access.mockImplementation(async (filePath: string) => {
+        if (path.normalize(filePath).startsWith(path.normalize('/media'))) throw new Error('missing');
+      });
+      fsMock.mkdir.mockResolvedValue(undefined);
+      fsMock.unlink.mockResolvedValue(undefined);
+      copyFileMock.copyFile.mockResolvedValue(undefined);
+      fsMock.chmod.mockResolvedValue(undefined);
+      const warn = vi.fn().mockResolvedValue(undefined);
+      const info = vi.fn().mockResolvedValue(undefined);
+      loggerMock.RMABLogger.forJob.mockReturnValue({ info, warn, error: vi.fn().mockResolvedValue(undefined), debug: vi.fn() });
+
+      const organizer = new FileOrganizer('/media', '/tmp');
+      (organizer as any).findAudiobookFiles = vi.fn().mockResolvedValue({ audioFiles: ['disc1.mp3', 'disc2.mp3'], coverFile: undefined, isFile: false });
+      const book = { ...('asin' in opts ? { ...BOOK, asin: opts.asin } : BOOK), ...opts.details };
+      const result = await organizer.organize('/downloads/book', book, '{author}/{title}', { jobId: 'job-a', context: 'test' });
+      return { result, warn, info, calls: metadataMock.addMp4FreeformTags.mock.calls };
+    }
+
+    const DETAILS = { publisher: 'Penguin Audio', subtitle: 'An Easy & Proven Way', language: 'english' };
+
+    it('tagging on: publisher, subtitle and language go to the tagging pass and the ASIN step, and are logged', async () => {
+      metadataMock.addMp4FreeformTags.mockResolvedValueOnce({ written: true });
+      const { calls, info } = await run({ tagging: true, merge: true, details: DETAILS });
+      expect(metadataMock.tagMultipleFiles.mock.calls[0][1]).toMatchObject(DETAILS);
+      expect(calls).toEqual([[`${merged}.tmp`, '.m4b', { asin: 'B0TESTASIN', ...DETAILS }]]);
+      expect(info).toHaveBeenCalledWith('Embedded ASIN B0TESTASIN, PUBLISHER, SUBTITLE, LANGUAGE in Book.m4b');
+    });
+
+    it('the log names what the ASIN step writes: a value that sanitizes to nothing is not listed', async () => {
+      metadataMock.addMp4FreeformTags.mockResolvedValueOnce({ written: true });
+      const { info } = await run({ tagging: true, merge: true, details: { publisher: '\u0000', subtitle: ' ', language: 'english' } });
+      expect(info).toHaveBeenCalledWith('Embedded ASIN B0TESTASIN, LANGUAGE in Book.m4b');
+    });
+
+    it('tagging off: the ASIN step on the merged file gets the ASIN only (the others are metadata tags)', async () => {
+      const { calls } = await run({ tagging: false, merge: true, details: DETAILS });
+      expect(calls).toEqual([[merged, '.m4b', { asin: 'B0TESTASIN' }]]);
+      expect(metadataMock.tagMultipleFiles).not.toHaveBeenCalled();
+    });
+
+    it('merging on, tagging on: the tagged copy of the merged file', async () => {
+      const { result, calls } = await run({ tagging: true, merge: true });
+      expect(result.success).toBe(true);
+      expect(calls).toEqual([[`${merged}.tmp`, '.m4b', expect.objectContaining({ asin: 'B0TESTASIN' })]]);
+    });
+
+    it('merging on, the tagging pass fails: the merged file itself (#208 not lost again)', async () => {
+      const { result, calls } = await run({
+        tagging: true,
+        merge: true,
+        tagResult: (files) => files.map((f) => ({ success: false, filePath: f, error: 'ffmpeg failed: timeout' })),
+      });
+      expect(result.success).toBe(true);
+      expect(calls).toEqual([[merged, '.m4b', expect.objectContaining({ asin: 'B0TESTASIN' })]]);
+    });
+
+    it('merging on, tagging off: the merged file; the setting is read once', async () => {
+      const { calls } = await run({ tagging: false, merge: true });
+      expect(calls).toEqual([[merged, '.m4b', expect.objectContaining({ asin: 'B0TESTASIN' })]]);
+      expect(chapterMock.mergeChapters.mock.calls[0][1]).not.toHaveProperty('asin');
+      const reads = prismaMock.configuration.findUnique.mock.calls.filter(([q]: Array<{ where: { key: string } }>) => q.where.key === 'metadata_tagging_enabled');
+      expect(reads).toHaveLength(1);
+    });
+
+    it("no merge, tagging off: never a download's own file", async () => {
+      const { calls } = await run({ tagging: false, merge: false });
+      expect(calls).toEqual([]);
+    });
+
+    it('no merge, tagging on: each tagged copy, with its own format', async () => {
+      const { calls } = await run({ tagging: true, merge: false });
+      expect(calls.map(([file, ext]: unknown[]) => [path.basename(String(file)), ext])).toEqual([
+        ['disc1.mp3.tmp', '.mp3'],
+        ['disc2.mp3.tmp', '.mp3'],
+      ]);
+    });
+
+    it('a tag that cannot be written is a warning; the import succeeds', async () => {
+      metadataMock.addMp4FreeformTags.mockResolvedValueOnce({ written: false, warning: 'ASIN tag not written (x)' });
+      const { result, warn } = await run({ tagging: false, merge: true });
+      expect(result.success).toBe(true);
+      expect(warn).toHaveBeenCalledWith('Book.m4b: ASIN tag not written (x)');
+      expect(result.errors.join(' ')).not.toContain('ASIN');
+    });
+
+    it('a written ASIN is logged at info', async () => {
+      metadataMock.addMp4FreeformTags.mockResolvedValueOnce({ written: true });
+      const { info } = await run({ tagging: false, merge: true });
+      expect(info).toHaveBeenCalledWith('Embedded ASIN B0TESTASIN in Book.m4b');
+    });
+
+    it('an unreadable tagging setting: warned and reported, tagging skipped, the import goes on', async () => {
+      prismaMock.configuration.findUnique.mockImplementationOnce(async () => {
+        throw new Error('database is locked');
+      });
+      const { result, warn, calls } = await run({ tagging: true, merge: true });
+      const skipped = 'Metadata tagging skipped: could not read setting (database is locked)';
+      expect(result.success).toBe(true);
+      expect(result.errors).toContain(skipped);
+      expect(warn).toHaveBeenCalledWith(skipped);
+      expect(metadataMock.tagMultipleFiles).not.toHaveBeenCalled();
+      expect(calls).toEqual([[merged, '.m4b', expect.objectContaining({ asin: 'B0TESTASIN' })]]);
+    });
+
+    it.each([
+      ['on, ASIN: merged + post-step copy + tagged copy, 3x', true, 'B0TESTASIN', 300],
+      ['off, ASIN: merged + post-step copy, 2x', false, 'B0TESTASIN', 200],
+      ['on, no ASIN: merged + tagged copy, 2x', true, undefined, 200],
+      ['off, no ASIN: the merged file, 1x', false, undefined, 100],
+      ['on, no ASIN, book details: merged + post-step copy + tagged copy, 3x', true, undefined, 300, DETAILS],
+      ['off, no ASIN, book details (not written untagged): the merged file, 1x', false, undefined, 100, DETAILS],
+      ['on, no ASIN, details that sanitize to nothing: merged + tagged copy, 2x', true, undefined, 200, { publisher: '\u0000', subtitle: ' ' }],
+    ])('disk-space check for a 100-byte merge, tagging %s', async (_n, tagging, asin, need, details?: Record<string, string>) => {
+      await run({ tagging, merge: true, available: need - 1, asin, details });
+      expect(chapterMock.mergeChapters).not.toHaveBeenCalled();
+      await run({ tagging, merge: true, available: need, asin, details });
+      expect(chapterMock.mergeChapters).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('uses tagged files when metadata tagging succeeds', async () => {
     configState.values.set('metadata_tagging_enabled', 'true');
     configState.values.set('ebook_sidecar_enabled', 'false');
@@ -235,13 +502,47 @@ describe('file organizer', () => {
     const result = await organizer.organize('/downloads/book', {
       title: 'Book',
       author: 'Author',
+      description: 'Summary.',
+      genres: ['Romance'],
     }, '{author}/{title}');
 
     const expectedDir = path.join('/media', 'Author', 'Book');
     expect(result.success).toBe(true);
     expect(result.targetPath).toBe(expectedDir);
+    // Description and genres reach the tagger (they are tags only, never path parts)
+    expect(metadataMock.tagMultipleFiles).toHaveBeenCalledWith(
+      [sourcePath],
+      expect.objectContaining({ description: 'Summary.', genres: ['Romance'] })
+    );
     expect(copyFileMock.copyFile).toHaveBeenCalledWith('/tmp/tagged.m4b', path.join(expectedDir, 'book.m4b'));
     expect(fsMock.unlink).toHaveBeenCalledWith('/tmp/tagged.m4b');
+  });
+
+  it.each([
+    [true, 'false'],
+    [false, 'true'],
+  ])('uses the tagging read passed in (%s) over the stored setting (%s), without reading it again', async (passed, stored) => {
+    configState.values.set('metadata_tagging_enabled', stored);
+    configState.values.set('ebook_sidecar_enabled', 'false');
+    metadataMock.checkFfmpegAvailable.mockResolvedValue(true);
+    const sourcePath = path.join('/downloads', 'book', 'book.m4b');
+    metadataMock.tagMultipleFiles.mockResolvedValue([{ success: true, filePath: sourcePath, taggedFilePath: '/tmp/tagged.m4b' }]);
+    fsMock.access.mockImplementation(async (filePath: string) => {
+      if (path.normalize(filePath).startsWith(path.normalize('/media'))) throw new Error('missing');
+    });
+    fsMock.mkdir.mockResolvedValue(undefined);
+    copyFileMock.copyFile.mockResolvedValue(undefined);
+    fsMock.chmod.mockResolvedValue(undefined);
+    fsMock.unlink.mockResolvedValue(undefined);
+    const organizer = new FileOrganizer('/media', '/tmp');
+    (organizer as any).findAudiobookFiles = vi.fn().mockResolvedValue({ audioFiles: ['book.m4b'], coverFile: undefined, isFile: false });
+
+    const result = await organizer.organize('/downloads/book', { title: 'Book', author: 'Author' }, '{author}/{title}',
+      undefined, undefined, undefined, { metadataTaggingEnabled: passed });
+
+    expect(result.success).toBe(true);
+    expect(metadataMock.tagMultipleFiles).toHaveBeenCalledTimes(passed ? 1 : 0);
+    expect(prismaMock.configuration.findUnique).not.toHaveBeenCalledWith({ where: { key: 'metadata_tagging_enabled' } });
   });
 
   it('skips metadata tagging when ffmpeg is unavailable', async () => {
@@ -280,6 +581,65 @@ describe('file organizer', () => {
     expect(copyFileMock.copyFile).toHaveBeenCalledWith(sourcePath, targetFile);
   });
 
+  it.each([
+    ['a cached thumbnail', '/api/cache/thumbnails/cover.jpg'],
+    ['a remote cover', 'https://m.media-amazon.com/images/I/cover.jpg'],
+  ])('keeps %s with a permission warning when chmod is refused', async (_label, coverArtUrl) => {
+    configState.values.set('metadata_tagging_enabled', 'false');
+    const organizer = new FileOrganizer('/media', '/tmp');
+    (organizer as any).findAudiobookFiles = vi.fn().mockResolvedValue({ audioFiles: ['book.m4b'], coverFile: undefined, isFile: false });
+    const sourcePath = path.join('/downloads', 'book', 'book.m4b');
+    const coverPath = path.join('/media', 'Author', 'Book', 'cover.jpg');
+    fsMock.access.mockImplementation(async (filePath: string) => {
+      if (path.normalize(filePath) === path.normalize(sourcePath)) return undefined;
+      throw new Error('missing');
+    });
+    fsMock.mkdir.mockResolvedValue(undefined);
+    copyFileMock.copyFile.mockResolvedValue(undefined);
+    fsMock.writeFile.mockResolvedValue(undefined);
+    axiosMock.get.mockResolvedValue({ data: Buffer.from('cover') });
+    fsMock.chmod.mockImplementation(async (filePath: string) => {
+      if (filePath === coverPath) throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' });
+    });
+
+    const result = await organizer.organize('/downloads/book', { title: 'Book', author: 'Author', coverArtUrl }, '{author}/{title}');
+
+    expect(result.success).toBe(true);
+    expect(result.coverArtFile).toBe(coverPath);
+    expect(result.errors).toEqual([]);
+    expect(result.permissionWarnings).toHaveLength(1);
+    expect(result.permissionWarnings![0]).toContain(coverPath);
+    expect(result.permissionWarnings![0]).toContain('EPERM');
+  });
+
+  it('records a cover as failed when it is not there after writing (chmod ENOENT)', async () => {
+    configState.values.set('metadata_tagging_enabled', 'false');
+    const organizer = new FileOrganizer('/media', '/tmp');
+    (organizer as any).findAudiobookFiles = vi.fn().mockResolvedValue({ audioFiles: ['book.m4b'], coverFile: undefined, isFile: false });
+    const sourcePath = path.join('/downloads', 'book', 'book.m4b');
+    const coverPath = path.join('/media', 'Author', 'Book', 'cover.jpg');
+    fsMock.access.mockImplementation(async (filePath: string) => {
+      if (path.normalize(filePath) === path.normalize(sourcePath)) return undefined;
+      throw new Error('missing');
+    });
+    fsMock.mkdir.mockResolvedValue(undefined);
+    copyFileMock.copyFile.mockResolvedValue(undefined);
+    fsMock.writeFile.mockResolvedValue(undefined);
+    axiosMock.get.mockResolvedValue({ data: Buffer.from('cover') });
+    fsMock.chmod.mockImplementation(async (filePath: string) => {
+      if (filePath === coverPath) throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' });
+    });
+
+    const result = await organizer.organize('/downloads/book', {
+      title: 'Book', author: 'Author', coverArtUrl: 'https://m.media-amazon.com/images/I/cover.jpg',
+    }, '{author}/{title}');
+
+    expect(result.success).toBe(true);
+    expect(result.coverArtFile).toBeUndefined();
+    expect(result.errors).toContain('Failed to download cover art');
+    expect(result.permissionWarnings).toBeUndefined();
+  });
+
   it('downloads remote cover art when no local cover exists', async () => {
     configState.values.set('metadata_tagging_enabled', 'false');
 
@@ -309,13 +669,13 @@ describe('file organizer', () => {
       title: 'Book',
       author: 'Author',
       asin: 'ASIN123',
-      coverArtUrl: 'https://images.example/cover.jpg',
+      coverArtUrl: 'https://m.media-amazon.com/images/I/cover.jpg',
     }, '{author}/{title} {asin}');
 
     expect(result.success).toBe(true);
     expect(result.coverArtFile).toBe(path.join(expectedDir, 'cover.jpg'));
     expect(axiosMock.get).toHaveBeenCalledWith(
-      'https://images.example/cover.jpg',
+      'https://m.media-amazon.com/images/I/cover.jpg',
       expect.objectContaining({ responseType: 'arraybuffer' })
     );
     // NOTE: Ebook downloads are now handled as first-class requests through the job queue
@@ -323,6 +683,74 @@ describe('file organizer', () => {
     expect(ebookMock.downloadEbook).not.toHaveBeenCalled();
     expect(copyFileMock.copyFile).toHaveBeenCalledWith(sourcePath, targetFile);
     expect(result.filesMovedCount).toBe(1);
+  });
+
+  it('follows up to 3 cover redirects, checks every hop, and applies the file mode', async () => {
+    configState.values.set('metadata_tagging_enabled', 'false');
+    const organizer = new FileOrganizer('/media', '/tmp');
+    (organizer as any).findAudiobookFiles = vi.fn().mockResolvedValue({ audioFiles: ['book.m4b'], coverFile: undefined, isFile: false });
+    const sourcePath = path.join('/downloads', 'book', 'book.m4b');
+    fsMock.access.mockImplementation(async (filePath: string) => {
+      if (path.normalize(filePath) === path.normalize(sourcePath)) return undefined;
+      throw new Error('missing');
+    });
+    fsMock.mkdir.mockResolvedValue(undefined);
+    copyFileMock.copyFile.mockResolvedValue(undefined);
+    fsMock.chmod.mockResolvedValue(undefined);
+    fsMock.writeFile.mockResolvedValue(undefined);
+    axiosMock.get.mockResolvedValue({ data: Buffer.from('cover') });
+
+    const result = await organizer.organize('/downloads/book', {
+      title: 'Book', author: 'Author', asin: 'ASIN123',
+      coverArtUrl: 'https://images-na.ssl-images-amazon.com/images/I/legacy.jpg',
+    }, '{author}/{title} {asin}');
+
+    const config = axiosMock.get.mock.calls[0][1];
+    expect(config.maxRedirects).toBe(3);
+    expect(() => config.beforeRedirect({ href: 'https://m.media-amazon.com/images/I/legacy.jpg' })).not.toThrow();
+    expect(() => config.beforeRedirect({ href: 'http://127.0.0.1:6379/' })).toThrow();
+    expect(() => config.beforeRedirect({ protocol: 'https:', hostname: 'evil.example' })).toThrow();
+    const coverPath = path.join('/media', 'Author', 'Book ASIN123', 'cover.jpg');
+    expect(result.coverArtFile).toBe(coverPath);
+    expect(fsMock.chmod).toHaveBeenCalledWith(coverPath, expect.anything());
+  });
+
+  it.each([
+    ['a loopback URL', 'http://127.0.0.1:6379/'],
+    ['a plain-http image host', 'http://m.media-amazon.com/images/I/cover.jpg'],
+    ['a look-alike host', 'https://media-amazon.com.evil.example/cover.jpg'],
+    ['a local file path', '/etc/passwd'],
+    ['a file URL', 'file:///etc/passwd'],
+    ['a cache path traversal', '/api/cache/thumbnails/../../../etc/passwd'],
+    ['a cache path with a sub-directory', '/api/cache/thumbnails/sub/cover.jpg'],
+  ])('never fetches or copies cover art from %s', async (_label, coverArtUrl) => {
+    configState.values.set('metadata_tagging_enabled', 'false');
+    const organizer = new FileOrganizer('/media', '/tmp');
+    (organizer as any).findAudiobookFiles = vi.fn().mockResolvedValue({
+      audioFiles: ['book.m4b'],
+      coverFile: undefined,
+      isFile: false,
+    });
+    const sourcePath = path.join('/downloads', 'book', 'book.m4b');
+    fsMock.access.mockImplementation(async (filePath: string) => {
+      if (path.normalize(filePath) === path.normalize(sourcePath)) return undefined;
+      throw new Error('missing');
+    });
+    fsMock.mkdir.mockResolvedValue(undefined);
+    copyFileMock.copyFile.mockResolvedValue(undefined);
+    fsMock.chmod.mockResolvedValue(undefined);
+    fsMock.writeFile.mockResolvedValue(undefined);
+    axiosMock.get.mockResolvedValue({ data: Buffer.from('cover') });
+
+    const result = await organizer.organize('/downloads/book', {
+      title: 'Book', author: 'Author', asin: 'ASIN123', coverArtUrl,
+    }, '{author}/{title} {asin}');
+
+    expect(axiosMock.get).not.toHaveBeenCalled();
+    expect(copyFileMock.copyFile).toHaveBeenCalledTimes(1); // the audio file only
+    expect(result.coverArtFile).toBeUndefined();
+    // Display-only covers are skipped with a warning, not reported as an error
+    expect(result.errors.join(' ')).not.toContain('cover art');
   });
 
   it('records an error when cover art download fails', async () => {
@@ -352,7 +780,7 @@ describe('file organizer', () => {
     const result = await organizer.organize('/downloads/book', {
       title: 'Book',
       author: 'Author',
-      coverArtUrl: 'https://images.example/cover.jpg',
+      coverArtUrl: 'https://m.media-amazon.com/images/I/cover.jpg',
     }, '{author}/{title}');
 
     expect(result.success).toBe(true);
@@ -654,29 +1082,13 @@ describe('file organizer', () => {
     await expect((organizer as any).findAudiobookFiles('/downloads/bad')).rejects.toThrow('bad path');
   });
 
-  it('returns an empty list when walkDirectory fails', async () => {
+  it('reports an incomplete listing when a directory cannot be read', async () => {
     fsMock.readdir.mockRejectedValue(new Error('no perms'));
 
-    const organizer = new FileOrganizer('/media', '/tmp');
-    const files = await (organizer as any).walkDirectory('/downloads');
+    const { walkFiles } = await import('@/lib/utils/import-inventory');
+    const walk = await walkFiles('/downloads');
 
-    expect(files).toEqual([]);
-  });
-
-  it('cleans up download directories safely', async () => {
-    fsMock.rm.mockRejectedValue(new Error('rm failed'));
-
-    const organizer = new FileOrganizer('/media', '/tmp');
-    await expect(organizer.cleanup('/downloads/book')).resolves.toBeUndefined();
-    expect(fsMock.rm).toHaveBeenCalledWith('/downloads/book', { recursive: true, force: true });
-  });
-
-  it('cleans up download directories on success', async () => {
-    fsMock.rm.mockResolvedValue(undefined);
-
-    const organizer = new FileOrganizer('/media', '/tmp');
-    await expect(organizer.cleanup('/downloads/book')).resolves.toBeUndefined();
-    expect(fsMock.rm).toHaveBeenCalledWith('/downloads/book', { recursive: true, force: true });
+    expect(walk).toEqual({ files: [], complete: false });
   });
 
   it('validates writable directories without issues', async () => {
@@ -909,7 +1321,7 @@ describe('file organizer', () => {
     const result = await organizer.organize('/downloads/book', {
       title: 'Book',
       author: 'Author',
-      coverArtUrl: 'https://images.example/cover.jpg',
+      coverArtUrl: 'https://m.media-amazon.com/images/I/cover.jpg',
     }, '{author}/{title}');
 
     expect(result.success).toBe(true);
@@ -944,7 +1356,7 @@ describe('file organizer', () => {
     const result = await organizer.organize('/downloads/book', {
       title: 'Book',
       author: 'Author',
-      coverArtUrl: 'https://images.example/cover.jpg',
+      coverArtUrl: 'https://m.media-amazon.com/images/I/cover.jpg',
     }, '{author}/{title}');
 
     // Audio copy failed → should be failure despite cover art being available

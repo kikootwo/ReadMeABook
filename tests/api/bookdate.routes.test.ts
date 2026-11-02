@@ -45,6 +45,8 @@ vi.mock('@/lib/integrations/audible.service', () => ({
 vi.mock('@/lib/middleware/auth', () => ({
   requireAuth: requireAuthMock,
   requireAdmin: requireAdminMock,
+  // Setup wizard path (setup incomplete); access rules: bookdate-test-connection.access.test.ts
+  requireSetupIncompleteOrAdmin: (req: unknown, handler: (r: unknown) => unknown) => handler(req),
 }));
 
 vi.mock('@/lib/services/encryption.service', () => ({
@@ -64,6 +66,8 @@ vi.mock('@/lib/bookdate/helpers', () => bookdateHelpersMock);
 describe('BookDate routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Right swipes run the real library check (findPlexMatch); default: book not in the library
+    prismaMock.plexLibrary.findMany.mockResolvedValue([]);
     authRequest = { user: { id: 'user-1', role: 'admin' }, json: vi.fn() };
     requireAuthMock.mockImplementation((_req: any, handler: any) => handler(authRequest));
     requireAdminMock.mockImplementation((_req: any, handler: any) => handler(authRequest));
@@ -170,6 +174,7 @@ describe('BookDate routes', () => {
   it('updates existing config without a new API key', async () => {
     prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce({
       id: 'cfg-9',
+      provider: 'openai',
       apiKey: 'enc-existing',
     });
     prismaMock.bookDateConfig.update.mockResolvedValueOnce({
@@ -186,6 +191,97 @@ describe('BookDate routes', () => {
 
     expect(payload.success).toBe(true);
     expect(prismaMock.bookDateConfig.update).toHaveBeenCalled();
+    expect(prismaMock.bookDateConfig.update.mock.calls[0][0].data).not.toHaveProperty('apiKey');
+  });
+
+  describe('saved API key reuse on save', () => {
+    const savedCustom = { id: 'cfg-11', provider: 'custom', apiKey: 'enc-saved-key', baseUrl: 'http://llm.saved:8080/v1' };
+    const save = async (body: Record<string, unknown>) => {
+      authRequest.json.mockResolvedValue(body);
+      const { POST } = await import('@/app/api/bookdate/config/route');
+      const response = await POST({} as any);
+      return { response, payload: await response.json() };
+    };
+
+    it('refuses switching to another built-in provider without a new key', async () => {
+      prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce({ id: 'cfg-11', provider: 'openai', apiKey: 'enc-sk-openai', baseUrl: null });
+      const { response, payload } = await save({ provider: 'claude', model: 'claude-x' });
+
+      expect(response.status).toBe(400);
+      expect(payload.error).toMatch(/different provider/i);
+      expect(prismaMock.bookDateConfig.update).not.toHaveBeenCalled();
+    });
+
+    it('does not carry a saved key over to a custom provider', async () => {
+      prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce({ id: 'cfg-11', provider: 'openai', apiKey: 'enc-sk-openai', baseUrl: null });
+      prismaMock.bookDateConfig.update.mockResolvedValueOnce({ id: 'cfg-11', provider: 'custom', apiKey: 'enc-' });
+      const { response } = await save({ provider: 'custom', model: 'local', baseUrl: 'http://llm.local:8080/v1' });
+
+      expect(response.status).toBe(200);
+      expect(prismaMock.bookDateConfig.update.mock.calls[0][0].data.apiKey).toBe('enc-');
+    });
+
+    it('refuses a new custom base URL while a key is saved for the old one', async () => {
+      prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce(savedCustom);
+      const { response, payload } = await save({ provider: 'custom', model: 'm', baseUrl: 'https://attacker.example/v1' });
+
+      expect(response.status).toBe(400);
+      expect(payload.error).toContain('AI provider API key');
+      expect(prismaMock.bookDateConfig.update).not.toHaveBeenCalled();
+    });
+
+    it('keeps the saved key for the same custom base URL (trailing slash ignored)', async () => {
+      prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce(savedCustom);
+      prismaMock.bookDateConfig.update.mockResolvedValueOnce({ ...savedCustom });
+      const { response } = await save({ provider: 'custom', model: 'm', baseUrl: 'http://llm.saved:8080/v1/' });
+
+      expect(response.status).toBe(200);
+      expect(prismaMock.bookDateConfig.update.mock.calls[0][0].data).not.toHaveProperty('apiKey');
+    });
+
+    it('allows a new custom base URL when the saved key is empty', async () => {
+      prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce({ ...savedCustom, apiKey: 'enc-' });
+      prismaMock.bookDateConfig.update.mockResolvedValueOnce({ ...savedCustom, apiKey: 'enc-' });
+      const { response } = await save({ provider: 'custom', model: 'm', baseUrl: 'http://llm.moved:8080/v1' });
+
+      expect(response.status).toBe(200);
+      expect(prismaMock.bookDateConfig.update.mock.calls[0][0].data.apiKey).toBe('enc-');
+    });
+
+    it('lets a custom provider at a new base URL be saved with the key explicitly cleared', async () => {
+      prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce(savedCustom);
+      prismaMock.bookDateConfig.update.mockResolvedValueOnce({ ...savedCustom, apiKey: 'enc-' });
+      const { response } = await save({ provider: 'custom', model: 'm', baseUrl: 'http://llm.moved:8080/v1', clearApiKey: true });
+
+      expect(response.status).toBe(200);
+      expect(prismaMock.bookDateConfig.update.mock.calls[0][0].data.apiKey).toBe('enc-');
+    });
+
+    it('refuses clearing the key for a built-in provider', async () => {
+      prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce({ id: 'cfg-11', provider: 'openai', apiKey: 'enc-sk', baseUrl: null });
+      const { response, payload } = await save({ provider: 'openai', model: 'gpt-4o', clearApiKey: true });
+
+      expect(response.status).toBe(400);
+      expect(payload.error).toMatch(/Only a custom provider/);
+      expect(prismaMock.bookDateConfig.update).not.toHaveBeenCalled();
+    });
+
+    it('says there is no saved key when switching from a keyless custom provider', async () => {
+      prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce({ ...savedCustom, apiKey: 'enc-' });
+      const { response, payload } = await save({ provider: 'openai', model: 'gpt-4o' });
+
+      expect(response.status).toBe(400);
+      expect(payload.error).toBe('There is no saved API key for this provider. Enter one.');
+    });
+
+    it('saves a new custom base URL with a newly entered key', async () => {
+      prismaMock.bookDateConfig.findFirst.mockResolvedValueOnce(savedCustom);
+      prismaMock.bookDateConfig.update.mockResolvedValueOnce({ ...savedCustom });
+      const { response } = await save({ provider: 'custom', model: 'm', baseUrl: 'http://llm.moved:8080/v1', apiKey: 'new-key' });
+
+      expect(response.status).toBe(200);
+      expect(prismaMock.bookDateConfig.update.mock.calls[0][0].data.apiKey).toBe('enc-new-key');
+    });
   });
 
   it('creates custom config with empty API key', async () => {
@@ -626,7 +722,9 @@ describe('BookDate routes', () => {
       audibleAsin: 'ASIN-YEAR',
     } as any);
     prismaMock.audiobook.update.mockResolvedValueOnce({ id: 'ab-year' } as any);
-    prismaMock.request.findFirst.mockResolvedValueOnce({ id: 'req-existing' } as any);
+    prismaMock.request.findFirst
+      .mockResolvedValueOnce(null) // no downloaded/available request by any user (#287 check)
+      .mockResolvedValueOnce({ id: 'req-existing' } as any); // this user's own request
 
     const { POST } = await import('@/app/api/bookdate/swipe/route');
     const response = await POST({} as any);
@@ -849,10 +947,10 @@ describe('BookDate routes', () => {
     expect(payload.success).toBe(true);
   });
 
-  it('tests BookDate connection without auth', async () => {
+  it('tests BookDate connection without auth during setup', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({ data: [{ id: 'model-1' }] }),
+      json: vi.fn().mockResolvedValue({ data: [{ id: 'gpt-4o' }] }),
       text: vi.fn().mockResolvedValue('ok'),
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -860,12 +958,12 @@ describe('BookDate routes', () => {
     const { POST } = await import('@/app/api/bookdate/test-connection/route');
     const response = await POST({
       headers: { get: () => null },
-      json: vi.fn().mockResolvedValue({ provider: 'custom', baseUrl: 'http://custom', apiKey: '' }),
+      json: vi.fn().mockResolvedValue({ provider: 'openai', apiKey: 'sk-test' }),
     } as any);
     const payload = await response.json();
 
     expect(payload.success).toBe(true);
-    expect(payload.models[0].id).toBe('model-1');
+    expect(payload.models[0].id).toBe('gpt-4o');
   });
 });
 

@@ -81,7 +81,8 @@ describe('IndexerManagement', () => {
     });
 
     expect(fetchWithAuthMock).not.toHaveBeenCalled();
-    expect(screen.getByText('IndexerA')).toBeInTheDocument();
+    // The list renders after the response is parsed: wait for it, not just for the request
+    expect(await screen.findByText('IndexerA')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -128,7 +129,7 @@ describe('IndexerManagement', () => {
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(screen.getByText('IndexerB')).toBeInTheDocument();
+    expect(await screen.findByText('IndexerB')).toBeInTheDocument();
   });
 
   it('removes a configured indexer after confirmation', async () => {

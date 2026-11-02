@@ -10,6 +10,11 @@ import crypto from 'crypto';
 import path from 'path';
 import { AUDIO_EXTENSIONS } from '../constants/audio-formats';
 
+/** True when the file name has a supported audio extension (any case). */
+export function isAudioFilename(name: string): boolean {
+  return (AUDIO_EXTENSIONS as readonly string[]).includes(path.extname(name).toLowerCase());
+}
+
 /**
  * Generates a SHA256 hash of audio filenames for library matching.
  *
@@ -45,10 +50,7 @@ export function generateFilesHash(filePaths: string[]): string {
       const normalizedPath = filePath.replace(/\\/g, '/');
       return path.posix.basename(normalizedPath);
     })
-    .filter((basename) => {
-      const ext = path.extname(basename).toLowerCase();
-      return (AUDIO_EXTENSIONS as readonly string[]).includes(ext);
-    })
+    .filter(isAudioFilename)
     .map((basename) => basename.toLowerCase()) // Normalize case
     .sort(); // Sort alphabetically for deterministic hash
 

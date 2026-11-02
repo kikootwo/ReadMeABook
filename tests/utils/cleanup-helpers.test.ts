@@ -4,7 +4,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { removeEmptyParentDirectories } from '@/lib/utils/cleanup-helpers';
+import { normalizePath, removeEmptyParentDirectories } from '@/lib/utils/cleanup-helpers';
 
 // Mock fs/promises
 const fsMock = vi.hoisted(() => ({
@@ -410,5 +410,22 @@ describe('removeEmptyParentDirectories', () => {
       expect(result.success).toBe(true);
       expect(result.removedDirectories).toEqual(['/media/usenet/complete/readmeabook']);
     });
+  });
+});
+
+describe('normalizePath (Windows input forms)', () => {
+  it.each([
+    ['C:', 'C:/'],
+    ['c:', 'C:/'],
+    ['C:\\', 'C:/'],
+    ['c:\\Media\\Books\\', 'C:/Media/Books'],
+    ['C:/Media//Books/', 'C:/Media/Books'],
+  ])('normalizes %s to %s', (input, expected) => {
+    expect(normalizePath(input)).toBe(expected);
+  });
+
+  it('leaves POSIX paths alone', () => {
+    expect(normalizePath('/media/books/')).toBe('/media/books');
+    expect(normalizePath('/')).toBe('/');
   });
 });

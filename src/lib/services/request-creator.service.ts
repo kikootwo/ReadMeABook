@@ -1,8 +1,8 @@
 /**
  * Component: Request Creator Service
- * Documentation: documentation/backend/services/requests.md
+ * Documentation: documentation/backend/services/goodreads-sync.md
  *
- * Shared request-creation logic used by both the API route and Goodreads sync.
+ * Shared request-creation logic used by the API route and the automatic callers (shelf sync, watched lists: `automatic: true`).
  * Encapsulates: duplicate detection, library check, Audnexus enrichment,
  * audiobook record creation, approval flow, notification queuing, and search job triggering.
  */
@@ -15,6 +15,9 @@ import { getAudibleService } from '@/lib/integrations/audible.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { shouldSkipAutoSearch } from '@/lib/utils/release-date';
 import { seedAsin, getSiblingAsins } from '@/lib/services/works.service';
+import { isLibraryCoverSource, sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
+import { createRequestReplacing, RE_REQUESTABLE_STATUSES, RequestAlreadyReplacedError } from '@/lib/services/request-rerequest';
+import { decideAutoReRequest, removedFromLibrarySkip, type AutoReRequestGo } from '@/lib/services/auto-rerequest';
 
 const logger = RMABLogger.create('RequestCreator');
 
@@ -31,11 +34,13 @@ export interface CreateRequestOptions {
   skipAutoSearch?: boolean;
   /** When true, skip the per-user ignore list check (used for manual requests) */
   bypassIgnore?: boolean;
+  /** Shelf sync and watched lists: never replace a cancelled request, back off on failures (auto-rerequest.ts) */
+  automatic?: boolean;
 }
 
 export type CreateRequestResult =
   | { success: true; request: any }
-  | { success: false; reason: 'already_available' | 'being_processed' | 'duplicate' | 'user_not_found' | 'ignored'; message: string };
+  | { success: false; reason: 'already_available' | 'being_processed' | 'duplicate' | 'user_not_found' | 'ignored' | 'cancelled_by_user' | 'retry_not_due' | 'removed_from_library'; message: string };
 
 /**
  * Create a request for a user, with full duplicate detection, library checks,
@@ -46,7 +51,7 @@ export async function createRequestForUser(
   audiobook: CreateRequestInput,
   options: CreateRequestOptions = {}
 ): Promise<CreateRequestResult> {
-  const { skipAutoSearch = false, bypassIgnore = false } = options;
+  const { skipAutoSearch = false, bypassIgnore = false, automatic = false } = options;
 
   // Check for existing active request (downloaded/available) for this ASIN
   const existingActiveRequest = await prisma.request.findFirst({
@@ -68,6 +73,10 @@ export async function createRequestForUser(
         : 'This audiobook is being processed and will be available soon',
     };
   }
+
+  // A book removed from the library comes back only through a manual request (#214)
+  const removedSkip = automatic ? await removedFromLibrarySkip(audiobook.asin) : null;
+  if (removedSkip) return removedSkip;
 
   // Check if audiobook is already in Plex/ABS library
   const plexMatch = await findPlexMatch({
@@ -141,7 +150,7 @@ export async function createRequestForUser(
         author: audiobook.author,
         narrator: audiobook.narrator,
         description: audiobook.description,
-        coverArtUrl: audiobook.coverArtUrl,
+        coverArtUrl: sanitizeCoverArtUrl(audiobook.coverArtUrl),
         year,
         series,
         seriesPart,
@@ -155,7 +164,12 @@ export async function createRequestForUser(
     const updates: Record<string, any> = {};
     if (audiobook.title && audiobook.title !== audiobookRecord.title) updates.title = audiobook.title;
     if (audiobook.author && audiobook.author !== audiobookRecord.author) updates.author = audiobook.author;
-    if (audiobook.coverArtUrl && !audiobookRecord.coverArtUrl) updates.coverArtUrl = audiobook.coverArtUrl;
+    const safeCoverArtUrl = sanitizeCoverArtUrl(audiobook.coverArtUrl);
+    // Fill a missing cover, or upgrade one the library can't use (e.g. a shelf-sync fallback) to one it can
+    const existingCover = sanitizeCoverArtUrl(audiobookRecord.coverArtUrl);
+    if (safeCoverArtUrl && (!existingCover || (!isLibraryCoverSource(existingCover) && isLibraryCoverSource(safeCoverArtUrl)))) {
+      updates.coverArtUrl = safeCoverArtUrl;
+    }
     if (year) updates.year = year;
     if (series) updates.series = series;
     if (seriesPart) updates.seriesPart = seriesPart;
@@ -188,18 +202,24 @@ export async function createRequestForUser(
     },
   });
 
+  // A failed/warn/cancelled request is replaced by the new one (atomically, below),
+  // keeping its blocklist; it is not touched until the new request is created
+  let replacesRequest: { id: string; customSearchTerms: string | null } | null = null;
+  let autoReRequest: AutoReRequestGo | undefined; // set only by automatic callers; user requests start at count 0
   if (existingRequest) {
-    const canReRequest = ['failed', 'warn', 'cancelled'].includes(existingRequest.status);
-    if (!canReRequest) {
+    if (!RE_REQUESTABLE_STATUSES.includes(existingRequest.status)) {
       return {
         success: false,
         reason: 'duplicate',
         message: 'You have already requested this audiobook',
       };
     }
-    // Delete existing failed/warn/cancelled request
-    logger.debug(`Deleting existing ${existingRequest.status} request ${existingRequest.id} to allow re-request`);
-    await prisma.request.delete({ where: { id: existingRequest.id } });
+    if (automatic) {
+      const decision = await decideAutoReRequest(existingRequest, audiobookRecord.title);
+      if (decision.skip) return decision.skip;
+      autoReRequest = decision;
+    }
+    replacesRequest = { id: existingRequest.id, customSearchTerms: existingRequest.customSearchTerms ?? null };
   }
 
   // Check ANY user's active request for same audiobook (avoid duplicate processing)
@@ -275,21 +295,39 @@ export async function createRequestForUser(
     initialStatus = 'pending';
   }
 
-  // Create request
-  const newRequest = await prisma.request.create({
-    data: {
-      userId,
-      audiobookId: audiobookRecord.id,
-      status: initialStatus,
-      type: 'audiobook',
-      progress: 0,
-      releaseDate,
-    },
-    include: {
-      audiobook: true,
-      user: { select: { id: true, plexUsername: true } },
-    },
-  });
+  // Create the request (replacing a failed one keeps its blocklist and search terms)
+  let newRequest;
+  try {
+    newRequest = await createRequestReplacing(
+      {
+        data: {
+          userId,
+          audiobookId: audiobookRecord.id,
+          status: initialStatus,
+          type: 'audiobook',
+          progress: 0,
+          releaseDate,
+          ...(replacesRequest?.customSearchTerms && { customSearchTerms: replacesRequest.customSearchTerms }),
+          ...(autoReRequest && { autoRerequestCount: autoReRequest.nextCount }),
+        },
+        include: {
+          audiobook: true,
+          user: { select: { id: true, plexUsername: true } },
+        },
+      },
+      replacesRequest?.id ?? null
+    );
+  } catch (error) {
+    if (error instanceof RequestAlreadyReplacedError) {
+      logger.info(`Request ${error.requestId} was re-requested concurrently; not creating a second request`);
+      return { success: false, reason: 'duplicate', message: 'You have already requested this audiobook' };
+    }
+    throw error;
+  }
+  if (replacesRequest) {
+    logger.debug(`Replaced ${existingRequest?.status} request ${replacesRequest.id} with ${newRequest.id} (blocklist carried over)`);
+    if (autoReRequest) logger.info(`${autoReRequest.logLine} (new request ${newRequest.id})`);
+  }
 
   if (releaseGateSkip) {
     logger.info(`Skipped auto-search for unreleased book`, {

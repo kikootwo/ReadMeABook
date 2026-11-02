@@ -35,6 +35,16 @@ vi.mock('@/lib/services/job-queue.service', () => ({
   getJobQueueService: () => jobQueueMock,
 }));
 
+
+// Prowlarr connection used by the download-URL guard and key stripping
+vi.mock('@/lib/integrations/prowlarr-connection', () => ({
+  getProwlarrConnection: async () => ({
+    baseUrl: 'http://prowlarr:9696',
+    apiKey: 'test-prowlarr-key',
+    base: { origin: 'http://prowlarr:9696', protocol: 'http:', hostname: 'prowlarr', host: 'prowlarr:9696', port: '9696', defaultPort: false, userinfo: '', basePath: '' },
+  }),
+}));
+
 describe('Admin requests routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -250,6 +260,25 @@ describe('Admin requests routes', () => {
     expect(deleteRequestMock).toHaveBeenCalledWith('req-1', 'admin-1');
   });
 
+  it('returns why the files were kept', async () => {
+    deleteRequestMock.mockResolvedValueOnce({
+      success: true,
+      message: 'Request deleted; files kept: folder contents changed since import',
+      filesDeleted: false,
+      torrentsRemoved: 0,
+      torrentsKeptSeeding: 0,
+      torrentsKeptUnlimited: 0,
+      filesKeptReason: 'folder contents changed since import',
+    });
+
+    const { DELETE } = await import('@/app/api/admin/requests/[id]/route');
+    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-1' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.details).toMatchObject({ filesDeleted: false, filesKeptReason: 'folder contents changed since import' });
+  });
+
   it('returns 401 when admin user is missing', async () => {
     authRequest.user = null;
 
@@ -337,7 +366,7 @@ describe('Admin requests routes', () => {
   });
 
   it('returns 404 when approving a missing request', async () => {
-    prismaMock.request.findUnique.mockResolvedValueOnce(null);
+    prismaMock.request.findFirst.mockResolvedValueOnce(null);
     const request = { json: vi.fn().mockResolvedValue({ action: 'approve' }) };
 
     const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
@@ -349,7 +378,7 @@ describe('Admin requests routes', () => {
   });
 
   it('returns 400 when request is not awaiting approval', async () => {
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-2',
       status: 'pending',
       audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
@@ -366,10 +395,10 @@ describe('Admin requests routes', () => {
   });
 
   it('approves request with a selected torrent and triggers download', async () => {
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-3',
       status: 'awaiting_approval',
-      selectedTorrent: { title: 'Torrent' },
+      selectedTorrent: { title: 'Torrent', downloadUrl: 'http://prowlarr:9696/1/download' },
       audiobook: { id: 'ab-3', title: 'Title', author: 'Author' },
       user: { id: 'u3', plexUsername: 'user3' },
       userId: 'u3',
@@ -393,7 +422,7 @@ describe('Admin requests routes', () => {
   });
 
   it('approves request without a selected torrent and triggers search', async () => {
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-4',
       status: 'awaiting_approval',
       selectedTorrent: null,
@@ -420,7 +449,7 @@ describe('Admin requests routes', () => {
   });
 
   it('denies request without triggering jobs', async () => {
-    prismaMock.request.findUnique.mockResolvedValueOnce({
+    prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-5',
       status: 'awaiting_approval',
       selectedTorrent: null,

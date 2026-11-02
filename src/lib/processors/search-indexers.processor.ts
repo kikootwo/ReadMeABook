@@ -6,12 +6,16 @@
 import { SearchIndexersPayload, getJobQueueService } from '../services/job-queue.service';
 import { prisma } from '../db';
 import { getProwlarrService } from '../integrations/prowlarr.service';
-import { getRankingAlgorithm } from '../utils/ranking-algorithm';
+import { getRankingAlgorithm, AUTO_SEARCH_MIN_MB_PER_MINUTE } from '../utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer-grouping';
 import { RMABLogger } from '../utils/logger';
 import { getLanguageForRegion } from '../constants/language-config';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
+import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import type { AudibleRegion } from '../types/audible';
+
+const MAX_RANKED_RESULTS = 100;
+const CANCELLED_DURING_SEARCH = 'Request cancelled or deleted during the search, not re-queued';
 
 /**
  * Process search indexers job
@@ -25,21 +29,19 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
   logger.info(`Processing request ${requestId} for "${audiobook.title}"`);
 
   try {
-    // Update request status to searching
-    await prisma.request.update({
-      where: { id: requestId },
-      data: {
-        status: 'searching',
-        searchAttempts: { increment: 1 },
-        updatedAt: new Date(),
-      },
-    });
+    // Update request status to searching, unless it was cancelled or deleted
+    if (!(await updateRequestUnlessStopped(requestId, { status: 'searching', searchAttempts: { increment: 1 } }))) {
+      logger.info(`Request ${requestId} is cancelled or deleted, skipping search`);
+      return { success: true, message: 'Request cancelled or deleted, search skipped', requestId };
+    }
 
-    // Check for custom search terms override
+    // Check for custom search terms override; the catalog series position feeds the volume check (#330)
     const requestRecord = await prisma.request.findUnique({
       where: { id: requestId },
-      select: { customSearchTerms: true },
+      select: { customSearchTerms: true, audiobook: { select: { series: true, seriesPart: true } } },
     });
+    const series = requestRecord?.audiobook?.series ?? undefined;
+    const seriesPart = requestRecord?.audiobook?.seriesPart ?? undefined;
     const effectiveSearchTitle = requestRecord?.customSearchTerms || audiobook.title;
 
     // Get enabled indexers from configuration
@@ -103,8 +105,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
           categories: group.categories,
           indexerIds: group.indexerIds,
           minSeeders: 1, // Only torrents with at least 1 seeder
-          maxResults: 100, // Limit per group
-        });
+        }, { exactTitle: Boolean(requestRecord?.customSearchTerms) }); // custom terms: sent as given (#316)
 
         logger.info(`Group ${i + 1} returned ${groupResults.length} results`);
         allResults.push(...groupResults);
@@ -132,15 +133,12 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
 
       logger.warn(`${errorMessage} for request ${requestId}, marking as awaiting_search`);
 
-      await prisma.request.update({
-        where: { id: requestId },
-        data: {
-          status: 'awaiting_search',
-          errorMessage,
-          lastSearchAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
+      // Unless a cancel or delete landed during the search: re-queueing it would
+      // let the scheduled re-search jobs download the book anyway
+      if (!(await updateRequestUnlessStopped(requestId, { status: 'awaiting_search', errorMessage, lastSearchAt: new Date() }))) {
+        logger.info(`Request ${requestId} was cancelled or deleted during the search, not re-queued`);
+        return { success: true, message: CANCELLED_DURING_SEARCH, requestId };
+      }
 
       return {
         success: false,
@@ -177,39 +175,53 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     const langConfig = getLanguageForRegion(region);
 
     // Rank results with indexer priorities and flag configs
-    // Note: rankTorrents now filters out results < 20 MB internally
+    // Note: rankTorrents filters out results < 20 MB internally, and here also results under
+    // the MB-per-minute floor when the runtime is known (one file of a multi-file post, #311)
     // Use effectiveSearchTitle so custom search terms are respected for ranking
     // requireAuthor: true (default) - strict filtering for automatic selection
+    // series/seriesPart: automatic only, a release naming another book of the series is rejected (#330)
+    if (seriesPart) {
+      logger.info(`Series position: ${series ? `"${series}" ` : ''}#${seriesPart}, releases naming another book are skipped`);
+    }
     const rankedResults = ranker.rankTorrents(searchResults, {
       title: effectiveSearchTitle,
       author: audiobook.author,
       durationMinutes,
+      series,
+      seriesPart,
     }, {
       indexerPriorities,
       flagConfigs,
       requireAuthor: true,  // Automatic mode - prevent wrong authors
       stopWords: langConfig.stopWords,
       characterReplacements: langConfig.characterReplacements,
+      minMBPerMinute: AUTO_SEARCH_MIN_MB_PER_MINUTE,  // Automatic only; interactive lists everything
     });
 
-    // Log filter results
+    // Log filter results (the floor applies only when the runtime is known)
     const postFilterCount = rankedResults.length;
     if (postFilterCount < preFilterCount) {
-      logger.info(`Filtered out ${preFilterCount - postFilterCount} results < ${sizeMBThreshold} MB`);
+      const floorNote = durationMinutes ? ` or < ${AUTO_SEARCH_MIN_MB_PER_MINUTE} MB/min` : '';
+      logger.info(`Filtered out ${preFilterCount - postFilterCount} results < ${sizeMBThreshold} MB${floorNote}`);
     }
 
     // Dual threshold filtering:
     // 1. Base score must be >= 50 (quality minimum)
     // 2. Final score must be >= 50 (not disqualified by negative bonuses)
-    const filteredResults = rankedResults.filter(result =>
+    const qualifyingResults = rankedResults.filter(result =>
       result.score >= 50 && result.finalScore >= 50
     );
+    const resultsTruncated = qualifyingResults.length > MAX_RANKED_RESULTS;
+    const filteredResults = qualifyingResults.slice(0, MAX_RANKED_RESULTS);
 
     const disqualifiedByNegativeBonus = rankedResults.filter(result =>
       result.score >= 50 && result.finalScore < 50
     ).length;
 
-    logger.info(`Ranked ${rankedResults.length} results, ${filteredResults.length} above threshold (50/100 base + final)`);
+    logger.info(`Ranked ${rankedResults.length} results, ${qualifyingResults.length} above threshold (50/100 base + final)`);
+    if (resultsTruncated) {
+      logger.info(`Limited automatic search to the top ${MAX_RANKED_RESULTS} of ${qualifyingResults.length} qualifying results after ranking`);
+    }
     if (disqualifiedByNegativeBonus > 0) {
       logger.info(`${disqualifiedByNegativeBonus} torrents disqualified by negative flag bonuses`);
     }
@@ -218,15 +230,14 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       // No quality results found - queue for re-search instead of failing
       logger.warn(`No quality matches found for request ${requestId} (all below 50/100), marking as awaiting_search`);
 
-      await prisma.request.update({
-        where: { id: requestId },
-        data: {
-          status: 'awaiting_search',
-          errorMessage: 'No quality matches found. Will retry automatically.',
-          lastSearchAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
+      if (!(await updateRequestUnlessStopped(requestId, {
+        status: 'awaiting_search',
+        errorMessage: 'No quality matches found. Will retry automatically.',
+        lastSearchAt: new Date(),
+      }))) {
+        logger.info(`Request ${requestId} was cancelled or deleted during the search, not re-queued`);
+        return { success: true, message: CANCELLED_DURING_SEARCH, requestId };
+      }
 
       return {
         success: false,
@@ -283,7 +294,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       id: audiobook.id,
       title: audiobook.title,
       author: audiobook.author,
-    }, bestResult);
+    }, bestResult, filteredResults.slice(1));
 
     return {
       success: true,
@@ -300,14 +311,11 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
-    await prisma.request.update({
-      where: { id: requestId },
-      data: {
-        status: 'failed',
-        errorMessage: error instanceof Error ? error.message : 'Unknown error during search',
-        updatedAt: new Date(),
-      },
-    });
+    // Mark failed, unless a cancel or delete landed meanwhile
+    await markRequestFailedUnlessStopped(
+      requestId,
+      error instanceof Error ? error.message : 'Unknown error during search'
+    );
 
     throw error;
   }

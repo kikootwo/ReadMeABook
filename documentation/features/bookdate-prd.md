@@ -23,6 +23,7 @@
 1. **Setup:** Admin configures AI provider, API key, model, library scope, and custom prompt (global for all users)
 2. **Discovery:** AI generates personalized audiobook recommendations based on each user's individual Plex library, ratings, and swipe history
 3. **Interaction:** Swipe right (request), left (not interested), or up (neutral) on recommendations
+   - Right swipe runs the two ownership checks of `POST /api/requests` (`createRequestForUser`) before creating a request: any user's `downloaded`/`available` request for the ASIN, then the library (`findPlexMatch`). Either hit or a failed check → no request; the swipe is always recorded. Not run: the check for another user's in-flight request
 4. **Learning:** AI refines future recommendations based on individual swipe history
 
 ### Key Differentiation
@@ -97,7 +98,7 @@ UI Elements:
 **Validation:**
 - API key required for initial setup
 - Model and library scope always required
-- API key optional when updating existing configuration (uses saved key)
+- API key optional when updating existing configuration: the saved key is kept only for the same provider (and, for custom, the same base URL); custom can be saved keyless with `clearApiKey: true`
 
 **Visibility:** BookDate tab visible to all admins in /admin/settings
 
@@ -397,7 +398,7 @@ UI Elements:
 **Configuration (Admin only - except GET):**
 - `POST /api/bookdate/config` - Create/update global BookDate config (Admin only)
 - `GET /api/bookdate/config` - Get global BookDate config (excluding API key) (All authenticated users)
-- `POST /api/bookdate/test-connection` - Validate API key, return available models (All authenticated users - admins use for setup)
+- `POST /api/bookdate/test-connection` - Validate API key, return available models (setup wizard without sign-in while setup is incomplete, built-in providers only; requires admin after setup; custom provider and saved key admin only). Errors report the provider's HTTP status or "response was not JSON", never the remote body
 - `DELETE /api/bookdate/config` - Delete global BookDate config (Admin only)
 - `DELETE /api/bookdate/swipes` - Clear ALL users' swipe history (Admin only)
 
@@ -407,6 +408,7 @@ UI Elements:
   - Response: Array of 10 recommendations
 - `POST /api/bookdate/swipe` - Record swipe action for current user
   - Body: `{ recommendationId, action, markedAsKnown? }`
+  - Response: `{ success, action, markedAsKnown, requestCreated, reason?, alreadyInLibrary }`; `reason` only when a right swipe created no request: `alreadyInLibrary` | `alreadyRequested` (any user's downloaded/available request, or this user's own request) | `libraryCheckFailed` (fail closed) | `requestFailed`; `alreadyInLibrary` = `reason === 'alreadyInLibrary'`
 - `POST /api/bookdate/undo` - Undo last swipe (left/up only)
 - `POST /api/bookdate/generate` - Force generate new batch (for "Get More" button)
 

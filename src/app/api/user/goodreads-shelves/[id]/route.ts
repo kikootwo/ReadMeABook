@@ -8,12 +8,16 @@ import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
+import { goodreadsRssUrlSchema } from '@/lib/utils/goodreads-rss-url.schema';
+import { DUPLICATE_SHELF_MESSAGE, findShelfWithSameFeed, isUniqueConstraintError } from '@/lib/services/goodreads-shelf-match';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.GoodreadsShelves');
 
 const UpdateGoodreadsSchema = z.object({
-  rssUrl: z.string().url('Must be a valid URL').optional(),
+  rssUrl: goodreadsRssUrlSchema.optional(),
   autoRequest: z.boolean().optional(),
 });
 
@@ -50,7 +54,7 @@ export async function DELETE(
 
       return NextResponse.json({ success: true });
     } catch (error) {
-      logger.error('Failed to delete shelf', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to delete shelf', { error: errorForLog(error) });
       return NextResponse.json({ error: 'Failed to delete shelf' }, { status: 500 });
     }
   });
@@ -81,13 +85,19 @@ export async function PATCH(
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
 
-      const body = await request.json();
+      const bodyResult = await readJsonBody(request);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const { rssUrl, autoRequest } = UpdateGoodreadsSchema.parse(body);
 
       const updateData: Record<string, unknown> = {};
       let needsResync = false;
 
       if (rssUrl !== undefined) {
+        // Another of the user's shelves already follows this feed (normalised comparison)
+        if (await findShelfWithSameFeed(req.user.id, rssUrl, id)) {
+          return NextResponse.json({ error: 'DuplicateShelf', message: DUPLICATE_SHELF_MESSAGE }, { status: 409 });
+        }
         updateData.rssUrl = rssUrl;
         updateData.lastSyncAt = null;
         updateData.bookCount = null;
@@ -110,7 +120,7 @@ export async function PATCH(
           await jobQueue.addSyncShelvesJob(undefined, updated.id, 'goodreads', 0, req.user.id);
         } catch (error) {
           logger.error('Failed to trigger immediate list sync', {
-            error: error instanceof Error ? error.message : String(error),
+            error: errorForLog(error),
           });
         }
       }
@@ -118,9 +128,16 @@ export async function PATCH(
       return NextResponse.json({ success: true, shelf: updated });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return NextResponse.json({ error: 'ValidationError', details: error.errors }, { status: 400 });
+        const details = zodIssueDetails(error);
+        return NextResponse.json(
+          { error: 'ValidationError', message: details[0]?.message, details },
+          { status: 400 }
+        );
       }
-      logger.error('Failed to update shelf', { error: error instanceof Error ? error.message : String(error) });
+      if (isUniqueConstraintError(error)) {
+        return NextResponse.json({ error: 'DuplicateShelf', message: DUPLICATE_SHELF_MESSAGE }, { status: 409 });
+      }
+      logger.error('Failed to update shelf', { error: errorForLog(error) });
       return NextResponse.json({ error: 'Failed to update shelf' }, { status: 500 });
     }
   });

@@ -398,7 +398,8 @@ export function useSearchTorrents() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const searchTorrents = async (title: string, author: string, asin?: string) => {
+  /** exactTitle: the user edited the title, so it is sent as given (no fallback queries, #316) */
+  const searchTorrents = async (title: string, author: string, asin?: string, exactTitle?: boolean) => {
     if (!accessToken) {
       throw new Error('Not authenticated');
     }
@@ -412,7 +413,7 @@ export function useSearchTorrents() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ title, author, asin }),
+        body: JSON.stringify({ title, author, asin, ...(exactTitle ? { exactTitle: true } : {}) }),
       });
 
       const data = await response.json();
@@ -464,7 +465,7 @@ export function useRequestWithTorrent() {
           throw new Error('This audiobook is being processed. It will be available in your library soon.');
         }
         if (data.error === 'AlreadyAvailable') {
-          throw new Error('This audiobook is already in your Plex library.');
+          throw new Error('This audiobook is already in your library.');
         }
         throw new Error(data.message || 'Failed to create request and download torrent');
       }

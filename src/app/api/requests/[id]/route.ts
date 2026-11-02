@@ -1,6 +1,6 @@
 /**
  * Component: Individual Request API Routes
- * Documentation: documentation/backend/api.md
+ * Documentation: documentation/backend/services/api-tokens.md
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -10,6 +10,10 @@ import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '@/lib/interfaces/download-client.interface';
 import { CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
+import { ADMIN_REQUEST_DETAIL_INCLUDE, OWNER_REQUEST_DETAIL_SELECT } from '@/lib/services/request-detail-query';
+import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
+import { readJsonBody } from '@/lib/utils/request-body';
+import { toJsonSafe } from '@/lib/utils/json-safe';
 
 const logger = RMABLogger.create('API.RequestById');
 
@@ -32,29 +36,13 @@ export async function GET(
 
       const { id } = await params;
 
-      const requestRecord = await prisma.request.findFirst({
-        where: {
-          id,
-          deletedAt: null, // Only show active requests
-        },
-        include: {
-          audiobook: true,
-          user: {
-            select: {
-              id: true,
-              plexUsername: true,
-            },
-          },
-          downloadHistory: {
-            where: { selected: true },
-            take: 1,
-          },
-          jobs: {
-            orderBy: { createdAt: 'desc' },
-            take: 5,
-          },
-        },
-      });
+      const isAdmin = req.user.role === 'admin';
+      const where = { id, deletedAt: null }; // Only show active requests
+
+      // Non-admins (owners, API tokens) get an explicit field list without internal job/download data
+      const requestRecord = isAdmin
+        ? await prisma.request.findFirst({ where, include: ADMIN_REQUEST_DETAIL_INCLUDE })
+        : await prisma.request.findFirst({ where, select: OWNER_REQUEST_DETAIL_SELECT });
 
       if (!requestRecord) {
         return NextResponse.json(
@@ -71,9 +59,10 @@ export async function GET(
         );
       }
 
+      // Sizes are BigInt columns, which JSON.stringify cannot serialize (#261)
       return NextResponse.json({
         success: true,
-        request: requestRecord,
+        request: toJsonSafe(isAdmin ? requestRecord : await stripProwlarrKeyFromResults(requestRecord)),
       });
     } catch (error) {
       logger.error('Failed to get request', { error: error instanceof Error ? error.message : String(error) });
@@ -106,7 +95,9 @@ export async function PATCH(
       }
 
       const { id } = await params;
-      const body = await req.json();
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const { action } = body;
 
       const requestRecord = await prisma.request.findFirst({
@@ -279,7 +270,11 @@ export async function PATCH(
           await jobQueue.addOrganizeJob(
             id,
             requestWithData.audiobook.id,
-            downloadPath
+            downloadPath,
+            undefined,
+            undefined,
+            undefined,
+            downloadHistory.id
           );
 
           updated = await prisma.request.update({
@@ -287,7 +282,7 @@ export async function PATCH(
             data: {
               status: 'processing',
               progress: 100,
-              errorMessage: null,
+              errorMessage: null, autoRerequestCount: 0,
               updatedAt: new Date(),
             },
             include: {
@@ -327,7 +322,7 @@ export async function PATCH(
             data: {
               status: 'pending',
               progress: 0,
-              errorMessage: null,
+              errorMessage: null, autoRerequestCount: 0,
               updatedAt: new Date(),
             },
             include: {

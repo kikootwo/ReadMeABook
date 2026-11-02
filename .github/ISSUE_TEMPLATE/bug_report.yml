@@ -1,0 +1,84 @@
+name: Bug report
+description: Something in ReadMeABook is broken or behaving wrong.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Setup and "how do I" questions get answered faster on [Discord](https://discord.gg/kaw6jKbKts).
+        Found a security problem? Please don't file it here. Follow the [security policy](https://github.com/kikootwo/ReadMeABook/security/policy) instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: ReadMeABook version
+      description: Shown in the app, or the image tag you pulled. "latest" is not enough, please give the actual version.
+      placeholder: e.g. 1.2.3
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment type
+      options:
+        - Unified Docker image
+        - Multi-container Docker
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Media backend
+      options:
+        - Plex
+        - Audiobookshelf
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead. Screenshots help for anything visual.
+    validations:
+      required: true
+
+  - type: textarea
+    id: compose
+    attributes:
+      label: Docker Compose (or run command)
+      description: The relevant part of your compose file or run command. Remove passwords, API keys and any other secrets before pasting. For other setups, describe how you run ReadMeABook instead.
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Container or app logs from around the time of the problem. Remove secrets here too.
+      render: shell
+    validations:
+      required: true

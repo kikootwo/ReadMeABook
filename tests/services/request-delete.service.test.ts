@@ -36,14 +36,14 @@ vi.mock('@/lib/services/download-client-manager.service', () => ({
 
 vi.mock('@/lib/services/audiobookshelf/api', () => ({
   deleteABSItem: vi.fn(),
+  getABSItem: vi.fn(),
 }));
 
-vi.mock('@/lib/utils/file-organizer', () => ({
-  buildAudiobookPath: vi.fn((mediaDir: string, template: string, data: any) => {
-    // Simple mock implementation that mimics the real behavior for tests
-    return path.join(mediaDir, data.author, `${data.title} ${data.asin}`);
-  }),
-}));
+// The library delete guard has its own real-filesystem tests; here it allows every folder
+const guardMock = vi.hoisted(() => ({ assertSafeLibraryDelete: vi.fn(), planEbookDelete: vi.fn(), isStaleStoredFolder: vi.fn(async () => false) }));
+vi.mock('@/lib/utils/library-delete-guard', () => guardMock);
+vi.mock('@/lib/processors/organize-cleanup-guard', () => ({ sweepEmptyParents: vi.fn(async () => undefined) }));
+const canonical = (p: string) => path.resolve(p).replace(/\\/g, '/');
 
 describe('deleteRequest', () => {
   beforeEach(() => {
@@ -52,6 +52,12 @@ describe('deleteRequest', () => {
     prismaMock.request.findMany.mockResolvedValue([]);
     prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
     downloadClientManagerMock.getClientServiceForProtocol.mockReset();
+    guardMock.assertSafeLibraryDelete.mockImplementation(async (p: string) => ({
+      deletePath: p,
+      canonicalPath: canonical(p),
+      exists: true,
+      roots: { mediaDir: '/media', downloadRoots: [], sweepRoots: [], mappedRoots: [] },
+    }));
   });
 
   it('returns not found when request is missing', async () => {
@@ -74,10 +80,12 @@ describe('deleteRequest', () => {
         audibleAsin: 'ASIN1',
         plexGuid: 'plex-1',
         absItemId: null,
+        filePath: path.join('/media', 'Author', 'Book ASIN1'),
       },
       downloadHistory: [
         {
           torrentHash: 'hash-1',
+          addedByRmab: true,
           indexerName: 'IndexerA',
           downloadStatus: 'completed',
         },
@@ -154,10 +162,12 @@ describe('deleteRequest', () => {
         audibleAsin: null,
         plexGuid: 'plex-2',
         absItemId: null,
+        filePath: path.join('/media', 'Author', 'Book Two'),
       },
       downloadHistory: [
         {
           nzbId: 'nzb-1',
+          downloadClient: 'sabnzbd',
           indexerName: 'IndexerB',
           downloadStatus: 'completed',
         },
@@ -219,10 +229,12 @@ describe('deleteRequest', () => {
         audibleAsin: 'ASIN3',
         plexGuid: 'plex-3',
         absItemId: null,
+        filePath: path.join('/media', 'Author Name', 'Book Three ASIN3'),
       },
       downloadHistory: [
         {
           torrentHash: 'hash-3',
+          addedByRmab: true,
           indexerName: 'IndexerC',
           downloadStatus: 'completed',
         },
@@ -265,9 +277,13 @@ describe('deleteRequest', () => {
     prismaMock.plexLibrary.findMany.mockResolvedValue([
       { id: 'lib-2', title: 'Book Three', author: 'Other' },
     ]);
-    fsMock.access
-      .mockRejectedValueOnce(new Error('missing'))
-      .mockResolvedValueOnce(undefined);
+    // The stored folder no longer exists
+    guardMock.assertSafeLibraryDelete.mockImplementation(async (p: string) => ({
+      deletePath: p,
+      canonicalPath: canonical(p),
+      exists: false,
+      roots: { mediaDir: '/media', downloadRoots: [], sweepRoots: [], mappedRoots: [] },
+    }));
     fsMock.rm.mockResolvedValue(undefined);
     prismaMock.request.update.mockResolvedValue({});
     prismaMock.audiobook.update.mockResolvedValue({});
@@ -277,7 +293,7 @@ describe('deleteRequest', () => {
 
     expect(result.torrentsKeptSeeding).toBe(1);
 
-    // Path doesn't exist, so rm should not be called (first access fails)
+    // Path doesn't exist, so rm should not be called
     expect(fsMock.rm).not.toHaveBeenCalled();
   });
 
@@ -291,10 +307,12 @@ describe('deleteRequest', () => {
         audibleAsin: null,
         plexGuid: 'plex-4',
         absItemId: null,
+        filePath: path.join('/media', 'Author', 'Book Four'),
       },
       downloadHistory: [
         {
           torrentHash: 'hash-4',
+          addedByRmab: true,
           indexerName: 'IndexerD',
           downloadStatus: 'completed',
         },
@@ -349,10 +367,12 @@ describe('deleteRequest', () => {
         audibleAsin: null,
         plexGuid: null,
         absItemId: 'abs-5',
+        filePath: path.join('/media', 'Author', 'Book Five'),
       },
       downloadHistory: [
         {
           nzbId: 'nzb-5',
+          downloadClient: 'sabnzbd',
           indexerName: 'IndexerE',
           downloadStatus: 'completed',
         },
@@ -401,6 +421,7 @@ describe('deleteRequest', () => {
         audibleAsin: 'ASIN6',
         plexGuid: null,
         absItemId: 'abs-item-123',
+        filePath: path.join('/media', 'Author Six', 'Book Six ASIN6'),
       },
       downloadHistory: [],
     });
@@ -423,14 +444,16 @@ describe('deleteRequest', () => {
     prismaMock.request.update.mockResolvedValue({});
     prismaMock.audiobook.update.mockResolvedValue({});
 
-    const { deleteABSItem } = await import('@/lib/services/audiobookshelf/api');
+    const { deleteABSItem, getABSItem } = await import('@/lib/services/audiobookshelf/api');
     vi.mocked(deleteABSItem).mockResolvedValue(undefined);
+    vi.mocked(getABSItem).mockResolvedValue({ path: path.join('/media', 'Author Six', 'Book Six ASIN6') });
 
     const { deleteRequest } = await import('@/lib/services/request-delete.service');
     const result = await deleteRequest('req-6', 'admin-6');
 
     expect(result.success).toBe(true);
-    expect(deleteABSItem).toHaveBeenCalledWith('abs-item-123');
+    // RMAB removed the folder itself: ABS deletes only its database entry
+    expect(deleteABSItem).toHaveBeenCalledWith('abs-item-123', { hard: false });
     expect(prismaMock.audiobook.update).toHaveBeenCalledWith({
       where: { id: 'ab-6' },
       data: expect.objectContaining({ absItemId: null }),
@@ -447,6 +470,7 @@ describe('deleteRequest', () => {
         audibleAsin: null,
         plexGuid: null,
         absItemId: 'abs-item-456',
+        filePath: path.join('/media', 'Author Seven', 'Book Seven'),
       },
       downloadHistory: [],
     });
@@ -462,14 +486,15 @@ describe('deleteRequest', () => {
     prismaMock.request.update.mockResolvedValue({});
     prismaMock.audiobook.update.mockResolvedValue({});
 
-    const { deleteABSItem } = await import('@/lib/services/audiobookshelf/api');
+    const { deleteABSItem, getABSItem } = await import('@/lib/services/audiobookshelf/api');
     vi.mocked(deleteABSItem).mockRejectedValue(new Error('ABS API error'));
+    vi.mocked(getABSItem).mockResolvedValue({ path: path.join('/media', 'Author Seven', 'Book Seven') });
 
     const { deleteRequest } = await import('@/lib/services/request-delete.service');
     const result = await deleteRequest('req-7', 'admin-7');
 
     expect(result.success).toBe(true);
-    expect(deleteABSItem).toHaveBeenCalledWith('abs-item-456');
+    expect(deleteABSItem).toHaveBeenCalledWith('abs-item-456', { hard: false });
     expect(prismaMock.request.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ deletedBy: 'admin-7' }),

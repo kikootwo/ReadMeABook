@@ -21,7 +21,14 @@ const requireAuthMock = vi.hoisted(() => vi.fn());
 const requireAdminMock = vi.hoisted(() => vi.fn());
 const notificationServiceMock = vi.hoisted(() => ({
   encryptConfig: vi.fn((type: string, config: any) => ({ ...config, encrypted: true })),
+  prepareSubmittedConfig: vi.fn((type: string, config: any) => ({ ok: true, config: { ...config, encrypted: true } })),
+  migrateStoredConfig: vi.fn(() => null),
   maskConfig: vi.fn((type: string, config: any) => ({ ...config, masked: true })),
+  // URL binding rules are covered in notification-secret-binding.test.ts; here masked values keep the saved ones
+  mergeMaskedSecrets: vi.fn((type: string, existing: any, updated: any) => ({
+    ok: true,
+    config: Object.fromEntries(Object.entries(updated).map(([k, v]) => [k, v === '••••••••' ? existing?.[k] : v])),
+  })),
   sendToBackend: vi.fn(),
   sendNotification: vi.fn(),
 }));
@@ -121,7 +128,7 @@ describe('Admin notifications routes', () => {
       const payload = await response.json();
 
       expect(payload.success).toBe(true);
-      expect(notificationServiceMock.encryptConfig).toHaveBeenCalledWith('discord', newBackend.config);
+      expect(notificationServiceMock.prepareSubmittedConfig).toHaveBeenCalledWith('discord', newBackend.config);
       expect(prismaMock.notificationBackend.create).toHaveBeenCalled();
     });
 
@@ -305,6 +312,25 @@ describe('Admin notifications routes', () => {
           }),
         })
       );
+    });
+
+    it('refuses an update whose masked secret cannot be kept, without saving', async () => {
+      prismaMock.notificationBackend.findUnique.mockResolvedValue({
+        id: '1', type: 'ntfy', name: 'ntfy', config: { topic: 't', accessToken: 'enc:tk' },
+        events: ['request_approved'], enabled: true, createdAt: new Date(), updatedAt: new Date(),
+      });
+      notificationServiceMock.mergeMaskedSecrets.mockReturnValueOnce({ ok: false, error: 'Re-enter the ntfy access token' });
+      authRequest.json.mockResolvedValue({ config: { serverUrl: 'https://ntfy.other', topic: 't', accessToken: '••••••••' } });
+
+      const { PUT } = await import('@/app/api/admin/notifications/[id]/route');
+      const response = await PUT(
+        { json: authRequest.json } as any,
+        { params: Promise.resolve({ id: '1' }) }
+      );
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).message).toBe('Re-enter the ntfy access token');
+      expect(prismaMock.notificationBackend.update).not.toHaveBeenCalled();
     });
 
     it('returns 404 if backend not found', async () => {

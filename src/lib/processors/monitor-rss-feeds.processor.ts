@@ -17,6 +17,8 @@ export interface MonitorRssFeedsPayload {
   scheduledJobId?: string;
 }
 
+const REQUEST_PAGE_SIZE = 100;
+
 export async function processMonitorRssFeeds(payload: MonitorRssFeedsPayload): Promise<any> {
   const { jobId, scheduledJobId } = payload;
   const logger = RMABLogger.forJob(jobId, 'MonitorRssFeeds');
@@ -63,16 +65,35 @@ export async function processMonitorRssFeeds(payload: MonitorRssFeedsPayload): P
     return { success: true, message: 'No RSS results', matched: 0 };
   }
 
-  // Get all active requests awaiting search (audiobooks and ebooks)
-  // Both types can be matched against RSS torrent feeds
-  const missingRequests = await prisma.request.findMany({
+  // Get every active request awaiting search (audiobooks and ebooks) in
+  // deterministic pages. A single unordered take(100) repeatedly inspected
+  // the same rows and made requests beyond that batch invisible to RSS.
+  const firstPage = await prisma.request.findMany({
     where: {
       status: 'awaiting_search',
       deletedAt: null,
     },
     include: { audiobook: true },
-    take: 100,
+    orderBy: { id: 'asc' },
+    take: REQUEST_PAGE_SIZE,
   });
+  const missingRequests = [...firstPage];
+  let page = firstPage;
+
+  while (page.length === REQUEST_PAGE_SIZE) {
+    page = await prisma.request.findMany({
+      where: {
+        status: 'awaiting_search',
+        deletedAt: null,
+      },
+      include: { audiobook: true },
+      orderBy: { id: 'asc' },
+      cursor: { id: page[page.length - 1].id },
+      skip: 1,
+      take: REQUEST_PAGE_SIZE,
+    });
+    missingRequests.push(...page);
+  }
 
   logger.info(`Found ${missingRequests.length} requests awaiting search`);
 

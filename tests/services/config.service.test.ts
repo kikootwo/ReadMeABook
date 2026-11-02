@@ -81,6 +81,35 @@ describe('ConfigurationService', () => {
     );
   });
 
+  it('writes setManyAtomic updates in one transaction, encrypting where asked', async () => {
+    prismaMock.configuration.upsert.mockImplementation((args: unknown) => args);
+    prismaMock.$transaction.mockResolvedValue([]);
+
+    const { ConfigurationService } = await import('@/lib/services/config.service');
+    const service = new ConfigurationService();
+
+    await service.setManyAtomic([
+      { key: 'oidc.client_secret', value: 'secret', encrypted: true },
+      { key: 'oidc.issuer_url', value: 'https://auth.example' },
+    ]);
+
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    const writes = prismaMock.$transaction.mock.calls[0][0];
+    expect(writes).toHaveLength(2);
+    expect(writes[0]).toMatchObject({ where: { key: 'oidc.client_secret' }, create: { value: 'enc:secret', encrypted: true } });
+    expect(writes[1]).toMatchObject({ where: { key: 'oidc.issuer_url' }, create: { value: 'https://auth.example', encrypted: false } });
+  });
+
+  it('rethrows when the setManyAtomic transaction fails', async () => {
+    prismaMock.configuration.upsert.mockImplementation((args: unknown) => args);
+    prismaMock.$transaction.mockRejectedValue(new Error('deadlock'));
+
+    const { ConfigurationService } = await import('@/lib/services/config.service');
+    const service = new ConfigurationService();
+
+    await expect(service.setManyAtomic([{ key: 'a', value: '1' }])).rejects.toThrow('deadlock');
+  });
+
   it('returns default Audible region when not configured', async () => {
     prismaMock.configuration.findUnique.mockResolvedValue(null);
 

@@ -6,6 +6,7 @@
 import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QBittorrentService, getQBittorrentService, invalidateQBittorrentService } from '@/lib/integrations/qbittorrent.service';
+import { DownloadSourceError } from '@/lib/interfaces/download-client.interface';
 
 const clientMock = vi.hoisted(() => ({
   get: vi.fn(),
@@ -83,16 +84,6 @@ describe('QBittorrentService', () => {
     expect(progress.speed).toBe(50);
     expect(progress.eta).toBe(120);
     expect(progress.state).toBe('paused');
-  });
-
-  it('extracts info hash from magnet links', () => {
-    const service = new QBittorrentService('http://qb', 'user', 'pass');
-    const hash = (service as any).extractHashFromMagnet(
-      'magnet:?xt=urn:btih:0123456789ABCDEF0123456789ABCDEF01234567'
-    );
-
-    expect(hash).toBe('0123456789abcdef0123456789abcdef01234567');
-    expect((service as any).extractHashFromMagnet('magnet:?xt=urn:btih:')).toBeNull();
   });
 
   it('maps allocating state to downloading', () => {
@@ -565,31 +556,45 @@ describe('QBittorrentService', () => {
     await expect(service.addTorrent('')).rejects.toThrow('Invalid download URL');
   });
 
-  it('skips adding duplicate magnet links', async () => {
+  it('reports a magnet already in the client as taken over and sends no add', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=dup';
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(undefined);
+    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
     vi.spyOn(service as any, 'getTorrent').mockResolvedValue({ hash: 'existing' });
 
-    const hash = await service.addTorrent('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567');
+    const result = await service.addTorrent('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567');
 
-    expect(hash).toBe('0123456789abcdef0123456789abcdef01234567');
+    expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: true, infoHash: '0123456789abcdef0123456789abcdef01234567' });
+    expect(clientMock.post).not.toHaveBeenCalled();
+  });
+
+  it('reports a .torrent already in the client as taken over and sends no add', async () => {
+    const service = new QBittorrentService('http://qb', 'user', 'pass');
+    (service as any).cookie = 'SID=dup';
+    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
+    vi.spyOn(service as any, 'getTorrent').mockResolvedValue({ hash: 'hash-1' });
+    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent') });
+    parseTorrentMock.mockResolvedValueOnce({ infoHash: 'hash-1', name: 'Book' });
+
+    const result = await service.addTorrent('http://example.com/file.torrent');
+
+    expect(result).toEqual({ id: 'hash-1', alreadyInClient: true, infoHash: 'hash-1' });
     expect(clientMock.post).not.toHaveBeenCalled();
   });
 
   it('adds magnet links when not already present', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=add';
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(undefined);
-    vi.spyOn(service as any, 'getTorrent').mockRejectedValue(new Error('not found'));
+    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
+    clientMock.get.mockResolvedValue({ status: 200, data: [] }); // lookups by ID and the full list: absent
     clientMock.post.mockResolvedValue({ data: 'Ok.' });
 
-    const hash = await service.addTorrent(
+    const result = await service.addTorrent(
       'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567',
       { tags: ['tag1', 'tag2'] }
     );
 
-    expect(hash).toBe('0123456789abcdef0123456789abcdef01234567');
+    expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: false, infoHash: '0123456789abcdef0123456789abcdef01234567' });
     expect(clientMock.post).toHaveBeenCalledWith(
       '/torrents/add',
       expect.any(URLSearchParams),
@@ -611,7 +616,7 @@ describe('QBittorrentService', () => {
   it('throws when qBittorrent rejects magnet uploads', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=rejected';
-    vi.spyOn(service as any, 'getTorrent').mockRejectedValue(new Error('not found'));
+    clientMock.get.mockResolvedValue({ status: 200, data: [] }); // lookups by ID and the full list: absent
     clientMock.post.mockResolvedValue({ data: 'Nope' });
 
     await expect(
@@ -626,7 +631,7 @@ describe('QBittorrentService', () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=old';
 
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(undefined);
+    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
     const loginSpy = vi.spyOn(service, 'login').mockResolvedValue();
     const addMagnetSpy = vi.spyOn(service as any, 'addMagnetLink')
       .mockRejectedValueOnce({ isAxiosError: true, response: { status: 403 } })
@@ -642,7 +647,7 @@ describe('QBittorrentService', () => {
   it('follows redirect to magnet link when downloading torrent files', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=redir';
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(undefined);
+    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
     const addMagnetSpy = vi.spyOn(service as any, 'addMagnetLink').mockResolvedValue('redirect-hash');
 
     axiosMock.get.mockRejectedValueOnce({
@@ -659,7 +664,7 @@ describe('QBittorrentService', () => {
   it('treats magnet response bodies as magnet links', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=body';
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(undefined);
+    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
     const addMagnetSpy = vi.spyOn(service as any, 'addMagnetLink').mockResolvedValue('body-hash');
 
     axiosMock.get.mockResolvedValueOnce({
@@ -676,20 +681,46 @@ describe('QBittorrentService', () => {
   it('adds torrent files after parsing successfully', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=ok';
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(undefined);
-    vi.spyOn(service as any, 'getTorrent').mockRejectedValue(new Error('not found'));
+    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
+    clientMock.get.mockResolvedValue({ status: 200, data: [] });
 
     axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent') });
     parseTorrentMock.mockResolvedValueOnce({ infoHash: 'hash-1', name: 'Book' });
     clientMock.post.mockResolvedValue({ data: 'Ok.' });
 
-    const hash = await service.addTorrent('http://example.com/file.torrent');
+    const result = await service.addTorrent('http://example.com/file.torrent');
 
-    expect(hash).toBe('hash-1');
+    expect(result).toEqual({ id: 'hash-1', alreadyInClient: false, infoHash: 'hash-1' });
     expect(clientMock.post).toHaveBeenCalledWith(
       '/torrents/add',
       expect.any(Object),
       expect.objectContaining({ maxBodyLength: Infinity })
+    );
+  });
+
+  it('preserves upstream HTTP status and forwards source headers', async () => {
+    const service = new QBittorrentService('http://qb', 'user', 'pass');
+    (service as any).cookie = 'SID=source-error';
+    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
+
+    axiosMock.get.mockRejectedValueOnce({
+      isAxiosError: true,
+      response: { status: 500, headers: {} },
+      message: 'Request failed',
+    });
+
+    const error = await service.addDownload(
+      'https://prowlarr/1/download',
+      { sourceAuth: { prowlarrBaseUrl: 'https://prowlarr', apiKey: 'secret' } }
+    ).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(DownloadSourceError);
+    expect(error).toMatchObject({ status: 500 });
+    expect(axiosMock.get).toHaveBeenCalledWith(
+      'https://prowlarr/1/download?apikey=secret',
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'X-Api-Key': 'secret' }),
+      })
     );
   });
 
@@ -732,7 +763,7 @@ describe('QBittorrentService', () => {
   it('throws when qBittorrent rejects torrent file uploads', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=reject';
-    vi.spyOn(service as any, 'getTorrent').mockRejectedValue(new Error('not found'));
+    clientMock.get.mockResolvedValue({ status: 200, data: [] });
 
     axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent') });
     parseTorrentMock.mockResolvedValueOnce({ infoHash: 'hash-2', name: 'Book' });
@@ -746,7 +777,7 @@ describe('QBittorrentService', () => {
   it('throws when torrent parsing fails', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=parse';
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(undefined);
+    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
 
     axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('not-a-torrent') });
     parseTorrentMock.mockRejectedValueOnce(new Error('bad torrent'));
@@ -781,7 +812,7 @@ describe('QBittorrentService', () => {
       response: { status: 500 },
     });
 
-    await expect((service as any).ensureCategory('readmeabook')).resolves.toBeUndefined();
+    await expect((service as any).ensureCategory('readmeabook')).resolves.toBe(false);
   });
 
   it('updates category when save path mismatches', async () => {
@@ -1308,7 +1339,7 @@ describe('QBittorrentService', () => {
 
     it('addTorrent does not attempt re-login on 403 when auth-optional', async () => {
       const service = new QBittorrentService('http://qb', '', '');
-      vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(undefined);
+      vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
       const loginSpy = vi.spyOn(service, 'login');
       vi.spyOn(service as any, 'addMagnetLink').mockRejectedValueOnce({
         isAxiosError: true,
@@ -1324,7 +1355,7 @@ describe('QBittorrentService', () => {
 
     it('omits Cookie header on requests when auth-optional', async () => {
       const service = new QBittorrentService('http://qb', '', '');
-      vi.spyOn(service as any, 'getTorrent').mockRejectedValue(new Error('not found'));
+      clientMock.get.mockResolvedValue({ status: 200, data: [] }); // lookups by ID and the full list: absent
       clientMock.post.mockResolvedValue({ data: 'Ok.' });
 
       await (service as any).addMagnetLink(

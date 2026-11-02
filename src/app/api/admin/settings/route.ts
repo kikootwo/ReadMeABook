@@ -18,16 +18,17 @@ export async function GET(request: NextRequest) {
     const configs = await prisma.configuration.findMany();
     const configMap = new Map(configs.map((c) => [c.key, c.value]));
 
-    // Check if any local users exist (for validation)
+    // Check if any local users exist (for validation); soft-deleted users can't sign in
     const hasLocalUsers = (await prisma.user.count({
-      where: { authProvider: 'local' }
+      where: { authProvider: 'local', deletedAt: null }
     })) > 0;
 
-    // Check if any local admin users exist (for validation)
+    // Check if any local admin users exist (for validation); soft-deleted users can't sign in
     const hasLocalAdmins = (await prisma.user.count({
       where: {
         authProvider: 'local',
-        role: 'admin'
+        role: 'admin',
+        deletedAt: null
       }
     })) > 0;
 

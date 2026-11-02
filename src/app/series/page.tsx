@@ -9,6 +9,7 @@ import { Suspense, useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Header } from '@/components/layout/Header';
 import { SeriesGrid } from '@/components/series/SeriesGrid';
+import { SeriesSearchError } from '@/components/series/SeriesSearchError';
 import { useSeriesSearch } from '@/lib/hooks/useSeries';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { CardSizeControls } from '@/components/ui/CardSizeControls';
@@ -40,7 +41,25 @@ function SeriesPageContent() {
     return () => clearTimeout(timer);
   }, [query, router]);
 
-  const { series, isLoading } = useSeriesSearch(debouncedQuery);
+  const searchedQuery = debouncedQuery.trim();
+  const { series, isLoading, error, hasData, retry } = useSeriesSearch(searchedQuery);
+  // The query whose Try again the user pressed: focus returns to the button once if it
+  // fails again. Editing the query or showing that failure clears it, so a cached error
+  // never pulls focus out of the search box.
+  const [retriedQuery, setRetriedQuery] = useState<string | null>(null);
+  const showError = !!error && !isLoading && !hasData;
+
+  const changeQuery = useCallback((value: string) => {
+    setQuery(value);
+    setRetriedQuery(null);
+  }, []);
+
+  const handleRetry = useCallback(() => {
+    setRetriedQuery(searchedQuery);
+    retry();
+  }, [searchedQuery, retry]);
+
+  const handleRetryFocused = useCallback(() => setRetriedQuery(null), []);
 
   const handleSearch = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -83,7 +102,7 @@ function SeriesPageContent() {
               <input
                 type="text"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => changeQuery(e.target.value)}
                 placeholder="Search by series name..."
                 className="w-full pl-12 pr-12 py-4 text-lg border-2 border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400"
                 autoFocus
@@ -91,7 +110,7 @@ function SeriesPageContent() {
               {query && (
                 <button
                   type="button"
-                  onClick={() => setQuery('')}
+                  onClick={() => changeQuery('')}
                   className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
                 >
                   <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -108,7 +127,7 @@ function SeriesPageContent() {
           </form>
 
           {/* Results */}
-          {debouncedQuery ? (
+          {searchedQuery ? (
             <div className="space-y-6">
               {/* Sticky Results Header */}
               <div className="sticky top-14 sm:top-16 z-30 mb-4 sm:mb-6">
@@ -131,14 +150,23 @@ function SeriesPageContent() {
                 </div>
               </div>
 
-              {/* Series Grid */}
-              <SeriesGrid
-                series={series}
-                isLoading={!!isLoading}
-                emptyMessage={`No series found for "${debouncedQuery}"`}
-                cardSize={cardSize}
-                squareCovers={squareCovers}
-              />
+              {/* Series Grid, or why the search failed */}
+              {showError ? (
+                <SeriesSearchError
+                  audibleUnavailable={error?.status === 502}
+                  onRetry={handleRetry}
+                  focusRetry={retriedQuery === searchedQuery}
+                  onRetryFocused={handleRetryFocused}
+                />
+              ) : (
+                <SeriesGrid
+                  series={series}
+                  isLoading={!!isLoading}
+                  emptyMessage={`No series found for "${searchedQuery}"`}
+                  cardSize={cardSize}
+                  squareCovers={squareCovers}
+                />
+              )}
             </div>
           ) : (
             /* Empty State */

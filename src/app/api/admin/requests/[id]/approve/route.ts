@@ -4,11 +4,16 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@/generated/prisma/client';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
+import { guardEbookSelection, guardTorrentSelection, rejectedSelectionResponse, selectionFailureResponse } from '@/lib/services/download-selection-guard';
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { buildEbookDownloadName } from '@/lib/utils/ebook-download-name';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Requests.Approve');
 
@@ -36,14 +41,16 @@ export async function POST(
         }
 
         const { id } = await params;
-        const body = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
 
         // Validate action and optional admin-selected torrent
         const { action, selectedTorrent: adminSelectedTorrent } = ApprovalActionSchema.parse(body);
 
-        // Fetch the request
-        const existingRequest = await prisma.request.findUnique({
-          where: { id },
+        // Fetch the request; a deleted request answers 404
+        const existingRequest = await prisma.request.findFirst({
+          where: { id, deletedAt: null },
           include: {
             audiobook: true,
             user: {
@@ -82,9 +89,36 @@ export async function POST(
           // Use admin-provided torrent (from admin interactive search) or fall back to user's pre-selected torrent
           const effectiveTorrent = adminSelectedTorrent || existingRequest.selectedTorrent;
 
+          const torrentSource = adminSelectedTorrent ? 'admin' : 'user';
+          let selectedTorrent: any = null;
+          let droppedPickReason: string | null = null;
+
           if (effectiveTorrent) {
-            const selectedTorrent = effectiveTorrent as any;
-            const torrentSource = adminSelectedTorrent ? 'admin' : 'user';
+            // Same rules for admin picks and stored user picks (older rows were never validated)
+            const candidate = effectiveTorrent as any;
+            const selectionCheck = isEbookRequest && candidate?.source
+              ? await guardEbookSelection(candidate)
+              : await guardTorrentSelection(candidate);
+            if (selectionCheck.ok) {
+              selectedTorrent = selectionCheck.value;
+            } else if (selectionCheck.retryable) {
+              // Source temporarily unreachable: keep the pick (status unchanged) so approval can be retried
+              return selectionFailureResponse(selectionCheck);
+            } else if (adminSelectedTorrent) {
+              return rejectedSelectionResponse(
+                `The admin-selected release cannot be used: ${selectionCheck.error}. Pick another release with interactive search.`
+              );
+            } else {
+              // Stored user pick is unusable (or has no links any more): approve with an automatic search instead
+              logger.warn(`Stored release pick for request ${id} cannot be used; falling back to automatic search`, {
+                requestId: id,
+                reason: selectionCheck.error,
+              });
+              droppedPickReason = selectionCheck.error;
+            }
+          }
+
+          if (selectedTorrent) {
 
             // Download the selected torrent directly
             logger.info(`Request ${id} has ${torrentSource}-selected torrent, starting download`, {
@@ -126,7 +160,7 @@ export async function POST(
                 existingRequest.id,
                 downloadHistory.id,
                 selectedTorrent.downloadUrl,
-                `${existingRequest.audiobook.title} - ${existingRequest.audiobook.author}.${selectedTorrent.format || 'epub'}`,
+                buildEbookDownloadName(existingRequest.audiobook.title, existingRequest.audiobook.author, selectedTorrent.format || 'epub'),
                 undefined
               );
             } else {
@@ -168,7 +202,7 @@ export async function POST(
               existingRequest.audiobook.author,
               existingRequest.user.plexUsername || 'Unknown User'
             ).catch((error) => {
-              logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
+              logger.error('Failed to queue notification', { error: errorForLog(error) });
             });
 
             logger.info(`Request ${id} approved by admin ${req.user.sub}, downloading ${torrentSource}-selected torrent`, {
@@ -198,7 +232,11 @@ export async function POST(
 
             const updatedRequest = await prisma.request.update({
               where: { id },
-              data: { status: 'pending' },
+              data: {
+                status: 'pending',
+                // Drop an unusable stored pick so it can't be approved again
+                ...(existingRequest.selectedTorrent ? { selectedTorrent: Prisma.DbNull } : {}),
+              },
               include: {
                 audiobook: true,
                 user: {
@@ -235,7 +273,7 @@ export async function POST(
               updatedRequest.audiobook.author,
               updatedRequest.user.plexUsername || 'Unknown User'
             ).catch((error) => {
-              logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
+              logger.error('Failed to queue notification', { error: errorForLog(error) });
             });
 
             logger.info(`Request ${id} approved by admin ${req.user.sub}`, {
@@ -246,11 +284,15 @@ export async function POST(
               type: existingRequest.type,
             });
 
+            const searchMessage = isEbookRequest
+              ? 'Ebook request approved and ebook search job triggered'
+              : 'Request approved and search job triggered';
             return NextResponse.json({
               success: true,
-              message: isEbookRequest
-                ? 'Ebook request approved and ebook search job triggered'
-                : 'Request approved and search job triggered',
+              message: droppedPickReason
+                ? `The user's selected release could not be used (${droppedPickReason}). ${searchMessage} instead.`
+                : searchMessage,
+              ...(droppedPickReason ? { selectionDropped: droppedPickReason } : {}),
               request: updatedRequest,
             });
           }
@@ -285,7 +327,7 @@ export async function POST(
         }
       } catch (error) {
         logger.error('Failed to process approval action', {
-          error: error instanceof Error ? error.message : String(error)
+          error: errorForLog(error)
         });
 
         if (error instanceof z.ZodError) {
@@ -293,7 +335,7 @@ export async function POST(
             {
               error: 'ValidationError',
               message: 'Invalid action. Must be "approve" or "deny"',
-              details: error.errors,
+              details: zodIssueDetails(error),
             },
             { status: 400 }
           );

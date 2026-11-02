@@ -8,7 +8,7 @@
 import { useRef, useEffect, useCallback } from 'react';
 import useSWR from 'swr';
 import useSWRInfinite from 'swr/infinite';
-import { authenticatedFetcher } from '@/lib/utils/api';
+import { authenticatedFetcher, type FetchJSONError } from '@/lib/utils/api';
 import { Audiobook } from './useAudiobooks';
 
 export interface SeriesSummary {
@@ -43,21 +43,28 @@ export interface SeriesDetail {
 }
 
 export function useSeriesSearch(query: string) {
-  const shouldFetch = query && query.length > 0;
-  const endpoint = shouldFetch
-    ? `/api/series/search?q=${encodeURIComponent(query)}`
-    : null;
+  const trimmed = query.trim();
+  const endpoint = trimmed ? `/api/series/search?q=${encodeURIComponent(trimmed)}` : null;
 
-  const { data, error, isLoading } = useSWR(endpoint, authenticatedFetcher, {
+  const { data, error, isLoading, mutate } = useSWR(endpoint, authenticatedFetcher, {
     revalidateOnFocus: false,
     dedupingInterval: 30000,
+    // A failed search waits for the user's Try again: automatic retries would keep
+    // asking Audible and flip the page back to the loading skeleton
+    shouldRetryOnError: false,
   });
+
+  const retry = useCallback(() => {
+    void mutate();
+  }, [mutate]);
 
   return {
     series: (data?.series || []) as SeriesSummary[],
     query: data?.query || '',
-    isLoading: shouldFetch && isLoading,
-    error,
+    isLoading: !!endpoint && isLoading,
+    hasData: data !== undefined,
+    error: error as FetchJSONError | undefined,
+    retry,
   };
 }
 

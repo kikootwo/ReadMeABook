@@ -9,6 +9,12 @@ import bcrypt from 'bcrypt';
 import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody, AUTH_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
+import {
+  getRegistrationRefusal,
+  PENDING_APPROVAL_MESSAGE,
+  REJECTED_ACCOUNT_ERROR,
+} from '@/lib/services/auth/local-account-status';
 
 const logger = RMABLogger.create('API.Auth.AdminLogin');
 
@@ -26,7 +32,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { username, password } = await request.json();
+    const bodyResult = await readJsonBody(request, { maxBytes: AUTH_JSON_BODY_LIMIT_BYTES });
+    if (!bodyResult.ok) return bodyResult.response;
+    const { username, password } = bodyResult.data;
 
     if (!username || !password) {
       return NextResponse.json(
@@ -45,7 +53,8 @@ export async function POST(request: NextRequest) {
       where: { plexId: `local-${normalizedUsername}` },
     });
 
-    if (!user) {
+    // A deleted account answers exactly like an unknown one
+    if (!user || user.deletedAt) {
       return NextResponse.json(
         {
           error: 'AuthenticationError',
@@ -81,6 +90,19 @@ export async function POST(request: NextRequest) {
         },
         { status: 401 }
       );
+    }
+
+    // Same registration checks as the regular local login, same responses
+    const refusal = getRegistrationRefusal(user.registrationStatus);
+    if (refusal === 'pending_approval') {
+      return NextResponse.json({
+        success: false,
+        pendingApproval: true,
+        message: PENDING_APPROVAL_MESSAGE,
+      });
+    }
+    if (refusal === 'rejected') {
+      return NextResponse.json({ error: REJECTED_ACCOUNT_ERROR }, { status: 401 });
     }
 
     // Update last login time

@@ -10,13 +10,16 @@ import { getNotificationService } from '@/lib/services/notification';
 import { NOTIFICATION_EVENT_KEYS } from '@/lib/constants/notification-events';
 import { RMABLogger } from '@/lib/utils/logger';
 import { z } from 'zod';
+import { boundedArray, errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Notifications.Id');
 
 const UpdateBackendSchema = z.object({
   name: z.string().min(1).optional(),
-  config: z.record(z.any()).optional(),
-  events: z.array(z.enum(NOTIFICATION_EVENT_KEYS)).min(1).optional(),
+  config: z.record(z.string(), z.any()).optional(),
+  // At most one entry per event type; duplicates are removed
+  events: boundedArray(z.enum(NOTIFICATION_EVENT_KEYS), NOTIFICATION_EVENT_KEYS.length, { min: 1, unique: true }).optional(),
   enabled: z.boolean().optional(),
 });
 
@@ -56,7 +59,7 @@ export async function GET(
         });
       } catch (error) {
         logger.error('Failed to fetch notification backend', {
-          error: error instanceof Error ? error.message : String(error),
+          error: errorForLog(error),
         });
 
         return NextResponse.json(
@@ -83,7 +86,9 @@ export async function PUT(
     return requireAdmin(req, async () => {
       try {
         const { id } = await params;
-        const body = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         const updates = UpdateBackendSchema.parse(body);
 
         // Get existing backend
@@ -100,22 +105,22 @@ export async function PUT(
 
         const notificationService = getNotificationService();
 
-        // Handle config updates (preserve masked values, encrypt new values)
+        // Handle config updates: masked values keep the saved (encrypted) value, but only
+        // while the server URL those secrets belong to is unchanged; new values are encrypted
+        // Order: the saved config in its migrated form (as GET showed it), the submitted
+        // config normalised and encrypted, then masked values merged from the saved one
         let finalConfig = existing.config;
         if (updates.config) {
-          const existingConfig = existing.config as any;
-          const updatedConfig = updates.config as any;
-
-          // Check if masked values need to be preserved
-          Object.keys(updatedConfig).forEach((key) => {
-            if (updatedConfig[key] === '••••••••') {
-              // Preserve existing encrypted value
-              updatedConfig[key] = existingConfig[key];
-            }
-          });
-
-          // Encrypt new/changed values
-          finalConfig = notificationService.encryptConfig(existing.type, updatedConfig);
+          const saved = notificationService.migrateStoredConfig(existing.type, existing.config) ?? existing.config;
+          const prepared = notificationService.prepareSubmittedConfig(existing.type, updates.config);
+          if (!prepared.ok) {
+            return NextResponse.json({ error: 'ValidationError', message: prepared.error }, { status: 400 });
+          }
+          const merge = notificationService.mergeMaskedSecrets(existing.type, saved, prepared.config);
+          if (!merge.ok) {
+            return NextResponse.json({ error: 'ValidationError', message: merge.error }, { status: 400 });
+          }
+          finalConfig = notificationService.encryptConfig(existing.type, merge.config);
         }
 
         // Update backend
@@ -145,14 +150,14 @@ export async function PUT(
         });
       } catch (error) {
         logger.error('Failed to update notification backend', {
-          error: error instanceof Error ? error.message : String(error),
+          error: errorForLog(error),
         });
 
         if (error instanceof z.ZodError) {
           return NextResponse.json(
             {
               error: 'ValidationError',
-              details: error.errors,
+              details: zodIssueDetails(error),
             },
             { status: 400 }
           );
@@ -211,7 +216,7 @@ export async function DELETE(
         });
       } catch (error) {
         logger.error('Failed to delete notification backend', {
-          error: error instanceof Error ? error.message : String(error),
+          error: errorForLog(error),
         });
 
         return NextResponse.json(

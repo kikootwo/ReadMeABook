@@ -8,7 +8,10 @@ import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
+import { nextNewReleasesSince, watchModeFields } from '@/lib/utils/watch-mode';
 
 const logger = RMABLogger.create('API.WatchedAuthors');
 
@@ -16,6 +19,8 @@ const AddWatchedAuthorSchema = z.object({
   authorAsin: z.string().regex(/^[A-Z0-9]{10}$/, 'Invalid author ASIN'),
   authorName: z.string().min(1).max(500),
   coverArtUrl: z.string().url().optional(),
+  /** true = request only books released from today on; default entire catalog */
+  newReleasesOnly: z.boolean().optional(),
 });
 
 /**
@@ -42,11 +47,12 @@ export async function GET(request: NextRequest) {
           authorName: a.authorName,
           coverArtUrl: a.coverArtUrl,
           lastCheckedAt: a.lastCheckedAt,
+          ...watchModeFields(a),
           createdAt: a.createdAt,
         })),
       });
     } catch (error) {
-      logger.error('Failed to list watched authors', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to list watched authors', { error: errorForLog(error) });
       return NextResponse.json({ error: 'Failed to list watched authors' }, { status: 500 });
     }
   });
@@ -63,8 +69,10 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
 
-      const body = await req.json();
-      const { authorAsin, authorName, coverArtUrl } = AddWatchedAuthorSchema.parse(body);
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
+      const { authorAsin, authorName, coverArtUrl, newReleasesOnly } = AddWatchedAuthorSchema.parse(body);
 
       // Check for duplicate
       const existing = await prisma.watchedAuthor.findUnique({
@@ -84,6 +92,7 @@ export async function POST(request: NextRequest) {
           authorAsin,
           authorName,
           coverArtUrl: coverArtUrl || null,
+          newReleasesSince: nextNewReleasesSince(null, newReleasesOnly === true),
         },
       });
 
@@ -95,7 +104,7 @@ export async function POST(request: NextRequest) {
         await jobQueue.addCheckWatchedItemJob(req.user.id, undefined, authorAsin);
         logger.info(`Triggered immediate check for watched author "${authorName}" (${authorAsin})`);
       } catch (error) {
-        logger.error('Failed to trigger immediate watched author check', { error: error instanceof Error ? error.message : String(error) });
+        logger.error('Failed to trigger immediate watched author check', { error: errorForLog(error) });
       }
 
       return NextResponse.json({
@@ -106,15 +115,16 @@ export async function POST(request: NextRequest) {
           authorName: watched.authorName,
           coverArtUrl: watched.coverArtUrl,
           lastCheckedAt: watched.lastCheckedAt,
+          ...watchModeFields(watched),
           createdAt: watched.createdAt,
         },
       }, { status: 201 });
     } catch (error) {
-      logger.error('Failed to add watched author', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to add watched author', { error: errorForLog(error) });
 
       if (error instanceof z.ZodError) {
         return NextResponse.json(
-          { error: 'ValidationError', details: error.errors },
+          { error: 'ValidationError', details: zodIssueDetails(error) },
           { status: 400 }
         );
       }

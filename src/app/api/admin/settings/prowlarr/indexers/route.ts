@@ -8,22 +8,10 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { getProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { getConfigService } from '@/lib/services/config.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { invalidIndexerLimit, toSavedIndexerConfig, type IndexerConfigInput } from '@/lib/utils/indexer-config';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Settings.ProwlarrIndexers');
-
-interface SavedIndexerConfig {
-  id: number;
-  name: string;
-  protocol: string;
-  priority: number;
-  seedingTimeMinutes?: number; // Torrents only
-  ratioLimit?: number; // Torrents only (0 = no ratio requirement)
-  removeAfterProcessing?: boolean; // Usenet only
-  rssEnabled?: boolean;
-  audiobookCategories?: number[]; // Array of category IDs for audiobooks (default: [3030])
-  ebookCategories?: number[]; // Array of category IDs for ebooks (default: [7020])
-  categories?: number[]; // Legacy field for migration
-}
 
 /**
  * GET /api/admin/settings/prowlarr/indexers
@@ -41,51 +29,34 @@ export async function GET(request: NextRequest) {
 
         // Get saved indexer configuration (matches wizard format)
         const savedConfigStr = await configService.get('prowlarr_indexers');
-        const savedIndexers: SavedIndexerConfig[] = savedConfigStr ? JSON.parse(savedConfigStr) : [];
+        const savedIndexers: IndexerConfigInput[] = savedConfigStr ? JSON.parse(savedConfigStr) : [];
 
         // Get saved flag configuration
         const flagConfigStr = await configService.get('indexer_flag_config');
         const flagConfigs = flagConfigStr ? JSON.parse(flagConfigStr) : [];
 
-        // Merge with defaults (wizard format: array of {id, name, priority, seedingTimeMinutes})
-        const savedIndexersMap = new Map<number, SavedIndexerConfig>(
+        // Merge live Prowlarr indexers with saved settings. Identity (name, protocol)
+        // comes from Prowlarr; per-indexer settings come from the saved entry.
+        const savedIndexersMap = new Map<number, IndexerConfigInput>(
           savedIndexers.map((idx) => [idx.id, idx])
         );
 
         const indexersWithConfig = indexers.map((indexer: any) => {
           const saved = savedIndexersMap.get(indexer.id);
           const isAdded = !!saved;
-          const isTorrent = indexer.protocol?.toLowerCase() === 'torrent';
 
-          // Migration: if old 'categories' field exists but new fields don't, migrate
-          const migratedAudiobookCategories = saved?.audiobookCategories ||
-            saved?.categories || // Legacy migration
-            [3030]; // Default to audiobooks category
-          const migratedEbookCategories = saved?.ebookCategories || [7020]; // Default to ebooks category
-
-          const config: any = {
-            id: indexer.id,
-            name: indexer.name,
-            protocol: indexer.protocol,
+          return {
+            ...toSavedIndexerConfig({
+              ...saved,
+              id: indexer.id,
+              name: indexer.name,
+              protocol: indexer.protocol,
+            }),
             privacy: indexer.privacy,
             enabled: isAdded, // Enabled if in saved list
             isAdded, // Explicit flag for UI (new card-based interface)
-            priority: saved?.priority || 10,
-            rssEnabled: saved?.rssEnabled ?? false,
-            audiobookCategories: migratedAudiobookCategories,
-            ebookCategories: migratedEbookCategories,
             supportsRss: indexer.capabilities?.supportsRss !== false, // Default to true if not specified
           };
-
-          // Add protocol-specific fields
-          if (isTorrent) {
-            config.seedingTimeMinutes = saved?.seedingTimeMinutes ?? 0;
-            config.ratioLimit = saved?.ratioLimit ?? 0;
-          } else {
-            config.removeAfterProcessing = saved?.removeAfterProcessing ?? true;
-          }
-
-          return config;
         });
 
         return NextResponse.json({
@@ -108,50 +79,61 @@ export async function GET(request: NextRequest) {
   });
 }
 
+const badRequest = (status: number, error: string) =>
+  NextResponse.json({ success: false, error }, { status });
+
 /**
  * PUT /api/admin/settings/prowlarr/indexers
- * Save indexer configuration and flag configs
+ * Save indexer configuration and flag configs.
+ * Body: { indexers, flagConfigs?, allowEmpty? }. An empty list never replaces
+ * saved indexers unless allowEmpty is true (the client loaded the list and the
+ * admin removed every indexer); a client whose list failed to load sends none.
  */
 export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { indexers, flagConfigs } = await req.json();
+        let body: any;
+        try {
+          const bodyResult = await readJsonBody(req);
+          if (!bodyResult.ok) return bodyResult.response;
+          body = bodyResult.data;
+        } catch {
+          return badRequest(400, 'Request body must be JSON');
+        }
+        const { indexers, flagConfigs, allowEmpty } = body ?? {};
+        if (!Array.isArray(indexers)) {
+          return badRequest(400, 'indexers must be an array');
+        }
 
-        // Filter to only enabled indexers and convert to wizard format
-        const enabledIndexers = indexers
-          .filter((indexer: any) => indexer.enabled)
-          .map((indexer: any) => {
-            const config: any = {
-              id: indexer.id,
-              name: indexer.name,
-              protocol: indexer.protocol,
-              priority: indexer.priority,
-              rssEnabled: indexer.rssEnabled || false,
-              audiobookCategories: indexer.audiobookCategories || [3030], // Default to audiobooks
-              ebookCategories: indexer.ebookCategories || [7020], // Default to ebooks
-            };
+        const enabled = indexers.filter((indexer: any) => indexer && typeof indexer === 'object' && indexer.enabled);
+        for (const indexer of enabled) {
+          const invalid = invalidIndexerLimit(indexer);
+          if (invalid) return badRequest(400, invalid);
+        }
 
-            // Add protocol-specific fields
-            const isTorrent = indexer.protocol?.toLowerCase() === 'torrent';
-            if (isTorrent) {
-              config.seedingTimeMinutes = indexer.seedingTimeMinutes ?? 0;
-              config.ratioLimit = indexer.ratioLimit ?? 0;
-            } else {
-              config.removeAfterProcessing = indexer.removeAfterProcessing ?? true;
-            }
+        const configService = getConfigService();
+        if (enabled.length === 0 && allowEmpty !== true) {
+          const savedStr = await configService.get('prowlarr_indexers');
+          const saved = savedStr ? JSON.parse(savedStr) : [];
+          if (Array.isArray(saved) && saved.length > 0) {
+            return badRequest(
+              409,
+              `Refusing to remove all ${saved.length} saved indexer(s): the list sent was empty. Reload the indexers from Prowlarr and save again.`
+            );
+          }
+        }
 
-            return config;
-          });
+        // Convert to the persisted shape
+        const enabledIndexers = enabled.map((indexer: IndexerConfigInput) => toSavedIndexerConfig(indexer));
 
         // Save to configuration (matches wizard format)
-        const configService = getConfigService();
         const configUpdates = [
           {
             key: 'prowlarr_indexers',
             value: JSON.stringify(enabledIndexers),
             category: 'indexer',
-            description: 'Prowlarr indexer settings (enabled, priority, seeding time)',
+            description: 'Prowlarr indexer settings (enabled, priority, seeding time, ratio limit)',
           },
         ];
 

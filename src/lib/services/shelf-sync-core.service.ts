@@ -120,7 +120,7 @@ export async function processShelfBooks(
           title: mapping.title,
           author: mapping.author,
           coverArtUrl: mapping.coverUrl || undefined,
-        });
+        }, { automatic: true });
 
         if (result.success) {
           stats.requestsCreated++;

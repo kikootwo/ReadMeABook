@@ -1,0 +1,20 @@
+# Component: E2E compose override "abs-fake-metadata" (#287): Audiobookshelf and RMAB use the fake Audible/Audnexus
+# Documentation: documentation/testing/e2e-harness.md
+# Use: npm run e2e -- ... --offline-fixtures --overrides abs-fake-metadata   (untainted only)
+# fake-arr:9898 answers absolute-URI proxy requests itself (fake-arr/src/metadata.js) and never forwards, so ABS's
+# metadata match and RMAB's own Audible/Audnexus lookups never reach a real provider. Unknown hosts get 403.
+x-fake-metadata-env: &fake-metadata-env
+  HTTP_PROXY: http://fake-arr:9898
+  HTTPS_PROXY: http://fake-arr:9898
+  http_proxy: http://fake-arr:9898
+  https_proxy: http://fake-arr:9898
+  NO_PROXY: fake-arr,tracker.e2e,abs,rmab,localhost,127.0.0.1
+  no_proxy: fake-arr,tracker.e2e,abs,rmab,localhost,127.0.0.1
+
+services:
+  abs:
+    environment:
+      <<: *fake-metadata-env
+  rmab:
+    environment:
+      <<: *fake-metadata-env

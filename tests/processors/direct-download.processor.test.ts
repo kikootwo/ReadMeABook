@@ -186,7 +186,11 @@ describe('processStartDirectDownload', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-2',
       'ab-2',
-      expect.stringContaining('Another Book.epub')
+      expect.stringContaining('Another Book.epub'),
+      undefined,
+      undefined,
+      undefined,
+      'dh-2'
     );
   });
 

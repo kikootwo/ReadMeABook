@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { enrichAudiobooksWithMatches, getAvailableAsins } from '@/lib/utils/audiobook-matcher';
-import { getCurrentUser } from '@/lib/middleware/auth';
+import { getOptionalAuthUser } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
 import { annotateWithIgnoreStatus } from '@/lib/utils/ignored-audiobooks';
 
@@ -125,9 +125,8 @@ export async function GET(
       })
       .filter(Boolean) as any[];
 
-    // Enrich with library matching and request status
-    const currentUser = getCurrentUser(request);
-    const userId = currentUser?.sub || undefined;
+    // Enrich with library matching; request details and ignore flags only for a checked account
+    const userId = (await getOptionalAuthUser(request))?.id;
     const enrichedAudiobooks = await enrichAudiobooksWithMatches(audibleBooks, userId);
 
     // Annotate with per-user ignore status

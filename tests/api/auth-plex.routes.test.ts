@@ -365,6 +365,7 @@ describe('Plex auth routes', () => {
 
   it('returns 401 for invalid profile PIN', async () => {
     authTokenCacheMock.get.mockReturnValue('cached-token');
+    plexServiceMock.getHomeUsers.mockResolvedValue([{ id: 'home-1', uuid: 'uuid1' }]);
     plexServiceMock.switchHomeUser.mockRejectedValue(new Error('Invalid PIN'));
 
     const { POST } = await import('@/app/api/auth/plex/switch-profile/route');
@@ -378,8 +379,11 @@ describe('Plex auth routes', () => {
     expect(payload.error).toBe('InvalidPIN');
   });
 
-  it('switches Plex profile using provided profile info', async () => {
+  it('switches Plex profile using the Plex Home user entry for identity', async () => {
     authTokenCacheMock.get.mockReturnValue('cached-token');
+    plexServiceMock.getHomeUsers.mockResolvedValue([
+      { id: 'home-1', uuid: 'uuid-1', title: 'Profile', friendlyName: 'Profile', email: '', thumb: '' },
+    ]);
     plexServiceMock.switchHomeUser.mockResolvedValue('profile-token');
     prismaMock.user.count.mockResolvedValue(1);
     prismaMock.user.upsert.mockResolvedValue({
@@ -406,10 +410,12 @@ describe('Plex auth routes', () => {
     expect(payload.success).toBe(true);
     expect(payload.accessToken).toBe('access-token');
     expect(authTokenCacheMock.delete).toHaveBeenCalledWith('123');
+    expect(prismaMock.user.upsert.mock.calls[0][0].where).toEqual({ plexId: 'uuid-1' });
   });
 
   it('switches Plex profile using getUserInfo fallback', async () => {
     authTokenCacheMock.get.mockReturnValue('cached-token');
+    plexServiceMock.getHomeUsers.mockResolvedValue([{ id: 'home-2', uuid: 'uuid2' }]);
     plexServiceMock.switchHomeUser.mockResolvedValue('profile-token');
     plexServiceMock.getUserInfo.mockResolvedValue({
       id: 'plex-3',
@@ -441,6 +447,7 @@ describe('Plex auth routes', () => {
 
   it('returns 500 when profile info lookup fails', async () => {
     authTokenCacheMock.get.mockReturnValue('cached-token');
+    plexServiceMock.getHomeUsers.mockResolvedValue([{ id: 'home-2', uuid: 'uuid2' }]);
     plexServiceMock.switchHomeUser.mockResolvedValue('profile-token');
     plexServiceMock.getUserInfo.mockResolvedValue({ id: null });
 

@@ -3,7 +3,7 @@
  * Documentation: documentation/phase3/file-organization.md
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
 import { generateFilesHash } from '@/lib/utils/files-hash';
 
@@ -19,6 +19,10 @@ const configMock = vi.hoisted(() => ({
 }));
 const formatCoercionMock = vi.hoisted(() => ({
   coerceToPlexCompatible: vi.fn(),
+}));
+// The processor enriches missing series data from Audnexus; keep unit tests off the network.
+const audibleServiceMock = vi.hoisted(() => ({
+  getAudiobookDetails: vi.fn(),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -41,11 +45,36 @@ vi.mock('@/lib/services/job-queue.service', () => ({
   getJobQueueService: () => jobQueueMock,
 }));
 
-vi.mock('@/lib/utils/format-coercion', () => formatCoercionMock);
+vi.mock('@/lib/utils/format-coercion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/utils/format-coercion')>()),
+  ...formatCoercionMock,
+}));
+
+vi.mock('@/lib/integrations/audible.service', () => ({
+  getAudibleService: () => audibleServiceMock,
+}));
+
+// resolveTagDetails is real unless a test sets an override (it never rejects on its own). Plain holder: survives mock resets.
+const tagDetailsOverride = vi.hoisted(() => ({ resolve: undefined as undefined | (() => Promise<unknown>) }));
+vi.mock('@/lib/processors/organize-tag-details', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/processors/organize-tag-details')>();
+  return {
+    ...actual,
+    resolveTagDetails: (...args: Parameters<typeof actual.resolveTagDetails>) =>
+      tagDetailsOverride.resolve ? tagDetailsOverride.resolve() : actual.resolveTagDetails(...args),
+  };
+});
 
 describe('processOrganizeFiles', () => {
+  // The processor's first import is slow under a loaded parallel run; pay it once here
+  beforeAll(async () => {
+    await import('@/lib/processors/organize-files.processor');
+  }, 60000);
+
   beforeEach(() => {
     vi.clearAllMocks();
+    // An active request: the stop guard's conditional status writes match one row
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     // Default mock for request lookup (processor needs to determine request type)
     prismaMock.request.findUnique.mockResolvedValue({
       id: 'req-default',
@@ -59,6 +88,8 @@ describe('processOrganizeFiles', () => {
       errors: [],
       finalAudioFiles: paths,
     }));
+    // No Audnexus data by default (no series enrichment)
+    audibleServiceMock.getAudiobookDetails.mockResolvedValue(null);
   });
 
   it('organizes files and triggers filesystem scan when enabled', async () => {
@@ -98,6 +129,8 @@ describe('processOrganizeFiles', () => {
 
     expect(result.success).toBe(true);
     expect(libraryServiceMock.triggerLibraryScan).toHaveBeenCalledWith('lib-1');
+    // Missing series data goes to the (mocked) Audnexus lookup, never the real network.
+    expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledWith('ASIN1', { fillSeries: true });
   });
 
   it('skips filesystem scan when disabled', async () => {
@@ -248,6 +281,7 @@ describe('processOrganizeFiles', () => {
       audiobookId: 'a2',
       downloadPath: '/downloads/book',
       jobId: 'job-2',
+      downloadHistoryId: 'dh-client',
     });
 
     expect(result.success).toBe(false);
@@ -309,6 +343,7 @@ describe('processOrganizeFiles', () => {
       audiobookId: 'a6',
       downloadPath: '/downloads/book',
       jobId: 'job-6',
+      downloadHistoryId: 'dh-client',
     });
 
     expect(result.success).toBe(false);
@@ -431,6 +466,7 @@ describe('processOrganizeFiles', () => {
       audiobookId: 'a-eperm',
       downloadPath: '/data/torrents/bookbit',
       jobId: 'job-eperm',
+      downloadHistoryId: 'dh-client',
     });
 
     // Should be identified as retryable and queued for re-import
@@ -463,6 +499,7 @@ describe('processOrganizeFiles', () => {
       filesMovedCount: 1,
       errors: [],
       audioFiles: ['/media/Author/Book/Book.mp4'],
+      records: [{ source: '/downloads/book/Book.mp4', target: '/media/Author/Book/Book.mp4', status: 'copied', verified: true }],
     });
     configMock.getBackendMode.mockResolvedValue('plex');
     configMock.get.mockResolvedValue('false');
@@ -478,8 +515,47 @@ describe('processOrganizeFiles', () => {
     expect(result.success).toBe(true);
     expect(formatCoercionMock.coerceToPlexCompatible).toHaveBeenCalledWith(
       ['/media/Author/Book/Book.mp4'],
+      new Set(['/media/Author/Book/Book.mp4']),
       expect.anything()
     );
+  });
+
+  it('offers format coercion only the library files holding this import content, never other library files', async () => {
+    prismaMock.audiobook.findUnique.mockResolvedValue({
+      id: 'a-coerce-own', title: 'Book', author: 'Author', narrator: null, coverArtUrl: null, audibleAsin: null,
+    });
+    prismaMock.configuration.findUnique.mockResolvedValue(undefined);
+    const lib = '/media/Author/Book';
+    organizerMock.organize.mockResolvedValue({
+      success: true,
+      targetPath: lib,
+      filesMovedCount: 1,
+      errors: [],
+      audioFiles: [`${lib}/Part 1.mp4`, `${lib}/Part 2.mp4`, `${lib}/Part 3.mp4`, `${lib}/Part 4.mp4`],
+      records: [
+        { source: '/downloads/book/Part 1.mp4', target: `${lib}/Part 1.mp4`, status: 'copied', verified: true },
+        { source: '/downloads/book/Part 2.mp4', target: `${lib}/Part 2.mp4`, status: 'differs', verified: false },
+        { source: '/downloads/book/Part 3.mp4', target: `${lib}/Part 3.mp4`, status: 'present', verified: false },
+        { source: '/downloads/book/Part 4.mp4', target: `${lib}/Part 4.mp4`, status: 'identical', verified: true },
+      ],
+    });
+    formatCoercionMock.coerceToPlexCompatible.mockResolvedValueOnce({
+      renamed: [{ from: `${lib}/Part 1.mp4`, to: `${lib}/Part 1.m4b` }],
+      warnings: [],
+      errors: [],
+      finalAudioFiles: [`${lib}/Part 1.m4b`, `${lib}/Part 2.mp4`, `${lib}/Part 3.mp4`, `${lib}/Part 4.mp4`],
+    });
+    configMock.getBackendMode.mockResolvedValue('plex');
+    configMock.get.mockResolvedValue('false');
+
+    const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+    await processOrganizeFiles({
+      requestId: 'req-coerce-own', audiobookId: 'a-coerce-own', downloadPath: '/downloads/book', jobId: 'job-coerce-own',
+    });
+
+    const placed = formatCoercionMock.coerceToPlexCompatible.mock.calls[0][1] as Set<string>;
+    // Copied now, or identical (an earlier attempt's copy after a crash); never present or differs
+    expect([...placed]).toEqual([`${lib}/Part 1.mp4`, `${lib}/Part 4.mp4`]);
   });
 
   it('skips Plex format coercion when disabled', async () => {
@@ -602,6 +678,76 @@ describe('processOrganizeFiles', () => {
     );
   });
 
+  it('leaves files the library already held (differs) out of coercion and filesHash; writes fileFormat', async () => {
+    prismaMock.audiobook.findUnique.mockResolvedValue({
+      id: 'a-differs', title: 'Book', author: 'Author', narrator: null, coverArtUrl: null, audibleAsin: 'ASIN-DF1',
+    });
+    prismaMock.configuration.findUnique.mockResolvedValue(undefined);
+    organizerMock.organize.mockResolvedValue({
+      success: true,
+      targetPath: '/media/Author/Book',
+      filesMovedCount: 1,
+      errors: [],
+      audioFiles: ['/media/Author/Book/01.mp4', '/media/Author/Book/02.mp3'],
+      records: [
+        { source: '/downloads/book/01.mp4', target: '/media/Author/Book/01.mp4', status: 'copied', verified: true },
+        { source: '/downloads/book/02.mp3', target: '/media/Author/Book/02.mp3', status: 'differs', verified: false },
+      ],
+      inventory: { kind: 'audio', files: ['/downloads/book/01.mp4', '/downloads/book/02.mp3'], complete: true },
+    });
+    formatCoercionMock.coerceToPlexCompatible.mockResolvedValueOnce({
+      renamed: [{ from: '/media/Author/Book/01.mp4', to: '/media/Author/Book/01.m4b' }],
+      warnings: [],
+      errors: [],
+      finalAudioFiles: ['/media/Author/Book/01.m4b'],
+    });
+    configMock.getBackendMode.mockResolvedValue('plex');
+    configMock.get.mockResolvedValue('false');
+
+    const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+    await processOrganizeFiles({ requestId: 'req-differs', audiobookId: 'a-differs', downloadPath: '/downloads/book', jobId: 'job-differs' });
+
+    // Only this import's file may be coerced (every organized file still counts as a sibling);
+    // the existing library file is never renamed
+    expect(formatCoercionMock.coerceToPlexCompatible).toHaveBeenCalledWith(
+      ['/media/Author/Book/01.mp4', '/media/Author/Book/02.mp3'],
+      new Set(['/media/Author/Book/01.mp4']),
+      expect.anything()
+    );
+    expect(prismaMock.audiobook.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'a-differs' },
+        data: expect.objectContaining({ filesHash: generateFilesHash(['01.m4b']), fileFormat: 'm4b' }),
+      })
+    );
+  });
+
+  it('stores no filesHash when every file was already in the library with different content', async () => {
+    prismaMock.audiobook.findUnique.mockResolvedValue({
+      id: 'a-all-differs', title: 'Book', author: 'Author', narrator: null, coverArtUrl: null, audibleAsin: 'ASIN-DF2',
+    });
+    prismaMock.configuration.findUnique.mockResolvedValue(undefined);
+    organizerMock.organize.mockResolvedValue({
+      success: true,
+      targetPath: '/media/Author/Book',
+      filesMovedCount: 0,
+      errors: [],
+      audioFiles: ['/media/Author/Book/Book.mp3'],
+      records: [{ source: '/downloads/book/Book.mp3', target: '/media/Author/Book/Book.mp3', status: 'differs', verified: false }],
+      inventory: { kind: 'audio', files: ['/downloads/book/Book.mp3'], complete: true },
+    });
+    configMock.getBackendMode.mockResolvedValue('plex');
+    configMock.get.mockResolvedValue('false');
+
+    const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+    await processOrganizeFiles({ requestId: 'req-all-differs', audiobookId: 'a-all-differs', downloadPath: '/downloads/book', jobId: 'job-all-differs' });
+
+    expect(formatCoercionMock.coerceToPlexCompatible).not.toHaveBeenCalled();
+    expect(prismaMock.audiobook.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ filesHash: null, fileFormat: 'mp3' }) })
+    );
+  });
+
   it('generates and stores filesHash after successful organization', async () => {
     prismaMock.request.update.mockResolvedValue({});
     prismaMock.audiobook.findUnique.mockResolvedValue({
@@ -649,6 +795,221 @@ describe('processOrganizeFiles', () => {
         }),
       })
     );
+  });
+
+  describe('metadata tag details', () => {
+    function setupBook(overrides: Record<string, unknown> = {}) {
+      prismaMock.request.update.mockResolvedValue({});
+      prismaMock.audiobook.findUnique.mockResolvedValue({
+        id: 'a-tags',
+        title: 'Book',
+        author: 'Author',
+        narrator: 'Narrator',
+        coverArtUrl: null,
+        audibleAsin: 'ASIN-TAGS',
+        year: 2020,
+        description: 'Stored short blurb.',
+        series: null,
+        seriesPart: null,
+        ...overrides,
+      });
+      organizerMock.organize.mockResolvedValue({
+        success: true,
+        targetPath: '/media/Author/Book',
+        filesMovedCount: 1,
+        errors: [],
+        audioFiles: ['/media/Author/Book/Book.m4b'],
+      });
+      prismaMock.audiobook.update.mockResolvedValue({});
+      configMock.getBackendMode.mockResolvedValue('audiobookshelf');
+      configMock.get.mockResolvedValue(null);
+    }
+
+    function taggingEnabled(enabled: boolean) {
+      prismaMock.configuration.findUnique.mockImplementation(async (args: { where?: { key?: string } }) =>
+        args?.where?.key === 'metadata_tagging_enabled' ? { value: String(enabled) } : null
+      );
+    }
+
+    async function runOrganize() {
+      const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+      const result = await processOrganizeFiles({
+        requestId: 'req-tags',
+        audiobookId: 'a-tags',
+        downloadPath: '/downloads/book',
+        jobId: 'job-tags',
+      });
+      expect(result.success).toBe(true);
+      const call = organizerMock.organize.mock.calls[0];
+      return { metadata: call[1], placement: call[6] };
+    }
+
+    const taggingReads = () =>
+      prismaMock.configuration.findUnique.mock.calls.filter((c: unknown[]) => (c[0] as { where?: { key?: string } } | undefined)?.where?.key === 'metadata_tagging_enabled');
+
+    it('passes the Audible summary and top-level genres, looked up once for series and tags', async () => {
+      setupBook();
+      taggingEnabled(true);
+      audibleServiceMock.getAudiobookDetails.mockResolvedValue({
+        asin: 'ASIN-TAGS',
+        title: 'Book',
+        author: 'Author',
+        description: 'Full Audible summary.',
+        primaryGenres: ['Science Fiction & Fantasy'],
+        series: 'The Saga',
+        seriesPart: '1',
+      });
+
+      const { metadata } = await runOrganize();
+
+      expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledTimes(1);
+      expect(metadata).toMatchObject({
+        series: 'The Saga',
+        seriesPart: '1',
+        description: 'Full Audible summary.',
+        genres: ['Science Fiction & Fantasy'],
+      });
+    });
+
+    it('passes publisher, subtitle and language from the lookup to the organizer', async () => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      taggingEnabled(true);
+      audibleServiceMock.getAudiobookDetails.mockResolvedValue({
+        description: 'Full Audible summary.',
+        publisherName: 'Penguin Audio',
+        subtitle: 'An Easy & Proven Way',
+        language: 'english',
+      });
+
+      const { metadata } = await runOrganize();
+
+      expect(metadata).toMatchObject({ publisher: 'Penguin Audio', subtitle: 'An Easy & Proven Way', language: 'english' });
+    });
+
+    it('series already known: the lookup serves only the tags (one call)', async () => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      taggingEnabled(true);
+      audibleServiceMock.getAudiobookDetails.mockResolvedValue({ description: 'Full Audible summary.', primaryGenres: ['History'] });
+
+      const { metadata } = await runOrganize();
+
+      expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledTimes(1);
+      expect(metadata).toMatchObject({ description: 'Full Audible summary.', genres: ['History'] });
+    });
+
+    it('falls back to the stored description when the lookup finds nothing', async () => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      taggingEnabled(true);
+      audibleServiceMock.getAudiobookDetails.mockResolvedValue(null);
+
+      const { metadata } = await runOrganize();
+
+      expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledWith('ASIN-TAGS', { fillSeries: false });
+      expect(metadata.description).toBe('Stored short blurb.');
+      expect(metadata.genres).toBeUndefined();
+    });
+
+    it('does not look anything up for tags when metadata tagging is off', async () => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      taggingEnabled(false);
+
+      const { metadata, placement } = await runOrganize();
+
+      expect(audibleServiceMock.getAudiobookDetails).not.toHaveBeenCalled();
+      expect(metadata.description).toBeUndefined();
+      expect(metadata.genres).toBeUndefined();
+      expect(placement).toMatchObject({ metadataTaggingEnabled: false });
+    });
+
+    it('runs the setup reads while the lookup is pending, and awaits it before organize()', async () => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      taggingEnabled(true);
+      let answer!: (value: unknown) => void;
+      audibleServiceMock.getAudiobookDetails.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+      const templateRead = () =>
+        prismaMock.configuration.findUnique.mock.calls.some(
+          (c: unknown[]) => (c[0] as { where?: { key?: string } } | undefined)?.where?.key === 'audiobook_path_template'
+        );
+
+      const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+      const run = processOrganizeFiles({ requestId: 'req-tags', audiobookId: 'a-tags', downloadPath: '/downloads/book', jobId: 'job-tags' });
+      await vi.waitFor(() => expect(templateRead()).toBe(true));
+      expect(organizerMock.organize).not.toHaveBeenCalled();
+
+      answer({ description: 'Full Audible summary.', primaryGenres: ['History'] });
+      await expect(run).resolves.toMatchObject({ success: true });
+      expect(organizerMock.organize.mock.calls[0][1]).toMatchObject({ description: 'Full Audible summary.', genres: ['History'] });
+    });
+
+    it('a setup failure while the tag details are pending leaves no unhandled rejection when they then reject', async () => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      let fail!: (error: Error) => void;
+      tagDetailsOverride.resolve = () => new Promise((_resolve, reject) => (fail = reject));
+      prismaMock.configuration.findUnique.mockImplementation(async (args: { where?: { key?: string } }) => {
+        if (args?.where?.key === 'metadata_tagging_enabled') return { value: 'true' };
+        if (args?.where?.key === 'audiobook_path_template') throw new Error('db gone during setup');
+        return null;
+      });
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on('unhandledRejection', onUnhandled);
+      try {
+        const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+        await processOrganizeFiles({ requestId: 'req-tags', audiobookId: 'a-tags', downloadPath: '/downloads/book', jobId: 'job-tags' }).catch(
+          () => undefined
+        );
+        expect(organizerMock.organize).not.toHaveBeenCalled();
+        fail(new Error('tag details rejected after the setup failed'));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+        tagDetailsOverride.resolve = undefined;
+      }
+    });
+
+    it.each([true, false])('reads the tagging switch once (tagging %s) and hands that read to the organizer', async (enabled) => {
+      setupBook({ series: 'The Saga', seriesPart: '1' });
+      taggingEnabled(enabled);
+
+      const { placement } = await runOrganize();
+
+      expect(taggingReads()).toHaveLength(1);
+      expect(configMock.get).not.toHaveBeenCalledWith('metadata_tagging_enabled');
+      expect(placement).toMatchObject({ metadataTaggingEnabled: enabled });
+    });
+  });
+
+  describe('request cancelled after the import was queued', () => {
+    it.each(['audiobook', 'ebook'])('does not import a cancelled or deleted %s request', async (type) => {
+      prismaMock.request.findUnique.mockResolvedValue({ id: 'req-c', type, userId: 'u1', user: { plexUsername: 'testuser' } });
+      // The 'processing' claim matches no row: cancelled (or deleted) while the job waited
+      prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
+
+      const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+      // .catch: on main the import runs on and fails on the unmocked book; the assertion below is the proof
+      const result = await processOrganizeFiles({
+        requestId: 'req-c',
+        audiobookId: 'a1',
+        downloadPath: '/downloads/book',
+        jobId: 'job-c',
+      }).catch((error: unknown) => error);
+
+      // Main overwrote the cancel with a plain 'processing' write and started the import
+      expect(prismaMock.request.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'processing' }) })
+      );
+      expect(result).toMatchObject({ success: true, requestId: 'req-c' });
+      expect(result.message).toContain('not imported');
+      expect(prismaMock.request.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 'req-c', deletedAt: null, status: { not: 'cancelled' } },
+        data: expect.objectContaining({ status: 'processing' }),
+      }));
+      expect(prismaMock.request.update).not.toHaveBeenCalled();
+      expect(prismaMock.audiobook.findUnique).not.toHaveBeenCalled();
+      expect(organizerMock.organize).not.toHaveBeenCalled();
+      expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+    });
   });
 });
 

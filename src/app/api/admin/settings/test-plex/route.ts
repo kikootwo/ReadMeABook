@@ -5,9 +5,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
-import { getConfigService } from '@/lib/services/config.service';
 import { getPlexService } from '@/lib/integrations/plex.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
+import { savedPlexCredential } from '@/lib/services/saved-credentials.service';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Settings.TestPlex');
 
@@ -15,7 +17,9 @@ export async function POST(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { url, token } = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const { url, token } = bodyResult.data;
 
         if (!url || !token) {
           return NextResponse.json(
@@ -24,21 +28,18 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // If token is masked, fetch the actual value from database (decrypted)
-        let actualToken = token;
-        if (token.startsWith('••••')) {
-          const configService = getConfigService();
-          const storedToken = await configService.get('plex_token');
-
-          if (!storedToken) {
-            return NextResponse.json(
-              { success: false, error: 'No stored token found. Please re-enter your Plex token.' },
-              { status: 400 }
-            );
-          }
-
-          actualToken = storedToken;
+        // A masked token reuses the saved one — only for the saved server URL
+        const resolved = await resolveSecretForUrl({
+          kind: 'plex',
+          url,
+          supplied: token,
+          missingMessage: 'No stored token found. Please re-enter your Plex token.',
+          loadSaved: savedPlexCredential,
+        });
+        if (!resolved.ok) {
+          return NextResponse.json({ success: false, error: resolved.error }, { status: 400 });
         }
+        const actualToken = resolved.secret;
 
         const plexService = getPlexService();
 
