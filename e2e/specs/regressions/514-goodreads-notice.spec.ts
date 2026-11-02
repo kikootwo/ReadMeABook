@@ -33,7 +33,7 @@ values (${sqlStr(SHELF.id)}, ${sqlStr(me.user.id)}, ${sqlStr(SHELF.name)}, ${sql
 
   const card = page.locator('div.group', { has: page.getByRole('heading', { name: new RegExp(`^${SHELF.name.replace(/[()#]/g, '\\$&')}`) }) });
   await expect(card.getByRole('note')).toHaveText(NOTICE);
-  await card.scrollIntoViewIfNeeded();
+  await card.evaluate((el) => el.scrollIntoView({ block: 'center' }));
   await page.waitForFunction(() => document.getAnimations().every((a) => !(a instanceof CSSTransition) || a.playState !== 'running'));
   await snap(page, '514', 'goodreads-shelf-notice');
 
