@@ -438,28 +438,11 @@ describe('Request by ID API routes', () => {
     expect(payload.error).toBe('ValidationError');
   });
 
-  it('allows admins to delete requests', async () => {
-    authRequest.user = { id: 'admin-1', role: 'admin' };
-    prismaMock.request.delete.mockResolvedValueOnce({});
+  it('has no DELETE handler: the raw hard delete is gone (admin delete is /api/admin/requests/:id)', async () => {
+    const route = await import('@/app/api/requests/[id]/route');
 
-    const { DELETE } = await import('@/app/api/requests/[id]/route');
-    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-4' }) });
-    const payload = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(payload.success).toBe(true);
-    expect(prismaMock.request.delete).toHaveBeenCalledWith({ where: { id: 'req-4' } });
-  });
-
-  it('blocks delete for non-admin users', async () => {
-    authRequest.user = { id: 'user-2', role: 'user' };
-
-    const { DELETE } = await import('@/app/api/requests/[id]/route');
-    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-9' }) });
-    const payload = await response.json();
-
-    expect(response.status).toBe(403);
-    expect(payload.error).toBe('Forbidden');
+    expect((route as Record<string, unknown>).DELETE).toBeUndefined();
+    expect(prismaMock.request.delete).not.toHaveBeenCalled();
   });
 });
 

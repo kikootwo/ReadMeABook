@@ -19,6 +19,7 @@ describe('isEndpointAllowed', () => {
       ['POST', '/api/requests'],
       ['GET', '/api/requests/abc-uuid-123'],
       ['GET', '/api/requests/00000000-0000-0000-0000-000000000000'],
+      ['POST', '/api/requests/abc-uuid-123/cancel'],
       ['GET', '/api/admin/metrics'],
       ['GET', '/api/admin/downloads/active'],
       ['GET', '/api/admin/requests/recent'],
@@ -49,6 +50,16 @@ describe('isEndpointAllowed', () => {
       expect(isEndpointAllowed('GET', '/api/requests/abc/manual-search')).toBe(false);
       expect(isEndpointAllowed('GET', '/api/requests/abc/select-ebook')).toBe(false);
       expect(isEndpointAllowed('POST', '/api/requests/abc/select-torrent')).toBe(false);
+    });
+
+    it('the cancel route is the only token path that changes a request; nothing deletes one (#228)', () => {
+      expect(isEndpointAllowed('DELETE', '/api/requests/abc')).toBe(false);
+      expect(isEndpointAllowed('PATCH', '/api/requests/abc')).toBe(false);
+      expect(isEndpointAllowed('GET', '/api/requests/abc/cancel')).toBe(false);
+      expect(isEndpointAllowed('POST', '/api/requests/abc/cancel/extra')).toBe(false);
+      expect(isEndpointAllowed('POST', '/api/requests/abc/def/cancel')).toBe(false);
+      expect(isEndpointAllowed('POST', '/api/requests//cancel')).toBe(false);
+      expect(isEndpointAllowed('DELETE', '/api/admin/requests/abc')).toBe(false);
     });
 
     it('rejects partial / extended paths', () => {
