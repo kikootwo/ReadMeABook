@@ -13,6 +13,7 @@ import { processSingleton } from '../utils/process-singleton';
 import { isProcessStopping } from '../utils/process-stopping';
 import { markRequestFailedUnlessStopped } from '../utils/request-stop-guard';
 import { createQueueShutdownTarget, JOB_QUEUE_SINGLETON_KEY, JobActivityTracker, QueueShutdownTarget } from './job-activity-tracker';
+import { handleStallLimitFailure } from './job-stall-failure';
 import type { NotificationEvent } from '@/lib/constants/notification-events';
 
 const logger = RMABLogger.create('JobQueue');
@@ -257,6 +258,7 @@ export class JobQueueService {
       if (!job) return; // stall-limit failure for a job already removed from Redis
       logger.error(`Job ${job.id} failed`, { error: error.message });
       await this.activity.trackWrite(this.updateJobInDatabase(job.id as string, 'failed', null, error.message, error.stack));
+      await this.activity.trackWrite(handleStallLimitFailure(job, error, this.activity));
 
       // Handle permanent failures for specific job types after all retries exhausted
       if (job.name === 'monitor_download' && job.data) {

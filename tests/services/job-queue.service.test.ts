@@ -523,6 +523,22 @@ describe('JobQueueService', () => {
       });
     });
 
+    it('puts an organize request cut twice (stall limit) back to awaiting_import', async () => {
+      prismaMock.request.findFirst.mockResolvedValue({ importAttempts: 0, maxImportRetries: 5 });
+      prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+      const { JobQueueService } = await import('@/lib/services/job-queue.service');
+      new JobQueueService();
+      const handlers = Object.fromEntries(queueMock.on.mock.calls.map(([event, handler]) => [event, handler]));
+
+      const data = { requestId: 'req-1', audiobookId: 'book-1', downloadPath: '/downloads/x', downloadHistoryId: 'hist-1' };
+      await handlers.failed({ id: 'bull-12', name: 'organize_files', data, attemptsMade: 0 }, new Error('job stalled more than allowable limit'));
+
+      expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+        where: { id: 'req-1', status: 'processing', deletedAt: null, importAttempts: 0 },
+        data: expect.objectContaining({ status: 'awaiting_import', importAttempts: 1 }),
+      });
+    });
+
     it('leaves a cancelled or deleted request alone when download_torrent fails', async () => {
       prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
 
