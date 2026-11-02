@@ -20,7 +20,7 @@ export async function PUT(request: NextRequest) {
         const bodyResult = await readJsonBody(request);
         if (!bodyResult.ok) return bodyResult.response;
         const body = bodyResult.data;
-        const { serverUrl, apiToken, libraryId, triggerScanAfterImport } = body;
+        const { serverUrl, apiToken, libraryId, ebookLibraryId, triggerScanAfterImport } = body;
 
         const { getConfigService } = await import('@/lib/services/config.service');
         const configService = getConfigService();
@@ -46,6 +46,7 @@ export async function PUT(request: NextRequest) {
         const updates: ConfigUpdate[] = [
           { key: 'audiobookshelf.server_url', value: serverUrl || '' },
           { key: 'audiobookshelf.library_id', value: libraryId || '' },
+          { key: 'audiobookshelf.ebook_library_id', value: ebookLibraryId || '' },
           { key: 'audiobookshelf.trigger_scan_after_import', value: triggerScanAfterImport === true ? 'true' : 'false' },
         ];
 
