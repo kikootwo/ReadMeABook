@@ -8,6 +8,7 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { freedAccountKeys } from '@/lib/services/auth/deleted-account-keys';
 
 const logger = RMABLogger.create('API.Admin.Users');
 
@@ -190,7 +191,9 @@ export async function DELETE(
           where: { id },
           select: {
             id: true,
+            plexId: true,
             plexUsername: true,
+            oidcSubject: true,
             isSetupAdmin: true,
             authProvider: true,
             deletedAt: true,
@@ -223,30 +226,30 @@ export async function DELETE(
           );
         }
 
-        // Only allow deleting local users (manual registration)
-        if (targetUser.authProvider !== 'local') {
-          const providerName = targetUser.authProvider === 'plex' ? 'Plex' :
-                               targetUser.authProvider === 'oidc' ? 'OIDC' :
-                               targetUser.authProvider || 'external';
-          return NextResponse.json(
-            {
-              error: `Cannot delete ${providerName} users. User access is managed by ${providerName}.`
-            },
-            { status: 403 }
-          );
-        }
-
-        // Soft-delete user (preserves their requests and history)
-        // Append timestamp to plexId to free it up for reuse (allows username reuse)
-        const timestamp = Date.now();
-        await prisma.user.update({
-          where: { id },
+        // Soft-delete user (preserves their requests and history). Any provider: the sign-in
+        // keys are renamed, so signing in again creates a new account (role user, approval
+        // as for any new account), and the login token is cleared.
+        const freedKeys = freedAccountKeys(targetUser);
+        const deleted = await prisma.user.updateMany({
+          where: { id, deletedAt: null },
           data: {
             deletedAt: new Date(),
             deletedBy: req.user?.sub || null,
-            plexId: `local-${targetUser.plexUsername}-deleted-${timestamp}`,
+            plexId: freedKeys.plexId,
+            oidcSubject: freedKeys.oidcSubject,
+            loginTokenHash: null,
           },
         });
+
+        // Deleted by a concurrent request since the check above: same answer as above
+        if (deleted.count === 0) {
+          return NextResponse.json(
+            { error: 'User has already been deleted' },
+            { status: 400 }
+          );
+        }
+
+        logger.info('User deleted', { userId: id, authProvider: targetUser.authProvider, deletedBy: req.user?.sub });
 
         return NextResponse.json({
           success: true,

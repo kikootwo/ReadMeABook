@@ -232,22 +232,28 @@ describe('Admin users routes', () => {
     expect(payload.user.autoApproveRequests).toBe(true);
   });
 
-  it('soft deletes a local user', async () => {
+  it('soft deletes a local user and keeps the local key format', async () => {
     prismaMock.user.findUnique.mockResolvedValueOnce({
       id: 'u4',
+      plexId: 'local-user',
       plexUsername: 'user',
+      oidcSubject: null,
       isSetupAdmin: false,
       authProvider: 'local',
       deletedAt: null,
       _count: { requests: 1 },
     });
-    prismaMock.user.update.mockResolvedValueOnce({});
+    prismaMock.user.updateMany.mockResolvedValueOnce({ count: 1 });
 
     const { DELETE } = await import('@/app/api/admin/users/[id]/route');
     const response = await DELETE({} as any, { params: Promise.resolve({ id: 'u4' }) });
     const payload = await response.json();
 
     expect(payload.success).toBe(true);
+    const write = (prismaMock.user.updateMany.mock.calls[0] ?? prismaMock.user.update.mock.calls[0])[0];
+    expect(write.data).toMatchObject({ deletedAt: expect.any(Date), deletedBy: 'admin-1', oidcSubject: null, loginTokenHash: null });
+    expect(write.data.plexId).toMatch(/^local-user-deleted-\d+$/);
+    expect(write.where).toEqual({ id: 'u4', deletedAt: null });
   });
 
   it('prevents deleting yourself', async () => {
@@ -306,22 +312,84 @@ describe('Admin users routes', () => {
     expect(payload.error).toMatch(/setup admin/);
   });
 
-  it('prevents deleting non-local users', async () => {
+  const FREED_KEY = /-deleted-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+  async function deleteRow(row: Record<string, unknown>) {
     prismaMock.user.findUnique.mockResolvedValueOnce({
-      id: 'plex-1',
-      plexUsername: 'plexuser',
-      isSetupAdmin: false,
-      authProvider: 'plex',
-      deletedAt: null,
-      _count: { requests: 0 },
+      id: 'p1', plexUsername: 'pat', oidcSubject: null, isSetupAdmin: false, deletedAt: null, _count: { requests: 3 }, ...row,
+    });
+    prismaMock.user.updateMany.mockResolvedValueOnce({ count: 1 });
+    const { DELETE } = await import('@/app/api/admin/users/[id]/route');
+    const response = await DELETE({} as never, { params: Promise.resolve({ id: String(row.id ?? 'p1') }) });
+    return { status: response.status, payload: await response.json(), data: prismaMock.user.updateMany.mock.calls.at(-1)?.[0].data };
+  }
+
+  it.each([
+    ['plex', '1001'],
+    [null, '1002'],
+  ])('soft deletes a Plex user (provider %s) and frees its key with a random part', async (authProvider, plexId) => {
+    const { status, payload, data } = await deleteRow({ authProvider, plexId });
+
+    expect(status).toBe(200);
+    expect(payload).toEqual({ success: true, message: 'User "pat" has been deleted. Their 3 request(s) have been preserved.' });
+    expect(data).toMatchObject({ deletedAt: expect.any(Date), deletedBy: 'admin-1', oidcSubject: null, loginTokenHash: null });
+    expect(data.plexId.startsWith(`${plexId}-deleted-`)).toBe(true);
+    expect(data.plexId).toMatch(FREED_KEY);
+  });
+
+  it('soft deletes an OIDC user and frees both the plexId and the OIDC subject', async () => {
+    const { status, data } = await deleteRow({ authProvider: 'oidc', plexId: 'sub-olive', oidcSubject: 'sub-olive' });
+
+    expect(status).toBe(200);
+    expect(data.plexId).toMatch(FREED_KEY);
+    expect(data.oidcSubject).toBe(data.plexId);
+    expect(data.oidcSubject.startsWith('sub-olive-deleted-')).toBe(true);
+  });
+
+  it('never gives two deletes of the same key the same freed key', async () => {
+    const first = await deleteRow({ authProvider: 'plex', plexId: '1001' });
+    const second = await deleteRow({ authProvider: 'plex', plexId: '1001' });
+
+    expect([first.status, second.status]).toEqual([200, 200]);
+    expect(first.data.plexId).not.toBe(second.data.plexId);
+  });
+
+  it('answers as already deleted when a concurrent delete got there first', async () => {
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      id: 'p1', plexId: '1001', plexUsername: 'pat', oidcSubject: null, isSetupAdmin: false, authProvider: 'plex', deletedAt: null, _count: { requests: 0 },
+    });
+    prismaMock.user.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    const { DELETE } = await import('@/app/api/admin/users/[id]/route');
+    const response = await DELETE({} as never, { params: Promise.resolve({ id: 'p1' }) });
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/already been deleted/);
+  });
+
+  it('refuses deleting your own account whatever the provider, before any lookup', async () => {
+    authRequest = { user: { sub: 'plex-admin', role: 'admin' } };
+
+    const { DELETE } = await import('@/app/api/admin/users/[id]/route');
+    const response = await DELETE({} as never, { params: Promise.resolve({ id: 'plex-admin' }) });
+
+    expect(response.status).toBe(403);
+    expect((await response.json()).error).toBe('You cannot delete your own account');
+    expect(prismaMock.user.findUnique).not.toHaveBeenCalled();
+    expect(prismaMock.user.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each(['plex', 'oidc'])('refuses deleting a %s setup admin', async (authProvider) => {
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      id: 'setup-2', plexId: 'x', plexUsername: 'owner', oidcSubject: null, isSetupAdmin: true, authProvider, deletedAt: null, _count: { requests: 0 },
     });
 
     const { DELETE } = await import('@/app/api/admin/users/[id]/route');
-    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'plex-1' }) });
-    const payload = await response.json();
+    const response = await DELETE({} as never, { params: Promise.resolve({ id: 'setup-2' }) });
 
     expect(response.status).toBe(403);
-    expect(payload.error).toMatch(/Cannot delete Plex users/);
+    expect((await response.json()).error).toMatch(/setup admin/);
+    expect(prismaMock.user.updateMany).not.toHaveBeenCalled();
   });
 
   it('approves a pending user', async () => {
