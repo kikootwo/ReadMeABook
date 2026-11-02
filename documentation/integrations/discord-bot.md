@@ -38,7 +38,6 @@ Typed accessor: [src/lib/services/discord/discord-config.ts](../../src/lib/servi
 - **/request `<type>` `[query]`** (audiobook|ebook): search modal → `audibleService.search` → result dropdown → confirm (cover thumbnail) → create request → post live **request card** (see below). The optional `query` skips the modal and goes straight to results.
   - audiobook → `createRequestForUser` ([request-creator.service.ts](../../src/lib/services/request-creator.service.ts), `bypassIgnore: true`).
   - ebook → `createEbookRequestForUser` ([ebook-request-creator.service.ts](../../src/lib/services/ebook-request-creator.service.ts)). **Sidecar rule:** the audiobook must already be in the library, else it's rejected (same as the Web "Fetch Ebook" button).
-  - **Result rows are media-aware:** `buildSearchSelect` omits "Narrated by" for e-book searches (narrator is audiobook-only, matching the cards and embeds).
 - **/status**: lists invoker's outstanding requests (admins see all). Read-only.
 - **/delete**: dropdown of invoker's deletable requests → select shows a **confirmation preview** (warning-colored embed enriched with Duration/Series/Format/Genre/File Size + cover) with **Confirm Delete** / **Cancel** buttons. The dropdown stays open, so re-selecting another title re-renders the preview. Only **Confirm Delete** commits `deleteRequest` (cascading soft-delete: files, library backend, download client); **Cancel** dismisses without removing anything. Gated by `discord.delete_permission`:
   - `own_only` (default): users see/delete their own; admins see/delete all.
