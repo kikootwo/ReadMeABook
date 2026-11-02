@@ -64,4 +64,30 @@ describe('ToastProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.queryByText('Failed')).toBeNull();
   });
+
+  it('gives every toast type a solid dark background so the page does not show through', () => {
+    const types = ['success', 'error', 'warning', 'info'] as const;
+    const AllTypes = () => {
+      const toast = useToast();
+      return (
+        <button type="button" onClick={() => types.forEach((t) => toast[t](`msg-${t}`, 0))}>
+          Add All
+        </button>
+      );
+    };
+
+    render(
+      <ToastProvider>
+        <AllTypes />
+      </ToastProvider>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Add All' }));
+
+    for (const type of types) {
+      const toastEl = screen.getByText(`msg-${type}`).parentElement as HTMLElement;
+      const darkBgs = toastEl.className.split(/\s+/).filter((c) => c.startsWith('dark:bg-'));
+      expect(darkBgs, type).toHaveLength(1);
+      expect(darkBgs[0], type).not.toMatch(/\//);
+    }
+  });
 });
