@@ -70,6 +70,7 @@ describe('direct download name fits in 255 bytes (#474)', () => {
       return null;
     });
     prismaMock.request.update.mockResolvedValue({});
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.downloadHistory.update.mockResolvedValue({});
     prismaMock.downloadHistory.findUnique.mockResolvedValue({ torrentUrl: JSON.stringify(['https://slow.example.com/book']) });
     prismaMock.request.findUnique.mockResolvedValue({ id: 'req-474', audiobookId: 'ab-474', audiobook: { id: 'ab-474' } });

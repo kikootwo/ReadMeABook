@@ -71,6 +71,10 @@ describe('RequestActionsDropdown', () => {
 
     fireEvent.click(screen.getByTitle('Actions'));
     fireEvent.click(screen.getByText('Cancel Request'));
+    // No download yet: the short line, nothing about "this request's download"
+    expect(screen.getByText('Cancel "Pending Book"? RMAB stops looking for this book.')).toBeInTheDocument();
+    expect(screen.queryByText(/this request's download/)).toBeNull();
+    expect(screen.queryByText(/Cancelling will stop the download/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel request' }));
     await waitFor(() => expect(onCancel).toHaveBeenCalledWith('req-1'));
 

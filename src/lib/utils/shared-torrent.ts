@@ -43,6 +43,8 @@ export interface TorrentSiblingDownload {
   indexerName: string | null;
   downloadClient: string | null;
   createdAt: Date;
+  /** Read by the cancelled-download step: a sibling whose rows here are all 'removed' no longer uses the torrent */
+  downloadStatus?: string | null;
 }
 
 function otherActiveRequestsWhere(requestId: string, torrentHash: string) {
@@ -111,9 +113,62 @@ export async function otherActiveRequestsSharingTorrent(
       audiobook: { select: { status: true, filePath: true, completedAt: true } },
       downloadHistory: {
         where: { torrentHash: { in: torrentHashForms(torrentHash) }, selected: true },
+        select: { id: true, indexerId: true, indexerName: true, downloadClient: true, createdAt: true, downloadStatus: true },
+      },
+    },
+  });
+}
+
+/** A soft-deleted request whose selected row for the torrent is not recorded as gone */
+export interface SoftDeletedHolder {
+  id: string;
+  downloadHistory: TorrentSiblingDownload[];
+}
+
+const NOT_REMOVED = { OR: [{ downloadStatus: null }, { downloadStatus: { not: 'removed' } }] };
+
+/**
+ * Cancelled-download cleanup only: soft-deleted requests other than `requestId` whose selected row for
+ * `torrentHash` is not 'removed' (a deleted request can keep its finished torrent to seed). The caller
+ * lets each go once its own indexer's rule is met; such a holder never keeps a partial torrent.
+ */
+export async function softDeletedHoldersOfTorrent(
+  requestId: string,
+  torrentHash: string | null | undefined
+): Promise<SoftDeletedHolder[]> {
+  if (!torrentHash) return [];
+  const row = { torrentHash: { in: torrentHashForms(torrentHash) }, selected: true, ...NOT_REMOVED };
+  return prisma.request.findMany({
+    where: { id: { not: requestId }, deletedAt: { not: null }, downloadHistory: { some: row } },
+    select: {
+      id: true,
+      downloadHistory: {
+        where: row,
         select: { id: true, indexerId: true, indexerName: true, downloadClient: true, createdAt: true },
       },
     },
+  });
+}
+
+/**
+ * Cancelled-download cleanup only: another active request for the same book that is searching or
+ * downloading and has no selected download yet (it may be about to grab this torrent), or null.
+ */
+export async function sameBookGrabInProgress(
+  requestId: string,
+  audiobookId: string,
+  type: string
+): Promise<ActiveRequestRef | null> {
+  return prisma.request.findFirst({
+    where: {
+      id: { not: requestId },
+      audiobookId,
+      type,
+      deletedAt: null,
+      status: { in: ['searching', 'downloading'] },
+      downloadHistory: { none: { selected: true } },
+    },
+    select: { id: true, status: true },
   });
 }
 

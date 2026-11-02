@@ -10,6 +10,7 @@ import { StartDirectDownloadPayload, MonitorDirectDownloadPayload, getJobQueueSe
 import { prisma } from '../db';
 import { getConfigService } from '../services/config.service';
 import { RMABLogger } from '../utils/logger';
+import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { capFilenameBytes } from '../utils/path-component';
 import { extractDownloadUrl, ExtractedDownload } from '../services/ebook-scraper';
 import axios from 'axios';
@@ -58,16 +59,11 @@ export async function processStartDirectDownload(payload: StartDirectDownloadPay
   logger.info(`Starting direct download for request ${requestId}`);
 
   try {
-    // Update request status to downloading
-    await prisma.request.update({
-      where: { id: requestId },
-      data: {
-        status: 'downloading',
-        progress: 0,
-        downloadAttempts: { increment: 1 },
-        updatedAt: new Date(),
-      },
-    });
+    // Update request status to downloading, unless it was cancelled or deleted: then download nothing
+    if (!(await updateRequestUnlessStopped(requestId, { status: 'downloading', progress: 0, downloadAttempts: { increment: 1 } }))) {
+      logger.info(`Request ${requestId} is cancelled or deleted, not downloading`);
+      return { success: true, message: 'Request cancelled or deleted, download not started', requestId };
+    }
 
     // Update download history
     await prisma.downloadHistory.update({
@@ -187,14 +183,7 @@ export async function processStartDirectDownload(payload: StartDirectDownloadPay
       // All attempts failed
       logger.error(`All ${attemptsLimit} download attempts failed`);
 
-      await prisma.request.update({
-        where: { id: requestId },
-        data: {
-          status: 'failed',
-          errorMessage: downloadResult.error || 'All download attempts failed',
-          updatedAt: new Date(),
-        },
-      });
+      await markRequestFailedUnlessStopped(requestId, downloadResult.error || 'All download attempts failed');
 
       await prisma.downloadHistory.update({
         where: { id: downloadHistoryId },
@@ -212,15 +201,8 @@ export async function processStartDirectDownload(payload: StartDirectDownloadPay
       };
     }
 
-    // Download succeeded - update records and trigger organize
-    await prisma.request.update({
-      where: { id: requestId },
-      data: {
-        status: 'processing',
-        progress: 100,
-        updatedAt: new Date(),
-      },
-    });
+    // Download succeeded - update records and trigger organize (not for a request cancelled meanwhile)
+    const stillWanted = await updateRequestUnlessStopped(requestId, { status: 'processing', progress: 100 });
 
     await prisma.downloadHistory.update({
       where: { id: downloadHistoryId },
@@ -230,6 +212,11 @@ export async function processStartDirectDownload(payload: StartDirectDownloadPay
         downloadPath: downloadResult.filePath,
       },
     });
+
+    if (!stillWanted) {
+      logger.info(`Request ${requestId} was cancelled or deleted during the download, not importing it`);
+      return { success: true, message: 'Request cancelled or deleted, download not imported', requestId };
+    }
 
     // Get audiobook ID for organize job
     const request = await prisma.request.findUnique({
@@ -265,14 +252,7 @@ export async function processStartDirectDownload(payload: StartDirectDownloadPay
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
 
-    await prisma.request.update({
-      where: { id: requestId },
-      data: {
-        status: 'failed',
-        errorMessage: error instanceof Error ? error.message : 'Unknown error during download',
-        updatedAt: new Date(),
-      },
-    });
+    await markRequestFailedUnlessStopped(requestId, error instanceof Error ? error.message : 'Unknown error during download');
 
     await prisma.downloadHistory.update({
       where: { id: downloadHistoryId },

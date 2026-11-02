@@ -127,13 +127,13 @@ describe('Request by ID API routes', () => {
       userId: 'user-1',
       status: 'pending',
       user: { plexUsername: 'testuser' },
+      audiobookId: 'ab-1',
+      type: 'audiobook',
       audiobook: { id: 'ab-1', title: 'Test Book', author: 'Test Author' },
     });
-    prismaMock.request.update.mockResolvedValueOnce({
-      id: 'req-2',
-      status: 'cancelled',
-      audiobook: { id: 'ab-1', title: 'Test Book', author: 'Test Author' },
-    });
+    // The conditional flip wrote the row; the request has no download yet
+    prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 });
+    prismaMock.downloadHistory.findFirst.mockResolvedValueOnce(null);
 
     const { PATCH } = await import('@/app/api/requests/[id]/route');
     const response = await PATCH({} as any, { params: Promise.resolve({ id: 'req-2' }) });
@@ -141,6 +141,12 @@ describe('Request by ID API routes', () => {
 
     expect(response.status).toBe(200);
     expect(payload.request.status).toBe('cancelled');
+    expect(payload.download).toBe('none');
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'req-2', deletedAt: null, status: 'pending' },
+      data: expect.objectContaining({ status: 'cancelled', cancelledAt: expect.any(Date) }),
+    }));
+    expect(prismaMock.request.update).not.toHaveBeenCalled();
     expect(jobQueueMock.addNotificationJob).toHaveBeenCalledWith(
       'request_cancelled',
       'req-2',
@@ -157,13 +163,12 @@ describe('Request by ID API routes', () => {
       userId: 'user-1',
       status: 'awaiting_approval',
       user: { plexUsername: 'testuser' },
+      audiobookId: 'ab-ap',
+      type: 'audiobook',
       audiobook: { id: 'ab-ap', title: 'Approval Book', author: 'Some Author' },
     });
-    prismaMock.request.update.mockResolvedValueOnce({
-      id: 'req-ap',
-      status: 'cancelled',
-      audiobook: { id: 'ab-ap', title: 'Approval Book', author: 'Some Author' },
-    });
+    prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 });
+    prismaMock.downloadHistory.findFirst.mockResolvedValueOnce(null);
 
     const { PATCH } = await import('@/app/api/requests/[id]/route');
     const response = await PATCH({} as any, { params: Promise.resolve({ id: 'req-ap' }) });
@@ -171,7 +176,7 @@ describe('Request by ID API routes', () => {
 
     expect(response.status).toBe(200);
     expect(payload.request.status).toBe('cancelled');
-    expect(prismaMock.request.update).toHaveBeenCalledWith(
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ selectedTorrent: Prisma.DbNull }),
       })
@@ -433,28 +438,11 @@ describe('Request by ID API routes', () => {
     expect(payload.error).toBe('ValidationError');
   });
 
-  it('allows admins to delete requests', async () => {
-    authRequest.user = { id: 'admin-1', role: 'admin' };
-    prismaMock.request.delete.mockResolvedValueOnce({});
+  it('has no DELETE handler: the raw hard delete is gone (admin delete is /api/admin/requests/:id)', async () => {
+    const route = await import('@/app/api/requests/[id]/route');
 
-    const { DELETE } = await import('@/app/api/requests/[id]/route');
-    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-4' }) });
-    const payload = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(payload.success).toBe(true);
-    expect(prismaMock.request.delete).toHaveBeenCalledWith({ where: { id: 'req-4' } });
-  });
-
-  it('blocks delete for non-admin users', async () => {
-    authRequest.user = { id: 'user-2', role: 'user' };
-
-    const { DELETE } = await import('@/app/api/requests/[id]/route');
-    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-9' }) });
-    const payload = await response.json();
-
-    expect(response.status).toBe(403);
-    expect(payload.error).toBe('Forbidden');
+    expect((route as Record<string, unknown>).DELETE).toBeUndefined();
+    expect(prismaMock.request.delete).not.toHaveBeenCalled();
   });
 });
 
