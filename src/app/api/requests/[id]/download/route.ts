@@ -14,7 +14,7 @@ import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
 import fs from 'fs';
 import path from 'path';
 import { ZipArchive } from 'archiver';
-import { PassThrough } from 'stream';
+import { PassThrough, Readable } from 'stream';
 
 const logger = RMABLogger.create('API.Download');
 
@@ -84,9 +84,29 @@ function streamZip(requestId: string, filePaths: string[]): ReadableStream<Uint8
   archive.on('entry', appendNext);
   appendNext();
 
-  // Pull-based: the next chunk is read only when the client has taken the last one, so a slow
-  // reader holds the archive back instead of the zip queueing in memory
-  const chunks = output[Symbol.asyncIterator]();
+  return pullFrom(output);
+}
+
+/**
+ * Sends one file as the client reads the response. A cancel closes the file; a read error is
+ * logged and ends the response with an error.
+ */
+function streamFile(requestId: string, filePath: string): ReadableStream<Uint8Array> {
+  const fileStream = fs.createReadStream(filePath);
+  // A cancel destroys the stream without an error, so only a real read error is logged
+  fileStream.on('error', err => {
+    logger.error('File stream error', { requestId, error: err.message });
+  });
+  return pullFrom(fileStream);
+}
+
+/**
+ * Pull-based: the next chunk is read only when the client has taken the last one, so a slow
+ * reader holds the source back instead of it queueing in memory. A cancel destroys the source;
+ * a source error ends the response with that error.
+ */
+function pullFrom(source: Readable): ReadableStream<Uint8Array> {
+  const chunks = source[Symbol.asyncIterator]();
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       const { value, done } = await chunks.next();
@@ -94,7 +114,7 @@ function streamZip(requestId: string, filePaths: string[]): ReadableStream<Uint8
       else controller.enqueue(new Uint8Array(value));
     },
     cancel() {
-      output.destroy();
+      source.destroy();
     },
   });
 }
@@ -189,23 +209,8 @@ export async function GET(
       const filePath = matchingFiles[0];
       const ext = path.extname(filePath);
       const stat = fs.statSync(filePath);
-      const fileStream = fs.createReadStream(filePath);
 
-      const readableStream = new ReadableStream({
-        start(controller) {
-          fileStream.on('data', chunk => controller.enqueue(chunk));
-          fileStream.on('end', () => controller.close());
-          fileStream.on('error', err => {
-            logger.error('File stream error', { error: err.message });
-            controller.error(err);
-          });
-        },
-        cancel() {
-          fileStream.destroy();
-        },
-      });
-
-      return new NextResponse(readableStream, {
+      return new NextResponse(streamFile(id, filePath), {
         headers: {
           'Content-Type': 'application/octet-stream',
           'Content-Disposition': `attachment; filename="${sanitizedTitle}${ext}"`,
