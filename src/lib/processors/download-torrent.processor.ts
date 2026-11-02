@@ -129,7 +129,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload, at
       let paused: boolean | undefined;
       try {
         ({ id: downloadClientId, alreadyInClient, infoHash, paused } = await client.addDownload(
-          // Prowlarr links go to the configured base (scheme, port, credentials); others as-is
+          // Prowlarr links (also ones published on a proxy's address) go to the configured base; others as-is
           toConfiguredProwlarrUrl(candidate.downloadUrl, prowlarr.base, { withCredentials: true }) ?? candidate.downloadUrl,
           {
             category,

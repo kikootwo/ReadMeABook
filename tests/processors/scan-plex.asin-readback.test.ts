@@ -158,7 +158,7 @@ describe('ASIN read-back after the Audiobookshelf match (#287)', () => {
 
     expect(result.matchedDownloads).toBe(1);
     expect(prismaMock.request.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'req-1', status: { notIn: ['available', 'cancelled', 'denied'] } },
+      where: { id: 'req-1', status: { notIn: ['available', 'cancelled', 'denied', 'awaiting_approval'] } },
       data: expect.objectContaining({ status: 'available' }),
     }));
   });

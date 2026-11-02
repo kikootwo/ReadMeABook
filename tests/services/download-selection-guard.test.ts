@@ -58,11 +58,72 @@ describe('checkClientDownloadUrl against the configured Prowlarr base', () => {
   });
 
   it.each([
-    ['a different host', 'https://prowlarr.example', 'http://evil.example/3/download'],
-    ['a different non-default port on the same host', 'http://prowlarr:9696', 'http://prowlarr:9697/3/download'],
-    ['same host but a non-default port while configured on the default one', 'https://prowlarr.example', 'http://prowlarr.example:8080/3/download'],
+    [
+      'a different host (Prowlarr behind a proxy that rewrites Host)',
+      'https://prowlarr.example',
+      'https://127.0.0.1:9663/3/download?link=abc&file=Book',
+      'https://prowlarr.example/3/download?link=abc&file=Book',
+    ],
+    [
+      'a different non-default port on the same host',
+      'http://prowlarr:9696',
+      'http://prowlarr:9697/3/download?link=abc',
+      'http://prowlarr:9696/3/download?link=abc',
+    ],
+    [
+      'same host but a non-default port while configured on the default one',
+      'https://prowlarr.example',
+      'http://prowlarr.example:8080/3/download?link=abc',
+      'https://prowlarr.example/3/download?link=abc',
+    ],
+    [
+      'outside the configured base path',
+      'http://prowlarr:9696/prowlarr',
+      'http://prowlarr:9696/3/download?link=abc',
+      'http://prowlarr:9696/prowlarr/3/download?link=abc',
+    ],
+    [
+      'another host with its own path prefix (always dropped)',
+      'http://prowlarr:9696/prowlarr',
+      'https://proxy.example:8443/otherapp/prowlarr/3/download?link=abc#f',
+      'http://prowlarr:9696/prowlarr/3/download?link=abc#f',
+    ],
+    [
+      'another host with its own credentials (dropped)',
+      'http://admin:s3cret@prowlarr:9696',
+      'http://u:p@127.0.0.1:9696/3/download?link=abc',
+      'http://prowlarr:9696/3/download?link=abc',
+    ],
+    [
+      'an IPv6 configured host',
+      'http://[::1]:9696',
+      'http://127.0.0.1:9663/3/download?link=abc',
+      'http://[::1]:9696/3/download?link=abc',
+    ],
+    [
+      'a configured base with a trailing slash',
+      'http://prowlarr:9696/prowlarr/',
+      'http://127.0.0.1:9663/prowlarr/3/download?link=abc',
+      'http://prowlarr:9696/prowlarr/3/download?link=abc',
+    ],
+  ])('accepts a proxy link on %s and rewrites it onto the configured base', async (_label, configured, picked, expected) => {
+    connection.baseUrl = configured;
+    await expect(checkClientDownloadUrl(picked)).resolves.toEqual({ ok: true, value: expected });
+  });
+
+  it.each([
+    ['a different host without link=', 'https://prowlarr.example', 'http://evil.example/3/download'],
+    ['a different port without link=', 'http://prowlarr:9696', 'http://prowlarr:9697/3/download'],
+    ['same host, non-default port, without link=', 'https://prowlarr.example', 'http://prowlarr.example:8080/3/download'],
+    ['outside the configured base path without link=', 'http://prowlarr:9696/prowlarr', 'http://prowlarr:9696/3/download'],
     ['a non-download Prowlarr path', 'http://prowlarr:9696', 'http://prowlarr:9696/api/v1/indexer'],
-    ['outside the configured base path', 'http://prowlarr:9696/prowlarr', 'http://prowlarr:9696/3/download'],
+    ['another host, a path past the download step', 'http://prowlarr:9696', 'http://evil.example/12/download/x?link=abc'],
+    ['another host, /download without an id', 'http://prowlarr:9696', 'http://evil.example/download?link=abc'],
+    ['another host, a non-numeric id', 'http://prowlarr:9696', 'http://evil.example/abc/download?link=abc'],
+    ['another host, an empty link=', 'http://prowlarr:9696', 'http://evil.example/12/download?link=&file=x'],
+    ['another host, link in the fragment only', 'http://prowlarr:9696', 'http://evil.example/12/download#link=abc'],
+    ['a non-http scheme', 'http://prowlarr:9696', 'ftp://evil.example/12/download?link=abc'],
+    ['a magnet with whitespace', 'http://prowlarr:9696', 'magnet:?xt=urn:btih:abc\nhttp://evil.example/12/download?link=a'],
   ])('rejects %s', async (_label, configured, picked) => {
     connection.baseUrl = configured;
     const result = await checkClientDownloadUrl(picked);

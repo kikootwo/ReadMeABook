@@ -4,13 +4,15 @@
  *
  * Which request a Manual Import works on (the stored request's type decides, never the
  * client's flag alone), recycling or creating it, and the ebook-file selection for an ebook
- * import. An ebook import only ever touches ebook requests.
+ * import. An ebook import only ever touches ebook requests. Recycling another user's
+ * unapproved request without naming it records `approvalBypassedBy` (#232).
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { prisma } from '@/lib/db';
 import { isEbookFile } from '@/lib/utils/import-inventory';
+import { approvalBypassMark } from '@/lib/constants/request-statuses';
 
 export type ImportKind = 'audiobook' | 'ebook';
 
@@ -68,17 +70,22 @@ export async function claimImportRequest(opts: {
   stored: StoredRequest | null;
 }): Promise<{ ok: true; requestId: string; recycled: boolean } | Refusal> {
   const { kind, audiobookId, userId, stored } = opts;
-  const existing = stored ?? (await prisma.request.findFirst({
+  const newest = stored ? null : await prisma.request.findFirst({
     where: { audiobookId, type: kind, deletedAt: null },
     orderBy: { createdAt: 'desc' },
-  }));
+  });
+  const existing = stored ?? newest;
 
   if (existing && ACTIVE_STATUSES.includes(existing.status)) {
     return refuse(409, `This ${kind} is already being processed`);
   }
   if (existing && RECYCLABLE_STATUSES.includes(existing.status)) {
-    await prisma.request.update({
-      where: { id: existing.id },
+    // A named request is the admin's choice: it counts as approval and clears an earlier record.
+    // Otherwise another user's unapproved request is recorded as completed without approval
+    // (the importing admin's own request never is).
+    const bypass = newest && newest.userId !== userId ? approvalBypassMark('manual_import', newest.status) : null;
+    const { count } = await prisma.request.updateMany({
+      where: { id: existing.id, status: existing.status }, // unchanged since it was read
       data: {
         status: 'processing',
         progress: 100,
@@ -86,8 +93,10 @@ export async function claimImportRequest(opts: {
         importAttempts: 0,
         autoRerequestCount: 0, // a manual import restarts the automatic re-request backoff
         updatedAt: new Date(),
+        ...(stored ? { approvalBypassedBy: null } : bypass ? { approvalBypassedBy: bypass } : {}),
       },
     });
+    if (count !== 1) return refuse(409, 'This request changed while the import was starting; try again');
     return { ok: true, requestId: existing.id, recycled: true };
   }
 
