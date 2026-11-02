@@ -11,7 +11,9 @@
  *      setting is turned off again through the API. Snapshots of the control at 1280 light/dark, 375.
  *   2  Labelled replay (page.route) of /api/audiobooks/search: a page with kept results and
  *      "47 in other languages hidden"; then a query whose every page is hidden: the page loads 4
- *      more pages by itself and stops on "No results in English so far" with the Load more bar.
+ *      more pages by itself and stops on "No results in English so far" with the Load more bar;
+ *      with "Hide Available" on and page 1 all owned: "All results so far are already available"
+ *      with the Load more bar, and a click loads page 2.
  *   3  Labelled replay of /api/series/search: series kept with "6 in other languages hidden", and
  *      the empty state `No series in English for "q"`.
  * The browser never leaves the RMAB origin (covers answered with a local SVG, the rest aborted).
@@ -230,6 +232,39 @@ test('#259: REPLAY (page.route) search where every page is hidden stops after 4 
     expect.soft([...new Set(automatic)], 'page 1 plus 4 automatic loads').toEqual([1, 2, 3, 4, 5].map((n) => `english title#${n}`));
     expect.soft([...new Set(afterClick)].length, 'a click allows 4 more after its own').toBe(10);
     await expect(page.getByText(/No results found/)).toHaveCount(0);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('#259: REPLAY (page.route) search with hide-available emptying page 1 keeps the Load more bar', async ({ browser }) => {
+  const blocked: string[] = [];
+  const asked: string[] = [];
+  const { ctx, page } = await viewSession(browser, VIEWS[0], blocked);
+  try {
+    // The user's own "Hide Available" preference (PreferencesContext reads it from localStorage)
+    await ctx.addInitScript(() => localStorage.setItem('preferences', JSON.stringify({ hideAvailable: true })));
+    const owned = BOOKS.map((b) => ({ ...b, isAvailable: true }));
+    const fresh = { ...BOOKS[0], asin: 'B0E2E25904', title: 'Rhythm of War' };
+    await replaySearch(page, (_q, pageNo) => pageNo === 1
+      ? { success: true, results: owned, totalResults: owned.length, page: 1, hasMore: true, hiddenCount: 47, filterLanguage: 'English' }
+      : { success: true, results: [fresh], totalResults: 1, page: pageNo, hasMore: false, hiddenCount: 12, filterLanguage: 'English' }, asked);
+    await typeSearch(page, 'stormlight archive');
+    await expect(page.getByText('All results so far are already available')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('47 in other languages hidden')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Load more' })).toBeVisible();
+    await expect(page.getByText(/No results found/)).toHaveCount(0);
+    await page.waitForTimeout(1_000);
+    const beforeClick = [...asked];
+    await shot(page, '2-search-hide-available-more-1280-light');
+
+    await page.getByRole('button', { name: 'Load more' }).click();
+    await expect(page.getByText('Rhythm of War').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('59 in other languages hidden')).toBeVisible();
+    writeEvidence('259/search-hide-available-more.json', { beforeClick, afterClick: [...asked], browserBlocked: blocked });
+
+    expect.soft([...new Set(beforeClick)], 'no automatic load while page 1 holds results').toEqual(['stormlight archive#1']);
+    expect.soft([...new Set(asked)], 'the click loads page 2').toEqual(['stormlight archive#1', 'stormlight archive#2']);
   } finally {
     await ctx.close();
   }
