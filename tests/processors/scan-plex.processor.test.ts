@@ -120,7 +120,8 @@ describe('processScanPlex', () => {
       },
     ]);
     prismaMock.audiobook.update.mockResolvedValue({});
-    prismaMock.request.update.mockResolvedValue({});
+    // The match completes the request with a compare-and-set: one row for this request id
+    prismaMock.request.updateMany.mockImplementation(async (a: { where: { id?: string } }) => ({ count: a.where.id ? 1 : 0 }));
 
     const matcher = await import('@/lib/utils/audiobook-matcher');
     vi.spyOn(matcher, 'findPlexMatch').mockResolvedValue({
@@ -136,8 +137,9 @@ describe('processScanPlex', () => {
     expect(result.success).toBe(true);
     expect(prismaMock.plexLibrary.create).toHaveBeenCalled();
     expect(prismaMock.plexLibrary.update).toHaveBeenCalled();
-    expect(prismaMock.request.update).toHaveBeenCalledWith(
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: { id: 'req-1', status: { notIn: ['available', 'cancelled', 'denied'] } },
         data: expect.objectContaining({ status: 'available' }),
       })
     );
@@ -356,7 +358,8 @@ describe('processScanPlex', () => {
       },
     ] as any);
     prismaMock.audiobook.update.mockResolvedValue({});
-    prismaMock.request.update.mockResolvedValue({});
+    // The match completes the request with a compare-and-set (one row), then records the item
+    prismaMock.request.updateMany.mockImplementation(async (a: { where: { id?: string } }) => ({ count: a.where.id ? 1 : 0 }));
 
     const matcher = await import('@/lib/utils/audiobook-matcher');
     (matcher.findPlexMatch as ReturnType<typeof vi.fn>).mockResolvedValue({
