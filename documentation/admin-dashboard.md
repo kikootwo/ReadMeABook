@@ -79,6 +79,7 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
   - Type dropdown (All Types / Audiobooks / Ebooks; shown even with the ebook sidecar off, since earlier ebook requests stay listed)
   - User dropdown (all users)
   - Clear filters button (shown when search, status, type or user is set)
+  - Layout: stacked below 640px; from 640px one row that wraps (`sm:flex-wrap`) instead of shrinking the search box below 240px, so no control is clipped by the card
 - **Sortable Columns:** Click headers to sort by title, user, status, requested, completed
 - **Pagination:** Page navigation, page size selector (10/25/50/100), results count
 - **URL State:** Filters/sort/page stored in URL query params (shareable, bookmarkable); defaults left out (`status`/`type` = all, page 1, pageSize 25); back/forward restores them; changing a filter resets to page 1

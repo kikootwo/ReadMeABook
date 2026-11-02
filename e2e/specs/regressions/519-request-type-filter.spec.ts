@@ -8,9 +8,10 @@
  * Audiobooks and Ebooks; Ebooks sends `type=ebook`, the answer holds only ebook requests (ours
  * listed, the audiobook one not), the page URL gets `?type=ebook` and keeps it on reload;
  * Audiobooks is the converse; Clear returns to All Types (no `type` in the URL, both rows back).
- * The API ignores an unknown type. Evidence (519/): `type-dropdown-open.jpg` (the select expanded
- * with `size=3` for the capture, as headless Chromium never paints a native select popup),
- * `type-ebooks.jpg`, and `519/result.json`.
+ * With a type set (Clear shown), the filter row stays inside the card at 680 px (wraps) and 375 px
+ * (stacks): Clear fully inside the card, search box at least 160 px wide. The API ignores an unknown
+ * type. Evidence (519/): `type-ebooks.jpg` (1280 px), `filters-680.jpg`, `filters-375.jpg`, and
+ * `519/result.json`.
  */
 
 import { test, expect, type Page } from '@playwright/test';
@@ -29,7 +30,6 @@ const ASINS = Object.values(BOOKS).map((b) => sqlStr(b.asin)).join(', ');
 
 type Row = { title: string; type: string };
 
-/** By attribute, not role: with `size` set for the capture the select is a listbox, not a combobox. */
 const TYPE_SELECT = 'select[aria-label="Filter by type"]';
 
 function cleanup() {
@@ -71,6 +71,24 @@ async function pickType(page: Page, value: string): Promise<{ url: string; rows:
 
 const titlesOf = (rows: Row[]) => rows.map((r) => r.title);
 
+type Box = { x: number; y: number; width: number; height: number };
+
+/** Clear sits fully inside the filter card and the search box keeps a usable width; frames the row for the shot. */
+async function checkFilterRow(page: Page) {
+  const search = page.getByPlaceholder('Search by title or author...');
+  const clear = page.getByRole('button', { name: 'Clear', exact: true });
+  const card = search.locator('xpath=ancestor::div[contains(concat(" ", @class, " "), " overflow-hidden ")][1]');
+  await search.scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.scrollBy(0, -120));
+  await expect(clear).toBeVisible();
+  const [s, c, k] = (await Promise.all([search.boundingBox(), clear.boundingBox(), card.boundingBox()])) as Box[];
+  expect(c.x, 'Clear starts inside the card').toBeGreaterThanOrEqual(k.x);
+  expect(c.x + c.width, 'Clear ends inside the card').toBeLessThanOrEqual(k.x + k.width);
+  expect(c.y + c.height, 'Clear is above the card bottom').toBeLessThanOrEqual(k.y + k.height);
+  expect(s.width, 'search box width').toBeGreaterThanOrEqual(160);
+  return { card: k, clear: c, search: s };
+}
+
 test.afterAll(() => cleanup());
 
 test('519: the Type filter lists only audiobook or only ebook requests, follows the URL, and clears', async ({ page }) => {
@@ -92,15 +110,6 @@ test('519: the Type filter lists only audiobook or only ebook requests, follows 
     ['ebook', 'Ebooks'],
   ]);
 
-  // The select expanded in place for the capture, then put back
-  await select.scrollIntoViewIfNeeded();
-  await page.evaluate(() => window.scrollBy(0, -120));
-  await select.focus();
-  await select.evaluate((el) => ((el as HTMLSelectElement).size = 3));
-  await snap(page, '519', 'type-dropdown-open');
-  await select.evaluate((el) => (el as HTMLSelectElement).removeAttribute('size'));
-  await expect(page.getByRole('combobox', { name: 'Filter by type' })).toHaveValue('all');
-
   // Ebooks
   const ebooks = await pickType(page, 'ebook');
   obs.ebooks = { url: ebooks.url, pageUrl: page.url(), titles: titlesOf(ebooks.rows) };
@@ -113,6 +122,15 @@ test('519: the Type filter lists only audiobook or only ebook requests, follows 
   await expect(table.getByText(BOOKS.audiobook.title)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Clear', exact: true })).toBeVisible();
   await snap(page, '519', 'type-ebooks');
+
+  // Narrow widths with Clear shown: the row wraps (680) or stacks (375), nothing clipped by the card
+  obs.layout = {};
+  for (const width of [680, 375]) {
+    await page.setViewportSize({ width, height: 800 });
+    (obs.layout as Record<number, unknown>)[width] = await checkFilterRow(page);
+    await snap(page, '519', `filters-${width}`);
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
 
   // The URL is the state: a reload keeps Ebooks
   await page.reload();

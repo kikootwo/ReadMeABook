@@ -543,9 +543,9 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
       {/* Filter Bar */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
-        <div className="flex flex-col sm:flex-row gap-3">
-          {/* Search Input */}
-          <div className="flex-1 relative">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3">
+          {/* Search Input (wraps the filters onto a second line rather than shrinking below 240px) */}
+          <div className="flex-1 relative sm:min-w-[240px]">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
