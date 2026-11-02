@@ -209,7 +209,7 @@ export function RequestActionsDropdown({
     <div
       ref={dropdownRef}
       style={style}
-      className="w-56 rounded-lg shadow-lg bg-white dark:bg-gray-800 ring-1 ring-black ring-opacity-5 z-50 max-h-[calc(100vh-2rem)] overflow-y-auto"
+      className="w-56 rounded-lg shadow-lg bg-white dark:bg-gray-800 ring-1 ring-black/5 z-50 max-h-[calc(100vh-2rem)] overflow-y-auto"
     >
           <div className="py-1" role="menu">
             {/* View Details */}
