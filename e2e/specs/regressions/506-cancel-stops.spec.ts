@@ -180,10 +180,36 @@ test('506 a cancel stops the download, removes what it fetched, and the cleanup 
     c.check(`d: partial before the cancel (progress ${tD?.progress})`, !!tD && tD.progress < 1, 'control');
     c.save('d-fault.json', await armDeleteFault(1, 500));
     const before = await lastSeq();
-    const res = await admin.raw('PATCH', `/api/requests/${ids.d}`, { action: 'cancel' });
-    const body = await res.json().catch(() => null);
-    c.save('d-cancel.json', { status: res.status, body });
-    c.check(`d: cancel 200 with the retry message (${res.status}, ${body?.download})`, res.ok && body?.download === 'retry_later' && /RMAB tries again on its next seeding cleanup\.$/.test(body?.message || ''), 'safety');
+    // The admin table at 375 px dark: the dialog, then the retry answer as a warning toast
+    {
+      const { ctx, page, settle } = await session(browser, { width: 375, height: 812, dark: true });
+      await page.goto('/admin');
+      // Request a (same book) is cancelled now: pick the live one
+      const row = page.locator('tr', { hasText: books.phm.title }).filter({ has: page.getByTitle('Actions') }).filter({ hasNotText: /cancelled/i }).first();
+      await row.getByTitle('Actions').click();
+      await page.getByRole('menuitem', { name: 'Cancel Request' }).click();
+      const heading = page.getByRole('heading', { name: 'Cancel request' });
+      await expect(heading).toBeVisible();
+      const dialog = page.locator('div.fixed.inset-0.z-50', { has: heading });
+      await settle();
+      await snap(page, DIR, 'admin-cancel-dialog-375-dark');
+      c.check('d: admin dialog text at 375 px dark', (await dialog.innerText()).includes(`Cancel "${books.phm.title}"? ${CONFIRM_TEXT}`), 'control');
+      const answer = page.waitForResponse((r) => r.url().endsWith(`/api/requests/${ids.d}`) && r.request().method() === 'PATCH');
+      await dialog.getByRole('button', { name: 'Cancel request' }).click();
+      const res = await answer;
+      const body = await res.json().catch(() => null);
+      c.save('d-cancel.json', { status: res.status(), body });
+      c.check(`d: cancel 200 with the retry message (${res.status()}, ${body?.download})`, res.ok() && body?.download === 'retry_later' && /RMAB tries again on its next seeding cleanup\.$/.test(body?.message || ''), 'safety');
+      const toast = page.getByText(/RMAB tries again on its next seeding cleanup\.$/);
+      await expect(toast).toBeVisible({ timeout: 30_000 });
+      const toastBox = toast.locator('xpath=ancestor-or-self::div[contains(@class, "animate-slide-in-right")][1]');
+      await toastBox.evaluate((el) => Promise.all(el.getAnimations().map((x) => x.finished)));
+      await snap(page, DIR, 'admin-cancel-retry-toast-375-dark');
+      c.save('d-toast.txt', `${await toast.innerText()}\n`);
+      const toastClass = (await toastBox.getAttribute('class')) || '';
+      c.check(`d: the retry toast is a warning, not a success (${toastClass.match(/bg-\w+-50/)?.[0]})`, toastClass.includes('bg-yellow-50') && !toastClass.includes('bg-green-50'), 'control');
+      await ctx.close();
+    }
     const faulted = (await fakeArr.requests(before)).filter((r) => r.service === 'qbit' && r.path.endsWith('/torrents/delete'));
     c.check('d: the cancel tried torrents/delete once and got the fault', faulted.length === 1 && (faulted[0] as any).fault === 500, 'control', JSON.stringify(faulted.map((r) => (r as any).fault)));
     c.check(`d: cancelled, row not removed (${JSON.stringify(cancelRow(ids.d))})`, cancelRow(ids.d).status === 'cancelled' && cancelRow(ids.d).downloadStatus !== 'removed', 'safety');

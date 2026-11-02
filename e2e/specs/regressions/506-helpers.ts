@@ -48,17 +48,41 @@ export async function configureIndexers(rmab: Rmab, seedingTimeMinutes = 1) {
   return psql(`select value from configuration where key = 'prowlarr_indexers'`);
 }
 
-/** A second, non-admin local user with a session and an API token of its own. */
+/** The registration settings as saved (missing keys read as off, the way the settings page reads them). */
+function registrationSettings(): { enabled: boolean; requireAdminApproval: boolean } {
+  const out = psql(`select key, value from configuration where key in ('auth.registration_enabled', 'auth.require_admin_approval')`);
+  const saved = new Map(out.split('\n').filter(Boolean).map((line) => line.split('\t') as [string, string]));
+  return {
+    enabled: saved.get('auth.registration_enabled') === 'true',
+    requireAdminApproval: saved.get('auth.require_admin_approval') === 'true',
+  };
+}
+
+/**
+ * A second, non-admin local user with a session and an API token of its own. Open registration is
+ * on only for the sign-up, then put back as it was, so later specs on the stack don't inherit it.
+ */
 export async function registerReader(admin: Rmab, username: string) {
+  const before = registrationSettings();
   const reg = await admin.raw('PUT', '/api/admin/settings/registration', { enabled: true, requireAdminApproval: false });
   if (!reg.ok) throw new Error(`enable registration: HTTP ${reg.status} ${await reg.text()}`);
-  const res = await fetch(`${urls.rmab()}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password: `e2e-${username}-password` }),
-  });
-  const body = await res.json();
-  if (!res.ok || !body.accessToken) throw new Error(`register ${username}: HTTP ${res.status} ${JSON.stringify(body)}`);
+  let body: any;
+  try {
+    const res = await fetch(`${urls.rmab()}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password: `e2e-${username}-password` }),
+    });
+    body = await res.json();
+    if (!res.ok || !body.accessToken) throw new Error(`register ${username}: HTTP ${res.status} ${JSON.stringify(body)}`);
+  } finally {
+    const restore = await admin.raw('PUT', '/api/admin/settings/registration', before);
+    if (!restore.ok) throw new Error(`restore registration: HTTP ${restore.status} ${await restore.text()}`);
+  }
+  const after = registrationSettings();
+  if (after.enabled !== before.enabled || after.requireAdminApproval !== before.requireAdminApproval) {
+    throw new Error(`registration not restored: ${JSON.stringify({ before, after })}`);
+  }
   const session = new Rmab(body.accessToken);
   const token = await session.post<{ fullToken: string; token: { role: string } }>('/api/user/api-tokens', { name: 'e2e-506' });
   return { session, apiToken: new Rmab(token.fullToken), userId: String(body.user?.id ?? ''), tokenRole: token.token.role };
