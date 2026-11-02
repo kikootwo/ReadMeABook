@@ -94,9 +94,10 @@ describe('search page', () => {
 
     await search('owned');
 
-    await waitFor(() => expect(screen.getByText('No results found for "owned"')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('38 in other languages hidden')).toBeInTheDocument());
     expect(screen.queryByText('No results in German so far')).not.toBeInTheDocument();
     expect(screen.queryByText(/No results in German/)).not.toBeInTheDocument();
+    expect(screen.getByText('No results found for "owned"')).toBeInTheDocument();
   });
 
   it('off: no hidden line, and an empty answer says "No results found"', async () => {
@@ -169,10 +170,10 @@ describe('series detail page', () => {
   it("on: the header and bar count the books shown, not Audible's total with other languages", async () => {
     await detailPage(detail([{ asin: 'B0EN000001' }, { asin: 'B0EN000002' }], { hiddenCount: 18, filterLanguage: 'English' }));
 
-    await waitFor(() => expect(screen.getByText('(2 titles)')).toBeInTheDocument());
-    expect(screen.getByText('2 books loaded')).toBeInTheDocument();
-    expect(screen.getByText('18 in other languages hidden')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('18 in other languages hidden')).toBeInTheDocument());
     expect(screen.queryByText(/of 120/)).not.toBeInTheDocument();
+    expect(screen.getByText('(2 titles)')).toBeInTheDocument();
+    expect(screen.getByText('2 books loaded')).toBeInTheDocument();
   });
 
   it("off: the header and bar still count against Audible's total", async () => {
@@ -187,17 +188,18 @@ describe('series detail page', () => {
     const body = detail(inLibrary('B0OWNED', 6), { hiddenCount: 4, filterLanguage: 'English' });
     await detailPage({ ...body, hasMore: false, series: { ...body.series, hasMore: false } });
 
-    await waitFor(() => expect(screen.getByText('No books found for Saga')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('4 in other languages hidden')).toBeInTheDocument());
     expect(screen.queryByText(/No books in English/)).not.toBeInTheDocument();
-    expect(screen.getByText('4 in other languages hidden')).toBeInTheDocument();
+    expect(screen.getByText('No books found for Saga')).toBeInTheDocument();
   });
 
   it('on, with hide-available and more pages: no "so far" bar while English books are loaded', async () => {
     api.hideAvailable = true;
     await detailPage(detail(inLibrary('B0OWNED', 6), { hiddenCount: 4, filterLanguage: 'English' }));
 
-    await waitFor(() => expect(screen.getByText('No books found for Saga')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('4 in other languages hidden')).toBeInTheDocument());
     expect(screen.queryByText('No books in English so far')).not.toBeInTheDocument();
+    expect(screen.getByText('No books found for Saga')).toBeInTheDocument();
   });
 
   it('off: a page with no books shows the empty message and no bar, as before', async () => {
