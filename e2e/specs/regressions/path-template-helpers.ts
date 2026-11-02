@@ -92,9 +92,13 @@ export async function pathsTabShots(browser: Browser, dir: string, prefix: strin
     try {
       await openPathsTab(page);
       const preview = await typeTemplate(page, template);
-      await variablesPanel(page).scrollIntoViewIfNeeded();
+      // A viewport as tall as the page: nothing scrolls, so the sticky Settings header stays at the top
+      // instead of being painted over the middle of a full-page capture. Width (breakpoints) is unchanged.
+      const fullHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+      await page.setViewportSize({ width: v.width, height: Math.max(v.height, fullHeight) });
+      await page.evaluate(() => window.scrollTo(0, 0));
       const clip = await templateRegion(page);
-      await page.screenshot({ path: evidencePath(dir, `${prefix}-paths-${v.name}.jpg`), type: 'jpeg', quality: 82, fullPage: true, clip });
+      await page.screenshot({ path: evidencePath(dir, `${prefix}-paths-${v.name}.jpg`), type: 'jpeg', quality: 82, clip });
       const overflowX = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       const box = async (loc: ReturnType<Page['locator']>) => {
         const b = await loc.boundingBox();
