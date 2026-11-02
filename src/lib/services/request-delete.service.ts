@@ -38,7 +38,7 @@ export interface DeleteRequestResult {
  * Rewrite the Discord surfaces for a request that has just been deleted: force the live request
  * card to its cancelled render and strip the Approve/Deny buttons from any pending approval embed.
  *
- * Lives here rather than in each caller so every deletion path converges -- Web UI, API token, the
+ * Lives here rather than in each caller so every deletion path converges -- the Web UI
  * admin route, Discord /status and /delete, and the reported-issue cleanup. Previously a web-side
  * delete left a live "Cancel Request" button and, worse, a live approval embed whose Approve button
  * still worked against the deleted request.
@@ -117,7 +117,7 @@ export async function deleteRequest(
   // account (e.g. a Discord admin-role holder) so a non-user identifier is never stored as deletedBy.
   adminUserId: string | null,
   // Discord ID of the acting user when the deletion originated in Discord. Used only to attribute
-  // the "Cancelled by" mention on the approval embed; Web UI and API-token deletions omit it and
+  // the "Cancelled by" mention on the approval embed; Web UI deletions omit it and
   // fall back to the deleting user's linked Discord account.
   actorDiscordUserId?: string | null
 ): Promise<DeleteRequestResult> {

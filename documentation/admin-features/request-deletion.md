@@ -171,13 +171,11 @@ where: {
   - None keeps it → one `deleteDownload`, this row `removed` (or soft-deleted: hard-deleted), the siblings' rows `removed` in one `updateMany` (also rows RMAB did not add, which never reach the guard themselves). Same run: `deletedHashes`; later runs: the probe's not-found → `removed`
   - Soft-deleted requests never keep it (unchanged)
 
-### API Endpoints
+### API Endpoint
 
-**DELETE** `/api/admin/requests/:id` — Admin-only (dashboard use)
+**DELETE** `/api/admin/requests/:id`
 
-**DELETE** `/api/requests/:id` — Ownership-based (user deletes own; admin deletes any). On the API token allowlist — usable by third-party integrations with `rmab_` tokens. Same cascading soft-delete as the admin endpoint.
-
-**Authorization:** Authenticated user (own requests) or admin (any request)
+**Authorization:** Admin only
 
 **Request:** No body
 
@@ -202,7 +200,7 @@ where: {
 
 **Errors:**
 - 401: Unauthorized (not logged in)
-- 403: Forbidden (not owner or admin)
+- 403: Forbidden (not admin)
 - 404: Request not found or already deleted
 - 500: Internal server error
 
@@ -271,8 +269,8 @@ where: {
 
 ## Discord Convergence
 
-`deleteRequest()` rewrites the Discord surfaces itself, so every deletion path converges — Web UI,
-API token, admin route, `/status`, `/delete`, and the reported-issue cleanup.
+`deleteRequest()` rewrites the Discord surfaces itself, so every deletion path converges — Web UI
+admin route, `/status`, `/delete`, and the reported-issue cleanup.
 
 - `editRequestCards(requestId, 'cancelled')` — soft delete leaves `status` untouched, so the
   cancelled render is forced.

@@ -245,6 +245,6 @@ export async function handleCancelRequestButton(
   }
 
   // The card and approval-embed rewrites now live inside deleteRequest, so every deletion path
-  // (Web UI, API token, /status, /delete) converges on the same cleanup.
+  // (Web UI, /status, /delete) converges on the same cleanup.
 }
 

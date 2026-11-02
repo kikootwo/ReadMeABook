@@ -362,8 +362,7 @@ export async function PATCH(
 
 /**
  * DELETE /api/requests/[id]
- * Soft-delete a request with cascading cleanup (files, library backend, download client).
- * Users may delete their own requests; admins may delete any.
+ * Delete a request (admin only)
  */
 export async function DELETE(
   request: NextRequest,
@@ -378,47 +377,22 @@ export async function DELETE(
         );
       }
 
-      const { id } = await params;
-
-      // Ownership check: users can delete their own, admins can delete any
-      const requestRecord = await prisma.request.findFirst({
-        where: { id, deletedAt: null },
-        select: { userId: true },
-      });
-
-      if (!requestRecord) {
+      if (req.user.role !== 'admin') {
         return NextResponse.json(
-          { error: 'NotFound', message: 'Request not found or already deleted' },
-          { status: 404 }
-        );
-      }
-
-      if (requestRecord.userId !== req.user.id && req.user.role !== 'admin') {
-        return NextResponse.json(
-          { error: 'Forbidden', message: 'You can only delete your own requests' },
+          { error: 'Forbidden', message: 'Admin access required' },
           { status: 403 }
         );
       }
 
-      const { deleteRequest } = await import('@/lib/services/request-delete.service');
-      const result = await deleteRequest(id, req.user.id);
+      const { id } = await params;
 
-      if (!result.success) {
-        return NextResponse.json(
-          { error: result.error || 'DeleteFailed', message: result.message },
-          { status: result.error === 'NotFound' ? 404 : 500 }
-        );
-      }
+      await prisma.request.delete({
+        where: { id },
+      });
 
       return NextResponse.json({
         success: true,
-        message: result.message,
-        details: {
-          filesDeleted: result.filesDeleted,
-          torrentsRemoved: result.torrentsRemoved,
-          torrentsKeptSeeding: result.torrentsKeptSeeding,
-          torrentsKeptUnlimited: result.torrentsKeptUnlimited,
-        },
+        message: 'Request deleted successfully',
       });
     } catch (error) {
       logger.error('Failed to delete request', { error: error instanceof Error ? error.message : String(error) });
