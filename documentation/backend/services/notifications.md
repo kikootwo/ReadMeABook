@@ -126,6 +126,23 @@ model NotificationBackend {
 - Auth: optional Bearer token (`authToken`), else optional Basic auth (`basicAuthUser` / `basicAuthPassword`)
 - Format: Event title + book details + user + error (if applicable)
 
+**Apprise per-user Tag (`{user}`, Config Key mode only):** `providers/apprise-tag.ts` (`resolveAppriseTag`, `toAppriseUserTag`)
+- `{user}` in the Tag field is replaced by the requester's username in tag-safe form, so each user's notifications go to the URLs listed under their tag in the Apprise config
+- Tag-safe rule (Apprise's tag grammar `[a-z0-9][a-z0-9_-]*`): lowercase, accents removed, every run of characters other than a-z, 0-9 and `_` becomes one `-`, `-`/`_` trimmed from both ends. Never yields an Apprise separator/operator (`,` `;` `[` `]` space `+` `:`)
+  - `Jane Doe` → `jane-doe`; `José.O'Brien@example.com` (OIDC email username) → `jose-o-brien-example-com`
+- Username = `user.plexUsername` of the request's user (Plex username, OIDC `preferred_username`/email/sub, local username); for `issue_reported` it is the reporter
+- Tag read as Apprise reads it: `,` = OR between groups, space or `+` = AND within a group; a Tag with no `{user}` is sent exactly as typed
+- No requester (username empty, the `Unknown User` fallback queued when a request's user can't be loaded, or no a-z/0-9 left after the rule, e.g. `李明`), or `{user}` would become the Apprise `all` tag: every group containing `{user}` is dropped whole (an AND group never widens); if nothing is left the notification is **not sent** through that backend (an untagged send goes to the config's untagged URLs, not the requester) and one info line is logged
+- Every event carries the request's user; only fallbacks (request/user row not found) reach the no-requester path. The Settings Test button sends as `Test User` (`{user}` → `test-user`, Apprise answers 424 if no URL has that tag)
+- Stateless mode (`urls`): Tag ignored as before; the field's help text says "Config Key only"
+- Use a prefix (`user-{user}`): a bare `{user}` collides with any other tag in the config that equals a username (user `admin` would get every admin notification)
+- Example Apprise config (TEXT form, `tag=url`) + RMAB Tag `admin, user-{user}` (owner gets everything, Jane Doe and Sam get their own requests):
+```text
+admin=mailto://user:pass@mail.example.com?to=owner@example.com
+user-jane-doe=mailto://user:pass@mail.example.com?to=jane@example.com
+user-sam=mailto://user:pass@mail.example.com?to=sam@example.com
+```
+
 **Discord (Rich Embeds):**
 - Color-coded by event (yellow=pending, green=approved, blue=available, red=error, orange=issue)
 - Fields: Title, Author, Requested/Reported By, Error/Reason (if applicable)
@@ -222,6 +239,7 @@ src/lib/services/notification/
   providers/
     apprise.provider.ts             # Apprise API (100+ services)
     apprise-credentials.ts          # Credentials out of serverUrl (normalise, lift, split)
+    apprise-tag.ts                  # {user} in the Tag field → requester's tag-safe username
     discord.provider.ts             # Discord webhook
     ntfy.provider.ts                # ntfy API
     pushover.provider.ts            # Pushover API

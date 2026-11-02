@@ -6,6 +6,10 @@
 import { INotificationProvider, NotificationPayload, ProviderMetadata } from '../INotificationProvider';
 import { getEventMeta, getEventTitle, type NotificationSeverity } from '@/lib/constants/notification-events';
 import { liftAppriseUrlCredentials, normalizeAppriseConfig, splitUrlCredentials } from './apprise-credentials';
+import { resolveAppriseTag } from './apprise-tag';
+import { RMABLogger } from '@/lib/utils/logger';
+
+const logger = RMABLogger.create('AppriseProvider');
 
 export interface AppriseConfig {
   serverUrl: string;
@@ -41,7 +45,7 @@ export class AppriseProvider implements INotificationProvider {
       { name: 'basicAuthPassword', label: 'Basic Auth Password', type: 'password', required: false, helpText: 'Not used when an Auth Token is set (the token takes precedence).' },
       { name: 'urls', label: 'Notification URLs', type: 'password', required: false, placeholder: 'slack://token, discord://webhook_id/token, ...' },
       { name: 'configKey', label: 'Config Key', type: 'text', required: false, placeholder: 'Persistent configuration key' },
-      { name: 'tag', label: 'Tag', type: 'text', required: false, placeholder: 'Filter tag for stateful config' },
+      { name: 'tag', label: 'Tag', type: 'text', required: false, placeholder: 'e.g. admin, user-{user}', helpText: 'Optional, Config Key only. {user} = the user who made the request, so each user gets their own notifications (list their URLs under that tag in Apprise).' },
       { name: 'authToken', label: 'Auth Token', type: 'password', required: false, placeholder: 'Optional API auth token' },
     ],
   };
@@ -89,6 +93,13 @@ export class AppriseProvider implements INotificationProvider {
 
     // Stateful mode: use configKey endpoint
     if (appriseConfig.configKey) {
+      // {user} in the tag targets the requester; with no requester, an untagged send would not reach them
+      const resolvedTag = resolveAppriseTag(appriseConfig.tag, payload.userName);
+      if (!resolvedTag.send) {
+        logger.info('Apprise notification not sent: the Tag uses {user} and this notification has no requester to fill it', { event: payload.event });
+        return;
+      }
+
       const url = `${serverUrl}/notify/${appriseConfig.configKey}`;
       const requestBody: Record<string, string> = {
         title,
@@ -96,8 +107,8 @@ export class AppriseProvider implements INotificationProvider {
         type: notificationType,
       };
 
-      if (appriseConfig.tag) {
-        requestBody.tag = appriseConfig.tag;
+      if (resolvedTag.tag) {
+        requestBody.tag = resolvedTag.tag;
       }
 
       const response = await fetch(url, {
