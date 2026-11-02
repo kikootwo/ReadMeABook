@@ -52,6 +52,8 @@ export interface CancelStepResult {
   clientName?: string;
   /** The strict lookup failed or timed out (the pass stops after a few in a row) */
   probeError?: boolean;
+  /** The strict lookup answered (found or not): the client is reachable */
+  probed?: boolean;
   /** The strict lookup answered that the torrent is gone */
   missing?: boolean;
   detail: string;
@@ -85,6 +87,15 @@ export interface CancelledRequestRef {
 
 const FINISHED_STATES = new Set(['completed', 'seeding']);
 const PARTIAL_STATES = new Set(['downloading', 'queued', 'paused']);
+
+/**
+ * qBittorrent answers an add before it lists the torrent. At cancel time a row younger than this
+ * that the client does not list yet is not taken as gone: nothing is written and the cleanup pass
+ * looks again.
+ */
+export const JUST_ADDED_MS = 2 * 60 * 1000;
+
+const justAdded = (row: DownloadHistory) => Date.now() - new Date(row.createdAt).getTime() < JUST_ADDED_MS;
 
 const result = (outcome: CancelDownloadOutcome, detail: string, extra: Partial<CancelStepResult> = {}): CancelStepResult =>
   ({ outcome, detail, ...extra });
@@ -127,13 +138,15 @@ export async function handleCancelledDownload(
   row: DownloadHistory | null,
   ctx: CancelStepContext
 ): Promise<CancelStepResult> {
+  const seen = { probed: false };
+  const withProbe = (res: CancelStepResult): CancelStepResult => (seen.probed ? { ...res, probed: true } : res);
   try {
-    return await decide(request, row, ctx);
+    return withProbe(await decide(request, row, ctx, seen));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`Cancelled request ${request.id}: download left as it is: ${message}`);
     const usenet = row?.downloadClient ? CLIENT_PROTOCOL_MAP[row.downloadClient as DownloadClientType] === 'usenet' : false;
-    return result(usenet ? 'not_removed' : 'retry_later', message);
+    return withProbe(result(usenet ? 'not_removed' : 'retry_later', message));
   }
 }
 
@@ -147,7 +160,12 @@ export async function stopCancelledDownload(requestId: string): Promise<CancelSt
   });
 }
 
-async function decide(request: CancelledRequestRef, row: DownloadHistory | null, ctx: CancelStepContext): Promise<CancelStepResult> {
+async function decide(
+  request: CancelledRequestRef,
+  row: DownloadHistory | null,
+  ctx: CancelStepContext,
+  seen: { probed: boolean }
+): Promise<CancelStepResult> {
   const deadline = ctx.deadline ?? CancelDeadline.none();
   if (!row) return result('none', 'no download');
   if (row.downloadStatus === 'removed' || row.downloadStatus === 'failed') {
@@ -201,7 +219,12 @@ async function decide(request: CancelledRequestRef, row: DownloadHistory | null,
   try {
     if (!client.probeDownload) throw new Error(`${client.clientType} has no strict lookup`);
     const probe = await withinDeadline(client.probeDownload(clientId), deadline);
+    seen.probed = true;
     if (!probe.found) {
+      if (ctx.mode === 'cancel' && justAdded(row)) {
+        logger.info(`Download ${clientId} is not listed in ${clientName} yet (just added): the seeding cleanup checks it again`);
+        return result('retry_later', `not listed in ${clientName} yet`, { clientName });
+      }
       await markRemoved(`Download ${clientId} is gone from ${clientName}`);
       return result('none', `no longer in ${clientName}`, { clientName, missing: true });
     }
@@ -285,8 +308,9 @@ async function holdReason(
   finishedInfo: DownloadInfo | null,
   configFor: ConfigFor
 ): Promise<string | null> {
-  // Cancelled siblings never hold it
-  const siblings = (await otherActiveRequestsSharingTorrent(request.id, torrentHash)).filter((s) => s.status !== 'cancelled');
+  // Cancelled siblings never hold it, nor one whose every row on this hash is recorded removed (it no longer uses it)
+  const siblings = (await otherActiveRequestsSharingTorrent(request.id, torrentHash))
+    .filter((s) => s.status !== 'cancelled' && s.downloadHistory.some((r) => r.downloadStatus !== 'removed'));
   if (finishedInfo === null) {
     if (siblings.length > 0) return `other request(s) use it: ${siblings.map((s) => s.id).join(', ')}`;
   } else {

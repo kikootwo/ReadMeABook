@@ -195,6 +195,24 @@ describe('ownership (#423)', () => {
     expect(c.probeDownload).not.toHaveBeenCalled();
   });
 
+  it('just added and not listed yet (qBittorrent adds asynchronously): at cancel time nothing is written', async () => {
+    const justNow = new Date(Date.now() - 1000);
+    const c = client({ found: false });
+    const res = await cancelStep(row({ createdAt: justNow }));
+    expect(res).toMatchObject({ outcome: 'retry_later', probed: true });
+    expect(res.missing).toBeUndefined();
+    expect(c.deleteDownload).not.toHaveBeenCalled();
+    expect(prismaMock.downloadHistory.update).not.toHaveBeenCalled();
+  });
+
+  it('the cleanup pass keeps the strict lookup: a young row not listed is recorded removed', async () => {
+    const { handleCancelledDownload } = await import('@/lib/services/cancelled-download');
+    client({ found: false });
+    const res = await handleCancelledDownload(REQUEST, row({ createdAt: new Date() }), { mode: 'sweep' });
+    expect(res).toMatchObject({ outcome: 'none', missing: true });
+    expect(statusWrites()).toEqual([{ downloadStatus: 'removed' }]);
+  });
+
   it('gone from the client: recorded removed, nothing deleted', async () => {
     const c = client({ found: false });
     const res = await cancelStep(row());
@@ -254,7 +272,8 @@ describe('lookup errors and the deadline', () => {
 describe('holds', () => {
   const sibling = (status: string, extra: Record<string, unknown> = {}) => ({
     id: `req-${status}`, status, type: 'audiobook', audiobook: null,
-    downloadHistory: [{ id: `dh-${status}`, indexerId: 1, indexerName: 'Tracker', downloadClient: 'qbittorrent', createdAt }], ...extra,
+    downloadHistory: [{ id: `dh-${status}`, indexerId: 1, indexerName: 'Tracker', downloadClient: 'qbittorrent', createdAt, downloadStatus: 'downloading' as string | null }],
+    ...extra,
   });
 
   it('another request downloading the same torrent keeps a partial one', async () => {
@@ -273,6 +292,33 @@ describe('holds', () => {
       where: expect.objectContaining({ requestId: { not: 'req-1' }, selected: true }),
       data: { downloadStatus: 'removed' },
     }));
+  });
+
+  it('a stale sibling whose only row on the hash is removed no longer holds a partial torrent', async () => {
+    const stale = sibling('available');
+    stale.downloadHistory[0].downloadStatus = 'removed';
+    db({ siblings: [stale] });
+    const c = client();
+    expect((await cancelStep(row())).outcome).toBe('removed');
+    expect(c.deleteDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it('a sibling with one live row among removed ones still holds it', async () => {
+    const live = sibling('downloading');
+    live.downloadHistory = [{ ...live.downloadHistory[0], downloadStatus: 'removed' }, { ...live.downloadHistory[0], id: 'dh-live', downloadStatus: null }];
+    db({ siblings: [live] });
+    const c = client();
+    expect((await cancelStep(row())).outcome).toBe('kept_shared');
+    expect(c.deleteDownload).not.toHaveBeenCalled();
+  });
+
+  it('a stale failed sibling whose row is removed no longer holds a finished torrent past its rule', async () => {
+    const stale = sibling('failed');
+    stale.downloadHistory[0].downloadStatus = 'removed';
+    db({ siblings: [stale] });
+    const c = client({ found: true, info: info({ status: 'seeding', progress: 1, seedingTime: 61 * 60 }) });
+    expect((await cancelStep(row())).outcome).toBe('removed');
+    expect(c.deleteDownload).toHaveBeenCalledTimes(1);
   });
 
   it('a soft-deleted request never holds a partial torrent', async () => {

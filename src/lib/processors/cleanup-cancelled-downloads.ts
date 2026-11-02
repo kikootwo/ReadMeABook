@@ -82,7 +82,9 @@ export async function cleanUpCancelledDownloads(options: CancelledPassOptions): 
           deletedHashes,
           lookupIndexer,
         });
-        probeErrorsInARow = step.probeError ? probeErrorsInARow + 1 : 0;
+        // Only a lookup the client answered resets the count (a step with no client call says nothing)
+        if (step.probeError) probeErrorsInARow++;
+        else if (step.probed) probeErrorsInARow = 0;
         switch (step.outcome) {
           case 'removed': counts.removed++; break;
           case 'kept_seeding': counts.keptSeeding++; break;

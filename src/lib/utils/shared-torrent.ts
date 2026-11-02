@@ -43,6 +43,8 @@ export interface TorrentSiblingDownload {
   indexerName: string | null;
   downloadClient: string | null;
   createdAt: Date;
+  /** Read by the cancelled-download step: a sibling whose rows here are all 'removed' no longer uses the torrent */
+  downloadStatus?: string | null;
 }
 
 function otherActiveRequestsWhere(requestId: string, torrentHash: string) {
@@ -111,7 +113,7 @@ export async function otherActiveRequestsSharingTorrent(
       audiobook: { select: { status: true, filePath: true, completedAt: true } },
       downloadHistory: {
         where: { torrentHash: { in: torrentHashForms(torrentHash) }, selected: true },
-        select: { id: true, indexerId: true, indexerName: true, downloadClient: true, createdAt: true },
+        select: { id: true, indexerId: true, indexerName: true, downloadClient: true, createdAt: true, downloadStatus: true },
       },
     },
   });

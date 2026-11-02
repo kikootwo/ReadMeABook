@@ -232,6 +232,42 @@ describe('cancelled-download pass', () => {
     expect(result.cancelled).toMatchObject({ errors: 3, stoppedEarly: true });
   });
 
+  it('steps that make no client call do not reset the count: client down, still stops after 3 errors', async () => {
+    configMock.get.mockResolvedValue(JSON.stringify([
+      { id: 1, name: 'Tracker', protocol: 'torrent', seedingTimeMinutes: 60, ratioLimit: 0 },
+      { id: 2, name: 'Free', protocol: 'torrent', seedingTimeMinutes: 0, ratioLimit: 0 },
+    ]));
+    // A recorded unlimited finish (indexer 2) is decided without a client call
+    const noCall = { downloadStatus: 'completed', indexerId: 2, indexerName: 'Free' };
+    store = [
+      req('req-1', {}, {}, hash(1)), req('req-2', {}, noCall, hash(2)), req('req-3', {}, {}, hash(3)),
+      req('req-4', {}, noCall, hash(4)), req('req-5', {}, {}, hash(5)), req('req-6', {}, {}, hash(6)),
+    ];
+    const c = qbit();
+    c.probeDownload.mockRejectedValue(new Error('ETIMEDOUT'));
+
+    const result = await runJob();
+
+    expect(c.probeDownload.mock.calls.map(([id]: string[]) => id)).toEqual([hash(1), hash(3), hash(5)]);
+    expect(result.cancelled).toMatchObject({ errors: 3, keptUnlimited: 2, stoppedEarly: true });
+  });
+
+  it('a lookup the client answers resets the count', async () => {
+    store = [1, 2, 3, 4, 5].map((n) => req(`req-${n}`, {}, {}, hash(n)));
+    torrents[hash(3)] = { status: 'seeding', progress: 1, seedingTime: 0 };
+    const c = qbit();
+    const answer = c.probeDownload.getMockImplementation();
+    c.probeDownload.mockImplementation(async (id: string) => {
+      if (id === hash(3)) return answer(id);
+      throw new Error('ETIMEDOUT');
+    });
+
+    const result = await runJob();
+
+    expect(c.probeDownload).toHaveBeenCalledTimes(5);
+    expect(result.cancelled).toMatchObject({ errors: 4, keptSeeding: 1, stoppedEarly: false });
+  });
+
   it('is skipped when the seeding pass stopped early', async () => {
     store = [req('req-1')];
     const c = qbit();
@@ -259,6 +295,33 @@ describe('cancelled-download pass', () => {
     const result = await runJob();
     expect(result.success).toBe(true);
     expect(result.cancelled).toMatchObject({ errors: 1 });
+  });
+});
+
+describe('a cancel during the add (qBittorrent lists the torrent a moment later)', () => {
+  it('the cancel finds it not listed yet and writes nothing; the next cleanup removes it', async () => {
+    const justAdded = new Date(Date.now() - 500);
+    store = [req('req-1', {}, { createdAt: justAdded })];
+    const c = qbit();
+    const listed = { id: hash(1), name: 'Book', status: 'downloading', progress: 0.2, seedingTime: 0, ratio: 0, addedAt: new Date(justAdded.getTime() + 200) };
+    c.probeDownload.mockResolvedValueOnce({ found: false }).mockResolvedValue({ found: true, info: listed });
+
+    const { handleCancelledDownload } = await import('@/lib/services/cancelled-download');
+    const { CancelDeadline } = await import('@/lib/services/cancel-deadline');
+    const first = await handleCancelledDownload(
+      { id: 'req-1', audiobookId: 'ab-1', type: 'audiobook' }, store[0].downloadHistory[0] as any, { mode: 'cancel', deadline: CancelDeadline.in(10_000) }
+    );
+
+    expect(first.outcome).toBe('retry_later');
+    expect(prismaMock.downloadHistory.update).not.toHaveBeenCalled();
+    expect(store[0].downloadHistory[0].downloadStatus).toBe('downloading');
+    expect(c.deleteDownload).not.toHaveBeenCalled();
+
+    const result = await runJob();
+
+    expect(c.deleteDownload).toHaveBeenCalledWith(hash(1), true);
+    expect(store[0].downloadHistory[0].downloadStatus).toBe('removed');
+    expect(result.cancelled).toMatchObject({ checked: 1, removed: 1 });
   });
 });
 
