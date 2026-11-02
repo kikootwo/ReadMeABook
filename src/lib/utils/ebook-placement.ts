@@ -133,11 +133,16 @@ export async function recordEbookPlacement(requestId: string, record: PlacementR
  * records, so only ebook requests can hold one.
  */
 export async function otherRecordedEntries(requestId: string): Promise<EbookPlacement[]> {
+  return activeRecordedEntries({ id: { not: requestId } });
+}
+
+/** Entries recorded by every active ebook request (an audiobook delete labels and keeps these, #526). */
+export async function activeRecordedEntries(where: { id?: { not: string } } = {}): Promise<EbookPlacement[]> {
   const rows = await prisma.request.findMany({
-    where: { id: { not: requestId }, deletedAt: null, type: 'ebook' },
+    where: { ...where, deletedAt: null, type: 'ebook' },
     select: { placedEbookFiles: true },
   });
-  return rows.flatMap((row) => readPlacements(row.placedEbookFiles)?.entries ?? []);
+  return (rows ?? []).flatMap((row) => readPlacements(row.placedEbookFiles)?.entries ?? []);
 }
 
 /**

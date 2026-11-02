@@ -43,6 +43,9 @@ vi.mock('@/lib/services/audiobookshelf/api', () => ({
 const guardMock = vi.hoisted(() => ({ assertSafeLibraryDelete: vi.fn(), isStaleStoredFolder: vi.fn(async () => false) }));
 vi.mock('@/lib/utils/library-delete-guard', () => guardMock);
 vi.mock('@/lib/processors/organize-cleanup-guard', () => ({ sweepEmptyParents: vi.fn(async () => undefined) }));
+// What D1 removes inside the folder has its own real-filesystem tests (request-delete.book-folder, book-folder-junk)
+const folderMock = vi.hoisted(() => ({ removeBookFolderFiles: vi.fn(), removeFolderIfOnlyJunk: vi.fn() }));
+vi.mock('@/lib/utils/book-folder-delete', () => folderMock);
 const canonical = (p: string) => path.resolve(p).replace(/\\/g, '/');
 
 describe('deleteRequest', () => {
@@ -52,12 +55,14 @@ describe('deleteRequest', () => {
     prismaMock.request.findMany.mockResolvedValue([]);
     prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
     downloadClientManagerMock.getClientServiceForProtocol.mockReset();
+    // A real folder on every OS (deletePath === canonicalPath): the link-only branch is not taken
     guardMock.assertSafeLibraryDelete.mockImplementation(async (p: string) => ({
-      deletePath: p,
+      deletePath: canonical(p),
       canonicalPath: canonical(p),
       exists: true,
       roots: { mediaDir: '/media', downloadRoots: [], sweepRoots: [], mappedRoots: [] },
     }));
+    folderMock.removeBookFolderFiles.mockResolvedValue({ kind: 'removed', folderRemoved: true, removed: 1, kept: [] });
   });
 
   it('returns not found when request is missing', async () => {
@@ -148,8 +153,9 @@ describe('deleteRequest', () => {
       },
     });
 
-    const expectedPath = path.join('/media', 'Author', 'Book ASIN1');
-    expect(fsMock.rm).toHaveBeenCalledWith(expectedPath, { recursive: true, force: true });
+    const expectedPath = canonical(path.join('/media', 'Author', 'Book ASIN1'));
+    expect(folderMock.removeBookFolderFiles).toHaveBeenCalledWith(expectedPath, undefined, []);
+    expect(fsMock.rm).not.toHaveBeenCalled();
   });
 
   it('removes SABnzbd downloads and continues cleanup', async () => {
@@ -293,8 +299,9 @@ describe('deleteRequest', () => {
 
     expect(result.torrentsKeptSeeding).toBe(1);
 
-    // Path doesn't exist, so rm should not be called
+    // Path doesn't exist, so nothing is removed
     expect(fsMock.rm).not.toHaveBeenCalled();
+    expect(folderMock.removeBookFolderFiles).not.toHaveBeenCalled();
   });
 
   it('keeps torrents for unlimited seeding when no config is present', async () => {

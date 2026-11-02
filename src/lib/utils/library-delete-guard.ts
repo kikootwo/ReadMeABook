@@ -2,16 +2,17 @@
  * Component: Library Delete Guard (admin request deletes)
  * Documentation: documentation/admin-features/request-deletion.md
  *
- * Decides whether deleting a request may remove the book's stored library
- * folder (`Audiobook.filePath`). An ebook request delete runs rules a-c on the
- * folder of each file it recorded (utils/ebook-placement.ts). A folder is removed only
- * when it provably holds this book's import and nothing else:
+ * Decides whether deleting a request may remove anything from the book's stored
+ * library folder (`Audiobook.filePath`). An ebook request delete runs rules a-c on the
+ * folder of each file it recorded (utils/ebook-placement.ts). An audiobook request
+ * delete removes files only when the folder provably holds this book's import, and
+ * then only what that import placed (utils/book-folder-delete.ts, #526):
  *  a. strictly inside media_dir (never media_dir itself)
  *  b. equals or contains no configured root (download dirs, mapped paths, bookdrop)
  *  c. equals or contains no other book's stored folder (each row canonicalized;
  *     rows whose folder no longer exists are skipped)
  *  evidence: the audio files directly in the folder hash to the book's
- *     filesHash, and no subfolder holds audio (the removal is recursive)
+ *     filesHash, and no subfolder holds audio
  * A missing folder counts as already gone only when the library looks mounted
  * (media_dir readable and not empty, and some other stored folder exists).
  * Rules a-c apply to the canonical folder and, for a symlink, to the link's own
