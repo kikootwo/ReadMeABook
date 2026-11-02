@@ -111,6 +111,8 @@ test('506 a cancel stops the download, removes what it fetched, and the cleanup 
     await dialog.getByRole('button', { name: 'Cancel request' }).click();
     const toast = page.getByText(/^Request cancelled\. Its download was removed from .+\.$/);
     await expect(toast).toBeVisible({ timeout: 30_000 });
+    // The toast slides in (a CSS animation): shoot once it has landed
+    await toast.locator('xpath=ancestor-or-self::div[contains(@class, "animate-slide-in-right")][1]').evaluate((el) => Promise.all(el.getAnimations().map((x) => x.finished)));
     await snap(page, DIR, 'admin-cancel-toast-1280-light');
     c.save('a-toast.txt', `${await toast.innerText()}\n`);
     await ctx.close();
