@@ -212,3 +212,44 @@ describe('hasUsableResult: apostrophes as in ranking (#316)', () => {
     expect(hasUsableResult(title, named(release) as never)).toBe(usable);
   });
 });
+
+describe('ProwlarrService.searchWithVariations: failed queries are counted (#522)', () => {
+  /** What axios rejects with on an HTTP 400: the request (with the key) and the body ride along */
+  const http400 = () => Object.assign(new Error('Request failed with status code 400'), {
+    config: { url: '/search', headers: { 'X-Api-Key': 'key' } },
+    response: { status: 400, data: 'indexer said: bad request body' },
+  });
+
+  it('fills the stats out-param from what search() throws: query and error message only', async () => {
+    const { ProwlarrService } = await import('@/lib/integrations/prowlarr.service');
+    const service = new ProwlarrService('https://prowlarr.example', 'key');
+    clientMock.get.mockReset();
+    clientMock.get.mockRejectedValueOnce(http400()).mockResolvedValueOnce({ data: [] });
+    const { newSearchStats } = await import('@/lib/utils/indexer-search-failures');
+    const stats = newSearchStats();
+
+    const results = await service.searchWithVariations('Book', 'Author', { categories: [3030] }, {}, stats);
+
+    expect(results).toEqual([]);
+    expect(stats).toEqual({
+      queriesSent: 2,
+      queriesFailed: 1,
+      failures: [{ query: 'Book Author', message: 'Request failed with status code 400' }],
+    });
+    expect(JSON.stringify(stats)).not.toMatch(/key|prowlarr\.example|body/i);
+  });
+
+  it('counts every query when all fail, and still works without a stats object', async () => {
+    const { service, search } = await serviceWithSpy();
+    search.mockRejectedValue(new Error('Failed to search Prowlarr: timeout of 30000ms exceeded'));
+    const { newSearchStats } = await import('@/lib/utils/indexer-search-failures');
+    const stats = newSearchStats();
+
+    await service.searchWithVariations('Book', 'Author', { categories: [3030] }, {}, stats);
+    await expect(service.searchWithVariations('Book', 'Author', { categories: [3030] })).resolves.toEqual([]);
+
+    expect(stats.queriesSent).toBe(2);
+    expect(stats.queriesFailed).toBe(2);
+    expect(stats.failures.map((f) => f.message)).toEqual(['timeout of 30000ms exceeded', 'timeout of 30000ms exceeded']);
+  });
+});
