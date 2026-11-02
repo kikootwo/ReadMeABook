@@ -42,6 +42,7 @@
 
 ## Reading Shelves (Goodreads, Hardcover)
 - **Goodreads shelf sync (RSS feeds)** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md)
+- **Goodreads feeds ended (404, add message, shelf notice, one warning per sync; #514)** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#feeds-ended-514)
 - **Hardcover shelf sync (GraphQL API)** → [backend/services/hardcover-sync.md](backend/services/hardcover-sync.md)
 - **Shared sync core (Audible lookup, request creation)** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#shared-sync-core)
 - **Combined shelves API, GenericShelf** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md)
@@ -214,6 +215,7 @@
 **"How do I add category sections to the home page?"** → [features/home-sections.md](features/home-sections.md)
 **"Does a deleted user's shelf or watched list still create requests?"** → No (#504): [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#deleted-users-504), [features/watched-lists.md](features/watched-lists.md), [backend/services/scheduler.md](backend/services/scheduler.md) (find_missing_ebooks)
 **"How do Goodreads shelves work?"** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md)
+**"Why does my Goodreads shelf return 404 / not sync?"** → Goodreads ended shelf RSS feeds (#514): [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#feeds-ended-514)
 **"How do Hardcover shelves work?"** → [backend/services/hardcover-sync.md](backend/services/hardcover-sync.md)
 **"How do I add a new shelf provider?"** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#adding-a-new-provider)
 **"How does the shelf sync core work?"** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#shared-sync-core)

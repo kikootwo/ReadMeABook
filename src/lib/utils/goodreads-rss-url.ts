@@ -21,6 +21,28 @@ export const GOODREADS_RSS_URL_HINT = 'https://www.goodreads.com/review/list_rss
 
 export const GOODREADS_RSS_URL_ERROR = `URL must be a Goodreads shelf RSS URL (${GOODREADS_RSS_URL_HINT})`;
 
+/** Shown when adding a shelf whose feed Goodreads answers with 404/410 (#514) */
+export const GOODREADS_FEEDS_ENDED_ADD_MESSAGE =
+  "Goodreads no longer serves shelf RSS feeds, so a Goodreads shelf can't be added. Hardcover lists still work.";
+
+/** Shown on every saved Goodreads shelf: the feeds are gone, so the shelf no longer syncs (#514) */
+export const GOODREADS_FEEDS_ENDED_NOTICE =
+  'Goodreads no longer serves shelf RSS feeds, so this shelf has stopped syncing. Hardcover lists still work.';
+
+/** HTTP statuses Goodreads answers a shelf feed with now that the feeds are gone */
+export const GOODREADS_FEED_ENDED_STATUSES: readonly number[] = [404, 410];
+
+/** A shelf feed request answered 404/410: Goodreads no longer serves shelf RSS feeds (#514) */
+export class GoodreadsFeedEndedError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`Goodreads answered HTTP ${status}: it no longer serves shelf RSS feeds`);
+    this.name = 'GoodreadsFeedEndedError';
+    this.status = status;
+  }
+}
+
 /** Goodreads host, default port, no credentials (URL already lowercases the host) */
 function isPlainGoodreadsHost(url: URL): boolean {
   return GOODREADS_HOSTS.includes(url.hostname) && url.port === '' && url.username === '' && url.password === '';

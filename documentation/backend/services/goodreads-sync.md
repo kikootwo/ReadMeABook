@@ -1,6 +1,6 @@
 # Goodreads & Shelf Sync
 
-**Status:** ✅ Implemented | RSS feed parsing, shared sync core, extensible provider architecture
+**Status:** ✅ Implemented | RSS feed parsing, shared sync core, extensible provider architecture. ⚠️ Goodreads no longer serves shelf RSS feeds (404 as of 2026-11-02; see [Feeds Ended](#feeds-ended-514))
 
 ## Overview
 Syncs user-subscribed Goodreads shelves via RSS feeds, resolves books to Audible ASINs, and creates requests. Also documents the shared shelf sync core used by all providers.
@@ -19,6 +19,7 @@ Syncs user-subscribed Goodreads shelves via RSS feeds, resolves books to Audible
 - `src/app/api/user/goodreads-shelves/[id]/route.ts` — DELETE + PATCH routes
 - `src/app/api/user/shelves/route.ts` — Combined GET for all providers (GenericShelf shape)
 - `src/lib/hooks/useGoodreadsShelves.ts` — Frontend hooks (via `createShelfHooks` factory)
+- `src/components/profile/GoodreadsFeedEndedNotice.tsx` — Feeds-ended notice on every Goodreads shelf card (`ShelvesSection`)
 
 ### Database Models
 - **GoodreadsShelf** — Per-user shelf subscription (`userId`, `rssUrl`, `name`, `lastSyncAt`, `bookCount`, `coverUrls`)
@@ -31,6 +32,16 @@ Syncs user-subscribed Goodreads shelves via RSS feeds, resolves books to Audible
 - **Duplicates:** POST/PATCH compare normalised feed URLs against the user's shelves (PATCH excludes itself) → 409 `DuplicateShelf`; a racing insert/update (Prisma P2002) → 409 too
 - **Redirects:** axios `maxRedirects: 0`; up to 3 redirects followed by hand, each target must be an https Goodreads host before it is requested
 - **Parsing:** `fast-xml-parser` extracts `item` entries with `book_id`, `title`, `author_name`, `book_image_url`
+
+### Feeds Ended (#514)
+- Goodreads answers every `review/list_rss/...` (and `user/updates_rss/...`) with **404**; the HTML shelf page redirects anonymous clients to sign-in, so scraping would need the user's Goodreads login (not done)
+- **Fetch:** a 404/410 page throws `GoodreadsFeedEndedError` (`goodreads-rss-url.ts`, `.status`); `validateStatus` admits 404/410 so axios hands them back instead of a generic error. Other statuses unchanged
+- **Add (POST):** → 400 `{ error: 'GoodreadsFeedsEnded', message: GOODREADS_FEEDS_ENDED_ADD_MESSAGE }`, nothing saved. Other feed failures keep 400 `InvalidRSS` "Could not fetch or parse the RSS feed: ..."
+- **Sync:** an ended feed counts in `stats.errors`, logs per shelf at debug only, then one `warn` per run: `Goodreads no longer serves shelf RSS feeds: N shelf(s) skipped (HTTP 404/410)...`. No shelf write (`lastSyncAt` stays). Other fetch failures still log `error` per shelf. Hardcover sync unchanged
+- **UI:** every Goodreads shelf card shows `GoodreadsFeedEndedNotice` (`GOODREADS_FEEDS_ENDED_NOTICE`, `role="note"`) as its own full-width row under the title/actions row (not in the info column, so it stays readable at 375 px). Unconditional: `GoodreadsShelf` stores no sync error, so no schema change
+- **UI status:** Goodreads cards get a neutral (gray) sync dot, and a never-synced one shows "Never synced" instead of the pulsing "Syncing..." and cover skeletons. Hardcover status unchanged
+- **Add Shelf modal:** the Goodreads tab (still the default) shows the notice with `GOODREADS_FEEDS_ENDED_ADD_MESSAGE` before submitting; hidden while the add error already shows that text
+- Code and shelves are kept in case Goodreads brings the feeds back; then drop the notice
 
 ## Shared Sync Core
 
@@ -79,6 +90,9 @@ Returns `{ useList, useAdd, useDelete, useUpdate }` — all with SWR caching, op
 4. Create API routes (or use a generic route handler)
 5. Create hook file (~40 lines) using `createShelfHooks(endpoint)`
 6. Add tab in `AddShelfModal` with provider-specific form fields
+
+## Fixed Issues
+- **#514 Goodreads shelf feeds return 404:** Goodreads ended shelf RSS. Adding a shelf showed a generic "Could not fetch or parse the RSS feed" error, existing shelves silently stopped updating, and every sync logged one error per shelf. Now: a clear add message, a notice on every Goodreads shelf, one warning per sync run ([Feeds Ended](#feeds-ended-514))
 
 ## Related
 - [Hardcover sync](hardcover-sync.md)
