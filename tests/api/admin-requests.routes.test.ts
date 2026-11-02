@@ -4,6 +4,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { NextRequest } from 'next/server';
 import { createPrismaMock } from '../helpers/prisma';
 
 let authRequest: any;
@@ -44,6 +45,10 @@ vi.mock('@/lib/integrations/prowlarr-connection', () => ({
     base: { origin: 'http://prowlarr:9696', protocol: 'http:', hostname: 'prowlarr', host: 'prowlarr:9696', port: '9696', defaultPort: false, userinfo: '', basePath: '' },
   }),
 }));
+
+/** A GET /api/admin/requests request; the route only reads its url. */
+const listRequest = (query: string) =>
+  ({ url: `http://localhost/api/admin/requests${query}` }) as unknown as NextRequest;
 
 describe('Admin requests routes', () => {
   beforeEach(() => {
@@ -139,6 +144,43 @@ describe('Admin requests routes', () => {
         }),
       })
     );
+  });
+
+  it.each(['audiobook', 'ebook'])('filters requests by type %s', async (type) => {
+    prismaMock.request.count.mockResolvedValueOnce(0);
+    prismaMock.request.findMany.mockResolvedValueOnce([]);
+
+    const { GET } = await import('@/app/api/admin/requests/route');
+    await GET(listRequest(`?type=${type}`));
+
+    expect(prismaMock.request.findMany.mock.calls[0][0].where).toEqual({ deletedAt: null, type });
+    expect(prismaMock.request.count.mock.calls[0][0].where).toEqual({ deletedAt: null, type });
+  });
+
+  it.each(['all', 'podcast', 'ebook&userId=x', ''])('applies no type filter for type=%j', async (type) => {
+    prismaMock.request.count.mockResolvedValueOnce(0);
+    prismaMock.request.findMany.mockResolvedValueOnce([]);
+
+    const { GET } = await import('@/app/api/admin/requests/route');
+    await GET(listRequest(`?type=${encodeURIComponent(type)}`));
+
+    expect(prismaMock.request.findMany.mock.calls[0][0].where).toEqual({ deletedAt: null });
+    expect(prismaMock.request.count.mock.calls[0][0].where).toEqual({ deletedAt: null });
+  });
+
+  it('combines the type filter with status and user filters', async () => {
+    prismaMock.request.count.mockResolvedValueOnce(0);
+    prismaMock.request.findMany.mockResolvedValueOnce([]);
+
+    const { GET } = await import('@/app/api/admin/requests/route');
+    await GET(listRequest('?status=failed&type=ebook&userId=user-123'));
+
+    expect(prismaMock.request.findMany.mock.calls[0][0].where).toEqual({
+      deletedAt: null,
+      status: 'failed',
+      type: 'ebook',
+      userId: 'user-123',
+    });
   });
 
   it('filters requests by userId', async () => {
