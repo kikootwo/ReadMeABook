@@ -240,6 +240,7 @@ src/app/admin/settings/
 - Merge (not overwrite): GET current tags, union, PATCH back — preserves manual tags and `req:` tags already on the item.
 - Users who would share a tag are never tagged; while tagging is on, an amber warning lists each shared tag and its users (`audiobookshelf.tagCollisions` from the settings GET).
 - Toggling false→true enqueues a one-time `backfill_requester_tags` job that tags existing available requests.
+- Only the first requester of a book is tagged (later requests for it are refused). Tags are visible to anyone who can see the item in Audiobookshelf.
 
 ## Plex Format Coercion
 
