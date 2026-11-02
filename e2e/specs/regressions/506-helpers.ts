@@ -16,7 +16,7 @@ export interface SlowRelease {
   usenet?: boolean;
 }
 
-/** One release per entry; torrents on indexer 1 (mp3 fixture), usenet on indexer 2 (m4b fixture). */
+/** One release per entry (mp3 fixtures: every book has one); torrents on indexer 1, usenet on indexer 2. */
 export function cancelScenario(name: string, releases: SlowRelease[]) {
   return {
     name,
@@ -25,10 +25,10 @@ export function cancelScenario(name: string, releases: SlowRelease[]) {
     releases: releases.map((r) => ({
       id: r.id,
       book: r.book,
-      title: `{{author}} - {{title}} (Unabridged) [${r.usenet ? 'M4B' : 'MP3 64kbps'}] ${r.id}`,
+      title: `{{author}} - {{title}} (Unabridged) [MP3 64kbps] ${r.id}`,
       sizeMB: 420,
       seeders: 60,
-      fixture: `${r.book}-${r.usenet ? 'm4b' : 'mp3'}`,
+      fixture: `${r.book}-mp3`,
       download: { completeMs: r.completeMs },
       ...(r.usenet ? { protocol: 'usenet', indexerId: USENET_INDEXER.id } : {}),
     })),
