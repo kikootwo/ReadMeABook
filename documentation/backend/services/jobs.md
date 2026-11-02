@@ -57,6 +57,7 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - 10s delay between checks (prevents excessive logging)
 - Only logs progress at 5% intervals or first 5%
 - Auto-reschedules until complete/failed
+- qBittorrent finished but still outside its save path: 30 s grace (5 re-checks), then one `warn` and organize from the incomplete folder (#520, [qbittorrent.md](../../phase3/qbittorrent.md#completion--relocation-grace))
 - **Cancelled/deleted requests** (`src/lib/utils/request-stop-guard.ts`):
   - Guarded writes are one conditional `updateMany` (`where: { id, deletedAt: null, status: { not: 'cancelled' } }`); 0 rows → leave the request alone. No request id → writes nothing (an unfiltered `updateMany` would hit every row)
   - Guarded sites:
