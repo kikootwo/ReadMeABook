@@ -7,7 +7,8 @@
  *      real two-line warning toast over the sticky page header
  *   2  1280 px, dark: plain delete, real success toast
  *   3  1280 px, light: plain delete, real success toast (light colours unchanged)
- * Each shot records the toast's computed background alpha and the text/background contrast.
+ * Each shot records the toast's computed background alpha and the text/background contrast (the
+ * contrast treats the background as opaque, so it only means something once the alpha is 1).
  * Snapshots come before the checks (`expect.soft`), so a run on an older image still leaves its shots.
  */
 
