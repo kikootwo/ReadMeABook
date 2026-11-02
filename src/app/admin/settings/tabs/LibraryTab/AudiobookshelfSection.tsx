@@ -171,9 +171,10 @@ export function AudiobookshelfSection({
             </span>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               When a requested audiobook becomes available, RMAB adds a <code>req:&lt;username&gt;</code> tag
-              to the matched Audiobookshelf item. Tags are merged, so multiple requesters and manual tags are
-              preserved. Audiobookshelf can use these tags to filter what each user sees in their library.
+              to the matched Audiobookshelf item. Tags are merged, so tags already on the item are kept.
+              Audiobookshelf can use these tags to filter what each user sees in their library.
               Enabling this kicks off a one-time backfill of already-available requests.
+              Tags are visible to anyone who can see the item in Audiobookshelf.
             </p>
           </div>
         </label>

@@ -39,6 +39,12 @@ function renderSection(tagRequester: boolean, tagCollisions = collisions) {
 }
 
 describe('AudiobookshelfSection requester tags', () => {
+  it('says tags are visible to anyone who can see the item', () => {
+    renderSection(false);
+
+    expect(screen.getByText(/Tags are visible to anyone who can see the item in Audiobookshelf\./)).toBeInTheDocument();
+  });
+
   it('warns about users who would share a tag while tagging is on', () => {
     renderSection(true);
 
