@@ -59,6 +59,21 @@ describe('interactive search: failed indexer searches (#522)', () => {
     expect(screen.queryByRole('button', { name: 'Search Again' })).not.toBeInTheDocument();
   });
 
+  it('some fail and the rest find nothing: the warning sits above "No results found"', async () => {
+    failures.current = { failed: 1, total: 2, errors: ['Request failed with status code 400'] };
+    searchByRequestMock.mockResolvedValue([]);
+
+    await openModal();
+
+    const empty = await screen.findByText('No results found');
+    const notice = screen.getByTestId('search-failure-notice');
+    expect(notice).toHaveTextContent('1 of 2 indexer searches failed, so results may be incomplete.');
+    expect(notice.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // one Search Again: the empty state's, not a second one in the notice
+    expect(screen.getAllByRole('button', { name: 'Search Again' })).toHaveLength(1);
+    expect(notice).not.toContainElement(screen.getByRole('button', { name: 'Search Again' }));
+  });
+
   it('every search fails: the warning replaces "No results found", with Search Again', async () => {
     failures.current = { failed: 2, total: 2, errors: ['Request failed with status code 400'] };
     searchByRequestMock.mockResolvedValue([]);

@@ -180,6 +180,7 @@ export function InteractiveTorrentSearchModal({
   const searchFailures = isEbookMode
     ? (useAsinMode ? ebookByAsinFailures : ebookFailures)
     : (hasRequestId ? byRequestFailures : byAudiobookFailures);
+  const allSearchesFailed = !!searchFailures && searchFailures.failed >= searchFailures.total;
 
   // Mount tracking for portal
   useEffect(() => { setMounted(true); }, []);
@@ -430,13 +431,13 @@ export function InteractiveTorrentSearchModal({
               </div>
             )}
 
-            {/* Indexer search failures: above the results, or in place of the empty state */}
+            {/* Indexer search failures: above the results or the empty state; in its place when every search failed */}
             {!isSearching && searchFailures && (
-              <SearchFailureNotice failures={searchFailures} onRetry={results.length === 0 ? performSearch : undefined} />
+              <SearchFailureNotice failures={searchFailures} onRetry={results.length === 0 && allSearchesFailed ? performSearch : undefined} />
             )}
 
             {/* Empty State */}
-            {!isSearching && results.length === 0 && !error && !searchFailures && (
+            {!isSearching && results.length === 0 && !error && !allSearchesFailed && (
               <div className="flex flex-col items-center justify-center py-14">
                 <div className="w-14 h-14 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-3">
                   <svg className="w-7 h-7 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">

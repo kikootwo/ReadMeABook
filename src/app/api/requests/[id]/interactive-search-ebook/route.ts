@@ -14,7 +14,7 @@ import { getConfigService } from '@/lib/services/config.service';
 import { getProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { rankEbookTorrents, RankedEbookTorrent } from '@/lib/utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '@/lib/utils/indexer-grouping';
-import { addGroupSearch, logSearchSummary, newSearchStats, recordFailure, searchFailureSummary, type SearchStats } from '@/lib/utils/indexer-search-failures';
+import { addGroupSearch, logSearchSummary, newSearchStats, recordFailure, recordRunFailure, searchFailureSummary, type SearchStats } from '@/lib/utils/indexer-search-failures';
 import { RMABLogger } from '@/lib/utils/logger';
 import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { getLanguageForRegion } from '@/lib/constants/language-config';
@@ -220,7 +220,7 @@ export async function POST(
               indexerSearchStats
             ).catch((err) => {
               logger.error(`Indexer search failed: ${err.message}`);
-              recordFailure(indexerSearchStats, '(indexer search)', err);
+              recordRunFailure(indexerSearchStats, err);
               return null;
             })
           );

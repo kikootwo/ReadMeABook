@@ -56,6 +56,14 @@ export function recordFailure(stats: SearchStats, query: string, error: unknown)
   stats.failures.push({ query, message: searchErrorMessage(error) });
 }
 
+/**
+ * Counts a whole search run that threw as one failure, but only when none of its groups was counted
+ * yet: a run that throws after searching (in ranking, say) already holds its group counts.
+ */
+export function recordRunFailure(stats: SearchStats, error: unknown): void {
+  if (stats.queriesSent === 0) recordFailure(stats, '(indexer search)', error);
+}
+
 /** Adds one indexer group's searches to the run's totals, with one warn line per failed search */
 export function addGroupSearch(totals: SearchStats, group: SearchStats, groupDescription: string, logger: WarnLogger): void {
   for (const failure of group.failures) {
