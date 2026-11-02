@@ -42,6 +42,7 @@ export NEXT_MANUAL_SIG_HANDLE=true
 SERVER_PID=""
 STOPPING=0
 
+# shellcheck disable=SC2317 # reached through the trap below
 on_stop() {
     STOPPING=1
     # $! covers a signal that lands between starting node and recording its PID
