@@ -77,7 +77,9 @@ test('#250: {seriesPart:00} typed in Paths files part 1 of a series as "01 - Tit
   writeEvidence('250/media-tree.txt', `${tree.join('\n')}\n`);
   const abs = await absItemAt(rel);
   writeEvidence('250/abs-item.json', abs);
-  writeEvidence('250/result.json', { expected, filePath: d.filePath, abs });
+  // Whether ABS could take the sequence from tags (tagging on) or only from the folder name (off).
+  const tagging = psql(`select coalesce((select value from configuration where key = 'metadata_tagging_enabled'), '(unset)')`);
+  writeEvidence('250/result.json', { expected, filePath: d.filePath, metadataTaggingEnabled: tagging, abs });
 
   expect.soft(d.filePath, 'audiobooks.file_path').toBe(expected);
   expect.soft(tree.some((p) => p.startsWith(`${expected}/`) && p.endsWith('.mp3')), 'audio files under the padded folder').toBe(true);
