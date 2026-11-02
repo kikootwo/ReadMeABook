@@ -38,6 +38,7 @@ describe('Admin settings local-user flags', () => {
     prismaMock.configuration.findMany.mockResolvedValue([
       { key: 'system.backend_mode', value: 'audiobookshelf' },
     ]);
+    prismaMock.user.findMany.mockResolvedValue([]);
   });
 
   it('does not count a soft-deleted local admin as a local user or a local admin', async () => {

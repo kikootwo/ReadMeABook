@@ -58,6 +58,15 @@ export function AudiobookshelfSection({
     });
   };
 
+  const tagCollisions = settings.audiobookshelf.tagCollisions ?? [];
+
+  const handleTagRequesterChange = (tagRequester: boolean) => {
+    onChange({
+      ...settings,
+      audiobookshelf: { ...settings.audiobookshelf, tagRequester },
+    });
+  };
+
   const handleAudibleRegionChange = (audibleRegion: string) => {
     onChange({
       ...settings,
@@ -146,6 +155,49 @@ export function AudiobookshelfSection({
             </p>
           </div>
         </label>
+      </div>
+
+      <div className="space-y-2">
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={settings.audiobookshelf.tagRequester}
+            onChange={(e) => handleTagRequesterChange(e.target.checked)}
+            className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800"
+          />
+          <div className="flex-1">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Tag items with the requester's username
+            </span>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              When a requested audiobook becomes available, RMAB adds a <code>req:&lt;username&gt;</code> tag
+              to the matched Audiobookshelf item. Tags are merged, so tags already on the item are kept.
+              Audiobookshelf can use these tags to filter what each user sees in their library.
+              Enabling this kicks off a one-time backfill of already-available requests.
+              Tags are visible to anyone who can see the item in Audiobookshelf.
+            </p>
+          </div>
+        </label>
+
+        {/* Warning: two users would share a tag, so neither is tagged */}
+        {settings.audiobookshelf.tagRequester && tagCollisions.length > 0 && (
+          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+              Some users would share a tag
+            </h3>
+            <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+              These users' books won't be tagged, so no one sees another user's books. Rename one user in each
+              group to tag them.
+            </p>
+            <ul className="text-sm text-amber-700 dark:text-amber-300 mt-2 list-disc list-inside">
+              {tagCollisions.map(({ tag, usernames }) => (
+                <li key={tag}>
+                  <code>{tag}</code>: {usernames.join(', ')}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       {/* Audible Region Selection */}

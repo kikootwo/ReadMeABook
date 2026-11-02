@@ -12,6 +12,7 @@ import { getLibraryService } from '../services/library';
 import { getConfigService } from '../services/config.service';
 import { getThumbnailCacheService } from '../services/thumbnail-cache.service';
 import { RMABLogger } from '../utils/logger';
+import { createRequesterTagger } from '../services/audiobookshelf/requester-tags';
 import { resetRequestsAfterLibraryRemoval } from './library-removal';
 import { createLibraryRowUnlessPresent } from './library-row-insert';
 
@@ -32,6 +33,11 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
     const configService = getConfigService();
     const backendMode = await configService.getBackendMode();
     const thumbnailCacheService = getThumbnailCacheService();
+
+    // Whether to tag matched ABS items with the requester's `req:<username>` tag.
+    // Read once per scan; only meaningful for the Audiobookshelf backend.
+    const tagRequester = (await configService.get('audiobookshelf.tag_requester')) === 'true';
+    const requesterTagFor = createRequesterTagger(logger);
 
     logger.info(`Backend mode: ${backendMode}`);
 
@@ -446,6 +452,18 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
           });
 
           matchedCount++;
+
+          // Tag the matched ABS item with the requester's username (best-effort).
+          // Only for the ABS backend, when enabled, and when we have both an item
+          // ID and a username. Tags are merged so other tags are preserved.
+          const username = request.user.plexUsername;
+          if (tagRequester && backendMode === 'audiobookshelf' && match.plexGuid && username) {
+            const tag = await requesterTagFor(username);
+            if (tag) {
+              const { addABSItemTags } = await import('../services/audiobookshelf/api');
+              await addABSItemTags(match.plexGuid, [tag]);
+            }
+          }
 
           // Note: Audiobookshelf metadata matching is handled in the file hash phase above
           // Items without ASIN get file-hash-matched ASIN, items with ASIN already have correct metadata

@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ABS_MATCH_TIMEOUT_MS,
   absRequest,
+  addABSItemTags,
   deleteABSItem,
   getABSLibraries,
   getABSLibraryItems,
@@ -385,5 +386,78 @@ describe('Audiobookshelf API client', () => {
     });
 
     await expect(deleteABSItem('item-1', { hard: false })).rejects.toThrow('ABS API error: 500 Boom');
+  });
+
+  it('does not write when all tags are empty/blank', async () => {
+    configServiceMock.get.mockImplementation(async (key: string) => {
+      if (key === 'audiobookshelf.server_url') return 'http://abs';
+      if (key === 'audiobookshelf.api_token') return 'token';
+      return null;
+    });
+
+    await addABSItemTags('item-1', ['', '   ']);
+
+    // Never even fetches the item — nothing usable to add.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('merges new tags with existing ABS item tags via PATCH', async () => {
+    configServiceMock.get.mockImplementation(async (key: string) => {
+      if (key === 'audiobookshelf.server_url') return 'http://abs';
+      if (key === 'audiobookshelf.api_token') return 'token';
+      return null;
+    });
+    // First call: GET item with existing tags. Second call: PATCH media.
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ media: { tags: ['nsfw', 'req:other'] } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({}),
+      });
+
+    await addABSItemTags('item-1', ['req:john']);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const patchCall = fetchMock.mock.calls[1];
+    expect(patchCall[0]).toBe('http://abs/api/items/item-1/media');
+    expect(patchCall[1].method).toBe('PATCH');
+    expect(JSON.parse(patchCall[1].body)).toEqual({
+      tags: ['nsfw', 'req:other', 'req:john'],
+    });
+  });
+
+  it('skips the PATCH when all tags already exist', async () => {
+    configServiceMock.get.mockImplementation(async (key: string) => {
+      if (key === 'audiobookshelf.server_url') return 'http://abs';
+      if (key === 'audiobookshelf.api_token') return 'token';
+      return null;
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ media: { tags: ['req:john'] } }),
+    });
+
+    await addABSItemTags('item-1', ['req:john']);
+
+    // Only the GET happened, no PATCH
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('suppresses errors when tagging fails', async () => {
+    configServiceMock.get.mockImplementation(async (key: string) => {
+      if (key === 'audiobookshelf.server_url') return 'http://abs';
+      if (key === 'audiobookshelf.api_token') return 'token';
+      return null;
+    });
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: 'Boom',
+    });
+
+    await expect(addABSItemTags('item-1', ['req:john'])).resolves.toBeUndefined();
   });
 });

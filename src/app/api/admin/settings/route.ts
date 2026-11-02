@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { findRequesterTagCollisions } from '@/lib/services/audiobookshelf/requester-tags';
 
 const logger = RMABLogger.create('API.Admin.Settings');
 
@@ -58,6 +59,8 @@ export async function GET(request: NextRequest) {
         apiToken: maskValue('api_token', configMap.get('audiobookshelf.api_token')),
         libraryId: configMap.get('audiobookshelf.library_id') || '',
         triggerScanAfterImport: configMap.get('audiobookshelf.trigger_scan_after_import') === 'true',
+        tagRequester: configMap.get('audiobookshelf.tag_requester') === 'true',
+        tagCollisions: await findRequesterTagCollisions(),
       },
       oidc: {
         enabled: configMap.get('oidc.enabled') === 'true',

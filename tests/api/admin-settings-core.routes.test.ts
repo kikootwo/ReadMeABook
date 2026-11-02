@@ -12,6 +12,7 @@ const prismaMock = createPrismaMock();
 const requireAuthMock = vi.hoisted(() => vi.fn());
 const requireAdminMock = vi.hoisted(() => vi.fn());
 const configServiceMock = vi.hoisted(() => ({
+  get: vi.fn(),
   setMany: vi.fn(),
   setManyAtomic: vi.fn(),
   clearCache: vi.fn(),
@@ -21,6 +22,7 @@ const audibleServiceMock = vi.hoisted(() => ({
 }));
 const jobQueueMock = vi.hoisted(() => ({
   addAudibleRefreshJob: vi.fn(),
+  addBackfillRequesterTagsJob: vi.fn(),
 }));
 const plexServiceMock = vi.hoisted(() => ({
   testConnection: vi.fn(),
@@ -92,6 +94,7 @@ describe('Admin settings core routes', () => {
     authRequest = { user: { id: 'admin-1', role: 'admin' }, json: vi.fn() };
     requireAuthMock.mockImplementation((_req: any, handler: any) => handler(authRequest));
     requireAdminMock.mockImplementation((_req: any, handler: any) => handler());
+    prismaMock.user.findMany.mockResolvedValue([]);
     // Reset download client manager mocks with default values
     downloadClientManagerMock.getAllClients.mockResolvedValue([]);
     downloadClientManagerMock.testConnection.mockResolvedValue({ success: true, message: 'Connected' });
@@ -111,6 +114,24 @@ describe('Admin settings core routes', () => {
 
     expect(payload.plex.url).toBe('http://plex');
     expect(payload.backendMode).toBe('plex');
+    expect(payload.audiobookshelf.tagCollisions).toEqual([]);
+  });
+
+  it('lists requester tags two users would share, so the admin can be warned', async () => {
+    prismaMock.configuration.findMany.mockResolvedValueOnce([]);
+    prismaMock.user.count.mockResolvedValue(0);
+    prismaMock.user.findMany.mockResolvedValue([
+      { plexUsername: 'john.smith' },
+      { plexUsername: 'johnsmith' },
+      { plexUsername: 'guggs' },
+    ]);
+
+    const { GET } = await import('@/app/api/admin/settings/route');
+    const payload = await (await GET({} as any)).json();
+
+    expect(payload.audiobookshelf.tagCollisions).toEqual([
+      { tag: 'req:johnsmith', usernames: ['john.smith', 'johnsmith'] },
+    ]);
   });
 
   it('updates Plex settings', async () => {
@@ -424,6 +445,50 @@ describe('Admin settings core routes', () => {
 
     expect(payload.success).toBe(true);
     expect(configServiceMock.setMany).toHaveBeenCalled();
+  });
+
+  it('enqueues a backfill job when tagRequester toggles false→true', async () => {
+    // Previous stored value is 'false' (off)
+    configServiceMock.get.mockResolvedValue('false');
+
+    const request = {
+      json: vi.fn().mockResolvedValue({
+        serverUrl: 'http://abs',
+        apiToken: 'token',
+        libraryId: 'lib',
+        triggerScanAfterImport: false,
+        tagRequester: true,
+      }),
+    };
+
+    const { PUT } = await import('@/app/api/admin/settings/audiobookshelf/route');
+    const response = await PUT(request as any);
+    const payload = await response.json();
+
+    expect(payload.success).toBe(true);
+    expect(jobQueueMock.addBackfillRequesterTagsJob).toHaveBeenCalled();
+  });
+
+  it('does not enqueue a backfill job when tagRequester was already on', async () => {
+    // Previous stored value is 'true' (already on)
+    configServiceMock.get.mockResolvedValue('true');
+
+    const request = {
+      json: vi.fn().mockResolvedValue({
+        serverUrl: 'http://abs',
+        apiToken: 'token',
+        libraryId: 'lib',
+        triggerScanAfterImport: false,
+        tagRequester: true,
+      }),
+    };
+
+    const { PUT } = await import('@/app/api/admin/settings/audiobookshelf/route');
+    const response = await PUT(request as any);
+    const payload = await response.json();
+
+    expect(payload.success).toBe(true);
+    expect(jobQueueMock.addBackfillRequesterTagsJob).not.toHaveBeenCalled();
   });
 });
 
