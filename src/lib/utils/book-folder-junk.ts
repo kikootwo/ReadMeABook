@@ -8,8 +8,10 @@
  * limited walk: lstat only, links never followed, and the whole folder is kept
  * (nothing in it removed) on any link, special file, audio or ebook file, depth
  * over JUNK_MAX_DEPTH or more than JUNK_MAX_ENTRIES entries. Each walked folder
- * stays open from the walk until its own rmdir, so no folder made in the meantime
- * can reuse its inode number (Linux reuses a freed one at once).
+ * stays open from the walk until its own rmdir, so on a local filesystem a folder
+ * made in its place can't pass the re-check with a reused inode number (Linux
+ * reuses a freed one at once). Not covered: a swap after the re-check, or a
+ * filesystem that keeps a folder's number by path (mergerfs, NFS).
  */
 
 import * as fs from 'fs/promises';
