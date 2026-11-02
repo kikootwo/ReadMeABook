@@ -209,8 +209,10 @@ export async function replaceAudiobook(
     logger.info(`Deleted existing request ${existingRequest.id} for replacement`);
     // A delivered ebook request outlives the delete (#526): the book keeps the stored
     // path deleteRequest pointed at its ebook's folder, so the ebook stays downloadable
-    const { hasDeliveredEbookRequest } = await import('./request-delete-children');
-    ebookStays = await hasDeliveredEbookRequest(audiobook.id);
+    if (deleteResult.success) {
+      const { hasDeliveredEbookRequest } = await import('./request-delete-children');
+      ebookStays = await hasDeliveredEbookRequest(audiobook.id);
+    }
   } else {
     // No active request. A stored folder (e.g. an earlier delete kept the files) goes
     // through the library delete guard; only a book added outside RMAB is removed via

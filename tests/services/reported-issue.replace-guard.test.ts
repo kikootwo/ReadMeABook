@@ -125,6 +125,16 @@ describe('replaceAudiobook with the library delete guard', () => {
     expect(jobQueueMock.addDownloadJob).toHaveBeenCalled();
   });
 
+  it('clears the stored path as before when the delete itself failed, even with a delivered ebook request', async () => {
+    ebookRequests([{ id: 'ebook-1', status: 'downloaded', completedAt: new Date(), placedEbookFiles: null }]);
+    deleteRequestMock.mockResolvedValue({ success: false, filesDeleted: false, error: 'db down' });
+    prismaMock.request.create.mockResolvedValue({ id: 'req-new', audiobook, user: { id: 'admin-1' } });
+
+    await replaceAudiobook('issue-1', 'admin-1', { guid: 't' });
+
+    expect(prismaMock.audiobook.update.mock.calls[0][0].data).toMatchObject({ filePath: null, fileFormat: null });
+  });
+
   it('clears the stored path when the remaining ebook request has not delivered', async () => {
     ebookRequests([{ id: 'ebook-1', status: 'searching', completedAt: null, placedEbookFiles: null }]);
     prismaMock.request.create.mockResolvedValue({ id: 'req-new', audiobook, user: { id: 'admin-1' } });
