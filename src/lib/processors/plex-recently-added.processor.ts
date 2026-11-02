@@ -7,6 +7,7 @@
 
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
+import { createRequesterTagger } from '../services/audiobookshelf/requester-tags';
 import { getLibraryService } from '../services/library';
 import { getThumbnailCacheService } from '../services/thumbnail-cache.service';
 import { createLibraryRowUnlessPresent } from './library-row-insert';
@@ -30,6 +31,7 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
   // Whether to tag matched ABS items with the requester's `req:<username>` tag.
   // Read once per run; only meaningful for the Audiobookshelf backend.
   const tagRequester = (await configService.get('audiobookshelf.tag_requester')) === 'true';
+  const requesterTagFor = createRequesterTagger(logger);
 
   // Validate configuration based on backend mode
   if (backendMode === 'audiobookshelf') {
@@ -285,9 +287,9 @@ export async function processPlexRecentlyAddedCheck(payload: PlexRecentlyAddedPa
             // flips a request to 'available', so it must tag too.
             const username = request.user.plexUsername;
             if (tagRequester && backendMode === 'audiobookshelf' && match.plexGuid && username) {
-              const { addABSItemTags, formatRequesterTag } = await import('../services/audiobookshelf/api');
-              const tag = formatRequesterTag(username);
+              const tag = await requesterTagFor(username);
               if (tag) {
+                const { addABSItemTags } = await import('../services/audiobookshelf/api');
                 await addABSItemTags(match.plexGuid, [tag]);
               }
             }

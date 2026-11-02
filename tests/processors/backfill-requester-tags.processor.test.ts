@@ -21,15 +21,12 @@ vi.mock('@/lib/services/config.service', () => ({
 
 vi.mock('@/lib/services/audiobookshelf/api', () => ({
   addABSItemTags: vi.fn(() => Promise.resolve()),
-  formatRequesterTag: (username: string) => {
-    const sanitized = username.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_-]/g, '');
-    return sanitized ? `req:${sanitized}` : '';
-  },
 }));
 
 describe('processBackfillRequesterTags', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    prismaMock.user.findMany.mockResolvedValue([]);
   });
 
   it('skips entirely when not in Audiobookshelf mode', async () => {
@@ -65,6 +62,27 @@ describe('processBackfillRequesterTags', () => {
     expect(absApi.addABSItemTags).toHaveBeenCalledTimes(2);
     expect(absApi.addABSItemTags).toHaveBeenCalledWith('abs-1', ['req:guggs']);
     expect(absApi.addABSItemTags).toHaveBeenCalledWith('abs-2', ['req:john_smith']);
+  });
+
+  it('skips requesters whose tag another user would share', async () => {
+    configMock.getBackendMode.mockResolvedValue('audiobookshelf');
+    prismaMock.user.findMany.mockResolvedValue([
+      { plexUsername: 'john.smith' },
+      { plexUsername: 'johnsmith' },
+      { plexUsername: 'guggs' },
+    ]);
+    prismaMock.request.findMany.mockResolvedValue([
+      { audiobook: { absItemId: 'abs-1' }, user: { plexUsername: 'john.smith' } },
+      { audiobook: { absItemId: 'abs-2' }, user: { plexUsername: 'guggs' } },
+    ] as any);
+
+    const absApi = await import('@/lib/services/audiobookshelf/api');
+    const { processBackfillRequesterTags } = await import('@/lib/processors/backfill-requester-tags.processor');
+    const result = await processBackfillRequesterTags({ jobId: 'job-4' });
+
+    expect(result).toMatchObject({ tagged: 1, skipped: 1 });
+    expect(absApi.addABSItemTags).toHaveBeenCalledTimes(1);
+    expect(absApi.addABSItemTags).toHaveBeenCalledWith('abs-2', ['req:guggs']);
   });
 
   it('queries only non-deleted available audiobook requests with an ABS item ID', async () => {

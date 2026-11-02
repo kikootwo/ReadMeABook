@@ -58,6 +58,8 @@ export function AudiobookshelfSection({
     });
   };
 
+  const tagCollisions = settings.audiobookshelf.tagCollisions ?? [];
+
   const handleTagRequesterChange = (tagRequester: boolean) => {
     onChange({
       ...settings,
@@ -175,6 +177,26 @@ export function AudiobookshelfSection({
             </p>
           </div>
         </label>
+
+        {/* Warning: two users would share a tag, so neither is tagged */}
+        {settings.audiobookshelf.tagRequester && tagCollisions.length > 0 && (
+          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+              Some users would share a tag
+            </h3>
+            <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+              These users' books won't be tagged, so no one sees another user's books. Rename one user in each
+              group to tag them.
+            </p>
+            <ul className="text-sm text-amber-700 dark:text-amber-300 mt-2 list-disc list-inside">
+              {tagCollisions.map(({ tag, usernames }) => (
+                <li key={tag}>
+                  <code>{tag}</code>: {usernames.join(', ')}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       {/* Audible Region Selection */}

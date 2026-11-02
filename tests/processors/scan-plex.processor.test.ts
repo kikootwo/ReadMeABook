@@ -38,7 +38,6 @@ vi.mock('@/lib/services/audiobookshelf/api', () => ({
   triggerABSItemMatch: vi.fn(),
   getABSItem: vi.fn(),
   addABSItemTags: vi.fn(() => Promise.resolve()),
-  formatRequesterTag: (username: string) => `req:${username.toLowerCase()}`,
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -385,6 +384,7 @@ describe('processScanPlex', () => {
 
   it('tags the matched ABS item with the requester when tag_requester is enabled', async () => {
     configMock.getBackendMode.mockResolvedValue('audiobookshelf');
+    prismaMock.user.findMany.mockResolvedValue([]);
     // Library ID lookup + tag_requester flag
     configMock.get.mockImplementation(async (key: string) =>
       key === 'audiobookshelf.tag_requester' ? 'true' : 'abs-lib'

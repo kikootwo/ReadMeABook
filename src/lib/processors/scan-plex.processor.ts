@@ -12,6 +12,7 @@ import { getLibraryService } from '../services/library';
 import { getConfigService } from '../services/config.service';
 import { getThumbnailCacheService } from '../services/thumbnail-cache.service';
 import { RMABLogger } from '../utils/logger';
+import { createRequesterTagger } from '../services/audiobookshelf/requester-tags';
 import { resetRequestsAfterLibraryRemoval } from './library-removal';
 import { createLibraryRowUnlessPresent } from './library-row-insert';
 
@@ -36,6 +37,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
     // Whether to tag matched ABS items with the requester's `req:<username>` tag.
     // Read once per scan; only meaningful for the Audiobookshelf backend.
     const tagRequester = (await configService.get('audiobookshelf.tag_requester')) === 'true';
+    const requesterTagFor = createRequesterTagger(logger);
 
     logger.info(`Backend mode: ${backendMode}`);
 
@@ -456,9 +458,9 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
           // ID and a username. Tags are merged so other tags are preserved.
           const username = request.user.plexUsername;
           if (tagRequester && backendMode === 'audiobookshelf' && match.plexGuid && username) {
-            const { addABSItemTags, formatRequesterTag } = await import('../services/audiobookshelf/api');
-            const tag = formatRequesterTag(username);
+            const tag = await requesterTagFor(username);
             if (tag) {
+              const { addABSItemTags } = await import('../services/audiobookshelf/api');
               await addABSItemTags(match.plexGuid, [tag]);
             }
           }

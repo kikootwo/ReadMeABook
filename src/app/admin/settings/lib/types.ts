@@ -46,6 +46,8 @@ export interface AudiobookshelfSettings {
    * Backing config key: `audiobookshelf.tag_requester`.
    */
   tagRequester: boolean;
+  /** Read-only: tags two or more users would share; those users aren't tagged (from GET /api/admin/settings) */
+  tagCollisions?: { tag: string; usernames: string[] }[];
 }
 
 /**

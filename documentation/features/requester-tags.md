@@ -8,13 +8,19 @@ When enabled, RMAB writes a `req:<sanitized_username>` tag onto each Audiobooksh
 ## Key Details
 - **Setting:** `audiobookshelf.tag_requester` (boolean, default `false`) — checkbox in Library tab → Audiobookshelf section.
 - **Tag format:** `req:` + username lowercased, trimmed, spaces→`_`, chars outside `[a-z0-9_-]` stripped. `John Smith` → `req:john_smith`.
-- **Merge, never overwrite:** GET `media.tags`, union with new tags (dedupe), PATCH back. Preserves manual tags (`nsfw`) and other requesters' `req:` tags. Skips the write if unchanged.
+- **Merge, never overwrite:** GET `media.tags`, union with new tags (dedupe), PATCH back. Preserves manual tags (`nsfw`) and any `req:` tags already on the item. Skips the write if unchanged.
+- **Shared tags are never written:** if two or more non-deleted users map to one tag (`john.smith` and `johnsmith` → `req:johnsmith`), none of them is tagged: a shared tag would show one user the other's books. Each run logs one warning per shared tag; the settings section shows the groups while tagging is on. Renaming one user clears it.
 - **Apply points:** both match loops that flip a request to `available` — `scan-plex.processor.ts` (full scan) and `plex-recently-added.processor.ts` (scheduled recently-added check). Guarded by `tagRequester && backendMode === 'audiobookshelf' && match.plexGuid && username`. Both paths must tag; a request matched by either is otherwise excluded from the other.
 - **Backfill:** false→true toggle of the setting enqueues a one-time `backfill_requester_tags` job that tags existing `available` audiobook requests with `absItemId` set.
 - **Best-effort:** tagging never throws; failures are logged and the scan/backfill continues.
 
+## Tag helpers (`src/lib/services/audiobookshelf/requester-tags.ts`)
+- `formatRequesterTag(username): string` — sanitized `req:<username>`, or `''` when nothing usable remains.
+- `findRequesterTagCollisions(): Promise<{ tag, usernames[] }[]>` — tags shared by 2+ users (`deletedAt: null`).
+- `createRequesterTagger(logger)` → `(username) => Promise<string>` — tag to write, or `''` (no usable tag, or shared). Loads users on first call; one per scan/backfill run.
+- Settings GET `/api/admin/settings` returns `audiobookshelf.tagCollisions` (same shape) for the warning.
+
 ## ABS API (`src/lib/services/audiobookshelf/api.ts`)
-- `formatRequesterTag(username): string` — sanitized `req:<username>`.
 - `addABSItemTags(itemId, tagsToAdd: string[]): Promise<void>` — GET `media.tags`, merge, PATCH `/items/:id/media` `{ tags }`. Best-effort.
 
 ## Job
@@ -27,8 +33,8 @@ When enabled, RMAB writes a `req:<sanitized_username>` tag onto each Audiobooksh
 - **Delete:** no tag removal needed — cascading `/delete` removes the whole ABS item.
 - **Idempotency:** merge dedupes; `available` requests are excluded from the match loop, so no repeat API calls outside the one-time backfill.
 - **Empty/unknown usernames:** skipped.
-- **Sanitization collisions:** two usernames could map to one tag (acceptable, low risk).
+- **Sanitization collisions:** never tagged; see "Shared tags are never written" above.
 
 ## Related
 - [settings-pages.md](../settings-pages.md#requester-tagging-audiobookshelf-only)
-- `src/lib/processors/scan-plex.processor.ts`, `src/lib/processors/plex-recently-added.processor.ts`, `src/lib/services/audiobookshelf/api.ts`
+- `src/lib/processors/scan-plex.processor.ts`, `src/lib/processors/plex-recently-added.processor.ts`, `src/lib/services/audiobookshelf/requester-tags.ts`, `src/lib/services/audiobookshelf/api.ts`

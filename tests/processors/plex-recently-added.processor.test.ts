@@ -47,7 +47,6 @@ vi.mock('@/lib/services/audiobookshelf/api', () => ({
   triggerABSItemMatch: vi.fn(),
   getABSItem: vi.fn(),
   addABSItemTags: vi.fn(() => Promise.resolve()),
-  formatRequesterTag: (username: string) => `req:${username.toLowerCase()}`,
 }));
 
 vi.mock('@/lib/services/thumbnail-cache.service', () => ({
@@ -275,6 +274,7 @@ describe('processPlexRecentlyAddedCheck', () => {
     const absApi = await import('@/lib/services/audiobookshelf/api');
 
     configMock.getBackendMode.mockResolvedValue('audiobookshelf');
+    prismaMock.user.findMany.mockResolvedValue([]);
     configMock.getMany.mockResolvedValue({
       'audiobookshelf.server_url': 'http://abs',
       'audiobookshelf.api_token': 'token',

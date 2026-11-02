@@ -9,7 +9,6 @@ import {
   absRequest,
   addABSItemTags,
   deleteABSItem,
-  formatRequesterTag,
   getABSLibraries,
   getABSLibraryItems,
   getABSRecentItems,
@@ -387,22 +386,6 @@ describe('Audiobookshelf API client', () => {
     });
 
     await expect(deleteABSItem('item-1', { hard: false })).rejects.toThrow('ABS API error: 500 Boom');
-  });
-
-  it('formats requester tags by sanitizing the username', () => {
-    expect(formatRequesterTag('John Smith')).toBe('req:john_smith');
-    expect(formatRequesterTag('  Jane.Doe!  ')).toBe('req:janedoe');
-    expect(formatRequesterTag('user-123_ok')).toBe('req:user-123_ok');
-    expect(formatRequesterTag('ALLCAPS')).toBe('req:allcaps');
-  });
-
-  it('returns an empty string when the username sanitizes to nothing', () => {
-    // All-symbol and non-Latin usernames strip down to nothing — must NOT
-    // collapse onto a shared bare `req:` tag.
-    expect(formatRequesterTag('!!!')).toBe('');
-    expect(formatRequesterTag('   ')).toBe('');
-    expect(formatRequesterTag('李雷')).toBe('');
-    expect(formatRequesterTag('')).toBe('');
   });
 
   it('does not write when all tags are empty/blank', async () => {

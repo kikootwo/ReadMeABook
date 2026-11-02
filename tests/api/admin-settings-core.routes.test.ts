@@ -94,6 +94,7 @@ describe('Admin settings core routes', () => {
     authRequest = { user: { id: 'admin-1', role: 'admin' }, json: vi.fn() };
     requireAuthMock.mockImplementation((_req: any, handler: any) => handler(authRequest));
     requireAdminMock.mockImplementation((_req: any, handler: any) => handler());
+    prismaMock.user.findMany.mockResolvedValue([]);
     // Reset download client manager mocks with default values
     downloadClientManagerMock.getAllClients.mockResolvedValue([]);
     downloadClientManagerMock.testConnection.mockResolvedValue({ success: true, message: 'Connected' });
@@ -113,6 +114,24 @@ describe('Admin settings core routes', () => {
 
     expect(payload.plex.url).toBe('http://plex');
     expect(payload.backendMode).toBe('plex');
+    expect(payload.audiobookshelf.tagCollisions).toEqual([]);
+  });
+
+  it('lists requester tags two users would share, so the admin can be warned', async () => {
+    prismaMock.configuration.findMany.mockResolvedValueOnce([]);
+    prismaMock.user.count.mockResolvedValue(0);
+    prismaMock.user.findMany.mockResolvedValue([
+      { plexUsername: 'john.smith' },
+      { plexUsername: 'johnsmith' },
+      { plexUsername: 'guggs' },
+    ]);
+
+    const { GET } = await import('@/app/api/admin/settings/route');
+    const payload = await (await GET({} as any)).json();
+
+    expect(payload.audiobookshelf.tagCollisions).toEqual([
+      { tag: 'req:johnsmith', usernames: ['john.smith', 'johnsmith'] },
+    ]);
   });
 
   it('updates Plex settings', async () => {

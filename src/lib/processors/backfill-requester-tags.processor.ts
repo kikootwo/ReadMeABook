@@ -9,6 +9,7 @@
 
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
+import { createRequesterTagger } from '../services/audiobookshelf/requester-tags';
 
 export interface BackfillRequesterTagsPayload {
   jobId?: string;
@@ -32,7 +33,8 @@ export async function processBackfillRequesterTags(payload: BackfillRequesterTag
       return { success: false, message: 'Not in Audiobookshelf mode', skipped: true };
     }
 
-    const { addABSItemTags, formatRequesterTag } = await import('../services/audiobookshelf/api');
+    const { addABSItemTags } = await import('../services/audiobookshelf/api');
+    const requesterTagFor = createRequesterTagger(logger);
 
     // All available audiobook requests whose matched ABS item ID is known.
     const requests = await prisma.request.findMany({
@@ -56,10 +58,10 @@ export async function processBackfillRequesterTags(payload: BackfillRequesterTag
     for (const request of requests) {
       const itemId = request.audiobook.absItemId;
       const username = request.user.plexUsername;
-      const tag = username ? formatRequesterTag(username) : '';
+      const tag = username ? await requesterTagFor(username) : '';
 
-      // Skip when we can't form a usable tag (missing item ID, or a username
-      // that sanitizes to nothing — see formatRequesterTag).
+      // Skip when we can't form a usable tag (missing item ID, a username that
+      // sanitizes to nothing, or a tag another user would share — see requester-tags).
       if (!itemId || !tag) {
         skipped++;
         continue;
