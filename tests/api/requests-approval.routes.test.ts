@@ -779,7 +779,6 @@ describe('Request Approval Workflow', () => {
               id: true,
               plexUsername: true,
               avatarUrl: true,
-              discordAvatarUrl: true,
             },
           },
         },

@@ -30,7 +30,6 @@ export async function GET(request: NextRequest) {
                 id: true,
                 plexUsername: true,
                 avatarUrl: true,
-                discordAvatarUrl: true,
               },
             },
           },
