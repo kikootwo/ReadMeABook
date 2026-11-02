@@ -17,7 +17,8 @@ src/app/admin/settings/
 │   ├── types.ts                  # Shared TypeScript interfaces
 │   └── helpers.ts                # Business logic (206 lines)
 ├── hooks/
-│   └── useSettings.ts            # Global settings hook
+│   ├── useSettings.ts            # Global settings hook
+│   └── useSettingsTabUrlState.ts # Active tab <-> ?tab=
 └── tabs/                         # Feature modules
     ├── LibraryTab/               # Plex/Audiobookshelf config
     │   ├── LibraryTab.tsx
@@ -72,6 +73,8 @@ src/app/admin/settings/
 6. **E-book Sidecar** - Multi-source ebook downloads (Anna's Archive + Indexer Search), preferred format
 7. **BookDate** - AI provider, API key (encrypted), model selection, library scope, custom prompt, swipe history
 8. **Notifications** - Multiple backends (Discord, Pushover), event subscriptions, test functionality
+
+**Active tab:** in the address, `/admin/settings?tab=<id>`: `library` (default, no param), `auth` (Audiobookshelf mode only), `prowlarr`, `download`, `paths`, `ebook`, `bookdate`, `notifications`, `api`. A click pushes a history entry (`window.history.pushState`, synced by Next.js, no server round trip), so reload, back/forward and links keep the tab; an unknown tab or one `getTabs(backendMode)` doesn't offer shows `library` and the URL is left alone (`hooks/useSettingsTabUrlState.ts`).
 
 ## E-book Sidecar
 
