@@ -207,10 +207,13 @@ async function performAudibleLookup(
     log.info(`Searching Audible for: "${fullQuery}"`);
 
     let searchResult = await audibleService.search(fullQuery);
-    // With the language filter on: the first result in the region's language whose title matches
+    // With the language filter on and the first result in another language: the first
+    // later result in the region's language whose title matches
     let firstResult = pickSearchMatch(searchResult, book.title);
 
-    if (!firstResult?.asin) {
+    // Retry only when the search found nothing, as before: not when the language filter
+    // hid results or none of them matched
+    if (!searchResult.results[0]?.asin && !searchResult.languageFilter?.hiddenCount) {
       const cleanTitle = book.title.replace(/\s*\(.*\)\s*$/, '').trim();
       if (cleanTitle !== book.title) {
         const cleanQuery = `${cleanTitle} ${book.author}`;

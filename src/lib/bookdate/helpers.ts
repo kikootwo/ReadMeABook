@@ -931,8 +931,8 @@ export async function matchToAudnexus(
       return null;
     }
 
-    // The first result (best match); with the language filter on, the first in the
-    // region's language whose title matches
+    // The first result (best match); with the language filter on and the first result in
+    // another language, the first later one in the region's language whose title matches
     const firstResult = pickSearchMatch(searchResults, title);
     if (!firstResult) {
       logger.warn(`No Audible result in the region's language matches "${title}" by ${author}`);

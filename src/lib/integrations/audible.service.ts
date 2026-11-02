@@ -36,7 +36,7 @@ import {
   type CatalogFetchProfile,
   type CatalogSeriesEntry,
 } from './audible-series-fill';
-import { isLanguageFilterOn, type LanguageFilterInfo } from './audible-language-filter';
+import { isLanguageFilterOn, type SearchLanguageFilterInfo } from './audible-language-filter';
 
 const logger = RMABLogger.create('Audible');
 
@@ -85,7 +85,7 @@ export interface AudibleSearchResult {
   page: number;
   hasMore: boolean;
   /** Only while the admin language filter is on */
-  languageFilter?: LanguageFilterInfo;
+  languageFilter?: SearchLanguageFilterInfo;
 }
 
 export interface AuthorBooksResult {
@@ -595,7 +595,13 @@ export class AudibleService {
           (totalResults > 0
             ? totalResults > page * AUDIBLE_PAGE_SIZE
             : products.length >= AUDIBLE_PAGE_SIZE),
-        ...(filterOn && { languageFilter: { language: langConfig.code, hiddenCount: hidden.length } }),
+        ...(filterOn && {
+          languageFilter: {
+            language: langConfig.code,
+            hiddenCount: hidden.length,
+            firstResultHidden: products.length > 0 && hidden[0] === products[0],
+          },
+        }),
       };
     } catch (error) {
       logger.error('Search failed', {

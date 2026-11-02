@@ -3,7 +3,7 @@
 **Status:** ✅ Implemented (#259) | Admin setting, off by default; hides other-language editions
 
 ## Overview
-One setting (Library tab, Plex and Audiobookshelf) that keeps Audible results in the configured region's language. Off: every list, pick and API response is the same as before the setting existed.
+One setting (Library tab, Plex and Audiobookshelf) that keeps Audible results in the configured region's language. Off: every list and pick, and every search, series and home-row response, is the same as before the setting existed (`GET /api/admin/settings` adds `audibleLanguageFilter: false`).
 
 ## Setting
 - **Key:** `audible.language_filter` (`'true'` / `'false'`; absent = off). Category `system`.
@@ -20,13 +20,13 @@ One setting (Library tab, Plex and Audiobookshelf) that keeps Audible results in
 ## Callers (filter on)
 | Caller | Effect | Result field |
 |---|---|---|
-| `audibleService.search()` | products partitioned; `hasMore` from the raw page | `languageFilter {language, hiddenCount}` |
+| `audibleService.search()` | products partitioned; `hasMore` from the raw page | `languageFilter {language, hiddenCount, firstResultHidden}` |
 | `GET /api/audiobooks/search` | flattens the field | `hiddenCount`, `filterLanguage` (display name) |
 | `scrapeSeriesPage()` (`audible-series.ts`) | counts, `hasMore` and the drift warning from raw rows, then filters | `rawCount`, `languageFilter` |
 | `GET /api/series/[asin]` | strips `rawCount`; flattens | `hiddenCount`, `filterLanguage` |
 | `searchSeries()` (`audible-series-search.ts`) | other-language products dropped before aggregation | `languageFilter.hiddenCount` = distinct series all of whose products were hidden |
 | `GET /api/series/search` | flattens | `hiddenCount`, `filterLanguage` |
-| Watched series scan (`watched-lists.service.ts`) | loop stops on `rawCount === 0`; `MAX_BOOKS_PER_SERIES` counts raw rows | none |
+| Watched series scan (`watched-lists.service.ts`) | loop stops on `rawCount === 0`; `MAX_BOOKS_PER_SERIES` counts raw rows; every row hidden → `lastCheckedAt` updated, logged as hidden, nothing requested | none |
 | Home rows (`audible-refresh.processor.ts`) | popular, new releases and category rows filtered before save | none |
 | BookDate (`bookdate/helpers.ts`), shelf sync (`shelf-sync-core.service.ts`) | `pickSearchMatch()` single pick (below) | none |
 
@@ -36,20 +36,26 @@ One setting (Library tab, Plex and Audiobookshelf) that keeps Audible results in
 
 ## Single pick (BookDate, shelf sync)
 - `pickSearchMatch(search, requestedTitle)`. Off: `results[0]` (unchanged).
-- On: first result whose language is **explicitly** accepted (no-language results do not count) AND `matchShare(title + subtitle, requested title without a trailing parenthetical) >= SINGLE_PICK_TITLE_SHARE` (0.8, bulk import's bar).
+- On, raw first product in an accepted language or with none listed (`firstResultHidden` false): `results[0]`, no title check (as off).
+- On, raw first product in another language: first later result whose language is **explicitly** accepted (no-language results do not count) AND `matchShare(title + subtitle, requested title without its last trailing parenthetical group) >= SINGLE_PICK_TITLE_SHARE` (0.8, bulk import's bar).
 - None → BookDate returns null for that recommendation; shelf sync records `noMatch`.
-- Translated-title editions (e.g. `Das Lied der Krähen` for `Six of Crows` on audible.de) become no-match.
+- Shelf sync's retry without `(Series, #n)` runs only when the search found nothing (no results, none hidden), as off.
+- Translated-title editions (e.g. `Das Lied der Krähen` for `Six of Crows` on audible.de, first result English) become no-match.
 
 ## Paging UI
 - `useSearch` (`useAudiobooks.ts`): a page with 0 visible, `hasMore`, and `hiddenCount` present loads the next page by itself, at most `MAX_AUTO_PAGE_LOADS` (4) in a row; the counter resets on a new query and on a Load more click; a query change ends the chain.
 - Search, series detail: 0 visible with `hasMore` → `LanguageHiddenNote` ("N in other languages hidden") + `LoadMoreBar` with `emptyText` (`No results in {Language} so far` / `No books in {Language} so far`).
 - Empty and done: `No results in {Language} for "q"`, `No books in {Language} found for {title}`, `/series`: `No series in {Language} for "q"`.
 - `hiddenCount` on search and series detail is summed over loaded pages.
+- "Nothing in the language yet" (bar, language empty messages) reads the list before hide-available; when hide-available empties it, the usual `No results found` / `No books found` shows.
+- Series detail, on: header and bar count the books shown (`2 titles`, `2 books loaded`); Audible's `bookCount` (all languages) is not shown there.
 
 ## Limits
 - **Shared `BookMapping`:** shelf sync matches are per provider and book, not per user. A match made before the filter was turned on stays and serves every user's shelf.
 - **BookDate cache-first match:** reads `AudibleCache` (home-row cache, no language column, never pruned). A cached hit from before the filter was turned on is used as is.
 - **Home rows:** language from the row's `.languageLabel` (`Sprache: Deutsch` → `Deutsch`, text after the colon). Seen on audible.de `/adblbestsellers` (50/50 rows, 2026-10-27). A row without the label is kept.
+- **Home rows below 200:** the filter runs after the 200-row scrape, so a row loses its hidden books and is not topped up (no extra requests).
+- **Turning it off:** a `noMatch` recorded while on is retried after `NO_MATCH_RETRY_DAYS` (7).
 - No schema change; release ranking and import are untouched.
 
 ## Related

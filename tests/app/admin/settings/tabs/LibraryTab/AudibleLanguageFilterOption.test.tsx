@@ -43,7 +43,10 @@ describe('AudibleLanguageFilterOption', () => {
   it('states what the filter covers and what it leaves alone', () => {
     render(<AudibleLanguageFilterOption settings={settings({})} onChange={() => {}} />);
 
-    expect(screen.getByText(/Books with no language listed are kept/)).toBeInTheDocument();
+    const help = screen.getByText(/Search, series and the home page rows hide other-language editions/).textContent?.replace(/\s+/g, ' ');
+    expect(help).toContain('show how many they hid; books with no language listed still show.');
+    expect(help).toContain('BookDate, shelf sync and watched series skip other-language editions and request nothing for them.');
+    expect(help).not.toContain('are kept');
     expect(screen.getByText(/Bulk import and requests made from a book page are not affected/)).toBeInTheDocument();
   });
 });

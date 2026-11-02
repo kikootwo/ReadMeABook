@@ -44,7 +44,7 @@ Syncs user-subscribed Goodreads shelves via RSS feeds, resolves books to Audible
 ### Function: `processShelfBooks()`
 Accepts provider-agnostic book list + context, performs:
 1. **BookMapping lookup** — Check if book already resolved (`provider` + `externalBookId`)
-2. **Audible search** — Full query (`title author`), fallback with cleaned title (strips parenthetical series info); pick via `pickSearchMatch` (filter on: explicit accepted language + title share >= 0.8, else noMatch; [audible-language-filter.md](../../integrations/audible-language-filter.md))
+2. **Audible search** — Full query (`title author`), fallback with cleaned title (strips parenthetical series info) only when the search found nothing; pick via `pickSearchMatch` (filter on and first result in another language: a later result with an explicit accepted language + title share >= 0.8, else noMatch; [audible-language-filter.md](../../integrations/audible-language-filter.md))
 3. **noMatch retry** — Re-searches after `NO_MATCH_RETRY_DAYS` (7 days)
 4. **Request creation** — Calls `createRequestForUser(..., { automatic: true })` for matched ASINs: never replaces a cancelled request; failed/warn ones on a backoff ([release-blocklist.md](../../admin-features/release-blocklist.md#automatic-re-requests-409))
 5. **Cover enrichment** — Queries `audibleCache` for cached covers, builds `/api/cache/thumbnails/` URLs

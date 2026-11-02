@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
   fetches: 0,
   requests: [] as string[],
   warnings: [] as string[],
+  infos: [] as string[],
 }));
 
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
@@ -33,7 +34,7 @@ vi.mock('@/lib/integrations/audible.service', () => ({
   }),
 }));
 vi.mock('@/lib/utils/logger', () => {
-  const make = () => ({ debug() {}, info() {}, error() {}, warn: (message: string) => state.warnings.push(message) });
+  const make = () => ({ debug() {}, info: (message: string) => state.infos.push(message), error() {}, warn: (message: string) => state.warnings.push(message) });
   return { RMABLogger: { create: make, forJob: make } };
 });
 vi.mock('@/lib/middleware/auth', () => ({
@@ -81,6 +82,7 @@ beforeEach(() => {
   state.fetches = 0;
   state.requests = [];
   state.warnings = [];
+  state.infos = [];
   vi.useFakeTimers({ toFake: ['setTimeout'] });
 });
 
@@ -196,6 +198,18 @@ describe('watched series scan', () => {
 
     expect(state.fetches).toBe(4);
     expect(state.requests).toEqual([]);
+  });
+
+  it('on: a series whose books are all hidden is marked checked and logged as hidden, not "No books found"', async () => {
+    state.filter = true;
+    state.pages[1] = page(rows('B0ES', 3, 'Español'), 3);
+
+    await scan();
+
+    expect(state.requests).toEqual([]);
+    expect(prismaMock.watchedSeries.update).toHaveBeenCalledWith({ where: { id: 'ws-1' }, data: { lastCheckedAt: expect.any(Date) } });
+    expect(state.infos.some((m) => m.includes('All 3 books in series "Series" are in other languages'))).toBe(true);
+    expect(state.infos.filter((m) => m.includes('No books found'))).toEqual([]);
   });
 
   it('off: every book on both pages is requested', async () => {

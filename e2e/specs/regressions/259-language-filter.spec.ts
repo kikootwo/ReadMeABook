@@ -168,7 +168,10 @@ for (const view of VIEWS) {
   });
 }
 
-/** Replays /api/audiobooks/search; records every page asked for */
+/**
+ * Replays /api/audiobooks/search; records every page asked for. Answers send only what the
+ * real route can: its totalResults is the page's own result count.
+ */
 async function replaySearch(page: Page, answer: (q: string, pageNo: number) => object, asked: string[]) {
   await page.route((url) => url.pathname === '/api/audiobooks/search', (route) => {
     const url = new URL(route.request().url());
@@ -190,7 +193,7 @@ for (const view of VIEWS) {
     try {
       // Replay, not the live route: the harness can't answer RMAB's catalog call.
       await replaySearch(page, () => ({
-        success: true, results: BOOKS, totalResults: 120, page: 1, hasMore: true, hiddenCount: 47, filterLanguage: 'English',
+        success: true, results: BOOKS, totalResults: BOOKS.length, page: 1, hasMore: true, hiddenCount: 47, filterLanguage: 'English',
       }), asked);
       await typeSearch(page, 'stormlight archive');
       await expect(page.getByText('47 in other languages hidden')).toBeVisible({ timeout: 15_000 });
@@ -209,7 +212,7 @@ test('#259: REPLAY (page.route) search where every page is hidden stops after 4 
   const { ctx, page } = await viewSession(browser, VIEWS[0], blocked);
   try {
     await replaySearch(page, (_q, pageNo) => ({
-      success: true, results: [], totalResults: 900, page: pageNo, hasMore: true, hiddenCount: 50, filterLanguage: 'English',
+      success: true, results: [], totalResults: 0, page: pageNo, hasMore: true, hiddenCount: 50, filterLanguage: 'English',
     }), asked);
     await typeSearch(page, 'english title');
     await expect(page.getByText('No results in English so far')).toBeVisible({ timeout: 15_000 });

@@ -21,6 +21,11 @@ export interface LanguageFilterInfo {
   hiddenCount: number;
 }
 
+/** search()'s form: also whether the page's first product was hidden */
+export interface SearchLanguageFilterInfo extends LanguageFilterInfo {
+  firstResultHidden: boolean;
+}
+
 /** Share of the requested title's words a single-pick match must hold (bulk import's bar) */
 export const SINGLE_PICK_TITLE_SHARE = 0.8;
 
@@ -35,18 +40,20 @@ export async function isLanguageFilterOn(): Promise<boolean> {
 }
 
 /**
- * The book a search stands for, for BookDate and shelf sync. Off: the first result, as
- * before. On: the first result whose language is explicitly the region's (no-language
- * products are mostly podcasts) and whose title and subtitle hold at least 80% of the
- * requested title's words (a trailing "(Series, #1)" left out). Otherwise none.
+ * The book a search stands for, for BookDate and shelf sync. Off, or on with the page's
+ * first product in the region's language or listing none: the first result, as before.
+ * On with the first product in another language: the first later result whose language
+ * is explicitly the region's (no-language products are mostly podcasts) and whose title
+ * and subtitle hold at least 80% of the requested title's words (a trailing
+ * parenthetical group such as "(Series, #1)" left out). Otherwise none.
  */
 export function pickSearchMatch(
-  search: { results: AudibleAudiobook[]; languageFilter?: LanguageFilterInfo },
+  search: { results: AudibleAudiobook[]; languageFilter?: SearchLanguageFilterInfo },
   requestedTitle: string,
 ): AudibleAudiobook | undefined {
-  if (!search.languageFilter) return search.results[0];
+  if (!search.languageFilter?.firstResultHidden) return search.results[0];
   const langConfig = LANGUAGE_CONFIGS[search.languageFilter.language];
-  const title = requestedTitle.replace(/\s*\(.*\)\s*$/, '').trim() || requestedTitle;
+  const title = requestedTitle.replace(/\s*\([^()]*\)\s*$/, '').trim() || requestedTitle;
   return search.results.find(
     (book) =>
       !!book.language &&

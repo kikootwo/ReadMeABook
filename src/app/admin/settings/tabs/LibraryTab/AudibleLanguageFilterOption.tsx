@@ -29,10 +29,11 @@ export function AudibleLanguageFilterOption({ settings, onChange }: AudibleLangu
           Only show books in {language}
         </span>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          Hides other-language editions from search, series, the home page rows, BookDate and
-          shelf sync, including their automatic requests. Books with no language listed are kept.
-          Books matched before you turn this on keep their match. Bulk import and requests made
-          from a book page are not affected.
+          Search, series and the home page rows hide other-language editions and show how many
+          they hid; books with no language listed still show. BookDate, shelf sync and watched
+          series skip other-language editions and request nothing for them. Books matched before
+          you turn this on keep their match. Bulk import and requests made from a book page are
+          not affected.
         </p>
       </div>
     </label>

@@ -37,8 +37,10 @@ export default function SearchPage() {
     [results, hideAvailable]
   );
 
-  // Language filter on: nothing to show yet, but Audible has more pages (the bar, not "No results")
-  const awaitingMore = !!filterLanguage && filteredResults.length === 0 && (hasMore || isLoadingMore);
+  // Language filter on: nothing in the language yet, but Audible has more pages (the bar, not
+  // "No results"). Read before hide-available, which empties the list for its own reason.
+  const awaitingMore = !!filterLanguage && results.length === 0 && (hasMore || isLoadingMore);
+  const languageEmpty = !!filterLanguage && hiddenCount > 0 && results.length === 0;
 
   const handleSearch = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -149,7 +151,7 @@ export default function SearchPage() {
                 audiobooks={filteredResults}
                 isLoading={isLoading || awaitingMore}
                 emptyMessage={
-                  filterLanguage && hiddenCount > 0
+                  languageEmpty
                     ? `No results in ${filterLanguage} for "${debouncedQuery}"`
                     : `No results found for "${debouncedQuery}"`
                 }

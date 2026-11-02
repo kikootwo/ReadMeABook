@@ -3,9 +3,10 @@
  * Documentation: documentation/integrations/audible-language-filter.md
  *
  * BookDate's search fallback and shelf sync turn one search into one book (shelf sync
- * requests it). With the filter on, the first kept result is often another book or a
- * podcast (recordings below, 2026-10-27), so they take only a result in the region's
- * language whose title matches. Off: the first result, as before.
+ * requests it). With the filter on and the first result in another language, the first
+ * kept result is often another book or a podcast (recordings below, 2026-10-27), so they
+ * then take only a later result in the region's language whose title matches. Off, or a
+ * first result in the region's language or with none listed: the first result, as before.
  */
 
 import fs from 'fs';
@@ -87,7 +88,7 @@ beforeEach(() => {
 });
 
 describe('filter on: no pick from the wrong book or a podcast', () => {
-  it('it "Red Rising Pierce Brown": every Italian-store result is English, the first kept is a podcast', async () => {
+  it('it "Red Rising Pierce Brown": no result is Italian, the first is English and the first kept is a podcast', async () => {
     serve('it', RED_RISING_IT);
     const search = await new AudibleService().search('Red Rising Pierce Brown');
     expect(search.results[0]).toMatchObject({ title: 'Red Rising by Pierce Brown', language: undefined });
@@ -123,6 +124,60 @@ describe('filter on: no pick from the wrong book or a podcast', () => {
       noMatch: false,
       requests: [{ asin: german.asin, title: german.title }],
     });
+  });
+});
+
+describe('filter on, synthetic us pages: the title check runs only when the first result is in another language', () => {
+  const product = (asin: string, title: string, language?: string) => ({
+    asin, title, ...(language && { language }), authors: [{ name: 'J. R. R. Tolkien' }],
+  });
+  const HOBBIT = product('B0HOBBITEN', 'The Hobbit', 'english');
+  const HOBBIT_DE = product('B0HOBBITDE', 'Der Hobbit', 'german');
+  const PODCAST = product('B0PODCAST1', 'Middle-earth Weekly', 'english');
+  const keywordCalls = () => clientMock.get.mock.calls.filter(([, config]) => config?.params?.keywords !== undefined).length;
+
+  it('an English first result is taken as before, even when the requested title has more words', async () => {
+    serve('us', { total_results: 2, products: [HOBBIT, PODCAST] });
+
+    expect(await bookDatePick('The Hobbit, or There and Back Again', 'J. R. R. Tolkien')).toBe(HOBBIT.asin);
+    expect((await shelfSyncPick('The Hobbit, or There and Back Again', 'J. R. R. Tolkien')).asin).toBe(HOBBIT.asin);
+  });
+
+  it('a first result with no language listed is taken as before', async () => {
+    const noLanguage = product('B0NOLANG01', 'The Hobbit (Dramatised)');
+    serve('us', { total_results: 2, products: [noLanguage, HOBBIT] });
+
+    expect(await bookDatePick('The Hobbit', 'J. R. R. Tolkien')).toBe(noLanguage.asin);
+  });
+
+  it('a German first result followed by the English edition picks the English one', async () => {
+    serve('us', { total_results: 2, products: [HOBBIT_DE, HOBBIT] });
+
+    expect(await bookDatePick('The Hobbit', 'J. R. R. Tolkien')).toBe(HOBBIT.asin);
+    expect((await shelfSyncPick('The Hobbit', 'J. R. R. Tolkien')).asin).toBe(HOBBIT.asin);
+  });
+
+  it('a German first result followed by an unrelated English podcast picks nothing', async () => {
+    serve('us', { total_results: 2, products: [HOBBIT_DE, PODCAST] });
+
+    expect(await bookDatePick('The Hobbit', 'J. R. R. Tolkien')).toBeNull();
+    expect(await shelfSyncPick('The Hobbit', 'J. R. R. Tolkien')).toEqual({ asin: null, noMatch: true, requests: [] });
+  });
+
+  it('shelf sync searches once when results exist but none is taken (no retry without the series)', async () => {
+    serve('us', { total_results: 2, products: [HOBBIT_DE, PODCAST] });
+    clientMock.get.mockClear();
+
+    expect((await shelfSyncPick('The Hobbit (Middle-earth, #1)', 'J. R. R. Tolkien')).noMatch).toBe(true);
+    expect(keywordCalls()).toBe(1);
+  });
+
+  it('shelf sync still retries without the series when the search found nothing', async () => {
+    serve('us', { total_results: 0, products: [] });
+    clientMock.get.mockClear();
+
+    await shelfSyncPick('The Hobbit (Middle-earth, #1)', 'J. R. R. Tolkien');
+    expect(keywordCalls()).toBe(2);
   });
 });
 

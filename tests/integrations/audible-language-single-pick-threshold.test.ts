@@ -2,17 +2,19 @@
  * Component: Language Filter Single-Pick Threshold Tests (#259)
  * Documentation: documentation/integrations/audible-language-filter.md
  *
- * pickSearchMatch on its own: the title share bar, the subtitle, a trailing
- * "(Series, #1)", and the explicit-language rule. Callers are covered in
- * audible-language-single-pick.test.ts.
+ * pickSearchMatch on its own: the first result kept as before unless it was hidden, then
+ * the title share bar, the subtitle, a trailing "(Series, #1)", and the explicit-language
+ * rule. Callers are covered in audible-language-single-pick.test.ts.
  */
 
 import { describe, expect, it } from 'vitest';
 import { pickSearchMatch, SINGLE_PICK_TITLE_SHARE } from '@/lib/integrations/audible-language-filter';
 
+const book = (title: string, language = 'english') => ({ asin: title, title, author: 'A', language });
+
 describe('pickSearchMatch title threshold (80% of the requested words)', () => {
-  const book = (title: string, language = 'english') => ({ asin: title, title, author: 'A', language });
-  const on = { language: 'en' as const, hiddenCount: 0 };
+  // The page's first product was in another language and hidden
+  const on = { language: 'en' as const, hiddenCount: 1, firstResultHidden: true };
 
   it('accepts 4 of 5 requested words and rejects 3 of 5', () => {
     const search = { results: [book('Alpha Bravo Charlie'), book('Alpha Bravo Charlie Delta')], languageFilter: on };
@@ -27,10 +29,26 @@ describe('pickSearchMatch title threshold (80% of the requested words)', () => {
     expect(pickSearchMatch(search, 'Mistborn: The Final Empire')?.asin).toBe('The Final Empire');
     expect(pickSearchMatch(search, 'The Final Empire (Mistborn, #1)')?.asin).toBe('The Final Empire');
   });
+
+  it('leaves out only the last parenthetical group, not everything from the first "("', () => {
+    const search = { results: [book('Foo')], languageFilter: on };
+
+    expect(pickSearchMatch(search, 'Foo (Illustrated) Bar Baz (Series, #2)')).toBeUndefined();
+    expect(pickSearchMatch(search, 'Foo (Series, #2)')?.asin).toBe('Foo');
+  });
+});
+
+describe('pickSearchMatch with the first result kept (accepted language or none listed)', () => {
+  const kept = { language: 'en' as const, hiddenCount: 2, firstResultHidden: false };
+
+  it('takes the first result as before, whatever its title', () => {
+    expect(pickSearchMatch({ results: [book('The Hobbit')], languageFilter: kept }, 'The Hobbit, or There and Back Again')?.asin).toBe('The Hobbit');
+    expect(pickSearchMatch({ results: [book('A Podcast', '')], languageFilter: kept }, 'Something Else')?.asin).toBe('A Podcast');
+  });
 });
 
 describe('pickSearchMatch language rule', () => {
-  const on = { language: 'de' as const, hiddenCount: 0 };
+  const on = { language: 'de' as const, hiddenCount: 1, firstResultHidden: true };
   const result = (language?: string) => ({ asin: language ?? 'none', title: 'Six of Crows', author: 'A', language });
 
   it('takes only an explicitly accepted language with the filter on; a result with no language is not enough', () => {

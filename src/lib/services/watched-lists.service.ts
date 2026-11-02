@@ -161,6 +161,14 @@ async function processSeriesForUsers(
     if (hasMore) await delay(1000);
   }
 
+  if (allBooks.length === 0 && rowsSeen > 0) {
+    // The language filter hid every book: the series was checked, nothing to request
+    log.info(`All ${rowsSeen} books in series "${title}" are in other languages (hidden by the language filter); nothing to request`);
+    await markSeriesChecked(subscriptions);
+    stats.seriesChecked++;
+    return;
+  }
+
   if (allBooks.length === 0) {
     log.info(`No books found for series "${title}"`);
     stats.seriesChecked++;
@@ -185,14 +193,20 @@ async function processSeriesForUsers(
       stats
     );
 
-    // Update lastCheckedAt
+    await markSeriesChecked([subscription]);
+  }
+
+  stats.seriesChecked++;
+}
+
+/** Update lastCheckedAt on each watch */
+async function markSeriesChecked(subscriptions: Array<{ id: string }>): Promise<void> {
+  for (const subscription of subscriptions) {
     await prisma.watchedSeries.update({
       where: { id: subscription.id },
       data: { lastCheckedAt: new Date() },
     }).catch(() => {});
   }
-
-  stats.seriesChecked++;
 }
 
 // ---------------------------------------------------------------------------

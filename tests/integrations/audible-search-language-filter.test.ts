@@ -90,7 +90,8 @@ describe('search() with the language filter on', () => {
 
     expect(result.results.map((b) => b.asin)).toEqual(FR_KEPT);
     expect(FR_KEPT).toHaveLength(13);
-    expect(result.languageFilter).toEqual({ language: 'fr', hiddenCount: 37 });
+    // The first product is English, so BookDate and shelf sync check titles (pickSearchMatch)
+    expect(result.languageFilter).toEqual({ language: 'fr', hiddenCount: 37, firstResultHidden: true });
     expect(result.hasMore).toBe(true);
   });
 
@@ -100,7 +101,7 @@ describe('search() with the language filter on', () => {
     const result = await new AudibleService().search('six of crows');
 
     expect(result.results).toEqual([]);
-    expect(result.languageFilter).toEqual({ language: 'fr', hiddenCount: 33 });
+    expect(result.languageFilter).toEqual({ language: 'fr', hiddenCount: 33, firstResultHidden: true });
     expect(result.hasMore).toBe(true);
   });
 

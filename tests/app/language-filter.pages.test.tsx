@@ -15,11 +15,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders } from '../helpers/render';
 
 // Plain holder: the config's mockReset clears vi.fn implementations per test
-const api = vi.hoisted(() => ({ fetcher: (async () => ({})) as (url: string) => Promise<unknown> }));
+const api = vi.hoisted(() => ({ fetcher: (async () => ({})) as (url: string) => Promise<unknown>, hideAvailable: false }));
 vi.mock('@/lib/utils/api', () => ({ authenticatedFetcher: (url: string) => api.fetcher(url) }));
 vi.mock('@/contexts/PreferencesContext', () => ({
   usePreferences: () => ({
-    cardSize: 5, setCardSize: () => {}, squareCovers: false, setSquareCovers: () => {}, hideAvailable: false, setHideAvailable: () => {},
+    cardSize: 5, setCardSize: () => {}, squareCovers: false, setSquareCovers: () => {}, hideAvailable: api.hideAvailable, setHideAvailable: () => {},
   }),
 }));
 vi.mock('@/components/auth/ProtectedRoute', () => ({ ProtectedRoute: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
@@ -48,7 +48,12 @@ async function search(query: string) {
 
 beforeEach(() => {
   api.fetcher = async () => ({});
+  api.hideAvailable = false;
 });
+
+/** Books already in the library: hide-available leaves them out */
+const inLibrary = (prefix: string, count: number) =>
+  Array.from({ length: count }, (_, i) => ({ asin: `${prefix}${i}`, isAvailable: true }));
 
 describe('search page', () => {
   it('on, every page hidden: the hidden line and the bar, not "No results found"', async () => {
@@ -81,6 +86,17 @@ describe('search page', () => {
     await waitFor(() => expect(screen.getByText('B0KEPT0001')).toBeInTheDocument());
     expect(screen.getByText('37 in other languages hidden')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Load more' })).toBeInTheDocument();
+  });
+
+  it('on, with hide-available emptying a page of kept results: "No results found", not the language bar', async () => {
+    api.hideAvailable = true;
+    api.fetcher = async () => ({ success: true, results: inLibrary('B0OWNED', 12), totalResults: 12, hasMore: true, hiddenCount: 38, filterLanguage: 'German' });
+
+    await search('owned');
+
+    await waitFor(() => expect(screen.getByText('No results found for "owned"')).toBeInTheDocument());
+    expect(screen.queryByText('No results in German so far')).not.toBeInTheDocument();
+    expect(screen.queryByText(/No results in German/)).not.toBeInTheDocument();
   });
 
   it('off: no hidden line, and an empty answer says "No results found"', async () => {
@@ -148,6 +164,40 @@ describe('series detail page', () => {
     expect(screen.getByText('50 in other languages hidden')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Load more' })).toBeInTheDocument();
     expect(screen.queryByText(/No books found/)).not.toBeInTheDocument();
+  });
+
+  it("on: the header and bar count the books shown, not Audible's total with other languages", async () => {
+    await detailPage(detail([{ asin: 'B0EN000001' }, { asin: 'B0EN000002' }], { hiddenCount: 18, filterLanguage: 'English' }));
+
+    await waitFor(() => expect(screen.getByText('(2 titles)')).toBeInTheDocument());
+    expect(screen.getByText('2 books loaded')).toBeInTheDocument();
+    expect(screen.getByText('18 in other languages hidden')).toBeInTheDocument();
+    expect(screen.queryByText(/of 120/)).not.toBeInTheDocument();
+  });
+
+  it("off: the header and bar still count against Audible's total", async () => {
+    await detailPage(detail([{ asin: 'B0EN000001' }, { asin: 'B0EN000002' }], {}));
+
+    await waitFor(() => expect(screen.getByText('(2 of 120 titles)')).toBeInTheDocument());
+    expect(screen.getByText('Showing 2 of 120 books')).toBeInTheDocument();
+  });
+
+  it('on, with hide-available emptying the kept books: "No books found", not the language message', async () => {
+    api.hideAvailable = true;
+    const body = detail(inLibrary('B0OWNED', 6), { hiddenCount: 4, filterLanguage: 'English' });
+    await detailPage({ ...body, hasMore: false, series: { ...body.series, hasMore: false } });
+
+    await waitFor(() => expect(screen.getByText('No books found for Saga')).toBeInTheDocument());
+    expect(screen.queryByText(/No books in English/)).not.toBeInTheDocument();
+    expect(screen.getByText('4 in other languages hidden')).toBeInTheDocument();
+  });
+
+  it('on, with hide-available and more pages: no "so far" bar while English books are loaded', async () => {
+    api.hideAvailable = true;
+    await detailPage(detail(inLibrary('B0OWNED', 6), { hiddenCount: 4, filterLanguage: 'English' }));
+
+    await waitFor(() => expect(screen.getByText('No books found for Saga')).toBeInTheDocument());
+    expect(screen.queryByText('No books in English so far')).not.toBeInTheDocument();
   });
 
   it('off: a page with no books shows the empty message and no bar, as before', async () => {

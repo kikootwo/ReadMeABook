@@ -48,13 +48,19 @@ export default function SeriesDetailPage({
     [series, hideAvailable]
   );
 
-  const awaitingMore = !!filterLanguage && filteredBooks.length === 0 && hasMore;
+  // Language filter on: nothing in the language yet, but Audible has more pages. Read
+  // before hide-available, which empties the list for its own reason.
+  const loadedBooks = series?.books.length ?? 0;
+  const awaitingMore = !!filterLanguage && loadedBooks === 0 && hasMore;
+  const languageEmpty = !!filterLanguage && hiddenCount > 0 && loadedBooks === 0;
+  // Audible's series total counts other-language books too: not shown while the filter is on
+  const totalBooks = !filterLanguage && series && series.bookCount > 0 ? series.bookCount : undefined;
 
   // Header count text: reflects filtered counts
   const visibleCount = filteredBooks.length;
   const booksCountText = series
-    ? hasMore && series.bookCount > series.books.length
-      ? `${visibleCount.toLocaleString()} of ${series.bookCount.toLocaleString()} title${series.bookCount !== 1 ? 's' : ''}`
+    ? hasMore && totalBooks && totalBooks > series.books.length
+      ? `${visibleCount.toLocaleString()} of ${totalBooks.toLocaleString()} title${totalBooks !== 1 ? 's' : ''}`
       : visibleCount > 0
         ? `${visibleCount.toLocaleString()} title${visibleCount !== 1 ? 's' : ''}`
         : ''
@@ -134,7 +140,7 @@ export default function SeriesDetailPage({
                   audiobooks={filteredBooks}
                   isLoading={seriesLoading}
                   emptyMessage={
-                    filterLanguage && hiddenCount > 0
+                    languageEmpty
                       ? `No books in ${filterLanguage} found for ${series.title}`
                       : `No books found for ${series.title}`
                   }
@@ -147,7 +153,7 @@ export default function SeriesDetailPage({
               {(filteredBooks.length > 0 || awaitingMore) && (
                 <LoadMoreBar
                   loadedCount={filteredBooks.length}
-                  totalCount={series.bookCount > 0 ? series.bookCount : undefined}
+                  totalCount={totalBooks}
                   hasMore={hasMore}
                   isLoading={isLoadingMore}
                   onLoadMore={loadMore}
