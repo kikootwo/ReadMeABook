@@ -1,0 +1,10 @@
+{
+  "name": "preview",
+  "description": "Preview seed: 'phm' completes into the library, 'martian' stalls at 40% (downloading), 'artemis' fails at 30% (failed).",
+  "indexers": [{ "id": 1, "name": "E2E Torrents", "protocol": "torrent", "priority": 25 }],
+  "releases": [
+    { "id": "phm", "book": "phm", "title": "{{author}} - {{title}} (Unabridged) [MP3 64kbps]", "sizeMB": 420, "seeders": 60, "fixture": "phm-mp3" },
+    { "id": "martian", "book": "martian", "title": "{{author}} - {{title}} (Unabridged) [M4B]", "sizeMB": 310, "seeders": 30, "fixture": "martian-m4b", "download": { "completeMs": 20000, "stallAtPct": 40 } },
+    { "id": "artemis", "book": "artemis", "title": "{{author}} - {{title}} (Unabridged) [MP3]", "sizeMB": 280, "seeders": 20, "fixture": "artemis-mp3", "download": { "completeMs": 6000, "failAtPct": 30 } }
+  ]
+}

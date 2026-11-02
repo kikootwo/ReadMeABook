@@ -8,7 +8,19 @@ import { RMAB_USER_AGENT } from '@/lib/utils/user-agent';
 import https from 'https';
 import FormData from 'form-data';
 import { RMABLogger } from '@/lib/utils/logger';
+import { fetchDownloadSource, type SourceAuth } from '@/lib/integrations/download-source';
+import { urlForLog } from '@/lib/utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '@/lib/utils/path-mapper';
+import {
+  duplicateOfNewJob,
+  findExistingJob,
+  lookupNames,
+  nzbJobName,
+  resolveExistingJob,
+  type ExistingJob,
+  type HistoryQuery,
+  type ResolvedJob,
+} from './sabnzbd-duplicates';
 import {
   IDownloadClient,
   DownloadClientType,
@@ -16,6 +28,7 @@ import {
   DownloadInfo,
   DownloadStatus,
   AddDownloadOptions,
+  AddDownloadResult,
   ConnectionTestResult,
   DownloadSourceError,
 } from '../interfaces/download-client.interface';
@@ -26,8 +39,25 @@ export interface AddNZBOptions {
   category?: string;
   priority?: 'low' | 'normal' | 'high' | 'force';
   paused?: boolean;
-  /** Headers to include when fetching the NZB from the source URL */
-  sourceHeaders?: Record<string, string>;
+  /** Prowlarr credentials for fetching the NZB (key scoped to Prowlarr download hops) */
+  sourceAuth?: SourceAuth;
+  /** A retried grab: reuse the job an earlier, timed-out upload left in SABnzbd */
+  retry?: boolean;
+  /** Release title (from the indexer): the name an existing job is matched by, with a specific upload name */
+  releaseTitle?: string;
+}
+
+/** nzo_id to track, and whether it is a job SABnzbd already held (duplicate or retried add) */
+export interface AddNZBResult {
+  id: string;
+  alreadyInClient: boolean;
+  /** A held job that waits paused in SABnzbd's queue */
+  paused?: boolean;
+}
+
+/** Result for a job SABnzbd already held */
+function heldJob(job: ResolvedJob): AddNZBResult {
+  return job.paused ? { id: job.id, alreadyInClient: true, paused: true } : { id: job.id, alreadyInClient: true };
 }
 
 export interface NZBInfo {
@@ -477,7 +507,16 @@ export class SABnzbdService implements IDownloadClient {
    * @returns SABnzbd NZB ID (nzo_id)
    */
   async addNZB(url: string, options?: AddNZBOptions): Promise<string> {
-    logger.info(`Adding NZB from URL: ${url.substring(0, 150)}...`);
+    return (await this.addNZBJob(url, options)).id;
+  }
+
+  /**
+   * addNZB with duplicate handling (#329): a duplicate SABnzbd refuses, pauses or fails is
+   * resolved to the job it already holds (see sabnzbd-duplicates.ts), and a retried add
+   * reuses the job a timed-out upload left behind instead of uploading a second copy.
+   */
+  async addNZBJob(url: string, options?: AddNZBOptions): Promise<AddNZBResult> {
+    logger.info(`Adding NZB from URL: ${urlForLog(url)}`);
 
     const category = options?.category || this.defaultCategory;
 
@@ -493,20 +532,18 @@ export class SABnzbdService implements IDownloadClient {
     try {
       logger.info('Downloading NZB file from source URL...');
 
-      const nzbResponse = await axios.get(url, {
-        responseType: 'arraybuffer',
-        timeout: 30000,
-        maxRedirects: 5,
-        headers: {
-          'User-Agent': RMAB_USER_AGENT,
-          ...options?.sourceHeaders,
-        },
-        // Use the same SSL settings as the SABnzbd client if the NZB URL
-        // happens to be served over HTTPS with a self-signed cert
-        httpsAgent: url.startsWith('https') ? this.httpsAgent : undefined,
+      // Shared fetcher: follows redirects hop by hop and scopes the Prowlarr key to Prowlarr download hops
+      const source = await fetchDownloadSource(url, {
+        sourceAuth: options?.sourceAuth,
+        allowMagnet: false,
+        timeoutMs: 30000,
+        httpsAgent: this.httpsAgent,
       });
+      if (source.kind !== 'file') {
+        throw new Error('Download source did not return an NZB file');
+      }
 
-      nzbBuffer = Buffer.from(nzbResponse.data);
+      nzbBuffer = source.data;
 
       if (nzbBuffer.length === 0) {
         throw new Error('NZB file is empty (0 bytes)');
@@ -515,7 +552,7 @@ export class SABnzbdService implements IDownloadClient {
       logger.info(`Downloaded NZB file: ${nzbBuffer.length} bytes`);
 
       // Extract filename from Content-Disposition header, URL path, or use fallback
-      filename = this.extractNZBFilename(url, nzbResponse.headers['content-disposition']);
+      filename = this.extractNZBFilename(url, source.headers['content-disposition'] as string | undefined);
     } catch (error) {
       if (axios.isAxiosError(error)) {
         const status = error.response?.status;
@@ -523,7 +560,7 @@ export class SABnzbdService implements IDownloadClient {
           throw new DownloadSourceError(
             `Grab failed: source returned HTTP ${status}`,
             status,
-            url,
+            urlForLog(url),
             error
           );
         }
@@ -535,6 +572,25 @@ export class SABnzbdService implements IDownloadClient {
         }
       }
       throw error;
+    }
+
+    const jobName = nzbJobName(filename);
+    // A generic upload name (`download.nzb`, `api`) could name another book's job: never matched by it
+    const names = lookupNames(jobName, options?.releaseTitle);
+
+    // A Bull retry after a timed-out upload: SABnzbd may already hold the first try
+    if (options?.retry) {
+      const earlier = await findExistingJob(this, names, category);
+      if (earlier) {
+        try {
+          const held = await resolveExistingJob(earlier, this.pathMappingConfig);
+          logger.info(`Retried add: SABnzbd already holds "${earlier.item.name}" (${held.id}), not uploading it again`);
+          return heldJob(held);
+        } catch (error) {
+          // A finished job whose files are gone is no copy to reuse: upload as a first try would
+          logger.info(`Retried add: ${error instanceof Error ? error.message : String(error)}; uploading`);
+        }
+      }
     }
 
     // Upload NZB file content to SABnzbd via mode=addfile (multipart POST)
@@ -556,19 +612,47 @@ export class SABnzbdService implements IDownloadClient {
       maxContentLength: Infinity,
     });
 
-    if (response.data?.status === false) {
-      throw new Error(response.data.error || 'Failed to add NZB to SABnzbd');
-    }
-
     const nzbIds = response.data?.nzo_ids;
-    if (!nzbIds || nzbIds.length === 0) {
+    if (response.data?.status === false || !nzbIds || nzbIds.length === 0) {
+      // No error text is SABnzbd's plain "not added" answer, which a discarded duplicate gets
+      const existing = response.data?.error ? null : await this.findDuplicate(names, category);
+      if (existing) {
+        return heldJob(await resolveExistingJob(existing, this.pathMappingConfig));
+      }
+      if (response.data?.status === false) {
+        throw new Error(response.data.error || 'Failed to add NZB to SABnzbd');
+      }
       throw new Error('SABnzbd did not return an NZB ID');
     }
 
     const nzbId = nzbIds[0];
     logger.info(`Added NZB: ${nzbId}`);
 
-    return nzbId;
+    // Pause and Fail duplicate modes accept the add but set the new job aside
+    let existing: ExistingJob | null = null;
+    try {
+      existing = await duplicateOfNewJob(this, nzbId, names, category);
+    } catch (error) {
+      logger.warn(`Could not check whether SABnzbd set ${nzbId} aside as a duplicate; tracking it`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (!existing) {
+      return { id: nzbId, alreadyInClient: false };
+    }
+    return heldJob(await resolveExistingJob(existing, this.pathMappingConfig));
+  }
+
+  /** Lookup after a refused add; a failed lookup keeps the refusal as it was. */
+  private async findDuplicate(names: string[], category: string) {
+    try {
+      return await findExistingJob(this, names, category);
+    } catch (error) {
+      logger.warn(`Could not look for an existing SABnzbd job named "${names.join('" or "')}"`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 
   /**
@@ -625,6 +709,18 @@ export class SABnzbdService implements IDownloadClient {
       return this.mapHistoryItemToNZBInfo(historyItem);
     }
 
+    // Older than the newest 100 rows, or archived (a duplicate RMAB took over): look it up by nzo_id
+    try {
+      for (const archive of [false, true]) {
+        const byId = (await this.queryHistory({ nzoIds: [nzbId], archive, limit: 20 })).find(item => item.nzbId === nzbId);
+        if (byId) {
+          return this.mapHistoryItemToNZBInfo(byId);
+        }
+      }
+    } catch (error) {
+      logger.debug(`History lookup by nzo_id failed for ${nzbId}`, { error: error instanceof Error ? error.message : String(error) });
+    }
+
     // Not found
     return null;
   }
@@ -659,10 +755,18 @@ export class SABnzbdService implements IDownloadClient {
    * Get download history
    */
   async getHistory(limit: number = 100): Promise<HistoryItem[]> {
+    return this.queryHistory({ limit });
+  }
+
+  /** History filtered by SABnzbd: name search (`*` wildcard), nzo_ids, or the archive */
+  async queryHistory(query: HistoryQuery): Promise<HistoryItem[]> {
     const response = await this.client.get('/api', {
       params: {
         mode: 'history',
-        limit,
+        limit: query.limit ?? 100,
+        ...(query.search ? { search: query.search } : {}),
+        ...(query.nzoIds?.length ? { nzo_ids: query.nzoIds.join(',') } : {}),
+        ...(query.archive ? { archive: 1 } : {}),
         output: 'json',
         apikey: this.apiKey,
       },
@@ -787,9 +891,9 @@ export class SABnzbdService implements IDownloadClient {
 
   /**
    * Add a download via the unified interface.
-   * Delegates to addNZB with mapped options.
+   * Delegates to addNZBJob with mapped options.
    */
-  async addDownload(url: string, options?: AddDownloadOptions): Promise<string> {
+  async addDownload(url: string, options?: AddDownloadOptions): Promise<AddDownloadResult> {
     const priorityMap: Record<string, 'low' | 'normal' | 'high' | 'force'> = {
       low: 'low',
       normal: 'normal',
@@ -797,11 +901,14 @@ export class SABnzbdService implements IDownloadClient {
       force: 'force',
     };
 
-    return this.addNZB(url, {
+    // A job SABnzbd already held (duplicate or retried add) comes back with alreadyInClient true
+    return this.addNZBJob(url, {
       category: options?.category,
       priority: options?.priority ? priorityMap[options.priority] || 'normal' : undefined,
       paused: options?.paused,
-      sourceHeaders: options?.sourceHeaders,
+      sourceAuth: options?.sourceAuth,
+      retry: options?.retry,
+      releaseTitle: options?.releaseTitle,
     });
   }
 
@@ -927,7 +1034,11 @@ export class SABnzbdService implements IDownloadClient {
     } else if (statusLower.includes('repairing') || statusLower.includes('verifying')) {
       state = 'repairing';
     } else if (percent >= 1.0) {
-      state = 'completed';
+      // 100% in the queue is the tail of file assembly (and direct unpack). SABnzbd
+      // then moves the job to history for post-processing (Verifying, Repairing,
+      // Extracting, Moving, Running); only a Completed history slot has the final
+      // storage path, so this is not completion yet.
+      state = 'extracting';
     }
 
     return {

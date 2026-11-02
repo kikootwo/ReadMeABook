@@ -41,6 +41,7 @@ vi.mock('@/lib/services/config.service', () => ({
 interface ProductOverrides {
   asin?: string;
   title?: string;
+  subtitle?: unknown;
   authors?: Array<{ asin?: string; name: string }>;
   narrators?: Array<{ name: string }>;
   publisher_summary?: string;
@@ -328,6 +329,120 @@ describe('AudibleService', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Italy region (audible.it): offline fixtures only, labels as seen on audible.it
+  // -------------------------------------------------------------------------
+
+  describe('Italy region (it)', () => {
+    beforeEach(() => {
+      configServiceMock.getAudibleRegion.mockResolvedValue('it');
+    });
+
+    it('creates htmlClient on www.audible.it with the italiano locale param', async () => {
+      apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse([])));
+
+      const service = new AudibleService();
+      await service.search('test', 1);
+
+      const htmlConfig = axiosMock.create.mock.calls[0][0];
+      expect(htmlConfig.baseURL).toBe('https://www.audible.it');
+      expect(htmlConfig.params).toEqual({ ipRedirectOverride: 'true', language: 'italiano' });
+      expect(service.getRegion()).toBe('it');
+    });
+
+    it('creates apiClient on api.audible.it', async () => {
+      apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse([])));
+
+      const service = new AudibleService();
+      await service.search('test', 1);
+
+      expect(axiosMock.create.mock.calls[1][0].baseURL).toBe('https://api.audible.it');
+    });
+
+    it('keeps Italian author books and drops English ones', async () => {
+      const authorAsin = 'B001H6UJO8';
+      const products = [
+        makeProduct({ asin: 'B0IT000001', authors: [{ asin: authorAsin, name: 'Elena Ferrante' }], language: 'italian' }),
+        makeProduct({ asin: 'B0IT000002', authors: [{ asin: authorAsin, name: 'Elena Ferrante' }], language: 'english' }),
+        makeProduct({ asin: 'B0IT000003', authors: [{ asin: authorAsin, name: 'Elena Ferrante' }], language: 'Italiano' }),
+      ];
+      apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(products, 3)));
+
+      const service = new AudibleService();
+      const result = await service.searchByAuthorAsin('Elena Ferrante', authorAsin, 1);
+
+      expect(result.books.map((b) => b.asin)).toEqual(['B0IT000001', 'B0IT000003']);
+    });
+
+    it('asks Audnexus for the it region', async () => {
+      axiosMock.get.mockResolvedValueOnce({
+        data: { title: 'Il nome della rosa', authors: [{ name: 'Umberto Eco' }], language: 'italian' },
+      });
+
+      const service = new AudibleService();
+      const details = await service.getAudiobookDetails('B0IT000004');
+
+      expect(details?.title).toBe('Il nome della rosa');
+      expect(axiosMock.get.mock.calls[0][0]).toBe('https://api.audnex.us/books/B0IT000004');
+      expect(axiosMock.get.mock.calls[0][1].params).toEqual({ region: 'it' });
+    });
+
+    it('strips Italian author and narrator labels from bestseller rows', async () => {
+      const item = `
+        <div class="productListItem">
+          <ul>
+            <li data-asin="B0IT000005">
+              <img src="https://images.example.com/cover._SL175_.jpg" />
+              <h3><a href="/pd/Dracula-Audiolibri/B0IT000005">Dracula</a></h3>
+              <span class="authorLabel">Di: <a href="/author/Bram-Stoker/B000APZOQA">Bram Stoker</a></span>
+              <span class="narratorLabel">Letto da: Anna Bonaiuto</span>
+              <span class="runtimeLabel">Durata: 5 ore e 54 min</span>
+            </li>
+          </ul>
+        </div>`;
+      htmlClientMock.get.mockResolvedValue(htmlResponse(makeHtmlPage([item])));
+
+      const service = new AudibleService();
+      const books = await service.getPopularAudiobooks(1);
+
+      expect(books[0]).toMatchObject({
+        asin: 'B0IT000005',
+        title: 'Dracula',
+        author: 'Bram Stoker',
+        authorAsin: 'B000APZOQA',
+        narrator: 'Anna Bonaiuto',
+      });
+    });
+
+    it('parses Italian durations from /search?node= category rows', async () => {
+      const item = `
+        <div class="s-result-item">
+          <ul>
+            <li data-asin="B0IT000006">
+              <img src="https://images.example.com/cover._SL175_.jpg" />
+              <h2><a href="/pd/Keeping-13-Audiolibri/B0IT000006">Keeping 13 - Mettiti in gioco</a></h2>
+              <span>Di: <a href="/author/Chloe-Walsh/B07CQ8R4ZS">Chloe Walsh</a></span>
+              <span>Letto da: <a href="/search?searchNarrator=Giada+Capo">Giada Capo</a>,
+                <a href="/search?searchNarrator=Federico+Vellani">Federico Vellani</a></span>
+              <span class="runtimeLabel">Durata: 26 ore e 4 min</span>
+            </li>
+          </ul>
+        </div>`;
+      htmlClientMock.get.mockResolvedValue(htmlResponse(makeHtmlPage([item])));
+
+      const service = new AudibleService();
+      const books = await service.getCategoryBooks('21837960031', 1);
+
+      expect(books[0]).toMatchObject({
+        asin: 'B0IT000006',
+        title: 'Keeping 13 - Mettiti in gioco',
+        author: 'Chloe Walsh',
+        narrator: 'Giada Capo, Federico Vellani',
+        durationMinutes: 1564,
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // search()
   // -------------------------------------------------------------------------
 
@@ -497,7 +612,7 @@ describe('AudibleService', () => {
     it('strips HTML tags and entities from publisher_summary to produce plain text description', async () => {
       const products = [
         makeProduct({
-          // Use a space before <br/> so whitespace is preserved after tag removal.
+          // <br/> becomes a line break; the space before it is trimmed off the line
           publisher_summary:
             '<p>A &amp; B book with&nbsp;smart text. <br/>More here.</p>',
         }),
@@ -507,7 +622,7 @@ describe('AudibleService', () => {
       const service = new AudibleService();
       const { results } = await service.search('test', 1);
 
-      expect(results[0].description).toBe('A & B book with smart text. More here.');
+      expect(results[0].description).toBe('A & B book with smart text.\nMore here.');
     });
 
     it('falls back to merchandising_summary when publisher_summary is absent', async () => {
@@ -616,6 +731,68 @@ describe('AudibleService', () => {
       // Duplicates removed
       const genreSet = new Set(results[0].genres);
       expect(genreSet.size).toBe(5);
+    });
+
+    it.each([
+      ['a subtitle', { subtitle: 'An Easy & Proven Way' }, 'An Easy & Proven Way'],
+      ['an empty subtitle', { subtitle: '' }, undefined],
+      ['a non-string subtitle', { subtitle: 42 }, undefined],
+      ['no subtitle', {}, undefined],
+    ])('maps the catalog subtitle for %s', async (_label, extra, expected) => {
+      const products = [makeProduct(extra)];
+      apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(products)));
+
+      const service = new AudibleService();
+      const { results } = await service.search('test', 1);
+
+      expect(results[0].subtitle).toBe(expected);
+    });
+
+    it('maps primaryGenres to the deduplicated top of each category ladder', async () => {
+      const products = [
+        makeProduct({
+          category_ladders: [
+            { ladder: [{ name: 'Fiction' }, { name: 'Fantasy' }, { name: 'Epic Fantasy' }] },
+            { ladder: [{ name: 'Fiction' }, { name: 'Adventure' }] },
+            { ladder: [{ name: 'Young Adult' }, { name: 'Coming of Age' }] },
+            { ladder: [] },
+          ],
+        }),
+      ];
+      apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(products)));
+
+      const service = new AudibleService();
+      const { results } = await service.search('test', 1);
+
+      expect(results[0].primaryGenres).toEqual(['Fiction', 'Young Adult']);
+    });
+
+    it('drops blank and non-string ladder names from primaryGenres', async () => {
+      const products = [
+        makeProduct({
+          category_ladders: [
+            { ladder: [{ name: '   ' }, { name: 'Sub' }] },
+            { ladder: [{ name: 42 as unknown as string }] },
+            { ladder: [{ name: 'History' }] },
+          ],
+        }),
+      ];
+      apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(products)));
+
+      const service = new AudibleService();
+      const { results } = await service.search('test', 1);
+
+      expect(results[0].primaryGenres).toEqual(['History']);
+    });
+
+    it('leaves primaryGenres undefined without category ladders', async () => {
+      const products = [makeProduct({ category_ladders: [] })];
+      apiClientMock.get.mockResolvedValue(apiResponse(makeProductsResponse(products)));
+
+      const service = new AudibleService();
+      const { results } = await service.search('test', 1);
+
+      expect(results[0].primaryGenres).toBeUndefined();
     });
 
     it('maps language from catalog product', async () => {
@@ -1307,7 +1484,7 @@ describe('AudibleService', () => {
           rating: '4.7',
           language: 'english',
           formatType: 'unabridged',
-          publisherName: 'Test Publisher',
+          publisherName: 'Test Publisher', seriesPrimary: { asin: 'S000000001', name: 'Some Series', position: '1' },
         },
       });
 
@@ -1322,6 +1499,103 @@ describe('AudibleService', () => {
       expect(details?.publisherName).toBe('Test Publisher');
       // Catalog API should NOT be called when Audnexus succeeds.
       expect(apiClientMock.get).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a subtitle', { subtitle: 'An Easy & Proven Way' }, 'An Easy & Proven Way'],
+      ['no subtitle', {}, undefined],
+      ['an empty subtitle', { subtitle: '' }, undefined],
+      ['a non-string subtitle', { subtitle: 42 }, undefined],
+    ])('maps the Audnexus subtitle for %s', async (_label, extra, expected) => {
+      axiosMock.get.mockResolvedValueOnce({ data: { title: 'Atomic Habits', ...extra } });
+
+      const service = new AudibleService();
+      const details = await service.getAudiobookDetails('B000SUBTTL');
+
+      expect(details?.subtitle).toBe(expected);
+    });
+
+    it('maps primaryGenres to the Audnexus genres of type genre, without the sub-genre tags', async () => {
+      axiosMock.get.mockResolvedValueOnce({
+        data: {
+          title: 'Audnexus Book',
+          genres: [
+            { asin: '1', name: 'Literature & Fiction', type: 'genre' },
+            { asin: '2', name: 'Science Fiction & Fantasy', type: 'genre' },
+            { asin: '3', name: 'Hard Science Fiction', type: 'tag' },
+            { asin: '4', name: 'Space Opera', type: 'tag' },
+          ],
+        },
+      });
+
+      const service = new AudibleService();
+      const details = await service.getAudiobookDetails('B000GENRES');
+
+      expect(details?.primaryGenres).toEqual(['Literature & Fiction', 'Science Fiction & Fantasy']);
+      // The display list keeps its existing shape (genres and tags, capped at 5)
+      expect(details?.genres).toEqual([
+        'Literature & Fiction',
+        'Science Fiction & Fantasy',
+        'Hard Science Fiction',
+        'Space Opera',
+      ]);
+    });
+
+    it.each([
+      ['plain string genres', { genres: ['Fiction', 'Fiction', 'History'] }, ['Fiction', 'History']],
+      ['only tags', { genres: [{ name: 'Space Opera', type: 'tag' }] }, undefined],
+      ['no genres', {}, undefined],
+    ])('maps Audnexus primaryGenres for %s', async (_label, extra, expected) => {
+      axiosMock.get.mockResolvedValueOnce({ data: { title: 'Audnexus Book', ...extra } });
+
+      const service = new AudibleService();
+      const details = await service.getAudiobookDetails('B000GENRE2');
+
+      expect(details?.primaryGenres).toEqual(expected);
+    });
+
+    it('prefers the full Audnexus summary over the short description, as plain text with paragraphs', async () => {
+      axiosMock.get.mockResolvedValueOnce({
+        data: {
+          title: 'Audnexus Book', seriesPrimary: { name: 'Some Series', position: '1' },
+          description: 'Short merchandising blurb.',
+          summary: '<p>Full publisher summary &amp; details.</p> <p>A <b>second</b> paragraph.</p>',
+        },
+      });
+
+      const service = new AudibleService();
+      const details = await service.getAudiobookDetails('B000SUMMARY');
+
+      expect(details?.description).toBe('Full publisher summary & details.\n\nA second paragraph.');
+      expect(apiClientMock.get).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['missing', {}],
+      ['empty', { summary: '' }],
+      ['only markup', { summary: '<p> </p>' }],
+      ['not a string', { summary: 42 }],
+    ])('falls back to the Audnexus description when the summary is %s, without the catalog API', async (_label, extra) => {
+      axiosMock.get.mockResolvedValueOnce({
+        data: { title: 'Audnexus Book', seriesPrimary: { name: 'Some Series' }, description: 'Short merchandising blurb.', ...extra },
+      });
+
+      const service = new AudibleService();
+      const details = await service.getAudiobookDetails('B000NOSUMMR');
+
+      expect(details?.description).toBe('Short merchandising blurb.');
+      expect(apiClientMock.get).not.toHaveBeenCalled();
+    });
+
+    it('turns an HTML description fallback into plain text too', async () => {
+      axiosMock.get.mockResolvedValueOnce({
+        data: { title: 'Audnexus Book', description: '<p>Short &amp; <b>sweet</b>.</p>' },
+      });
+
+      const service = new AudibleService();
+      const details = await service.getAudiobookDetails('B000HTMLDSC');
+
+      expect(details?.description).toBe('Short & sweet.');
     });
 
     it('falls back to the catalog API when Audnexus returns 404', async () => {

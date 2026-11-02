@@ -12,6 +12,7 @@ import { getConfigService } from '@/lib/services/config.service';
 import { fetchBotUser } from '@/lib/services/discord/discord-rest.helper';
 import { DISCORD_CONFIG_KEYS } from '@/lib/services/discord/discord-config';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Settings.TestDiscord');
 
@@ -19,7 +20,9 @@ export async function POST(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { botToken } = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const { botToken } = bodyResult.data;
 
         if (!botToken) {
           return NextResponse.json(

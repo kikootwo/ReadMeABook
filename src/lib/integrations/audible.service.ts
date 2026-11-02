@@ -25,10 +25,23 @@ import {
 } from '../utils/scrape-resilience';
 import { parseRuntime as parseRuntimeUtil } from '../utils/parse-runtime';
 import { extractAllNarrators } from '../utils/extract-narrator';
+import { stripHtml } from '../utils/strip-html';
+import {
+  SeriesFill,
+  catalogDeadline,
+  pickCatalogSeries,
+  DETAILS_FALLBACK_PROFILE,
+  SERIES_FILL_PROFILE,
+  type CatalogFetchProfile,
+  type CatalogSeriesEntry,
+} from './audible-series-fill';
 
 const logger = RMABLogger.create('Audible');
 
-const AUDIBLE_PAGE_SIZE = 50;
+export const AUDIBLE_PAGE_SIZE = 50;
+
+/** Max catalog pages for one author, so a bad `total_results` can't page forever. */
+export const AUDIBLE_MAX_AUTHOR_PAGES = 20;
 
 const CATALOG_RESPONSE_GROUPS =
   'contributors,product_desc,product_attrs,product_extended_attrs,media,rating,series,category_ladders,product_details';
@@ -43,6 +56,7 @@ const HTML_MAX_BACKOFF_MS = 180_000;
 export interface AudibleAudiobook {
   asin: string;
   title: string;
+  subtitle?: string;
   author: string;
   authorAsin?: string;
   narrator?: string;
@@ -52,6 +66,8 @@ export interface AudibleAudiobook {
   releaseDate?: string;
   rating?: number;
   genres?: string[];
+  /** Top-level genres only (no sub-genre tags), as written into the audio file tags */
+  primaryGenres?: string[];
   series?: string;
   seriesPart?: string;
   seriesAsin?: string;
@@ -84,12 +100,6 @@ interface CatalogProductNarrator {
   name: string;
 }
 
-interface CatalogProductSeries {
-  asin?: string;
-  title?: string;
-  sequence?: string;
-}
-
 interface CatalogProductLadderNode {
   name: string;
 }
@@ -101,6 +111,7 @@ interface CatalogProductLadder {
 interface CatalogProduct {
   asin: string;
   title?: string;
+  subtitle?: string;
   authors?: CatalogProductAuthor[];
   narrators?: CatalogProductNarrator[];
   publisher_summary?: string;
@@ -117,7 +128,7 @@ interface CatalogProduct {
     };
   };
   category_ladders?: CatalogProductLadder[];
-  series?: CatalogProductSeries[];
+  series?: CatalogSeriesEntry[];
 }
 
 interface CatalogProductsResponse {
@@ -131,19 +142,6 @@ interface CatalogProductResponse {
 
 interface CatalogCategoriesResponse {
   categories?: Array<{ id: string; name: string }>;
-}
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 function mapCatalogProduct(product: CatalogProduct): AudibleAudiobook {
@@ -168,27 +166,20 @@ function mapCatalogProduct(product: CatalogProduct): AudibleAudiobook {
       ? [...new Set(genreNames)].slice(0, 5)
       : undefined;
 
-  let series: string | undefined;
-  let seriesPart: string | undefined;
-  let seriesAsin: string | undefined;
+  // Each ladder runs from its top-level genre down to sub-genres
+  const primaryGenreNames =
+    product.category_ladders
+      ?.map((ladder) => ladder.ladder?.[0]?.name as unknown)
+      .filter((name): name is string => typeof name === 'string' && name.trim() !== '') ?? [];
+  const primaryGenres =
+    primaryGenreNames.length > 0 ? [...new Set(primaryGenreNames)] : undefined;
 
-  if (product.series && product.series.length > 0) {
-    const preferred =
-      product.series.find((s) => s.sequence && s.sequence.trim() !== '') ??
-      product.series[0];
-
-    series = preferred.title ?? undefined;
-    seriesAsin = preferred.asin ?? undefined;
-
-    if (preferred.sequence && preferred.sequence.trim() !== '') {
-      const digitMatch = preferred.sequence.match(/\d+(?:\.\d+)?/);
-      seriesPart = digitMatch ? digitMatch[0] : preferred.sequence;
-    }
-  }
+  const { series, seriesPart, seriesAsin } = pickCatalogSeries(product.series);
 
   return {
     asin: product.asin,
     title: product.title ?? '',
+    subtitle: typeof product.subtitle === 'string' && product.subtitle ? product.subtitle : undefined,
     author,
     authorAsin,
     narrator,
@@ -198,6 +189,7 @@ function mapCatalogProduct(product: CatalogProduct): AudibleAudiobook {
     releaseDate: product.release_date ?? undefined,
     rating: product.rating?.overall_distribution?.display_stars ?? undefined,
     genres,
+    primaryGenres,
     series,
     seriesPart,
     seriesAsin,
@@ -205,6 +197,18 @@ function mapCatalogProduct(product: CatalogProduct): AudibleAudiobook {
     formatType: product.format_type ?? undefined,
     publisherName: product.publisher_name ?? undefined,
   };
+}
+
+/**
+ * Top-level genres from an Audnexus genre list. Audnexus marks the top of each
+ * category ladder `type: 'genre'` and the sub-genres below it `type: 'tag'`.
+ */
+function audnexusPrimaryGenres(genres: unknown): string[] | undefined {
+  if (!Array.isArray(genres)) return undefined;
+  const names = (genres as Array<string | { name?: unknown; type?: unknown } | null>)
+    .map((g) => (typeof g === 'string' ? g : g?.type !== 'tag' ? g?.name : undefined))
+    .filter((name): name is string => typeof name === 'string' && name.trim() !== '');
+  return names.length > 0 ? [...new Set(names)] : undefined;
 }
 
 export class AudibleService {
@@ -215,6 +219,7 @@ export class AudibleService {
   private initialized: boolean = false;
   private sessionUserAgent: string = '';
   private pacer: AdaptivePacer = new AdaptivePacer();
+  private seriesFill = new SeriesFill(logger);
 
   public getBaseUrl(): string {
     return this.baseUrl;
@@ -224,9 +229,9 @@ export class AudibleService {
     return this.region;
   }
 
-  public async fetch(url: string, config: any = {}): Promise<{ data: any; meta: FetchResultMeta }> {
+  public async fetch(url: string, config: any = {}, { catalog = false } = {}): Promise<{ data: any; meta: FetchResultMeta }> {
     await this.initialize();
-    return this.fetchWithRetry(url, config);
+    return catalog ? this.fetchWithRetry(url, config, 0, this.apiClient) : this.fetchWithRetry(url, config);
   }
 
   public forceReinitialize(): void {
@@ -587,6 +592,7 @@ export class AudibleService {
     authorName: string,
     authorAsin: string,
     page: number = 1,
+    { newestFirst = false }: { newestFirst?: boolean } = {},
   ): Promise<AuthorBooksResult> {
     await this.initialize();
 
@@ -604,6 +610,7 @@ export class AudibleService {
             num_results: AUDIBLE_PAGE_SIZE,
             page: page - 1,
             response_groups: CATALOG_RESPONSE_GROUPS,
+            ...(newestFirst && { products_sort_by: '-ReleaseDate' }),
           },
         },
         5,
@@ -626,15 +633,16 @@ export class AudibleService {
         books.push(mapCatalogProduct(product));
       }
 
+      // From Audible's raw page, not the filtered books: a page of namesakes or other
+      // languages can sit between pages of this author's books (#310).
       const hasMore =
-        books.length > 0 &&
+        products.length > 0 &&
+        page < AUDIBLE_MAX_AUTHOR_PAGES &&
         (totalResults > 0
           ? totalResults > page * AUDIBLE_PAGE_SIZE
           : products.length >= AUDIBLE_PAGE_SIZE);
 
-      logger.info(
-        `Author books page ${page}: ${books.length} valid results (${totalResults} Audible total)`,
-      );
+      logger.info(`Author books page ${page}: ${books.length} valid results (${totalResults} Audible total)`);
       return { books, hasMore, page, totalResults };
     } catch (error) {
       logger.error(`Author books search failed for "${authorName}"`, {
@@ -644,7 +652,8 @@ export class AudibleService {
     }
   }
 
-  async getAudiobookDetails(asin: string): Promise<AudibleAudiobook | null> {
+  /** `fillSeries: false` for callers that never read the series (skips the catalog series fill). */
+  async getAudiobookDetails(asin: string, { fillSeries = true }: { fillSeries?: boolean } = {}): Promise<AudibleAudiobook | null> {
     await this.initialize();
 
     try {
@@ -653,7 +662,8 @@ export class AudibleService {
       const audnexusData = await this.fetchFromAudnexus(asin);
       if (audnexusData) {
         logger.info(` Successfully fetched from Audnexus for "${audnexusData.title}"`);
-        return audnexusData;
+        if (!fillSeries) return audnexusData;
+        return await this.seriesFill.fill(audnexusData, this.region, () => this.fetchAudibleDetailsFromApi(asin, SERIES_FILL_PROFILE));
       }
 
       logger.info(` Audnexus failed, falling back to Audible catalog API...`);
@@ -686,15 +696,20 @@ export class AudibleService {
       const result: AudibleAudiobook = {
         asin,
         title: data.title || '',
+        subtitle: typeof data.subtitle === 'string' && data.subtitle ? data.subtitle : undefined,
         author: data.authors?.map((a: any) => a.name).join(', ') || '',
         authorAsin: data.authors?.[0]?.asin || undefined,
         narrator: data.narrators?.map((n: any) => n.name).join(', ') || '',
-        description: data.description || data.summary || '',
+        // Prefer the full summary over the short description blurb; both become plain text
+        description:
+          (typeof data.summary === 'string' ? stripHtml(data.summary) : '') ||
+          (typeof data.description === 'string' ? stripHtml(data.description) : ''),
         coverArtUrl: data.image || '',
         durationMinutes: data.runtimeLengthMin ? parseInt(data.runtimeLengthMin) : undefined,
         releaseDate: data.releaseDate || undefined,
         rating: data.rating ? parseFloat(data.rating) : undefined,
         genres: data.genres?.map((g: any) => (typeof g === 'string' ? g : g.name)).slice(0, 5) || undefined,
+        primaryGenres: audnexusPrimaryGenres(data.genres),
         series: data.seriesPrimary?.name || undefined,
         seriesPart: data.seriesPrimary?.position || undefined,
         seriesAsin: data.seriesPrimary?.asin || undefined,
@@ -731,12 +746,15 @@ export class AudibleService {
     }
   }
 
-  private async fetchAudibleDetailsFromApi(asin: string): Promise<AudibleAudiobook | null> {
+  private async fetchAudibleDetailsFromApi(
+    asin: string,
+    profile: CatalogFetchProfile = DETAILS_FALLBACK_PROFILE,
+  ): Promise<AudibleAudiobook | null> {
     try {
       const { data: response } = await this.fetchWithRetry(
         `/1.0/catalog/products/${asin}`,
-        { params: { response_groups: CATALOG_RESPONSE_GROUPS } },
-        5,
+        { params: { response_groups: CATALOG_RESPONSE_GROUPS }, ...catalogDeadline(profile) },
+        profile.maxRetries,
         this.apiClient,
       );
 
@@ -752,6 +770,7 @@ export class AudibleService {
 
       return mapCatalogProduct(product);
     } catch (error) {
+      if (profile.onFailure === 'throw') throw error;
       logger.error(`Catalog API details fetch failed for ${asin}`, {
         error: error instanceof Error ? error.message : String(error),
       });

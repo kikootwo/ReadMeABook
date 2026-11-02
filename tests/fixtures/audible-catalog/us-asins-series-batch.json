@@ -1,0 +1,260 @@
+{
+  "total_results": 3,
+  "products": [
+    {
+      "asin": "B01N9CUGHG",
+      "title": "Expeditionary Force",
+      "content_delivery_type": "BookSeries",
+      "language": "english",
+      "relationships": [
+        {
+          "asin": "B09V1X64YV",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "14"
+        },
+        {
+          "asin": "177424361X",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "10"
+        },
+        {
+          "asin": "B0DRPQFHHW",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "18"
+        },
+        {
+          "asin": "B09FR4D8MC",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "13"
+        },
+        {
+          "asin": "1774242621",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "9"
+        },
+        {
+          "asin": "B0BDNMLGFW",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "15"
+        },
+        {
+          "asin": "1774248050",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "12"
+        },
+        {
+          "asin": "B0D38CR7BR",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "17"
+        },
+        {
+          "asin": "1774246325",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "11"
+        },
+        {
+          "asin": "B0FS2Z2SVC",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "19"
+        },
+        {
+          "asin": "1774241285",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "8"
+        },
+        {
+          "asin": "B0HG4R9JT6",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "20"
+        },
+        {
+          "asin": "1772309141",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "7.5"
+        },
+        {
+          "asin": "B0C6FLJTM8",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "16"
+        },
+        {
+          "asin": "B06W5861HP",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "2"
+        },
+        {
+          "asin": "B01N48VJFJ",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "1"
+        },
+        {
+          "asin": "1772308633",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "7"
+        },
+        {
+          "asin": "B071438NCM",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "3"
+        },
+        {
+          "asin": "B078RV7BWR",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "5"
+        },
+        {
+          "asin": "B075NMRZTR",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "4"
+        },
+        {
+          "asin": "1772306932",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "6"
+        },
+        {
+          "asin": "B072YT17GJ",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "3.5"
+        }
+      ],
+      "rating": {
+        "overall_distribution": {
+          "display_stars": 0
+        }
+      },
+      "category_ladders": [
+        {
+          "ladder": [
+            {
+              "name": "Science Fiction & Fantasy"
+            },
+            {
+              "name": "Fantasy"
+            }
+          ]
+        },
+        {
+          "ladder": [
+            {
+              "name": "Science Fiction & Fantasy"
+            },
+            {
+              "name": "Science Fiction"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "asin": "B0937JMKYV",
+      "title": "Dungeon Crawler Carl",
+      "content_delivery_type": "BookSeries",
+      "language": "english",
+      "relationships": [
+        {
+          "asin": "B08V8B2CGV",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "1"
+        },
+        {
+          "asin": "B094XCNV6G",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "3"
+        },
+        {
+          "asin": "B0934GTSGT",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "2"
+        },
+        {
+          "asin": "B0CDXWSS5D",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "6"
+        },
+        {
+          "asin": "B0FXY6DVJS",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "8"
+        },
+        {
+          "asin": "B09ZJ82C7Y",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "5"
+        },
+        {
+          "asin": "B09GCYRZRQ",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "4"
+        },
+        {
+          "asin": "B0DK282SYV",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "7"
+        }
+      ],
+      "rating": {
+        "overall_distribution": {
+          "display_stars": 5
+        }
+      },
+      "category_ladders": []
+    },
+    {
+      "asin": "B07RRBJ23R",
+      "title": "Expeditionary Force Mavericks",
+      "content_delivery_type": "BookSeries",
+      "language": "english",
+      "relationships": [
+        {
+          "asin": "1774243318",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "2"
+        },
+        {
+          "asin": "B07QXLT89C",
+          "relationship_to_product": "child",
+          "relationship_type": "series",
+          "sequence": "1"
+        }
+      ],
+      "rating": {
+        "overall_distribution": {
+          "display_stars": 0
+        }
+      },
+      "category_ladders": []
+    }
+  ]
+}

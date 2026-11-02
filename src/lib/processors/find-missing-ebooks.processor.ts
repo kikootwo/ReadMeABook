@@ -10,10 +10,14 @@
  * Per-run scan cap = 50. Per-audiobook lifetime auto-retry cap = 5
  * (tracked in Request.ebookAutoRetryCount; counter is processor-private —
  * manual Fetch Ebook never touches it).
+ *
+ * A book whose folder (Audiobook.filePath) already holds an ebook file is
+ * skipped before any request is created or retried (#313).
  */
 
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
+import { findEbookOnDisk } from '../utils/ebook-on-disk';
 import { getJobQueueService } from '../services/job-queue.service';
 import { getConfigService } from '../services/config.service';
 
@@ -30,6 +34,7 @@ interface CandidateRow {
   audiobook_title: string;
   audiobook_author: string;
   audible_asin: string | null;
+  audiobook_file_path: string | null;
   ebook_request_id: string | null;
   ebook_status: string | null;
   ebook_auto_retry_count: number | null;
@@ -51,6 +56,13 @@ const IN_FLIGHT_STATUSES = new Set([
 const AUTO_RETRY_CAP = 5;
 const PER_RUN_LIMIT = 50;
 
+/** True when this run would create or retry an ebook request for the row (the only cases that fetch). */
+function wouldFetch(row: CandidateRow): boolean {
+  if (!row.ebook_request_id) return true;
+  return (row.ebook_status === 'failed' || row.ebook_status === 'warn')
+    && (row.ebook_auto_retry_count ?? 0) < AUTO_RETRY_CAP;
+}
+
 export async function processFindMissingEbooks(payload: FindMissingEbooksPayload): Promise<any> {
   const { jobId } = payload;
   const logger = RMABLogger.forJob(jobId, 'FindMissingEbooks');
@@ -70,6 +82,7 @@ export async function processFindMissingEbooks(payload: FindMissingEbooksPayload
       skippedInFlight: 0,
       skippedCancelled: 0,
       skippedCapHit: 0,
+      skippedOnDisk: 0,
     };
   };
 
@@ -109,6 +122,7 @@ export async function processFindMissingEbooks(payload: FindMissingEbooksPayload
         a.title               AS audiobook_title,
         a.author              AS audiobook_author,
         a.audible_asin        AS audible_asin,
+        a.file_path           AS audiobook_file_path,
         e.id                  AS ebook_request_id,
         e.status              AS ebook_status,
         e.ebook_auto_retry_count AS ebook_auto_retry_count
@@ -145,6 +159,7 @@ export async function processFindMissingEbooks(payload: FindMissingEbooksPayload
         skippedInFlight: 0,
         skippedCancelled: 0,
         skippedCapHit: 0,
+        skippedOnDisk: 0,
       };
     }
 
@@ -155,6 +170,7 @@ export async function processFindMissingEbooks(payload: FindMissingEbooksPayload
     let skippedInFlight = 0;
     let skippedCancelled = 0;
     let skippedCapHit = 0;
+    let skippedOnDisk = 0;
 
     for (const row of candidates) {
       let action:
@@ -164,11 +180,27 @@ export async function processFindMissingEbooks(payload: FindMissingEbooksPayload
         | 'skipped-in-flight'
         | 'skipped-cancelled'
         | 'skipped-cap'
+        | 'skipped-on-disk'
         | 'skipped-unknown'
         | null = null;
       let ebookRequestId: string | null = row.ebook_request_id;
 
       try {
+        // An ebook the user put next to the audiobook: no request, no fetch, this run or any other (#313)
+        const ebookOnDisk = wouldFetch(row) ? await findEbookOnDisk(row.audiobook_file_path, row.audiobook_id, logger) : null;
+        if (ebookOnDisk) {
+          action = 'skipped-on-disk';
+          skippedOnDisk++;
+          logger.info('find_missing_ebooks iteration', {
+            audiobookId: row.audiobook_id,
+            parentRequestId: row.parent_request_id,
+            ebookRequestId,
+            action,
+            ebookFile: ebookOnDisk,
+          });
+          continue;
+        }
+
         await prisma.$transaction(async (tx) => {
           if (!row.ebook_request_id) {
             // No live ebook child — create one and seed counter at 1.
@@ -277,6 +309,7 @@ export async function processFindMissingEbooks(payload: FindMissingEbooksPayload
       skippedInFlight,
       skippedCancelled,
       skippedCapHit,
+      skippedOnDisk,
     });
 
     return {
@@ -290,6 +323,7 @@ export async function processFindMissingEbooks(payload: FindMissingEbooksPayload
       skippedInFlight,
       skippedCancelled,
       skippedCapHit,
+      skippedOnDisk,
     };
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);

@@ -30,7 +30,9 @@ src/components/
 **Audiobooks**
 - **AudiobookCard** ✅ - Cover, title, author, narrator, duration, request button, clickable to open details modal. Shows "Requested by [username]" when someone else has requested the book, "Requested" when current user has requested it
 - **AudiobookGrid** - Responsive grid (1/2/3/4 cols)
-- **AudiobookDetailsModal** ✅ - Full-screen modal with comprehensive metadata (description, genres, rating, release date, narrator, language, format, publisher, request functionality). Shows requesting user's name when applicable
+- **SeriesSearchError** ✅ - `src/components/series/SeriesSearchError.tsx`: `/series` page panel in place of the grid when a search fails with no results to show (`error && !isLoading && !hasData`). `role="alert"`; 502 → "Couldn't get results from Audible" + "Audible didn't return series results. Try again in a moment.", other errors → "Series search failed"; Try again button (≥44 px) reruns the search, and focus returns to it after a failed retry (`focusRetry`, once per click; `onRetryFocused` clears it, and so does editing the query, so a cached error never pulls focus from the search box). See [integrations/audible-series-search.md](../integrations/audible-series-search.md)
+- **AudiobookDetailsModal** ✅ - Full-screen modal with comprehensive metadata (description, genres, rating, release date, narrator, language, format, publisher, request functionality). Shows requesting user's name when applicable. Scroll area (`flex flex-col`) holds a `flex flex-col min-h-0` content column; bottom padding is an `after:` spacer so it survives when the column is shrunk. Summary rendered by **BookSummary**
+- **BookSummary** ✅ - `src/components/audiobooks/BookSummary.tsx`. Summary h3 + capped scroll box, returned as a fragment (both are flex items of the modal content column). Wrapper owns the cap via `--summary-cap`: 38dvh by default, 15rem at `[@media(min-width:640px)_and_(min-height:500px)]`; `max-h-(--summary-cap)`. Phones and landscape phones (below that query): `shrink-0`, fixed 38dvh box, sheet scrolls. At/above it: box absorbs leftover height: wrapper `shrink basis-[content] h-24` → height between min(6rem, natural) and 15rem (CSS only: auto min size = min(content, specified h-24)); 1440x900 default modal has 0 outer overflow. Text over the cap by ≤12px: inline `maxHeight: calc(var(--summary-cap) + 12px)` (shown whole; decided against the cap, not the current height, so no flip-flop). Overflowing only: `overflow-y-auto` (else `overflow-y-hidden`), `role=region`, `aria-labelledby` heading ("Summary"), `tabIndex=0`, bottom fade `h-6` + "more" chevron button while more text below, top fade `h-4` once scrolled; fades and chevron inset by scrollbar width. Chevron: `type=button tabIndex=-1 aria-hidden` (pointer only; keyboard/SR use the region), `absolute -bottom-2` (disc top = bottom fade top, so it only covers faded text; hangs 8px below the box, inside the next section mt-6), `right: scrollbarWidth + 4`, click → `scrollBy(max(clientHeight - 40, 24))` (40 = both fades, so the cut-off line lands clear of the top fade), smooth unless reduced motion; mousedown does not take focus. Focused box that stops overflowing keeps region/tab stop until blur (focus never drops to body). Focus ring `focus-visible:outline-offset-4`. Short text: natural height, no region/tab stop/fades/chevron. `overscroll-y-auto` on every pointer (swipe/wheel at the end chains to the modal; modal scroll area is `overscroll-contain` + body lock, so the page never moves). `<p>` is `whitespace-pre-wrap break-words`, box `overflow-x-hidden`. Modal passes `description.trim()` (computed once); whitespace-only → no section
 
 **Requests**
 - **RequestCard** ✅ - Cover, title, author, status badge, progress bar, timestamps, action buttons (cancel, manual search, interactive search). When status=`awaiting_release` and `releaseDate` is set, shows "Releases &lt;Mon DD, YYYY&gt;" next to the status badge (UTC-formatted)
@@ -45,7 +47,9 @@ src/components/
 - **Input** - Label, error display, validation, icons
 - **Select** - Custom styling, search/filter
 - **Modal** ✅ - Dialog overlay with backdrop, sizes (sm/md/lg/xl/full), ESC to close, body scroll lock
-- **ConfirmModal** ✅ - Confirmation dialog with customizable title, message, buttons, loading state, and variant (primary/danger)
+- **ConfirmModal** ✅ - Confirmation dialog with customizable title, message (string or node), buttons, loading state, `confirmDisabled`, and variant (primary/danger)
+- **WatchModeChoice** ✅ - `src/components/ui/WatchModeChoice.tsx`: fieldset radio group "Entire catalog / New releases only" for watched authors/series (Watch dialog, Profile Change dialog); backlog note on New → Entire. See [features/watched-lists.md](../features/watched-lists.md)
+- **WatchModeControl** ✅ - `src/components/profile/WatchModeControl.tsx`: watched card mode line (cutoff shown as its UTC day) + bordered Change button → dialog (Save disabled until changed, PATCH; a failed Save shows a `role="alert"` message)
 - **ChangePasswordModal** ✅ - Password change form for local users. Three fields (current, new, confirm), real-time validation, success/error states, auto-closes on success. Only accessible to users with `authProvider='local'`
 - **Pagination** ✅ - Traditional page navigation with prev/next buttons, smart ellipsis (shows 1...4 5 6...10)
 - **StickyPagination** ✅ - Minimal floating pill at bottom center with prev/next arrows, quick jump input, section label. Shows/hides based on section visibility (IntersectionObserver). Rounded-full design, backdrop blur, subtle shadow, auto-scroll on page change
@@ -119,14 +123,22 @@ interface AudiobookDetailsModalProps {
   requestStatus?: string | null;
   isAvailable?: boolean;
   requestedByUsername?: string | null;
+  requestId?: string | null; // Request behind the card; Interactive Search picks for it (select-torrent / select-ebook) when own or admin and status is advanceable (`ADVANCEABLE_FROM_INTERACTIVE_SEARCH` / `EBOOK_ADVANCEABLE_FROM_INTERACTIVE_SEARCH`, `src/lib/constants/request-statuses.ts`)
+  requestedByUserId?: string | null; // Owner of requestId
+  requestType?: 'audiobook' | 'ebook'; // 'ebook' → Interactive Search searches ebook sources (with requestId when pending/failed/awaiting_search, else by ASIN)
   hideRequestActions?: boolean; // Hides sticky action bar for read-only contexts (BookDate, ShelvesSection)
   hasReportedIssue?: boolean;
   aiReason?: string | null;
   adminActions?: React.ReactNode; // Optional admin buttons (Approve/Search/Deny) rendered as second row in action bar
 }
 
+interface BookSummaryProps {
+  text: string; // already trimmed; paragraphs kept via whitespace-pre-wrap
+}
+
 interface RequestCardProps {
-  request: {id, status, progress, audiobook: {title, author, coverArtUrl?}, createdAt, updatedAt};
+  request: {id, type?, userId?, status, progress, audiobook: {title, author, coverArtUrl?, audibleAsin?}, createdAt, updatedAt};
+  // Passes id, userId and type to AudiobookDetailsModal so a My Requests pick goes to this request (#281)
   showActions?: boolean;
 }
 
@@ -144,6 +156,7 @@ interface InteractiveTorrentSearchModalProps {
   onClose: () => void;
   requestId: string;
   audiobook: {title: string, author: string};
+  onSuccess?: (outcome?: {needsApproval?: boolean}) => void; // ebook picks pass needsApproval; details modal toasts "submitted for approval"
 }
 
 interface ConfirmModalProps {
@@ -151,11 +164,14 @@ interface ConfirmModalProps {
   onClose: () => void;
   onConfirm: () => void;
   title: string;
-  message: string;
+  message: string | React.ReactNode;
   confirmText?: string;
   cancelText?: string;
   isLoading?: boolean;
+  confirmDisabled?: boolean; // disables Confirm (e.g. nothing changed)
   variant?: 'danger' | 'primary';
+  secondaryText?: string; // optional third button between Cancel and Confirm
+  onSecondary?: () => void;
 }
 
 interface PaginationProps {
@@ -187,6 +203,7 @@ interface UnifiedPaginationProps {
 - **useAudiobooks** - `{audiobooks, isLoading, error, totalPages, hasMore}`
 - **useAudiobookDetails** ✅ - `{audiobook, isLoading, error}` - Fetches individual audiobook by ASIN
 - **useRequest** - `{createRequest, cancelRequest, isLoading}`
+- **useSeriesSearch** ✅ - `{series, isLoading, hasData, error, retry}`: trimmed query (no request when blank), no automatic retry on error, `error.status` from `fetchJSON`, `retry` = `mutate()`
 
 ## Styling
 

@@ -1,0 +1,10 @@
+# Component: E2E compose override "media-bind" (#242 case 1E): the media volume mounted twice in rmab
+# Documentation: documentation/testing/e2e-harness.md
+# Use: npm run e2e -- ... --overrides media-bind   (untainted runs only)
+services:
+  rmab:
+    volumes:
+      - type: volume
+        source: media
+        target: /downloads/media-bind
+        volume: { nocopy: true }

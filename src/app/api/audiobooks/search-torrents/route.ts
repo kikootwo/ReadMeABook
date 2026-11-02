@@ -13,7 +13,11 @@ import { groupIndexersByCategories, getGroupDescription } from '@/lib/utils/inde
 import { getLanguageForRegion } from '@/lib/constants/language-config';
 import type { AudibleRegion } from '@/lib/types/audible';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
+import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
+import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.AudiobookSearch');
 const MAX_RANKED_RESULTS = 100;
@@ -22,6 +26,7 @@ const SearchSchema = z.object({
   title: z.string(),
   author: z.string(),
   asin: z.string().optional(), // Optional ASIN for runtime-based size scoring
+  exactTitle: z.boolean().optional(), // the user edited the title: sent as given, no fallback queries (#316)
 });
 
 /**
@@ -38,8 +43,13 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const body = await req.json();
-      const { title, author, asin } = SearchSchema.parse(body);
+      const accessDenied = await denyWithoutInteractiveSearchAccess(req.user.id);
+      if (accessDenied) return accessDenied;
+
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
+      const { title, author, asin, exactTitle } = SearchSchema.parse(body);
 
       // Get enabled indexers from configuration
       const { getConfigService } = await import('@/lib/services/config.service');
@@ -99,7 +109,7 @@ export async function POST(request: NextRequest) {
           const groupResults = await prowlarr.searchWithVariations(title, author, {
             categories: group.categories,
             indexerIds: group.indexerIds,
-          });
+          }, { exactTitle: exactTitle === true });
 
           logger.debug(`Group ${i + 1} returned ${groupResults.length} results`);
           allResults.push(...groupResults);
@@ -215,7 +225,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({
         success: true,
-        results: resultsWithRank,
+        results: await stripProwlarrKeyFromResults(resultsWithRank),
         truncated,
         rawCount: results.length,
         message: limitedRankedResults.length > 0
@@ -223,13 +233,13 @@ export async function POST(request: NextRequest) {
           : 'No results found',
       });
     } catch (error) {
-      logger.error('Failed to search for torrents', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to search for torrents', { error: errorForLog(error) });
 
       if (error instanceof z.ZodError) {
         return NextResponse.json(
           {
             error: 'ValidationError',
-            details: error.errors,
+            details: zodIssueDetails(error),
           },
           { status: 400 }
         );

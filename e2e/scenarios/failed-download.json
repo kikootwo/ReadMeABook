@@ -1,0 +1,8 @@
+{
+  "name": "failed-download",
+  "description": "Download client reports an error state at 30%.",
+  "book": "phm",
+  "releases": [
+    { "id": "broken", "title": "{{author}} - {{title}} (Unabridged) [MP3]", "sizeMB": 400, "seeders": 40, "fixture": "phm-mp3", "download": { "failAtPct": 30 } }
+  ]
+}

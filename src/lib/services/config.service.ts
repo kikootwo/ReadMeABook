@@ -154,6 +154,37 @@ export class ConfigurationService {
   }
 
   /**
+   * Set multiple configuration values in one database transaction: all are written or
+   * none are (encrypts if needed). Use when values must stay consistent with each other,
+   * e.g. a secret and the server address it belongs to.
+   */
+  async setManyAtomic(updates: ConfigUpdate[]): Promise<void> {
+    const encryptionService = getEncryptionService();
+    const writes = updates.map((update) => {
+      const data = {
+        value: update.encrypted ? encryptionService.encrypt(update.value) : update.value,
+        encrypted: update.encrypted || false,
+        category: update.category,
+        description: update.description,
+      };
+      return prisma.configuration.upsert({
+        where: { key: update.key },
+        create: { key: update.key, ...data },
+        update: data,
+      });
+    });
+
+    try {
+      await prisma.$transaction(writes);
+    } catch (error) {
+      logger.error('Failed to set configuration', { error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    } finally {
+      for (const update of updates) this.clearCache(update.key);
+    }
+  }
+
+  /**
    * Set multiple configuration values (encrypts if needed)
    */
   async setMany(updates: ConfigUpdate[]): Promise<void> {

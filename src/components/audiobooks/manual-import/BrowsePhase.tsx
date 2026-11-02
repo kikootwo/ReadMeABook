@@ -3,7 +3,7 @@
  * Documentation: documentation/features/manual-import.md
  *
  * Directory listing with root tiles, breadcrumb navigation,
- * folder metadata, audio file badges, and selection state.
+ * folder metadata, audio (or ebook) file rows, and selection state.
  */
 
 'use client';
@@ -18,6 +18,7 @@ import {
   ChevronRightIcon,
   ArrowLeftIcon,
   MusicalNoteIcon,
+  BookOpenIcon,
   ExclamationTriangleIcon,
   ArrowPathIcon,
 } from '@heroicons/react/24/outline';
@@ -40,6 +41,8 @@ interface BrowsePhaseProps {
   currentPath: string | null;
   entries: DirectoryEntry[];
   currentAudioFiles: AudioFileEntry[];
+  /** What the listed files are: audio (audiobook import) or ebook files (ebook import). */
+  fileKind?: 'audio' | 'ebook';
   checkedFiles: Set<string>;
   isLoading: boolean;
   error: string | null;
@@ -62,6 +65,7 @@ export function BrowsePhase({
   currentPath,
   entries,
   currentAudioFiles,
+  fileKind = 'audio',
   checkedFiles,
   isLoading,
   error,
@@ -79,6 +83,11 @@ export function BrowsePhase({
   onRetry,
 }: BrowsePhaseProps) {
   const hasSelection = checkedFiles.size > 0;
+  const FileIcon = fileKind === 'ebook' ? BookOpenIcon : MusicalNoteIcon;
+  // A multi-disc book folder lists its disc folders' files as `Disc 1/01.m4a`
+  const discCount = new Set(
+    currentAudioFiles.filter((f) => f.name.includes('/')).map((f) => f.name.split('/')[0])
+  ).size;
   const totalSize = currentAudioFiles.reduce((sum, f) => sum + f.size, 0);
   const checkedSize = hasSelection
     ? currentAudioFiles.filter((f) => checkedFiles.has(f.name)).reduce((sum, f) => sum + f.size, 0)
@@ -205,7 +214,7 @@ export function BrowsePhase({
             {currentAudioFiles.length > 0 && entries.length > 0 && (
               <div className="px-4 py-2 bg-gray-50/50 dark:bg-gray-800/20">
                 <p className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider">
-                  Audio Files {hasSelection && `\u00B7 click to select`}
+                  {fileKind === 'ebook' ? 'Ebook Files' : 'Audio Files'} {hasSelection && `\u00B7 click to select`}
                 </p>
               </div>
             )}
@@ -221,7 +230,7 @@ export function BrowsePhase({
                       : 'hover:bg-gray-50 dark:hover:bg-gray-800/50 border-l-2 border-transparent'
                   }`}
                 >
-                  <MusicalNoteIcon className={`w-4 h-4 flex-shrink-0 ${
+                  <FileIcon className={`w-4 h-4 flex-shrink-0 ${
                     isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-blue-500/50 dark:text-blue-400/50'
                   }`} />
                   <span className={`flex-1 min-w-0 text-sm truncate ${
@@ -268,7 +277,8 @@ export function BrowsePhase({
             ) : (
               <>
                 <span className="font-medium text-gray-900 dark:text-gray-100">{currentAudioFiles.length}</span>
-                {' '}audio file{currentAudioFiles.length !== 1 ? 's' : ''} in this folder
+                {' '}{fileKind} file{currentAudioFiles.length !== 1 ? 's' : ''}
+                {discCount > 1 ? ` in ${discCount} discs` : ' in this folder'}
               </>
             )}
             {checkedSize > 0 && (

@@ -8,23 +8,65 @@ import { prisma } from '../db';
 import { getConfigService } from '../services/config.service';
 import { getDownloadClientManager } from '../services/download-client-manager.service';
 import { ProwlarrService } from '../integrations/prowlarr.service';
+import { getProwlarrConnection } from '../integrations/prowlarr-connection';
+import { isMagnetUri, toConfiguredProwlarrUrl } from '../utils/prowlarr-url';
 import { RMABLogger } from '../utils/logger';
 import { isTransientConnectionError } from '../utils/connection-errors';
+import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
+import { addAutoBlock } from '../services/blocklist.service';
 import {
   DownloadSourceError,
+  UnusableDownloadSourceError,
   isRetryableDownloadSourceError,
+  type IDownloadClient,
 } from '../interfaces/download-client.interface';
+
+/** Bull's view of this run: attemptsMade > 0 means an earlier attempt failed (a retry). */
+export interface DownloadAttempt {
+  attemptsMade?: number;
+}
+
+/**
+ * A held usenet job that waits paused (#329): resumed only when RMAB added that job for an
+ * earlier download; someone else's paused job is tracked as it is, with a warning.
+ */
+async function resumeHeldJob(client: IDownloadClient, id: string, logger: ReturnType<typeof RMABLogger.forJob>): Promise<void> {
+  const ours = await prisma.downloadHistory.findFirst({
+    where: { downloadClient: client.clientType, addedByRmab: true, OR: [{ downloadClientId: id }, { nzbId: id }] },
+    select: { id: true },
+  });
+  if (!ours) {
+    logger.warn(`${client.clientType} job ${id} is paused and RMAB did not add it; resume it in ${client.clientType} to continue the download`);
+    return;
+  }
+  try {
+    await client.resumeDownload(id);
+    logger.info(`Resumed paused ${client.clientType} job ${id}: RMAB added it for an earlier download (${ours.id})`);
+  } catch (error) {
+    logger.warn(`Could not resume paused ${client.clientType} job ${id}`, { error: error instanceof Error ? error.message : String(error) });
+  }
+}
 
 /**
  * Process download job
  * Routes to appropriate download client based on protocol detection
  * Adds selected result to download client and starts monitoring
  */
-export async function processDownloadTorrent(payload: DownloadTorrentPayload): Promise<any> {
+export async function processDownloadTorrent(payload: DownloadTorrentPayload, attempt?: DownloadAttempt): Promise<any> {
   const { requestId, audiobook, torrent, alternateTorrents = [], jobId } = payload;
-  const candidates = [torrent, ...alternateTorrents];
-
   const logger = RMABLogger.forJob(jobId, 'DownloadTorrent');
+  // A retry may follow an add that reached the client before it failed here (timeout)
+  const isRetry = (attempt?.attemptsMade ?? 0) > 0;
+
+  // A magnet must be one whitespace-free URI (clients split their URL lists on newlines)
+  const candidates = [torrent, ...(alternateTorrents ?? [])].filter((candidate) => {
+    if (!candidate) return false;
+    const malformed = /^magnet:/i.test(candidate.downloadUrl ?? '') && !isMagnetUri(candidate.downloadUrl);
+    if (malformed) {
+      logger.warn(`Skipping release with a malformed magnet link: ${candidate.title}`, { indexer: candidate.indexer });
+    }
+    return !malformed;
+  });
 
   logger.info(`Processing request ${requestId} for "${audiobook.title}"`);
   logger.info(`Selected result: ${torrent.title}`, {
@@ -36,32 +78,34 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
   });
 
   try {
-    // Update request status to downloading
-    const request = await prisma.request.update({
+    // Update request status to downloading, unless it was cancelled or deleted
+    // (for example during the search, or between Bull retries): then add nothing
+    if (!(await updateRequestUnlessStopped(requestId, { status: 'downloading', progress: 0 }))) {
+      logger.info(`Request ${requestId} is cancelled or deleted, not adding a download`);
+      return { success: true, message: 'Request cancelled or deleted, download not started', requestId };
+    }
+
+    const request = await prisma.request.findUnique({
       where: { id: requestId },
-      data: {
-        status: 'downloading',
-        progress: 0,
-        updatedAt: new Date(),
-      },
-      include: {
-        user: { select: { plexUsername: true } },
-      },
+      select: { type: true, user: { select: { plexUsername: true } } },
     });
 
     const config = await getConfigService();
     const manager = getDownloadClientManager(config);
 
-    // Include Prowlarr API key as source header so NZB/torrent downloads from
-    // Prowlarr proxy URLs are authenticated (fixes 403 for indexers like NZBFinder)
-    const prowlarrApiKey = (await config.getMany(['prowlarr_api_key'])).prowlarr_api_key || process.env.PROWLARR_API_KEY;
-    const sourceHeaders: Record<string, string> = {};
-    if (prowlarrApiKey) {
-      sourceHeaders['X-Api-Key'] = prowlarrApiKey;
-    }
+    // Prowlarr credentials for authenticated proxy-download fetches (fixes 403 for
+    // indexers like NZBFinder). The fetcher sends the key only to Prowlarr download hops.
+    const prowlarr = await getProwlarrConnection();
+    const sourceAuth = prowlarr.apiKey
+      ? { prowlarrBaseUrl: prowlarr.baseUrl, apiKey: prowlarr.apiKey }
+      : undefined;
+
+    // Last temporary (429/5xx) failure, so a later unusable release cannot hide it from Bull's retry
+    let lastRetryableError: DownloadSourceError | null = null;
 
     for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
       const candidate = candidates[candidateIndex];
+      const hasNextCandidate = candidateIndex < candidates.length - 1;
       const isUsenet = ProwlarrService.isNZBResult(candidate);
       const protocol = isUsenet ? 'usenet' : 'torrent';
       const client = await manager.getClientServiceForProtocol(protocol);
@@ -79,13 +123,47 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
       );
 
       let downloadClientId: string;
+      let alreadyInClient: boolean;
+      let infoHash: string | undefined;
+      let paused: boolean | undefined;
       try {
-        downloadClientId = await client.addDownload(candidate.downloadUrl, {
-          category,
-          priority: 'normal',
-          sourceHeaders,
-        });
+        ({ id: downloadClientId, alreadyInClient, infoHash, paused } = await client.addDownload(
+          // Prowlarr links go to the configured base (scheme, port, credentials); others as-is
+          toConfiguredProwlarrUrl(candidate.downloadUrl, prowlarr.base, { withCredentials: true }) ?? candidate.downloadUrl,
+          {
+            category,
+            priority: 'normal',
+            sourceAuth,
+            ...(isRetry ? { retry: true } : {}),
+            // SABnzbd matches a job it already holds by the release title (#329)
+            ...(protocol === 'usenet' ? { releaseTitle: candidate.title } : {}),
+          }
+        ));
       } catch (error) {
+        if (error instanceof UnusableDownloadSourceError) {
+          // This release can't be fetched (bad redirect, malformed magnet, ...): try the next one
+          if (error.blocklistReason) {
+            // The release itself is unusable (a duplicate whose files are gone): never pick it again
+            await addAutoBlock({
+              requestId,
+              releaseName: candidate.title,
+              indexerName: candidate.indexer,
+              indexerId: candidate.indexerId,
+              source: 'download_fail',
+              reason: error.blocklistReason,
+              reasonDetail: error.message,
+              jobId,
+            });
+          }
+          logger.warn(`${error.message} for "${candidate.title}"${hasNextCandidate ? '; trying next ranked release' : ''}`, {
+            indexer: candidate.indexer,
+            candidate: candidateIndex + 1,
+            candidateCount: candidates.length,
+          });
+          if (hasNextCandidate) continue;
+          throw lastRetryableError ?? error;
+        }
+
         if (!(error instanceof DownloadSourceError)) {
           throw error;
         }
@@ -101,7 +179,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
           throw contextualError;
         }
 
-        const hasNextCandidate = candidateIndex < candidates.length - 1;
+        lastRetryableError = contextualError;
 
         logger.warn(
           `${contextualError.message}${hasNextCandidate ? '; trying next ranked release' : ''}`,
@@ -120,7 +198,19 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
         throw contextualError;
       }
 
-      logger.info(`Download added with ID: ${downloadClientId}`);
+      if (alreadyInClient && client.protocol === 'usenet') {
+        // A duplicate NZB or a retried add: track the job the client already holds
+        logger.warn(`"${candidate.title}" is already in ${client.clientType} (${downloadClientId}); tracking that job`);
+        if (paused) {
+          await resumeHeldJob(client, downloadClientId, logger);
+        }
+      } else if (alreadyInClient) {
+        logger.warn(
+          `"${candidate.title}" is already in ${client.clientType} (${downloadClientId}); RMAB will never remove it or its files`
+        );
+      } else {
+        logger.info(`Download added with ID: ${downloadClientId}`);
+      }
 
       // Create DownloadHistory record. Exclude magnet links from the indexer-page fallback.
       const indexerPageUrl = candidate.infoUrl || (candidate.guid?.startsWith('magnet:') ? null : candidate.guid);
@@ -134,7 +224,7 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
           downloadClientId,
           torrentName: candidate.title,
           // Set protocol-specific ID fields for backward compatibility
-          torrentHash: client.protocol === 'torrent' ? (candidate.infoHash || downloadClientId) : undefined,
+          torrentHash: client.protocol === 'torrent' ? (candidate.infoHash || infoHash || downloadClientId) : undefined,
           nzbId: client.protocol === 'usenet' ? downloadClientId : undefined,
           torrentSizeBytes: candidate.size,
           torrentUrl: indexerPageUrl,
@@ -142,6 +232,8 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
           seeders: candidate.seeders || 0,
           leechers: candidate.leechers || 0,
           downloadStatus: 'downloading',
+          // From the client's own add result: only an explicit "newly added" counts as RMAB's
+          addedByRmab: alreadyInClient === false,
           selected: true,
           startedAt: new Date(),
         },
@@ -157,9 +249,9 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
         requestId,
         audiobook.title,
         audiobook.author,
-        request.user.plexUsername || 'Unknown User',
+        request?.user.plexUsername || 'Unknown User',
         grabMessage,
-        request.type
+        request?.type
       ).catch((error) => {
         logger.error('Failed to queue grab notification', { error: error instanceof Error ? error.message : String(error) });
       });
@@ -204,15 +296,11 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload): P
           : `Download client unreachable for request ${requestId}, allowing Bull to retry`
       );
     } else {
-      // Permanent error — mark request as failed immediately
-      await prisma.request.update({
-        where: { id: requestId },
-        data: {
-          status: 'failed',
-          errorMessage: error instanceof Error ? error.message : 'Failed to add download to client',
-          updatedAt: new Date(),
-        },
-      });
+      // Permanent error — mark request as failed immediately (a cancel is left in place)
+      await markRequestFailedUnlessStopped(
+        requestId,
+        error instanceof Error ? error.message : 'Failed to add download to client'
+      );
     }
 
     throw error;

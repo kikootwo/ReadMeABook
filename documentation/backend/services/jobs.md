@@ -18,7 +18,7 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - Redis-backed for persistence
 - Retry: 3 attempts, exponential backoff (2s, 4s, 8s)
 - Priority: High (10), Medium (5), Low (1)
-- Concurrency: 3 per job type
+- Concurrency: set per named processor and summed per queue by Bull, so not a per-type limit (see Concurrency Settings)
 - Jobs survive app restarts
 - Remove on complete: keep last 100
 - Remove on fail: keep last 200
@@ -40,8 +40,13 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - `download_torrent` immediately tries the next ranked release; the successful candidate is the only one written to download history.
 - If every ranked grab is temporarily unavailable, the job remains retryable under Bull's exponential backoff. The global failed handler marks the request failed only after all job attempts are exhausted.
 - Manual selections carry no alternates and retain their explicit-release behavior.
+- The history row records `addedByRmab` (false when the torrent was already in the client: never removed; [download-clients.md](../../phase3/download-clients.md#torrent-ownership-423)). A Bull retry after an add that succeeded finds RMAB's own torrent and records `false` (kept, a known leak).
 
 ## Special Behaviors
+
+**check_watched_lists:** scheduled run (no payload ASIN) checks every watched series and author; a targeted run (payload `userId` + `seriesAsin` or `authorAsin`, queued when a watch is added) runs only that series or author, never the user's other watched lists (#429). See [features/watched-lists.md](../../features/watched-lists.md).
+
+**cleanup_seeded_torrents:** pages through every candidate, strict probe, ownership check before any remove; see [scheduler.md](scheduler.md).
 
 **monitor_download:**
 - 3s initial delay before first check (avoids race condition with qBittorrent processing)
@@ -52,6 +57,16 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - 10s delay between checks (prevents excessive logging)
 - Only logs progress at 5% intervals or first 5%
 - Auto-reschedules until complete/failed
+- **Cancelled/deleted requests** (`src/lib/utils/request-stop-guard.ts`):
+  - Guarded writes are one conditional `updateMany` (`where: { id, deletedAt: null, status: { not: 'cancelled' } }`); 0 rows → leave the request alone. No request id → writes nothing (an unfiltered `updateMany` would hit every row)
+  - Guarded sites:
+    - `search_indexers`: `searching` claim (0 rows → no search), both `awaiting_search` writes (0 rows → not re-queued for the scheduled re-search jobs) and its `failed` write
+    - `download_torrent`: `downloading` claim (0 rows → nothing added to the client) and its permanent-error `failed` write
+    - `monitor_download`: each poll first reads the request (cancelled, soft-deleted or missing → stop: no client call, no write, no re-queue); re-checked before queuing `organize_files`; client-failure branch and PATH 3 `failed` writes (0 rows → no blocklist entry, no `request_error`)
+    - `organize_files`: audiobook and ebook `processing` claim (0 rows → not imported)
+    - `job-queue.service.ts` `failed` handlers for `monitor_download` (history `failed` only when the request row was written) and `download_torrent`
+  - Not guarded: the other status writes in the download, monitor and organize processors (e.g. organize `failed`/`warn`/`downloaded`), `search_ebook`, direct downloads
+  - Cancelling leaves the download in the client (seeded cleanup skips cancelled requests); delete the request to remove it under the seeding rule
 
 **search_indexers:**
 - No torrents found → 'awaiting_search' status (not failed)
@@ -72,12 +87,14 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - Matched requests → 'available' status with plexGuid/absItemId linked
 - Clears errorMessage and retry counters on match
 - Use case: Manual library imports automatically complete stuck requests
+- ABS: items without ASIN → ABS match → ASIN from the response stored before request matching (#287, [file-hash-matching.md](../../fixes/file-hash-matching.md#asin-read-back-287))
 
 **plex_recently_added_check:**
 - Polls recently added items (top 10) every 5 minutes
 - Matches all non-terminal request statuses against new library items
 - Same matching logic as scan_plex (ASIN priority, fuzzy fallback)
 - Clears error state and retry counters on match
+- ABS: same match + ASIN read-back as scan_plex (shared `matchItemsWithoutAsin`)
 
 ## Job Payloads
 
@@ -155,11 +172,9 @@ queue.on('stalled', async (job) => {
 
 ## Concurrency Settings
 
-- **search_indexers:** 3 (avoid overwhelming indexers)
-- **monitor_download:** 5 (lightweight API calls)
-- **organize_files:** 2 (I/O intensive)
-- **scan_plex:** 1 (only one scan at a time)
-- **match_plex:** 3 (CPU bound)
+- **Registered with 2:** search_indexers, download_torrent, monitor_download, organize_files, send_notification, search_ebook, start_direct_download, monitor_direct_download
+- **Registered with 1:** scan_plex, plex_library_scan, plex_recently_added_check, monitor_rss_feeds, audible_refresh, retry_missing_torrents, retry_failed_imports, find_missing_ebooks, cleanup_seeded_torrents, sync_reading_shelves, check_watched_lists
+- **Not a per-type limit:** Bull 4.16.5 sums the concurrency of every named processor on the queue and any free worker takes any job type, so two jobs of one type can overlap (e.g. two scans; ASIN writes are idempotent per `plexGuid`)
 
 ## Fixed Issues ✅
 

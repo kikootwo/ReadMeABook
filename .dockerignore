@@ -59,8 +59,17 @@ docker-compose.yml
 .dockerignore
 
 # Data directories (will be mounted as volumes)
+bookdrop
+cache
 config
 downloads
 media
 pgdata
 redisdata
+redis
+
+# Local tooling
+.claude
+
+# E2E harness (never part of the app image)
+e2e/

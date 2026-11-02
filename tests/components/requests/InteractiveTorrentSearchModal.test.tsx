@@ -142,7 +142,7 @@ describe('InteractiveTorrentSearchModal', () => {
     );
 
     await waitFor(() => {
-      expect(searchByAudiobookMock).toHaveBeenCalledWith('Test Book', 'Test Author', 'ASIN-1');
+      expect(searchByAudiobookMock).toHaveBeenCalledWith('Test Book', 'Test Author', 'ASIN-1', false);
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Get' }));
@@ -178,6 +178,32 @@ describe('InteractiveTorrentSearchModal', () => {
 
     await waitFor(() => {
       expect(searchByRequestMock).toHaveBeenNthCalledWith(2, 'req-456', 'Custom Title');
+    });
+  });
+
+  it('sends a title edited in a search with no request as given (#316)', async () => {
+    searchByAudiobookMock.mockResolvedValue([]);
+    const { InteractiveTorrentSearchModal } = await import('@/components/requests/InteractiveTorrentSearchModal');
+
+    render(
+      <InteractiveTorrentSearchModal
+        isOpen={true}
+        onClose={vi.fn()}
+        audiobook={{ title: 'Original Title', author: 'Author' }}
+        fullAudiobook={{ asin: 'ASIN-2', title: 'Original Title', author: 'Author' } as never}
+      />
+    );
+
+    await waitFor(() => {
+      expect(searchByAudiobookMock).toHaveBeenCalledWith('Original Title', 'Author', 'ASIN-2', false);
+    });
+
+    const input = screen.getByPlaceholderText('Search title...');
+    fireEvent.change(input, { target: { value: 'Custom Title' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() => {
+      expect(searchByAudiobookMock).toHaveBeenNthCalledWith(2, 'Custom Title', 'Author', 'ASIN-2', true);
     });
   });
 

@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAccessToken } from '@/lib/utils/jwt';
+import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
 
@@ -18,56 +18,49 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    // Verify admin auth
-    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  return requireAuth(request, async (req: AuthenticatedRequest) => {
+    return requireAdmin(req, async () => {
+      try {
+        // Await params in Next.js 15+
+        const { id } = await params;
 
-    const payload = verifyAccessToken(token);
-    if (!payload || payload.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden - Admin access required' }, { status: 403 });
-    }
+        logger.debug(`Fetching status for job ID: ${id}`);
 
-    // Await params in Next.js 15+
-    const { id } = await params;
+        const jobQueueService = getJobQueueService();
+        const job = await jobQueueService.getJob(id);
 
-    logger.debug(`Fetching status for job ID: ${id}`);
+        if (!job) {
+          logger.debug(`Job not found: ${id}`);
+          return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+        }
 
-    const jobQueueService = getJobQueueService();
-    const job = await jobQueueService.getJob(id);
+        logger.debug(`Job ${id} status: ${job.status}, type: ${job.type}`);
 
-    if (!job) {
-      logger.debug(`Job not found: ${id}`);
-      return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-    }
-
-    logger.debug(`Job ${id} status: ${job.status}, type: ${job.type}`);
-
-    return NextResponse.json({
-      success: true,
-      job: {
-        id: job.id,
-        type: job.type,
-        status: job.status,
-        createdAt: job.createdAt,
-        startedAt: job.startedAt,
-        completedAt: job.completedAt,
-        result: job.result,
-        errorMessage: job.errorMessage,
-        attempts: job.attempts,
-        maxAttempts: job.maxAttempts,
-      },
+        return NextResponse.json({
+          success: true,
+          job: {
+            id: job.id,
+            type: job.type,
+            status: job.status,
+            createdAt: job.createdAt,
+            startedAt: job.startedAt,
+            completedAt: job.completedAt,
+            result: job.result,
+            errorMessage: job.errorMessage,
+            attempts: job.attempts,
+            maxAttempts: job.maxAttempts,
+          },
+        });
+      } catch (error) {
+        logger.error('Failed to get job status', { error: error instanceof Error ? error.message : String(error) });
+        return NextResponse.json(
+          {
+            error: 'InternalError',
+            message: error instanceof Error ? error.message : 'Failed to get job status',
+          },
+          { status: 500 }
+        );
+      }
     });
-  } catch (error) {
-    logger.error('Failed to get job status', { error: error instanceof Error ? error.message : String(error) });
-    return NextResponse.json(
-      {
-        error: 'InternalError',
-        message: error instanceof Error ? error.message : 'Failed to get job status',
-      },
-      { status: 500 }
-    );
-  }
+  });
 }

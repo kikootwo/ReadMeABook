@@ -9,7 +9,9 @@ import { getNotificationService, getRegisteredProviderTypes, NotificationPayload
 import { NOTIFICATION_EVENT_KEYS, type NotificationEvent } from '@/lib/constants/notification-events';
 import { RMABLogger } from '@/lib/utils/logger';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { prisma } from '@/lib/db';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Notifications.Test');
 
@@ -17,7 +19,7 @@ const logger = RMABLogger.create('API.Admin.Notifications.Test');
 const TestNotificationSchema = z.object({
   backendId: z.string().optional(),
   type: z.string().refine((val) => getRegisteredProviderTypes().includes(val), { message: 'Unsupported notification provider type' }).optional(),
-  config: z.record(z.any()).optional(),
+  config: z.record(z.string(), z.any()).optional(),
   // When true, send one sample notification for every event type (for easy inspection of formatting).
   allEvents: z.boolean().optional(),
 });
@@ -70,7 +72,9 @@ export async function POST(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const body = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         const parsed = TestNotificationSchema.parse(body);
 
         let type: string;
@@ -94,9 +98,15 @@ export async function POST(request: NextRequest) {
           type = backend.type;
           encryptedConfig = backend.config; // Already encrypted in DB
         } else if (parsed.type && parsed.config) {
-          // Test new config before saving
+          // Test new config before saving. Prepared like a save: credentials moved out of the
+          // URL, and every supplied secret encrypted as text, so a value that looks like our
+          // ciphertext is never decrypted and sent to the given server
           type = parsed.type;
-          encryptedConfig = notificationService.encryptConfig(type, parsed.config);
+          const prepared = notificationService.prepareSubmittedConfig(type, parsed.config);
+          if (!prepared.ok) {
+            return NextResponse.json({ error: 'ValidationError', message: prepared.error }, { status: 400 });
+          }
+          encryptedConfig = prepared.config;
         } else {
           return NextResponse.json(
             { error: 'ValidationError', message: 'Must provide either backendId or type+config' },
@@ -153,14 +163,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, message });
       } catch (error) {
         logger.error('Failed to test notification', {
-          error: error instanceof Error ? error.message : String(error),
+          error: errorForLog(error),
         });
 
         if (error instanceof z.ZodError) {
           return NextResponse.json(
             {
               error: 'ValidationError',
-              details: error.errors,
+              details: zodIssueDetails(error),
             },
             { status: 400 }
           );

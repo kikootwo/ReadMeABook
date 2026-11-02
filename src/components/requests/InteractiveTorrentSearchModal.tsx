@@ -52,7 +52,7 @@ interface InteractiveTorrentSearchModalProps {
   };
   customSearchTerms?: string | null; // Optional - admin-set custom search terms override
   fullAudiobook?: Audiobook; // Optional - only provided when called from details modal
-  onSuccess?: () => void;
+  onSuccess?: (outcome?: { needsApproval?: boolean }) => void; // needsApproval: an ebook pick waits for an admin
   searchMode?: 'audiobook' | 'ebook'; // Search mode - defaults to audiobook
   replaceIssueId?: string; // Optional - when set, confirm handler calls replace endpoint instead
   onConfirm?: (torrent: TorrentResult) => Promise<void>; // Optional - overrides default confirm handler
@@ -269,7 +269,7 @@ export function InteractiveTorrentSearchModal({
         data = await searchByRequestId(requestId, customTitle);
       } else {
         const audiobookAsin = fullAudiobook?.asin || asin;
-        data = await searchByAudiobook(searchTitle, audiobook.author, audiobookAsin);
+        data = await searchByAudiobook(searchTitle, audiobook.author, audiobookAsin, searchTitle !== audiobook.title);
       }
       setResults(data || []);
     } catch (err) {
@@ -287,6 +287,7 @@ export function InteractiveTorrentSearchModal({
 
   const handleConfirmDownload = async () => {
     if (!confirmTorrent) return;
+    let outcome: { needsApproval?: boolean } | undefined;
     try {
       if (onConfirm) {
         // Custom confirm handler (e.g., admin approve-with-torrent flow)
@@ -296,20 +297,22 @@ export function InteractiveTorrentSearchModal({
         // Reported issue replacement flow
         await replaceWithTorrent(replaceIssueId, confirmTorrent);
       } else if (isEbookMode) {
+        let result: { needsApproval?: boolean } | undefined;
         if (useAsinMode && asin) {
-          await selectEbookByAsin(asin, confirmTorrent);
+          result = await selectEbookByAsin(asin, confirmTorrent);
         } else if (requestId) {
-          await selectEbook(requestId, confirmTorrent);
+          result = await selectEbook(requestId, confirmTorrent);
         } else {
           throw new Error('Request ID or ASIN required for ebook selection');
         }
+        outcome = { needsApproval: result?.needsApproval === true };
       } else if (hasRequestId) {
         await selectTorrent(requestId, confirmTorrent);
       } else {
         if (!fullAudiobook) throw new Error('Audiobook data required to create request');
         await requestWithTorrent(fullAudiobook, confirmTorrent);
       }
-      onSuccess?.();
+      onSuccess?.(outcome);
       setConfirmTorrent(null);
       onClose();
     } catch (err) {

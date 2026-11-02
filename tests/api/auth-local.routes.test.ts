@@ -118,6 +118,37 @@ describe('Local auth routes', () => {
     expect(blocked.status).toBe(429);
     expect(payload.error).toMatch(/Too many registration attempts/);
   });
+
+  describe('request size limit (64 KB)', () => {
+    const bigBody = () => JSON.stringify({ username: 'user', password: 'p'.repeat(100 * 1024) });
+    const realRequest = async (path: string, ip: string) => {
+      const { NextRequest } = await import('next/server');
+      return new NextRequest(`http://localhost${path}`, {
+        method: 'POST',
+        body: bigBody(),
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
+      });
+    };
+
+    it('returns 413 for an oversized login body without checking credentials', async () => {
+      const { POST } = await import('@/app/api/auth/local/login/route');
+
+      const response = await POST(await realRequest('/api/auth/local/login', 'ip-3'));
+
+      expect(response.status).toBe(413);
+      expect(await response.json()).toEqual({ error: 'PayloadTooLarge', message: 'Request body is larger than 64 KB' });
+      expect(localAuthProviderMock.handleCallback).not.toHaveBeenCalled();
+    });
+
+    it('returns 413 for an oversized registration body without registering', async () => {
+      const { POST } = await import('@/app/api/auth/register/route');
+
+      const response = await POST(await realRequest('/api/auth/register', 'ip-4'));
+
+      expect(response.status).toBe(413);
+      expect(localAuthProviderMock.register).not.toHaveBeenCalled();
+    });
+  });
 });
 
 

@@ -9,9 +9,22 @@ import { XMLParser } from 'fast-xml-parser';
 import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
 import { TorrentResult } from '../utils/ranking-algorithm';
 import { RMABLogger } from '../utils/logger';
+import { urlForLog } from '../utils/prowlarr-url';
+import { fallbackTitles, hasUsableResult, searchQueries } from './prowlarr-query-variations';
 
 // Module-level logger
 const logger = RMABLogger.create('Prowlarr');
+
+/** A raw Prowlarr result for debug logs: URL fields reduced to scheme + host (they carry the API key). */
+function loggableResult(result: unknown): Record<string, unknown> {
+  if (!result || typeof result !== 'object') return { value: result };
+  const copy: Record<string, unknown> = { ...(result as Record<string, unknown>) };
+  for (const field of ['downloadUrl', 'magnetUrl', 'guid', 'infoUrl']) {
+    const value = copy[field];
+    if (typeof value === 'string' && /^(https?:|magnet:)/i.test(value)) copy[field] = urlForLog(value);
+  }
+  return copy;
+}
 
 export interface SearchFilters {
   category?: number; // Deprecated: use categories instead
@@ -19,6 +32,11 @@ export interface SearchFilters {
   minSeeders?: number;
   maxResults?: number;
   indexerIds?: number[];
+}
+
+export interface SearchVariationOptions {
+  /** Custom search terms (admin's, or typed in interactive search): sent as given, no fallback pass */
+  exactTitle?: boolean;
 }
 
 export interface IndexerCategory {
@@ -167,7 +185,7 @@ export class ProwlarrService {
 
       // Debug: Log first raw result full structure (automatically filtered by LOG_LEVEL)
       if (response.data.length > 0) {
-        logger.debug('Sample raw result from API', response.data[0]);
+        logger.debug('Sample raw result from API', loggableResult(response.data[0]));
       }
 
       // Transform Prowlarr results to our format
@@ -176,7 +194,7 @@ export class ProwlarrService {
           const transformed = this.transformResult(result);
           if (!transformed) {
             // Log the full raw result that was skipped (automatically filtered by LOG_LEVEL)
-            logger.debug(`Result #${index + 1} was skipped`, { rawData: result });
+            logger.debug(`Result #${index + 1} was skipped`, { rawData: loggableResult(result) });
           }
           return transformed;
         })
@@ -212,31 +230,50 @@ export class ProwlarrService {
   }
 
   /**
-   * Search with multiple query variations to increase coverage
-   * Fires 2 queries per call: "title author" and "title", then deduplicates by guid
+   * Search with query variations, then deduplicate by guid.
+   * First pass: "title author" then "title" (blank author: "title" once; no query is ever empty).
+   * Fallback pass (#316), only when the first pass found nothing that names the title: the title
+   * without punctuation inside its words, then without its subtitle, each as "variation author"
+   * then "variation", stopping at the first query that names the title. Skipped for an exact
+   * title (custom search terms) and when every first-pass query failed.
    */
   async searchWithVariations(
     title: string,
     author: string,
-    filters?: SearchFilters
+    filters?: SearchFilters,
+    options: SearchVariationOptions = {}
   ): Promise<TorrentResult[]> {
-    const queries = [
-      `${title} ${author}`,
-      title,
-    ];
-
-    logger.info(`Searching with ${queries.length} query variations`, { queries });
-
     const allResults: TorrentResult[] = [];
+    const sent: string[] = [];
+    let succeeded = 0;
 
-    for (const query of queries) {
+    const run = async (query: string): Promise<TorrentResult[]> => {
+      sent.push(query);
       try {
         const results = await this.search(query, filters);
         logger.info(`Query "${query}" returned ${results.length} results`);
+        succeeded++;
         allResults.push(...results);
+        return results;
       } catch (error) {
         logger.error(`Query "${query}" failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
         // Continue with other queries even if one fails
+        return [];
+      }
+    };
+
+    const queries = searchQueries(title, author);
+    logger.info(`Searching with ${queries.length} query variations`, { queries });
+    for (const query of queries) await run(query);
+
+    if (!options.exactTitle && succeeded > 0 && !hasUsableResult(title, allResults)) {
+      const fallback: string[] = [];
+      for (const variation of fallbackTitles(title)) fallback.push(...searchQueries(variation, author, [...sent, ...fallback]));
+      if (fallback.length > 0) {
+        logger.info('First pass found nothing that names the title; trying fallback variations', { queries: fallback });
+      }
+      for (const query of fallback) {
+        if (hasUsableResult(title, await run(query))) break;
       }
     }
 
@@ -329,6 +366,10 @@ export class ProwlarrService {
         ignoreAttributes: false,
         attributeNamePrefix: '@_',
         allowBooleanAttributes: true,
+        // Decode numeric references (&#39;, &#x27;, &#233;) plus a short list of named ones
+        // (&nbsp;, dashes, curly quotes, &hellip;, currency, &copy;/&reg;/&trade;) in titles/authors.
+        // Other named entities (e.g. &eacute;) stay as-is. fast-xml-parser 5.6+ needs this for numeric ones.
+        htmlEntities: true,
       });
 
       const parsed = parser.parse(response.data);
@@ -448,7 +489,7 @@ export class ProwlarrService {
       // Debug: Log first few results to see their protocols
       if (results.length > 0 && results.length <= 5) {
         results.forEach((r, i) => {
-          logger.info(` Result ${i + 1}: protocol="${r.protocol || 'undefined'}", url="${r.downloadUrl.substring(0, 80)}..."`);
+          logger.info(` Result ${i + 1}: protocol="${r.protocol || 'undefined'}", url="${urlForLog(r.downloadUrl)}"`);
         });
       } else if (results.length > 5) {
         logger.info(` First 3 results:`);
@@ -660,13 +701,8 @@ export function invalidateProwlarrService(): void {
 
 export async function getProwlarrService(): Promise<ProwlarrService> {
   if (!prowlarrService) {
-    // Get configuration from database
-    const { getConfigService } = await import('@/lib/services/config.service');
-    const configService = getConfigService();
-
-    const config = await configService.getMany(['prowlarr_url', 'prowlarr_api_key']);
-    const baseUrl = config.prowlarr_url || process.env.PROWLARR_URL || 'http://prowlarr:9696';
-    const apiKey = config.prowlarr_api_key || process.env.PROWLARR_API_KEY;
+    const { getProwlarrConnection } = await import('./prowlarr-connection');
+    const { baseUrl, apiKey } = await getProwlarrConnection();
 
     if (!apiKey) {
       throw new Error('Prowlarr API key not configured');

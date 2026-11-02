@@ -8,6 +8,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import { createPrismaMock } from '../helpers/prisma';
+import { generateFilesHash } from '@/lib/utils/files-hash';
 
 const prismaMock = createPrismaMock();
 const configServiceMock = {
@@ -48,6 +49,14 @@ describe('deleteRequest stored media path', () => {
     prismaMock.request.update.mockResolvedValue({});
     prismaMock.audiobook.update.mockResolvedValue({});
     prismaMock.plexLibrary.findMany.mockResolvedValue([]);
+    prismaMock.plexLibrary.deleteMany.mockResolvedValue({ count: 0 });
+    prismaMock.audiobook.findMany.mockResolvedValue([]);
+    // The library delete guard reads its roots straight from the database
+    prismaMock.configuration.findUnique.mockImplementation(async ({ where }: { where: { key: string } }) => {
+      if (where.key === 'media_dir') return { key: 'media_dir', value: tempRoot, encrypted: false };
+      if (where.key === 'download_dir') return { key: 'download_dir', value: path.join(tempRoot, '..', `${path.basename(tempRoot)}-downloads`), encrypted: false };
+      return null;
+    });
   });
 
   afterEach(async () => {
@@ -81,6 +90,7 @@ describe('deleteRequest stored media path', () => {
         absItemId: null,
         filePath: storedPath,
         fileFormat: 'm4b',
+        filesHash: generateFilesHash(['book.m4b']),
       },
       downloadHistory: [],
     });
@@ -115,6 +125,7 @@ describe('deleteRequest stored media path', () => {
         absItemId: null,
         filePath: null,
         fileFormat: null,
+        filesHash: null,
       },
       downloadHistory: [],
     });

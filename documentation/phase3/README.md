@@ -16,7 +16,7 @@ Request → search_indexers → rank_results → download_torrent
 1. **search_indexers** - Search Prowlarr for torrents
 2. **rank_results** - Apply ranking algorithm, select best
 3. **download_torrent** - Add to download client (qBittorrent/Transmission/SABnzbd)
-4. **monitor_download** - Poll progress (10s intervals)
+4. **monitor_download** - Poll progress (10s intervals); stops polling a cancelled/deleted request. Search, download, monitor and import skip a cancelled request at their guarded writes (list: [jobs.md](../backend/services/jobs.md)); the download stays in the client
 5. **process_audiobook** - Organize files to media directory
 6. **update_plex** - Trigger scan, fuzzy match
 

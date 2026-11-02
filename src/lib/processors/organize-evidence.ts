@@ -1,0 +1,213 @@
+/**
+ * Component: Organize Import Evidence (what reached the library, and what the request should say)
+ * Documentation: documentation/phase3/file-organization.md
+ */
+
+import * as path from 'path';
+import type { RMABLogger } from '../utils/logger';
+import { getConfigService } from '../services/config.service';
+import { planDownloadCleanup } from './organize-cleanup-guard';
+import { ebookInventory, type ImportEvidence, type ImportInventory, type PlacementRecord } from '../utils/import-inventory';
+import type { EbookOrganizationResult, OrganizationResult } from '../utils/file-organizer';
+import { summarizePermissionWarnings } from '../utils/organize-copy';
+
+/** What download cleanup would do for this job: remove an indexer download, a direct download file, nothing, or unknown (lookup failed). */
+export type DownloadCleanupKind = 'indexer' | 'direct' | 'none' | 'unknown';
+
+export async function downloadCleanupKind(
+  requestId: string,
+  downloadPath: string,
+  downloadHistoryId: string | undefined
+): Promise<DownloadCleanupKind> {
+  try {
+    const plan = await planDownloadCleanup(requestId, downloadPath, downloadHistoryId, () =>
+      getConfigService().get('prowlarr_indexers')
+    );
+    return plan?.kind ?? 'none';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** deleteMayFollow for an already-looked-up cleanup kind. */
+export function deleteMayFollowFor(kind: DownloadCleanupKind, cleanupSource: boolean | undefined): boolean {
+  // Unknown: compare, so a later delete is never based on an unchecked file
+  return cleanupSource === true || kind !== 'none';
+}
+
+/**
+ * True when this job may delete source files after organizing (manual
+ * cleanupSource, or a download that cleanup would remove). Only then are
+ * same-size existing library files compared byte-for-byte.
+ */
+export async function deleteMayFollow(
+  requestId: string,
+  downloadPath: string,
+  downloadHistoryId: string | undefined,
+  cleanupSource: boolean | undefined
+): Promise<boolean> {
+  if (cleanupSource === true) {
+    return true;
+  }
+  return deleteMayFollowFor(await downloadCleanupKind(requestId, downloadPath, downloadHistoryId), cleanupSource);
+}
+
+const MISSING_INVENTORY: ImportInventory = { kind: 'audio', files: [], complete: false };
+
+export function audioEvidence(result: OrganizationResult): ImportEvidence {
+  return {
+    records: result.records ?? [],
+    coverRecord: result.coverRecord,
+    inventory: result.inventory ?? MISSING_INVENTORY,
+    permissionWarnings: result.permissionWarnings,
+  };
+}
+
+/** Ebook evidence, keyed on the original file (the organizer reads a temp copy when the Kindle fix ran). */
+export async function ebookEvidence(
+  result: EbookOrganizationResult,
+  importedFile: string | undefined,
+  downloadPath: string
+): Promise<ImportEvidence> {
+  return {
+    records: result.record && importedFile ? [{ ...result.record, source: importedFile }] : [],
+    inventory: await ebookInventory(downloadPath),
+    permissionWarnings: result.permissionWarnings,
+  };
+}
+
+export interface ImportStatusContext {
+  /** Download cleanup would remove the whole download folder (an indexer download with cleanup on). */
+  folderRemovalPlanned?: boolean;
+}
+
+/**
+ * Short message for the request when the import was not complete, or null.
+ * Examples: "1 of 3 files not imported; source files kept",
+ * "already in the library with different content; source kept",
+ * "merged file kept; sources kept",
+ * "1 file imported without metadata tags (the length could not be checked)",
+ * "download kept: it holds several ebook formats and only one was imported; ...". A note is appended when file
+ * permissions could not be applied ("permissions could not be applied to 2 files").
+ */
+export function importStatusMessage(evidence: ImportEvidence, context: ImportStatusContext = {}): string | null {
+  const message = outcomeMessage(evidence, context);
+  const refused = evidence.permissionWarnings?.length ?? 0;
+  if (refused === 0) return message;
+  const note = `permissions could not be applied to ${refused} file${refused === 1 ? '' : 's'}`;
+  return message ? `${message}; ${note}` : note;
+}
+
+/** Placement, tagging and kept-download message, without the permissions note. */
+function outcomeMessage(evidence: ImportEvidence, context: ImportStatusContext): string | null {
+  const parts = [placementStatusMessage(evidence), tagsMessage(evidence)].filter((p): p is string => p !== null);
+  if (parts.length > 0) {
+    return parts.join('; ');
+  }
+  return severalEbooksMessage(evidence, context);
+}
+
+function placementStatusMessage(evidence: ImportEvidence): string | null {
+  const total = evidence.records.length;
+  const failed = evidence.records.filter((r) => r.status === 'failed');
+  const differs = evidence.records.filter((r) => r.status === 'differs');
+  const unverifiedCopies = evidence.records.filter((r) => r.status === 'copied' && !r.verified);
+  const incomplete = !evidence.inventory.complete && evidence.inventory.files.length > 0;
+
+  if (total > 0 && differs.length === total) {
+    return 'already in the library with different content; source kept';
+  }
+  if (failed.length === 0 && differs.length === 0 && unverifiedCopies.length > 0 && !incomplete) {
+    return 'merged file kept; sources kept';
+  }
+
+  const parts: string[] = [];
+  if (failed.length > 0) parts.push(`${failed.length} of ${total} files not imported`);
+  if (differs.length > 0) parts.push(`${differs.length} of ${total} files already in the library with different content`);
+  if (unverifiedCopies.length > 0) parts.push('merged file kept');
+  if (incomplete) parts.push('source folder could not be fully read');
+  return parts.length > 0 ? `${parts.join('; ')}; source files kept` : null;
+}
+
+/**
+ * The library got the untagged original for some files (the tagged file failed
+ * its length check or could not be saved). Counted per library file, so a
+ * merged book is one file; every distinct reason is listed.
+ */
+function tagsMessage(evidence: ImportEvidence): string | null {
+  const untagged = evidence.records.filter((r) => r.tagsDropped);
+  if (untagged.length === 0) return null;
+  const files = new Set(untagged.map((r) => r.target)).size;
+  const total = new Set(evidence.records.map((r) => r.target)).size;
+  const reasons = [...new Set(untagged.map((r) => r.tagsDropped))].join('; ');
+  if (total === 1) return `the file was imported without metadata tags (${reasons})`;
+  if (files === 1) return `1 file imported without metadata tags (${reasons})`;
+  return `${files} of ${total} files imported without metadata tags (${reasons})`;
+}
+
+/**
+ * An ebook import that is complete in itself, from a download that cleanup
+ * would remove, but whose folder holds more ebook files than were imported:
+ * the folder is kept (rewalkBlocker), and the request says why.
+ */
+function severalEbooksMessage(evidence: ImportEvidence, context: ImportStatusContext): string | null {
+  const { inventory } = evidence;
+  if (!context.folderRemovalPlanned || inventory.kind !== 'ebook' || !inventory.complete) return null;
+  const imported = evidence.records.filter((r) => r.verified).length;
+  if (imported === 0 || inventory.files.length <= imported) return null;
+  const formats = new Set(inventory.files.map((f) => path.extname(f).toLowerCase()));
+  const holds = formats.size > 1 ? 'several ebook formats' : 'several ebook files';
+  return `download kept: it holds ${holds} and only one was imported; remove it from the download client once you no longer need the others`;
+}
+
+/** Log detail for the records behind importStatusMessage. */
+export function describeUnverified(records: PlacementRecord[]): string {
+  return records
+    .filter((r) => (!r.verified && r.status !== 'present') || r.tagsDropped)
+    .map((r) => `${path.basename(r.source)} (${r.status}${r.reason ? `: ${r.reason}` : ''})`)
+    .join(', ');
+}
+
+/** The request message for this import (or null), logged with the files behind it. */
+export function reportImportStatus(evidence: ImportEvidence, logger: RMABLogger, context: ImportStatusContext = {}): string | null {
+  const message = importStatusMessage(evidence, context);
+  const outcome = outcomeMessage(evidence, context);
+  if (outcome) {
+    const detail = describeUnverified(evidence.records);
+    logger.warn(detail ? `${outcome}: ${detail}` : outcome);
+  }
+  // One line per job, however many files were affected
+  const permissions = summarizePermissionWarnings(evidence.permissionWarnings);
+  if (permissions) logger.warn(permissions);
+  return message;
+}
+
+/**
+ * Split organized audio into this import's files and files the library already
+ * held with different content (`differs` records): those were not written by
+ * this import, so they are neither coerced nor part of filesHash.
+ */
+export function splitForeignAudio(
+  audioFiles: string[],
+  records: PlacementRecord[] | undefined
+): { owned: string[]; foreign: string[] } {
+  const foreignTargets = new Set(
+    (records ?? []).filter((r) => r.status === 'differs').map((r) => path.resolve(r.target))
+  );
+  const owned: string[] = [];
+  const foreign: string[] = [];
+  for (const file of audioFiles) (foreignTargets.has(path.resolve(file)) ? foreign : owned).push(file);
+  return { owned, foreign };
+}
+
+/** Audiobook.fileFormat for organized audio: the extension, or the most common one (first on a tie); null if none. */
+export function audioFileFormat(audioFiles: string[]): string | null {
+  const counts = new Map<string, number>();
+  for (const file of audioFiles) {
+    const ext = path.extname(file).toLowerCase().slice(1);
+    if (ext) counts.set(ext, (counts.get(ext) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  for (const [ext, count] of counts) if (best === null || count > counts.get(best)!) best = ext;
+  return best;
+}

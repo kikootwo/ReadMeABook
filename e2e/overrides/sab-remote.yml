@@ -1,0 +1,12 @@
+# Component: E2E compose override "sab-remote" (#242 case 3B): fake SABnzbd sees downloads at /sab-remote
+# Documentation: documentation/testing/e2e-harness.md
+# Use: npm run e2e -- ... --overrides sab-remote   (untainted runs only; pair with remote path mapping)
+services:
+  fake-arr:
+    environment:
+      DOWNLOADS_DIR: /sab-remote
+    volumes:
+      - type: volume
+        source: downloads
+        target: /sab-remote
+        volume: { nocopy: true }

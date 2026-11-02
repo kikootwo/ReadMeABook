@@ -8,6 +8,7 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { generateApiToken } from '@/lib/utils/api-token';
+import { getRegistrationRefusal } from '@/lib/services/auth/local-account-status';
 
 const logger = RMABLogger.create('API.Admin.Users.LoginToken');
 
@@ -22,7 +23,7 @@ export async function POST(
 
         const targetUser = await prisma.user.findUnique({
           where: { id },
-          select: { plexUsername: true, deletedAt: true },
+          select: { plexUsername: true, deletedAt: true, registrationStatus: true },
         });
 
         if (!targetUser) {
@@ -32,6 +33,13 @@ export async function POST(
         if (targetUser.deletedAt) {
           return NextResponse.json(
             { error: 'Cannot generate token for deleted user' },
+            { status: 403 }
+          );
+        }
+
+        if (getRegistrationRefusal(targetUser.registrationStatus)) {
+          return NextResponse.json(
+            { error: 'Cannot generate token for an account that is not approved' },
             { status: 403 }
           );
         }

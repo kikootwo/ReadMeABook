@@ -17,7 +17,8 @@ import { groupIndexersByCategories } from '@/lib/utils/indexer-grouping';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { RMABLogger } from '@/lib/utils/logger';
-import { resolveInteractiveSearchAccess } from '@/lib/utils/permissions';
+import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
+import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { getLanguageForRegion } from '@/lib/constants/language-config';
 import type { AudibleRegion } from '@/lib/types/audible';
 import {
@@ -25,6 +26,7 @@ import {
   searchByTitle,
   getSlowDownloadLinks,
 } from '@/lib/services/ebook-scraper';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Audiobooks.InteractiveSearchEbook');
 
@@ -88,20 +90,12 @@ export async function POST(
       const { asin } = await params;
 
       // Check interactive search access permission
-      if (req.user) {
-        const callingUser = await prisma.user.findUnique({
-          where: { id: req.user.id },
-          select: { role: true, interactiveSearchAccess: true },
-        });
-        if (!callingUser || !(await resolveInteractiveSearchAccess(callingUser.role, callingUser.interactiveSearchAccess))) {
-          return NextResponse.json(
-            { error: 'Forbidden', message: 'You do not have interactive search access. Contact your admin to enable this permission.' },
-            { status: 403 }
-          );
-        }
-      }
+      const accessDenied = await denyWithoutInteractiveSearchAccess(req.user?.id);
+      if (accessDenied) return accessDenied;
 
-      const body = await request.json().catch(() => ({}));
+      const bodyResult = await readJsonBody(request, { fallback: {} });
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const customTitle = body.customTitle as string | undefined;
 
       if (!asin || asin.length !== 10) {
@@ -271,7 +265,8 @@ export async function POST(
           searchIndexersForInteractive(
             searchTitle,
             audiobook.author,
-            format
+            format,
+            Boolean(customTitle)
           ).catch((err) => {
             logger.error(`Indexer search failed: ${err.message}`);
             return null;
@@ -305,7 +300,7 @@ export async function POST(
       logger.info(`Found ${combinedResults.length} total ebook results`);
 
       return NextResponse.json({
-        results: combinedResults,
+        results: await stripProwlarrKeyFromResults(combinedResults),
         searchTitle,
         preferredFormat: format,
         audiobookId: audiobook.id,
@@ -408,7 +403,8 @@ async function searchAnnasArchiveForInteractive(
 async function searchIndexersForInteractive(
   title: string,
   author: string,
-  preferredFormat: string
+  preferredFormat: string,
+  exactTitle: boolean // a custom title: sent as given, no fallback queries (#316)
 ): Promise<EbookSearchResult[]> {
   const configService = getConfigService();
 
@@ -452,12 +448,13 @@ async function searchIndexersForInteractive(
 
   for (const group of groups) {
     try {
-      const groupResults = await prowlarr.search(title, {
+      // "title author" then "title", deduped (same as audiobook search)
+      const groupResults = await prowlarr.searchWithVariations(title, author, {
         categories: group.categories,
         indexerIds: group.indexerIds,
         minSeeders: 0,
         maxResults: 100,
-      });
+      }, { exactTitle });
       allResults.push(...groupResults);
     } catch (error) {
       logger.error(`Group search failed: ${error instanceof Error ? error.message : 'Unknown'}`);
@@ -483,6 +480,7 @@ async function searchIndexersForInteractive(
     indexerPriorities,
     flagConfigs,
     requireAuthor: false,
+    enforceSizeCap: false, // List oversized ebooks; the user decides (#323)
     stopWords: rankLangConfig.stopWords,
     characterReplacements: rankLangConfig.characterReplacements,
   });

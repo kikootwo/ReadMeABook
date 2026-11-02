@@ -22,6 +22,12 @@ vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/services/job-queue.service', () => ({
   getJobQueueService: () => jobQueueMock,
 }));
+// Release-pick validation passes picks through here; its rules are covered at the approve route
+// (tests/api/download-selection-guard.routes.test.ts), which runs through this service.
+vi.mock('@/lib/services/download-selection-guard', () => ({
+  guardTorrentSelection: vi.fn(async (pick: unknown) => ({ ok: true, value: pick })),
+  guardEbookSelection: vi.fn(async (pick: unknown) => ({ ok: true, value: pick })),
+}));
 vi.mock('@/lib/utils/logger', () => ({
   RMABLogger: {
     create: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),

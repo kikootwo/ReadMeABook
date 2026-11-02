@@ -4,6 +4,15 @@
  */
 
 import { compareTwoStrings } from 'string-similarity';
+import { matchesByInitials } from './author-initials';
+import {
+  apostropheEndingWords, foldForMatching, FULLWIDTH_RE, fromFullwidth, hasNonLatinLetter, hasUnspacedScript, isWordInTitle,
+  keepUnrequestedApostrophes, normalizeForMatching, splitSubtitle,
+} from './match-normalize';
+import {
+  authorAppears, colonSubtitleAgrees, dashNamesOtherSubtitle, foldNumberWord, foldReleaseWords, isAuthorPresent, missingRequiredNumber,
+  shortTitleStandsAlone, shortTitleWord, splitPositionNumbers, volumeConflict,
+} from './match-gates';
 
 export interface TorrentResult {
   indexer: string;
@@ -29,6 +38,8 @@ export interface AudiobookRequest {
   author: string;
   narrator?: string;
   durationMinutes?: number;
+  series?: string | null;      // Catalog series name; automatic search only (G4c, #330)
+  seriesPart?: string | null;  // Catalog series position ("3", "2.5"); automatic search only (G4c, #330)
 }
 
 export interface IndexerFlagConfig {
@@ -42,7 +53,11 @@ export interface RankTorrentsOptions {
   requireAuthor?: boolean;                   // Enforce author presence check (default: true)
   stopWords?: string[];                      // Language-specific stop words for matching
   characterReplacements?: Record<string, string>;  // Language-specific char replacements (e.g. ß→ss)
+  minMBPerMinute?: number;                   // Size floor when runtime is known (opt-in; automatic search only)
 }
+
+/** Size floor for automatic search, about 21 kbps: drops a single file of a multi-file post (#311) */
+export const AUTO_SEARCH_MIN_MB_PER_MINUTE = 0.15;
 
 export interface EbookTorrentRequest {
   title: string;
@@ -56,7 +71,11 @@ export interface RankEbookTorrentsOptions {
   requireAuthor?: boolean;                   // Enforce author presence check (default: true)
   stopWords?: string[];                      // Language-specific stop words for matching
   characterReplacements?: Record<string, string>;  // Language-specific char replacements (e.g. ß→ss)
+  enforceSizeCap?: boolean;                  // Skip results over EBOOK_MAX_SIZE_MB (default: true; interactive passes false)
 }
+
+/** Ebook size cap: automatic search skips larger results; interactive search lists them (#323) */
+export const EBOOK_MAX_SIZE_MB = 20;
 
 export interface BonusModifier {
   type: 'indexer_priority' | 'indexer_flag' | 'custom';
@@ -120,11 +139,17 @@ export class RankingAlgorithm {
       requireAuthor = true,  // Safe default: require author in automatic mode
       stopWords,
       characterReplacements,
+      minMBPerMinute,
     } = options;
-    // Filter out files < 20 MB (likely ebooks/samples)
+    // Filter out files < 20 MB (likely ebooks/samples), and, when a floor is set and the
+    // runtime is known, results too small for the runtime (one file of a multi-file post)
+    const runtime = audiobook.durationMinutes;
+    const floorMB = minMBPerMinute !== undefined && runtime !== undefined && runtime > 0
+      ? minMBPerMinute * runtime
+      : 0;
     const filteredTorrents = torrents.filter((torrent) => {
       const sizeMB = torrent.size / (1024 * 1024);
-      return sizeMB >= 20;
+      return sizeMB >= 20 && sizeMB >= floorMB;
     });
 
     const ranked = filteredTorrents.map((torrent) => {
@@ -292,8 +317,8 @@ export class RankingAlgorithm {
    * @returns 0-15 points based on MB/min ratio
    *
    * Algorithm:
-   * - >= 1.0 MB/min → 15/15 points (high quality baseline)
-   * - Linear scaling below 1.0 MB/min
+   * - >= 1.0 MB/min (MiB, about 140 kbps) → 15/15 points (high quality baseline)
+   * - Linear scaling below 1.0 MB/min (64 kbps ≈ 0.46 MB/min ≈ 6.9 points)
    * - 0 points if no runtime data (graceful degradation)
    *
    * Note: Files < 20 MB are pre-filtered in rankTorrents()
@@ -307,15 +332,15 @@ export class RankingAlgorithm {
     const sizeMB = torrent.size / (1024 * 1024);
     const mbPerMin = sizeMB / runtimeMinutes;
 
-    // High quality baseline: 1.0 MB/min or higher gets full points
-    // This is ~64 kbps MP3 equivalent
+    // Full points at 1.0 MB/min or higher (MB = MiB here): about 140 kbps
+    // (1 MiB/min = 1,048,576 bytes x 8 / 60 s ≈ 139.8 kbps), so a 128 kbps MP3 gets about 13.7 (#318)
     if (mbPerMin >= 1.0) {
       return 15;
     }
 
     // Linear scaling below baseline
-    // 0.5 MB/min = 7.5 points
-    // 0.3 MB/min = 4.5 points
+    // 0.5 MB/min (about 70 kbps) = 7.5 points; 64 kbps (0.46 MB/min) = about 6.9 points
+    // 0.3 MB/min (about 42 kbps) = 4.5 points
     return mbPerMin * 15;
   }
 
@@ -341,37 +366,6 @@ export class RankingAlgorithm {
 
 
   /**
-   * Normalize text for matching by handling CamelCase and punctuation separators
-   * "VirginaEvans TheCorrespondent" → "virgina evans the correspondent"
-   * "Twelve.Months-Jim.Butcher" → "twelve months jim butcher"
-   * "Author_Name_Book" → "author name book"
-   */
-  private normalizeForMatching(text: string, characterReplacements?: Record<string, string>): string {
-    let result = text
-      // Split CamelCase FIRST (before lowercasing): "TheCorrespondent" → "The Correspondent"
-      .replace(/([a-z])([A-Z])/g, '$1 $2')
-      .toLowerCase();
-    // Apply language-specific character replacements before NFD (e.g. ß→ss)
-    if (characterReplacements) {
-      for (const [from, to] of Object.entries(characterReplacements)) {
-        result = result.replace(new RegExp(from, 'g'), to);
-      }
-    }
-    return result
-      // NFD normalization: convert accented chars to ASCII base forms
-      // e.g. "uber" from "uber", "senor" from "senor", "cafe" from "cafe"
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      // Replace underscores with spaces (must be explicit since \w includes _)
-      .replace(/_/g, ' ')
-      // Replace other punctuation/separators with spaces (preserves apostrophes in contractions)
-      .replace(/[^\w\s']/g, ' ')
-      // Collapse multiple spaces
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  /**
    * Score title/author match quality (60 points max)
    * Title similarity: 0-45 points (heavily weighted!)
    * Author presence: 0-15 points
@@ -383,21 +377,26 @@ export class RankingAlgorithm {
     customStopWords?: string[],
     characterReplacements?: Record<string, string>
   ): number {
+    // A release word with an apostrophe ending matches only a request word written with one (#316)
+    const release = keepUnrequestedApostrophes(torrent.title, apostropheEndingWords(audiobook.title, characterReplacements), characterReplacements);
     // Normalize for matching (handles CamelCase, punctuation separators, diacritics)
-    const torrentTitle = this.normalizeForMatching(torrent.title, characterReplacements);
-    const requestTitle = this.normalizeForMatching(audiobook.title, characterReplacements);
+    const torrentTitle = normalizeForMatching(release, characterReplacements);
+    const requestTitle = normalizeForMatching(audiobook.title, characterReplacements);
+    // Fail closed: a title with no letters or digits left cannot be matched
+    if (!requestTitle) return 0;
 
     // Parse authors from RAW string first (preserving commas for splitting)
-    // Then normalize individual authors for matching
+    // Then normalize individual authors for matching. Names under 3 characters are dropped,
+    // except names in a non-Latin script, where 2 characters is a full name (金庸, 한강)
     const parsedAuthors = audiobook.author
       .replace(/\s+/g, ' ')
       .trim()
       .split(/,|&| and | - /i)
       .map(a => a.trim())
-      .filter(a => a.length > 2 && !['translator', 'narrator'].includes(a.toLowerCase()));
+      .filter(a => (a.length > 2 || hasNonLatinLetter(a)) && !['translator', 'narrator'].includes(a.toLowerCase()));
 
-    // Normalize parsed authors for matching (handles CamelCase in author names)
-    const normalizedAuthors = parsedAuthors.map(a => this.normalizeForMatching(a, characterReplacements));
+    // Normalize parsed authors; one that normalizes to nothing is dropped (it would match every title)
+    const normalizedAuthors = parsedAuthors.map(a => normalizeForMatching(a, characterReplacements)).filter(a => a.length > 0);
     // Combined normalized author string for fuzzy matching
     const requestAuthorNormalized = normalizedAuthors.join(' ');
 
@@ -406,40 +405,21 @@ export class RankingAlgorithm {
     // Use provided language-specific stop words, or fall back to English defaults
     const stopWords = customStopWords || ['the', 'a', 'an', 'of', 'on', 'in', 'at', 'by', 'for'];
 
-    const extractWords = (text: string, stopList: string[]): string[] => {
-      let processed = text
-        // Split CamelCase FIRST: "TheCorrespondent" → "The Correspondent"
-        .replace(/([a-z])([A-Z])/g, '$1 $2')
-        .toLowerCase();
-      // Apply language-specific character replacements before NFD
-      if (characterReplacements) {
-        for (const [from, to] of Object.entries(characterReplacements)) {
-          processed = processed.replace(new RegExp(from, 'g'), to);
-        }
-      }
-      return processed
-        // NFD normalization for accented characters
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        // Replace underscores with spaces (must be explicit since \w includes _)
-        .replace(/_/g, ' ')
-        // Remove other punctuation (but keep apostrophes for contractions)
-        .replace(/[^\w\s']/g, ' ')
-        .split(/\s+/)
-        .filter(word => word.length > 0 && !stopList.includes(word));
-    };
+    const extractWords = (text: string, stopList: string[]): string[] =>
+      normalizeForMatching(text, characterReplacements).split(' ').filter(word => word.length > 0 && !stopList.includes(word));
 
-    // Separate required words (outside parentheses/brackets/colon subtitles) from optional words
+    // Separate required words (outside parentheses/brackets/subtitle splits) from optional words
     // This handles common patterns like:
     //   "Title (Subtitle)" where subtitle may be omitted
     //   "Title: Series Name" where Audible appends series names after a colon
+    //   "Series 1. Title" and "Title - Subtitle", split the same way (#466)
     // Note: Run on ORIGINAL title to preserve brackets/colons, then normalize the result
-    const separateRequiredOptional = (title: string): { required: string; optional: string } => {
-      // Work with original title format for bracket/colon detection
-      const originalTitle = audiobook.title.toLowerCase();
+    const separateRequiredOptional = (): { required: string; optional: string; dashSplit: boolean; subtitle: string; unbracketed: string } => {
+      // Work with original title format for bracket/colon detection (fullwidth （）［］： fold to ASCII)
+      const originalTitle = audiobook.title.toLowerCase().replace(FULLWIDTH_RE, fromFullwidth);
 
-      // Extract content in parentheses/brackets as optional
-      const optionalPattern = /[(\[{]([^)\]}]+)[)\]}]/g;
+      // Extract content in parentheses/brackets (including CJK 【】) as optional
+      const optionalPattern = /[(\[{【]([^)\]}】]+)[)\]}】]/g;
       const optionalMatches: string[] = [];
       let match;
 
@@ -448,65 +428,86 @@ export class RankingAlgorithm {
       }
 
       // Remove parenthetical/bracketed content to get the non-bracketed portion
-      let requiredRaw = originalTitle.replace(/[(\[{][^)\]}]+[)\]}]/g, ' ').trim();
+      let requiredRaw = originalTitle.replace(/[(\[{【][^)\]}】]+[)\]}】]/g, ' ').trim();
 
-      // Treat content after a colon as optional (Audible commonly appends series names)
+      // Treat content after a colon, a spaced dash or ". " as optional (#466; Audible commonly appends series names)
       // e.g., "The Finest Edge of Twilight: Dungeons & Dragons" → required: title, optional: series
-      const colonIndex = requiredRaw.indexOf(':');
-      if (colonIndex > 0 && colonIndex < requiredRaw.length - 1) {
-        const afterColon = requiredRaw.substring(colonIndex + 1).trim();
-        if (afterColon.length > 0) {
-          optionalMatches.push(afterColon);
-        }
-        requiredRaw = requiredRaw.substring(0, colonIndex).trim();
+      // The full title without brackets, before the split: still a complete title for a dash or dot split
+      const unbracketed = normalizeForMatching(requiredRaw, characterReplacements);
+      const split = splitSubtitle(requiredRaw);
+      const dashSplit = split !== null && !split.colon;
+      if (split) {
+        optionalMatches.push(split.subtitle);
+        requiredRaw = split.main;
       }
 
       // Normalize the required portion (handles CamelCase, punctuation)
-      const required = this.normalizeForMatching(requiredRaw, characterReplacements);
+      const required = normalizeForMatching(requiredRaw, characterReplacements);
       const optional = optionalMatches.join(' ');
 
-      return { required, optional };
+      return { required, optional, dashSplit, subtitle: split?.subtitle ?? '', unbracketed };
     };
 
-    const { required: requiredTitle, optional: optionalTitle } = separateRequiredOptional(requestTitle);
+    const { required: requiredTitle, optional: optionalTitle, dashSplit, subtitle, unbracketed } = separateRequiredOptional();
+    const optionalWords = new Set(extractWords(optionalTitle, stopWords));
 
     // Extract words from required portion only for coverage check
-    const requiredWords = extractWords(requiredTitle, stopWords);
-    const torrentWords = extractWords(torrentTitle, stopWords);
+    // (a required portion with no letters or digits left falls back to the whole title)
+    // Numbers fold for coverage: 01 = 1, "seven" = 7, and a volume token (t01, book2) names its number
+    const requiredWords = extractWords(requiredTitle || requestTitle, stopWords);
+    const coverageWords = requiredWords.map(foldNumberWord);
+    const torrentWords = foldReleaseWords(extractWords(torrentTitle, stopWords));
+
+    const catalog = { series: audiobook.series, seriesPart: audiobook.seriesPart };
 
     // Calculate word coverage: how many REQUIRED words appear in TORRENT
-    if (requiredWords.length === 0) {
-      // Edge case: title is only stop words or only optional content, skip filter
-      // Fall through to normal scoring
-    } else {
-      const matchedWords = requiredWords.filter(word => torrentWords.includes(word));
-      const coverage = matchedWords.length / requiredWords.length;
-
-      // HARD REQUIREMENT: Must have 80%+ coverage of REQUIRED words
-      if (coverage < 0.80) {
-        // Automatic rejection - doesn't contain enough of the requested words
-        return 0;
-      }
+    if (coverageWords.length > 0) {
+      // The series position written before a subtitle split ("Die Tribute von Panem 1. Tödliche Spiele")
+      // is not a title word: G4a skips it and G4c reads it. Coverage skips it too (#466), but only when the
+      // release carries the subtitle (half its words or more): a release with neither the position nor the
+      // subtitle is often another volume named after the series. Never when it is the only word or the
+      // release names another position (G4c conflict: then it counts as missing)
+      const splitPositions = splitPositionNumbers(audiobook.title);
+      const nonPositionWords = coverageWords.filter(w => !splitPositions.has(w));
+      const subtitleWords = extractWords(subtitle, stopWords).map(foldNumberWord);
+      const subtitleMatched = subtitleWords.filter(word => isWordInTitle(word, torrentWords, torrentTitle)).length;
+      const skipPositions = nonPositionWords.length > 0 && nonPositionWords.length < coverageWords.length &&
+        subtitleWords.length > 0 && subtitleMatched * 2 >= subtitleWords.length &&
+        !volumeConflict(audiobook.title, release, stopWords, characterReplacements, catalog);
+      const countedWords = skipPositions ? nonPositionWords : coverageWords;
+      const matchedWords = countedWords.filter(word => isWordInTitle(word, torrentWords, torrentTitle));
+      // HARD REQUIREMENT: Must have 80%+ coverage of REQUIRED words (a title of only stop words skips this)
+      if (matchedWords.length / countedWords.length < 0.80) return 0;
+      // G4a (automatic mode): a number in the required title is never optional, unless it is the series position
+      if (requireAuthor && missingRequiredNumber(nonPositionWords, torrentWords)) return 0;
     }
 
-    // ========== STAGE 1.5: AUTHOR PRESENCE CHECK (OPTIONAL) ==========
-    // Only enforced in automatic mode (requireAuthor: true)
-    // Interactive search (requireAuthor: false) shows all results
-    if (requireAuthor && !this.checkAuthorPresenceWithParsed(torrentTitle, normalizedAuthors)) {
-      // No high-confidence author match → reject to prevent wrong-author matches
-      return 0;
+    // ========== STAGE 1.5: AUTHOR PRESENCE CHECK (AUTOMATIC MODE) ==========
+    // Interactive search (requireAuthor: false) shows all results. Rules: match-gates.md (G3)
+    if (requireAuthor && !isAuthorPresent(torrentTitle, normalizedAuthors)) return 0;
+    // G4c: the request (title or catalog series part) names one position and the release names another
+    if (requireAuthor && volumeConflict(audiobook.title, release, stopWords, characterReplacements, catalog)) return 0;
+    // G4b: a one-word title must start a name element of the release (left boundary only)
+    const shortWord = shortTitleWord(requiredWords);
+    if (requireAuthor && shortWord) {
+      const requiredTokens = (requiredTitle || requestTitle).split(' ');
+      const leadingWords = requiredTokens.slice(0, Math.max(0, requiredTokens.indexOf(shortWord)));
+      const context = { word: shortWord, authors: normalizedAuthors, leadingWords, characterReplacements };
+      if (!shortTitleStandsAlone(release, context)) return 0;
     }
 
     // ========== STAGE 2: TITLE MATCHING (0-35 points) ==========
     let titleScore = 0;
 
-    // Keep original torrent title (lowercased only) for metadata marker detection
-    // Markers like [ ] ( ) : are removed by normalization but needed for suffix validation
-    const torrentTitleOriginal = torrent.title.toLowerCase().replace(/\s+/g, ' ').trim();
+    // Folded torrent title that keeps the markers ([ ] ( ) :) normalization removes, for suffix/prefix checks
+    const torrentTitleOriginal = foldForMatching(release, characterReplacements);
 
     // Try matching with full title first, then fall back to required title (without parentheses)
     const titlesToTry = [requestTitle];
-    if (requiredTitle !== requestTitle) {
+    if (dashSplit && unbracketed && !titlesToTry.includes(unbracketed)) {
+      titlesToTry.push(unbracketed); // A dash or dot split: the full title without brackets, as main tried it
+    }
+    if (requiredTitle && !titlesToTry.includes(requiredTitle)) {
       titlesToTry.push(requiredTitle); // Add required-only version if different
     }
 
@@ -520,7 +521,7 @@ export class RankingAlgorithm {
 
         // For metadata marker detection, try to find where the title starts in the ORIGINAL string
         // Search for key words from the title to locate position in original
-        const titleWords = titleToMatch.split(/\s+/).filter(w => w.length > 2);
+        const titleWords = titleToMatch.split(/\s+/).filter(w => w.length > 2 || hasUnspacedScript(w));
         let afterTitleOriginal = '';
         if (titleWords.length > 0) {
           // Find the last significant title word in the original string
@@ -546,10 +547,15 @@ export class RankingAlgorithm {
         );
 
         // Check metadata markers in both normalized and original suffixes
+        // G1: a colon right after the title counts only when the release subtitle agrees with the request's;
+        // for a request split at " - " or ". ", so does a " - " after its main part (#466)
+        const otherSubtitle = dashSplit && titleToMatch === requiredTitle && requiredTitle !== unbracketed &&
+          dashNamesOtherSubtitle(afterTitleOriginal, optionalWords, normalizedAuthors, text => extractWords(text, stopWords));
         const hasMetadataSuffix = afterTitle === '' ||
                                   metadataMarkers.some(marker => afterTitle.startsWith(marker)) ||
-                                  metadataMarkers.some(marker => afterTitleOriginal.startsWith(marker)) ||
-                                  afterStartsWithAuthor;
+                                  metadataMarkers.some(marker => afterTitleOriginal.startsWith(marker) && !(otherSubtitle && marker === ' - ')) ||
+                                  afterStartsWithAuthor ||
+                                  colonSubtitleAgrees(afterTitleOriginal, optionalWords, text => extractWords(text, stopWords));
 
         // Check prefix validity:
         // - No words before = clean match
@@ -610,14 +616,14 @@ export class RankingAlgorithm {
     }
 
     // ========== STAGE 3: AUTHOR MATCHING (0-15 points) ==========
-    // Check how many authors appear in torrent title (exact substring match)
+    // How many authors appear as whole words or matching initials (G2, G3)
     const authorMatches = normalizedAuthors.filter(author =>
-      torrentTitle.includes(author)
+      authorAppears(torrentTitle, author) || matchesByInitials(torrentTitle, author)
     );
 
     let authorScore = 0;
     if (authorMatches.length > 0) {
-      // Exact substring match → proportional credit
+      // Whole-word or initials match → proportional credit
       authorScore = (authorMatches.length / normalizedAuthors.length) * 15;
     } else {
       // No exact match → use fuzzy similarity for partial credit
@@ -625,76 +631,6 @@ export class RankingAlgorithm {
     }
 
     return Math.min(60, titleScore + authorScore);
-  }
-
-  /**
-   * Check if author is present in torrent title with high confidence
-   * Uses pre-parsed and normalized authors array
-   *
-   * @param torrentTitle - Normalized torrent title (already processed by normalizeForMatching)
-   * @param normalizedAuthors - Array of normalized author names (roles already filtered)
-   * @returns true if at least ONE author is present with high confidence
-   */
-  private checkAuthorPresenceWithParsed(torrentTitle: string, normalizedAuthors: string[]): boolean {
-    // At least ONE author must match with high confidence
-    return normalizedAuthors.some(author => {
-      // Check 1: Exact substring match (works well now that both are normalized)
-      if (torrentTitle.includes(author)) {
-        return true;
-      }
-
-      // Check 2: High fuzzy similarity (≥ 0.85)
-      // Handles: "J.K. Rowling" vs "J. K. Rowling" vs "JK Rowling"
-      // Also handles: "Dennis E. Taylor" vs "Dennis Taylor"
-      const similarity = compareTwoStrings(author, torrentTitle);
-      if (similarity >= 0.85) {
-        return true;
-      }
-
-      // Check 3: Core name components (first + last name present within 30 chars)
-      // Handles: "Sanderson, Brandon" vs "Brandon Sanderson"
-      // Handles: "Brandon R. Sanderson" vs "Brandon Sanderson"
-      // Now also handles: "VirginaEvans" → "virgina evans" (after normalization)
-      const words = author.split(/\s+/).filter(w => w.length > 1);
-      if (words.length >= 2) {
-        const firstName = words[0];
-        const lastName = words[words.length - 1];
-
-        const firstIdx = torrentTitle.indexOf(firstName);
-        const lastIdx = torrentTitle.indexOf(lastName);
-
-        // Both components present and reasonably close?
-        if (firstIdx !== -1 && lastIdx !== -1) {
-          const distance = Math.abs(lastIdx - firstIdx);
-          if (distance <= 30) {
-            return true;
-          }
-        }
-      }
-
-      return false;
-    });
-  }
-
-  /**
-   * Check if author is present in torrent title with high confidence
-   * Handles variations: middle initials, spacing, punctuation, name order, CamelCase
-   *
-   * @param torrentTitle - Normalized torrent title (already processed by normalizeForMatching)
-   * @param requestAuthor - Raw author string (will be parsed and normalized internally)
-   * @returns true if at least ONE author is present with high confidence
-   */
-  private checkAuthorPresence(torrentTitle: string, requestAuthor: string, characterReplacements?: Record<string, string>): boolean {
-    // Parse multiple authors (same logic as Stage 3 author matching)
-    const authors = requestAuthor
-      .split(/,|&| and | - /)
-      .map(a => a.trim())
-      .filter(a => a.length > 2 && !['translator', 'narrator'].includes(a));
-
-    // Normalize each author for matching
-    const normalizedAuthors = authors.map(a => this.normalizeForMatching(a, characterReplacements));
-
-    return this.checkAuthorPresenceWithParsed(torrentTitle, normalizedAuthors);
   }
 
   /**
@@ -805,7 +741,7 @@ export class RankingAlgorithm {
    * Rank ebook torrents from indexers
    * Reuses title/author matching and seeder scoring from audiobook ranking
    * Uses ebook-specific format scoring (10 pts for match, 0 otherwise)
-   * Uses inverted size scoring (smaller = better, > 20MB filtered)
+   * Uses inverted size scoring (smaller = better, > EBOOK_MAX_SIZE_MB filtered unless enforceSizeCap is false)
    *
    * @param torrents - Array of torrent results from Prowlarr
    * @param ebook - Ebook request details (title, author, preferredFormat)
@@ -822,13 +758,13 @@ export class RankingAlgorithm {
       requireAuthor = true,  // Safe default: require author in automatic mode
       stopWords,
       characterReplacements,
+      enforceSizeCap = true,  // Safe default: automatic mode skips oversized ebooks
     } = options;
 
-    // Filter out files > 20 MB (too large for ebooks)
-    const filteredTorrents = torrents.filter((torrent) => {
-      const sizeMB = torrent.size / (1024 * 1024);
-      return sizeMB <= 20;
-    });
+    // Automatic search skips files over the cap; interactive search lists them (scored 0 for size)
+    const filteredTorrents = enforceSizeCap
+      ? torrents.filter((torrent) => torrent.size / (1024 * 1024) <= EBOOK_MAX_SIZE_MB)
+      : torrents;
 
     const ranked = filteredTorrents.map((torrent) => {
       // Detect ebook format from title
@@ -952,8 +888,8 @@ export class RankingAlgorithm {
    * Score ebook file size (15 points max, inverted - smaller is better)
    * < 5 MB = 15 pts (full)
    * 5-15 MB = 10 pts
-   * 15-20 MB = 5 pts
-   * > 20 MB = filtered out (not scored)
+   * 15-20 MB (EBOOK_MAX_SIZE_MB) = 5 pts
+   * > EBOOK_MAX_SIZE_MB = 0 pts (automatic search filters these out first)
    */
   private scoreEbookSize(torrent: TorrentResult): number {
     const sizeMB = torrent.size / (1024 * 1024);
@@ -962,11 +898,11 @@ export class RankingAlgorithm {
       return 15; // Optimal size for ebooks
     } else if (sizeMB <= 15) {
       return 10; // Acceptable, may have images
-    } else if (sizeMB <= 20) {
+    } else if (sizeMB <= EBOOK_MAX_SIZE_MB) {
       return 5;  // Large but within limit
     }
 
-    // > 20 MB should have been filtered, but return 0 as safety
+    // Over the cap: only interactive search keeps these
     return 0;
   }
 
@@ -1024,8 +960,10 @@ export class RankingAlgorithm {
       notes.push('✓ Optimal file size');
     } else if (sizeMB <= 15) {
       notes.push('Good file size (may have images)');
-    } else if (sizeMB <= 20) {
+    } else if (sizeMB <= EBOOK_MAX_SIZE_MB) {
       notes.push('⚠️ Large file size');
+    } else {
+      notes.push(`⚠️ Over ${EBOOK_MAX_SIZE_MB} MB (automatic search skips it)`);
     }
 
     // Seeder notes (same logic as audiobooks)

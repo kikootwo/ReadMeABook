@@ -20,6 +20,8 @@ interface RequestCardProps {
   request: {
     id: string;
     type?: 'audiobook' | 'ebook';
+    /** Owner of the request; lets Interactive Search pick for this request instead of creating one */
+    userId?: string;
     status: string;
     progress: number;
     errorMessage?: string;
@@ -273,6 +275,9 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
           onClose={() => setShowDetailsModal(false)}
           requestStatus={request.status}
           isAvailable={COMPLETED_STATUSES.includes(request.status as typeof COMPLETED_STATUSES[number])}
+          requestId={request.id}
+          requestedByUserId={request.userId ?? null}
+          requestType={requestType}
         />
       )}
 

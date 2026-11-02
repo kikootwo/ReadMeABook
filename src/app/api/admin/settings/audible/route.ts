@@ -10,6 +10,7 @@ import { getAudibleService } from '@/lib/integrations/audible.service';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { AUDIBLE_REGIONS } from '@/lib/types/audible';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Settings.Audible');
 
@@ -19,7 +20,9 @@ export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { region } = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const { region } = bodyResult.data;
 
         // Validate region
         if (!region || !VALID_REGIONS.includes(region)) {

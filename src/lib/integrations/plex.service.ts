@@ -785,6 +785,39 @@ export class PlexService {
    * @param authToken - Authentication token
    * @param ratingKey - The ratingKey of the item to delete
    */
+  /**
+   * File paths (Media > Part file, as Plex sees them) of an item and its
+   * children (an album's tracks). Throws when Plex cannot be read.
+   */
+  async getItemFilePaths(serverUrl: string, authToken: string, ratingKey: string): Promise<string[]> {
+    const files = new Set<string>();
+    const collect = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        node.forEach(collect);
+        return;
+      }
+      if (!node || typeof node !== 'object') return;
+      for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+        if (key === 'Part') {
+          for (const part of Array.isArray(value) ? value : [value]) {
+            const p = part as { file?: unknown; $?: { file?: unknown } } | null;
+            const file = p?.file ?? p?.$?.file;
+            if (typeof file === 'string' && file) files.add(file);
+          }
+        } else {
+          collect(value);
+        }
+      }
+    };
+    for (const suffix of ['', '/children']) {
+      const response = await this.client.get(`${serverUrl}/library/metadata/${ratingKey}${suffix}`, {
+        headers: { 'X-Plex-Token': authToken, Accept: 'application/json' },
+      });
+      collect(typeof response.data === 'string' ? await parseStringPromise(response.data) : response.data);
+    }
+    return [...files];
+  }
+
   async deleteItem(
     serverUrl: string,
     authToken: string,

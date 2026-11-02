@@ -14,6 +14,8 @@ const useAudiobookDetailsMock = vi.hoisted(() => vi.fn());
 const createRequestMock = vi.hoisted(() => vi.fn());
 const fetchEbookMock = vi.hoisted(() => vi.fn());
 const revalidateEbookStatusMock = vi.hoisted(() => vi.fn());
+// What the mocked search modal hands to onSuccess when its success button is clicked
+const modalOutcome = vi.hoisted(() => ({ value: undefined as { needsApproval?: boolean } | undefined }));
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => useAuthMock(),
@@ -38,12 +40,20 @@ vi.mock('@/lib/hooks/useRequests', () => ({
 }));
 
 vi.mock('@/components/requests/InteractiveTorrentSearchModal', () => ({
-  InteractiveTorrentSearchModal: ({ isOpen, requestId }: { isOpen: boolean; requestId?: string }) => (
+  InteractiveTorrentSearchModal: ({ isOpen, requestId, searchMode, onSuccess }: {
+    isOpen: boolean;
+    requestId?: string;
+    searchMode?: string;
+    onSuccess?: (outcome?: { needsApproval?: boolean }) => void;
+  }) => (
     <div
       data-testid="interactive-modal"
       data-open={String(isOpen)}
       data-request-id={requestId ?? ''}
-    />
+      data-search-mode={searchMode ?? 'audiobook'}
+    >
+      <button type="button" data-testid="interactive-modal-success" onClick={() => onSuccess?.(modalOutcome.value)} />
+    </div>
   ),
 }));
 
@@ -103,6 +113,51 @@ describe('AudiobookDetailsModal', () => {
     const closeButtons = screen.getAllByRole('button', { name: 'Close' });
     fireEvent.click(closeButtons[0]);
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('renders the trimmed summary in its own scroll box', async () => {
+    useAudiobookDetailsMock.mockReturnValue({
+      audiobook: { ...audiobookDetails, description: '  First paragraph.\n\nSecond paragraph.  ' },
+      isLoading: false,
+      error: null,
+    });
+    const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+    render(<AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} />);
+    await act(async () => {});
+
+    expect(screen.getByRole('heading', { name: 'Summary' })).toBeInTheDocument();
+    const box = screen.getByTestId('book-summary-scroll');
+    expect(box.querySelector('p')?.textContent).toBe('First paragraph.\n\nSecond paragraph.');
+  });
+
+  it('keeps the summary inside a shrinkable column of the modal scroll area (so the card cannot grow)', async () => {
+    const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+    render(<AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} />);
+    await act(async () => {});
+
+    // BookSummary's wrapper must be a direct flex item of a min-h-0 column inside the flex scroll area;
+    // without min-h-0 the column refuses to shrink and the whole modal scrolls again.
+    const column = screen.getByTestId('book-summary').parentElement!;
+    expect(column).toHaveClass('flex', 'flex-col', 'min-h-0');
+    expect(column.parentElement).toHaveClass('overflow-y-auto', 'flex', 'flex-col');
+  });
+
+  it('omits the summary section when the description is only whitespace', async () => {
+    useAudiobookDetailsMock.mockReturnValue({
+      audiobook: { ...audiobookDetails, description: ' \n\n  ' },
+      isLoading: false,
+      error: null,
+    });
+    const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+    render(<AudiobookDetailsModal asin="ASIN123" isOpen={true} onClose={vi.fn()} />);
+    await act(async () => {});
+
+    expect(screen.getByText('Detail Book')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Summary' })).toBeNull();
+    expect(screen.queryByTestId('book-summary-scroll')).toBeNull();
   });
 
   it('creates requests and auto-closes after success', async () => {
@@ -413,6 +468,65 @@ describe('AudiobookDetailsModal', () => {
         requestedByUserId: 'user-1',
       });
       expect(forwarded).toBe('');
+    });
+
+    describe('ebook request opened from My Requests (#281)', () => {
+      const openEbookSearch = async (status: string, user = { id: 'user-1', username: 'u' }) => {
+        useAuthMock.mockReturnValue({ user });
+        const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
+
+        render(
+          <AudiobookDetailsModal
+            asin="ASIN123"
+            isOpen={true}
+            onClose={vi.fn()}
+            requestStatus={status}
+            requestId="ebook-1"
+            requestedByUserId="user-1"
+            requestType="ebook"
+          />
+        );
+
+        await act(async () => {});
+        fireEvent.click(screen.getByTitle('Interactive Search'));
+        return screen.getByTestId('interactive-modal');
+      };
+
+      it.each(['pending', 'failed', 'awaiting_search'])(
+        'searches ebooks for that request when it is %s',
+        async (status) => {
+          const modal = await openEbookSearch(status);
+          expect(modal).toHaveAttribute('data-search-mode', 'ebook');
+          expect(modal).toHaveAttribute('data-request-id', 'ebook-1');
+        }
+      );
+
+      it.each(['searching', 'downloading', 'awaiting_release'])(
+        'searches ebooks by ASIN without the request id when it is %s',
+        async (status) => {
+          const modal = await openEbookSearch(status);
+          expect(modal).toHaveAttribute('data-search-mode', 'ebook');
+          expect(modal).toHaveAttribute('data-request-id', '');
+        }
+      );
+
+      it('does not forward another user ebook request id to a non-admin', async () => {
+        const modal = await openEbookSearch('failed', { id: 'user-2', username: 'other' });
+        expect(modal).toHaveAttribute('data-search-mode', 'ebook');
+        expect(modal).toHaveAttribute('data-request-id', '');
+      });
+
+      it.each([
+        [true, 'Ebook request submitted for approval!'],
+        [false, 'Ebook download started!'],
+      ])('a pick with needsApproval %s shows "%s"', async (needsApproval, toast) => {
+        modalOutcome.value = { needsApproval };
+        await openEbookSearch('failed');
+
+        fireEvent.click(screen.getByTestId('interactive-modal-success'));
+
+        expect(screen.getByText(toast)).toBeInTheDocument();
+      });
     });
   });
 });

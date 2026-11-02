@@ -112,7 +112,7 @@ describe('useEbookSettings', () => {
     expect(result.current.flaresolverrTestResult?.message).toBe('flare down');
   });
 
-  it('saves ebook settings and clears success banner after delay', async () => {
+  it('saves ebook settings and reports success (the page clears the banner)', async () => {
     vi.useFakeTimers();
     fetchWithAuthMock.mockResolvedValueOnce({ ok: true, json: async () => ({}) });
 
@@ -132,7 +132,9 @@ describe('useEbookSettings', () => {
       vi.advanceTimersByTime(3000);
     });
 
-    expect(onSuccess).toHaveBeenCalledWith('');
+    // The banner belongs to the settings page, which clears it; the hook leaves no timer behind
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
     vi.useRealTimers();
   });
 

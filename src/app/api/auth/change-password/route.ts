@@ -9,6 +9,7 @@ import { prisma } from '@/lib/db';
 import bcrypt from 'bcrypt';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Auth.ChangePassword');
 
@@ -25,7 +26,9 @@ const logger = RMABLogger.create('API.Auth.ChangePassword');
 export async function POST(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     try {
-      const { currentPassword, newPassword, confirmPassword } = await request.json();
+      const bodyResult = await readJsonBody(request);
+      if (!bodyResult.ok) return bodyResult.response;
+      const { currentPassword, newPassword, confirmPassword } = bodyResult.data;
 
       // Validate input
       if (!currentPassword || !newPassword || !confirmPassword) {

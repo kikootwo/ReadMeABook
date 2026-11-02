@@ -32,6 +32,7 @@ const SEVERITY_TAGS: Record<NotificationSeverity, string[]> = {
 export class NtfyProvider implements INotificationProvider {
   type = 'ntfy' as const;
   sensitiveFields = ['accessToken'];
+  secretBoundUrl = { field: 'serverUrl', defaultUrl: DEFAULT_SERVER_URL, credentialKind: 'ntfy' as const };
   metadata: ProviderMetadata = {
     type: 'ntfy',
     displayName: 'ntfy',

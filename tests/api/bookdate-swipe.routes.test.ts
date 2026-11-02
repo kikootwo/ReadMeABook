@@ -54,6 +54,8 @@ function pastIso(days = 30): string {
 describe('BookDate swipe — release-date gate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Right swipes run the real library check (findPlexMatch); default: book not in the library
+    prismaMock.plexLibrary.findMany.mockResolvedValue([]);
     jobQueueMock.addSearchJob.mockResolvedValue(undefined);
     jobQueueMock.addNotificationJob.mockResolvedValue(undefined);
     authRequest = { user: { id: 'user-1', role: 'admin' }, json: vi.fn() };

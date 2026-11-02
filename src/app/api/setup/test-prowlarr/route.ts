@@ -7,13 +7,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { requireSetupIncomplete } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Setup.TestProwlarr');
 
 export async function POST(request: NextRequest) {
   return requireSetupIncomplete(request, async (req) => {
   try {
-    const { url, apiKey } = await req.json();
+    const bodyResult = await readJsonBody(req);
+    if (!bodyResult.ok) return bodyResult.response;
+    const { url, apiKey } = bodyResult.data;
 
     if (!url || !apiKey) {
       return NextResponse.json(

@@ -108,9 +108,18 @@ export function useAuthorBooks(asin: string | null, authorName: string | null) {
 
   const books = (data ? dedupeByAsin(data.flatMap(page => page?.books || [])) : []) as Audiobook[];
   const totalBooks = data?.[0]?.totalBooks || 0;
-  const hasMore = !!(data && data.length > 0 && data[data.length - 1]?.hasMore);
+  const lastPage = data?.[data.length - 1];
+  const hasMore = !!lastPage?.hasMore;
   const isLoadingInitial = !data && !error && !!identity;
   const isLoadingMore = !!(data && typeof data[size - 1] === 'undefined' && isValidating);
+
+  // A page can hold no books (all namesakes or other languages) while Audible has more (#310).
+  // Load past it without waiting for a click, and keep showing loading rather than an empty end.
+  const skippingEmptyPage = !!(lastPage?.hasMore && (lastPage.books?.length ?? 0) === 0 && !error);
+  const loadedPages = data?.length ?? 0;
+  useEffect(() => {
+    if (skippingEmptyPage && loadedPages === size && !isValidating) setSize(loadedPages + 1);
+  }, [skippingEmptyPage, loadedPages, size, isValidating, setSize]);
 
   const loadMore = useCallback(() => {
     setSize(prev => prev + 1);
@@ -120,8 +129,8 @@ export function useAuthorBooks(asin: string | null, authorName: string | null) {
     books,
     totalBooks,
     hasMore,
-    isLoading: isLoadingInitial || (!!identity && isLoading),
-    isLoadingMore,
+    isLoading: isLoadingInitial || (!!identity && isLoading) || (skippingEmptyPage && books.length === 0),
+    isLoadingMore: isLoadingMore || skippingEmptyPage,
     loadMore,
     error,
   };

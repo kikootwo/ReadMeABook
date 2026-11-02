@@ -8,6 +8,11 @@ import { afterAll, afterEach, beforeAll, vi } from 'vitest';
 import '@testing-library/jest-dom';
 import { cleanup } from '@testing-library/react';
 
+// Deployments always provide JWT signing secrets (entrypoint-generated or derived from
+// CONFIG_ENCRYPTION_KEY); tests that sign real tokens need them too.
+process.env.JWT_SECRET ??= 'test-jwt-secret';
+process.env.JWT_REFRESH_SECRET ??= 'test-jwt-refresh-secret';
+
 vi.mock('next/link', () => ({
   default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) =>
     React.createElement('a', { href, ...props }, children),

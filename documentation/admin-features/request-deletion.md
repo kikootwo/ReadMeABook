@@ -50,7 +50,7 @@ model Request {
 
 ### Deletion Logic Flow
 
-**Service:** `src/lib/services/request-delete.service.ts`
+**Service:** `src/lib/services/request-delete.service.ts`; download handling in `src/lib/services/request-delete-download.ts` (`cleanUpRequestDownload()`, never throws)
 
 **Steps:**
 
@@ -63,57 +63,81 @@ model Request {
    For each selected download:
 
    ```
-   IF torrent not in qBittorrent:
+   IF row is 'removed' (gone from the client) or addedByRmab = false (taken over, #423):
+     → No client call at all; taken over → torrentsKeptNotOwned++ ('removed' only logs)
+
+   IF recorded client type != configured client type:
+     → Leave it (warn): the id means nothing in the new client
+       (torrent and usenet: a usenet delete also skips when another usenet client type is configured)
+
+   IF torrent not in the client:
      → Skip (already removed)
 
-   ELSE IF unlimited seeding (0):
+   (usenet: delete the job + files; a taken-over job (#329) was left above; RMAB's own job is kept
+    while another active request's selected row has the same nzo_id → torrentsKeptShared++)
+
+   IF resolveOwnership(row, client added time) says not RMAB's
+      (src/lib/utils/torrent-ownership.ts; see download-clients.md#torrent-ownership-423):
+     → Keep it exactly as it is → torrentsKeptNotOwned++
+       (legacy NULL row added ≥ 24 h before the request: also write addedByRmab = false)
+
+   ELSE IF unlimited seeding (no indexer config, or seedingTimeMinutes AND ratioLimit both 0):
      → Log: "Keeping for unlimited seeding"
      → Do nothing (stop monitoring)
      → torrentsKeptUnlimited++
 
-   ELSE IF download not completed:
-     → Delete torrent + files
-     → torrentsRemoved++
+   "completed" = history downloadStatus completed, OR the live client reports completed/seeding
+     or progress >= 1 (history lags for a cancelled request: the monitor stops polling it)
 
-   ELSE:
-     → Query actual seeding time
-     → Calculate remaining = (target - actual)
-
-     IF remaining > 0:
-       → Log: "Keeping for X more minutes"
-       → torrentsKeptSeeding++
+   ELSE IF download not completed, OR evaluateSeeding(config, {seedingTime, ratio}).met:
+     (src/lib/utils/seeding-policy.ts, same rule as cleanup_seeded_torrents: every set
+      limit met; 0 turns a limit off; unreported ratio with ratioLimit > 0 = not met)
+     IF another active request uses the same torrentHash (otherActiveRequestsUsingTorrent,
+        src/lib/utils/shared-torrent.ts), whatever its status, even finished and done seeding:
+       → Keep torrent → torrentsKeptShared++ (the cleanup job may remove it later, see below)
      ELSE:
-       → Delete torrent + files
-       → torrentsRemoved++
+       → Delete torrent + files → torrentsRemoved++ → row downloadStatus = 'removed'
+
+   ELSE (still seeding):
+     → Log: "Keeping ... to finish seeding: ratio a/b, time x/y min"
+     → History not yet completed → write downloadStatus completed (cleanup only reads completed rows)
+     → torrentsKeptSeeding++ (cleanup job removes it later)
    ```
 
-3. **Delete Media Files**
-   - Path: persisted `Audiobook.filePath` recorded during file organization
-   - Never rebuilds the path from the current `media_dir` or path template
-   - **ONLY deletes title folder** (not author folder)
-   - Missing stored path: skips file deletion and returns `filesDeleted: false`
-   - Handles missing folders gracefully
+3. **Library Delete Guard** (`src/lib/utils/library-delete-guard.ts`, run from `src/lib/services/request-delete-files.ts`)
+   - Path: persisted `Audiobook.filePath` only (never rebuilt from `media_dir` or a template)
+   - The stored folder is removed (`rm -rf`) only when ALL hold, else nothing is removed:
+     | Rule | Refusal reason (`filesKeptReason`) |
+     |------|------------------------------------|
+     | a. strictly inside `media_dir` | `it is the media library root` / `it is outside the media library (...)` |
+     | b. equals/contains no configured root (download dirs, client paths, mapped paths, `/bookdrop`) | `it is a configured root (...)` / `it contains a configured root (...)` |
+     | c. equals/contains no other book's `filePath` (each row canonicalized: realpath + dev/ino; missing rows skipped) | `it is also the folder of "<title>"` / `it contains the folder of "<title>"` |
+     | evidence: audio directly in the folder hashes to `filesHash` | `folder contents changed since import` / `there is no import record (files hash) for this folder` |
+     | evidence: no audio in any subfolder (the removal is recursive) | `it has audio files in a subfolder` |
+   - Roots are read strictly from the DB (`collectGuardRoots`, fail closed: any error refuses)
+   - Symlinked title folder: rules a-c on the target AND the link location; only the link is removed
+   - No stored path but a library item (`absItemId`/`plexGuid`): kept (`RMAB has no stored folder ...`); no path and no item: nothing to remove
+   - Missing folder: "already gone" only when the library looks mounted (`media_dir` readable and not empty, and some other stored book folder exists when other rows have one); otherwise kept (`the folder is missing and ... is the media volume mounted?`): no backend call, row untouched (protects against a media volume not mounted yet)
+   - Mount-check limit: a mount point that received new imports while the share was unmounted is not empty, so it passes; a missing folder there then counts as gone (no Plex delete; ABS `hard=0` only for an item inside that path; row cleared)
+   - Stale record: the stored folder is gone AND outside the current `media_dir` (library moved): nothing removed or protected; the delete clears only `filePath`/`filesHash`/`fileFormat` (no backend call, records and status kept; message says so), a replace goes on
+   - `rm` failure: kept (`the folder was partly removed (permission denied); remove the rest manually`); `fs.rm` stops at the first error, so earlier files are gone; backend and row untouched
+   - After removal: empty parents swept up to the nearest root (`sweepEmptyParents`)
+   - **Ebook requests (D2):** rules a-c on `filePath`, then unlink every ebook file directly in it if the folder passes the evidence rule, or the only one if it holds exactly one; otherwise kept (`it holds N ebook files and is not provably this book's folder (...)`). A shared `{author}` or flat `Ebooks` folder fails rule c when another book points at it. Never a sweep of other books' ebooks
+   - Not handled (needs a separate ebook location, PR2): an ebook in a separate folder (custom `ebook_path_template`) is not removed by the audiobook delete
 
-4. **Delete from Library Backend**
-   - **Audiobookshelf Mode:** Delete library item via API if `absItemId` exists
-     - Prevents "ghost" entries in Audiobookshelf library
-     - Only removes from ABS database, not files (already deleted in step 3)
-   - **Plex Mode:** Delete library item via API if `plexGuid` exists
-     - Queries plex_library table to get plexRatingKey from audiobook's plexGuid
-     - Calls Plex DELETE `/library/metadata/{ratingKey}` endpoint with the ratingKey
-     - Requires deletion enabled in Plex: Settings > Server > Library
+4. **Files kept: library left exactly as it is**
+   - No backend delete, no plex_library cleanup, no status reset, linkage and stored paths kept
+   - Request still soft-deleted; result `filesDeleted: false`, `filesKeptReason`, message `Request deleted; files kept: <reason>`
 
-5. **Delete plex_library Cache Records**
-   - **Primary:** Delete by ASIN (same query as availability check)
-     - `WHERE asin = audiobookAsin OR plexGuid CONTAINS audiobookAsin`
-     - Ensures exact same record found during availability check gets deleted
-   - **Fallback:** Delete by exact title/author (for legacy records without ASIN)
-     - Only used if ASIN-based deletion finds no records
-   - **Result:** Book immediately shows as NOT available, can be re-requested
+5. **Backend item (only after RMAB removed the folder, or found it already gone)**
+   - **Audiobookshelf:** `DELETE /api/items/<id>?hard=0` (database entry only; RMAB already removed the files), only when the item's `path` is inside the removed folder, or its `relPath` matches the folder's path relative to `media_dir` (ABS mounting the library elsewhere). Otherwise skipped (a second copy elsewhere survives). The `relPath` match can also hit the same relative path in another ABS library folder; with `hard=0` only that item's database entry goes (the next ABS scan re-adds it)
+   - **Plex:** `DELETE /library/metadata/{ratingKey}` only after RMAB removed the folder itself, and only when every file Plex lists for the item and its tracks (`getItemFilePaths`: Media > Part `file`) is inside it; otherwise (incl. a folder that was already gone) skipped, the next library scan drops it
+   - `deleteABSItem(id, { hard })`: `hard: true` (`?hard=1`) also deletes files; only a replace of a book added outside RMAB (no request, no stored folder; `replace-library-content.ts`) uses it
 
-6. **Clear Audiobook Linkage**
-   - Reset audiobook.status to 'requested'
-   - Clear plexGuid (Plex mode) or absItemId (ABS mode)
+6. **plex_library records, linkage, stored paths** (only after removal / already gone)
+   - plex_library delete by ASIN, fallback exact title/author
+   - Audiobook: `status = 'requested'`, clear `absItemId` (ABS) or `plexGuid` (Plex), clear `filePath`, `filesHash`, `fileFormat`
+   - Child requests soft-deleted: `parentRequestId = id`, and ebook requests with no parent on the same book row
 
 7. **Soft Delete Request**
    - UPDATE: `deletedAt = NOW(), deletedBy = adminUserId`
@@ -135,9 +159,17 @@ where: {
 ```
 
 **Behavior:**
-- **Active requests:** Delete torrent when seeding complete
+- **Active requests:** Delete torrent when seeding complete (row → `removed`)
 - **Soft-deleted requests:** Delete torrent + hard-delete request when seeding complete
 - **Unlimited seeding:** Hard-delete orphaned request immediately (no monitoring)
+- **Not RMAB's torrent:** never removed; a soft-deleted request is hard-deleted, the torrent stays. Details: [scheduler.md](../backend/services/scheduler.md) (cleanup_seeded_torrents)
+- **Shared torrent (#283):** after ownership and this row's seeding check, `otherActiveRequestsSharingTorrent()` lists the other non-deleted requests on the torrent (same hash forms as the delete guard). Each keeps it (logged with the reason) unless `siblingKeepsTorrent()` (`src/lib/utils/shared-torrent.ts`) finds it:
+  - finished: `FINISHED_REQUESTS` (audiobook `available`, ebook `downloaded`; also the candidate query's statuses). Any other status keeps it (`downloading`, `processing`, audiobook `downloaded`, `failed`, `cancelled`, ...)
+  - an audiobook also imported by RMAB since it took the torrent: its book record `completed` with a `filePath` (written only by the organizer after the copy) and `completedAt` later than the row's `createdAt`. A library scan can mark it `available` mid-copy, and a library match alone never passes, so either keeps it
+  - every row it has for the torrent recorded for the configured client type
+  - its own indexer's requirement met (`evaluateSeeding()` with its row's indexer, by the same probe answer); unlimited or unconfigured indexer keeps it
+  - None keeps it → one `deleteDownload`, this row `removed` (or soft-deleted: hard-deleted), the siblings' rows `removed` in one `updateMany` (also rows RMAB did not add, which never reach the guard themselves). Same run: `deletedHashes`; later runs: the probe's not-found → `removed`
+  - Soft-deleted requests never keep it (unchanged)
 
 ### API Endpoints
 
@@ -158,10 +190,15 @@ where: {
     "filesDeleted": true,
     "torrentsRemoved": 2,
     "torrentsKeptSeeding": 1,
-    "torrentsKeptUnlimited": 0
+    "torrentsKeptUnlimited": 0,
+    "torrentsKeptShared": 0,
+    "torrentsKeptNotOwned": 0,
+    "filesKeptReason": "folder contents changed since import"
   }
 }
 ```
+- `filesKeptReason` present only when library files were kept; the request is still deleted (HTTP 200)
+- `torrentsKeptNotOwned`: torrents left in the client because RMAB did not add them (or can't tell that it did)
 
 **Errors:**
 - 401: Unauthorized (not logged in)
@@ -181,6 +218,7 @@ where: {
 - State management for confirmation dialog
 - SWR cache invalidation after deletion
 - Loading states during deletion
+- Files kept: warning toast `Request deleted; files kept: <reason>` (10 s) instead of the success toast
 
 ## Re-Requesting After Deletion
 
@@ -204,7 +242,9 @@ where: {
 ## Edge Cases Handled
 
 1. ✅ **Torrent not in qBittorrent** - Skip deletion, continue with files
-2. ✅ **Unlimited seeding (0)** - Keep in qBittorrent, hard-delete orphaned request
+1a. ✅ **Torrent RMAB did not add** (already in the client at grab time, #423) - Kept, never removed or re-categorized; `torrentsKeptNotOwned`
+1b. ✅ **Row already `removed`** - No client call, never written back to `completed`
+2. ✅ **Unlimited seeding (time and ratio both 0, or no config)** - Keep in qBittorrent, hard-delete orphaned request
 3. ✅ **Incomplete download** - Delete torrent + files immediately
 4. ✅ **Seeding requirement met** - Delete torrent + files
 5. ✅ **Still seeding** - Keep torrent, soft-delete request, cleanup job handles later
@@ -220,7 +260,13 @@ where: {
 15. ✅ **No ASIN available** - Falls back to exact title/author matching
 16. ✅ **Path template changed after organization** - Deletes only the persisted organized path
 17. ✅ **Legacy row has no stored path** - Skips file deletion without guessing a path
-18. ✅ **Discord bot disabled or unreachable** - Discord sync is gated on a live client and never
+18. ✅ **Folder shared with other books, foreign files, symlinks, roots** - Library delete guard keeps the files and says why
+19. ✅ **Reported-issue replace when files would be kept** - `replaceAudiobook` stops with HTTP 409 and the reason before deleting anything (and again if `deleteRequest` kept files); no record reset, no new request, issue stays open
+20. ✅ **Replace with no active request but a stored folder** (an earlier delete kept the files) - `removeLibraryContentForReplace`: the folder goes through the guard (409 when kept), backend item as in step 5; never an ABS hard delete
+21. ✅ **Replace after a library move** - stale stored folder (gone, outside `media_dir`): no backend call, the replace resets the stored path and continues
+22. ✅ **Replace that keeps refusing** (e.g. a legacy row whose stored folder is shared with other books): every 409 names the way out: "Remove those files manually, then re-request the book after the next library scan."
+23. ✅ **ABS hard delete for a book added outside RMAB** (no stored folder, item looked up by ASIN in plex_library): refused when more than one library item matches the ASIN
+24. ✅ **Discord bot disabled or unreachable** - Discord sync is gated on a live client and never
     throws, so deletion succeeds regardless
 
 ## Discord Convergence
@@ -255,7 +301,32 @@ holders with no linked RMAB account); other callers fall back to the deleting us
 - **Fix:** Delete only the persisted path; legacy rows without one skip file cleanup
 - **Result:** Configuration changes cannot redirect deletion to a newly rendered directory
 
-**3. Web/API Deletions Left Live Discord Buttons**
+**3. Deleting a Request Removed Other Books' Files**
+- **Issue:** `fs.rm(filePath, { recursive })` with no checks; an ebook import overwrote `filePath` with its folder (`{author}` or flat `Ebooks` templates), and the ebook delete unlinked every ebook in that folder. ABS deletes always sent `hard=1`
+- **Fix:** library delete guard (rules a-c + evidence); backend deletes only after RMAB removed the folder, ABS with `hard=0`, Plex only for items inside the folder
+- **Note:** `filesHash` covers file names only (a same-named replacement passes); it is built from this import's audio after format coercion, excluding files the library already held with different content (`differs`)
+
+**4. Deletion Ignored the Indexer Ratio Limit**
+- **Issue:** Deleting a request removed a torrent once its seeding time was met even when its ratio limit was not; a ratio-only indexer (`seedingTimeMinutes: 0`) was treated as unlimited and kept forever
+- **Cause:** request deletion had its own time-only check; the scheduled cleanup already used time AND ratio
+- **Fix:** both use `evaluateSeeding()` (`src/lib/utils/seeding-policy.ts`)
+- **Also (rename):** settings were found by indexer name, so a rename in Prowlarr made the torrent "unlimited"; both now match by `indexerId` first, name as fallback
+- **Also:** deletion now skips removing a torrent another active request still uses (`otherActiveRequestsUsingTorrent()`, same check as the cleanup job). Behaviour change: a ratio-only indexer's incomplete download is removed on delete (it was kept forever as "unlimited")
+
+**5. Deleting a Request Removed a Torrent RMAB Did Not Add (#423)**
+- **Issue:** a release already in the client (added by hand or another app) was grabbed by its existing hash; deleting the request (or the seeding cleanup) then removed it with its files
+- **Fix:** `DownloadHistory.addedByRmab` recorded at the grab; delete and cleanup act only on RMAB's torrents (`resolveOwnership()`); rows from before the fix are judged by the client's added time
+
+**6. Torrent Shared by Several Finished Requests Never Cleaned Up (#283)**
+- **Issue:** a series pack (or re-request) used by several finished requests stayed in the client forever
+- **Cause:** the cleanup job's shared-torrent check counted every non-deleted sibling, so each finished request kept it for the others
+- **Fix:** cleanup job only: a sibling keeps it unless finished and done seeding by its own indexer's rule (`siblingKeepsTorrent()`); request deletion unchanged
+
+**7. Deleted Request Still Took a Torrent Pick or a Search (#470)**
+- **Issue:** `select-torrent`, `interactive-search`, `manual-search` and `fetch-ebook` (`/api/requests/[id]/`) and admin approve/deny (`/api/admin/requests/[id]/approve`) loaded the request by id only, so a deleted request could still start a download or a search
+- **Fix:** each loads with `deletedAt: null` (as `select-ebook`/`interactive-search-ebook` do since #463); a deleted request answers that route's usual "Request not found" 404
+
+**8. Web/API Deletions Left Live Discord Buttons**
 - **Issue:** Deleting from the Web UI or via an API token never touched Discord: the request card
   kept a working Cancel Request button and the approval embed kept working Approve/Deny buttons
 - **Impact:** The stale approval embed made approving an already-deleted request reachable
@@ -272,6 +343,11 @@ holders with no linked RMAB account); other callers fall back to the deleting us
 Backend:
 - prisma/schema.prisma (deletedAt, deletedBy fields)
 - src/lib/services/request-delete.service.ts (deletion logic)
+- src/lib/services/request-delete-download.ts (download in the client: remove / keep seeding / leave alone)
+- src/lib/utils/torrent-ownership.ts (whether RMAB added the torrent)
+- src/lib/services/request-delete-files.ts (library files, backend items, plex_library records)
+- src/lib/utils/library-delete-guard.ts (assertSafeLibraryDelete, planEbookDelete)
+- src/lib/services/replace-library-content.ts (replace with no active request)
 - src/app/api/admin/requests/[id]/route.ts (DELETE endpoint)
 - src/lib/processors/cleanup-seeded-torrents.processor.ts (orphaned cleanup)
 
@@ -291,7 +367,7 @@ Queries Updated (deletedAt: null filters):
 ## Configuration
 
 **No new config required** - uses existing:
-- `prowlarr_indexers` (seeding time per indexer)
+- `prowlarr_indexers` (per indexer `seedingTimeMinutes` and `ratioLimit`), matched to the download by Prowlarr indexer id, else by name (`findIndexerConfig()`; the id is ignored when the recorded name is another configured indexer or the id's indexer has another protocol). Not a JSON list → the download is left in the client
 
 ## Security
 

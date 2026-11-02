@@ -143,6 +143,9 @@ export async function fetchWithAuth(url: string, options: RequestInit = {}): Pro
   return response;
 }
 
+/** A failed fetchJSON request: the server's message, plus the HTTP status */
+export type FetchJSONError = Error & { status?: number };
+
 /**
  * Fetch JSON data with authentication
  */
@@ -157,7 +160,7 @@ export async function fetchJSON<T = any>(url: string, options: RequestInit = {})
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Request failed' }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+    throw Object.assign(new Error(error.message || `HTTP ${response.status}`), { status: response.status }) as FetchJSONError;
   }
 
   return response.json();

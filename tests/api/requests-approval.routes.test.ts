@@ -634,6 +634,41 @@ describe('Request Approval Workflow', () => {
       expect(payload.message).toContain('not found');
     });
 
+    it.each(['approve', 'deny'])('%s on a request deleted while awaiting approval → 404, nothing queued (#470)', async (action) => {
+      const mockRequest = {
+        json: vi.fn().mockResolvedValue({ action }),
+      };
+      const deleted = {
+        id: 'req-del',
+        status: 'awaiting_approval',
+        deletedAt: new Date('2026-01-01T00:00:00Z'),
+        selectedTorrent: null,
+        userId: 'user-1',
+        audiobook: { id: 'ab-del', title: 'Deleted Book', author: 'Test Author', audibleAsin: 'ASIN-DEL' },
+        user: { id: 'user-1', plexUsername: 'testuser' },
+      };
+      // Plain field equality, as Prisma applies it; `deletedAt: null` matches only a live row
+      const lookup = async ({ where }: { where: Record<string, unknown> }) =>
+        Object.entries(where).every(([key, value]) =>
+          value === null ? (deleted as Record<string, unknown>)[key] == null : (deleted as Record<string, unknown>)[key] === value
+        ) ? deleted : null;
+      prismaMock.request.findUnique.mockImplementation(lookup);
+      prismaMock.request.findFirst.mockImplementation(lookup);
+      prismaMock.request.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ ...deleted, ...data }));
+
+      const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
+      const response = await POST(mockRequest as never, { params: Promise.resolve({ id: 'req-del' }) });
+
+      expect({ status: response.status, body: await response.json() }).toEqual({
+        status: 404,
+        body: { error: 'NotFound', message: 'Request not found' },
+      });
+      expect(prismaMock.request.update).not.toHaveBeenCalled();
+      expect(jobQueueMock.addSearchJob).not.toHaveBeenCalled();
+      expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
+      expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+    });
+
     it('Non-admin user cannot approve requests (403)', async () => {
       authRequest.user = { id: 'user-1', sub: 'user-1', role: 'user' };
       requireAdminMock.mockImplementation((_req: any, _handler: any) => {

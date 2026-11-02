@@ -6,10 +6,15 @@
  */
 
 import { prisma } from '../db';
-import * as fs from 'fs/promises';
-import * as path from 'path';
 import { RMABLogger } from '../utils/logger';
-import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
+import {
+  deleteBackendItem,
+  deleteLibraryRecords,
+  type LibraryFilesOutcome,
+  removeAudiobookFolder,
+  removeEbookFiles,
+} from './request-delete-files';
+import { cleanUpRequestDownload, emptyDownloadCleanupCounts } from './request-delete-download';
 
 const logger = RMABLogger.create('RequestDelete');
 
@@ -20,6 +25,12 @@ export interface DeleteRequestResult {
   torrentsRemoved: number;
   torrentsKeptSeeding: number;
   torrentsKeptUnlimited: number;
+  /** Set when library files were kept (the guard refused, or the removal failed): why. */
+  filesKeptReason?: string;
+  /** Torrents left in the client because another active request still uses them. */
+  torrentsKeptShared: number;
+  /** Torrents left in the client because RMAB did not add them (it never removes those). */
+  torrentsKeptNotOwned: number;
   error?: string;
 }
 
@@ -79,18 +90,24 @@ async function syncDiscordOnDelete(
  * Logic (audiobook requests):
  * 1. Check if request exists and is not already deleted
  * 2. For each download:
- *    - If unlimited seeding (0): Log and keep seeding, no monitoring
- *    - If incomplete download: Delete torrent + files
- *    - If seeding requirement met: Delete torrent + files
- *    - If still seeding: Keep in qBittorrent for cleanup job
- * 3. Delete media files (title folder only)
- * 4. Delete from backend library (Plex/ABS)
- * 5. Clear audiobook availability linkage
+ *    - Seeding rule (evaluateSeeding, same as the seeding cleanup job): every limit
+ *      that is set (seeding time, ratio) must be met; 0 turns a limit off
+ *    - A torrent RMAB did not add (taken over, or a legacy row whose client added time says
+ *      so or can't tell) is left exactly as it is: never removed, never changed
+ *    - If both limits are 0 (or no indexer config): keep seeding forever, no monitoring
+ *    - If incomplete download, or every set limit met: delete torrent + files,
+ *      unless another active request still uses the torrent
+ *    - Otherwise: keep in the client for the cleanup job
+ * 3. Delete the stored title folder, only when the library delete guard allows it
+ * 4. If RMAB removed it: delete the backend item (ABS without files, Plex only
+ *    when its files were inside the folder), plex_library records, linkage and
+ *    stored paths. If files were kept: none of that, and filesKeptReason says why
+ * 5. Soft delete child ebook requests (linked, or parentless on the same book)
  * 6. Soft delete request (set deletedAt, deletedBy)
  *
  * Logic (ebook requests):
  * 1. Check if request exists and is not already deleted
- * 2. Delete ebook files only (leave audiobook files intact)
+ * 2. Delete ebook files only, when the guard allows it (leave audiobook files intact)
  * 3. Soft delete request (set deletedAt, deletedBy)
  * Note: No backend library deletion or audiobook linkage clearing for ebooks
  */
@@ -123,6 +140,7 @@ export async function deleteRequest(
             absItemId: true,
             filePath: true,
             fileFormat: true,
+            filesHash: true,
           },
         },
         downloadHistory: {
@@ -149,355 +167,105 @@ export async function deleteRequest(
         torrentsRemoved: 0,
         torrentsKeptSeeding: 0,
         torrentsKeptUnlimited: 0,
+        torrentsKeptShared: 0,
+        torrentsKeptNotOwned: 0,
         error: 'NotFound',
       };
     }
 
-    let torrentsRemoved = 0;
-    let torrentsKeptSeeding = 0;
-    let torrentsKeptUnlimited = 0;
-
     // 2. Handle downloads & seeding (skip for ebooks - they use direct HTTP downloads)
     const downloadHistory = request.downloadHistory[0];
     const skipTorrentHandling = isEbook; // Ebooks use direct downloads, not torrents/NZBs
+    const downloadCounts = !skipTorrentHandling && downloadHistory && downloadHistory.indexerName
+      ? await cleanUpRequestDownload(requestId, downloadHistory)
+      : emptyDownloadCleanupCounts();
 
-    if (!skipTorrentHandling && downloadHistory && downloadHistory.indexerName) {
-      try {
-        // Get indexer seeding configuration
-        const { getConfigService } = await import('./config.service');
-        const configService = getConfigService();
-        const indexersConfigStr = await configService.get('prowlarr_indexers');
 
-        let seedingConfig: any = null;
-        if (indexersConfigStr) {
-          const indexersConfig = JSON.parse(indexersConfigStr);
-          seedingConfig = indexersConfig.find(
-            (idx: any) => idx.name === downloadHistory.indexerName
-          );
-        }
-
-        // Handle download cleanup via unified interface
-        const clientId = downloadHistory.downloadClientId || downloadHistory.torrentHash || downloadHistory.nzbId;
-        const clientType = downloadHistory.downloadClient || 'qbittorrent';
-
-        if (clientId && clientType !== 'direct') {
-          const { getDownloadClientManager } = await import('./download-client-manager.service');
-          const manager = getDownloadClientManager(configService);
-          const protocol = CLIENT_PROTOCOL_MAP[clientType as DownloadClientType] || 'torrent';
-          const client = await manager.getClientServiceForProtocol(protocol as 'torrent' | 'usenet');
-
-          if (client) {
-            // Get download info to check seeding status
-            let downloadInfo;
-            try {
-              downloadInfo = await client.getDownload(clientId);
-            } catch (error) {
-              logger.info(`Download ${clientId} not found in ${clientType}, skipping`);
-            }
-
-            if (downloadInfo) {
-              const isUnlimitedSeeding = !seedingConfig || seedingConfig.seedingTimeMinutes === 0;
-              const isCompleted = downloadHistory.downloadStatus === 'completed';
-
-              if (client.protocol === 'usenet') {
-                // Usenet - no seeding concept, delete immediately
-                try {
-                  await client.deleteDownload(clientId, true);
-                  logger.info(`Deleted download ${clientId} from ${client.clientType}`);
-                  torrentsRemoved++;
-                } catch (error) {
-                  logger.info(`Download ${clientId} not found in ${client.clientType}, skipping`);
-                }
-              } else if (isUnlimitedSeeding) {
-                // Unlimited seeding - keep in client, stop monitoring
-                logger.info(
-                  `Keeping download ${downloadInfo.name} for unlimited seeding (indexer: ${downloadHistory.indexerName})`
-                );
-                torrentsKeptUnlimited++;
-              } else if (!isCompleted) {
-                // Download not completed - delete immediately
-                logger.info(`Deleting incomplete download: ${downloadInfo.name}`);
-                await client.deleteDownload(clientId, true);
-                torrentsRemoved++;
-              } else {
-                // Check if seeding requirement is met
-                const seedingTimeSeconds = seedingConfig.seedingTimeMinutes * 60;
-                const actualSeedingTime = downloadInfo.seedingTime || 0;
-                const hasMetRequirement = actualSeedingTime >= seedingTimeSeconds;
-
-                if (hasMetRequirement) {
-                  logger.info(
-                    `Deleting download ${downloadInfo.name} (seeding complete: ${Math.floor(
-                      actualSeedingTime / 60
-                    )}/${seedingConfig.seedingTimeMinutes} minutes)`
-                  );
-                  await client.deleteDownload(clientId, true);
-                  torrentsRemoved++;
-                } else {
-                  const remainingMinutes = Math.ceil((seedingTimeSeconds - actualSeedingTime) / 60);
-                  logger.info(
-                    `Keeping download ${downloadInfo.name} for ${remainingMinutes} more minutes of seeding`
-                  );
-                  torrentsKeptSeeding++;
-                }
-              }
-            }
-          }
-        }
-      } catch (error) {
-        logger.error(
-          `Error handling download for request ${requestId}`,
-          { error: error instanceof Error ? error.message : String(error) }
-        );
-        // Continue with deletion even if download handling fails
-      }
-    }
-
-    // 3. Delete media files
-    // For audiobooks: delete entire title folder
-    // For ebooks: delete only ebook files (leave audiobook files intact)
+    // 3. Library files, behind the library delete guard
+    // Audiobooks: the stored folder, only when it provably holds this import
+    // Ebooks: ebook files in it (leave audiobook files intact), never a shared-folder sweep
+    const book = request.audiobook;
     let filesDeleted = false;
-    try {
-      const titleFolderPath = request.audiobook.filePath;
-
-      if (!titleFolderPath) {
-        logger.warn(
-          `Skipping media file deletion for request ${requestId}: no stored file path`
-        );
-      } else {
-        // Check if the directory recorded during organization still exists.
-        try {
-          await fs.access(titleFolderPath);
-
-          if (isEbook) {
-            // For ebooks: only delete ebook files, leave audiobook files intact
-            const ebookExtensions = ['.epub', '.pdf', '.mobi', '.azw', '.azw3', '.fb2', '.cbz', '.cbr'];
-            const files = await fs.readdir(titleFolderPath);
-
-            let deletedCount = 0;
-            for (const file of files) {
-              const ext = path.extname(file).toLowerCase();
-              if (ebookExtensions.includes(ext)) {
-                const filePath = path.join(titleFolderPath, file);
-                await fs.unlink(filePath);
-                logger.info(`Deleted ebook file: ${file}`);
-                deletedCount++;
-              }
-            }
-
-            filesDeleted = deletedCount > 0;
-            logger.info(`Deleted ${deletedCount} ebook file(s) from: ${titleFolderPath}`);
-          } else {
-            // For audiobooks: delete the entire title folder
-            await fs.rm(titleFolderPath, { recursive: true, force: true });
-            logger.info(`Deleted media directory: ${titleFolderPath}`);
-            filesDeleted = true;
-          }
-        } catch (accessError) {
-          // Folder doesn't exist - that's okay
-          logger.info(`Media directory not found: ${titleFolderPath}`);
-          filesDeleted = false;
-        }
-      }
-    } catch (error) {
-      logger.error(
-        `Error deleting media files for request ${requestId}`,
-        { error: error instanceof Error ? error.message : String(error) }
-      );
-      // Continue with soft delete even if file deletion fails
+    let filesKeptReason: string | undefined;
+    let outcome: LibraryFilesOutcome | null = null;
+    if (isEbook) {
+      const ebook = await removeEbookFiles(book);
+      filesDeleted = ebook.deleted > 0;
+      filesKeptReason = ebook.keptReason;
+    } else {
+      outcome = await removeAudiobookFolder(book);
+      filesDeleted = outcome.kind === 'removed';
+      if (outcome.kind === 'kept') filesKeptReason = outcome.reason;
     }
 
-    // 4. Delete from plex_library table and clear audiobook availability
-    // Skip for ebooks - audiobook files and library entry should remain intact
-    // This ensures the book immediately shows as NOT available when searching
-    if (!isEbook) {
+    // 4. Backend item, plex_library records and availability (audiobooks only).
+    // When files were kept, the library stays exactly as it is: no backend
+    // delete, no record cleanup, no status reset, linkage and paths kept.
+    if (outcome?.kind === 'stale') {
+      // Stale record (e.g. the library moved): nothing to remove or protect here.
+      // Only the stored path is cleared; backend item, records and status stay.
+      await prisma.audiobook.update({
+        where: { id: book.id },
+        data: { filePath: null, filesHash: null, fileFormat: null, updatedAt: new Date() },
+      });
+    } else if (outcome && outcome.kind !== 'kept') {
       try {
         const { getConfigService } = await import('./config.service');
         const configService = getConfigService();
         const backendMode = await configService.getBackendMode();
 
-        // Delete from library backend (ABS or Plex)
-        if (backendMode === 'audiobookshelf' && request.audiobook.absItemId) {
-          // Audiobookshelf: delete the library item from ABS
-          try {
-            const { deleteABSItem } = await import('../services/audiobookshelf/api');
-            await deleteABSItem(request.audiobook.absItemId);
-            logger.info(
-              `Deleted Audiobookshelf library item ${request.audiobook.absItemId} for "${request.audiobook.title}"`
-            );
-          } catch (absError) {
-            logger.error(
-              `Error deleting Audiobookshelf library item ${request.audiobook.absItemId}`,
-              { error: absError instanceof Error ? absError.message : String(absError) }
-            );
-            // Continue with deletion even if ABS deletion fails
-          }
-        } else if (backendMode === 'plex' && request.audiobook.plexGuid) {
-          // Plex: delete the library item from Plex by ratingKey
-          try {
-            // Query plex_library table to get the ratingKey
-            const plexLibraryRecord = await prisma.plexLibrary.findUnique({
-              where: { plexGuid: request.audiobook.plexGuid },
-              select: { plexRatingKey: true },
-            });
-
-            if (plexLibraryRecord && plexLibraryRecord.plexRatingKey) {
-              const ratingKey = plexLibraryRecord.plexRatingKey;
-
-              // Get Plex config
-              const plexServerUrl = (await configService.get('plex_url')) || '';
-              const plexToken = (await configService.get('plex_token')) || '';
-
-              if (plexServerUrl && plexToken) {
-                const { getPlexService } = await import('../integrations/plex.service');
-                const plexService = getPlexService();
-                await plexService.deleteItem(plexServerUrl, plexToken, ratingKey);
-                logger.info(
-                  `Deleted Plex library item ${ratingKey} (plexGuid: ${request.audiobook.plexGuid}) for "${request.audiobook.title}"`
-                );
-              } else {
-                logger.warn('Plex server URL or token not configured, skipping Plex library deletion');
-              }
-            } else {
-              logger.warn(
-                `No plexRatingKey found in plex_library for plexGuid: ${request.audiobook.plexGuid}`
-              );
-            }
-          } catch (plexError) {
-            logger.error(
-              `Error deleting Plex library item (plexGuid: ${request.audiobook.plexGuid})`,
-              { error: plexError instanceof Error ? plexError.message : String(plexError) }
-            );
-            // Continue with deletion even if Plex deletion fails
-          }
+        if (outcome.kind === 'removed' || outcome.kind === 'gone') {
+          await deleteBackendItem(book, outcome, backendMode, configService);
         }
+        await deleteLibraryRecords(book);
 
-        // Delete plex_library records to ensure book shows as NOT available
-        // Uses ASIN-based matching (same as availability check) for consistency
-        try {
-          let deletedCount = 0;
-
-          // Primary method: Delete by ASIN (matches availability check logic exactly)
-          // This ensures the same record found during availability check gets deleted
-          if (request.audiobook.audibleAsin) {
-            const asinDeleteResult = await prisma.plexLibrary.deleteMany({
-              where: {
-                OR: [
-                  { asin: request.audiobook.audibleAsin },
-                  { plexGuid: { contains: request.audiobook.audibleAsin } },
-                ],
-              },
-            });
-            deletedCount = asinDeleteResult.count;
-
-            if (deletedCount > 0) {
-              logger.info(
-                `Deleted ${deletedCount} plex_library record(s) by ASIN "${request.audiobook.audibleAsin}" for "${request.audiobook.title}"`
-              );
-            }
-          }
-
-          // Fallback: Delete by exact title/author match (for legacy records without ASIN)
-          // Only used if ASIN deletion didn't find any records
-          if (deletedCount === 0) {
-            const matchingLibraryRecords = await prisma.plexLibrary.findMany({
-              where: {
-                title: {
-                  equals: request.audiobook.title,
-                  mode: 'insensitive',
-                },
-                author: {
-                  equals: request.audiobook.author,
-                  mode: 'insensitive',
-                },
-              },
-            });
-
-            if (matchingLibraryRecords.length > 0) {
-              const deletePromises = matchingLibraryRecords.map((record) =>
-                prisma.plexLibrary.delete({ where: { id: record.id } })
-              );
-              await Promise.all(deletePromises);
-              deletedCount = matchingLibraryRecords.length;
-
-              logger.info(
-                `Deleted ${deletedCount} plex_library record(s) by title/author for "${request.audiobook.title}"`
-              );
-            } else {
-              logger.info(
-                `No plex_library records found for "${request.audiobook.title}" (ASIN: ${request.audiobook.audibleAsin || 'none'})`
-              );
-            }
-          }
-        } catch (libError) {
-          logger.error(
-            `Error deleting plex_library records`,
-            { error: libError instanceof Error ? libError.message : String(libError) }
-          );
-          // Continue with deletion even if library cleanup fails
-        }
-
-        // Clear audiobook record linkage
-        const updateData: any = {
-          status: 'requested', // Reset to requested state
-          updatedAt: new Date(),
-        };
-
-        // Clear library linkage based on backend mode
-        if (backendMode === 'audiobookshelf') {
-          updateData.absItemId = null;
-        } else {
-          updateData.plexGuid = null;
-        }
-
+        // Reset to requested, clear the library linkage and the (now removed) stored folder
         await prisma.audiobook.update({
-          where: { id: request.audiobook.id },
-          data: updateData,
+          where: { id: book.id },
+          data: {
+            status: 'requested',
+            updatedAt: new Date(),
+            ...(backendMode === 'audiobookshelf' ? { absItemId: null } : { plexGuid: null }),
+            filePath: null,
+            filesHash: null,
+            fileFormat: null,
+          },
         });
-
-        logger.info(
-          `Cleared availability status for audiobook ${request.audiobook.id}`
-        );
+        logger.info(`Cleared availability status for audiobook ${book.id}`);
       } catch (error) {
-        logger.error(
-          `Error clearing audiobook status`,
-          { error: error instanceof Error ? error.message : String(error) }
-        );
+        logger.error(`Error clearing audiobook status`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
         // Continue with deletion even if this fails
       }
-    } else {
+    } else if (isEbook) {
       logger.info(`Skipping backend library deletion for ebook request ${requestId}`);
+    } else {
+      logger.warn(`Files kept for request ${requestId}: ${filesKeptReason}; backend item and library records left as they are`);
     }
 
-    // 5. Delete child requests (ebook requests linked to this audiobook request)
+    // 5. Delete child requests: ebook requests linked to this audiobook request,
+    // and ebook requests with no parent on the same book row
     if (!isEbook) {
       try {
+        const childWhere = {
+          deletedAt: null,
+          OR: [
+            { parentRequestId: requestId },
+            { type: 'ebook', parentRequestId: null, audiobookId: book.id },
+          ],
+        };
         const childRequests = await prisma.request.findMany({
-          where: {
-            parentRequestId: requestId,
-            deletedAt: null,
-          },
-          select: {
-            id: true,
-            type: true,
-          },
+          where: childWhere,
+          select: { id: true, type: true },
         });
 
         if (childRequests.length > 0) {
           logger.info(`Found ${childRequests.length} child request(s) to delete`);
-
-          // Soft delete all child requests
           await prisma.request.updateMany({
-            where: {
-              parentRequestId: requestId,
-              deletedAt: null,
-            },
-            data: {
-              deletedAt: new Date(),
-              deletedBy: adminUserId,
-            },
+            where: { id: { in: childRequests.map((c) => c.id) } },
+            data: { deletedAt: new Date(), deletedBy: adminUserId },
           });
-
           logger.info(`Soft-deleted ${childRequests.length} child request(s)`);
         }
       } catch (error) {
@@ -508,6 +276,7 @@ export async function deleteRequest(
         // Continue with parent deletion even if child deletion fails
       }
     }
+
 
     // 6. Soft delete request
     await prisma.request.update({
@@ -532,11 +301,14 @@ export async function deleteRequest(
 
     return {
       success: true,
-      message: 'Request deleted successfully',
+      message: filesKeptReason
+        ? `Request deleted; files kept: ${filesKeptReason}`
+        : outcome?.kind === 'stale'
+          ? 'Request deleted; its stored folder no longer exists outside the current media library, nothing was removed'
+          : 'Request deleted successfully',
       filesDeleted,
-      torrentsRemoved,
-      torrentsKeptSeeding,
-      torrentsKeptUnlimited,
+      ...(filesKeptReason && { filesKeptReason }),
+      ...downloadCounts,
     };
   } catch (error) {
     logger.error(
@@ -551,6 +323,8 @@ export async function deleteRequest(
       torrentsRemoved: 0,
       torrentsKeptSeeding: 0,
       torrentsKeptUnlimited: 0,
+      torrentsKeptShared: 0,
+      torrentsKeptNotOwned: 0,
       error: error instanceof Error ? error.message : 'Unknown error',
     };
   }

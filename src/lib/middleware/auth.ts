@@ -9,6 +9,11 @@ import { verifyAccessToken, TokenPayload } from '../utils/jwt';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { API_TOKEN_PREFIX, isEndpointAllowed } from '../constants/api-tokens';
+import {
+  getRegistrationRefusal,
+  getSessionRefusal,
+  type SessionRefusal,
+} from '../services/auth/local-account-status';
 
 const logger = RMABLogger.create('Auth');
 
@@ -52,6 +57,7 @@ async function authenticateApiToken(token: string): Promise<TokenPayload | null>
           plexUsername: true,
           role: true,
           deletedAt: true,
+          registrationStatus: true,
         },
       },
     },
@@ -65,12 +71,14 @@ async function authenticateApiToken(token: string): Promise<TokenPayload | null>
     return null;
   }
 
-  // Reject tokens for soft-deleted users
+  // Reject tokens for missing, soft-deleted, pending-approval or rejected users
   const user = apiToken.tokenUser;
-  if (!user || user.deletedAt) {
-    logger.warn('API token used by deleted or missing user', {
+  const refusal = user ? getRegistrationRefusal(user.registrationStatus) : null;
+  if (!user || user.deletedAt || refusal) {
+    logger.warn('API token used by a missing, deleted or unapproved user', {
       tokenPrefix: apiToken.tokenPrefix,
       userId: user?.id,
+      reason: !user ? 'missing' : user.deletedAt ? 'deleted' : refusal,
     });
     return null;
   }
@@ -86,13 +94,46 @@ async function authenticateApiToken(token: string): Promise<TokenPayload | null>
     });
   });
 
-  // Use the token's target user (userId), not the creator (createdById)
+  // Use the token's target user (userId), not the creator (createdById).
+  // The token's role is an upper bound: it never exceeds the owner's current role.
   return {
     sub: user.id,
     plexId: user.plexId,
     username: user.plexUsername,
-    role: apiToken.role,
+    role: apiToken.role === 'admin' && user.role === 'admin' ? 'admin' : 'user',
   };
+}
+
+type AuthenticatedUser = NonNullable<AuthenticatedRequest['user']>;
+
+type SessionCheck =
+  | { user: AuthenticatedUser; reason?: undefined }
+  | { user?: undefined; reason: 'invalid_token' | SessionRefusal; userId?: string };
+
+/**
+ * The account check for an access token: a valid signature, then the account row
+ * (missing, deleted, pending, rejected, revoked). The role comes from the row.
+ */
+async function checkAccessToken(token: string): Promise<SessionCheck> {
+  const payload = verifyAccessToken(token);
+  if (!payload) return { reason: 'invalid_token' };
+
+  const user = await prisma.user.findUnique({
+    where: { id: payload.sub },
+    select: {
+      id: true,
+      role: true,
+      deletedAt: true,
+      sessionsInvalidatedAt: true,
+      registrationStatus: true,
+    },
+  });
+
+  const refusal = getSessionRefusal(user, payload.iat);
+  if (!user || refusal) return { reason: refusal ?? 'missing', userId: payload.sub };
+
+  // The role comes from the account, not the token, so role changes apply now
+  return { user: { ...payload, id: payload.sub, role: user.role } };
 }
 
 /**
@@ -153,61 +194,52 @@ export async function requireAuth(
   }
 
   // Fall back to JWT verification
-  const payload = verifyAccessToken(token);
+  const session = await checkAccessToken(token);
 
-  if (!payload) {
+  if (session.reason === 'invalid_token') {
     logger.error('Token verification failed');
-    return NextResponse.json(
-      {
-        error: 'Unauthorized',
-        message: 'Invalid or expired token',
-      },
-      { status: 401 }
-    );
+    return NextResponse.json({ error: 'Unauthorized', message: 'Invalid or expired token' }, { status: 401 });
   }
 
-  // Verify user still exists in database
-  const user = await prisma.user.findUnique({
-    where: { id: payload.sub },
-    select: {
-      id: true,
-      deletedAt: true,
-      sessionsInvalidatedAt: true,
-    },
-  });
-
-  if (!user || user.deletedAt) {
-    logger.error('User not found in database', { userId: payload.sub });
-    return NextResponse.json(
-      {
-        error: 'Unauthorized',
-        message: 'User not found',
-      },
-      { status: 401 }
-    );
+  if (session.reason === 'sessions_revoked') {
+    logger.warn('Token issued before session invalidation', { userId: session.userId });
+    return NextResponse.json({ error: 'Unauthorized', message: 'Session has been revoked' }, { status: 401 });
   }
 
-  // Check if session was invalidated after this token was issued
-  if (user.sessionsInvalidatedAt && payload.iat &&
-      payload.iat < Math.floor(user.sessionsInvalidatedAt.getTime() / 1000)) {
-    logger.warn('Token issued before session invalidation', { userId: payload.sub });
-    return NextResponse.json(
-      {
-        error: 'Unauthorized',
-        message: 'Session has been revoked',
-      },
-      { status: 401 }
-    );
+  // Missing, deleted, pending-approval and rejected accounts are refused the same way
+  if (!session.user) {
+    logger.error('Session refused: user missing, deleted or not approved', { userId: session.userId, reason: session.reason });
+    return NextResponse.json({ error: 'Unauthorized', message: 'User not found' }, { status: 401 });
   }
 
-  // Add user to request
   const authenticatedRequest = request as AuthenticatedRequest;
-  authenticatedRequest.user = {
-    ...payload,
-    id: payload.sub,
-  };
+  authenticatedRequest.user = session.user;
 
   return handler(authenticatedRequest);
+}
+
+/**
+ * Optional authentication for routes that also answer without a session.
+ * Returns the caller only when the credential passes the same account checks as
+ * `requireAuth` (an API token also needs the endpoint on its allowlist); otherwise
+ * null, never a 401. Per-user details must be added only for a non-null caller.
+ */
+export async function getOptionalAuthUser(request: NextRequest): Promise<AuthenticatedUser | null> {
+  const token = extractToken(request);
+  if (!token) return null;
+
+  if (token.startsWith(API_TOKEN_PREFIX)) {
+    if (!isEndpointAllowed(request.method, request.nextUrl.pathname)) return null;
+    const apiUser = await authenticateApiToken(token);
+    return apiUser ? { ...apiUser, id: apiUser.sub } : null;
+  }
+
+  const session = await checkAccessToken(token);
+  if (!session.user) {
+    logger.debug('Optional auth: no checked caller', { userId: session.userId, reason: session.reason });
+    return null;
+  }
+  return session.user;
 }
 
 /**
@@ -239,41 +271,6 @@ export async function requireAdmin(
   }
 
   return handler(request);
-}
-
-/**
- * Helper: Get current user from request (for use in API routes).
- * JWT-only — does NOT recognize API tokens. Use `getCurrentUserAsync` if
- * the caller should also accept `rmab_`-prefixed API tokens.
- */
-export function getCurrentUser(request: NextRequest): TokenPayload | null {
-  const token = extractToken(request);
-  if (!token) return null;
-  return verifyAccessToken(token);
-}
-
-/**
- * Helper: Get current user from request, recognizing BOTH JWT sessions and
- * API tokens (`rmab_` prefix). Returns the same `TokenPayload` shape in both
- * cases so callers don't need to branch on auth type.
- *
- * Use this in routes that are open to optional auth but should still enrich
- * responses with per-user context when called by an API token holder.
- */
-export async function getCurrentUserAsync(request: NextRequest): Promise<TokenPayload | null> {
-  const token = extractToken(request);
-  if (!token) return null;
-  if (token.startsWith(API_TOKEN_PREFIX)) {
-    return authenticateApiToken(token);
-  }
-  return verifyAccessToken(token);
-}
-
-/**
- * Helper: Check if user is admin
- */
-export function isAdmin(user: TokenPayload | null): boolean {
-  return user?.role === 'admin';
 }
 
 /**
@@ -358,6 +355,18 @@ export async function isLocalAdmin(userId: string): Promise<boolean> {
   return user.isSetupAdmin && user.plexId.startsWith('local-');
 }
 
+/** 503 when the setup state cannot be read (setup/admin guards fail closed). */
+function setupStateUnavailable(request: NextRequest, error: unknown): NextResponse {
+  logger.error('Could not read setup state; refusing request', {
+    path: request.nextUrl?.pathname,
+    error: error instanceof Error ? error.message : String(error),
+  });
+  return NextResponse.json(
+    { error: 'ServiceUnavailable', message: 'Database is not ready. Try again shortly.' },
+    { status: 503 }
+  );
+}
+
 /**
  * Middleware: Require setup to be incomplete
  * Blocks access to setup-only endpoints after initial setup is finished.
@@ -384,8 +393,9 @@ export async function requireSetupIncomplete(
         { status: 403 }
       );
     }
-  } catch {
-    // If database is not ready, setup is definitely not complete — allow through
+  } catch (error) {
+    // Fail closed: without the setup state we cannot tell whether this endpoint is still allowed
+    return setupStateUnavailable(request, error);
   }
 
   return handler(request);
@@ -407,9 +417,9 @@ export async function requireSetupIncompleteOrAdmin(
       where: { key: 'setup_completed' },
     });
     setupComplete = config?.value === 'true';
-  } catch {
-    // If database is not ready, setup is definitely not complete — allow through
-    return handler(request);
+  } catch (error) {
+    // Fail closed: without the setup state we cannot tell whether auth is required
+    return setupStateUnavailable(request, error);
   }
 
   if (!setupComplete) {

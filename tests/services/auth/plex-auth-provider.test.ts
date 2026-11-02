@@ -57,132 +57,21 @@ describe('PlexAuthProvider', () => {
     expect(result.pinId).toBe('42');
   });
 
-  it('returns error when PIN authorization is still pending', async () => {
-    plexServiceMock.checkPin.mockResolvedValue(null);
-
-    const { PlexAuthProvider } = await import('@/lib/services/auth/PlexAuthProvider');
-    const provider = new PlexAuthProvider();
-    const result = await provider.handleCallback({ pinId: '123' });
-
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/waiting for user authorization/i);
-  });
-
-  it('returns error when pinId is missing', async () => {
-    const { PlexAuthProvider } = await import('@/lib/services/auth/PlexAuthProvider');
-    const provider = new PlexAuthProvider();
-    const result = await provider.handleCallback({});
-
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/missing pin id/i);
-  });
-
-  it('returns error when Plex server is not configured', async () => {
+  it('handleCallback refuses and writes nothing (Plex sign-in completes in the Plex routes)', async () => {
     plexServiceMock.checkPin.mockResolvedValue('token');
-    plexServiceMock.getUserInfo.mockResolvedValue({
-      id: 1,
-      username: 'user',
-      authToken: 'token',
-    });
-    configMock.getPlexConfig.mockResolvedValue({
-      serverUrl: null,
-      authToken: 'token',
-      libraryId: null,
-      machineIdentifier: null,
-    });
+    plexServiceMock.getUserInfo.mockResolvedValue({ id: 1, username: 'user', authToken: 'token' });
 
     const { PlexAuthProvider } = await import('@/lib/services/auth/PlexAuthProvider');
     const provider = new PlexAuthProvider();
-    const result = await provider.handleCallback({ pinId: '123' });
 
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/plex server is not configured/i);
-  });
-
-  it('returns profile selection when multiple home users are present', async () => {
-    plexServiceMock.checkPin.mockResolvedValue('token');
-    plexServiceMock.getUserInfo.mockResolvedValue({
-      id: 1,
-      username: 'user',
-      authToken: 'token',
-    });
-    configMock.getPlexConfig.mockResolvedValue({
-      serverUrl: 'http://plex',
-      authToken: 'token',
-      libraryId: 'lib',
-      machineIdentifier: 'machine',
-    });
-    plexServiceMock.verifyServerAccess.mockResolvedValue(true);
-    plexServiceMock.getHomeUsers.mockResolvedValue([
-      { id: '1', title: 'User 1' },
-      { id: '2', title: 'User 2' },
-    ]);
-
-    const { PlexAuthProvider } = await import('@/lib/services/auth/PlexAuthProvider');
-    const provider = new PlexAuthProvider();
-    const result = await provider.handleCallback({ pinId: '123' });
-
-    expect(result.success).toBe(true);
-    expect(result.requiresProfileSelection).toBe(true);
-    expect(result.profiles?.length).toBe(2);
-  });
-
-  it('denies login when server access check fails', async () => {
-    plexServiceMock.checkPin.mockResolvedValue('token');
-    plexServiceMock.getUserInfo.mockResolvedValue({
-      id: 1,
-      username: 'user',
-      authToken: 'token',
-    });
-    configMock.getPlexConfig.mockResolvedValue({
-      serverUrl: 'http://plex',
-      authToken: 'token',
-      libraryId: 'lib',
-      machineIdentifier: 'machine',
-    });
-    plexServiceMock.verifyServerAccess.mockResolvedValue(false);
-
-    const { PlexAuthProvider } = await import('@/lib/services/auth/PlexAuthProvider');
-    const provider = new PlexAuthProvider();
-    const result = await provider.handleCallback({ pinId: '123' });
-
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/do not have access/i);
-  });
-
-  it('creates user and returns tokens when auth succeeds', async () => {
-    plexServiceMock.checkPin.mockResolvedValue('token');
-    plexServiceMock.getUserInfo.mockResolvedValue({
-      id: 1,
-      username: 'user',
-      email: 'user@example.com',
-      thumb: 'avatar',
-      authToken: 'token',
-    });
-    configMock.getPlexConfig.mockResolvedValue({
-      serverUrl: 'http://plex',
-      authToken: 'token',
-      libraryId: 'lib',
-      machineIdentifier: 'machine',
-    });
-    plexServiceMock.verifyServerAccess.mockResolvedValue(true);
-    plexServiceMock.getHomeUsers.mockResolvedValue([]);
-    prismaMock.user.count.mockResolvedValue(1);
-    prismaMock.user.upsert.mockResolvedValue({
-      id: 'user-1',
-      plexUsername: 'user',
-      plexEmail: 'user@example.com',
-      avatarUrl: 'avatar',
-      role: 'user',
-    });
-
-    const { PlexAuthProvider } = await import('@/lib/services/auth/PlexAuthProvider');
-    const provider = new PlexAuthProvider();
-    const result = await provider.handleCallback({ pinId: '123' });
-
-    expect(result.success).toBe(true);
-    expect(result.tokens?.accessToken).toBeTruthy();
-    expect(result.user?.authProvider).toBe('plex');
+    for (const params of [{}, { pinId: '123' }, { code: 'code', state: 'state' }]) {
+      const result = await provider.handleCallback(params);
+      expect(result).toEqual({ success: false, error: expect.any(String) });
+    }
+    expect(plexServiceMock.checkPin).not.toHaveBeenCalled();
+    expect(prismaMock.user.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.user.create).not.toHaveBeenCalled();
+    expect(prismaMock.user.update).not.toHaveBeenCalled();
   });
 
   it('returns false when access validation has no server config', async () => {

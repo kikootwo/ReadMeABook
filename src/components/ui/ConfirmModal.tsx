@@ -18,7 +18,12 @@ interface ConfirmModalProps {
   confirmText?: string;
   cancelText?: string;
   isLoading?: boolean;
+  /** Disables Confirm (e.g. nothing changed yet). */
+  confirmDisabled?: boolean;
   variant?: 'danger' | 'primary';
+  /** Optional third choice, shown between Cancel and Confirm. */
+  secondaryText?: string;
+  onSecondary?: () => void;
 }
 
 export function ConfirmModal({
@@ -30,7 +35,10 @@ export function ConfirmModal({
   confirmText = 'Confirm',
   cancelText = 'Cancel',
   isLoading = false,
+  confirmDisabled = false,
   variant = 'primary',
+  secondaryText,
+  onSecondary,
 }: ConfirmModalProps) {
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={title} size="sm" showCloseButton={false}>
@@ -43,10 +51,16 @@ export function ConfirmModal({
           <Button onClick={onClose} variant="outline" disabled={isLoading}>
             {cancelText}
           </Button>
+          {secondaryText && onSecondary && (
+            <Button onClick={onSecondary} variant="outline" disabled={isLoading}>
+              {secondaryText}
+            </Button>
+          )}
           <Button
             onClick={onConfirm}
             variant={variant}
             loading={isLoading}
+            disabled={confirmDisabled}
           >
             {confirmText}
           </Button>

@@ -11,6 +11,7 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { getDiscordConfig } from '@/lib/services/discord/discord-config';
 import { resolveMembersByIds } from '@/lib/services/discord/discord-rest.helper';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Settings.DiscordResolveMembers');
 
@@ -18,7 +19,9 @@ export async function POST(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
-        const { ids } = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const { ids } = bodyResult.data;
         const cleanIds = Array.isArray(ids)
           ? Array.from(
               new Set(

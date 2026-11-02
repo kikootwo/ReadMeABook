@@ -6,6 +6,7 @@
 - **Plex OAuth, JWT sessions, RBAC** → [backend/services/auth.md](backend/services/auth.md)
 - **Local admin authentication, password change** → [backend/services/auth.md](backend/services/auth.md)
 - **Admin-generated login token per user (URL-login)** → [backend/services/auth.md](backend/services/auth.md)
+- **API tokens, allowlist, GET /api/requests/:id (field list, BigInt sizes #261)** → [backend/services/api-tokens.md](backend/services/api-tokens.md)
 - **Route protection, auth guards** → [frontend/routing-auth.md](frontend/routing-auth.md)
 - **Login page UI/UX** → [frontend/pages/login.md](frontend/pages/login.md)
 - **Credential recovery (lost CONFIG_ENCRYPTION_KEY, locked-out admin)** → [admin-features/credential-recovery.md](admin-features/credential-recovery.md)
@@ -17,6 +18,7 @@
 - **Settings architecture refactoring (Jan 2026)** → [settings-pages.md](settings-pages.md#architecture-refactored-jan-2026)
 - **Audiobook organization templates** → [settings-pages.md](settings-pages.md#audiobook-organization-template), [phase3/file-organization.md](phase3/file-organization.md#target-structure)
 - **Setup middleware & status check** → [backend/middleware.md](backend/middleware.md)
+- **API request validation (request size limits / readJsonBody, zod array bounds, validation error details/logging)** → [backend/validation.md](backend/validation.md)
 - **Environment variables, PUBLIC_URL, OAuth configuration** → [backend/services/environment.md](backend/services/environment.md)
 
 ## Database & Data Models
@@ -30,8 +32,10 @@
 ## Audiobookshelf Integration
 - **ABS API client, library scanning** → `src/lib/services/audiobookshelf/api.ts`
 - **ABS library service** → `src/lib/services/library/AudiobookshelfLibraryService.ts`
+- **ABS connection test, fetch failure reasons (#221)** → [setup-wizard.md](setup-wizard.md) (API Endpoints, Fixed Issues 8)
 - **Backend mode selection (Plex vs ABS)** → [backend/services/config.md](backend/services/config.md)
 - **File hash matching for accurate ASIN** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md)
+- **ASIN read-back after the ABS match (#287)** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#asin-read-back-287)
 - **OIDC authentication** → [backend/services/auth.md](backend/services/auth.md)
 
 ## Reading Shelves (Goodreads, Hardcover)
@@ -41,6 +45,7 @@
 - **Combined shelves API, GenericShelf** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md)
 - **Hook factory (createShelfHooks)** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#hook-factory)
 - **Adding a new shelf provider** → [backend/services/goodreads-sync.md](backend/services/goodreads-sync.md#adding-a-new-provider)
+- **Watched authors & series (auto-request, Entire catalog vs New releases only, release cutoff, undated books, targeted check)** → [features/watched-lists.md](features/watched-lists.md)
 
 ## Audible Integration
 - **Web scraping (popular, new releases)** → [integrations/audible.md](integrations/audible.md)
@@ -49,31 +54,45 @@
 - **Dedup & works table (cross-ASIN identity)** → [integrations/audible.md](integrations/audible.md#dedup--works-table)
 - **Multi-narrator capture in HTML scrapers** → [integrations/audible.md](integrations/audible.md#narrator-capture-in-html-scrapers)
 - **Series page dual layout (modern/legacy A/B)** → [integrations/audible.md](integrations/audible.md#series-page-dual-layout)
+- **Series search (catalog API, ranking, book counts, error state)** → [integrations/audible-series-search.md](integrations/audible-series-search.md)
+- **Audible regions, language configs, adding a region, changing region** → [integrations/audible.md](integrations/audible.md#region-configuration)
 
 ## E-book Support (First-Class)
 - **First-class ebook requests, separate tracking** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
 - **Multi-source ebook downloads (Anna's Archive + Indexer Search)** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
 - **Ebook indexer search (Prowlarr with ebook categories)** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#flow-indexer-search)
+- **Ebook already in the book folder skips auto-grab (#313)** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#on-disk-check-313)
 - **ASIN-based matching, format selection** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
 - **Ebook ranking algorithm (unified with audiobooks)** → [phase3/ranking-algorithm.md](phase3/ranking-algorithm.md#ebook-torrent-ranking)
 - **Direct HTTP downloads from Anna's Archive** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
 - **Ebook delete behavior (files only, torrents seed)** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#delete-behavior)
+- **Kindle EPUB fix, read-back check of the fixed copy** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md#kindle-epub-fix)
 - **Ebook settings (3-section UI)** → [settings-pages.md](settings-pages.md#e-book-sidecar)
 - **Indexer categories (audiobook/ebook tabs)** → [settings-pages.md](settings-pages.md#indexer-categories-tabbed)
+- **Per-indexer settings mapping (ratio limit, seeding time, priority)** → [settings-pages.md](settings-pages.md#api-endpoints)
 
 ## Automation Pipeline
 - **Full pipeline overview** → [phase3/README.md](phase3/README.md)
 - **Search via Prowlarr (torrents + NZBs)** → [phase3/prowlarr.md](phase3/prowlarr.md)
 - **Torrent ranking/selection** → [phase3/ranking-algorithm.md](phase3/ranking-algorithm.md)
-- **Multi-download-client support (qBittorrent, Transmission, SABnzbd, NZBGet)** → [phase3/download-clients.md](phase3/download-clients.md)
+- **Automatic-search match gates (one-word titles, required numbers, author whole words, volume conflict, #223)** → [phase3/match-gates.md](phase3/match-gates.md)
+- **Multi-download-client support (qBittorrent, Transmission, Deluge, SABnzbd, NZBGet; base32 magnets, torrent IDs)** → [phase3/download-clients.md](phase3/download-clients.md)
+- **.torrent/.nzb fetch, redirects, Prowlarr key scoping, user-picked release validation** → [phase3/download-clients.md](phase3/download-clients.md#source-fetch--prowlarr-key-scoping)
 - **qBittorrent integration (torrents)** → [phase3/qbittorrent.md](phase3/qbittorrent.md)
+- **qBittorrent torrent IDs (hybrid v1+v2 torrents, base32 magnets)** → [phase3/qbittorrent.md](phase3/qbittorrent.md)
 - **SABnzbd integration (Usenet/NZB)** → [phase3/sabnzbd.md](phase3/sabnzbd.md)
+- **SABnzbd duplicate NZBs, retried adds after a timeout** → [phase3/sabnzbd.md](phase3/sabnzbd.md#duplicate-nzbs-and-retried-adds-329)
 - **File organization, seeding** → [phase3/file-organization.md](phase3/file-organization.md)
+- **Post-organize cleanup safety (delete guard, remove-after-processing gate)** → [phase3/file-organization.md](phase3/file-organization.md#post-organize-cleanup-safety)
+- **Verified import (atomic copy, placement records, delete only what reached the library)** → [phase3/file-organization.md](phase3/file-organization.md#verified-import-delete-only-what-reached-the-library)
+- **Custom M4B tags (ASIN, publisher, subtitle, language as iTunes freeform `----` atoms), tagged MP4 faststart** → [phase3/file-organization.md](phase3/file-organization.md#mp4-freeform-tags)
 - **Chapter merging (auto-merge to M4B)** → [features/chapter-merging.md](features/chapter-merging.md)
+- **Multi-disc (CD1/Disc 1) folders: disc names, import order, disc/track tags, Manual/Bulk Import, in-place stop** → [features/multi-disc-folders.md](features/multi-disc-folders.md)
 
 ## Background Jobs
 - **Bull queue, processors, retry logic** → [backend/services/jobs.md](backend/services/jobs.md)
 - **Scheduled/recurring jobs (cron)** → [backend/services/scheduler.md](backend/services/scheduler.md)
+- **Startup initialization (instrumentation hook, /api/init, single-process rule)** → [backend/services/scheduler.md](backend/services/scheduler.md#startup-initialization)
 - **Job types:** search, download monitor, organize, Plex scan, cleanup, retries
 
 ## Logging
@@ -117,7 +136,7 @@
 - **System logs (filters, search, pagination, /api/admin/logs)** → [admin-dashboard.md](admin-dashboard.md)
 - **Bulk import (scan folders, match Audible, batch import)** → [features/bulk-import.md](features/bulk-import.md)
 - **Jobs management UI** → [backend/services/scheduler.md](backend/services/scheduler.md)
-- **Request deletion (soft delete, seeding awareness)** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
+- **Request deletion (soft delete, seeding awareness, library delete guard, files kept reason)** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
 - **Request approval system, auto-approve settings** → [admin-features/request-approval.md](admin-features/request-approval.md)
 - **Release blocklist (auto-block failed releases, /admin/blocklist)** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md)
 
@@ -128,22 +147,28 @@
 ## Deployment
 - **Docker Compose setup (multi-container)** → [deployment/docker.md](deployment/docker.md)
 - **Unified container (all-in-one)** → [deployment/unified.md](deployment/unified.md)
+- **Image build stages, runtime image contents, Prisma CLI in the image, build guards** → [deployment/unified.md](deployment/unified.md#dockerfile-structure)
 - **Environment variables, volumes** → [deployment/docker.md](deployment/docker.md)
+- **TLS errors after upgrading to Node 24 (`dh key too small`, `EE certificate key too weak`, `Issuer.discover() failed.`, SABnzbd/NZBGet "SSL/TLS certificate error")** → [deployment/unified.md](deployment/unified.md#tls-errors-after-upgrading-to-node-24)
 - **Volume mapping (download clients)** → [deployment/volume-mapping.md](deployment/volume-mapping.md)
 - **Database setup (Prisma), migrations** → [deployment/docker.md](deployment/docker.md)
+- **CI workflows (GitHub Actions), tag-only image publishing, action SHA pins** → [deployment/ci-workflows.md](deployment/ci-workflows.md)
 
 ## Testing
 - **Backend unit test framework, scripts** [testing.md](testing.md)
+- **E2E harness (disposable Docker stack, fake-arr, Playwright, self-gate, preview)** → [testing/e2e-harness.md](testing/e2e-harness.md)
 
 ## Feature-Specific Lookups
 **"How do I add a new audiobook?"** → [integrations/audible.md](integrations/audible.md) (scraping), [phase3/README.md](phase3/README.md) (automation)
 **"How do I configure multiple download clients?"** → [phase3/download-clients.md](phase3/download-clients.md)
+**"A torrent already in my client was deleted" / "Does RMAB remove torrents it didn't add?"** → [phase3/download-clients.md](phase3/download-clients.md#torrent-ownership-423) (ownership rule, probe, known limits), [backend/services/scheduler.md](backend/services/scheduler.md) (cleanup_seeded_torrents), [admin-features/request-deletion.md](admin-features/request-deletion.md)
 **"How do torrent downloads work?"** → [phase3/qbittorrent.md](phase3/qbittorrent.md), [backend/services/jobs.md](backend/services/jobs.md)
 **"How do Usenet/NZB downloads work?"** → [phase3/sabnzbd.md](phase3/sabnzbd.md), [phase3/download-clients.md](phase3/download-clients.md), [backend/services/jobs.md](backend/services/jobs.md)
 **"Can I use both qBittorrent and SABnzbd?"** → [phase3/download-clients.md](phase3/download-clients.md)
 **"How do I use NZBGet instead of SABnzbd?"** → [phase3/download-clients.md](phase3/download-clients.md)
 **"How do I use Transmission instead of qBittorrent?"** → [phase3/download-clients.md](phase3/download-clients.md)
 **"How do I set different download paths per client?"** → [phase3/download-clients.md](phase3/download-clients.md#per-client-custom-download-path)
+**"How do I test a branch end to end without touching my own Docker setup?"** → [testing/e2e-harness.md](testing/e2e-harness.md)
 **"How does Plex matching work?"** → [integrations/plex.md](integrations/plex.md)
 **"How does e-book support work?"** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md)
 **"How do I enable e-book downloads?"** → [integrations/ebook-sidecar.md](integrations/ebook-sidecar.md), [settings-pages.md](settings-pages.md#e-book-sidecar)
@@ -165,11 +190,14 @@
 **"How do I enable auto-approve for requests?"** → [admin-features/request-approval.md](admin-features/request-approval.md)
 **"How does the release blocklist work?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md)
 **"Why does the same bad release keep getting re-downloaded?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md) (it shouldn't anymore — auto-blocked on permanent failure)
+**"Why didn't shelf sync / a watch re-request my failed or cancelled book?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md#automatic-re-requests-409) (cancelled: never; a failure that blocked nothing: 1, 3, 7, 14, then every 30 days; pressing Request retries at once)
+**"I deleted a book from the library; why is its request failed / why wasn't it re-downloaded?"** → [backend/services/scheduler.md](backend/services/scheduler.md) (plex_library_scan: files gone → `failed` "Removed from library", request it again by hand; never re-requested automatically, #214)
 **"How do I unblock a release?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md) (admin → /admin/blocklist → Unblock, or chip on the request row)
 **"How does the admin book info modal work?"** → [admin-features/request-approval.md](admin-features/request-approval.md#ui-features), [frontend/components.md](frontend/components.md#component-apis)
 **"How do I customize audiobook folder organization?"** → [settings-pages.md](settings-pages.md#audiobook-organization-template), [phase3/file-organization.md](phase3/file-organization.md#target-structure)
 **"How do I deploy?"** → [deployment/docker.md](deployment/docker.md) (multi-container), [deployment/unified.md](deployment/unified.md) (all-in-one)
 **"How do I use the unified container?"** → [deployment/unified.md](deployment/unified.md)
+**"Download client / OIDC / Plex stopped connecting over HTTPS after the upgrade"** → [deployment/unified.md](deployment/unified.md#tls-errors-after-upgrading-to-node-24) (Node 24 refuses weak TLS keys)
 **"Why can't RMAB find my downloaded files?"** → [deployment/volume-mapping.md](deployment/volume-mapping.md)
 **"How do I set up volume mapping for qBittorrent/Transmission/SABnzbd/NZBGet?"** → [deployment/volume-mapping.md](deployment/volume-mapping.md)
 **"OAuth redirects to localhost / PUBLIC_URL not working"** → [backend/services/environment.md](backend/services/environment.md)
@@ -194,4 +222,7 @@
 **"How does bulk import work?"** → [features/bulk-import.md](features/bulk-import.md)
 **"How do I import multiple audiobooks at once?"** → [features/bulk-import.md](features/bulk-import.md)
 **"How does the bulk import scanner detect audiobooks?"** → [features/bulk-import.md](features/bulk-import.md)
+**"How are books in CD1/Disc 1 folders imported and ordered?"** → [features/multi-disc-folders.md](features/multi-disc-folders.md)
 **"Why is a series page blank / showing no books, then fine after a refresh?"** → [integrations/audible.md](integrations/audible.md#series-page-dual-layout) (Audible A/B-serves two layouts; parsers handle both)
+**"Why is a book's series line missing, or a request saved without a series?"** → [integrations/audible.md](integrations/audible.md#fixed-issues) (series fill from the Audible catalog when Audnexus has none; 15 min pause after a catalog outage (429, 401/403, 5xx, timeout, network), 24 h cache)
+**"Why does series search say it couldn't get results from Audible, or show series without a rating or book count?"** → [integrations/audible-series-search.md](integrations/audible-series-search.md) (catalog keyword + batch calls, 502 when Audible doesn't answer, counts only from the catalog, no series rating on search cards)

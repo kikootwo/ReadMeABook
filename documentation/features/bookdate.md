@@ -69,8 +69,11 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 
 **Global Configuration (Admin):**
 - POST `/api/bookdate/test-connection` - Validate API key (saved or new), fetch models
-  - **Auth:** Optional (unauthenticated during setup wizard, authenticated for saved keys in settings)
-  - Supports `useSavedKey: true` to test with encrypted saved API key (requires authentication)
+  - **Auth:** `requireSetupIncompleteOrAdmin`. After setup: admin only (API tokens refused). During setup: no sign-in, built-in providers (openai/claude/gemini) with a caller-supplied key only
+  - `provider: 'custom'`: admin only (403 otherwise)
+  - `useSavedKey: true`: admin only (401 otherwise); refused (400) when `provider` differs from the saved provider; custom uses the saved `baseUrl`, ignoring any in the request
+  - Custom model list: only entries with a string `id` (or bare strings) are returned, as `{id, name}` strings
+  - Errors: `Failed to connect to custom provider (HTTP n)` (400), `Connected to the custom provider, but the response was not JSON` (400), `Could not connect to the custom provider` (500), `Connection test failed` (500). The remote response body goes to the server log only
 - GET `/api/bookdate/config` - Get global config (excluding API key) (All authenticated)
 - POST `/api/bookdate/config` - Create/update global config (Admin only)
   - Accepts optional `apiKey` (only required for initial setup)
@@ -146,7 +149,21 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 
 2. **AI Call:**
    - OpenAI: `response_format: {type: "json_object"}`, system prompt enforces JSON
-   - Claude: System prompt: "Return ONLY valid JSON"
+   - Claude: user message states the exact shape `{"recommendations":[{"title","author","reason"}]}` + "Return ONLY valid JSON"; `max_tokens: 8192`; no `thinking` field
+     - Effort: `GET /v1/models/{id}` (10 s timeout covering headers + body; lookup promise cached per model per process, so concurrent calls share one GET; failures dropped from the cache and retried next call; failed-response body cancelled). `capabilities.effort.low.supported === true` → `output_config: {effort: "low"}`; else / lookup failure → no effort (`claude-effort.ts`)
+     - Low effort also applies to older models that report effort support but don't think by default (Opus 4.5-4.8, Sonnet 4.6); their text may get terser
+     - Current models (Opus 5.5/5, Sonnet 5.5/5, Haiku 5.5, Fable) think by default; thinking counts against `max_tokens`
+     - Logs (info): model, effort, `stop_reason`, `usage.output_tokens`, `usage.output_tokens_details.thinking_tokens`. Numbers only
+   - Custom fallback (no `response_format`): system message also states the exact shape
+   - Response extraction (`src/lib/bookdate/ai-response.ts`):
+     - Claude: answer = all `type:"text"` blocks joined; `thinking`/`redacted_thinking` skipped
+     - Claude `stop_reason`: `refusal` → declined (checked before parsing); empty text → no recommendations
+     - OpenAI/custom: `message.refusal` or `finish_reason:content_filter` → declined (before parsing); null/empty content → no recommendations; content-part arrays joined
+     - Token limit (Claude `max_tokens`/`model_context_window_exceeded`, OpenAI/custom `finish_reason:length`): reply is still parsed; "cut off" only when the text is empty or the parse fails (complete JSON + padding is accepted)
+     - Parse: trim → strip ```` ```json ```` / ```` ``` ```` fence → trim → `JSON.parse`; must be an object with a `recommendations` array; items without a non-empty string `title` and `author` are dropped (non-empty list with none usable → wrong-shape error; `[]` stays `[]`)
+     - Error messages never contain reply text, refusal text or reasoning; provider reason codes shown only if `/^[a-z_]{1,32}$/i`, else `unknown`
+     - Custom provider: `AIResponseError` rethrown as-is; other errors still wrapped as "Custom provider error: …"
+     - Gemini branch unchanged: guards missing text, but still uses a bare `JSON.parse` (SyntaxError text can reach the page; follow-up filed)
    - Request: 20 recommendations (expect ~10 after filtering)
 
 3. **Post-Processing:**
@@ -218,7 +235,14 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 
 **Recommendation Errors:**
 - AI API call failed → Check cache first, show cached if available, else error
-- Invalid JSON response → Log full response, retry once, then show error
+- Invalid JSON response → no retry; warn log carries the reply length only (reply text at debug only); user sees "Not JSON" below
+- Unusable AI reply → `AIResponseError` (shown on BookDate page; `{label}` = Claude / OpenAI / Custom provider):
+  - Unexpected (Claude, no `content` array): "Claude returned an unexpected response. …"
+  - Declined: "{label} declined to give recommendations. Try again, or change Special Requests in your BookDate Preferences."
+  - Cut off: "{label}'s reply was cut off before the recommendations were complete. …"
+  - No text: "{label} returned no recommendations (stop reason: X). …"
+  - Not JSON: "{label}'s reply was not valid JSON. …"; wrong shape / no usable items: "{label}'s reply did not include a recommendations list. …"
+  - "…" = "Try again. If it keeps happening, an admin can choose a different model under Settings > BookDate."
 - All recommendations filtered out → Show message: "Couldn't find new recommendations. Try adjusting settings."
 - No Audnexus match → Skip silently, log warning, continue with next
 
@@ -295,6 +319,8 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 **Backend:**
 - `prisma/schema.prisma` - Database models (User.bookDateOnboardingComplete, BookDateConfig, BookDateRecommendation, BookDateSwipe)
 - `src/lib/bookdate/helpers.ts` - Helper functions (AI calling, matching, filtering)
+- `src/lib/bookdate/ai-response.ts` - Provider reply extraction + JSON parsing, user-safe errors
+- `src/lib/bookdate/claude-effort.ts` - Claude model capability lookup (low effort support)
 - `src/app/api/bookdate/` - API routes (config, preferences, recommendations, swipe, undo, generate)
 - `src/app/api/bookdate/preferences/route.ts` - User preferences API (GET, PUT with onboarding tracking)
 
@@ -354,10 +380,9 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
 - Cause: `/api/bookdate/test-connection` required authentication, but setup wizard runs before user login
   - Wizard tried to send Authorization header from localStorage (doesn't exist during setup)
   - Settings page works because user is already authenticated
-- Fix: Modified endpoint to support optional authentication
-  - Unauthenticated: Allowed during setup wizard (tests provided API key only)
-  - Authenticated: Required when using `useSavedKey: true` in settings (accesses saved encrypted key)
-  - Route checks for Authorization header presence to determine flow
+- Fix: endpoint open to the setup wizard while setup is incomplete
+  - Unauthenticated: allowed only while setup is incomplete (built-in providers, provided API key only)
+  - After setup: admin only via `requireSetupIncompleteOrAdmin`; saved key requires the caller's admin role
   - Files updated: `src/app/api/bookdate/test-connection/route.ts`, `src/app/setup/steps/BookDateStep.tsx`
 
 **5. Library Books Appearing in Recommendations**
@@ -468,6 +493,14 @@ Personalized audiobook discovery using OpenAI/Claude APIs. Admin configures AI p
   - Only books actually in library get filtered out
 - Files updated: `src/lib/utils/audiobook-matcher.ts:44-61`
 - Documentation: `documentation/fixes/asin-matching-fix.md` - Phase 3 section added
+
+**11. Claude Provider Shows "Cannot read properties of undefined (reading 'replace')"**
+- Issue: With the Claude provider, the BookDate page showed the raw TypeError and no recommendations (v1.2.8)
+- Cause: `callAI` read `data.content[0].text`. Current Claude models think by default when no `thinking` field is sent, and their reply starts with a `thinking` block (`{type, thinking: "", signature}`, no `text`). Setup auto-selects `models[0]` (newest first), so fresh installs got such a model
+  - Same class: custom provider `message.content: null` (reasoning models) → `null.replace`; OpenAI refusal → `JSON.parse(null)`; JSON split across text blocks; bare ``` fence; `max_tokens` cut-offs surfaced as SyntaxErrors that quoted the reply
+- Fix: extraction module (`ai-response.ts`) joins text blocks, maps refusal / cut-off / empty to clear errors (cut-off only when a token-limited reply fails to parse), drops unusable list items; exact JSON shape stated in the Claude prompt and custom fallback prompt; `effort: "low"` when the model supports it (`claude-effort.ts`), `max_tokens` kept at 8192
+- Verified against mocked responses shaped per the official docs only, not the live API
+- Files updated: `src/lib/bookdate/helpers.ts`, `src/lib/bookdate/ai-response.ts`, `src/lib/bookdate/claude-effort.ts`, `tests/bookdate/call-ai-claude-replies.test.ts`, `tests/bookdate/call-ai-requests.test.ts`, `tests/helpers/bookdate-ai-fixtures.ts`, `tests/bookdate/helpers.test.ts`
 
 ## Related
 

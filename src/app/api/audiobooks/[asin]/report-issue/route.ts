@@ -7,7 +7,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { reportIssue, ReportedIssueError } from '@/lib/services/reported-issue.service';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.ReportIssue');
 
@@ -36,7 +38,9 @@ export async function POST(
       }
 
       const { asin } = await params;
-      const body = await req.json();
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
       const { reason, title, author, coverArtUrl } = ReportIssueSchema.parse(body);
 
       const issue = await reportIssue(asin, req.user.id, reason, { title, author, coverArtUrl });
@@ -45,7 +49,7 @@ export async function POST(
     } catch (error) {
       if (error instanceof z.ZodError) {
         return NextResponse.json(
-          { error: 'ValidationError', details: error.errors },
+          { error: 'ValidationError', details: zodIssueDetails(error) },
           { status: 400 }
         );
       }
@@ -58,7 +62,7 @@ export async function POST(
       }
 
       logger.error('Failed to report issue', {
-        error: error instanceof Error ? error.message : String(error),
+        error: errorForLog(error),
       });
       return NextResponse.json(
         { error: 'ServerError', message: 'Failed to report issue' },

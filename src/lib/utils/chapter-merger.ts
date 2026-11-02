@@ -6,14 +6,19 @@
  * with proper chapter markers.
  */
 
-import { exec, spawn } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
+import { probeAudioContent } from './audio-content';
+import { checkMergedOutput, measureChapterContent, sameDecodedFormat, verifyMergedContent } from './merge-verification';
 import { RMABLogger } from './logger';
 import { CHAPTER_MERGE_FORMATS } from '../constants/audio-formats';
+import { ffmpegRemuxTimeoutMs } from './metadata-tagger';
 
-const execPromise = promisify(exec);
+// Media tools run via execFile/spawn with argv arrays (never a shell): file
+// names come from downloads and import folders and are untrusted.
+const execFilePromise = promisify(execFile);
 
 // Supported audio formats for chapter merging (from shared constants)
 const SUPPORTED_FORMATS: readonly string[] = CHAPTER_MERGE_FORMATS;
@@ -60,8 +65,7 @@ export interface MergeOptions {
   author: string;
   narrator?: string;
   year?: number;
-  asin?: string;
-  outputPath: string;
+  outputPath: string; // ASIN: added by the organizer to the file it places (ffmpeg drops it)
   dirMode?: number;
 }
 
@@ -70,6 +74,14 @@ export interface MergeResult {
   outputPath?: string;
   chapterCount?: number;
   totalDuration?: number;     // milliseconds
+  /** Merged file's audio (ms) as verifyMergedContent measured it, or the container estimate. */
+  actualDuration?: number;
+  /**
+   * True when the merged file holds all the chapters' measured audio
+   * (verifyMergedContent: codec copy, every packet; re-encode, at most 1 s
+   * short) and has no timeline gap. Only then do the input files count as imported.
+   */
+  durationVerified?: boolean;
   error?: string;
 }
 
@@ -112,10 +124,10 @@ export async function detectChapterFiles(files: string[], logger?: RMABLogger): 
  * Probe an audio file to extract duration and metadata
  */
 export async function probeAudioFile(filePath: string): Promise<AudioProbeResult> {
-  const command = `ffprobe -v quiet -print_format json -show_format -show_streams "${filePath}"`;
+  const args = ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath];
 
   try {
-    const { stdout } = await execPromise(command, { timeout: 30000 });
+    const { stdout } = await execFilePromise('ffprobe', args, { timeout: 30000 });
     const data = JSON.parse(stdout);
 
     const format = data.format || {};
@@ -282,13 +294,10 @@ function detectBookTitle(files: { titleMetadata?: string }[]): string | null {
 }
 
 /**
- * Analyze and order chapter files
- * Returns files in correct order with metadata populated
+ * Analyze and order chapter files, returned with metadata populated. `keepOrder` (a multi-disc
+ * import's own order) keeps the given order: no metadata/filename decision is made or logged.
  */
-export async function analyzeChapterFiles(
-  filePaths: string[],
-  logger?: RMABLogger
-): Promise<ChapterFile[]> {
+export async function analyzeChapterFiles(filePaths: string[], logger?: RMABLogger, keepOrder = false): Promise<ChapterFile[]> {
   await logger?.info(`Analyzing ${filePaths.length} chapter files...`);
 
   // Probe all files in parallel
@@ -329,6 +338,23 @@ export async function analyzeChapterFiles(
     await logger?.info(`Title metadata flagged as book title - will prioritize filename extraction for chapter names`);
   }
 
+  const orderedFiles = keepOrder ? files : await chooseChapterOrder(files, logger);
+  if (keepOrder) await logger?.info(`Using the multi-disc import order for ${orderedFiles.length} chapters`);
+
+  // Compute chapter titles
+  for (let i = 0; i < orderedFiles.length; i++) {
+    orderedFiles[i].chapterTitle = getChapterTitle(orderedFiles[i], i);
+  }
+
+  // Log sample chapter titles
+  const sampleTitles = orderedFiles.slice(0, 3).map((f, i) => `Ch${i + 1}: "${f.chapterTitle}"`);
+  await logger?.info(`Sample chapter titles: ${sampleTitles.join(', ')}${orderedFiles.length > 3 ? ', ...' : ''}`);
+
+  return orderedFiles;
+}
+
+/** Filename order, or metadata order when every file has a track number and they run 1..N. */
+async function chooseChapterOrder(files: ChapterFile[], logger?: RMABLogger): Promise<ChapterFile[]> {
   // Create filename-based order (natural sort)
   const filenameOrder = [...files].sort((a, b) =>
     naturalSortCompare(a.filename, b.filename)
@@ -371,22 +397,8 @@ export async function analyzeChapterFiles(
     const missingCount = files.filter(f => !f.trackNumber).length;
     await logger?.info(`Chapter ordering: ${missingCount} file(s) missing track numbers - using filename order`);
   }
-
-  // Use the determined order
   const orderedFiles = useMetadataOrder ? metadataOrder : filenameOrder;
-
-  // Log ordering decision summary
   await logger?.info(`Using ${useMetadataOrder ? 'metadata' : 'filename'}-based ordering for ${orderedFiles.length} chapters`);
-
-  // Compute chapter titles
-  for (let i = 0; i < orderedFiles.length; i++) {
-    orderedFiles[i].chapterTitle = getChapterTitle(orderedFiles[i], i);
-  }
-
-  // Log sample chapter titles
-  const sampleTitles = orderedFiles.slice(0, 3).map((f, i) => `Ch${i + 1}: "${f.chapterTitle}"`);
-  await logger?.info(`Sample chapter titles: ${sampleTitles.join(', ')}${orderedFiles.length > 3 ? ', ...' : ''}`);
-
   return orderedFiles;
 }
 
@@ -408,7 +420,7 @@ function generateChapterMetadata(chapters: ChapterFile[]): string {
       .replace(/=/g, '\\=')
       .replace(/;/g, '\\;')
       .replace(/#/g, '\\#')
-      .replace(/\n/g, '');
+      .replace(/[\r\n\0]/g, ''); // ffmetadata ends a line at \r or \n
 
     metadata += '\n[CHAPTER]\n';
     metadata += 'TIMEBASE=1/1000\n';
@@ -471,8 +483,8 @@ function bitrateToVbrQuality(bitrateStr: string): number {
  */
 async function checkLibFdkAac(): Promise<boolean> {
   try {
-    const { stdout } = await execPromise('ffmpeg -encoders 2>&1', { timeout: 5000 });
-    return stdout.includes('libfdk_aac');
+    const { stdout, stderr } = await execFilePromise('ffmpeg', ['-encoders'], { timeout: 5000 });
+    return `${stdout}${stderr}`.includes('libfdk_aac');
   } catch {
     // ffmpeg not available or error checking - assume not available
     return false;
@@ -480,21 +492,15 @@ async function checkLibFdkAac(): Promise<boolean> {
 }
 
 /**
- * Execute FFmpeg command with real-time progress logging
+ * Execute FFmpeg (argv array, no shell) with real-time progress logging
  */
 async function executeFFmpegWithProgress(
-  command: string,
+  args: string[],
   timeout: number,
   expectedDuration: number, // milliseconds
   logger?: RMABLogger
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    // Parse the command to extract args (remove 'ffmpeg' and handle quotes)
-    const args = command
-      .replace(/^ffmpeg\s+/, '')
-      .match(/(?:[^\s"]+|"[^"]*")+/g)
-      ?.map(arg => arg.replace(/^"|"$/g, '')) || [];
-
     const ffmpeg = spawn('ffmpeg', args);
 
     let stderrBuffer = '';
@@ -574,10 +580,11 @@ async function executeFFmpegWithProgress(
  * Merge chapter files into a single M4B with chapter markers
  */
 export async function mergeChapters(
-  chapters: ChapterFile[],
+  inputChapters: ChapterFile[],
   options: MergeOptions,
   logger?: RMABLogger
 ): Promise<MergeResult> {
+  let chapters = inputChapters;
   if (chapters.length === 0) {
     await logger?.error('Chapter merge failed: No chapters provided');
     return { success: false, error: 'No chapters to merge' };
@@ -586,10 +593,24 @@ export async function mergeChapters(
   const tempDir = path.dirname(options.outputPath);
   const concatFile = path.join(tempDir, `concat_${Date.now()}.txt`);
   const metadataFile = path.join(tempDir, `chapters_${Date.now()}.txt`);
+  let ffmpegStarted = false; // before that, a file at the output path is not this merge's
 
   try {
     await logger?.info(`Starting chapter merge: "${options.title}" by ${options.author}`);
     await logger?.info(`Output: ${path.basename(options.outputPath)}`);
+
+    // Each chapter's audio content, measured from its packets: used for the
+    // chapter markers, the merge check and the source verification
+    // (format.duration is only an estimate for some files). If any chapter
+    // can't be measured, keep the estimates and never verify the merge, so the
+    // sources are kept.
+    const measured = await measureChapterContent(chapters.map((c) => c.path));
+    if (measured.contentMs) {
+      const contentMs = measured.contentMs;
+      chapters = chapters.map((c, i) => ({ ...c, duration: contentMs[i] }));
+    } else {
+      await logger?.warn(`Could not measure chapter audio (${measured.error}); using estimated durations, source files will be kept`);
+    }
 
     // Calculate total duration and estimated size
     const totalDuration = chapters.reduce((sum, c) => sum + c.duration, 0);
@@ -619,7 +640,13 @@ export async function mergeChapters(
     // Ensure temp directory exists
     await fs.mkdir(tempDir, { recursive: true, ...(options.dirMode !== undefined && { mode: options.dirMode }) });
 
-    // Create concat file
+    // Create concat file. The list is line-based with no escape for a line break
+    // (or NUL), so a path containing one could smuggle in extra directives:
+    // refuse it (the caller then organizes the files individually).
+    const unsafeChapter = chapters.find(c => /[\r\n\0]/.test(c.path));
+    if (unsafeChapter) {
+      throw new Error(`Cannot merge: file path contains a line break or NUL character (${JSON.stringify(unsafeChapter.path)})`);
+    }
     const concatContent = chapters
       .map(c => `file '${c.path.replace(/'/g, "'\\''")}'`)
       .join('\n');
@@ -635,14 +662,14 @@ export async function mergeChapters(
     const inputFormat = path.extname(chapters[0].path).toLowerCase();
     const needsReencode = inputFormat === '.mp3' || inputFormat === '.flac' || inputFormat === '.aac';
 
-    // Build ffmpeg command
+    // Build ffmpeg argv (passed directly to spawn - values need no quoting or escaping)
     const args: string[] = [
-      'ffmpeg',
       '-y',
       '-f', 'concat',
       '-safe', '0',
-      '-i', `"${concatFile}"`,
-      '-i', `"${metadataFile}"`,
+      '-protocol_whitelist', 'file', // Concat entries may only open local files
+      '-i', concatFile,
+      '-i', metadataFile,
       '-map_metadata', '1',
       '-map', '0:a', // Explicit audio stream mapping
     ];
@@ -655,6 +682,17 @@ export async function mergeChapters(
       const hasFdkAac = await checkLibFdkAac();
 
       const formatLabel = inputFormat.slice(1).toUpperCase(); // '.mp3' -> 'MP3', '.flac' -> 'FLAC'
+
+      // Timestamps from the decoded sample count: the concat demuxer starts each
+      // chapter at the previous one's container duration, an estimate for ADTS
+      // .aac and VBR MP3 without a Xing/VBRI header (holes or overlaps otherwise).
+      // Only for one decoded format: a format change rebuilds the filter graph,
+      // restarting the count (those merges keep the demuxer's timestamps)
+      if (sameDecodedFormat(measured)) {
+        args.push('-af', 'asetpts=N/SR/TB');
+      } else {
+        await logger?.info('Chapters differ in sample rate/channels/sample format (or were not measured): keeping container timestamps');
+      }
 
       if (hasFdkAac) {
         args.push('-c:a', 'libfdk_aac');
@@ -680,39 +718,23 @@ export async function mergeChapters(
     args.push('-avoid_negative_ts', 'make_zero'); // Handle negative timestamps
     args.push('-max_muxing_queue_size', '9999'); // Prevent buffer overflow on long files
 
-    // Add book metadata (escape for double-quoted shell context)
-    // Single quotes do NOT need escaping inside double quotes - they are literal
-    const escapeMetadata = (val: string): string =>
-      val
-        .replace(/\\/g, '\\\\') // Backslashes first
-        .replace(/"/g, '\\"') // Double quotes
-        .replace(/`/g, '\\`') // Backticks
-        .replace(/\$/g, '\\$'); // Dollar signs
-
-    args.push('-metadata', `title="${escapeMetadata(options.title)}"`);
-    args.push('-metadata', `album="${escapeMetadata(options.title)}"`);
-    args.push('-metadata', `album_artist="${escapeMetadata(options.author)}"`);
-    args.push('-metadata', `artist="${escapeMetadata(options.author)}"`);
+    // Add book metadata (raw values: argv elements reach ffmpeg verbatim)
+    args.push('-metadata', `title=${options.title}`);
+    args.push('-metadata', `album=${options.title}`);
+    args.push('-metadata', `album_artist=${options.author}`);
+    args.push('-metadata', `artist=${options.author}`);
 
     if (options.narrator) {
-      args.push('-metadata', `composer="${escapeMetadata(options.narrator)}"`);
+      args.push('-metadata', `composer=${options.narrator}`);
     }
 
     if (options.year) {
-      args.push('-metadata', `date="${options.year}"`);
-    }
-
-    if (options.asin) {
-      // Custom iTunes tag for ASIN
-      args.push('-metadata', `----:com.apple.iTunes:ASIN="${escapeMetadata(options.asin)}"`);
-      await logger?.info(`Embedding ASIN: ${options.asin}`);
+      args.push('-metadata', `date=${options.year}`);
     }
 
     // Output format
     args.push('-f', 'mp4');
-    args.push(`"${options.outputPath}"`);
-
-    const command = args.join(' ');
+    args.push(options.outputPath);
 
     // Calculate timeout based on operation type and total duration
     const totalDurationMinutes = totalDuration / 1000 / 60;
@@ -722,7 +744,7 @@ export async function mergeChapters(
           90 * 60 * 1000, // Minimum 90 minutes for re-encoding
           Math.round((totalDurationMinutes / 5) * 60 * 1000) + (60 * 60 * 1000) // duration/5 (worst case 5x realtime) + 60min safety margin
         )
-      : (5 * 60 * 1000) + (chapters.length * 30 * 1000); // Codec copy: 5min + 30s per chapter
+      : Math.max((5 * 60 * 1000) + (chapters.length * 30 * 1000), ffmpegRemuxTimeoutMs(estimatedSize)); // Codec copy: 5min + 30s per chapter, at least the size-scaled +faststart allowance
 
     const timeoutMinutes = Math.ceil(timeout / 60000);
 
@@ -734,13 +756,15 @@ export async function mergeChapters(
       await logger?.info(`This is a long audiobook (${Math.round(totalDurationMinutes / 60)}h). Encoding may take ${estimatedMinEncoding}-${estimatedMaxEncoding} minutes depending on CPU speed.`);
     }
 
-    // Log command for debugging (truncate if too long)
+    // Log command for debugging (display only - quoting is cosmetic; truncate if too long)
+    const command = ['ffmpeg', ...args].map(a => (/[\s"']/.test(a) ? JSON.stringify(a) : a)).join(' ');
     const commandPreview = command.length > 500 ? command.substring(0, 500) + '...' : command;
     await logger?.info(`FFmpeg command: ${commandPreview}`);
 
-    // Execute FFmpeg with progress logging
+    // Execute FFmpeg with progress logging (from here on the output path holds this merge's file)
     try {
-      await executeFFmpegWithProgress(command, timeout, totalDuration, logger);
+      ffmpegStarted = true;
+      await executeFFmpegWithProgress(args, timeout, totalDuration, logger);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       await logger?.error(`FFmpeg merge failed: ${errorMsg}`);
@@ -755,8 +779,20 @@ export async function mergeChapters(
       throw new Error('Merged file not created');
     }
 
-    // Validate merged file
-    const validation = await validateMergedFile(options.outputPath, totalDuration, logger);
+    // The merged file's audio compared with the measured chapters (codec copy:
+    // every packet must arrive; re-encode: content within the window). Its end
+    // timestamp can hide lost audio, so it is not what is compared.
+    const outputContent = await probeAudioContent(options.outputPath).catch((error: Error) => ({ error: error.message }));
+    const verification = verifyMergedContent(measured, chapters.length, outputContent, needsReencode ? 'reencode' : 'copy');
+
+    // A broken output fails the merge, so the files are organized individually:
+    // a timeline that doesn't match the audio (gaps, or an end far from it: chapter
+    // markers and seeking wrong) or a re-encode over 1 s short. Then the usual
+    // checks, on the verification's actual audio (undefined: container estimate).
+    const outputProblem = checkMergedOutput(verification, outputContent);
+    const validation = outputProblem
+      ? { valid: false, error: `Merged file rejected: ${outputProblem}` }
+      : await validateMergedFile(options.outputPath, totalDuration, logger, verification.actualMs);
 
     if (!validation.valid) {
       await logger?.error(`Output validation failed: ${validation.error}`);
@@ -781,15 +817,31 @@ export async function mergeChapters(
     await logger?.info(`  - Format: M4B with embedded chapter markers`);
     await logger?.info(`  - Validation: Passed (duration accurate, file playable)`);
 
+    const actualDuration = validation.actualDuration ?? 0;
+    // Whether the chapter files may be cleaned up
+    const durationVerified = verification.verified;
+    if (durationVerified) {
+      await logger?.info(
+        verification.packets !== undefined
+          ? `  - Source verification: Passed (all ${verification.packets} audio packets copied)`
+          : `  - Source verification: Passed (${formatDuration(verification.actualMs ?? 0)} of audio for the chapters' ${formatDuration(verification.expectedMs ?? 0)})`
+      );
+    } else {
+      await logger?.warn(`Merged audio not verified: ${verification.reason}; source files will be kept`);
+    }
+
     return {
       success: true,
       outputPath: options.outputPath,
       chapterCount: chapters.length,
       totalDuration,
+      actualDuration,
+      durationVerified,
     };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
     await logger?.error(`Chapter merge failed: ${errorMsg}`);
+    if (ffmpegStarted) await fs.unlink(options.outputPath).catch(() => undefined); // no orphaned partial or rejected output
     return { success: false, error: errorMsg };
   } finally {
     // Clean up temp files
@@ -815,14 +867,14 @@ export async function mergeChapters(
 async function validateMergedFile(
   outputPath: string,
   expectedDuration: number, // milliseconds
-  logger?: RMABLogger
+  logger?: RMABLogger,
+  contentMs?: number // the merged audio as verifyMergedContent measured it, when it could
 ): Promise<{ valid: boolean; error?: string; actualDuration?: number }> {
   try {
     await logger?.info('Validating merged file...');
 
-    // 1. Probe output file to get actual duration
-    const probe = await probeAudioFile(outputPath);
-    const actualDuration = probe.duration;
+    // 1. Actual duration: measured audio content, else the container's estimate
+    const actualDuration = contentMs ?? (await probeAudioFile(outputPath)).duration;
 
     await logger?.info(`Duration check: expected ${formatDuration(expectedDuration)}, got ${formatDuration(actualDuration)}`);
 
@@ -845,12 +897,10 @@ async function validateMergedFile(
 
     try {
       // Test first 10 seconds
-      const firstDecodeCommand = `ffmpeg -v error -i "${outputPath}" -t 10 -f null -`;
-      await execPromise(firstDecodeCommand, { timeout: 30000 }); // 30 sec timeout
+      await execFilePromise('ffmpeg', ['-v', 'error', '-i', outputPath, '-t', '10', '-f', 'null', '-'], { timeout: 30000 }); // 30 sec timeout
 
       // Test last 10 seconds (seeks to 10 seconds before end)
-      const lastDecodeCommand = `ffmpeg -v error -sseof -10 -i "${outputPath}" -f null -`;
-      await execPromise(lastDecodeCommand, { timeout: 30000 }); // 30 sec timeout
+      await execFilePromise('ffmpeg', ['-v', 'error', '-sseof', '-10', '-i', outputPath, '-f', 'null', '-'], { timeout: 30000 }); // 30 sec timeout
 
       await logger?.info('✓ File integrity test passed (beginning and end playable)');
     } catch (decodeError) {
@@ -910,14 +960,15 @@ export function formatDuration(ms: number): string {
  */
 export async function checkDiskSpace(directory: string): Promise<number | null> {
   try {
-    // Use df on Unix-like systems
-    const { stdout } = await execPromise(`df -k "${directory}" | tail -1 | awk '{print $4}'`);
-    const availableKb = parseInt(stdout.trim());
-    if (!isNaN(availableKb)) {
-      return availableKb * 1024; // Convert to bytes
+    // Blocks available to unprivileged users x block size. Close to `df` "Available";
+    // may differ where fragment size != block size (e.g. some FUSE/virtiofs mounts)
+    const stats = await fs.statfs(directory);
+    const available = stats.bavail * stats.bsize;
+    if (Number.isFinite(available)) {
+      return available;
     }
   } catch {
-    // df not available (Windows) or other error
+    // Directory missing or statfs unsupported
   }
 
   return null;

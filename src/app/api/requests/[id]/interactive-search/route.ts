@@ -12,7 +12,9 @@ import { groupIndexersByCategories, getGroupDescription } from '@/lib/utils/inde
 import { getLanguageForRegion } from '@/lib/constants/language-config';
 import type { AudibleRegion } from '@/lib/types/audible';
 import { RMABLogger } from '@/lib/utils/logger';
-import { resolveInteractiveSearchAccess } from '@/lib/utils/permissions';
+import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
+import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.InteractiveSearch');
 const MAX_RANKED_RESULTS = 100;
@@ -40,14 +42,17 @@ export async function POST(
       // Parse optional request body
       let customTitle: string | undefined;
       try {
-        const body = await req.json();
+        const bodyResult = await readJsonBody(req);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         customTitle = body.customTitle;
       } catch (e) {
         // No body or invalid JSON - that's okay, customTitle will be undefined
       }
 
-      const requestRecord = await prisma.request.findUnique({
-        where: { id },
+      // A deleted request answers 404 for everyone
+      const requestRecord = await prisma.request.findFirst({
+        where: { id, deletedAt: null },
         include: {
           audiobook: true,
         },
@@ -77,16 +82,8 @@ export async function POST(
       }
 
       // Check interactive search access permission
-      const callingUser = await prisma.user.findUnique({
-        where: { id: req.user.id },
-        select: { role: true, interactiveSearchAccess: true },
-      });
-      if (!callingUser || !(await resolveInteractiveSearchAccess(callingUser.role, callingUser.interactiveSearchAccess))) {
-        return NextResponse.json(
-          { error: 'Forbidden', message: 'You do not have interactive search access. Contact your admin to enable this permission.' },
-          { status: 403 }
-        );
-      }
+      const accessDenied = await denyWithoutInteractiveSearchAccess(req.user.id);
+      if (accessDenied) return accessDenied;
 
       // Get enabled indexers from configuration
       const { getConfigService } = await import('@/lib/services/config.service');
@@ -152,7 +149,7 @@ export async function POST(
           const groupResults = await prowlarr.searchWithVariations(searchTitle, searchAuthor, {
             categories: group.categories,
             indexerIds: group.indexerIds,
-          });
+          }, { exactTitle: Boolean(customTitle || requestRecord.customSearchTerms) }); // custom terms: sent as given (#316)
 
           logger.debug(`Group ${i + 1} returned ${groupResults.length} results`);
           allResults.push(...groupResults);
@@ -262,7 +259,7 @@ export async function POST(
 
       return NextResponse.json({
         success: true,
-        results: resultsWithRank,
+        results: await stripProwlarrKeyFromResults(resultsWithRank),
         truncated,
         rawCount: results.length,
         message: limitedRankedResults.length > 0

@@ -10,15 +10,20 @@ import path from 'path';
 import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
 import * as parseTorrentModule from 'parse-torrent';
 import { RMABLogger } from '../utils/logger';
+import { fetchDownloadSource } from './download-source';
+import { urlForLog } from '../utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
+import { delugeProbeStatus } from './torrent-probe';
+import { addedTorrentId, candidateIds, magnetHashes, normalizeTorrentId, torrentFileHashes, TorrentHashes } from './torrent-ids';
 import {
   IDownloadClient, DownloadClientType, ProtocolType,
-  DownloadInfo, DownloadStatus, AddDownloadOptions, ConnectionTestResult,
-  DownloadSourceError,
+  DownloadInfo, DownloadStatus, AddDownloadOptions, AddDownloadResult, DownloadProbe, ConnectionTestResult,
 } from '../interfaces/download-client.interface';
 
 const parseTorrent = (parseTorrentModule as any).default || parseTorrentModule;
 const logger = RMABLogger.create('Deluge');
+const STATUS_FIELDS = ['name', 'total_size', 'total_done', 'progress', 'state', 'download_payload_rate', 'eta', 'label',
+  'save_path', 'time_added', 'is_finished', 'seeding_time', 'ratio', 'message'];
 
 export class DelugeService implements IDownloadClient {
   readonly clientType: DownloadClientType = 'deluge';
@@ -156,7 +161,7 @@ export class DelugeService implements IDownloadClient {
     }
   }
 
-  async addDownload(url: string, options?: AddDownloadOptions): Promise<string> {
+  async addDownload(url: string, options?: AddDownloadOptions): Promise<AddDownloadResult> {
     if (!url || typeof url !== 'string' || url.trim() === '') {
       throw new Error('Invalid download URL: URL is required and must be a non-empty string');
     }
@@ -166,103 +171,71 @@ export class DelugeService implements IDownloadClient {
       : this.addTorrentFile(url, category, options);
   }
 
-  private async addMagnetLink(magnetUrl: string, category: string, options?: AddDownloadOptions): Promise<string> {
-    const infoHash = this.extractHashFromMagnet(magnetUrl);
-    if (!infoHash) throw new Error('Invalid magnet link - could not extract info_hash');
-    logger.info(`Extracted info_hash from magnet: ${infoHash}`);
+  private async addMagnetLink(magnetUrl: string, category: string, options?: AddDownloadOptions): Promise<AddDownloadResult> {
+    const hashes = magnetHashes(magnetUrl);
+    if (!hashes?.v1) throw new Error('Invalid magnet link - could not extract info_hash');
+    logger.info(`Extracted info_hash from magnet: ${hashes.v1}`);
 
-    const existing = await this.rpc('core.get_torrent_status', [infoHash, ['name']]);
-    if (existing.result && Object.keys(existing.result).length > 0) {
-      logger.info(`Torrent ${infoHash} already exists (duplicate)`);
-      return infoHash;
+    const existing = await this.existingTorrent(hashes);
+    if (existing) {
+      logger.info(`Torrent ${existing.id} is already in Deluge (not added by RMAB)`);
+      return existing;
     }
 
     const opts = this.buildTorrentOptions(options?.paused);
     const data = await this.rpc('core.add_torrent_magnet', [magnetUrl, opts]);
-    if (!data.result) throw new Error(`Deluge rejected magnet link: ${data.error?.message || 'unknown error'}`);
+    if (!data.result) return this.recheckRejectedAdd(hashes, `Deluge rejected magnet link: ${data.error?.message || 'unknown error'}`);
 
-    await this.postAddSetup(data.result, category);
-    logger.info(`Successfully added magnet link: ${infoHash}`);
-    return infoHash;
+    const id = addedTorrentId(data.result, hashes, (message) => logger.warn(message));
+    await this.postAddSetup(id, category);
+    logger.info(`Successfully added magnet link: ${id}`);
+    return { id, alreadyInClient: false, infoHash: hashes.v1 };
   }
 
-  private async addTorrentFile(torrentUrl: string, category: string, options?: AddDownloadOptions): Promise<string> {
-    logger.info(`Downloading .torrent file from: ${torrentUrl}`);
+  private async addTorrentFile(torrentUrl: string, category: string, options?: AddDownloadOptions): Promise<AddDownloadResult> {
+    logger.info(`Downloading .torrent file from: ${urlForLog(torrentUrl)}`);
 
-    let torrentResponse;
-    try {
-      torrentResponse = await axios.get(torrentUrl, {
-        responseType: 'arraybuffer', maxRedirects: 0,
-        validateStatus: (s) => s >= 200 && s < 300, timeout: DOWNLOAD_CLIENT_TIMEOUT,
-        headers: { 'User-Agent': RMAB_USER_AGENT, ...options?.sourceHeaders },
-      });
-      if (torrentResponse.data.length > 0) {
-        const magnetMatch = torrentResponse.data.toString().match(/^magnet:\?[^\s]+$/);
-        if (magnetMatch) return this.addMagnetLink(magnetMatch[0], category, options);
-      }
-    } catch (error) {
-      if (!axios.isAxiosError(error) || !error.response) throw error;
-      const status = error.response.status;
-      if (status >= 300 && status < 400) {
-        const loc = error.response.headers['location'];
-        if (loc?.startsWith('magnet:')) return this.addMagnetLink(loc, category, options);
-        if (loc?.startsWith('http://') || loc?.startsWith('https://')) {
-          try { torrentResponse = await axios.get(loc, { responseType: 'arraybuffer', timeout: DOWNLOAD_CLIENT_TIMEOUT, maxRedirects: 5, headers: { 'User-Agent': RMAB_USER_AGENT, ...options?.sourceHeaders } }); }
-          catch (redirectError) {
-            if (axios.isAxiosError(redirectError) && redirectError.response?.status) {
-              throw new DownloadSourceError(
-                `Grab failed: source returned HTTP ${redirectError.response.status}`,
-                redirectError.response.status,
-                loc,
-                redirectError
-              );
-            }
-            throw new Error('Failed to download torrent file after redirect');
-          }
-        } else { throw new Error(`Invalid redirect location: ${loc}`); }
-      } else {
-        throw new DownloadSourceError(
-          `Grab failed: source returned HTTP ${status}`,
-          status,
-          torrentUrl,
-          error
-        );
-      }
-    }
+    // Shared fetcher: every redirect hop, magnet at any hop, Prowlarr key scoped to Prowlarr download hops
+    const source = await fetchDownloadSource(torrentUrl, {
+      sourceAuth: options?.sourceAuth,
+      allowMagnet: true,
+      timeoutMs: DOWNLOAD_CLIENT_TIMEOUT,
+    });
+    if (source.kind === 'magnet') return this.addMagnetLink(source.magnetUrl, category, options);
 
-    const torrentBuffer = Buffer.from(torrentResponse.data);
+    const torrentBuffer = source.data;
     let parsed: any;
     try { parsed = await parseTorrent(torrentBuffer); }
     catch { throw new Error('Invalid .torrent file - failed to parse'); }
 
-    const infoHash = parsed.infoHash;
-    if (!infoHash) throw new Error('Failed to extract info_hash from .torrent file');
-    logger.info(`Extracted info_hash: ${infoHash}`);
+    // A hybrid on libtorrent 2 is keyed by its truncated v2 hash, so both IDs are checked
+    const hashes = torrentFileHashes(parsed);
+    if (!hashes?.v1) throw new Error('Failed to extract info_hash from .torrent file');
+    logger.info(`Extracted info_hash: ${hashes.v1}`);
 
-    const existing = await this.rpc('core.get_torrent_status', [infoHash, ['name']]);
-    if (existing.result && Object.keys(existing.result).length > 0) {
-      logger.info(`Torrent ${infoHash} already exists (duplicate)`);
-      return infoHash;
+    const existing = await this.existingTorrent(hashes);
+    if (existing) {
+      logger.info(`Torrent ${existing.id} is already in Deluge (not added by RMAB)`);
+      return existing;
     }
 
     const filename = parsed.name ? `${parsed.name}.torrent` : 'torrent.torrent';
     const opts = this.buildTorrentOptions(options?.paused);
     const data = await this.rpc('core.add_torrent_file', [filename, torrentBuffer.toString('base64'), opts]);
-    if (!data.result) throw new Error(`Deluge rejected .torrent file: ${data.error?.message || 'unknown error'}`);
+    if (!data.result) return this.recheckRejectedAdd(hashes, `Deluge rejected .torrent file: ${data.error?.message || 'unknown error'}`);
 
-    await this.postAddSetup(infoHash, category);
-    logger.info(`Successfully added torrent: ${infoHash}`);
-    return infoHash;
+    const id = addedTorrentId(data.result, hashes, (message) => logger.warn(message));
+    await this.postAddSetup(id, category);
+    logger.info(`Successfully added torrent: ${id}`);
+    return { id, alreadyInClient: false, infoHash: hashes.v1 };
   }
 
+  /** A stored base32 hash is looked up (and acted on) as hex: Deluge keys torrents by lowercase hex */
   async getDownload(id: string): Promise<DownloadInfo | null> {
-    const fields = ['name', 'total_size', 'total_done', 'progress', 'state',
-      'download_payload_rate', 'eta', 'label', 'save_path',
-      'time_added', 'is_finished', 'seeding_time', 'ratio', 'message'];
-
+    const hash = normalizeTorrentId(id);
     for (let attempt = 0; attempt <= 3; attempt++) {
-      const { result } = await this.rpc('core.get_torrent_status', [id, fields]);
-      if (result && Object.keys(result).length > 0) return this.mapToDownloadInfo(id, result);
+      const { result } = await this.rpc('core.get_torrent_status', [hash, STATUS_FIELDS]);
+      if (result && Object.keys(result).length > 0) return this.mapToDownloadInfo(hash, result);
       if (attempt === 3) return null;
       const delay = 500 * Math.pow(2, attempt);
       logger.warn(`Torrent ${id} not found, retrying in ${delay}ms (${attempt + 1}/3)`);
@@ -271,18 +244,25 @@ export class DelugeService implements IDownloadClient {
     return null;
   }
 
+  /** Strict probe for the seeding cleanup: one status call, no retries; a daemon error throws */
+  async probeDownload(id: string): Promise<DownloadProbe> {
+    const hash = normalizeTorrentId(id);
+    const status = delugeProbeStatus(await this.rpc('core.get_torrent_status', [hash, STATUS_FIELDS]), hash);
+    return status ? { found: true, info: this.mapToDownloadInfo(hash, status) } : { found: false };
+  }
+
   async pauseDownload(id: string): Promise<void> {
-    await this.rpc('core.pause_torrent', [[id]]);
+    await this.rpc('core.pause_torrent', [[normalizeTorrentId(id)]]);
     logger.info(`Paused torrent: ${id}`);
   }
 
   async resumeDownload(id: string): Promise<void> {
-    await this.rpc('core.resume_torrent', [[id]]);
+    await this.rpc('core.resume_torrent', [[normalizeTorrentId(id)]]);
     logger.info(`Resumed torrent: ${id}`);
   }
 
   async deleteDownload(id: string, deleteFiles: boolean = false): Promise<void> {
-    await this.rpc('core.remove_torrent', [id, deleteFiles]);
+    await this.rpc('core.remove_torrent', [normalizeTorrentId(id), deleteFiles]);
     logger.info(`Deleted torrent: ${id}`);
   }
 
@@ -294,13 +274,30 @@ export class DelugeService implements IDownloadClient {
   }
 
   async setCategory(id: string, category: string): Promise<void> {
-    await this.applyLabel(id, category);
+    await this.applyLabel(normalizeTorrentId(id), category);
     logger.info(`Set label for torrent ${id}: ${category}`);
   }
 
   // =========================================================================
   // Internal Helpers
   // =========================================================================
+
+  /** Already in Deluge under one of its candidate IDs (status lookups are exact-key): taken over */
+  private async existingTorrent(hashes: TorrentHashes): Promise<AddDownloadResult | null> {
+    for (const id of candidateIds(hashes)) {
+      const { result } = await this.rpc('core.get_torrent_status', [id, ['name']]);
+      if (result && Object.keys(result).length > 0) return { id, alreadyInClient: true, infoHash: hashes.v1 };
+    }
+    return null;
+  }
+
+  /** Deluge rejects a duplicate add ("Torrent already in session"): check once more; present = taken over. */
+  private async recheckRejectedAdd(hashes: TorrentHashes, rejection: string): Promise<AddDownloadResult> {
+    const existing = await this.existingTorrent(hashes);
+    if (!existing) throw new Error(rejection);
+    logger.warn(`Deluge rejected the add of ${existing.id} but already has it: recorded as already in the client`);
+    return existing;
+  }
 
   private buildTorrentOptions(paused?: boolean): Record<string, any> {
     const remoteSavePath = PathMapper.reverseTransform(this.defaultSavePath, this.pathMappingConfig);
@@ -341,6 +338,7 @@ export class DelugeService implements IDownloadClient {
       completedAt: t.is_finished && t.time_added ? new Date(t.time_added * 1000) : undefined,
       errorMessage: t.message || undefined, seedingTime: t.seeding_time,
       ratio: t.ratio >= 0 ? t.ratio : undefined,
+      addedAt: t.time_added > 0 ? new Date(t.time_added * 1000) : undefined,
     };
   }
 
@@ -350,11 +348,6 @@ export class DelugeService implements IDownloadClient {
       'Checking': 'checking', 'Queued': 'queued', 'Error': 'failed', 'Moving': 'downloading',
     };
     return map[state] || 'downloading';
-  }
-
-  private extractHashFromMagnet(magnetUrl: string): string | null {
-    const match = magnetUrl.match(/xt=urn:btih:([a-fA-F0-9]{40}|[a-zA-Z0-9]{32})/i);
-    return match ? match[1].toLowerCase() : null;
   }
 }
 

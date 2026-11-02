@@ -472,36 +472,66 @@ describe('JobQueueService', () => {
     expect(updateSpy).toHaveBeenCalledWith('bull-10', 'stuck');
   });
 
-  it('marks monitor download failures and updates request status', async () => {
-    prismaMock.request.update.mockResolvedValue({});
-    prismaMock.downloadHistory.update.mockResolvedValue({});
+  describe('permanent-failure handlers', () => {
+    const notCancelled = { id: 'req-1', deletedAt: null, status: { not: 'cancelled' } };
 
-    const { JobQueueService } = await import('@/lib/services/job-queue.service');
-    new JobQueueService();
+    const fireFailed = async (name: string, data: Record<string, unknown>) => {
+      const { JobQueueService } = await import('@/lib/services/job-queue.service');
+      new JobQueueService();
+      const handlers = Object.fromEntries(queueMock.on.mock.calls.map(([event, handler]) => [event, handler]));
+      await handlers.failed({ id: 'bull-11', name, data, attemptsMade: 3 }, new Error(`${name} failed`));
+    };
 
-    const handlers = Object.fromEntries(queueMock.on.mock.calls.map(([event, handler]) => [event, handler]));
-    await handlers.failed(
-      {
-        id: 'bull-11',
-        name: 'monitor_download',
-        data: { requestId: 'req-1', downloadHistoryId: 'hist-1' },
-        attemptsMade: 3,
-      },
-      new Error('Monitor failed')
-    );
+    it('marks monitor download failures and updates request status', async () => {
+      prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+      prismaMock.downloadHistory.update.mockResolvedValue({});
 
-    expect(prismaMock.request.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'req-1' },
-        data: expect.objectContaining({ status: 'failed' }),
-      })
-    );
-    expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'hist-1' },
-        data: expect.objectContaining({ downloadStatus: 'failed' }),
-      })
-    );
+      await fireFailed('monitor_download', { requestId: 'req-1', downloadHistoryId: 'hist-1' });
+
+      expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+        where: notCancelled,
+        data: expect.objectContaining({ status: 'failed', errorMessage: 'monitor_download failed' }),
+      });
+      expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'hist-1' },
+          data: expect.objectContaining({ downloadStatus: 'failed' }),
+        })
+      );
+    });
+
+    it('leaves a cancelled or deleted request alone when monitor_download fails', async () => {
+      // The conditional write matches no row: cancelled or deleted
+      prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
+
+      await fireFailed('monitor_download', { requestId: 'req-1', downloadHistoryId: 'hist-1' });
+
+      // Main overwrote the cancel with a plain update
+      expect(prismaMock.request.update).not.toHaveBeenCalled();
+      expect(prismaMock.request.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: notCancelled }));
+      expect(prismaMock.downloadHistory.update).not.toHaveBeenCalled();
+    });
+
+    it('marks the request failed when download_torrent fails permanently', async () => {
+      prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+
+      await fireFailed('download_torrent', { requestId: 'req-1' });
+
+      expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+        where: notCancelled,
+        data: expect.objectContaining({ status: 'failed', errorMessage: 'download_torrent failed' }),
+      });
+    });
+
+    it('leaves a cancelled or deleted request alone when download_torrent fails', async () => {
+      prismaMock.request.updateMany.mockResolvedValue({ count: 0 });
+
+      await fireFailed('download_torrent', { requestId: 'req-1' });
+
+      // Main overwrote the cancel with a plain update
+      expect(prismaMock.request.update).not.toHaveBeenCalled();
+      expect(prismaMock.request.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: notCancelled }));
+    });
   });
 
   it('updates database fields for completed jobs', async () => {

@@ -11,13 +11,16 @@ import { checkApiTokenCreateRateLimit } from '@/lib/utils/rateLimit';
 import { MAX_TOKENS_PER_USER } from '@/lib/constants/api-tokens';
 import { generateApiToken } from '@/lib/utils/api-token';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
+import { readJsonBody } from '@/lib/utils/request-body';
+import { getRegistrationRefusal } from '@/lib/services/auth/local-account-status';
 
 const logger = RMABLogger.create('API.Admin.ApiTokens');
 
 const CreateTokenSchema = z.object({
   name: z.string().min(1).max(100),
   expiresAt: z.string().datetime().nullable().optional(),
-  userId: z.string().uuid().optional(), // Admin can specify which user the token acts as
+  userId: z.string().guid().optional(), // Admin can specify which user the token acts as
   role: z.enum(['admin', 'user']).optional(), // Accepted for compatibility, but cannot differ from target user role
 });
 
@@ -57,7 +60,7 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json({ tokens: sanitized });
       } catch (error) {
-        logger.error('Failed to list API tokens', { error: error instanceof Error ? error.message : String(error) });
+        logger.error('Failed to list API tokens', { error: errorForLog(error) });
         return NextResponse.json({ error: 'Failed to list API tokens' }, { status: 500 });
       }
     })
@@ -87,7 +90,9 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const body = await req.json();
+        const bodyResult = await readJsonBody(req);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
         const { name, expiresAt, userId, role } = CreateTokenSchema.parse(body);
 
         // Determine target user (defaults to the admin themselves)
@@ -96,11 +101,18 @@ export async function POST(request: NextRequest) {
         // Verify the target user exists
         const targetUser = await prisma.user.findUnique({
           where: { id: targetUserId },
-          select: { id: true, role: true, plexUsername: true },
+          select: { id: true, role: true, plexUsername: true, registrationStatus: true },
         });
 
         if (!targetUser) {
           return NextResponse.json({ error: 'Target user not found' }, { status: 404 });
+        }
+
+        if (getRegistrationRefusal(targetUser.registrationStatus)) {
+          return NextResponse.json(
+            { error: 'Cannot create a token for an account that is not approved' },
+            { status: 403 }
+          );
         }
 
         // Enforce per-user token cap (count only active, non-expired tokens)
@@ -177,10 +189,10 @@ export async function POST(request: NextRequest) {
           fullToken,
         }, { status: 201 });
       } catch (error) {
-        logger.error('Failed to create API token', { error: error instanceof Error ? error.message : String(error) });
+        logger.error('Failed to create API token', { error: errorForLog(error) });
 
         if (error instanceof z.ZodError) {
-          return NextResponse.json({ error: 'Validation error', details: error.errors }, { status: 400 });
+          return NextResponse.json({ error: 'Validation error', details: zodIssueDetails(error) }, { status: 400 });
         }
 
         return NextResponse.json({ error: 'Failed to create API token' }, { status: 500 });

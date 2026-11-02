@@ -1,0 +1,118 @@
+# Component: E2E disposable stack (RMAB under test + real Audiobookshelf + fake-arr)
+# Documentation: documentation/testing/e2e-harness.md
+#
+# Always driven by e2e/run.mjs from a trusted checkout:
+#   docker compose -p rmab-e2e-<slug> -f e2e/compose.yml [-f e2e/compose.tainted.yml] --env-file e2e/.env.test ...
+# Rules: named volumes only (no host bind mounts); shared volumes use nocopy (images ship /media content,
+# e.g. alpine's /media/floppy, and concurrent first mounts race on the copy). Only RMAB is published (127.0.0.1:RMAB_PORT, trusted
+# runs only). The Playwright runner container joins `stack` + `control`; RMAB is never on `control`.
+
+name: rmab-e2e-${E2E_SLUG:?E2E_SLUG is required}
+
+networks:
+  stack: {}
+  # The runner reaches fake-arr's control API over this network. fake-arr listens on 0.0.0.0, so the
+  # control port is also reachable from `stack` (incl. RMAB): the per-run CONTROL_TOKEN is the real protection.
+  control:
+    internal: true
+
+services:
+  rmab:
+    image: ${RMAB_IMAGE:?RMAB_IMAGE is required}
+    depends_on:
+      fake-arr:
+        condition: service_healthy
+      abs:
+        condition: service_started
+    networks: [stack]
+    ports:
+      - "127.0.0.1:${RMAB_PORT:?RMAB_PORT is required}:3030"
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      LOG_LEVEL: ${RMAB_LOG_LEVEL:-info}
+      # Empty values let the image generate and persist its own secrets (upgrade runs use this).
+      JWT_SECRET: ${RMAB_JWT_SECRET:-}
+      JWT_REFRESH_SECRET: ${RMAB_JWT_REFRESH_SECRET:-}
+      CONFIG_ENCRYPTION_KEY: ${RMAB_CONFIG_ENCRYPTION_KEY:-}
+      POSTGRES_PASSWORD: ${RMAB_POSTGRES_PASSWORD:-}
+      # The browser (runner container) reaches RMAB as http://rmab:3030.
+      PUBLIC_URL: http://rmab:3030
+    volumes:
+      - rmab-config:/app/config
+      - rmab-cache:/app/cache
+      - pgdata:/var/lib/postgresql/data
+      - redis:/var/lib/redis
+      - type: volume
+        source: downloads
+        target: /downloads
+        volume: { nocopy: true }
+      - type: volume
+        source: media
+        target: /media
+        volume: { nocopy: true }
+    labels:
+      rmab-e2e: "true"
+
+  abs:
+    # Same index digest as ghcr.io/advplyr/audiobookshelf:2.37.1; Docker Hub avoids ghcr.io daemon-auth issues.
+    image: ${ABS_IMAGE:-docker.io/advplyr/audiobookshelf:2.37.1@sha256:581d68b2a6fc7ebf58d81c878a9f387cbbc0d88ac9d37b298b9cee10168af85b}
+    networks: [stack]
+    volumes:
+      - abs-config:/config
+      - abs-metadata:/metadata
+      - type: volume
+        source: media
+        target: /media
+        volume: { nocopy: true }
+    labels:
+      rmab-e2e: "true"
+
+  fake-arr:
+    image: rmab-e2e/fake-arr:${FAKE_ARR_TAG:-local}
+    build:
+      context: .
+      dockerfile: fake-arr/Dockerfile
+      args:
+        FIXTURE_METADATA: ${FIXTURE_METADATA:-}
+      labels:
+        rmab-e2e: "true"
+        rmab-e2e.slug: ${E2E_SLUG}
+    networks:
+      stack:
+        aliases:
+          - tracker.e2e
+      control: {}
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      SCENARIO: ${E2E_SCENARIO:-smoke}
+      PROWLARR_API_KEY: ${PROWLARR_API_KEY}
+      QBIT_USER: ${QBIT_USER}
+      QBIT_PASS: ${QBIT_PASS}
+      SAB_API_KEY: ${SAB_API_KEY}
+      PLEX_TOKEN: ${PLEX_TOKEN}
+      CONTROL_TOKEN: ${CONTROL_TOKEN:?CONTROL_TOKEN is required}
+      PUBLIC_HOST: fake-arr
+      TRACKER_HOST: tracker.e2e
+    volumes:
+      - type: volume
+        source: downloads
+        target: /downloads
+        volume: { nocopy: true }
+      - type: volume
+        source: media
+        target: /media
+        volume: { nocopy: true }
+    labels:
+      rmab-e2e: "true"
+
+volumes:
+  rmab-config:
+  rmab-cache:
+  pgdata:
+  redis:
+  downloads:
+  media:
+  abs-config:
+  abs-metadata:

@@ -23,6 +23,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -115,8 +116,12 @@ function useAutoRefreshControlImpl(): AutoRefreshControl {
   const reasonsRef = useRef<Set<string>>(new Set());
   const [visibleReasons, setVisibleReasons] = useState<string[]>([]);
   const exitDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set on unmount. Children unregister in their own unmount cleanup, which can run after
+  // ours; without this they would arm a new debounce that fires after teardown.
+  const unmountedRef = useRef(false);
 
   const flushVisible = useCallback(() => {
+    if (unmountedRef.current) return;
     setVisibleReasons(Array.from(reasonsRef.current).sort());
   }, []);
 
@@ -138,6 +143,7 @@ function useAutoRefreshControlImpl(): AutoRefreshControl {
     (reason: string) => {
       if (!reasonsRef.current.has(reason)) return;
       reasonsRef.current.delete(reason);
+      if (unmountedRef.current) return;
       // Exit → debounce so brief blips (dropdown opened-then-closed) don't flash.
       if (exitDebounceRef.current) clearTimeout(exitDebounceRef.current);
       exitDebounceRef.current = setTimeout(() => {
@@ -148,10 +154,13 @@ function useAutoRefreshControlImpl(): AutoRefreshControl {
     [flushVisible]
   );
 
-  // Clean up any pending debounce on unmount.
+  // Clean up any pending debounce on unmount, and refuse new ones after it.
   useEffect(() => {
+    unmountedRef.current = false; // StrictMode re-runs effects after a simulated unmount
     return () => {
+      unmountedRef.current = true;
       if (exitDebounceRef.current) clearTimeout(exitDebounceRef.current);
+      exitDebounceRef.current = null;
     };
   }, []);
 
@@ -202,7 +211,9 @@ function useAutoRefreshControlImpl(): AutoRefreshControl {
 // ---------------------------------------------------------------------------
 export function useRegisterPauseReason(reason: string, active: boolean): void {
   const { register, unregister } = useAutoRefreshControl();
-  useEffect(() => {
+  // Layout effect: on unmount its cleanup runs before the provider's passive cleanup,
+  // so the provider still clears any debounce this unregister arms
+  useLayoutEffect(() => {
     if (active) register(reason);
     else unregister(reason);
     return () => unregister(reason);

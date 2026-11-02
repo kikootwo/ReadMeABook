@@ -15,6 +15,7 @@ import { getConfigService } from '@/lib/services/config.service';
 import { getDiscordBotService } from '@/lib/services/discord/discord-bot.service';
 import { DISCORD_CONFIG_KEYS, asRequestCardMode, asDeletePermission } from '@/lib/services/discord/discord-config';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Settings.Discord');
 
@@ -22,6 +23,8 @@ export async function PUT(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
         const {
           enabled,
           botToken,
@@ -32,7 +35,7 @@ export async function PUT(request: NextRequest) {
           requestCardMode,
           requesterRoleId,
           deletePermission,
-        } = await request.json();
+        } = bodyResult.data;
 
         // Plain (non-secret) keys
         const plainUpdates: Array<{ key: string; value: string }> = [

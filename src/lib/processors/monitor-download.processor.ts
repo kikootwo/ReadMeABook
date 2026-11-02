@@ -12,6 +12,32 @@ import { getDownloadClientManager } from '../services/download-client-manager.se
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 import { isTransientConnectionError } from '../utils/connection-errors';
 import { addAutoBlock } from '../services/blocklist.service';
+import { getRequestStopReason, markRequestFailedUnlessStopped } from '../utils/request-stop-guard';
+
+type JobLogger = ReturnType<typeof RMABLogger.forJob>;
+
+/** Queue a request_error notification. A queueing failure is logged, not thrown. */
+async function notifyRequestError(requestId: string, message: string, logger: JobLogger): Promise<void> {
+  const request = await prisma.request.findUnique({
+    where: { id: requestId },
+    include: {
+      audiobook: true,
+      user: { select: { plexUsername: true } },
+    },
+  });
+  if (!request) return;
+
+  await getJobQueueService().addNotificationJob(
+    'request_error',
+    request.id,
+    request.audiobook.title,
+    request.audiobook.author,
+    request.user.plexUsername || 'Unknown User',
+    message
+  ).catch((error) => {
+    logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
+  });
+}
 
 /**
  * Map a download client's error signal to a coarse, human-readable reason
@@ -62,6 +88,14 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
           connectionFailureCount: prevConnectionFailures } = payload;
 
   const logger = RMABLogger.forJob(jobId, 'MonitorDownload');
+
+  // A request cancelled or deleted while its download runs: stop polling.
+  // No client call, no write, no re-queue.
+  const stopReason = await getRequestStopReason(requestId);
+  if (stopReason) {
+    logger.info(`Request ${requestId} is ${stopReason}, stopping download monitoring`);
+    return { success: true, completed: true, message: `Request ${stopReason}, monitoring stopped`, requestId };
+  }
 
   try {
     // Get the download client service via the manager
@@ -196,6 +230,13 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         },
       });
 
+      // Cancelled or deleted while the download was finishing: don't queue the import
+      const stoppedAtCompletion = await getRequestStopReason(requestId);
+      if (stoppedAtCompletion) {
+        logger.info(`Request ${requestId} is ${stoppedAtCompletion}, not importing the finished download`);
+        return { success: true, completed: true, message: `Request ${stoppedAtCompletion}, download not imported`, requestId };
+      }
+
       if (!request || !request.audiobook) {
         throw new Error('Request or audiobook not found or deleted');
       }
@@ -205,7 +246,11 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
       await jobQueue.addOrganizeJob(
         requestId,
         request.audiobook.id,
-        organizePath
+        organizePath,
+        undefined,
+        undefined,
+        undefined,
+        downloadHistoryId
       );
 
       logger.info(`Triggered organize_files job for request ${requestId}`);
@@ -224,15 +269,11 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
       const errorMessage = `Download failed in ${client.clientType}`;
       const clientErrorDetail = info.errorMessage ?? null;
 
-      // Update request to failed
-      await prisma.request.update({
-        where: { id: requestId },
-        data: {
-          status: 'failed',
-          errorMessage,
-          updatedAt: new Date(),
-        },
-      });
+      // Update request to failed, unless a cancel or delete landed meanwhile
+      if (!(await markRequestFailedUnlessStopped(requestId, errorMessage))) {
+        logger.info(`Request ${requestId} was cancelled or deleted, leaving it unchanged`);
+        return { success: true, completed: true, message: 'Request cancelled or deleted, monitoring stopped', requestId };
+      }
 
       // Update download history
       await prisma.downloadHistory.update({
@@ -264,28 +305,7 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
         });
       }
 
-      // Send notification for request failure
-      const request = await prisma.request.findUnique({
-        where: { id: requestId },
-        include: {
-          audiobook: true,
-          user: { select: { plexUsername: true } },
-        },
-      });
-
-      if (request) {
-        const jobQueue = getJobQueueService();
-        await jobQueue.addNotificationJob(
-          'request_error',
-          request.id,
-          request.audiobook.title,
-          request.audiobook.author,
-          request.user.plexUsername || 'Unknown User',
-          errorMessage
-        ).catch((error) => {
-          logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
-        });
-      }
+      await notifyRequestError(requestId, errorMessage, logger);
 
       return {
         success: false,
@@ -401,39 +421,14 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
     }
 
     // PATH 3: Permanent error (or connection failures exhausted).
-    // Mark request as failed immediately.
+    // Mark request as failed immediately, unless a cancel or delete landed meanwhile.
     const failureMessage = errorMessage || 'Monitor download failed';
-    await prisma.request.update({
-      where: { id: requestId },
-      data: {
-        status: 'failed',
-        errorMessage: failureMessage,
-        updatedAt: new Date(),
-      },
-    });
-
-    // Send notification for request failure
-    const request = await prisma.request.findUnique({
-      where: { id: requestId },
-      include: {
-        audiobook: true,
-        user: { select: { plexUsername: true } },
-      },
-    });
-
-    if (request) {
-      const jobQueue = getJobQueueService();
-      await jobQueue.addNotificationJob(
-        'request_error',
-        request.id,
-        request.audiobook.title,
-        request.audiobook.author,
-        request.user.plexUsername || 'Unknown User',
-        failureMessage
-      ).catch((notifError) => {
-        logger.error('Failed to queue notification', { error: notifError instanceof Error ? notifError.message : String(notifError) });
-      });
+    if (!(await markRequestFailedUnlessStopped(requestId, failureMessage))) {
+      logger.info(`Request ${requestId} was cancelled or deleted, leaving it unchanged`);
+      return { success: true, completed: true, message: 'Request cancelled or deleted, monitoring stopped', requestId };
     }
+
+    await notifyRequestError(requestId, failureMessage, logger);
 
     // Rethrow to trigger Bull's retry mechanism as a safety net
     throw error;

@@ -364,6 +364,8 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
         const errorData = await response.json();
         throw new Error(errorData.message || 'Failed to delete request');
       }
+      const result = await response.json().catch(() => null);
+      const filesKeptReason: string | undefined = result?.details?.filesKeptReason;
 
       // Refresh the requests list
       await mutate(apiUrl);
@@ -372,7 +374,11 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
 
       setShowDeleteConfirm(false);
       setSelectedRequest(null);
-      toast.success('Request deleted successfully');
+      if (filesKeptReason) {
+        toast.warning(`Request deleted; files kept: ${filesKeptReason}`, 10000);
+      } else {
+        toast.success('Request deleted successfully');
+      }
     } catch (error) {
       console.error('[Admin] Failed to delete request:', error);
       toast.error(`Failed to delete request: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -701,6 +707,11 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                         </div>
                         {request.errorMessage && (request.status === 'failed' || request.status === 'warn') && (
                           <div className="text-xs text-red-600 dark:text-red-400 mt-1">
+                            {request.errorMessage}
+                          </div>
+                        )}
+                        {request.errorMessage && (request.status === 'downloaded' || request.status === 'available') && (
+                          <div className="text-xs text-amber-600 dark:text-amber-400 mt-1">
                             {request.errorMessage}
                           </div>
                         )}

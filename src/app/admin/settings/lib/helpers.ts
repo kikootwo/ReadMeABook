@@ -6,6 +6,7 @@
 import { fetchWithAuth } from '@/lib/utils/api';
 import type { Settings, SettingsTab, SavedIndexerConfig } from './types';
 import type { IndexerFlagConfig } from '@/lib/utils/ranking-algorithm';
+import type { IndexerSavePlan } from './useConfiguredIndexers';
 
 /**
  * Converts JSON array string to comma-separated string for display
@@ -20,6 +21,22 @@ export const parseArrayToCommaSeparated = (jsonStr: string): string => {
 };
 
 /**
+ * Throw for a failed save, using the route's own `error` message when it sends one
+ * (e.g. which credential to re-enter), else the fallback.
+ */
+const throwUnlessOk = async (res: Response, fallback: string): Promise<void> => {
+  if (res.ok) return;
+  let message = fallback;
+  try {
+    const data = await res.json();
+    if (typeof data?.error === 'string' && data.error) message = data.error;
+  } catch {
+    // Non-JSON error body: keep the fallback
+  }
+  throw new Error(message);
+};
+
+/**
  * Converts comma-separated string to JSON array string for storage
  */
 export const parseCommaSeparatedToArray = (str: string): string => {
@@ -28,6 +45,15 @@ export const parseCommaSeparatedToArray = (str: string): string => {
   return JSON.stringify(items);
 };
 
+export interface SaveTabOptions {
+  /**
+   * Prowlarr tab: whether to PUT the indexer list and flags, and whether an
+   * empty list is intended (see useConfiguredIndexers). Default: save, empty
+   * not allowed.
+   */
+  indexerPlan?: IndexerSavePlan;
+}
+
 /**
  * Saves settings for a specific tab
  */
@@ -35,7 +61,8 @@ export const saveTabSettings = async (
   activeTab: SettingsTab,
   settings: Settings,
   configuredIndexers: SavedIndexerConfig[],
-  flagConfigs: IndexerFlagConfig[]
+  flagConfigs: IndexerFlagConfig[],
+  options: SaveTabOptions = {}
 ): Promise<void> => {
   switch (activeTab) {
     case 'library':
@@ -76,22 +103,30 @@ export const saveTabSettings = async (
         allowedUsernames: parseCommaSeparatedToArray(settings.oidc.allowedUsernames),
       };
 
-      await fetchWithAuth('/api/admin/settings/oidc', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(oidcPayload),
-      }).then(res => {
-        if (!res.ok) throw new Error('Failed to save OIDC settings');
-      });
+      // OIDC and registration save independently: a refused OIDC save (e.g. the client
+      // secret must be re-entered for a new issuer) does not skip the registration settings
+      const authFailures: string[] = [];
+      try {
+        await fetchWithAuth('/api/admin/settings/oidc', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(oidcPayload),
+        }).then(res => throwUnlessOk(res, 'Failed to save OIDC settings'));
+      } catch (error) {
+        authFailures.push(error instanceof Error ? error.message : 'Failed to save OIDC settings');
+      }
 
-      // Save registration settings
-      await fetchWithAuth('/api/admin/settings/registration', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings.registration),
-      }).then(res => {
-        if (!res.ok) throw new Error('Failed to save registration settings');
-      });
+      try {
+        await fetchWithAuth('/api/admin/settings/registration', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(settings.registration),
+        }).then(res => throwUnlessOk(res, 'Failed to save registration settings'));
+      } catch (error) {
+        authFailures.push(error instanceof Error ? error.message : 'Failed to save registration settings');
+      }
+
+      if (authFailures.length > 0) throw new Error(authFailures.join(' '));
       break;
 
     case 'prowlarr':
@@ -104,15 +139,22 @@ export const saveTabSettings = async (
         if (!res.ok) throw new Error('Failed to save Prowlarr settings');
       });
 
-      // Save indexer configuration and flag configs
-      const indexersForSave = configuredIndexers.map(idx => ({ ...idx, enabled: true }));
-      await fetchWithAuth('/api/admin/settings/prowlarr/indexers', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ indexers: indexersForSave, flagConfigs }),
-      }).then(res => {
-        if (!res.ok) throw new Error('Failed to save indexer configuration');
-      });
+      // Save indexer configuration and flag configs only when the plan says so: never from a list
+      // that failed to load, and not at all when nothing changed
+      const indexerPlan = options.indexerPlan ?? { saveIndexers: true, allowEmpty: false, saveFlags: true };
+      if (indexerPlan.saveIndexers) {
+        const indexersForSave = configuredIndexers.map(idx => ({ ...idx, enabled: true }));
+        await fetchWithAuth('/api/admin/settings/prowlarr/indexers', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          // flagConfigs left out = the saved flag rules stay as they are
+          body: JSON.stringify({
+            indexers: indexersForSave,
+            ...(indexerPlan.saveFlags ? { flagConfigs } : {}),
+            allowEmpty: indexerPlan.allowEmpty,
+          }),
+        }).then(res => throwUnlessOk(res, 'Failed to save indexer configuration'));
+      }
 
       // Save indexer-wide options (auto-search behavior, etc.)
       await fetchWithAuth('/api/admin/settings/indexer-options', {

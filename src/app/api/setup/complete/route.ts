@@ -8,16 +8,21 @@ import { prisma } from '@/lib/db';
 import bcrypt from 'bcrypt';
 import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
 import { getEncryptionService } from '@/lib/services/encryption.service';
+import { serializeDownloadClients } from '@/lib/services/download-client-storage';
 import { getPlexService } from '@/lib/integrations/plex.service';
 import { getClientDisplayName } from '@/lib/interfaces/download-client.interface';
 import { requireSetupIncomplete } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
+import { toSavedIndexerConfig, type IndexerConfigInput } from '@/lib/utils/indexer-config';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Setup.Complete');
 
 export async function POST(request: NextRequest) {
   return requireSetupIncomplete(request, async (req) => {
   try {
+    const bodyResult = await readJsonBody(req);
+    if (!bodyResult.ok) return bodyResult.response;
     const {
       backendMode,
       audibleRegion,
@@ -31,7 +36,7 @@ export async function POST(request: NextRequest) {
       downloadClient,
       paths,
       bookdate,
-    } = await req.json();
+    } = bodyResult.data;
 
     // Validate backend mode
     if (!backendMode || !['plex', 'audiobookshelf'].includes(backendMode)) {
@@ -387,10 +392,14 @@ export async function POST(request: NextRequest) {
       create: { key: 'prowlarr_api_key', value: encryptedProwlarrApiKey, encrypted: true },
     });
 
+    // Same persisted shape as the Indexers settings tab saves
+    const savedIndexers = JSON.stringify(
+      prowlarr.indexers.map((indexer: IndexerConfigInput) => toSavedIndexerConfig(indexer))
+    );
     await prisma.configuration.upsert({
       where: { key: 'prowlarr_indexers' },
-      update: { value: JSON.stringify(prowlarr.indexers) },
-      create: { key: 'prowlarr_indexers', value: JSON.stringify(prowlarr.indexers) },
+      update: { value: savedIndexers },
+      create: { key: 'prowlarr_indexers', value: savedIndexers },
     });
 
     // Download clients configuration (multi-client support)
@@ -420,16 +429,13 @@ export async function POST(request: NextRequest) {
       throw new Error('Invalid download client configuration');
     }
 
-    // Encrypt passwords in download clients
-    const encryptedClients = downloadClientsArray.map(client => ({
-      ...client,
-      password: client.password ? encryptionService.encrypt(client.password) : '',
-    }));
+    // Passwords are encrypted when serialised
+    const storedClients = serializeDownloadClients(downloadClientsArray);
 
     await prisma.configuration.upsert({
       where: { key: 'download_clients' },
-      update: { value: JSON.stringify(encryptedClients) },
-      create: { key: 'download_clients', value: JSON.stringify(encryptedClients) },
+      update: { value: storedClients },
+      create: { key: 'download_clients', value: storedClients },
     });
 
     // Path configuration

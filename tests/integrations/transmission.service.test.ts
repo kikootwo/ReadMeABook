@@ -180,11 +180,13 @@ describe('TransmissionService', () => {
           },
         });
 
-      const hash = await service.addDownload(
+      const result = await service.addDownload(
         'magnet:?xt=urn:btih:0123456789ABCDEF0123456789ABCDEF01234567'
       );
 
-      expect(hash).toBe('0123456789abcdef0123456789abcdef01234567');
+      expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: false, infoHash: '0123456789abcdef0123456789abcdef01234567' });
+      // Fresh add: RMAB's seed limits are set
+      expect(clientMock.post.mock.calls[2][1]).toMatchObject({ method: 'torrent-set', arguments: { seedRatioMode: 2 } });
     });
 
     it('skips duplicate magnet links', async () => {
@@ -203,14 +205,40 @@ describe('TransmissionService', () => {
         },
       });
 
-      const hash = await service.addDownload(
+      const result = await service.addDownload(
         'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'
       );
 
-      expect(hash).toBe('0123456789abcdef0123456789abcdef01234567');
+      expect(result).toEqual({ id: '0123456789abcdef0123456789abcdef01234567', alreadyInClient: true, infoHash: '0123456789abcdef0123456789abcdef01234567' });
       // Only 1 RPC call (torrent-get), no torrent-add
       expect(clientMock.post).toHaveBeenCalledTimes(1);
     });
+
+    // #423: someone else added it between the pre-check and the add
+    it.each(['magnet', 'file'] as const)(
+      'records a torrent-duplicate answer (%s) as taken over and leaves its seed limits alone',
+      async (kind) => {
+        const service = new TransmissionService('http://transmission', 'user', 'pass');
+        if (kind === 'file') {
+          axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent-data') });
+          parseTorrentMock.mockResolvedValueOnce({ infoHash: 'parsed-hash', name: 'Book' });
+        }
+        const hash = kind === 'file' ? 'parsed-hash' : '0123456789abcdef0123456789abcdef01234567';
+        clientMock.post
+          .mockResolvedValueOnce({ data: { result: 'success', arguments: { torrents: [] } } })
+          .mockResolvedValueOnce({
+            data: { result: 'success', arguments: { 'torrent-duplicate': { hashString: hash, name: 'Theirs' } } },
+          });
+
+        const result = await service.addDownload(
+          kind === 'file' ? 'http://example.com/file.torrent' : `magnet:?xt=urn:btih:${hash}`
+        );
+
+        expect(result).toEqual({ id: hash, alreadyInClient: true, infoHash: hash });
+        // torrent-get + torrent-add only: no torrent-set rewriting the user's seed limits
+        expect(clientMock.post).toHaveBeenCalledTimes(2);
+      }
+    );
 
     it('throws on invalid magnet link', async () => {
       const service = new TransmissionService('http://transmission', 'user', 'pass');
@@ -256,13 +284,29 @@ describe('TransmissionService', () => {
           },
         });
 
-      const hash = await service.addDownload('http://example.com/file.torrent');
+      const result = await service.addDownload('http://example.com/file.torrent');
 
-      expect(hash).toBe('parsed-hash');
+      expect(result).toEqual({ id: 'parsed-hash', alreadyInClient: false, infoHash: 'parsed-hash' });
       // Verify metainfo was sent
       const addCall = clientMock.post.mock.calls[1];
       const body = addCall[0] === '/transmission/rpc' ? JSON.parse(JSON.stringify(addCall[1])) : null;
       // The body should be the RPC call with metainfo
+    });
+
+    it('throws when a .torrent add answer has neither torrent-added nor torrent-duplicate', async () => {
+      const service = new TransmissionService('http://transmission', 'user', 'pass');
+
+      axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent-data') });
+      parseTorrentMock.mockResolvedValueOnce({ infoHash: 'parsed-hash', name: 'Book' });
+      clientMock.post
+        .mockResolvedValueOnce({ data: { result: 'success', arguments: { torrents: [] } } })
+        .mockResolvedValueOnce({ data: { result: 'success', arguments: {} } });
+
+      await expect(service.addDownload('http://example.com/file.torrent')).rejects.toThrow(
+        'Transmission did not return torrent info after adding'
+      );
+      // torrent-get + torrent-add only: no torrent-set on a torrent RMAB can't prove it added
+      expect(clientMock.post).toHaveBeenCalledTimes(2);
     });
 
     it('follows redirect to magnet link', async () => {
@@ -291,8 +335,8 @@ describe('TransmissionService', () => {
           },
         });
 
-      const hash = await service.addDownload('http://example.com/file.torrent');
-      expect(hash).toBe('abcdef0123456789abcdef0123456789abcdef01');
+      const result = await service.addDownload('http://example.com/file.torrent');
+      expect(result).toEqual({ id: 'abcdef0123456789abcdef0123456789abcdef01', alreadyInClient: false, infoHash: 'abcdef0123456789abcdef0123456789abcdef01' });
     });
 
     it('throws on invalid .torrent file', async () => {
@@ -362,47 +406,69 @@ describe('TransmissionService', () => {
       expect(info).toBeNull();
     });
 
-    it('maps error code to failed status', async () => {
+    const getWith = async (fields: { status: number; error: number; errorString: string; percentDone: number }) => {
       const service = new TransmissionService('http://transmission', 'user', 'pass');
-
       clientMock.post.mockResolvedValueOnce({
         data: {
           result: 'success',
           arguments: {
             torrents: [{
               hashString: 'abc123',
-              name: 'Failed',
+              name: 'Book',
               totalSize: 1000,
-              downloadedEver: 0,
-              percentDone: 0,
-              status: 0,
+              downloadedEver: 1000 * fields.percentDone,
               rateDownload: 0,
               eta: -1,
               labels: [],
               downloadDir: '/downloads',
               doneDate: 0,
-              errorString: 'Tracker error',
-              error: 2,
               uploadRatio: -1,
               uploadedEver: 0,
+              ...fields,
             }],
           },
         },
       });
-
       const info = await service.getDownload('abc123');
-
       expect(info).not.toBeNull();
-      expect(info!.status).toBe('failed');
-      expect(info!.errorMessage).toBe('Tracker error');
+      return info!;
+    };
+
+    it('maps a local error (3) to failed with its error string', async () => {
+      const info = await getWith({ status: 0, error: 3, errorString: 'No space left on device', percentDone: 0.4 });
+
+      expect(info.status).toBe('failed');
+      expect(info.errorMessage).toBe('No space left on device');
+    });
+
+    it('does not fail a downloading torrent on a tracker warning (1) (#286)', async () => {
+      const info = await getWith({
+        status: 4, error: 1, errorString: 'Tracker gave HTTP response code 404', percentDone: 0.3,
+      });
+
+      expect(info.status).toBe('downloading');
+      expect(info.errorMessage).toBeUndefined();
+    });
+
+    it('does not fail a seeding torrent on a tracker error (2)', async () => {
+      const info = await getWith({ status: 6, error: 2, errorString: 'Tracker error', percentDone: 1 });
+
+      expect(info.status).toBe('seeding');
+      expect(info.errorMessage).toBeUndefined();
+    });
+
+    it('reports a stopped torrent at 100% as completed', async () => {
+      const info = await getWith({ status: 0, error: 0, errorString: '', percentDone: 1 });
+
+      expect(info.status).toBe('completed');
     });
   });
 
   describe('status mapping', () => {
     const makeService = () => new TransmissionService('http://transmission', '', '');
 
-    const mapStatus = (service: TransmissionService, status: number, error = 0) => {
-      return (service as any).mapStatus(status, error);
+    const mapStatus = (service: TransmissionService, status: number, error = 0, percentDone = 0) => {
+      return (service as any).mapStatus(status, error, percentDone);
     };
 
     it('maps 0 (stopped) to paused', () => {
@@ -433,9 +499,23 @@ describe('TransmissionService', () => {
       expect(mapStatus(makeService(), 6)).toBe('seeding');
     });
 
-    it('maps any status with error > 0 to failed', () => {
-      expect(mapStatus(makeService(), 4, 1)).toBe('failed');
-      expect(mapStatus(makeService(), 6, 2)).toBe('failed');
+    it('maps only a local error (3) to failed; tracker errors (1, 2) keep the normal status', () => {
+      expect(mapStatus(makeService(), 4, 3)).toBe('failed');
+      expect(mapStatus(makeService(), 6, 3)).toBe('failed');
+      expect(mapStatus(makeService(), 4, 1)).toBe('downloading');
+      expect(mapStatus(makeService(), 4, 2)).toBe('downloading');
+      expect(mapStatus(makeService(), 6, 1)).toBe('seeding');
+      expect(mapStatus(makeService(), 6, 2)).toBe('seeding');
+    });
+
+    it('maps a stopped torrent to completed only once every wanted byte is done', () => {
+      expect(mapStatus(makeService(), 0, 0, 1)).toBe('completed');
+      expect(mapStatus(makeService(), 0, 0, 0.5)).toBe('paused');
+      expect(mapStatus(makeService(), 0, 0, 0.999)).toBe('paused');
+    });
+
+    it('lets a local error win over a stopped torrent at 100%', () => {
+      expect(mapStatus(makeService(), 0, 3, 1)).toBe('failed');
     });
   });
 

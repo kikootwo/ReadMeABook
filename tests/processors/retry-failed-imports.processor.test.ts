@@ -69,7 +69,7 @@ describe('processRetryFailedImports', () => {
       {
         id: 'req-1',
         audiobook: { id: 'a1', title: 'Book' },
-        downloadHistory: [{ torrentHash: 'hash-1', torrentName: 'Book', downloadClient: 'qbittorrent' }],
+        downloadHistory: [{ id: 'dh-x', torrentHash: 'hash-1', torrentName: 'Book', downloadClient: 'qbittorrent' }],
       },
     ]);
 
@@ -92,7 +92,11 @@ describe('processRetryFailedImports', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-1',
       'a1',
-      '/downloads/Book'
+      '/downloads/Book',
+      undefined,
+      undefined,
+      undefined,
+      'dh-x'
     );
   });
 
@@ -149,7 +153,7 @@ describe('processRetryFailedImports', () => {
       {
         id: 'req-3',
         audiobook: { id: 'a3', title: 'Book' },
-        downloadHistory: [{ torrentHash: 'hash-3', torrentName: 'Book', downloadClient: 'qbittorrent' }],
+        downloadHistory: [{ id: 'dh-x', torrentHash: 'hash-3', torrentName: 'Book', downloadClient: 'qbittorrent' }],
       },
     ]);
 
@@ -160,7 +164,11 @@ describe('processRetryFailedImports', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-3',
       'a3',
-      path.join('/downloads', 'Book')
+      path.join('/downloads', 'Book'),
+      undefined,
+      undefined,
+      undefined,
+      'dh-x'
     );
   });
 
@@ -195,7 +203,7 @@ describe('processRetryFailedImports', () => {
       {
         id: 'req-4',
         audiobook: { id: 'a4', title: 'Book' },
-        downloadHistory: [{ nzbId: 'nzb-1', torrentName: 'Book', downloadClient: 'sabnzbd' }],
+        downloadHistory: [{ id: 'dh-x', nzbId: 'nzb-1', torrentName: 'Book', downloadClient: 'sabnzbd' }],
       },
     ]);
 
@@ -206,7 +214,11 @@ describe('processRetryFailedImports', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-4',
       'a4',
-      path.join('/downloads', 'Book')
+      path.join('/downloads', 'Book'),
+      undefined,
+      undefined,
+      undefined,
+      'dh-x'
     );
   });
 
@@ -229,7 +241,7 @@ describe('processRetryFailedImports', () => {
       {
         id: 'req-5',
         audiobook: { id: 'a5', title: 'Book' },
-        downloadHistory: [{ nzbId: 'nzb-2', torrentName: 'Book', downloadClient: 'sabnzbd' }],
+        downloadHistory: [{ id: 'dh-x', nzbId: 'nzb-2', torrentName: 'Book', downloadClient: 'sabnzbd' }],
       },
     ]);
 
@@ -252,7 +264,7 @@ describe('processRetryFailedImports', () => {
       {
         id: 'req-6',
         audiobook: { id: 'a6', title: 'Book' },
-        downloadHistory: [{ downloadClient: 'qbittorrent' }],
+        downloadHistory: [{ id: 'dh-x', downloadClient: 'qbittorrent' }],
       },
     ]);
 
@@ -292,7 +304,7 @@ describe('processRetryFailedImports', () => {
       {
         id: 'req-7',
         audiobook: { id: 'a7', title: 'Book' },
-        downloadHistory: [{ torrentHash: 'hash-7', torrentName: 'Book', downloadClient: 'qbittorrent' }],
+        downloadHistory: [{ id: 'dh-x', torrentHash: 'hash-7', torrentName: 'Book', downloadClient: 'qbittorrent' }],
       },
     ]);
     jobQueueMock.addOrganizeJob.mockRejectedValue(new Error('queue down'));
@@ -322,7 +334,7 @@ describe('processRetryFailedImports', () => {
       {
         id: 'req-8',
         audiobook: { id: 'a8', title: 'Book' },
-        downloadHistory: [{ torrentHash: 'hash-8', downloadClient: 'qbittorrent' }],
+        downloadHistory: [{ id: 'dh-x', torrentHash: 'hash-8', downloadClient: 'qbittorrent' }],
       },
     ]);
 
@@ -353,7 +365,7 @@ describe('processRetryFailedImports', () => {
       {
         id: 'req-9',
         audiobook: { id: 'a9', title: 'Book' },
-        downloadHistory: [{ torrentHash: 'hash-9', torrentName: 'Book', downloadClient: 'qbittorrent' }],
+        downloadHistory: [{ id: 'dh-x', torrentHash: 'hash-9', torrentName: 'Book', downloadClient: 'qbittorrent' }],
       },
     ]);
 
@@ -382,7 +394,7 @@ describe('processRetryFailedImports', () => {
       {
         id: 'req-10',
         audiobook: { id: 'a10', title: 'Book' },
-        downloadHistory: [{ nzbId: 'nzb-10', torrentName: 'Book', downloadClient: 'sabnzbd' }],
+        downloadHistory: [{ id: 'dh-x', nzbId: 'nzb-10', torrentName: 'Book', downloadClient: 'sabnzbd' }],
       },
     ]);
 
@@ -413,6 +425,7 @@ describe('processRetryFailedImports', () => {
         id: 'req-stored-1',
         audiobook: { id: 'a-stored-1', title: 'Freefall' },
         downloadHistory: [{
+          id: 'dh-x',
           torrentHash: 'hash-stored-1',
           torrentName: 'Freefall: Expeditionary Force Mavericks, Book 2 - Craig Alanson',
           downloadClient: 'qbittorrent',
@@ -429,7 +442,11 @@ describe('processRetryFailedImports', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-stored-1',
       'a-stored-1',
-      '/downloads/Craig Alanson - Freefall Expeditionary Force Mavericks, Book 2'
+      '/downloads/Craig Alanson - Freefall Expeditionary Force Mavericks, Book 2',
+      undefined,
+      undefined,
+      undefined,
+      'dh-x'
     );
   });
 
@@ -454,6 +471,7 @@ describe('processRetryFailedImports', () => {
         id: 'req-stored-2',
         audiobook: { id: 'a-stored-2', title: 'Book' },
         downloadHistory: [{
+          id: 'dh-x',
           torrentHash: 'hash-stored-2',
           torrentName: 'Book',
           downloadClient: 'qbittorrent',
@@ -470,7 +488,11 @@ describe('processRetryFailedImports', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-stored-2',
       'a-stored-2',
-      '/downloads/Book'
+      '/downloads/Book',
+      undefined,
+      undefined,
+      undefined,
+      'dh-x'
     );
   });
 
@@ -505,6 +527,7 @@ describe('processRetryFailedImports', () => {
         id: 'req-stored-3',
         audiobook: { id: 'a-stored-3', title: 'Book' },
         downloadHistory: [{
+          id: 'dh-x',
           torrentHash: 'hash-stored-3',
           torrentName: 'Book',
           downloadClient: 'qbittorrent',
@@ -521,8 +544,86 @@ describe('processRetryFailedImports', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-stored-3',
       'a-stored-3',
-      '/downloads/LivePath'
+      '/downloads/LivePath',
+      undefined,
+      undefined,
+      undefined,
+      'dh-x'
     );
+  });
+
+  describe('stored download path refresh', () => {
+    const setupLivePath = () => {
+      downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue({
+        clientType: 'sabnzbd',
+        protocol: 'usenet',
+        getDownload: vi.fn().mockResolvedValue({ id: 'nzo-r', downloadPath: '/remote/complete/Book.Moved' }),
+      });
+      downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+        id: 'client-s',
+        type: 'sabnzbd',
+        name: 'SABnzbd',
+        enabled: true,
+        remotePathMappingEnabled: true,
+        remotePath: '/remote',
+        localPath: '/downloads',
+      });
+      prismaMock.request.findMany.mockResolvedValue([
+        {
+          id: 'req-r',
+          audiobook: { id: 'a-r', title: 'Book' },
+          downloadHistory: [{
+            id: 'dh-r',
+            nzbId: 'nzo-r',
+            downloadClientId: 'nzo-r',
+            downloadClient: 'sabnzbd',
+            downloadPath: '/downloads/complete/Book',
+          }],
+        },
+      ]);
+    };
+
+    it('stores the mapped client path before queueing the organize job', async () => {
+      setupLivePath();
+
+      const { processRetryFailedImports } = await import('@/lib/processors/retry-failed-imports.processor');
+      const result = await processRetryFailedImports({ jobId: 'job-r1' });
+
+      const toPosix = (p: string) => p.split(path.sep).join('/');
+      const queuedPath = jobQueueMock.addOrganizeJob.mock.calls[0][2] as string;
+      expect(result.triggered).toBe(1);
+      expect(toPosix(queuedPath)).toBe('/downloads/complete/Book.Moved');
+      expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith({
+        where: { id: 'dh-r' },
+        data: { downloadPath: queuedPath },
+      });
+      expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith('req-r', 'a-r', queuedPath, undefined, undefined, undefined, 'dh-r');
+    });
+
+    it('still queues the import when storing the refreshed path fails', async () => {
+      setupLivePath();
+      prismaMock.downloadHistory.update.mockRejectedValueOnce(new Error('database is locked'));
+
+      const { processRetryFailedImports } = await import('@/lib/processors/retry-failed-imports.processor');
+      const result = await processRetryFailedImports({ jobId: 'job-r2' });
+
+      expect(result.triggered).toBe(1);
+      expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not store a guessed fallback path', async () => {
+      setupLivePath();
+      downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue({
+        clientType: 'sabnzbd',
+        protocol: 'usenet',
+        getDownload: vi.fn().mockRejectedValue(new Error('offline')),
+      });
+
+      const { processRetryFailedImports } = await import('@/lib/processors/retry-failed-imports.processor');
+      await processRetryFailedImports({ jobId: 'job-r3' });
+
+      expect(prismaMock.downloadHistory.update).not.toHaveBeenCalled();
+    });
   });
 
   it('skips requests without download_dir when no client identifiers exist', async () => {
@@ -538,7 +639,7 @@ describe('processRetryFailedImports', () => {
       {
         id: 'req-11',
         audiobook: { id: 'a11', title: 'Book' },
-        downloadHistory: [{ torrentName: 'Book', downloadClient: 'qbittorrent' }],
+        downloadHistory: [{ id: 'dh-x', torrentName: 'Book', downloadClient: 'qbittorrent' }],
       },
     ]);
 
@@ -560,6 +661,7 @@ describe('processRetryFailedImports', () => {
         type: 'ebook',
         audiobook: { id: 'a-ebook-1', title: 'Equal Rites' },
         downloadHistory: [{
+          id: 'dh-x',
           downloadClient: 'direct',
           torrentName: 'Equal Rites - Terry Pratchett.epub',
           downloadPath: '/downloads/Equal Rites - Terry Pratchett.epub',
@@ -575,7 +677,11 @@ describe('processRetryFailedImports', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-ebook-1',
       'a-ebook-1',
-      '/downloads/Equal Rites - Terry Pratchett.epub'
+      '/downloads/Equal Rites - Terry Pratchett.epub',
+      undefined,
+      undefined,
+      undefined,
+      'dh-x'
     );
   });
 
@@ -588,6 +694,7 @@ describe('processRetryFailedImports', () => {
         type: 'ebook',
         audiobook: { id: 'a-ebook-2', title: 'Equal Rites' },
         downloadHistory: [{
+          id: 'dh-x',
           downloadClient: 'direct',
           torrentName: 'Equal Rites - Terry Pratchett.epub',
           downloadPath: null, // No stored path
@@ -602,7 +709,11 @@ describe('processRetryFailedImports', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-ebook-2',
       'a-ebook-2',
-      '/downloads/Equal Rites - Terry Pratchett.epub'
+      '/downloads/Equal Rites - Terry Pratchett.epub',
+      undefined,
+      undefined,
+      undefined,
+      'dh-x'
     );
   });
 
@@ -615,6 +726,7 @@ describe('processRetryFailedImports', () => {
         type: 'ebook',
         audiobook: { id: 'a-ebook-3', title: 'Equal Rites' },
         downloadHistory: [{
+          id: 'dh-x',
           downloadClient: 'direct',
           torrentName: 'Equal Rites - Terry Pratchett.epub',
           downloadPath: null,
@@ -662,6 +774,7 @@ describe('processRetryFailedImports', () => {
         type: 'ebook',
         audiobook: { id: 'a-ebook-idx', title: 'Equal Rites' },
         downloadHistory: [{
+          id: 'dh-x',
           torrentHash: 'hash-ebook-idx',
           torrentName: 'Equal Rites - Terry Pratchett (epub)',
           downloadClient: 'qbittorrent',
@@ -676,7 +789,11 @@ describe('processRetryFailedImports', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-ebook-idx',
       'a-ebook-idx',
-      '/downloads/Equal Rites - Terry Pratchett (epub)'
+      '/downloads/Equal Rites - Terry Pratchett (epub)',
+      undefined,
+      undefined,
+      undefined,
+      'dh-x'
     );
   });
 
@@ -712,6 +829,7 @@ describe('processRetryFailedImports', () => {
         type: 'audiobook',
         audiobook: { id: 'a-mixed-audio', title: 'Gideon the Ninth' },
         downloadHistory: [{
+          id: 'dh-x',
           torrentHash: 'hash-audio',
           torrentName: 'Gideon the Ninth',
           downloadClient: 'qbittorrent',
@@ -722,6 +840,7 @@ describe('processRetryFailedImports', () => {
         type: 'ebook',
         audiobook: { id: 'a-mixed-ebook', title: 'Equal Rites' },
         downloadHistory: [{
+          id: 'dh-x',
           downloadClient: 'direct',
           torrentName: 'Equal Rites - Terry Pratchett.epub',
           downloadPath: '/downloads/Equal Rites - Terry Pratchett.epub',
@@ -738,12 +857,20 @@ describe('processRetryFailedImports', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-mixed-audio',
       'a-mixed-audio',
-      '/downloads/Gideon the Ninth'
+      '/downloads/Gideon the Ninth',
+      undefined,
+      undefined,
+      undefined,
+      'dh-x'
     );
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-mixed-ebook',
       'a-mixed-ebook',
-      '/downloads/Equal Rites - Terry Pratchett.epub'
+      '/downloads/Equal Rites - Terry Pratchett.epub',
+      undefined,
+      undefined,
+      undefined,
+      'dh-x'
     );
   });
 
@@ -754,6 +881,7 @@ describe('processRetryFailedImports', () => {
         type: 'ebook',
         audiobook: { id: 'a-ebook-noname', title: 'Book' },
         downloadHistory: [{
+          id: 'dh-x',
           downloadClient: 'direct',
           torrentName: null,
           downloadPath: null,

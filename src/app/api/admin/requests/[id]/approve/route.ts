@@ -10,8 +10,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { processRequestApproval } from '@/lib/services/request-approval.service';
+import { rejectedSelectionResponse, selectionFailureResponse } from '@/lib/services/download-selection-guard';
 import { RMABLogger } from '@/lib/utils/logger';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Requests.Approve');
 
@@ -39,7 +42,9 @@ export async function POST(
         }
 
         const { id } = await params;
-        const body = await request.json();
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
+        const body = bodyResult.data;
 
         // Validate action and optional admin-selected torrent
         const { action, selectedTorrent: adminSelectedTorrent } = ApprovalActionSchema.parse(body);
@@ -69,6 +74,12 @@ export async function POST(
               { status: 400 }
             );
           }
+          if (result.reason === 'source_unavailable') {
+            return selectionFailureResponse({ error: result.message, retryable: true });
+          }
+          if (result.reason === 'invalid_selection') {
+            return rejectedSelectionResponse(result.message);
+          }
           return NextResponse.json(
             { error: 'ApprovalError', message: result.message },
             { status: 500 }
@@ -78,11 +89,12 @@ export async function POST(
         return NextResponse.json({
           success: true,
           message: result.message,
+          ...(result.selectionDropped ? { selectionDropped: result.selectionDropped } : {}),
           request: result.request,
         });
       } catch (error) {
         logger.error('Failed to process approval action', {
-          error: error instanceof Error ? error.message : String(error)
+          error: errorForLog(error)
         });
 
         if (error instanceof z.ZodError) {
@@ -90,7 +102,7 @@ export async function POST(
             {
               error: 'ValidationError',
               message: 'Invalid action. Must be "approve" or "deny"',
-              details: error.errors,
+              details: zodIssueDetails(error),
             },
             { status: 400 }
           );

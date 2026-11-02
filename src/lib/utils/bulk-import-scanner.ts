@@ -7,25 +7,24 @@
  * matching. Used by the bulk import API.
  */
 
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
 import { AUDIO_EXTENSIONS } from '../constants/audio-formats';
+import { isGenericFolderName } from './disc-layout';
+import { foldDiscFolders } from './disc-fold';
+import { asyncPool } from './async-pool';
+import { buildGroupingKey, UNGROUPED_FOLDER_KEY, UNGROUPED_PREFIX } from './bulk-import-keys';
 
-const execPromise = promisify(exec);
+// ffprobe runs via execFile with an argv array (never a shell): paths are untrusted.
+const execFilePromise = promisify(execFile);
 
 /** Maximum recursion depth for folder scanning. */
 export const MAX_SCAN_DEPTH = 10;
 
 /** Maximum concurrent ffprobe calls for metadata reads. */
 const METADATA_CONCURRENCY = 10;
-
-/**
- * Folder names matching this pattern are considered generic and should not be
- * used as Audible search terms (e.g. "CD1", "Disc 2", "Part 3", "Volume 1").
- */
-const GENERIC_FOLDER_NAME_RE = /^(cd|disc|disk|part|vol(ume)?)\s*\d+$/i;
 
 /** Metadata extracted from an audio file via ffprobe. */
 export interface AudioFileMetadata {
@@ -86,8 +85,8 @@ export function extractAsinFromString(str: string): string | null {
  */
 export async function readAudioMetadata(filePath: string): Promise<AudioFileMetadata> {
   try {
-    const command = `ffprobe -v quiet -print_format json -show_format "${filePath}"`;
-    const { stdout } = await execPromise(command, { timeout: 15000 });
+    const args = ['-v', 'quiet', '-print_format', 'json', '-show_format', filePath];
+    const { stdout } = await execFilePromise('ffprobe', args, { timeout: 15000 });
     const data = JSON.parse(stdout);
 
     const tags = data?.format?.tags || {};
@@ -206,7 +205,7 @@ export function buildSearchTerm(
   }
 
   // Fallback 1: folder name (if provided and not generic)
-  if (folderName && !GENERIC_FOLDER_NAME_RE.test(folderName.trim())) {
+  if (folderName && !isGenericFolderName(folderName)) {
     const cleaned = cleanSearchString(folderName);
     if (cleaned) {
       return { searchTerm: cleaned, source: 'folder_name' };
@@ -216,24 +215,6 @@ export function buildSearchTerm(
   // Fallback 2: first audio file name
   const cleaned = cleanSearchString(firstFileName);
   return { searchTerm: cleaned || firstFileName, source: 'file_name' };
-}
-
-/**
- * Build a normalized grouping key from metadata.
- * Used to determine which files belong to the same book.
- * Returns null if metadata has no title (ungroupable by metadata).
- */
-function buildGroupingKey(metadata: AudioFileMetadata): string | null {
-  if (!metadata.title) return null;
-
-  const normalize = (s?: string) =>
-    (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-
-  return [
-    normalize(metadata.title),
-    normalize(metadata.author),
-    normalize(metadata.narrator),
-  ].join('|');
 }
 
 /**
@@ -267,32 +248,6 @@ async function scanDirectoryForAudio(
   } catch {
     return null;
   }
-}
-
-/**
- * Run async tasks with a concurrency limit.
- */
-async function asyncPool<T, R>(
-  items: T[],
-  concurrency: number,
-  fn: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results: R[] = [];
-  let index = 0;
-
-  async function worker() {
-    while (index < items.length) {
-      const i = index++;
-      results[i] = await fn(items[i]);
-    }
-  }
-
-  const workers = Array.from(
-    { length: Math.min(concurrency, items.length) },
-    () => worker()
-  );
-  await Promise.all(workers);
-  return results;
 }
 
 /**
@@ -355,10 +310,8 @@ async function groupAudioFilesByMetadata(
         });
       }
     } else {
-      // No title metadata — collect all such files under one folder-level group.
-      // Key must start with '__ungrouped_' so deduplicateDiscoveries treats it
-      // as unique per folder (prefixes it with folderPath before deduplication).
-      const ungroupedKey = '__ungrouped_folder';
+      // No title metadata — one folder-level group (deduplicateDiscoveries keeps UNGROUPED_PREFIX keys per folder)
+      const ungroupedKey = UNGROUPED_FOLDER_KEY;
       const existing = groups.get(ungroupedKey);
       if (existing) {
         existing.files.push(fileName);
@@ -379,14 +332,14 @@ async function groupAudioFilesByMetadata(
   // without tags, or a cover/intro file carries different metadata).
   // Only do this when there is a single tagged group — multiple tagged groups
   // mean genuinely different books are mixed in the folder, so keep them separate.
-  const ungrouped = groups.get('__ungrouped_folder');
+  const ungrouped = groups.get(UNGROUPED_FOLDER_KEY);
   if (ungrouped) {
-    const taggedKeys = Array.from(groups.keys()).filter((k) => k !== '__ungrouped_folder');
+    const taggedKeys = Array.from(groups.keys()).filter((k) => k !== UNGROUPED_FOLDER_KEY);
     if (taggedKeys.length === 1) {
       const taggedGroup = groups.get(taggedKeys[0])!;
       taggedGroup.files.push(...ungrouped.files);
       taggedGroup.totalSize += ungrouped.totalSize;
-      groups.delete('__ungrouped_folder');
+      groups.delete(UNGROUPED_FOLDER_KEY);
     }
   }
 
@@ -416,7 +369,7 @@ function deduplicateDiscoveries(
 
   for (const disc of discoveries) {
     // Skip ungrouped entries (each is unique)
-    if (disc.groupingKey.startsWith('__ungrouped_')) {
+    if (disc.groupingKey.startsWith(UNGROUPED_PREFIX)) {
       const key = `${disc.folderPath}::${disc.groupingKey}`;
       byKey.set(key, [disc]);
       continue;
@@ -510,18 +463,20 @@ function findCommonParent(paths: string[]): string {
  * Scanning ALWAYS recurses into subfolders regardless of whether the current
  * folder has audio files.
  *
- * After the full walk, discoveries sharing the same grouping key across
- * different folders (e.g., CD1/ and CD2/) are merged.
+ * After the full walk, disc folders of one book folder (CD1/, CD2/) fold into
+ * it, then discoveries sharing a grouping key across folders are merged.
  *
  * @param rootPath - The root directory to scan
  * @param onProgress - Optional callback for progress updates
  * @param abortSignal - Optional AbortSignal to cancel the scan
+ * @param protectedRoots - Configured roots that disc folders never fold into
  * @returns Array of discovered audiobook folders with metadata
  */
 export async function discoverAudiobooks(
   rootPath: string,
   onProgress?: (progress: ScanProgress) => void,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  protectedRoots: readonly string[] = []
 ): Promise<DiscoveredAudiobook[]> {
   const results: DiscoveredAudiobook[] = [];
   let foldersScanned = 0;
@@ -618,6 +573,7 @@ export async function discoverAudiobooks(
 
   await walk(rootPath, 0);
 
-  // Post-scan: merge discoveries with the same grouping key across folders
-  return deduplicateDiscoveries(results);
+  // Post-scan: fold disc folders into their book folder, then merge same-key discoveries
+  const fold = { rootPath: rootPath.replace(/\\/g, '/'), protectedRoots, buildSearchTerm, extractAsin: extractAsinFromString };
+  return deduplicateDiscoveries(await foldDiscFolders(results, fold));
 }

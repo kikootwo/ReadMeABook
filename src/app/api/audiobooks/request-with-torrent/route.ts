@@ -8,13 +8,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
+import { createRequestReplacing, RE_REQUESTABLE_STATUSES, RequestAlreadyReplacedError } from '@/lib/services/request-rerequest';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { z } from 'zod';
+import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
+import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
+import { sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
+import { guardTorrentSelection, rejectedSelectionResponse } from '@/lib/services/download-selection-guard';
+import { hideStoredPick } from '@/lib/services/request-detail-query';
+import { readJsonBody } from '@/lib/utils/request-body';
+import { resolveAutoApprove } from '@/lib/utils/permissions';
 
 const logger = RMABLogger.create('API.RequestWithTorrent');
+
+/** 409 reply for a pick on a book whose request is already done or in flight (any user). */
+const IN_FLIGHT_REPLIES: Record<string, { error: string; message: string }> = {
+  available: { error: 'AlreadyAvailable', message: 'This audiobook is already in your library' },
+  downloaded: { error: 'BeingProcessed', message: 'This audiobook is being processed and will be available soon' },
+  downloading: { error: 'BeingProcessed', message: 'This audiobook is being processed and will be available soon' },
+  processing: { error: 'BeingProcessed', message: 'This audiobook is being processed and will be available soon' },
+  awaiting_import: { error: 'BeingProcessed', message: 'This audiobook is being processed and will be available soon' },
+  awaiting_approval: { error: 'AwaitingApproval', message: 'A request for this audiobook is already awaiting admin approval' },
+};
 
 const RequestWithTorrentSchema = z.object({
   audiobook: z.object({
@@ -61,18 +79,29 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const body = await req.json();
-      const { audiobook, torrent } = RequestWithTorrentSchema.parse(body);
+      const accessDenied = await denyWithoutInteractiveSearchAccess(req.user.id);
+      if (accessDenied) return accessDenied;
 
-      // First check: Is there an existing audiobook request in 'downloaded' or 'available' status?
-      // This catches the gap where files are organized but Plex hasn't scanned yet
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
+      const { audiobook, torrent: pickedTorrent } = RequestWithTorrentSchema.parse(body);
+
+      // Only magnet links or Prowlarr download links may be fetched on the user's behalf
+      const torrentCheck = await guardTorrentSelection(pickedTorrent);
+      if (!torrentCheck.ok) return rejectedSelectionResponse(torrentCheck.error);
+      const torrent = torrentCheck.value;
+
+      // First check (any user): a request for this book that is already in the library,
+      // being downloaded or imported, or awaiting approval. Covers the gap between files
+      // being organized and the library scan, and says what is actually happening (#291)
       const existingActiveRequest = await prisma.request.findFirst({
         where: {
           audiobook: {
             audibleAsin: audiobook.asin,
           },
           type: 'audiobook', // Only check audiobook requests (ebook requests are separate)
-          status: { in: ['downloaded', 'available'] },
+          status: { in: Object.keys(IN_FLIGHT_REPLIES) },
           deletedAt: null,
         },
         include: {
@@ -82,16 +111,13 @@ export async function POST(request: NextRequest) {
 
       if (existingActiveRequest) {
         const status = existingActiveRequest.status;
-        const isOwnRequest = existingActiveRequest.userId === req.user.id;
+        const reply = IN_FLIGHT_REPLIES[status];
 
         return NextResponse.json(
           {
-            error: status === 'available' ? 'AlreadyAvailable' : 'BeingProcessed',
-            message: status === 'available'
-              ? 'This audiobook is already available in your Plex library'
-              : 'This audiobook is being processed and will be available soon',
+            ...reply,
             requestStatus: status,
-            isOwnRequest,
+            isOwnRequest: existingActiveRequest.userId === req.user.id,
             requestedBy: existingActiveRequest.user?.plexUsername,
           },
           { status: 409 }
@@ -109,8 +135,7 @@ export async function POST(request: NextRequest) {
       if (plexMatch) {
         return NextResponse.json(
           {
-            error: 'AlreadyAvailable',
-            message: 'This audiobook is already available in your Plex library',
+            ...IN_FLIGHT_REPLIES.available,
             plexGuid: plexMatch.plexGuid,
           },
           { status: 409 }
@@ -164,7 +189,7 @@ export async function POST(request: NextRequest) {
             author: audiobook.author,
             narrator: audiobook.narrator,
             description: audiobook.description,
-            coverArtUrl: audiobook.coverArtUrl,
+            coverArtUrl: sanitizeCoverArtUrl(audiobook.coverArtUrl),
             year,
             series,
             seriesPart,
@@ -195,38 +220,81 @@ export async function POST(request: NextRequest) {
         },
       });
 
+      // A failed/warn/cancelled request is replaced by the new one atomically (below),
+      // keeping its blocklist; it is not touched until the new request is created
       if (existingRequest) {
-        const canReRequest = ['failed', 'warn', 'cancelled'].includes(existingRequest.status);
+        const canReRequest = RE_REQUESTABLE_STATUSES.includes(existingRequest.status);
 
         if (!canReRequest) {
           return NextResponse.json(
             {
               error: 'DuplicateRequest',
               message: 'You have already requested this audiobook',
-              request: existingRequest,
+              request: hideStoredPick(existingRequest, req.user.role),
             },
             { status: 409 }
           );
         }
-
-        // Delete the existing failed/warn/cancelled request
-        logger.debug(`Deleting existing ${existingRequest.status} request ${existingRequest.id}`);
-        await prisma.request.delete({
-          where: { id: existingRequest.id },
-        });
       }
 
-      // Check if request needs approval
-      let needsApproval = false;
+      // Another user's open request for this book: the pick would start a second download
+      // of the same book, so it is refused. Unlike a plain request, a denied one does not count.
+      const otherUsersRequest = await prisma.request.findFirst({
+        where: {
+          audiobookId: audiobookRecord.id,
+          type: 'audiobook',
+          userId: { not: req.user.id },
+          status: { notIn: [...RE_REQUESTABLE_STATUSES, 'denied', 'available', 'downloaded'] },
+          deletedAt: null,
+        },
+      });
+
+      if (otherUsersRequest) {
+        return NextResponse.json(
+          {
+            error: 'AlreadyRequested',
+            message: 'This audiobook is already being requested by another user',
+            requestStatus: otherUsersRequest.status,
+            isOwnRequest: false,
+          },
+          { status: 409 }
+        );
+      }
+
+      // Create the request; replacing a failed one keeps its blocklist and search terms.
+      // Null when another re-request replaced it first (nothing created).
+      const createRequest = async (status: string, extra: { selectedTorrent?: any } = {}) => {
+        try {
+          return await createRequestReplacing(
+            {
+              data: {
+                userId: req.user!.id,
+                audiobookId: audiobookRecord!.id,
+                status,
+                type: 'audiobook', // Explicit type for user-created requests
+                progress: 0,
+                ...extra,
+                ...(existingRequest?.customSearchTerms && { customSearchTerms: existingRequest.customSearchTerms }),
+              },
+              include: { audiobook: true, user: { select: { id: true, plexUsername: true } } },
+            },
+            existingRequest?.id ?? null
+          );
+        } catch (error) {
+          if (error instanceof RequestAlreadyReplacedError) return null;
+          throw error;
+        }
+      };
+      const alreadyReplaced = () =>
+        NextResponse.json(
+          { error: 'DuplicateRequest', message: 'You have already requested this audiobook' },
+          { status: 409 }
+        );
 
       // Fetch user with autoApproveRequests setting
       const user = await prisma.user.findUnique({
         where: { id: req.user.id },
-        select: {
-          role: true,
-          autoApproveRequests: true,
-          plexUsername: true,
-        },
+        select: { role: true, autoApproveRequests: true, plexUsername: true },
       });
 
       if (!user) {
@@ -236,26 +304,8 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Determine if approval is needed
-      if (user.role === 'admin') {
-        // Admins always auto-approve
-        needsApproval = false;
-      } else {
-        // Check user's personal setting first
-        if (user.autoApproveRequests === true) {
-          needsApproval = false;
-        } else if (user.autoApproveRequests === false) {
-          needsApproval = true;
-        } else {
-          // User setting is null, check global setting
-          const globalConfig = await prisma.configuration.findUnique({
-            where: { key: 'auto_approve_requests' },
-          });
-          // Default to true if not configured (backward compatibility)
-          const globalAutoApprove = globalConfig === null ? true : globalConfig.value === 'true';
-          needsApproval = !globalAutoApprove;
-        }
-      }
+      // Admins skip approval; users follow their own setting, then the global one
+      const needsApproval = !(await resolveAutoApprove(user.role, user.autoApproveRequests));
 
       const jobQueue = getJobQueueService();
 
@@ -263,25 +313,9 @@ export async function POST(request: NextRequest) {
         // Create request with awaiting_approval status and store selected torrent
         logger.info('Request requires approval, storing selected torrent', { userId: req.user.id });
 
-        const newRequest = await prisma.request.create({
-          data: {
-            userId: req.user.id,
-            audiobookId: audiobookRecord.id,
-            status: 'awaiting_approval',
-            type: 'audiobook', // Explicit type for user-created requests
-            progress: 0,
-            selectedTorrent: torrent as any, // Store the selected torrent for later
-          },
-          include: {
-            audiobook: true,
-            user: {
-              select: {
-                id: true,
-                plexUsername: true,
-              },
-            },
-          },
-        });
+        // Store the selected torrent for later
+        const newRequest = await createRequest('awaiting_approval', { selectedTorrent: torrent as any });
+        if (!newRequest) return alreadyReplaced();
 
         // Send pending approval notification
         await jobQueue.addNotificationJob(
@@ -291,38 +325,22 @@ export async function POST(request: NextRequest) {
           audiobookRecord.author,
           user.plexUsername || 'Unknown User'
         ).catch((error) => {
-          logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
+          logger.error('Failed to queue notification', { error: errorForLog(error) });
         });
 
         logger.info(`Request ${newRequest.id} created, awaiting admin approval`);
 
         return NextResponse.json({
           success: true,
-          request: newRequest,
+          request: hideStoredPick(newRequest, req.user.role),
           message: 'Request submitted for admin approval',
         }, { status: 201 });
       } else {
         // Auto-approved - create request with downloading status and start download
         logger.info('Request auto-approved, starting download', { userId: req.user.id });
 
-        const newRequest = await prisma.request.create({
-          data: {
-            userId: req.user.id,
-            audiobookId: audiobookRecord.id,
-            status: 'downloading',
-            type: 'audiobook', // Explicit type for user-created requests
-            progress: 0,
-          },
-          include: {
-            audiobook: true,
-            user: {
-              select: {
-                id: true,
-                plexUsername: true,
-              },
-            },
-          },
-        });
+        const newRequest = await createRequest('downloading');
+        if (!newRequest) return alreadyReplaced();
 
         // Queue download job with the selected torrent
         await jobQueue.addDownloadJob(
@@ -343,24 +361,24 @@ export async function POST(request: NextRequest) {
           audiobookRecord.author,
           user.plexUsername || 'Unknown User'
         ).catch((error) => {
-          logger.error('Failed to queue notification', { error: error instanceof Error ? error.message : String(error) });
+          logger.error('Failed to queue notification', { error: errorForLog(error) });
         });
 
         logger.info(`Request ${newRequest.id} auto-approved and download queued`);
 
         return NextResponse.json({
           success: true,
-          request: newRequest,
+          request: hideStoredPick(newRequest, req.user.role),
         }, { status: 201 });
       }
     } catch (error) {
-      logger.error('Failed to create request with torrent', { error: error instanceof Error ? error.message : String(error) });
+      logger.error('Failed to create request with torrent', { error: errorForLog(error) });
 
       if (error instanceof z.ZodError) {
         return NextResponse.json(
           {
             error: 'ValidationError',
-            details: error.errors,
+            details: zodIssueDetails(error),
           },
           { status: 400 }
         );

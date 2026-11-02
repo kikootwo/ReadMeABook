@@ -12,8 +12,20 @@ const encryptionMock = vi.hoisted(() => ({
   decrypt: vi.fn(),
 }));
 
+// Access rules are covered with the real middleware in bookdate-test-connection.access.test.ts.
+// Here: a request with an Authorization header is the admin after setup (the middleware sets
+// request.user); without one, the setup wizard.
 vi.mock('@/lib/middleware/auth', () => ({
   requireAuth: requireAuthMock,
+  requireSetupIncompleteOrAdmin: (req: any, handler: (r: any) => any) => {
+    const signedIn = Boolean(req.headers.get('authorization'));
+    prismaMock.configuration.findUnique.mockResolvedValue(signedIn ? { key: 'setup_completed', value: 'true' } : null);
+    if (!signedIn) return handler(req);
+    return requireAuthMock(req, () => {
+      req.user = { id: 'u-admin', sub: 'u-admin', role: 'admin', plexId: 'p1', username: 'admin' };
+      return handler(req);
+    });
+  },
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -59,11 +71,12 @@ describe('BookDate test connection route', () => {
     expect(payload.error).toMatch(/API key is required/);
   });
 
-  it('requires baseUrl for custom unauthenticated requests', async () => {
+  it('requires baseUrl for custom requests', async () => {
+    requireAuthMock.mockImplementation((_req: any, handler: any) => handler(_req));
     const { POST } = await import('@/app/api/bookdate/test-connection/route');
 
     const response = await POST({
-      headers: { get: () => null },
+      headers: { get: () => 'Bearer token' },
       json: vi.fn().mockResolvedValue({ provider: 'custom' }),
     } as any);
 
@@ -343,7 +356,7 @@ describe('BookDate test connection route', () => {
 
   it('returns error when saved key decryption fails', async () => {
     requireAuthMock.mockImplementation((_req: any, handler: any) => handler(_req));
-    prismaMock.bookDateConfig.findFirst.mockResolvedValue({ apiKey: 'enc-key', baseUrl: null });
+    prismaMock.bookDateConfig.findFirst.mockResolvedValue({ provider: 'openai', apiKey: 'enc-key', baseUrl: null });
     encryptionMock.decrypt.mockImplementation(() => {
       throw new Error('decrypt failed');
     });
@@ -376,6 +389,7 @@ describe('BookDate test connection route', () => {
   it('requires baseUrl when using saved custom config without baseUrl', async () => {
     requireAuthMock.mockImplementation((_req: any, handler: any) => handler(_req));
     prismaMock.bookDateConfig.findFirst.mockResolvedValue({
+      provider: 'custom',
       apiKey: 'enc-key',
       baseUrl: null,
     });
@@ -395,6 +409,7 @@ describe('BookDate test connection route', () => {
   it('uses saved key for custom provider and parses OpenAI format', async () => {
     requireAuthMock.mockImplementation((_req: any, handler: any) => handler(_req));
     prismaMock.bookDateConfig.findFirst.mockResolvedValue({
+      provider: 'custom',
       apiKey: 'enc-key',
       baseUrl: 'http://custom',
     });
@@ -402,10 +417,7 @@ describe('BookDate test connection route', () => {
 
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({
-        data: [{ id: 'model-a', name: 'Model A' }],
-      }),
-      text: vi.fn().mockResolvedValue('ok'),
+      text: vi.fn().mockResolvedValue(JSON.stringify({ data: [{ id: 'model-a', name: 'Model A' }] })),
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -434,17 +446,20 @@ describe('BookDate test connection route', () => {
     expect(payload.error).toMatch(/Invalid base URL/i);
   });
 
-  it('validates custom base URLs for unauthenticated requests', async () => {
+  it('refuses the custom provider during setup without fetching', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
     const { POST } = await import('@/app/api/bookdate/test-connection/route');
 
     const response = await POST({
       headers: { get: () => null },
-      json: vi.fn().mockResolvedValue({ provider: 'custom', baseUrl: 'ftp://bad' }),
+      json: vi.fn().mockResolvedValue({ provider: 'custom', baseUrl: 'http://10.0.0.5/v1' }),
     } as any);
 
     const payload = await response.json();
-    expect(response.status).toBe(400);
-    expect(payload.error).toMatch(/Invalid base URL/i);
+    expect(response.status).toBe(403);
+    expect(payload.error).toMatch(/only be tested by an admin/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('returns custom provider models for authenticated requests', async () => {
@@ -452,11 +467,10 @@ describe('BookDate test connection route', () => {
 
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue([
+      text: vi.fn().mockResolvedValue(JSON.stringify([
         { id: 'model-a' },
         { id: 'model-b', name: 'Model B' },
-      ]),
-      text: vi.fn().mockResolvedValue('ok'),
+      ])),
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -479,8 +493,7 @@ describe('BookDate test connection route', () => {
 
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({ unexpected: true }),
-      text: vi.fn().mockResolvedValue('ok'),
+      text: vi.fn().mockResolvedValue(JSON.stringify({ unexpected: true })),
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -509,7 +522,7 @@ describe('BookDate test connection route', () => {
 
     const payload = await response.json();
     expect(response.status).toBe(500);
-    expect(payload.error).toMatch(/Network error/i);
+    expect(payload.error).toMatch(/Could not connect to the custom provider/i);
   });
 
   it('returns 400 (not 401) when custom provider returns 401 to prevent logout', async () => {
@@ -534,29 +547,10 @@ describe('BookDate test connection route', () => {
     expect(payload.error).toMatch(/Failed to connect to custom provider/i);
   });
 
-  it('returns 400 (not 401) when custom provider returns 401 during unauthenticated request', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      text: vi.fn().mockResolvedValue('Unauthorized'),
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { POST } = await import('@/app/api/bookdate/test-connection/route');
-    const response = await POST({
-      headers: { get: () => null },
-      json: vi.fn().mockResolvedValue({ provider: 'custom', baseUrl: 'http://custom', apiKey: 'bad-key' }),
-    } as any);
-
-    const payload = await response.json();
-    // Should return 400, not 401, to prevent fetchWithAuth from logging user out
-    expect(response.status).toBe(400);
-    expect(payload.error).toMatch(/Failed to connect to custom provider/i);
-  });
-
   it('allows custom provider when saved key decryption fails', async () => {
     requireAuthMock.mockImplementation((_req: any, handler: any) => handler(_req));
     prismaMock.bookDateConfig.findFirst.mockResolvedValue({
+      provider: 'custom',
       apiKey: 'enc-key',
       baseUrl: 'http://custom',
     });
@@ -566,8 +560,7 @@ describe('BookDate test connection route', () => {
 
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue([{ id: 'model-a' }]),
-      text: vi.fn().mockResolvedValue('ok'),
+      text: vi.fn().mockResolvedValue(JSON.stringify([{ id: 'model-a' }])),
     });
     vi.stubGlobal('fetch', fetchMock);
 

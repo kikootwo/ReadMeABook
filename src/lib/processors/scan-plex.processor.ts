@@ -12,6 +12,8 @@ import { getLibraryService } from '../services/library';
 import { getConfigService } from '../services/config.service';
 import { getThumbnailCacheService } from '../services/thumbnail-cache.service';
 import { RMABLogger } from '../utils/logger';
+import { resetRequestsAfterLibraryRemoval } from './library-removal';
+import { createLibraryRowUnlessPresent } from './library-row-insert';
 
 /**
  * Process library scan job
@@ -77,101 +79,108 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
 
       try {
         // Check if this audiobook already exists in plex_library by externalId (plexGuid or abs_item_id)
-        const existing = await prisma.plexLibrary.findFirst({
+        let existing = await prisma.plexLibrary.findFirst({
           where: { plexGuid: item.externalId },
         });
 
-        if (existing) {
-          // Update existing record with latest data
-          await prisma.plexLibrary.update({
-            where: { id: existing.id },
-            data: {
-              title: item.title,
-              author: item.author || existing.author,
-              narrator: item.narrator || existing.narrator,
-              summary: item.description || existing.summary,
-              duration: item.duration ? BigInt(Math.round(item.duration * 1000)) : existing.duration, // Convert seconds to milliseconds
-              year: item.year || existing.year,
-              asin: item.asin || existing.asin,  // Store ASIN from library backend
-              isbn: item.isbn || existing.isbn,  // Store ISBN from library backend
-              thumbUrl: item.coverUrl || existing.thumbUrl,
-              plexLibraryId: targetLibraryId,
-              plexRatingKey: item.id || existing.plexRatingKey,
-              lastScannedAt: new Date(),
-              updatedAt: new Date(),
-            },
-          });
-
-          // Cache library cover (synchronous with smart skip-if-exists logic)
-          if (item.coverUrl && item.externalId) {
-            const cachedPath = await thumbnailCacheService.cacheLibraryThumbnail(
-              item.externalId,
-              item.coverUrl,
-              coverCachingParams.backendBaseUrl,
-              coverCachingParams.authToken,
-              coverCachingParams.backendMode
-            );
-
-            // Update database with cached path if successful
-            if (cachedPath) {
-              await prisma.plexLibrary.update({
-                where: { id: existing.id },
-                data: { cachedLibraryCoverPath: cachedPath },
-              });
-            }
-          }
-
-          updatedCount++;
-        } else {
+        if (!existing) {
           // Create new plex_library entry
-          const newLibraryItem = await prisma.plexLibrary.create({
-            data: {
-              plexGuid: item.externalId,
-              plexRatingKey: item.id,
-              title: item.title,
-              author: item.author || 'Unknown Author',
-              narrator: item.narrator,
-              summary: item.description,
-              duration: item.duration ? BigInt(Math.round(item.duration * 1000)) : null, // Convert seconds to milliseconds
-              year: item.year,
-              asin: item.asin,  // Store ASIN from library backend (Plex or Audiobookshelf)
-              isbn: item.isbn,  // Store ISBN from library backend
-              thumbUrl: item.coverUrl,
-              plexLibraryId: targetLibraryId,
-              addedAt: item.addedAt,
-              lastScannedAt: new Date(),
-            },
+          const insert = await createLibraryRowUnlessPresent({
+            plexGuid: item.externalId,
+            plexRatingKey: item.id,
+            title: item.title,
+            author: item.author || 'Unknown Author',
+            narrator: item.narrator,
+            summary: item.description,
+            duration: item.duration ? BigInt(Math.round(item.duration * 1000)) : null, // Convert seconds to milliseconds
+            year: item.year,
+            asin: item.asin,  // Store ASIN from library backend (Plex or Audiobookshelf)
+            isbn: item.isbn,  // Store ISBN from library backend
+            thumbUrl: item.coverUrl,
+            plexLibraryId: targetLibraryId,
+            addedAt: item.addedAt,
+            lastScannedAt: new Date(),
           });
 
-          // Cache library cover (synchronous with smart skip-if-exists logic)
-          if (item.coverUrl && item.externalId) {
-            const cachedPath = await thumbnailCacheService.cacheLibraryThumbnail(
-              item.externalId,
-              item.coverUrl,
-              coverCachingParams.backendBaseUrl,
-              coverCachingParams.authToken,
-              coverCachingParams.backendMode
-            );
+          if (insert.created) {
+            const newLibraryItem = insert.row;
 
-            // Update database with cached path if successful
-            if (cachedPath) {
-              await prisma.plexLibrary.update({
-                where: { id: newLibraryItem.id },
-                data: { cachedLibraryCoverPath: cachedPath },
-              });
+            // Cache library cover (synchronous with smart skip-if-exists logic)
+            if (item.coverUrl && item.externalId) {
+              const cachedPath = await thumbnailCacheService.cacheLibraryThumbnail(
+                item.externalId,
+                item.coverUrl,
+                coverCachingParams.backendBaseUrl,
+                coverCachingParams.authToken,
+                coverCachingParams.backendMode
+              );
+
+              // Update database with cached path if successful
+              if (cachedPath) {
+                await prisma.plexLibrary.update({
+                  where: { id: newLibraryItem.id },
+                  data: { cachedLibraryCoverPath: cachedPath },
+                });
+              }
             }
+
+            newCount++;
+            logger.info(`Added new: "${item.title}" by ${item.author}`);
+
+            results.push({
+              id: newLibraryItem.id,
+              plexGuid: newLibraryItem.plexGuid,
+              title: item.title,
+              author: item.author,
+            });
+            continue;
           }
 
-          newCount++;
-          logger.info(`Added new: "${item.title}" by ${item.author}`);
-
-          results.push({
-            id: newLibraryItem.id,
-            plexGuid: newLibraryItem.plexGuid,
-            title: item.title,
-            author: item.author,
-          });
+          // Another job inserted this item after our lookup (#222): update its row instead
+          existing = insert.row;
+          logger.info(`"${item.title}" was just added by another job; updating it`);
         }
+
+        // Update existing record with latest data
+        await prisma.plexLibrary.update({
+          where: { id: existing.id },
+          data: {
+            title: item.title,
+            author: item.author || existing.author,
+            narrator: item.narrator || existing.narrator,
+            summary: item.description || existing.summary,
+            duration: item.duration ? BigInt(Math.round(item.duration * 1000)) : existing.duration, // Convert seconds to milliseconds
+            year: item.year || existing.year,
+            asin: item.asin || existing.asin,  // Store ASIN from library backend
+            isbn: item.isbn || existing.isbn,  // Store ISBN from library backend
+            thumbUrl: item.coverUrl || existing.thumbUrl,
+            plexLibraryId: targetLibraryId,
+            plexRatingKey: item.id || existing.plexRatingKey,
+            lastScannedAt: new Date(),
+            updatedAt: new Date(),
+          },
+        });
+
+        // Cache library cover (synchronous with smart skip-if-exists logic)
+        if (item.coverUrl && item.externalId) {
+          const cachedPath = await thumbnailCacheService.cacheLibraryThumbnail(
+            item.externalId,
+            item.coverUrl,
+            coverCachingParams.backendBaseUrl,
+            coverCachingParams.authToken,
+            coverCachingParams.backendMode
+          );
+
+          // Update database with cached path if successful
+          if (cachedPath) {
+            await prisma.plexLibrary.update({
+              where: { id: existing.id },
+              data: { cachedLibraryCoverPath: cachedPath },
+            });
+          }
+        }
+
+        updatedCount++;
       } catch (error) {
         logger.error(`Failed to process "${item.title}": ${error instanceof Error ? error.message : 'Unknown error'}`);
         skippedCount++;
@@ -180,76 +189,13 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
 
     logger.info(`Scan complete: ${libraryItems.length} items scanned, ${newCount} new, ${updatedCount} updated, ${skippedCount} skipped`);
 
-    // 4b. For Audiobookshelf: Trigger metadata match for items without ASIN
-    // This ensures ASIN gets populated so items can be matched against requests
+    // 4b. For Audiobookshelf: Trigger metadata match for items without ASIN, and store the ASIN
+    // from the match response now (#287), before requests are matched in step 6
     if (backendMode === 'audiobookshelf') {
       logger.info(`Checking for Audiobookshelf items without ASIN...`);
-      const { triggerABSItemMatch, getABSItem } = await import('../services/audiobookshelf/api');
-      const { generateFilesHash } = await import('../utils/files-hash');
-
-      const itemsWithoutAsin = libraryItems.filter(item => !item.asin && item.externalId);
-
-      if (itemsWithoutAsin.length > 0) {
-        logger.info(`Found ${itemsWithoutAsin.length} items without ASIN, attempting file hash matching...`);
-
-        let fileMatchCount = 0;
-        let fuzzyMatchCount = 0;
-
-        for (const item of itemsWithoutAsin) {
-          try {
-            // 1. Fetch full item details to get file list
-            const absItem = await getABSItem(item.externalId);
-
-            // 2. Extract audio filenames and generate hash
-            const audioFilenames = absItem.media?.audioFiles?.map((f: any) => f.metadata?.filename).filter(Boolean) || [];
-            const itemHash = generateFilesHash(audioFilenames);
-
-            // 3. Query database for matching downloaded request
-            let matchedAsin: string | undefined = undefined;
-
-            if (itemHash) {
-              const matchedAudiobook = await prisma.audiobook.findFirst({
-                where: {
-                  filesHash: itemHash,
-                  status: 'completed',
-                },
-                select: {
-                  audibleAsin: true,
-                  title: true,
-                },
-              });
-
-              if (matchedAudiobook?.audibleAsin) {
-                matchedAsin = matchedAudiobook.audibleAsin;
-                logger.info(
-                  `File hash match found for "${item.title}" → ASIN: ${matchedAsin} (from "${matchedAudiobook.title}")`
-                );
-                fileMatchCount++;
-              }
-            }
-
-            // 4. Trigger metadata match (with ASIN if matched, undefined if not)
-            await triggerABSItemMatch(item.externalId, matchedAsin);
-
-            if (matchedAsin) {
-              logger.info(`Triggered metadata match with ASIN ${matchedAsin} for: "${item.title}"`);
-            } else {
-              logger.info(`No file match found, triggering fuzzy metadata match for: "${item.title}"`);
-              fuzzyMatchCount++;
-            }
-
-          } catch (error) {
-            logger.error(
-              `Failed to process metadata match for "${item.title}": ${error instanceof Error ? error.message : 'Unknown error'}`
-            );
-            fuzzyMatchCount++;
-          }
-        }
-
-        logger.info(
-          `Metadata match complete: ${fileMatchCount} file hash matches, ${fuzzyMatchCount} fuzzy matches (ASIN population is async)`
-        );
-      } else {
+      const { matchItemsWithoutAsin } = await import('../services/audiobookshelf/match-missing-asins');
+      const matchResult = await matchItemsWithoutAsin(libraryItems, logger);
+      if (matchResult.considered === 0) {
         logger.info(`All items have ASIN, no metadata match needed`);
       }
     }
@@ -317,19 +263,8 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
 
             audiobooksReset++;
 
-            // Reset any 'available' requests back to 'downloaded' or 'failed'
-            for (const request of audiobook.requests) {
-              if (request.status === 'available') {
-                await prisma.request.update({
-                  where: { id: request.id },
-                  data: {
-                    status: 'downloaded', // Back to downloaded state (files may still be there)
-                    updatedAt: new Date(),
-                  },
-                });
-                requestsReset++;
-              }
-            }
+            // 'available' requests: 'failed' when the files are gone too, else 'downloaded' (#214)
+            requestsReset += await resetRequestsAfterLibraryRemoval(audiobook, logger);
 
             logger.info(`Reset audiobook "${staleItem.title}" (no longer in library)`);
           }
@@ -409,19 +344,8 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
 
         orphanedAudiobooksReset++;
 
-        // Reset any 'available' requests
-        for (const request of audiobook.requests) {
-          if (request.status === 'available') {
-            await prisma.request.update({
-              where: { id: request.id },
-              data: {
-                status: 'downloaded',
-                updatedAt: new Date(),
-              },
-            });
-            orphanedRequestsReset++;
-          }
-        }
+        // 'available' requests: 'failed' when the files are gone too, else 'downloaded' (#214)
+        orphanedRequestsReset += await resetRequestsAfterLibraryRemoval(audiobook, logger);
       } catch (error) {
         logger.error(`Failed to reset orphaned audiobook "${audiobook.title}": ${error instanceof Error ? error.message : 'Unknown error'}`);
       }

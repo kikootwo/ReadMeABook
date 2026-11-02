@@ -42,9 +42,9 @@ export async function POST(
           );
         }
 
-        // Get the parent request with audiobook data
-        const parentRequest = await prisma.request.findUnique({
-          where: { id: parentRequestId },
+        // Get the parent request with audiobook data; a deleted request answers 404
+        const parentRequest = await prisma.request.findFirst({
+          where: { id: parentRequestId, deletedAt: null },
           include: {
             audiobook: true,
           },

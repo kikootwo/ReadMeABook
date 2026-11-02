@@ -85,10 +85,31 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 - Refresh: HTTP-only secure cookie only
 - SameSite=Strict (CSRF protection)
 
+## JWT Signing Secrets
+
+**Source:** `src/lib/utils/jwt.ts` — resolved lazily on first sign/verify (never at module load), memoized per process
+
+| Token | Env var (wins if set) | Fallback if unset |
+|-------|----------------------|-------------------|
+| Access | `JWT_SECRET` | HKDF-SHA256(`CONFIG_ENCRYPTION_KEY`, info `readmeabook:jwt:access:v1`) |
+| Refresh | `JWT_REFRESH_SECRET` | HKDF-SHA256(`CONFIG_ENCRYPTION_KEY`, info `readmeabook:jwt:refresh:v1`) |
+| Download | `JWT_DOWNLOAD_SECRET` | resolved access secret + `-download` |
+
+- **HKDF params:** salt `readmeabook:jwt-secret-derivation`, 32 bytes, base64-encoded
+- **No hardcoded fallback:** neither env var nor `CONFIG_ENCRYPTION_KEY` set → sign/verify throw
+- **Unified container:** entrypoint generates + persists `JWT_SECRET`/`JWT_REFRESH_SECRET` → derivation unused
+- **Derivation in use:** logged once at info level (names only, no secret material)
+- **Session impact:** changing HKDF params, or `CONFIG_ENCRYPTION_KEY` while derived, invalidates all sessions + download links
+
 ## Middleware
 
 **requireAuth()** - Verifies JWT exists/valid, adds user to request, returns 401 if invalid
 **requireAdmin()** - Checks `user.role === 'admin'`, returns 403 if not, chains after requireAuth
+**getOptionalAuthUser()** - For routes that also answer without a session: the caller after the same account checks as requireAuth (API tokens: allowlist too), else `null`, never a 401
+**requireSetupIncomplete()** - Setup-only routes; 403 once `setup_completed='true'`
+**requireSetupIncompleteOrAdmin()** - Shared setup/settings routes; open during setup, admin after
+- Both **fail closed**: if the `setup_completed` lookup throws → 503 `ServiceUnavailable` (handler not run; details logged only)
+- `/api/*` is not covered by `src/middleware.ts`; every route must call its own guard
 
 ## First User Setup
 
@@ -97,6 +118,7 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 - Setup admin role is **protected** - cannot be changed to prevent lockout
 - Ensures someone always has admin access after fresh install
 - Subsequent users default to 'user' role
+- First-user check (`prisma.user.count()` in Plex callback, switch-profile, `LocalAuthProvider.register`, `OIDCAuthProvider`) counts soft-deleted users on purpose: a deleted account never makes the next sign-up an admin (the `LocalAuthProvider.register` site is pinned by `tests/services/auth/first-user-admin.test.ts`)
 - Local admin uses username/password authentication (stored in `authToken` field as bcrypt hash)
 - `plexId` format: `local-{username}` for local admin accounts
 
@@ -106,7 +128,9 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 - Created during setup wizard (step 2)
 - Username/password authentication (separate from Plex OAuth)
 - Password hashed with bcrypt (10 rounds) and stored in `authToken` field
+- `bcrypt` 6.x: prebuilt native binaries ship in the package (linux x64/arm64, glibc + musl), no install-time download or compile. `$2a$`/`$2b$` hashes made by bcrypt 5 verify unchanged (`tests/services/auth/bcrypt-compat.test.ts`)
 - Login: POST `/api/auth/admin/login` with username/password
+- Account checks: same as the regular local login (`src/lib/services/auth/local-account-status.ts`). Pending approval: 200 `{success:false, pendingApproval:true}`; rejected: 401 `Account has been rejected`; deleted (`deletedAt` set): 401 `Invalid username or password`. Approved or null `registrationStatus` signs in. Checked after the password, before `lastLoginAt` and tokens
 - Identified by: `isSetupAdmin=true` AND `plexId` starts with `local-`
 
 **Password Management:**
@@ -132,6 +156,11 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 5. System switches to profile via `POST https://plex.tv/api/home/users/{id}/switch`
 6. Profile's auth token is stored (encrypted)
 7. User record created with profile's details
+
+**Profile Identity (`POST /api/auth/plex/switch-profile`):**
+- The chosen profile must be one of the account's Plex Home users (`getHomeUsers` with the cached account token) → else 403 `AccessDenied`
+- Identity fields (plexId, name, email, avatar) come from Plex: the Home user entry's `uuid`, or `getUserInfo(<profile token>)` when the client sends no profile details or the entry has no uuid
+- Plex sign-ins (switch-profile and the single-profile callback) set `authProvider: 'plex'` and never change `role`; `src/lib/services/auth/plex-identity.ts` checks the row before it is written
 
 **Profile Data Storage:**
 - `plexId`: Profile's unique ID (not main account ID)
@@ -167,6 +196,11 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 - **Client ID/Secret**: OAuth2 credentials from OIDC provider
 - **Required Scopes**: `openid`, `profile`, `email`, `groups`
 - **Redirect URI**: `{BASE_URL}/api/auth/oidc/callback`
+
+### OIDC Accounts
+- The user row is keyed on the IdP subject (`plexId` = `oidcSubject`); OIDC sign-in only uses an OIDC account's row (`authProvider: 'oidc'`) → otherwise sign-in is refused with a generic message
+- Create and update set `authProvider: 'oidc'`
+- `PlexAuthProvider.handleCallback` is not used (Plex sign-in completes in `/api/auth/plex/callback` and `/api/auth/plex/switch-profile`) and always refuses
 
 ### Access Control Methods
 Controls who can log in to the application (separate from admin role assignment):
@@ -219,6 +253,7 @@ Automatically grants admin permissions based on OIDC claims (e.g., group members
 - **GET /api/auth/oidc/callback** - Handle OAuth callback, create/update user, return JWT
 - **GET /api/auth/providers** - List enabled auth providers for login page
   - Returns: `backendMode`, `providers[]`, `registrationEnabled`, `hasLocalUsers`, `oidcProviderName`, `localLoginDisabled`, `automationEnabled`
+  - `hasLocalUsers`: non-deleted users only (ABS: `authProvider='local'`; Plex: `local-` setup admin). Same filter for `hasLocalUsers`/`hasLocalAdmins` in GET `/api/admin/settings` (feeds the Auth tab lockout warnings, client-side only)
   - `automationEnabled`: true if Prowlarr/indexer configured (used for dynamic login page description)
 
 ### Configuration Keys
@@ -255,6 +290,8 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 - Admin generates/revokes via user permissions modal
 - User navigates to `/auth/token/login?token=rmab_...` → page POSTs token to API in request body
 - API: `POST /api/auth/token/login` with `{ token }` in JSON body
+- Account checks (after the token matches, before `lastLoginAt` and tokens): pending approval: 200 `{success:false, pendingApproval:true, message}` (page sends it to `/login?error=`); rejected: 401 `Account has been rejected`. Approved or null signs in
+- Generating a token (`POST /api/admin/users/[id]/login-token`) for a pending or rejected account: 403
 - Invalid token redirects to `/login`
 
 ## Security
@@ -269,6 +306,21 @@ oidc.admin_claim_value       = 'readmeabook-admin'
   - Prevents any Plex user from accessing the instance
   - machineIdentifier stored during setup/settings configuration (architectural optimization)
 - **OIDC PKCE**: All OIDC flows use PKCE (Proof Key for Code Exchange) for enhanced security
+
+## Fixed Issues
+
+- **OIDC accounts:** OIDC sign-in is kept to OIDC accounts.
+- **Plex profile identity:** profile sign-in takes the profile's identity from Plex and requires a profile from the account's Home list.
+- **Admin sign-in account checks:** `/api/auth/admin/login` now applies the same account checks as the regular local sign-in (pending approval, rejected) and also refuses deleted accounts.
+- **#297 Hardcoded JWT fallback secrets:** `jwt.ts` fell back to built-in default strings when `JWT_SECRET`/`JWT_REFRESH_SECRET` were unset (installs that bypass the unified entrypoint). Fix: fallbacks removed; secrets derived from `CONFIG_ENCRYPTION_KEY` via HKDF. Affected installs: all sessions + download links invalidated on upgrade (re-login required).
+- **Sessions follow approval status:** `requireAuth` (access tokens and API tokens) and `/api/auth/refresh` now read `registrationStatus` in their existing user lookup and refuse `pending_approval`/`rejected` accounts like a deleted one (401); null counts as approved. Token login refuses them like the regular sign-in, and login and API tokens can no longer be created for them. One rule for every check: `getRegistrationRefusal` (`src/lib/services/auth/local-account-status.ts`).
+- **Download links check the account:** `GET /api/requests/:id/download?token=` now checks the link's account like a sign-in does (one `getSessionRefusal` rule shared with `requireAuth`): missing, deleted, pending or rejected accounts, and links made before the account's sessions were revoked, get 401 (`Invalid or expired download token`); an account without download access now (`resolveDownloadAccess`, same rule as `POST /api/requests/:id/download-token`) gets 403. Live accounts with access: unchanged, no session cookie needed.
+- **Multi-file download zip entry names:** a request with several files streams one zip (`archiver` 8, `ZipArchive`). Each entry is the file's base name with any `/`, `\` or `:` replaced by `_`, so every file sits at the zip root under its full name. Before, a `\` in a Linux file name became a folder separator in the entry name, and archiver dropped a leading `word:` (`Prologue: The Start.mp3` downloaded as ` The Start.mp3`).
+- **#215 Soft-deleted users counted as local users/admins:** `hasLocalUsers`/`hasLocalAdmins` (providers + admin settings) had no `deletedAt: null`, so a deleted local admin kept the login form shown and the Auth tab lockout warnings quiet. Fix: count non-deleted users only. First-user checks unchanged (deleted users still count).
+- **Admin job routes:** `/api/admin/jobs`, `/api/admin/jobs/:id`, `/api/admin/jobs/:id/trigger` and `/api/admin/job-status/:id` use `requireAuth` + `requireAdmin` like the other admin routes: the account must still exist, its sessions must not be revoked, and the session must be an admin session. API tokens are refused (not on the allowlist).
+- **Author and series catalog routes:** `/api/authors/:asin`, `/api/authors/:asin/books`, `/api/authors/search`, `/api/series/:asin` and `/api/series/search` use `requireAuth` like the other signed-in routes: the account must still exist, be approved, and its sessions must not be revoked. API tokens get 403 (not on the allowlist; previously 401). Popular, new releases, category and audiobook search are unchanged.
+- **Admin checks use the current role:** `requireAuth` selects `role` in its existing user lookup and sets `request.user.role` from the account, not the access token, so `requireAdmin`/`requireLocalAdmin` and route role checks follow a role change (either way) on the next request. API tokens: effective role = token role capped by the owner's current role (never raised on promotion). `/api/auth/refresh` already issued the current role.
+- **Discovery routes check the account before adding request details:** `/api/audiobooks/popular`, `/new-releases`, `/category/:categoryId` and `/search` take the caller from `getOptionalAuthUser` (same account checks as `requireAuth`). Request details (`isRequested`, `requestStatus`, `requestId`, `requestedByUserId`, `requestedByUsername`) and ignore flags are added only for a checked account; any other caller gets the same books with none of them. Signed-in responses unchanged. The unchecked `getCurrentUser`, `getCurrentUserAsync` and `isAdmin` helpers were removed.
 
 ## Tech Stack
 

@@ -4,11 +4,20 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { checkFfmpegAvailable, tagAudioFileMetadata, tagMultipleFiles } from '@/lib/utils/metadata-tagger';
+import {
+  addMp4FreeformTags,
+  buildMp4FreeformTags,
+  checkFfmpegAvailable,
+  ffmpegRemuxTimeoutMs,
+  tagAudioFileMetadata,
+  tagMultipleFiles,
+} from '@/lib/utils/metadata-tagger';
+import { MAX_DESCRIPTION_BYTES } from '@/lib/utils/metadata-text';
 
 const execFileMock = vi.hoisted(() => vi.fn());
 const fsMock = vi.hoisted(() => ({
   access: vi.fn(),
+  stat: vi.fn(async () => ({ size: 1024 })), // the size scales the ffmpeg timeout
   unlink: vi.fn(),
 }));
 
@@ -20,6 +29,20 @@ vi.mock('fs/promises', () => ({
   default: fsMock,
   ...fsMock,
 }));
+
+// The freeform-tag post-step (real-file behaviour: mp4-freeform-tags tests). Plain holder: survives mock resets.
+const freeform = vi.hoisted(() => ({
+  calls: [] as Array<[string, Array<{ name: string; value: string }>]>,
+  result: { written: true } as { written: boolean; warning?: string },
+}));
+vi.mock('@/lib/utils/mp4-freeform-tags', () => ({
+  addFreeformTags: async (file: string, tags: Array<{ name: string; value: string }>) => {
+    freeform.calls.push([file, tags]);
+    return tags.length ? freeform.result : { written: false };
+  },
+}));
+
+const hasFreeformArg = (argv: string[]) => argv.some((a) => a.startsWith('----:'));
 
 function mockExecFileSuccess(stdout = 'ok') {
   execFileMock.mockImplementation((file: string, args: string[], options: any, callback?: any) => {
@@ -67,6 +90,8 @@ function expectMetadataArg(argv: string[], key: string, value: string): void {
 describe('metadata tagger', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    freeform.calls = [];
+    freeform.result = { written: true };
   });
 
   it('returns an error for unsupported file formats', async () => {
@@ -106,7 +131,10 @@ describe('metadata tagger', () => {
     expectMetadataArg(argv, 'artist', 'Author');
     expectMetadataArg(argv, 'composer', 'Narrator');
     expectMetadataArg(argv, 'date', '2020');
-    expectMetadataArg(argv, '----:com.apple.iTunes:ASIN', 'ASIN123');
+    // ffmpeg drops freeform keys: the organizer adds the ASIN later (addMp4FreeformTags)
+    expect(hasFreeformArg(argv)).toBe(false);
+    expect(argv[argv.indexOf('-movflags') + 1]).toBe('+faststart');
+    expect(freeform.calls).toEqual([]);
 
     expect(argv).toContain('/tmp/book.m4b');
     expect(argv).toContain('/tmp/book.m4b.tmp');
@@ -115,6 +143,18 @@ describe('metadata tagger', () => {
     expect(fIdx).toBeGreaterThanOrEqual(0);
     expect(argv[fIdx + 1]).toBe('mp4');
   });
+
+  it.each(['/tmp/book.m4b', '/tmp/book.mp3', '/tmp/book.flac'])(
+    'does not use -xerror when tagging %s (codec copy would turn benign timestamp warnings into lost tags)',
+    async (file) => {
+      fsMock.access.mockResolvedValue(undefined);
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata(file, { title: 'Book', author: 'Author' });
+
+      expect(lastCallArgv()).not.toContain('-xerror');
+    }
+  );
 
   it('tags an mp3 file with mp3 output format', async () => {
     fsMock.access.mockResolvedValue(undefined);
@@ -163,6 +203,73 @@ describe('metadata tagger', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('ffmpeg failed');
     expect(fsMock.unlink).toHaveBeenCalledWith('/tmp/book.mp3.tmp');
+  });
+
+  it.each([
+    ['with an ASIN', 'B0TESTASIN'],
+    ['without an ASIN', undefined],
+  ])('m4b %s: ffmpeg always writes moov first (+faststart), so a refused post-step still leaves it first', async (_n, asin) => {
+    mockExecFileSuccess('done');
+
+    await tagAudioFileMetadata('/tmp/book.m4b', { title: 'Book', author: 'Author', asin });
+
+    const argv = lastCallArgv();
+    expect(argv[argv.indexOf('-movflags') + 1]).toBe('+faststart');
+    expect(freeform.calls).toEqual([]); // the tagger never runs the post-step itself
+  });
+
+  it('the ffmpeg timeout scales with the file size (+faststart writes it twice)', async () => {
+    fsMock.stat.mockResolvedValueOnce({ size: 3 * 1024 ** 3 });
+    mockExecFileSuccess('done');
+
+    await tagAudioFileMetadata('/tmp/big.m4b', { title: 'Book', author: 'Author' });
+
+    expect(execFileMock.mock.calls.at(-1)?.[2]).toMatchObject({ timeout: 480_000 });
+  });
+
+  it('ffmpegRemuxTimeoutMs: 120 s plus 120 s per GiB', () => {
+    expect(ffmpegRemuxTimeoutMs(0)).toBe(120_000);
+    expect(ffmpegRemuxTimeoutMs(1024 ** 3)).toBe(240_000);
+    expect(ffmpegRemuxTimeoutMs(1.5 * 1024 ** 3)).toBe(300_000);
+    expect(ffmpegRemuxTimeoutMs(10 * 1024 ** 3)).toBe(1_320_000);
+  });
+
+  it('a missing file is an error, ffmpeg never runs', async () => {
+    fsMock.stat.mockRejectedValueOnce(Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' }));
+
+    const result = await tagAudioFileMetadata('/tmp/gone.m4b', { title: 'Book', author: 'Author' });
+
+    expect(result).toMatchObject({ success: false, error: expect.stringContaining('ENOENT') });
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
+  it('mp3/flac keep the ASIN in argv', async () => {
+    for (const file of ['/tmp/book.mp3', '/tmp/book.flac']) {
+      mockExecFileSuccess('done');
+      await tagAudioFileMetadata(file, { title: 'Book', author: 'Author', asin: 'B0TESTASIN' });
+      expectMetadataArg(lastCallArgv(), 'ASIN', 'B0TESTASIN');
+    }
+    expect(freeform.calls).toEqual([]);
+  });
+
+  it.each(['.m4b', '.M4A', '.mp4'])('addMp4FreeformTags (%s): the sanitized ASIN goes to the post-step, its result comes back', async (ext) => {
+    freeform.result = { written: false, warning: 'ASIN tag not written (meta handler is not mdir)' };
+
+    const result = await addMp4FreeformTags('/tmp/merged.part', ext, { asin: ' B0TESTASIN\n' });
+
+    expect(freeform.calls).toEqual([['/tmp/merged.part', [{ name: 'ASIN', value: 'B0TESTASIN' }]]]);
+    expect(result).toEqual({ written: false, warning: 'ASIN tag not written (meta handler is not mdir)' });
+  });
+
+  it.each(['.mp3', '.flac'])('addMp4FreeformTags (%s): not an MP4, nothing to do', async (ext) => {
+    expect(await addMp4FreeformTags('/tmp/book.tmp', ext, { asin: 'B0TESTASIN' })).toEqual({ written: false });
+    expect(freeform.calls).toEqual([]);
+  });
+
+  it('buildMp4FreeformTags: sanitized ASIN, nothing when absent or blank', () => {
+    expect(buildMp4FreeformTags({ asin: ' B0TEST\nASIN ' })).toEqual([{ name: 'ASIN', value: 'B0TESTASIN' }]);
+    expect(buildMp4FreeformTags({ asin: '\u00a0 ' })).toEqual([]);
+    expect(buildMp4FreeformTags({})).toEqual([]);
   });
 
   it('tags multiple files in sequence', async () => {
@@ -251,6 +358,238 @@ describe('metadata tagger', () => {
       expect(payloads.some((p) => p.startsWith('SERIES='))).toBe(false);
       expect(payloads.some((p) => p.startsWith('SERIES-PART='))).toBe(false);
     });
+  });
+
+  describe('description, genre and audiobook flags', () => {
+    const DESCRIPTION = 'A heist on Luthadel.\n\nThe second paragraph.';
+    const FLAT_DESCRIPTION = 'A heist on Luthadel. The second paragraph.';
+    const GENRES = ['Science Fiction & Fantasy', 'Mystery, Thriller & Suspense'];
+    const GENRE_TAG = 'Science Fiction & Fantasy; Mystery, Thriller & Suspense';
+
+    function metadataPayloads(argv: string[]): string[] {
+      return argv.filter((_, i) => i > 0 && argv[i - 1] === '-metadata');
+    }
+
+    const payloadFor = (argv: string[], key: string) =>
+      metadataPayloads(argv).filter((p) => p.startsWith(`${key}=`)).map((p) => p.slice(key.length + 1));
+
+    it('m4b: writes desc + ldes, joined genres, media type Audiobook and gapless, before -movflags and -f mp4', async () => {
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.m4b', {
+        title: 'Book',
+        author: 'Author',
+        description: DESCRIPTION,
+        genres: GENRES,
+      });
+
+      const argv = lastCallArgv();
+      expectMetadataArg(argv, 'description', FLAT_DESCRIPTION);
+      expectMetadataArg(argv, 'synopsis', FLAT_DESCRIPTION);
+      expectMetadataArg(argv, 'genre', GENRE_TAG);
+      expectMetadataArg(argv, 'media_type', '2');
+      expectMetadataArg(argv, 'gapless_playback', '1');
+      expect(argv.slice(-5)).toEqual(['-movflags', '+faststart', '-f', 'mp4', '/tmp/book.m4b.tmp']);
+    });
+
+    it('m4b: always marks the file as an audiobook, even without description or genres', async () => {
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.m4a', { title: 'Book', author: 'Author' });
+
+      const argv = lastCallArgv();
+      expectMetadataArg(argv, 'media_type', '2');
+      expectMetadataArg(argv, 'gapless_playback', '1');
+      const payloads = metadataPayloads(argv);
+      expect(payloads.some((p) => p.startsWith('description='))).toBe(false);
+      expect(payloads.some((p) => p.startsWith('synopsis='))).toBe(false);
+      expect(payloads.some((p) => p.startsWith('genre='))).toBe(false);
+    });
+
+    it('mp3: writes description (TXXX) and joined genres, no MP4-only fields', async () => {
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.mp3', { title: 'Book', author: 'Author', description: DESCRIPTION, genres: GENRES });
+
+      const argv = lastCallArgv();
+      expectMetadataArg(argv, 'description', FLAT_DESCRIPTION);
+      expectMetadataArg(argv, 'genre', GENRE_TAG);
+      for (const key of ['comment', 'synopsis', 'media_type', 'gapless_playback']) {
+        expect(payloadFor(argv, key)).toEqual([]);
+      }
+    });
+
+    it('flac: writes the description as comment (the Vorbis DESCRIPTION field), never a second description key', async () => {
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.flac', { title: 'Book', author: 'Author', description: DESCRIPTION, genres: GENRES });
+
+      const argv = lastCallArgv();
+      expectMetadataArg(argv, 'comment', FLAT_DESCRIPTION);
+      expectMetadataArg(argv, 'genre', GENRE_TAG);
+      for (const key of ['description', 'synopsis', 'media_type', 'gapless_playback']) {
+        expect(payloadFor(argv, key)).toEqual([]);
+      }
+    });
+
+    it('turns CRLF and indented line breaks into single spaces (words never run together)', async () => {
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.m4b', {
+        title: 'Book',
+        author: 'Author',
+        description: '  First line.\r\n\r\n   Second line.\nThird\u0000 line.  ',
+      });
+
+      expectMetadataArg(lastCallArgv(), 'description', 'First line. Second line. Third line.');
+    });
+
+    it('turns U+2028/U+2029, tabs, VT and FF into spaces and drops other C0 controls', async () => {
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.mp3', {
+        title: 'Book',
+        author: 'Author',
+        description: 'One.\u2028Two.\u2029Three.\tFour\u0007\u001b five\u000bsix\u000cseven.',
+      });
+
+      expectMetadataArg(lastCallArgv(), 'description', 'One. Two. Three. Four five six seven.');
+    });
+
+    it('sanitizes each genre and drops empty ones', async () => {
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.m4b', {
+        title: 'Book',
+        author: 'Author',
+        genres: ['\ufeff Romance ', '', '   ', 'History'],
+      });
+
+      expectMetadataArg(lastCallArgv(), 'genre', 'Romance; History');
+    });
+
+    it("replaces '/' inside a genre name with ' & ' (Audiobookshelf would split on it)", async () => {
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.m4b', {
+        title: 'Book',
+        author: 'Author',
+        genres: ['Science Fiction/Fantasy', 'Mystery / Thriller'],
+      });
+
+      expectMetadataArg(lastCallArgv(), 'genre', 'Science Fiction & Fantasy; Mystery & Thriller');
+    });
+
+    it('omits description and genre when they sanitize to empty', async () => {
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.mp3', {
+        title: 'Book',
+        author: 'Author',
+        description: ' \r\n ',
+        genres: [' ', ''],
+      });
+
+      const payloads = metadataPayloads(lastCallArgv());
+      expect(payloads.some((p) => p.startsWith('description='))).toBe(false);
+      expect(payloads.some((p) => p.startsWith('genre='))).toBe(false);
+    });
+
+    it('caps a 200 KB description at 16 KiB in both MP4 fields, cut at a word boundary with an ellipsis', async () => {
+      mockExecFileSuccess('done');
+      const huge = 'word '.repeat(40_000); // 200,000 bytes
+
+      await tagAudioFileMetadata('/tmp/book.m4b', { title: 'Book', author: 'Author', description: huge });
+
+      const argv = lastCallArgv();
+      for (const key of ['description', 'synopsis']) {
+        const [value] = payloadFor(argv, key);
+        expect(Buffer.byteLength(value, 'utf8')).toBeLessThanOrEqual(MAX_DESCRIPTION_BYTES);
+        expect(Buffer.byteLength(value, 'utf8')).toBeGreaterThan(MAX_DESCRIPTION_BYTES - 16);
+        expect(value.endsWith('word\u2026')).toBe(true);
+        const head = value.slice(0, -1);
+        expect(huge.startsWith(head)).toBe(true);
+        expect(huge[head.length]).toBe(' '); // the cut falls between words
+      }
+    });
+
+    it('collapses a whitespace-only line or a run of tabs into one space', async () => {
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.mp3', { title: 'Book', author: 'Author', description: 'One.\n   \n\t\tTwo.  \t Three.' });
+
+      expectMetadataArg(lastCallArgv(), 'description', 'One. Two. Three.');
+    });
+
+    it.each([
+      // past the raw bound: cut to spaces only, so no description at all
+      [200_000, []],
+      // inside the raw bound: the whitespace regex alone (the old one took ~30 s here)
+      [60_000, ['x']],
+    ])('sanitizes %i spaces before a word in linear time (was quadratic: ~1 min at 200k)', async (spaces, expected) => {
+      mockExecFileSuccess('done');
+      const started = performance.now();
+
+      await tagAudioFileMetadata('/tmp/book.m4b', { title: 'Book', author: 'Author', description: ' '.repeat(spaces) + 'x' });
+
+      expect(performance.now() - started).toBeLessThan(1000);
+      expect(payloadFor(lastCallArgv(), 'description')).toEqual(expected);
+    });
+
+    it('bounds a 1 MB mixed-whitespace description: fast, single spaces, within the cap', async () => {
+      mockExecFileSuccess('done');
+      const chunk = 'word \t\r\n\u000b\u000c\u2028\u2029 ';
+      const huge = chunk.repeat(Math.ceil(1_000_000 / chunk.length));
+      const started = performance.now();
+
+      await tagAudioFileMetadata('/tmp/book.m4b', { title: 'Book', author: 'Author', description: huge });
+
+      expect(performance.now() - started).toBeLessThan(1000);
+      const [value] = payloadFor(lastCallArgv(), 'description');
+      expect(Buffer.byteLength(value, 'utf8')).toBeLessThanOrEqual(MAX_DESCRIPTION_BYTES);
+      expect(value).toMatch(/^word( word)+\u2026$/);
+    });
+
+    it("replaces ';' inside a genre name with ' & ' too", async () => {
+      mockExecFileSuccess('done');
+
+      await tagAudioFileMetadata('/tmp/book.m4b', { title: 'Book', author: 'Author', genres: ['Sci-Fi; Horror', ' ; History / '] });
+
+      expectMetadataArg(lastCallArgv(), 'genre', 'Sci-Fi & Horror; History');
+    });
+
+    it('sanitizes a genre with 200,000 spaces (and one with spaces around a slash) in linear time', async () => {
+      mockExecFileSuccess('done');
+      const started = performance.now();
+
+      await tagAudioFileMetadata('/tmp/book.m4b', {
+        title: 'Book',
+        author: 'Author',
+        genres: [' '.repeat(200_000) + 'x', ' '.repeat(1_000) + '/' + ' '.repeat(1_000) + 'y'],
+      });
+
+      expect(performance.now() - started).toBeLessThan(1000);
+      expectMetadataArg(lastCallArgv(), 'genre', 'x; y');
+    });
+
+    it('a failed run reports ffmpeg stderr, never the argv (so no description in job logs)', async () => {
+      execFileMock.mockImplementation((file: string, args: string[], options: unknown, callback?: unknown) => {
+        const cb = (typeof options === 'function' ? options : callback) as (e: Error, out: string, err: string) => void;
+        const error = Object.assign(new Error(`Command failed: ffmpeg ${args.join(' ')}\nInvalid data found`), {
+          code: 1,
+          stderr: 'Input #0 ...\n[mp3 @ 0x1] Header missing\nInvalid data found when processing input\n',
+        });
+        cb(error, '', '');
+      });
+
+      const result = await tagAudioFileMetadata('/tmp/book.mp3', { title: 'Book', author: 'Author', description: 'SECRET summary text' });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid data found when processing input');
+      expect(result.error).not.toContain('SECRET');
+      expect(result.error).not.toContain('-metadata');
+    });
+
   });
 
   describe('quote regression (#171) — embedded `"` flows through untouched', () => {
@@ -462,7 +801,7 @@ describe('metadata tagger', () => {
       expectMetadataArg(argv, 'title', 'Perfectly Clean Title');
       expectMetadataArg(argv, 'album_artist', 'Clean Author');
       expectMetadataArg(argv, 'composer', 'Clean Narrator');
-      expectMetadataArg(argv, '----:com.apple.iTunes:ASIN', 'B0009JKV9W');
+      expect(hasFreeformArg(argv)).toBe(false);
       expectMetadataArg(argv, 'show', 'Clean Series');
       expectMetadataArg(argv, 'episode_id', '1');
     });

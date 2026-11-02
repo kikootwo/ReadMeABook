@@ -10,7 +10,7 @@ import { randomUUID } from 'crypto';
 import path from 'path';
 import { ConfigurationService } from './config.service';
 import { getEncryptionService } from './encryption.service';
-import { isEncryptedFormat } from './credential-migration.service';
+import { serializeDownloadClients } from './download-client-storage';
 import { RMABLogger } from '@/lib/utils/logger';
 import { QBittorrentService } from '@/lib/integrations/qbittorrent.service';
 import { SABnzbdService } from '@/lib/integrations/sabnzbd.service';
@@ -100,7 +100,7 @@ export class DownloadClientManager {
         // Decrypt passwords if they're in encrypted format
         const encryptionService = getEncryptionService();
         const decryptedClients = clients.map(client => {
-          if (client.password && isEncryptedFormat(client.password)) {
+          if (client.password && encryptionService.isEncryptedFormat(client.password)) {
             try {
               return {
                 ...client,
@@ -412,10 +412,10 @@ export class DownloadClientManager {
       category: category || 'readmeabook',
     };
 
-    // Save to new format
+    // Save to new format (password encrypted; the cache keeps it decrypted)
     const newConfig = [newClient];
     await this.configService.setMany([
-      { key: 'download_clients', value: JSON.stringify(newConfig) },
+      { key: 'download_clients', value: serializeDownloadClients(newConfig) },
     ]);
 
     logger.info('Migration completed successfully', {

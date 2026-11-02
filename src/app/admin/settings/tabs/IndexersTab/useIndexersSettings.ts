@@ -15,6 +15,8 @@ interface UseIndexersSettingsProps {
   originalProwlarrUrl: string;
   originalProwlarrApiKey: string;
   configuredIndexersCount: number;
+  /** False when the saved list could not be loaded: its size is unknown, so assume it has entries. */
+  indexersLoaded?: boolean;
   onValidationChange: (isValid: boolean) => void;
   onRefreshIndexers?: () => Promise<void>;
   onClearIndexers: () => void;
@@ -26,6 +28,7 @@ export function useIndexersSettings({
   originalProwlarrUrl,
   originalProwlarrApiKey,
   configuredIndexersCount,
+  indexersLoaded = true,
   onValidationChange,
   onRefreshIndexers,
   onClearIndexers,
@@ -74,13 +77,16 @@ export function useIndexersSettings({
             message: `Connected to Prowlarr. Found ${data.indexers?.length || 0} indexers. Previous indexer configurations have been removed — please re-add indexers from the new instance.`,
           });
         } else {
+          // The saved list is read through the SAVED connection: with an unsaved new URL or key,
+          // reloading would only hit the old address (and report a load failure)
+          const connectionUnsaved = hasConnectionChanged();
           setTestResult({
             success: true,
-            message: `Connected to Prowlarr. Found ${data.indexers?.length || 0} indexers`,
+            message: `Connected to Prowlarr. Found ${data.indexers?.length || 0} indexers`
+              + (connectionUnsaved && !indexersLoaded ? '. Save to load your saved indexers from the new address.' : ''),
           });
 
-          // Refresh indexers from database if callback provided
-          if (onRefreshIndexers) {
+          if (onRefreshIndexers && !connectionUnsaved) {
             await onRefreshIndexers();
           }
         }
@@ -105,10 +111,10 @@ export function useIndexersSettings({
 
   /**
    * Handle test connection click — shows confirmation if credentials changed
-   * and there are existing configured indexers.
+   * and there are (or may be: the list failed to load) configured indexers.
    */
   const testConnection = async () => {
-    if (hasConnectionChanged() && configuredIndexersCount > 0) {
+    if (hasConnectionChanged() && (configuredIndexersCount > 0 || !indexersLoaded)) {
       setShowConnectionChangeConfirm(true);
       return;
     }
@@ -125,6 +131,15 @@ export function useIndexersSettings({
   };
 
   /**
+   * Same Prowlarr at a new address: test it without clearing the saved indexers.
+   * After saving, the page loads the list from the new address.
+   */
+  const keepIndexersOnConnectionChange = async () => {
+    setShowConnectionChangeConfirm(false);
+    await executeTest(false);
+  };
+
+  /**
    * User cancelled the credential change confirmation
    */
   const cancelConnectionChange = () => {
@@ -137,6 +152,7 @@ export function useIndexersSettings({
     testConnection,
     showConnectionChangeConfirm,
     confirmConnectionChange,
+    keepIndexersOnConnectionChange,
     cancelConnectionChange,
     configuredIndexersCount,
   };

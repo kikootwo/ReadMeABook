@@ -18,6 +18,7 @@ import {
 } from '@/lib/services/discord/discord-rest.helper';
 import { DISCORD_CONFIG_KEYS } from '@/lib/services/discord/discord-config';
 import { RMABLogger } from '@/lib/utils/logger';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.Admin.Settings.DiscordResolve');
 
@@ -39,6 +40,8 @@ export async function POST(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
     return requireAdmin(req, async () => {
       try {
+        const bodyResult = await readJsonBody(request);
+        if (!bodyResult.ok) return bodyResult.response;
         const {
           botToken,
           guildId,
@@ -47,7 +50,7 @@ export async function POST(request: NextRequest) {
           adminNotifyChannelId,
           requesterRoleId,
           userId,
-        } = await request.json();
+        } = bodyResult.data;
 
         // Resolve the token to use (masked/absent → stored value)
         let token: string | null = botToken && !botToken.startsWith('••••') ? botToken.trim() : null;

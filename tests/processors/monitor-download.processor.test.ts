@@ -52,6 +52,15 @@ describe('processMonitorDownload', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     jobQueueMock.addNotificationJob.mockResolvedValue(undefined);
+    // An active request (read by the cancel guard and the failure notification)
+    prismaMock.request.findUnique.mockResolvedValue({
+      id: 'req-active',
+      status: 'downloading',
+      deletedAt: null,
+      audiobook: { title: 'Book', author: 'Author' },
+      user: { plexUsername: 'user' },
+    });
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
   });
 
   it('queues organize job when qBittorrent download completes', async () => {
@@ -102,7 +111,11 @@ describe('processMonitorDownload', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-1',
       'a1',
-      expect.stringMatching(/downloads[\\/]+Book/)
+      expect.stringMatching(/downloads[\\/]+Book/),
+      undefined,
+      undefined,
+      undefined,
+      'dh-1'
     );
     // Verify downloadPath is stored in download history on completion
     expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith(
@@ -205,8 +218,9 @@ describe('processMonitorDownload', () => {
     });
 
     expect(result.success).toBe(false);
-    expect(prismaMock.request.update).toHaveBeenCalledWith(
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: expect.objectContaining({ deletedAt: null, status: { not: 'cancelled' } }),
         data: expect.objectContaining({ status: 'failed' }),
       })
     );
@@ -257,8 +271,9 @@ describe('processMonitorDownload', () => {
       connectionFailureCount: 30,
     })).rejects.toThrow();
 
-    expect(prismaMock.request.update).toHaveBeenCalledWith(
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: expect.objectContaining({ deletedAt: null, status: { not: 'cancelled' } }),
         data: expect.objectContaining({ status: 'failed' }),
       })
     );
@@ -312,7 +327,11 @@ describe('processMonitorDownload', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-4',
       'a4',
-      '/usenet/complete/Book'
+      '/usenet/complete/Book',
+      undefined,
+      undefined,
+      undefined,
+      'dh-4'
     );
     // Verify downloadPath is stored in download history on completion
     expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith(
@@ -373,7 +392,11 @@ describe('processMonitorDownload', () => {
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
       'req-nzbget',
       'a-nzbget',
-      '/downloads/readmeabook/Book'
+      '/downloads/readmeabook/Book',
+      undefined,
+      undefined,
+      undefined,
+      'dh-nzbget'
     );
   });
 
@@ -395,6 +418,7 @@ describe('processMonitorDownload', () => {
     })).rejects.toThrow(/not found/i);
 
     expect(prismaMock.request.update).not.toHaveBeenCalled();
+    expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
   });
 
   it('marks request failed when download client is unsupported', async () => {
@@ -415,8 +439,9 @@ describe('processMonitorDownload', () => {
       jobId: 'job-6',
     })).rejects.toThrow(/Unknown download client type: rtorrent/);
 
-    expect(prismaMock.request.update).toHaveBeenCalledWith(
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: expect.objectContaining({ deletedAt: null, status: { not: 'cancelled' } }),
         data: expect.objectContaining({ status: 'failed' }),
       })
     );
@@ -464,8 +489,9 @@ describe('processMonitorDownload', () => {
       jobId: 'job-7',
     })).rejects.toThrow(/Download path not available/i);
 
-    expect(prismaMock.request.update).toHaveBeenCalledWith(
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: expect.objectContaining({ deletedAt: null, status: { not: 'cancelled' } }),
         data: expect.objectContaining({ status: 'failed' }),
       })
     );

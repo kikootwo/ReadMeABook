@@ -1,0 +1,9 @@
+{
+  "name": "usenet-smoke",
+  "description": "Single NZB release for book 'phm' via fake SABnzbd.",
+  "book": "phm",
+  "indexers": [{ "id": 2, "name": "E2E Usenet", "protocol": "usenet", "priority": 25 }],
+  "releases": [
+    { "id": "nzb", "protocol": "usenet", "indexerId": 2, "title": "{{author}} - {{title}} (Unabridged) [M4B]", "sizeMB": 380, "fixture": "phm-m4b" }
+  ]
+}

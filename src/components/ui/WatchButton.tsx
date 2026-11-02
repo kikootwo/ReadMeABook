@@ -3,7 +3,8 @@
  * Documentation: documentation/features/watched-lists.md
  *
  * Reusable toggle button for watching/unwatching a series or author.
- * Shows a confirmation modal before watching. Unwatching is instant.
+ * Shows a confirmation modal before watching, with the choice of entire catalog or
+ * new releases only (default entire catalog). Unwatching is instant.
  */
 
 'use client';
@@ -12,6 +13,7 @@ import React, { useState } from 'react';
 import { useWatchedSeries, useAddWatchedSeries, useDeleteWatchedSeries } from '@/lib/hooks/useWatchedSeries';
 import { useWatchedAuthors, useAddWatchedAuthor, useDeleteWatchedAuthor } from '@/lib/hooks/useWatchedAuthors';
 import { ConfirmModal } from './ConfirmModal';
+import { WatchModeChoice } from './WatchModeChoice';
 
 interface WatchSeriesButtonProps {
   seriesAsin: string;
@@ -25,6 +27,7 @@ export function WatchSeriesButton({ seriesAsin, seriesTitle, coverArtUrl }: Watc
   const { deleteSeries, isLoading: isDeleting } = useDeleteWatchedSeries();
   const [error, setError] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [newReleasesOnly, setNewReleasesOnly] = useState(false);
 
   const watchedEntry = series.find((s) => s.seriesAsin === seriesAsin);
   const isWatching = !!watchedEntry;
@@ -40,7 +43,8 @@ export function WatchSeriesButton({ seriesAsin, seriesTitle, coverArtUrl }: Watc
         setError(err instanceof Error ? err.message : 'Failed');
       }
     } else {
-      // Show confirmation before watching
+      // Show confirmation before watching (entire catalog preselected)
+      setNewReleasesOnly(false);
       setShowConfirm(true);
     }
   };
@@ -49,7 +53,7 @@ export function WatchSeriesButton({ seriesAsin, seriesTitle, coverArtUrl }: Watc
     setShowConfirm(false);
     setError(null);
     try {
-      await addSeries(seriesAsin, seriesTitle, coverArtUrl);
+      await addSeries(seriesAsin, seriesTitle, coverArtUrl, newReleasesOnly);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed');
     }
@@ -91,7 +95,7 @@ export function WatchSeriesButton({ seriesAsin, seriesTitle, coverArtUrl }: Watc
         onClose={() => setShowConfirm(false)}
         onConfirm={handleConfirmWatch}
         title={`Watch "${seriesTitle}"?`}
-        message={`This will request all books in "${seriesTitle}" that aren't already in your library, and automatically request new releases as they're added to the series. Continue?`}
+        message={<WatchModeChoice kind="series" name={seriesTitle} value={newReleasesOnly} onChange={setNewReleasesOnly} />}
         confirmText="Watch"
         isLoading={isAdding}
       />
@@ -111,6 +115,7 @@ export function WatchAuthorButton({ authorAsin, authorName, coverArtUrl }: Watch
   const { deleteAuthor, isLoading: isDeleting } = useDeleteWatchedAuthor();
   const [error, setError] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [newReleasesOnly, setNewReleasesOnly] = useState(false);
 
   const watchedEntry = authors.find((a) => a.authorAsin === authorAsin);
   const isWatching = !!watchedEntry;
@@ -126,7 +131,8 @@ export function WatchAuthorButton({ authorAsin, authorName, coverArtUrl }: Watch
         setError(err instanceof Error ? err.message : 'Failed');
       }
     } else {
-      // Show confirmation before watching
+      // Show confirmation before watching (entire catalog preselected)
+      setNewReleasesOnly(false);
       setShowConfirm(true);
     }
   };
@@ -135,7 +141,7 @@ export function WatchAuthorButton({ authorAsin, authorName, coverArtUrl }: Watch
     setShowConfirm(false);
     setError(null);
     try {
-      await addAuthor(authorAsin, authorName, coverArtUrl);
+      await addAuthor(authorAsin, authorName, coverArtUrl, newReleasesOnly);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed');
     }
@@ -177,7 +183,7 @@ export function WatchAuthorButton({ authorAsin, authorName, coverArtUrl }: Watch
         onClose={() => setShowConfirm(false)}
         onConfirm={handleConfirmWatch}
         title={`Watch "${authorName}"?`}
-        message={`This will request all books by "${authorName}" that aren't already in your library, and automatically request new releases. Continue?`}
+        message={<WatchModeChoice kind="author" name={authorName} value={newReleasesOnly} onChange={setNewReleasesOnly} />}
         confirmText="Watch"
         isLoading={isAdding}
       />

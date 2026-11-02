@@ -6,6 +6,8 @@
  * Enables protocol-agnostic download management across torrent and usenet clients.
  */
 
+import type { SourceAuth } from '@/lib/integrations/download-source';
+
 // =========================================================================
 // TYPE DEFINITIONS
 // =========================================================================
@@ -92,7 +94,31 @@ export interface DownloadInfo {
   seedingTime?: number;
   /** Upload/download ratio (torrent clients only) */
   ratio?: number;
+  /** When the client added it (torrent clients; unset when the client reports none or 0) */
+  addedAt?: Date;
 }
+
+/** Result of addDownload */
+export interface AddDownloadResult {
+  /** Client-assigned identifier (torrent hash or NZB ID) */
+  id: string;
+  /**
+   * True when the torrent was already in the client, so RMAB did not add it (taken over).
+   * RMAB never removes such a torrent or changes it. SABnzbd: true when it reuses a job it
+   * already holds (a duplicate NZB, or a retried add); otherwise false.
+   */
+  alreadyInClient: boolean;
+  /** BitTorrent v1 info hash, when the client knows it (may differ from `id` for hybrid torrents) */
+  infoHash?: string;
+  /** SABnzbd: the job it already held waits paused in its queue */
+  paused?: boolean;
+}
+
+/**
+ * Answer of the strict probe (seeding cleanup). `found: false` only on a well-formed
+ * answer without the torrent; anything unclear throws.
+ */
+export type DownloadProbe = { found: true; info: DownloadInfo } | { found: false };
 
 /** Options for adding a new download */
 export interface AddDownloadOptions {
@@ -102,8 +128,15 @@ export interface AddDownloadOptions {
   priority?: string;
   /** Whether to add in paused state */
   paused?: boolean;
-  /** Headers to include when fetching the source file (e.g. Prowlarr API key for proxy URLs) */
-  sourceHeaders?: Record<string, string>;
+  /** Prowlarr credentials; the key is sent only to Prowlarr proxy-download hops (see download-source.ts) */
+  sourceAuth?: SourceAuth;
+  /**
+   * A retried attempt of this grab (Bull retry): an earlier add may have reached the client
+   * even though it failed here (timeout). SABnzbd checks for that job before uploading again.
+   */
+  retry?: boolean;
+  /** The release's title from the indexer (SABnzbd matches an existing job by it, #329) */
+  releaseTitle?: string;
 }
 
 /**
@@ -125,6 +158,20 @@ export class DownloadSourceError extends Error {
 }
 
 /** HTTP source failures that may clear on their own or succeed via another indexer. */
+/**
+ * The release's source can't be used at all (redirect to an invalid or malformed
+ * location, magnet for a usenet client, redirect loop). The processor skips it
+ * and tries the next ranked release. With `blocklistReason` (the release itself is
+ * unusable, e.g. a duplicate NZB whose files are gone) it also blocklists the release.
+ */
+export class UnusableDownloadSourceError extends Error {
+  readonly name = 'UnusableDownloadSourceError';
+
+  constructor(message: string, public readonly blocklistReason?: string) {
+    super(message);
+  }
+}
+
 export function isRetryableDownloadSourceError(
   error: unknown
 ): error is DownloadSourceError {
@@ -172,9 +219,9 @@ export interface IDownloadClient {
    * Add a new download.
    * @param url - Download URL (magnet link, .torrent URL, or .nzb URL)
    * @param options - Optional download settings
-   * @returns Client-assigned download ID (torrent hash or NZB ID)
+   * @returns Client-assigned download ID, and whether the torrent was already in the client
    */
-  addDownload(url: string, options?: AddDownloadOptions): Promise<string>;
+  addDownload(url: string, options?: AddDownloadOptions): Promise<AddDownloadResult>;
 
   /**
    * Get current status of a download.
@@ -183,6 +230,13 @@ export interface IDownloadClient {
    * @returns Download info, or null if not found
    */
   getDownload(id: string): Promise<DownloadInfo | null>;
+
+  /**
+   * Strict "is it still there" check for the seeding cleanup: one request, no retries.
+   * Torrent clients only. Missing only on a well-formed answer without the torrent
+   * (contract per client: documentation/phase3/download-clients.md); anything else throws.
+   */
+  probeDownload?(id: string): Promise<DownloadProbe>;
 
   /**
    * Pause a download.

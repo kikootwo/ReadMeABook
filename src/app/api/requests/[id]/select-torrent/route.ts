@@ -9,6 +9,10 @@ import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { TorrentResult } from '@/lib/utils/ranking-algorithm';
 import { RMABLogger } from '@/lib/utils/logger';
+import { denyWithoutInteractiveSearchAccess } from '@/lib/middleware/interactive-search-access';
+import { guardTorrentSelection, rejectedSelectionResponse } from '@/lib/services/download-selection-guard';
+import { hideStoredPick } from '@/lib/services/request-detail-query';
+import { readJsonBody } from '@/lib/utils/request-body';
 
 const logger = RMABLogger.create('API.SelectTorrent');
 
@@ -29,19 +33,23 @@ export async function POST(
         );
       }
 
+      const accessDenied = await denyWithoutInteractiveSearchAccess(req.user.id);
+      if (accessDenied) return accessDenied;
+
       const { id } = await params;
-      const body = await req.json();
-      const { torrent } = body as { torrent: TorrentResult };
+      const bodyResult = await readJsonBody(req);
+      if (!bodyResult.ok) return bodyResult.response;
+      const body = bodyResult.data;
+      const { torrent: rawTorrent } = (body ?? {}) as { torrent?: TorrentResult };
 
-      if (!torrent) {
-        return NextResponse.json(
-          { error: 'ValidationError', message: 'Torrent data is required' },
-          { status: 400 }
-        );
-      }
+      // Only magnet links or Prowlarr download links may be fetched on the user's behalf
+      const torrentCheck = await guardTorrentSelection(rawTorrent);
+      if (!torrentCheck.ok) return rejectedSelectionResponse(torrentCheck.error);
+      const torrent = torrentCheck.value;
 
-      const requestRecord = await prisma.request.findUnique({
-        where: { id },
+      // A deleted request answers 404 for everyone
+      const requestRecord = await prisma.request.findFirst({
+        where: { id, deletedAt: null },
         include: {
           audiobook: true,
         },
@@ -121,6 +129,7 @@ export async function POST(
           data: {
             status: 'awaiting_approval',
             selectedTorrent: torrent as any, // Store the selected torrent
+            autoRerequestCount: 0, // a user retry restarts the automatic re-request backoff
             updatedAt: new Date(),
           },
           include: {
@@ -143,7 +152,7 @@ export async function POST(
 
         return NextResponse.json({
           success: true,
-          request: updated,
+          request: hideStoredPick(updated, req.user.role),
           message: 'Request submitted for admin approval',
         });
       }
@@ -180,6 +189,7 @@ export async function POST(
           status: 'downloading',
           progress: 0,
           errorMessage: null,
+          autoRerequestCount: 0, // a user retry restarts the automatic re-request backoff
           updatedAt: new Date(),
         },
         include: {
@@ -189,7 +199,7 @@ export async function POST(
 
       return NextResponse.json({
         success: true,
-        request: updated,
+        request: hideStoredPick(updated, req.user.role),
         message: 'Torrent download initiated',
       });
     } catch (error) {

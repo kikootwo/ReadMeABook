@@ -13,6 +13,7 @@ const requireAuthMock = vi.hoisted(() => vi.fn());
 const requireAdminMock = vi.hoisted(() => vi.fn());
 const configServiceMock = vi.hoisted(() => ({
   setMany: vi.fn(),
+  setManyAtomic: vi.fn(),
   clearCache: vi.fn(),
 }));
 const audibleServiceMock = vi.hoisted(() => ({
@@ -81,6 +82,7 @@ vi.mock('@/lib/services/encryption.service', () => ({
   getEncryptionService: () => ({
     encrypt: (value: string) => `enc-${value}`,
     decrypt: (value: string) => value.replace('enc-', ''),
+    isEncryptedFormat: (value: string) => typeof value === 'string' && value.startsWith('enc-'),
   }),
 }));
 
@@ -350,7 +352,7 @@ describe('Admin settings core routes', () => {
     const payload = await response.json();
 
     expect(payload.success).toBe(true);
-    expect(configServiceMock.setMany).toHaveBeenCalled();
+    expect(configServiceMock.setManyAtomic).toHaveBeenCalled();
   });
 
   it('updates ebook settings', async () => {
@@ -375,6 +377,35 @@ describe('Admin settings core routes', () => {
 
     expect(payload.success).toBe(true);
     expect(jobQueueMock.addAudibleRefreshJob).toHaveBeenCalled();
+  });
+
+  it('accepts the Italy Audible region and triggers refresh', async () => {
+    const request = { json: vi.fn().mockResolvedValue({ region: 'it' }) };
+
+    const { PUT } = await import('@/app/api/admin/settings/audible/route');
+    const response = await PUT(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(configServiceMock.setMany).toHaveBeenCalledWith([
+      expect.objectContaining({ key: 'audible.region', value: 'it' }),
+    ]);
+    expect(jobQueueMock.addAudibleRefreshJob).toHaveBeenCalled();
+  });
+
+  it('rejects an unknown Audible region', async () => {
+    const request = { json: vi.fn().mockResolvedValue({ region: 'xx' }) };
+
+    const { PUT } = await import('@/app/api/admin/settings/audible/route');
+    const response = await PUT(request as any);
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain('fr, it');
+    expect(configServiceMock.setMany).not.toHaveBeenCalled();
+    expect(jobQueueMock.addAudibleRefreshJob).not.toHaveBeenCalled();
   });
 
   it('updates Audiobookshelf settings', async () => {

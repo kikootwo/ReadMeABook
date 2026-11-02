@@ -323,6 +323,21 @@ describe('useRequests hooks', () => {
       '/api/audiobooks/search-torrents',
       expect.objectContaining({ method: 'POST' })
     );
+    expect(JSON.parse(fetchWithAuthMock.mock.calls[0][1].body)).toEqual({ title: 'Title', author: 'Author', asin: 'asin' });
+  });
+
+  it('marks an edited title as exact when searching torrents (#316)', async () => {
+    useAuthMock.mockReturnValue({ accessToken: 'token' });
+    fetchWithAuthMock.mockResolvedValueOnce(makeResponse({ results: [] }));
+
+    const { useSearchTorrents } = await import('@/lib/hooks/useRequests');
+    const hook = renderHookValue(() => useSearchTorrents());
+
+    await act(async () => {
+      await hook.searchTorrents('Custom', 'Author', 'asin', true);
+    });
+
+    expect(JSON.parse(fetchWithAuthMock.mock.calls[0][1].body)).toEqual({ title: 'Custom', author: 'Author', asin: 'asin', exactTitle: true });
   });
 
   it('requests torrents with audiobook payloads', async () => {
@@ -376,11 +391,11 @@ describe('useRequests hooks', () => {
           { asin: 'a5', title: 'Book', author: 'Author' } as any,
           { title: 'Torrent' }
         )
-      ).rejects.toThrow('already in your Plex library');
+      ).rejects.toThrow('This audiobook is already in your library.');
     });
 
     await waitFor(() => {
-      expect(result.current.error).toContain('already in your Plex library');
+      expect(result.current.error).toContain('This audiobook is already in your library.');
     });
   });
 });

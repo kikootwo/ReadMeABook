@@ -1,0 +1,5 @@
+{
+  "B08G9PRS1K": { "title": "Fixture Book One", "author": "Test Author", "narrator": "Test Narrator", "runtimeMin": 970 },
+  "B082BHJMFF": { "title": "Fixture Book Two", "author": "Test Author", "narrator": "Other Narrator", "runtimeMin": 659 },
+  "B072R1CY4P": { "title": "Fixture Book Three", "author": "Test Author", "narrator": "Third Narrator", "runtimeMin": 537 }
+}

@@ -35,6 +35,16 @@ vi.mock('@/lib/services/job-queue.service', () => ({
   getJobQueueService: () => jobQueueMock,
 }));
 
+
+// Prowlarr connection used by the download-URL guard and key stripping
+vi.mock('@/lib/integrations/prowlarr-connection', () => ({
+  getProwlarrConnection: async () => ({
+    baseUrl: 'http://prowlarr:9696',
+    apiKey: 'test-prowlarr-key',
+    base: { origin: 'http://prowlarr:9696', protocol: 'http:', hostname: 'prowlarr', host: 'prowlarr:9696', port: '9696', defaultPort: false, userinfo: '', basePath: '' },
+  }),
+}));
+
 describe('Admin requests routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -250,6 +260,25 @@ describe('Admin requests routes', () => {
     expect(deleteRequestMock).toHaveBeenCalledWith('req-1', 'admin-1');
   });
 
+  it('returns why the files were kept', async () => {
+    deleteRequestMock.mockResolvedValueOnce({
+      success: true,
+      message: 'Request deleted; files kept: folder contents changed since import',
+      filesDeleted: false,
+      torrentsRemoved: 0,
+      torrentsKeptSeeding: 0,
+      torrentsKeptUnlimited: 0,
+      filesKeptReason: 'folder contents changed since import',
+    });
+
+    const { DELETE } = await import('@/app/api/admin/requests/[id]/route');
+    const response = await DELETE({} as any, { params: Promise.resolve({ id: 'req-1' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.details).toMatchObject({ filesDeleted: false, filesKeptReason: 'folder contents changed since import' });
+  });
+
   it('returns 401 when admin user is missing', async () => {
     authRequest.user = null;
 
@@ -369,18 +398,12 @@ describe('Admin requests routes', () => {
     prismaMock.request.findFirst.mockResolvedValueOnce({
       id: 'req-3',
       status: 'awaiting_approval',
-      selectedTorrent: { title: 'Torrent' },
+      selectedTorrent: { title: 'Torrent', downloadUrl: 'http://prowlarr:9696/1/download' },
       audiobook: { id: 'ab-3', title: 'Title', author: 'Author' },
       user: { id: 'u3', plexUsername: 'user3' },
       userId: 'u3',
     });
-    prismaMock.request.update.mockResolvedValueOnce({
-      id: 'req-3',
-      status: 'downloading',
-      audiobook: { id: 'ab-3', title: 'Title', author: 'Author' },
-      user: { id: 'u3', plexUsername: 'user3' },
-      userId: 'u3',
-    });
+    prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 });
     const request = { json: vi.fn().mockResolvedValue({ action: 'approve' }) };
 
     const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
@@ -401,13 +424,7 @@ describe('Admin requests routes', () => {
       user: { id: 'u4', plexUsername: 'user4' },
       userId: 'u4',
     });
-    prismaMock.request.update.mockResolvedValueOnce({
-      id: 'req-4',
-      status: 'pending',
-      audiobook: { id: 'ab-4', title: 'Title', author: 'Author', audibleAsin: 'ASIN4' },
-      user: { id: 'u4', plexUsername: 'user4' },
-      userId: 'u4',
-    });
+    prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 });
     const request = { json: vi.fn().mockResolvedValue({ action: 'approve' }) };
 
     const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
@@ -428,13 +445,7 @@ describe('Admin requests routes', () => {
       user: { id: 'u5', plexUsername: 'user5' },
       userId: 'u5',
     });
-    prismaMock.request.update.mockResolvedValueOnce({
-      id: 'req-5',
-      status: 'denied',
-      audiobook: { id: 'ab-5', title: 'Title', author: 'Author' },
-      user: { id: 'u5', plexUsername: 'user5' },
-      userId: 'u5',
-    });
+    prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 });
     const request = { json: vi.fn().mockResolvedValue({ action: 'deny' }) };
 
     const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');

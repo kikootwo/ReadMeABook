@@ -16,8 +16,10 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { tagAudioFileMetadata } from '@/lib/utils/metadata-tagger';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { addMp4FreeformTags, tagAudioFileMetadata } from '@/lib/utils/metadata-tagger';
+import { testHooks } from '@/lib/utils/mp4-freeform-tags';
+import { audioMd5, countFreeform, makeM4b, probe, topLevelTypes } from './mp4-tags.helpers';
 
 const execFileP = promisify(execFile);
 
@@ -58,7 +60,7 @@ afterAll(async () => {
 });
 
 /** Create a small silent fixture audio file in the requested format. */
-async function makeFixture(ext: '.m4a' | '.mp3' | '.flac'): Promise<string> {
+async function makeFixture(ext: '.m4a' | '.mp3' | '.flac', extra: string[] = []): Promise<string> {
   const out = path.join(workDir, `fixture-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
   const codecArgs =
     ext === '.mp3'
@@ -72,6 +74,7 @@ async function makeFixture(ext: '.m4a' | '.mp3' | '.flac'): Promise<string> {
     '-i', 'anullsrc=channel_layout=mono:sample_rate=22050',
     '-t', '1',
     ...codecArgs,
+    ...extra,
     out,
   ]);
   return out;
@@ -132,6 +135,75 @@ describe('metadata-tagger integration (real ffmpeg)', () => {
     60_000
   );
 
+  describe('description, genre and audiobook flags', () => {
+    const DESCRIPTION = 'A heist on Luthadel.\n\nThe second paragraph \u2014 with "quotes".';
+    const FLAT_DESCRIPTION = 'A heist on Luthadel. The second paragraph \u2014 with "quotes".';
+    const GENRES = ['Science Fiction & Fantasy', 'Mystery, Thriller & Suspense'];
+    const GENRE_TAG = 'Science Fiction & Fantasy; Mystery, Thriller & Suspense';
+    const details = { title: 'Book', author: 'Author', description: DESCRIPTION, genres: GENRES };
+
+    it.skipIf(skipReal)(
+      'm4a: desc, ldes, genre, stik and pgap are written and read back',
+      async () => {
+        const result = await tagAudioFileMetadata(await makeFixture('.m4a'), details);
+        expect(result.success).toBe(true);
+        const tagged = result.taggedFilePath!;
+        expect(await readTag(tagged, 'description')).toBe(FLAT_DESCRIPTION);
+        expect(await readTag(tagged, 'synopsis')).toBe(FLAT_DESCRIPTION);
+        expect(await readTag(tagged, 'genre')).toBe(GENRE_TAG);
+        expect(await readTag(tagged, 'media_type')).toBe('2');
+        expect(await readTag(tagged, 'gapless_playback')).toBe('1');
+      },
+      60_000
+    );
+
+    it.skipIf(skipReal)(
+      'mp3: description and genre are written and read back',
+      async () => {
+        const result = await tagAudioFileMetadata(await makeFixture('.mp3'), details);
+        expect(result.success).toBe(true);
+        expect(await readTag(result.taggedFilePath!, 'description')).toBe(FLAT_DESCRIPTION);
+        expect(await readTag(result.taggedFilePath!, 'genre')).toBe(GENRE_TAG);
+      },
+      60_000
+    );
+
+    it.skipIf(skipReal)(
+      'flac with a DESCRIPTION already in the source: exactly one DESCRIPTION (the new one), genre read back',
+      async () => {
+        const src = await makeFixture('.flac', ['-metadata', 'DESCRIPTION=old']);
+        expect(await readTag(src, 'comment')).toBe('old'); // the fixture really carries one
+        const result = await tagAudioFileMetadata(src, details);
+        expect(result.success).toBe(true);
+        const tagged = result.taggedFilePath!;
+        // ffprobe (what Audiobookshelf reads) joins repeated fields: "old;new" if both were kept
+        expect(await readTag(tagged, 'comment')).toBe(FLAT_DESCRIPTION);
+        expect(await readTag(tagged, 'genre')).toBe(GENRE_TAG);
+        // Byte scan of the Vorbis comments, independent of ffprobe
+        const raw = (await fs.readFile(tagged)).toString('utf8');
+        expect(raw.match(/DESCRIPTION=/gi)).toHaveLength(1);
+        expect(raw).toContain(`DESCRIPTION=${FLAT_DESCRIPTION}`);
+        expect(raw).not.toContain('DESCRIPTION=old');
+      },
+      60_000
+    );
+
+    it.skipIf(skipReal)(
+      'mp3: a 200 KB description is written capped at 16 KiB (ffmpeg still runs)',
+      async () => {
+        const result = await tagAudioFileMetadata(await makeFixture('.mp3'), {
+          ...details,
+          description: 'word '.repeat(40_000),
+        });
+        expect(result.success).toBe(true);
+        const readBack = (await readTag(result.taggedFilePath!, 'description'))!;
+        expect(Buffer.byteLength(readBack, 'utf8')).toBeLessThanOrEqual(16 * 1024);
+        expect(readBack.endsWith('word\u2026')).toBe(true);
+      },
+      60_000
+    );
+  });
+
   it.skipIf(skipReal)(
     'm4a: author does NOT inherit a stray leading `"` when title contains `"`',
     async () => {
@@ -149,4 +221,124 @@ describe('metadata-tagger integration (real ffmpeg)', () => {
     },
     60_000
   );
+});
+
+describe.skipIf(skipReal)('m4b ASIN and layout (real ffmpeg)', () => {
+  afterEach(() => {
+    testHooks.afterPlan = undefined;
+  });
+
+  /** The organizer's order: the tagging pass, then the one ASIN step on the tagged copy. */
+  async function tagWithAsin(src: string, asin: string) {
+    const result = await tagAudioFileMetadata(src, { title: 'Book', author: 'Author', asin });
+    expect(result.success).toBe(true);
+    const step = await addMp4FreeformTags(result.taggedFilePath!, path.extname(src), { asin });
+    return { tagged: result.taggedFilePath!, step };
+  }
+
+  it('the ASIN is written: ffprobe (the reader Audiobookshelf uses) reads format tag ASIN', async () => {
+    const src = await makeM4b(workDir, 'asin-src.m4b', { faststart: false });
+    const { tagged, step } = await tagWithAsin(src, 'B0TESTASIN');
+    expect(step).toEqual({ written: true });
+    const { tags } = await probe(tagged);
+    expect(tags.ASIN).toBe('B0TESTASIN');
+    expect(tags.title).toBe('Book');
+    expect(countFreeform(tagged, 'ASIN')).toBe(1);
+  }, 60_000);
+
+  it.each([
+    ['with the ASIN step', 'B0TESTASIN'],
+    ['without an ASIN (ffmpeg +faststart only)', undefined],
+  ])('the tagged copy is moov first (faststart) %s, cover and text-track chapters intact', async (_name, asin) => {
+    const src = await makeM4b(workDir, `layout-${asin ?? 'none'}.m4b`, { faststart: false });
+    const before = await probe(src);
+    const md5 = await audioMd5(src);
+    const tagged = asin
+      ? (await tagWithAsin(src, asin)).tagged
+      : (await tagAudioFileMetadata(src, { title: 'Book', author: 'Author' })).taggedFilePath!;
+    expect(topLevelTypes(tagged).slice(0, 2)).toEqual(['ftyp', 'moov']);
+    const after = await probe(tagged);
+    expect(after.streams).toEqual(before.streams);
+    // ffmpeg's re-mux may change the chapter time base (9.0.2 does): compare times and titles
+    const marks = (p: typeof before) => p.chapters.map((c) => [c.start_time, c.end_time, c.tags?.title]);
+    expect(marks(after)).toEqual(marks(before));
+    expect(marks(after).map((m) => m[2])).toEqual(['Chapter One', 'Chapter Two']);
+    expect(await audioMd5(tagged)).toBe(md5);
+  }, 60_000);
+
+  it('a refused ASIN step still leaves the tagged copy moov first (ffmpeg +faststart), unchanged', async () => {
+    const src = await makeM4b(workDir, 'refused.m4b', { faststart: false });
+    const result = await tagAudioFileMetadata(src, { title: 'Book', author: 'Author', asin: 'B0TESTASIN' });
+    const original = await fs.readFile(result.taggedFilePath!);
+    testHooks.afterPlan = () => {
+      throw new Error('refused for the test');
+    };
+    const step = await addMp4FreeformTags(result.taggedFilePath!, '.m4b', { asin: 'B0TESTASIN' });
+    expect(step).toEqual({ written: false, warning: 'ASIN tag not written (refused for the test)' });
+    expect((await fs.readFile(result.taggedFilePath!)).equals(original)).toBe(true);
+    expect(topLevelTypes(result.taggedFilePath!).slice(0, 2)).toEqual(['ftyp', 'moov']);
+  }, 60_000);
+
+  it('re-tagging a tagged copy that already holds an ASIN: exactly one ASIN item (the new one), moov first', async () => {
+    const src = await makeM4b(workDir, 'retag.m4b', { faststart: true });
+    const first = await tagWithAsin(src, 'B0FIRST000');
+    expect(countFreeform(first.tagged, 'ASIN')).toBe(1);
+    const tagged = path.join(workDir, 'retag-tagged.m4b');
+    await fs.rename(first.tagged, tagged);
+    const { tagged: again } = await tagWithAsin(tagged, 'B0TESTASIN');
+    expect(countFreeform(again, 'ASIN')).toBe(1);
+    expect((await probe(again)).tags.ASIN).toBe('B0TESTASIN');
+    expect(topLevelTypes(again).slice(0, 2)).toEqual(['ftyp', 'moov']);
+  }, 60_000);
+
+  it('round trip: description, synopsis, genre, media type, gapless and the ASIN freeform tag all read back', async () => {
+    const src = await makeM4b(workDir, 'details-src.m4b', { faststart: false });
+    const result = await tagAudioFileMetadata(src, {
+      title: 'Book',
+      author: 'Author',
+      asin: 'B0TESTASIN',
+      description: 'First paragraph.\n\nSecond paragraph.',
+      genres: ['Science Fiction & Fantasy', 'Sci-Fi/Horror'],
+    });
+    expect(result.success).toBe(true);
+    const tagged = result.taggedFilePath!;
+    expect(await addMp4FreeformTags(tagged, '.m4b', { asin: 'B0TESTASIN' })).toEqual({ written: true });
+
+    const { tags } = await probe(tagged);
+    expect(tags).toMatchObject({
+      description: 'First paragraph. Second paragraph.',
+      synopsis: 'First paragraph. Second paragraph.',
+      genre: 'Science Fiction & Fantasy; Sci-Fi & Horror',
+      media_type: '2',
+      gapless_playback: '1',
+      ASIN: 'B0TESTASIN',
+      title: 'Book',
+    });
+    expect(countFreeform(tagged, 'ASIN')).toBe(1);
+    expect(topLevelTypes(tagged).slice(0, 2)).toEqual(['ftyp', 'moov']);
+  }, 60_000);
+
+  it('the ASIN rewrite keeps every other tag the tagging pass wrote', async () => {
+    const src = await makeM4b(workDir, 'keep-src.m4b', { faststart: true });
+    const result = await tagAudioFileMetadata(src, {
+      title: 'Book',
+      author: 'Author',
+      narrator: 'Narrator',
+      year: 2001,
+      series: 'Saga',
+      seriesPart: '2',
+      description: 'A summary.',
+      genres: ['History'],
+    });
+    expect(result.success).toBe(true);
+    const tagged = result.taggedFilePath!;
+    const before = await probe(tagged);
+    expect(before.tags.ASIN).toBeUndefined();
+
+    expect(await addMp4FreeformTags(tagged, '.m4b', { asin: 'B0TESTASIN' })).toEqual({ written: true });
+
+    const after = await probe(tagged);
+    expect(after.tags).toEqual({ ...before.tags, ASIN: 'B0TESTASIN' });
+    expect(after.streams).toEqual(before.streams);
+  }, 60_000);
 });

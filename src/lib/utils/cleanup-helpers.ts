@@ -235,7 +235,7 @@ async function isDirectoryEmpty(dirPath: string): Promise<boolean | null> {
  * @param boundaryPath - The boundary path (must be normalized)
  * @returns true if testPath is strictly below boundaryPath
  */
-function isPathBelowBoundary(testPath: string, boundaryPath: string): boolean {
+export function isPathBelowBoundary(testPath: string, boundaryPath: string): boolean {
   // Ensure both paths don't have trailing slashes for comparison
   const normalizedTest = testPath.replace(/\/+$/, '');
   const normalizedBoundary = boundaryPath.replace(/\/+$/, '');
@@ -256,7 +256,7 @@ function isPathBelowBoundary(testPath: string, boundaryPath: string): boolean {
  * @param filePath - Path to normalize
  * @returns Normalized path with forward slashes and no trailing slash
  */
-function normalizePath(filePath: string): string {
+export function normalizePath(filePath: string): string {
   // Convert backslashes to forward slashes
   let normalized = filePath.replace(/\\/g, '/');
 
@@ -269,6 +269,15 @@ function normalizePath(filePath: string): string {
   // Remove trailing slash (except for root '/')
   if (normalized.length > 1 && normalized.endsWith('/')) {
     normalized = normalized.slice(0, -1);
+  }
+
+  // Windows drive letters: upper-case the letter, and keep a drive root as 'C:/'
+  // (path.normalize('C:') is 'C:.', the drive's current directory)
+  if (/^[A-Za-z]:/.test(normalized)) {
+    normalized = normalized[0].toUpperCase() + normalized.slice(1);
+    if (/^[A-Z]:\.?$/.test(normalized)) {
+      normalized = `${normalized.slice(0, 2)}/`;
+    }
   }
 
   return normalized;

@@ -8,9 +8,12 @@
  * is responsible for mapping it to an HTTP response or a Discord reply.
  */
 
+import { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
+import { resolveApprovalSelection } from '@/lib/services/request-approval-selection';
 import { RMABLogger } from '@/lib/utils/logger';
+import { buildEbookDownloadName } from '@/lib/utils/ebook-download-name';
 
 const logger = RMABLogger.create('Service.RequestApproval');
 
@@ -26,11 +29,20 @@ export interface ProcessApprovalInput {
 }
 
 export type ApprovalResult =
-  | { success: true; message: string; request: any }
+  | {
+      success: true;
+      message: string;
+      request: any;
+      /** Why the requester's stored release pick was dropped in favour of an automatic search. */
+      selectionDropped?: string;
+    }
   | {
       success: false;
-      /** Machine-readable reason: 'not_found' | 'invalid_status' | 'error'. */
-      reason: 'not_found' | 'invalid_status' | 'error';
+      /**
+       * Machine-readable reason. 'source_unavailable': the pick's source couldn't be reached (retryable,
+       * request unchanged). 'invalid_selection': the admin-selected release can't be used.
+       */
+      reason: 'not_found' | 'invalid_status' | 'source_unavailable' | 'invalid_selection' | 'error';
       message: string;
       currentStatus?: string;
     };
@@ -194,8 +206,18 @@ export async function processRequestApproval(
 
     // Update request based on action
     if (action === 'approve') {
-      // Use admin-provided torrent (from admin interactive search) or fall back to user's pre-selected torrent
-      const effectiveTorrent = adminSelectedTorrent || existingRequest.selectedTorrent;
+      // Use admin-provided torrent (from admin interactive search) or fall back to user's pre-selected
+      // torrent, validated before the claim so a rejected or unreachable pick leaves the row untouched.
+      const selection = await resolveApprovalSelection(
+        id,
+        isEbookRequest,
+        adminSelectedTorrent,
+        existingRequest.selectedTorrent
+      );
+      if (!selection.ok) {
+        return { success: false, reason: selection.reason, message: selection.message };
+      }
+      const { selectedTorrent, droppedPickReason } = selection;
 
       // Atomically claim the transition out of 'awaiting_approval' BEFORE enqueuing any jobs, so two
       // concurrent approvals (e.g. the Discord Approve button and the Web UI, or two admins) can't
@@ -203,16 +225,19 @@ export async function processRequestApproval(
       // actor whose conditional update actually flips the row proceeds; the loser bails as stale.
       const claim = await prisma.request.updateMany({
         where: { id, status: 'awaiting_approval', deletedAt: null },
-        data: effectiveTorrent
+        data: selectedTorrent
           ? { status: 'downloading', selectedTorrent: null as any }
-          : { status: 'pending' },
+          : {
+              status: 'pending',
+              // Drop an unusable stored pick so it can't be approved again
+              ...(existingRequest.selectedTorrent ? { selectedTorrent: Prisma.DbNull } : {}),
+            },
       });
       if (claim.count === 0) {
         return staleStatusResult(id);
       }
 
-      if (effectiveTorrent) {
-        const selectedTorrent = effectiveTorrent as any;
+      if (selectedTorrent) {
         const torrentSource = adminSelectedTorrent ? 'admin' : 'user';
 
         // Download the selected torrent directly
@@ -258,7 +283,7 @@ export async function processRequestApproval(
               existingRequest.id,
               downloadHistory.id,
               selectedTorrent.downloadUrl,
-              `${existingRequest.audiobook.title} - ${existingRequest.audiobook.author}.${selectedTorrent.format || 'epub'}`,
+              buildEbookDownloadName(existingRequest.audiobook.title, existingRequest.audiobook.author, selectedTorrent.format || 'epub'),
               undefined
             );
           } else {
@@ -390,11 +415,15 @@ export async function processRequestApproval(
 
         await syncDiscordOnDecision(id, 'approve', adminUserId);
 
+        const searchMessage = isEbookRequest
+          ? 'Ebook request approved and ebook search job triggered'
+          : 'Request approved and search job triggered';
         return {
           success: true,
-          message: isEbookRequest
-            ? 'Ebook request approved and ebook search job triggered'
-            : 'Request approved and search job triggered',
+          message: droppedPickReason
+            ? `The user's selected release could not be used (${droppedPickReason}). ${searchMessage} instead.`
+            : searchMessage,
+          ...(droppedPickReason ? { selectionDropped: droppedPickReason } : {}),
           request: updatedRequest,
         };
       }

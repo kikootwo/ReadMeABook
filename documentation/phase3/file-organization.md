@@ -38,12 +38,12 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 
 1. Download completes in `/downloads/[torrent-name]/` or `/downloads/[filename]` (single file)
 1b. **Path stored** in `DownloadHistory.downloadPath` (mapped local path) for retry reliability — avoids reconstructing path from `torrentName` which may differ from actual folder name
-2. Identify audiobook files (.m4b, .m4a, .mp3, .mp4, .aa, .aax, .flac, .ogg) - supports both directories and single files
+2. Identify audiobook files (.m4b, .m4a, .mp3, .mp4, .aa, .aax, .flac, .ogg) - supports both directories and single files; `selectedFiles` (`/` separators) filter the walk. Multi-disc sources (`CD1/`, `Disc 2/`) are then ordered disc by disc for the merge, copy and rename numbering, and a Manual/Bulk import of the book's own library folder stops here with nothing changed: [multi-disc-folders.md](../features/multi-disc-folders.md)
 3. Read media directory and path template from database config (`media_dir`, `audiobook_path_template`)
 4. Apply template to create target path: `[media_dir]/[template result]/`
-5. **Copy** files (not move - originals stay for seeding)
-6. **Tag metadata** (if enabled) - writes correct title, author, narrator, ASIN to audio files
-7. Copy cover art if found, else download from Audible
+5. **Tag metadata** (if enabled, before the move) - writes correct title, author, narrator, ASIN, series, description, genre, publisher, subtitle, language to tagged copies of the audio files
+6. **ASIN step** - adds the MP4 freeform `ASIN` (with tagging on also `PUBLISHER`, `SUBTITLE`, `LANGUAGE`) to the file about to be placed, when RMAB wrote it (see MP4 Freeform Tags), then **copy** files (not move - originals stay for seeding)
+7. Copy cover art if found, else download from Audible. `coverArtUrl` must be a cached thumbnail `/api/cache/thumbnails/<file>` (plain file name, resolved in `/app/cache/thumbnails`) or an https URL on `COVER_ART_HOSTS` (`*.media-amazon.com`, `*.ssl-images-amazon.com`, `*.images-amazon.com`), up to `MAX_COVER_ART_REDIRECTS` (3) redirects with every hop checked; anything else is skipped with a warning (`src/lib/utils/cover-art-url.ts`). An existing `cover.jpg` is never replaced and not fetched for (kept, debug log; a re-import with the same cover lands here too); an empty regular-file `cover.jpg` (older interrupted write) counts as missing and is replaced (`replace` publish, size re-checked under the lock). New covers are published like audio (`src/lib/utils/cover-placement.ts` → `publishCover`): hidden partial (`copyFile` for a cached thumbnail, `writeFileAtomic` for downloaded bytes), fsync + size check, `create` publish (`EEXIST` → kept), under the per-target lock; an interrupted write leaves no `cover.jpg`. Downloaded and copied covers get the library file mode (`applyFileMode`: a refused chmod is a permission warning, a missing file a failure). At request creation, covers are stored for display if they are any http(s) URL or a safe cached path (`sanitizeCoverArtUrl`; shelf-sync Goodreads/Hardcover fallbacks stay visible); a stored cover the library can't use is replaced by a later usable one (`isLibraryCoverSource`)
 8. **Coerce file formats** (if enabled) - rename .mp4 → .m4b and single-file .m4a → .m4b for Plex compatibility (see: Plex Format Coercion below)
 9. **Generate file hash** - SHA256 of sorted audio filenames for library matching (see: [fixes/file-hash-matching.md](../fixes/file-hash-matching.md))
 10. Update request status to `downloaded` and store file hash in `audiobooks.files_hash`
@@ -106,8 +106,32 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 - `composer` - Narrator (standard audiobook field)
 - `date` - Year
 - `ASIN` - Audible ASIN (custom tag)
-  - M4B/M4A/MP4: `----:com.apple.iTunes:ASIN`
-  - MP3: Custom ID3v2 tag
+  - M4B/M4A/MP4: iTunes freeform item `----` (mean `com.apple.iTunes`, name `ASIN`), written after ffmpeg (see MP4 Freeform Tags)
+  - MP3: ID3v2 `TXXX:ASIN`; FLAC: Vorbis comment `ASIN`
+- Read back as ffprobe format tag `ASIN`; Audiobookshelf maps it (`asin`, case-insensitive) to `tagASIN` → book `asin`
+- Description - publisher summary; raw input first cut to `MAX_RAW_DESCRIPTION_LENGTH` (4x the cap, UTF-16 units, `truncateRawText`, surrogate-safe); non-whitespace C0 controls dropped, each whitespace run (space/tab/CR/LF/VT/FF/U+2028/U+2029) → one space (linear); capped at `MAX_DESCRIPTION_BYTES` (16 KiB UTF-8, `capUtf8Bytes`: last word boundary + `…`; one argv string each)
+  - M4B/M4A/MP4: `description` (`desc`) + `synopsis` (`ldes`), each capped
+  - MP3: `description` (TXXX); FLAC: `comment` (= Vorbis `DESCRIPTION`; replaces the source's DESCRIPTION/COMMENT, which ffmpeg reads as one `comment`; a `description` key would add a second one, read as "old;new")
+- `genre` - top-level genres (`primaryGenres`, no sub-genre tags) joined with `; `; `/` or `;` in a name → ` & ` (split/trim/join; Audiobookshelf splits on `/`, `//`, `;`)
+- M4B/M4A/MP4 only: `media_type=2` (`stik` Audiobook), `gapless_playback=1` (`pgap`) - always written, before `-movflags +faststart`
+- Publisher, subtitle, language - from the lookup only (`publisherName`, `subtitle`, `language`; the book row stores none). `sanitizeShortTagValue` (`metadata-text.ts`; `bookDetailValues` applies it to all three): non-strings ignored, bounded, whitespace runs → one space, C0 controls dropped, lone surrogates and U+FFFE/U+FFFF → U+FFFD (ffprobe reads neither back as written, which would fail the post-step for every tag, the ASIN included), capped at `MAX_SHORT_TAG_BYTES` (1 KiB). Language: first letter capitalized (`languageTagValue`, "english" → "English", as Audiobookshelf shows it; not an ISO 639 code). Empty → not written (MP3/FLAC keep the source's; an MP4's remux drops the source's freeform tags)
+  - M4B/M4A/MP4: freeform `PUBLISHER`, `SUBTITLE`, `LANGUAGE` (ASIN step; ffmpeg drops them)
+  - MP3: `publisher` (TPUB), `TIT3` (the ID3 subtitle frame) plus `subtitle=` (clears a source `TXXX:SUBTITLE`, which would sit next to TIT3), `language` (TLAN, the name; ID3 expects ISO 639-2 there)
+  - FLAC: `publisher`, `subtitle`, `language` (replace the source's, case-insensitive; `ORGANIZATION`/`LABEL` left as they are)
+  - Audiobookshelf reads `publisher`, `subtitle` (then `tit3`), `language` (case-insensitive)
+- `disc` + `track` - multi-disc sources only (`CD1/`, `Disc 2/`, not merged): disc = the folder's number of the highest (`d/D`), track = position across the book in import order (`n/N`), replacing any source numbers (`tagMultipleFiles(files, metadata, positions)`; values from `discTrackTags`, `n/N` only, one argv element each; no disc value for a disc 0 or a disc number that would go down: the source disc is cleared instead, empty `disc` plus FLAC `DISCNUMBER`/`DISCTOTAL`/`TOTALDISCS`). MP4 `trkn`/`disk`, MP3 `TRCK`/`TPOS`, FLAC `TRACKNUMBER`/`DISCNUMBER` plus `TRACKTOTAL`/`TOTALTRACKS`/`DISCTOTAL`/`TOTALDISCS`; ffprobe reads all three back as `track`/`disc`, the keys Audiobookshelf orders by. Single-folder imports, merged m4bs and tagging off: none written (source numbers kept)
+- Fixed set, no per-field settings; all under `metadata_tagging_enabled`
+
+**Tag details lookup** (`src/lib/processors/organize-tag-details.ts`):
+- Processor reads `metadata_tagging_enabled` once (`readMetadataTaggingEnabled`), passes it to the lookup and `organize()` (`placement.metadataTaggingEnabled`); unreadable → undefined: no lookup, `organize()` reads it itself
+- Only when tagging is on; one `getAudiobookDetails(asin)` per import (`createAudibleDetailsLoader`), shared with the missing-series backfill
+- Series known (lookup serves tags only): `{ fillSeries: false }` (no catalog series call), raced against `TAG_DETAILS_TIMEOUT_MS` (15 s); series missing: the lookup may add one catalog series call (`integrations/audible.md` series fill) and the backfill awaits it in full
+- Description: Audible summary (Audnexus `summary`) → stored `Audiobook.description` fallback (client text: bounded by `truncateRawText`, then `stripHtml` like the lookup)
+- Started right after the switch read, awaited just before `organize()` (setup reads run meanwhile; a no-op handler keeps a rejection handled if setup throws first)
+- A failed ffmpeg run reports `describeFfmpegFailure` (stderr tail, never the argv, so no description in job logs)
+- Job log "Metadata tag details: description=<n> chars, genres=…, publisher=…, subtitle=…, language=…": publisher, subtitle and language sanitized as written ("English"), a value over 100 characters shortened to 100 plus "…"; genres as looked up
+- Lookup failure or timeout is non-fatal (warning): stored description, no genres/publisher/subtitle/language (an MP4's remux then also drops the source's freeform tags; MP3/FLAC keep theirs)
+- Genres/description/publisher/subtitle/language are tags only (not path template variables); ebooks unchanged
 
 **Note:** ASIN is a custom metadata tag and may not appear in standard file properties viewers (Windows/macOS/Linux). Use specialized tools to verify:
 ```bash
@@ -118,16 +142,46 @@ ffprobe -v quiet -print_format json -show_format "audiobook.m4b" | grep -i asin
 exiftool "audiobook.m4b" | grep -i asin
 ```
 
+**MP4 layout:** every tagged MP4 is written moov first: ffmpeg `-movflags +faststart` on the tagging pass (always), and the freeform post-step also writes moov first. A post-step that refuses or fails leaves ffmpeg's output as it is (moov first, no freeform tags) and logs a warning.
+
+### MP4 Freeform Tags
+
+**Code:** `src/lib/utils/mp4-boxes.ts` (pure: parse, plan, verify), `src/lib/utils/mp4-freeform-tags.ts` (I/O)
+
+**Why a post-step:** ffmpeg's mp4 muxer writes only the iTunes atoms it knows and drops `-metadata ----:com.apple.iTunes:ASIN=…` (9.0.2's only freeform writer is `disc_subtitle` → `DISCSUBTITLE`). `-movflags use_metadata_tags` is not used: it replaces the iTunes `mdir` tag list with QuickTime `mdta` keys, so the cover (`covr`) is lost and iTunes-atom readers lose title/artist/album.
+
+**API:**
+- `buildMp4FreeformTags(metadata)` (`metadata-tagger.ts`) → `FreeformTag[]` (`{ name, value }`); the one place new freeform fields are mapped
+- `addMp4FreeformTags(file, sourceExt, metadata)` (`metadata-tagger.ts`) → `{ written, warning? }`: the organizer's one call; no-op unless `sourceExt` is an MP4 container
+- `addFreeformTags(file, tags)` → `{ written, warning? }`, never throws; sweeps stale partials in the folder (`removeStalePartials`), writes a `.rmab-partial-<hash>-<rand>.part` sibling (`partialNameFor`, short name), verifies, renames it over `file`, fsyncs the folder; no-op for `[]`. A failed write removes only what this run created; a failed rename removes the verified copy
+- `writeFreeformTaggedCopy(input, output, tags)`: output must differ from input and not exist (`wx`); input is only read
+
+**Rewrite:** output = `ftyp` + new `moov` + every other top-level box in input order; existing `----` items with the same name (case-insensitive) replaced, all other ilst items byte-identical; each `stco`/`co64` entry shifted by the move of the `mdat` holding its chunk.
+
+**Refused (file unchanged, warning):** top-level box other than `ftyp/free/skip/wide/mdat/moov`; not exactly one `ftyp` (first) and `moov`; no `mdat`; `mvex`; missing `udta`/`meta`/`ilst` (never created); meta handler ≠ `mdir`; a `trak` without exactly one `stco|co64`, `stsc`, `stsz` (or with `stz2`); non-self-contained `dref`; a chunk not wholly inside an `mdat` payload; `stco`/`co64` code count in moov (outside `udta`) ≠ tables read; a shifted `stco` entry > 0xFFFFFFFF; moov > 128 MiB; more than 1000 top-level boxes.
+
+**Verification:** before anything is written, the new moov's chunk offsets = offsets computed from the input, chunk sizes unchanged, each tag present exactly once; after the write and before rename: output size and top-level layout as planned, written moov bytes = the verified moov, chunk bytes equal input's (every chunk of non-audio tracks up to 1 MiB each, 64 spread audio chunks × 4 KiB), ffprobe reads every tag. All handles closed before rename (Windows).
+
+**Call site (one):** `file-organizer.ts`, per audio file right before placement, on the file about to be placed when RMAB wrote it: the tagged copy (`${file}.tmp`), else the merged file (tagging off, or the tagging pass failed on it). Never on a download's own file (tagging off, no merge → no ASIN in MP4s). It runs after the merge's own checks. The merger and tagger never write the ASIN; `metadata_tagging_enabled` is read once per `organize()`, or taken from `placement.metadataTaggingEnabled` (unreadable → tagging off, warning + `result.errors` "Metadata tagging skipped: could not read setting (<msg>)"). With tagging off it gets the ASIN only (publisher/subtitle/language are metadata tags). A write logs "Embedded ASIN <asin>, PUBLISHER, SUBTITLE, LANGUAGE in <file>" (info, the tags it was given); a refused one logs a warning naming every tag ("ASIN, PUBLISHER tags not written (<reason>)").
+
+**Resources:**
+- Disk: the merge check (`TEMP_DIR`) counts the estimated merged size × (1 merged file, + 1 post-step copy when there are freeform tags to write, + 1 tagged copy when tagging is on): 1x-3x. Freeform tags: the ASIN, and with tagging on publisher/subtitle/language. A tagged single file with an ASIN needs 2x its size next to the download (tagged copy + post-step copy)
+- Memory: peak ≈ 2x the moov while planning (the read moov is the scratch copy, offsets shifted in place, plus the assembled new moov; then 1x) + ~32 bytes per chunk (`Float64Array` offsets/sizes: the plan's old tables, and the re-analysis of the new moov during verification); moov capped at 128 MiB. Read-back compares run in 1 MiB chunks
+- Time: tagging ffmpeg timeout `ffmpegRemuxTimeoutMs(size)` = 120 s + 120 s/GiB (+faststart writes the file twice); the merger's codec-copy timeout is at least that for its estimated size
+
+**Fields (#208):** `ASIN` always; `PUBLISHER`, `SUBTITLE`, `LANGUAGE` with tagging on (Audiobookshelf 2.37.1 reads `publisher`, `subtitle`, `language` from these names). New fields go in `buildMp4FreeformTags`; a value empty after sanitizing is left out (the post-step writes all tags or none, so one bad value must not cost the ASIN).
+
 **Configuration:**
 - Key: `metadata_tagging_enabled` (Configuration table)
 - Default: `true`
 - Configurable in: Setup wizard (Paths step), Admin settings (Paths tab)
 
 **Implementation:**
-- Uses ffmpeg with `-codec copy` (no re-encoding, metadata only)
+- Uses ffmpeg with `-codec copy -movflags +faststart` for MP4 (no re-encoding, metadata only); timeout scales with the file size
+- The ASIN step (MP4 Freeform Tags) runs later, on the file being placed; its warnings are logged and do not fail the import
 - Fast (no audio transcoding)
 - Lossless (original audio preserved)
-- Runs after file copy, before cover art download
+- Runs before the move (tagged copies are placed, originals stay for seeding), before cover art download
 - Non-blocking (errors don't fail file organization)
 - Logs success/failure per file
 
@@ -141,15 +195,16 @@ exiftool "audiobook.m4b" | grep -i asin
 **Tech Stack:**
 - ffmpeg (system dependency - included in Docker image)
 - `src/lib/utils/metadata-tagger.ts` - Tagging utility
+- `src/lib/utils/metadata-text.ts` - text helpers: `sanitizeMetadataValue`, `sanitizeMultilineValue`, `sanitizeGenreName`, `truncateRawText`, `capUtf8Bytes`, `describeFfmpegFailure`, `MAX_DESCRIPTION_BYTES`, `MAX_RAW_DESCRIPTION_LENGTH`
 - Integrated into `src/lib/utils/file-organizer.ts`
+- `src/lib/processors/organize-tag-details.ts` - description/genres for the tags
 
 **Requirements:**
-- ffmpeg must be installed in the container
-- **Multi-container setup** (`Dockerfile`): Added at line 56 via `apk add ffmpeg`
-- **Unified setup** (`dockerfile.unified`): Added at line 16 via `apt-get install ffmpeg`
-- **Verify installation:**
-  - Multi-container: `docker exec readmeabook ffmpeg -version`
-  - Unified: `docker exec readmeabook-unified ffmpeg -version`
+- ffmpeg + ffprobe must be on PATH (`/usr/local/bin`)
+- **Image install** (`dockerfile.unified`): see [deployment/unified.md](../deployment/unified.md) → ffmpeg (pinned static 9.0.2, amd64 + arm64)
+- Codecs/formats RMAB needs: demux concat/ffmetadata/mov/mp3/flac/aac/ogg; decode mp3/flac/aac/alac/ogg (vorbis, opus); encode aac (libfdk_aac optional, not in image); mux mp4/ipod/mp3/flac/null; bsf aac_adtstoasc
+- **Verify installation:** `docker exec readmeabook ffmpeg -version`
+- **Fixed (#230):** arm64 images shipped an amd64 ffprobe (`Exec format error`), silently disabling tagging + chapter merge
 
 ## Plex Format Coercion
 
@@ -180,7 +235,9 @@ exiftool "audiobook.m4b" | grep -i asin
 
 **Behavior:**
 - Each audio file evaluated independently (mixed-format folders supported).
-- Pre-rename collision check: if target exists → no-op + info log. Never overwrites.
+- Only library files holding this import's content are renamed (`coercibleTargets`): `copied`, or `identical` (e.g. the earlier attempt's copy on a retry after a crash). `present`/`differs` targets are never touched. Same-size existing `.mp4`/`.m4a` targets are always byte-compared (`COERCION_CANDIDATE_EXTENSIONS`), so a retry gets `identical` rather than `present`. `.m4a` siblings are still counted over every organized file.
+- Never overwrites: `link(old, new)` then `unlink(old)` (`EEXIST` → no-op + info log, both files kept), under the same per-target lock as `placeFile` (`withTargetLock`, key = folder + name without extension), so a concurrent organize job (queue concurrency 2) placing `Book.m4b` is never replaced. No hard links on the filesystem → lstat + rename (in-process serialized by the lock). A run stopped between link and unlink (both names on one file: same dev/ino, regular files) is finished by dropping the old name. A failed unlink undoes the link only while the old name still exists (ENOENT = the old name is gone, the new one stays).
+- Renamed placement records get the new target path.
 - Idempotent: re-running on already-coerced folder is a no-op (extension is the signal — no marker files).
 - Operates on `targetPath` (organized library files) only — never touches `/downloads` (seeding-safe).
 
@@ -193,7 +250,7 @@ exiftool "audiobook.m4b" | grep -i asin
 - `src/lib/utils/format-coercion.ts` — coercion module
 - `src/lib/constants/audio-formats.ts` — `PLEX_COMPATIBLE_EXTENSIONS`, `COERCION_RENAME_MAP`, `DRM_EXTENSIONS`, `TRANSCODE_REQUIRED_EXTENSIONS`
 - Invoked from `src/lib/processors/organize-files.processor.ts` between file organization and `generateFilesHash`
-- `fs.rename` (same filesystem — no cross-mount issues)
+- `fs.link` + `fs.unlink` (same folder — no cross-mount issues)
 
 **Hash Interaction:**
 - File hash (`audiobooks.files_hash`) is generated AFTER coercion → reflects post-coercion filenames.
@@ -214,8 +271,8 @@ exiftool "audiobook.m4b" | grep -i asin
 1. Find requests with status 'available' or soft-deleted (orphaned downloads)
 2. Query qBittorrent for actual `seeding_time` field
 3. **CRITICAL: Check if torrent hash is shared by other active requests**
-   - If yes → Skip torrent deletion, only hard-delete the soft-deleted request record
-   - If no → Delete torrent + files
+   - Any of them not finished, or not done seeding by its own indexer (#283) → Skip torrent deletion, only hard-delete the soft-deleted request record
+   - Else → Delete torrent + files, mark every sharing row removed ([request-deletion.md](../admin-features/request-deletion.md))
 4. Delete torrent + files only after seeding requirement met
 5. Respects config (0 = never cleanup)
 
@@ -226,6 +283,90 @@ When user deletes and re-requests the same audiobook:
 - Before deleting torrent, checks if any active (non-deleted) request uses same hash
 - If found → Keeps torrent, only removes soft-deleted database record
 - Prevents deleting source files for active requests during chapter merging
+
+## Post-Organize Cleanup Safety
+
+**Code:** `src/lib/processors/organize-cleanup.ts`, `src/lib/processors/organize-cleanup-guard.ts`, `src/lib/utils/delete-guard.ts`, `src/lib/utils/import-inventory.ts`
+
+**Download cleanup** (indexer `removeAfterProcessing`, non-torrent) runs only when all hold:
+- Job payload carries `downloadHistoryId` (set by monitor-download, retry-failed-imports, direct-download, request retry route; never by manual or bulk import)
+- That row belongs to the request, `downloadStatus = completed`, stored `downloadPath` == job `downloadPath`
+- Protocol: indexer `protocol` (case-insensitive), else `CLIENT_PROTOCOL_MAP[downloadClient]`; unknown or `torrent` → skip
+- Row not recorded `addedByRmab: false` (a client job RMAB took over, e.g. a SABnzbd duplicate, #329) → else skip, files kept
+- retry-failed-imports writes a client-reported (mapped) path back to the row before queueing; a failed write only skips cleanup
+
+**`assertSafeToDelete(path, ctx)`** guards every delete in both cleanups (download + manual-import `cleanupSource`). Refused deletes log a warning; the job still succeeds.
+
+| Rule | Refuses |
+|------|---------|
+| a | Equals, contains, or is inside the organize target |
+| b | Equals or contains any root: `media_dir`, `download_dir`, `download_dir/customPath` per client, mapped `localPath` per client, `/bookdrop` |
+| c | Inside `media_dir`, unless inside a download root that itself sits strictly inside `media_dir` (`allowMediaSources` bypasses c for `cleanupSource` files only; a whole folder inside `media_dir` is never removed) |
+
+- Comparison: realpath of candidate, target and roots (symlinks, junctions), plus dev+inode identity of the entry and its ancestors (case-insensitive mounts). Inode 0 never matches.
+- Acts on the path the guard returns (the canonical path it checked). For a symlink candidate the rules are applied to both the link's target and the link's own location (canonical parent + name, lstat identity); only the link is removed. A library entry that is a link to a seeding file is therefore refused.
+- Fail closed: roots are read straight from the database (`download_dir`, `download_clients`, legacy mapped path; no cache, no swallowed errors). Any database, decryption or JSON error, or any root that is a filesystem root, → nothing is deleted (job still succeeds).
+- Empty-parent sweep: walks up to the nearest ancestor that is a configured root (canonical path or dev+inode match) and stops there, never removing it. No sweep when no ancestor is a root, or when the nearest root is only a client's mapped `localPath` (a mapped path that is also `download_dir` still sweeps).
+- `cleanupSource` + `selectedFiles`: each file is checked; files inside the target are kept and listed in a warning (in-place renamed re-imports keep the old-named file).
+- Ebook `cleanupSource` removes only the imported ebook file (`result.sourceFile`; the original EPUB when the Kindle fix ran), never its folder.
+- Direct HTTP download files (`downloadClient = direct`) are removed by `cleanupDirectDownloadSource` (same provenance gate + guard); the organizer itself never deletes its source.
+- Manual vs download job: `isManualImport = !downloadHistoryId && typeof cleanupSource === 'boolean'` (manual sends `true`, bulk `false`; download jobs leave it unset). A failed manual/bulk import → request `failed` with `Import from <path> did not complete: <error>. Fix the folder and run the import again.`, one notification without the path, result `success: false` (not thrown, so no queue retries); never `awaiting_import` (that path re-queues the request's last client download).
+- Windows drive roots normalize to `C:/` (`normalizeGuardPath`), never `C:.` (the drive's current directory).
+- `media_dir` resolution shared via `src/lib/utils/media-dir.ts` (`media_dir` → `MEDIA_DIR` → `/media/audiobooks`).
+
+**Same-file copies:** `copyFile` is a no-op when source and destination are the same file (`isSameFile`: realpath equal, or same dev + non-zero inode); the organizer skips audio and cover art already in place.
+
+## Verified Import (delete only what reached the library)
+
+**Code:** `src/lib/utils/copy-file.ts`, `src/lib/utils/organize-copy.ts`, `src/lib/utils/cover-placement.ts`, `src/lib/utils/import-inventory.ts`, `src/lib/utils/audio-duration.ts`, `src/lib/processors/organize-evidence.ts`
+
+**Atomic copy (`copyFile`):** writes `<target dir>/.rmab-partial-<sha256(name)[:12]>-<rand>.part` through one FileHandle (write, fsync, close all fatal) → size must equal the source → publish → final path must have that size and the partial's dev/ino (when ino ≠ 0) → best-effort directory fsync (EINVAL/ENOTSUP/EISDIR/EBADF/EPERM/EACCES ignored). An inode change after publish or a failed folder fsync is accepted only if the final file holds the source's exact bytes. Failed rename/link (EXDEV, EBUSY, EACCES, …) = failed; never falls back to writing the final name. A crash leaves only a hidden `.part` file. `writeFileAtomic(dest, buffer)` runs the same steps for in-memory bytes (downloaded covers).
+- Publish modes: `replace` (rename over; used only to repair an interrupted copy) and `create` (new targets: `link(partial, dest)` then unlink the partial; `EEXIST` if the target appeared → `placeFile` re-runs the existing-target rules on it). Filesystems without hard links fall back to lstat + rename, serialized in-process.
+- `placeFile` also serializes placements per target name (any extension) in-process: two organize jobs (queue concurrency 2) placing the same generic file name never overwrite each other; the second gets `identical`/`differs`.
+- Permissions (`applyFileMode` → `applied` / `refused` / `missing`): after a copy is published, `chmod(file_chmod)` is best-effort. mergerfs/NFS/FUSE/SMB often refuse it (EPERM, ENOTSUP, EACCES, …) though the write succeeded → placement stays `copied` with `PlaceResult.warning` (path, octal mode, code). ENOENT/ENOTDIR mean no file at the path → `failed`, never verified. Same for downloaded/cached cover art (missing = cover failed). No `chown` is done
+- Warnings collect in `OrganizationResult.permissionWarnings` / `EbookOrganizationResult.permissionWarnings` (never in `errors`); `reportImportStatus` logs one summary per job (`summarizePermissionWarnings`) and the request message gets `permissions could not be applied to <n> file(s)`
+
+**Stale partials:** before placing, regular files in that one target folder matching the exact pattern are removed when they belong to this target name or are older than 24 h.
+
+**`placeFile(source, target)` statuses** (records keyed on the original source path):
+
+| Existing target | Status |
+|-----------------|--------|
+| none | `copied` |
+| not a regular file (symlink, dir) | `differs`, never overwritten |
+| same regular file (hard link ok) | `identical` |
+| smaller and a byte-prefix of the source (interrupted copy) | re-copied → `copied` |
+| smaller, not a prefix (other book, edited tags) | `differs` |
+| same size | `identical` / `differs` by chunked compare when a delete depends on it, else `present` |
+| larger | `differs` |
+
+- `.mp4` / `.m4a` targets also match an existing `<name>.m4b` (Plex format coercion rename).
+- Tagged derivative (`<source>.tmp`): checked before it is placed: its audio duration must be within 1 s of the original's, both measured from the first audio stream's packets (`probeStreamDurationMs`; `format.duration` is an estimate for e.g. VBR MP3 without a Xing header). Otherwise (or on probe failure) the original is placed untagged (byte-checked) and the record carries `tagsDropped` (short reason, shown on the request). A derivative that fails or differs at placement falls back to the original (`tagsDropped` when the original was copied). After a failed derivative copy the fallback runs with `resumeInterrupted: false`: an existing target (the failed copy may have landed) is never replaced. If the target was not there before the tagged attempt, what is there now is RMAB's own unverified copy → `failed` (not `differs`); the reason keeps both parts (`Tagged copy failed (…); original not placed (…)`). The check runs on every import, torrents included: seeded-torrent cleanup removes the download later without import evidence, so the library copy must already be right. Tagging does not use `-xerror` (codec copy would turn benign timestamp warnings into lost tags).
+- Chapter merge: inputs map to the merged target; verified only if the merged file holds all the chapters' audio, both measured from packets (`MergeResult.durationVerified`, `verifyMergedContent` in `merge-verification.ts`; see [chapter-merging.md](../features/chapter-merging.md)): codec copy → output packet count == sum of the chapters' (exact, no window); re-encode → content at most 1 s short (up to 1 s + 50 ms/chapter long); no timeline gap. Otherwise the merged file and all sources are kept. Fails the merge (`checkMergedOutput`) → files organized individually: a merged timeline with gaps or an end more than 1 s + 50 ms/chapter from its audio, or a re-encode more than 1 s short. Re-encodes rebuild timestamps from the sample count (`-af asetpts=N/SR/TB`) when every chapter decodes to the same rate/channels/layout/sample format: covers ADTS `.aac` and VBR MP3 without a Xing/VBRI header, whose container durations are estimates. Merges do not use `-xerror` (one bad frame must not drop the merge; `durationVerified` guards deletes).
+- Book row after an audio import: `filePath` = title folder, `fileFormat` = extension of the placed audio (most common one for multi-file), `filesHash` = `generateFilesHash` of this import's audio AFTER format coercion (`copied`/`identical`/`present`; `differs` targets, files the library already held, are excluded and never coerced). An all-`differs` import stores no hash, so an admin request delete keeps the folder ([request-deletion.md](../admin-features/request-deletion.md)); library matching then falls back to ASIN/title
+- Compare cost: same-size compares run only when a delete may follow (manual `cleanupSource`, or a download that cleanup would remove: `downloadCleanupKind` ≠ `none`; a failed lookup counts as may-follow), except for `.mp4`/`.m4a` targets, which are always compared (also against an existing same-size coerced `.m4b`) so coercion can tell this import's copy (`identical`) from another file; compares stop at the first differing chunk.
+
+**Deletes consume the records (`ImportEvidence`):**
+- Selected files (`cleanupSource` + `selectedFiles`): only those with a verified record (`copied`/`identical`); others are kept and listed in a warning. Disc-folder entries (`Disc 1/01.m4a`) work the same; emptied disc folders stay behind (no sweep below the source folder).
+- Whole folder or file (download cleanup, `cleanupSource` without selection, direct download): inventory complete (every source folder readable) and every audio file found in it verified; then a fresh walk right before removal must be complete and find no audio (or ebook) file the import never saw. Otherwise the download is kept and `postProcess` (client history archive) is skipped.
+- Ebook folders: kept when they hold more ebook files than were imported.
+- Only audio (or the ebook) is verified: non-audio extras (cover, nfo, samples) go with the folder.
+- Request messages (`errorMessage` on status `downloaded`, shown amber in the admin requests table; a full import clears it; audiobooks and ebooks):
+
+| Situation | Message |
+|-----------|---------|
+| some files failed | `<n> of <m> files not imported; source files kept` |
+| every file already in the library with different content | `already in the library with different content; source kept` (not a failure; no failure notification) |
+| merge kept but not verified (audio missing or not measurable) | `merged file kept; sources kept` |
+| file permissions refused (appended to any of the above, or alone) | `permissions could not be applied to <n> file(s)` |
+| source folder not fully readable | `... source folder could not be fully read; source files kept` |
+| tagged file failed its length check or could not be saved (untagged original copied) | `the file was imported without metadata tags (<reasons>)` (one-file book), `1 file imported ...`, or `<n> of <m> files imported ...`; counted per library file (a merge is one), every distinct reason listed (`the length could not be checked`, `the tagged version had a different length`, `the tagged version could not be saved to the library`); appended with `; ` to any message above |
+| ebook download that cleanup would remove (`downloadCleanupKind` = `indexer`) holds more ebook files than were imported; import itself complete | `download kept: it holds several ebook formats and only one was imported; remove it from the download client once you no longer need the others` (`several ebook files` when they share one extension) |
+| Kindle-fixed EPUB failed its read-back check (ebooks) | `Kindle fix could not be verified; original imported` (placed before any message above, joined with `; `) |
+
+- Kindle-fixed EPUB: the library gets the fixed copy only after it passes its read-back check (entries + CRCs + hashes); the original EPUB then counts as imported once that copy is placed (`copied`/`identical`). A copy that fails the check is never imported: the original is placed instead (its own byte-verified placement is the evidence) and the message is `Kindle fix could not be verified; original imported`.
+- EPUB folders: other files next to the ebook (cover, opf, extras) are not verified and go with the folder when it is removed.
+- Not covered here: seeded-torrent cleanup (`cleanup_seeded_torrents`) removes torrent data after seeding without import evidence, and library matching clears the partial-import message. Tracked separately.
 
 ## Interface
 
@@ -250,7 +391,9 @@ async function organize(
 - Remove invalid chars: `<>:"/\|?*`
 - Trim dots/spaces
 - Collapse multiple spaces
-- Limit to 200 chars
+- Limit to 200 UTF-16 units per variable (and per renamed base name), cut between grapheme clusters (`capGraphemeUnits`); same for `FileOrganizer.sanitizePath` (merge temp name, source-aware folder prefixes)
+- Ebook source name (renaming off): 200 units for the whole name, but only the stem is cut, so the extension is kept; a name that fits is unchanged
+- Then every finished component ≤255 UTF-8 bytes (`src/lib/utils/path-component.ts`): `capPathComponents` on `substituteTemplate` output; `capFilenameBytes(stem, suffix)` for renamed files (` - N` + ext), the merge temp `.m4b` (4 bytes left for the tagger's `<name>.tmp` when tagging is on; `TAG_TEMP_SUFFIX`), source-aware names (only the folder prefix cut), ` (N)` dedup, ebook source names. Cut between grapheme clusters (an emoji sequence, flag or accented letter stays whole), trailing spaces/dots trimmed; a component that fits is unchanged
 - Example: `Author: The <Best>! Book?` → `Author The Best! Book`
 
 ## Configuration
@@ -271,6 +414,17 @@ async function organize(
 **4. Single file downloads** - Now supports files directly in downloads folder (not just directories)
 **5. Hardcoded media path** - Now reads `media_dir` from database config instead of hardcoded `/media/audiobooks`
 **6. Invalid URL error for cached cover art** - Fixed by detecting local cached thumbnails (`/api/cache/thumbnails/*`) and copying from `/app/cache/thumbnails/` instead of attempting HTTP download
+**7. Manual import deleted library folders (#242)** - Download cleanup used the request's newest download row regardless of origin and `rm -rf`'d the import folder (even the media root); `cleanupSource` with source == target unlinked the library files; in-place re-import truncated `cover.jpg` to 0 bytes. Fixed by provenance gate + delete guard + same-file copy skip (see Post-Organize Cleanup Safety)
+   - Upgrade note: organize jobs queued before this change carry no `downloadHistoryId`, so they skip download cleanup once (files stay on disk, client history entry is not archived). Their import retry on transient errors is unchanged; only manual/bulk imports fail without retry
+**8. Cleanup after partial or interrupted imports** - A download was removed when at least one file copied, an interrupted copy left a truncated file under the final name that later counted as done, and a same-named existing file skipped the copy while the source was still deleted. Fixed by atomic copies, per-file placement records and verified-only deletes (see Verified Import)
+**9. chmod refused after a successful copy (#233)** - Before verified import, a post-copy `chmod` EPERM on mergerfs/NFS/FUSE failed the import (`awaiting_import`) and the fallback copied the untagged original over the tagged copy. Verified import already made audio chmod non-fatal; on top of it: permission warnings (one per job, plus a request note), best-effort chmod for downloaded/cached cover art, chmod ENOENT/ENOTDIR = failed, and a fallback that never replaces a landed copy
+**10. Format coercion could replace a library file** - The `.mp4`/`.m4a` → `.m4b` rename checked for the target and then renamed outside the placement lock, so a concurrent organize job's fresh `Book.m4b` could be overwritten, and files already in the library (`differs`, `present`) were renamed too. Fixed: only files holding this import's content are renamed, by link + unlink under the per-target lock (see Plex Format Coercion); a retry after a crash also renames the earlier attempt's (`identical`) copy. Known limit: if a retry's source changed (e.g. new metadata tags) after a crash before coercion, the earlier copy now differs: it stays `.m4a`/`.mp4` and the request says the library has different content
+**11. Cover art replaced the library cover** - A cached thumbnail was copied in replace mode and a downloaded cover was written with a plain `fs.writeFile`, so an existing `cover.jpg` was overwritten and an interrupted download left a truncated one. Fixed: covers are published without replacing (see Process step 7); an empty `cover.jpg` an older version left behind is replaced. Known limit: replacing an empty cover is check-then-rename; all RMAB writers share the per-target lock, but an outside writer (e.g. Audiobookshelf storing covers with the item) landing a cover in that window would be replaced
+**12. Silent keeps** - A usenet ebook release with several formats was kept with no request message, and a tagged copy that failed its duration check only showed in job errors. Fixed: both now get a request message (see Verified Import)
+**13. Chapter merge verified a merge that lost audio** - Codec-copy AAC merges count each later chapter's priming + trimmed last packet as full frames (~69 ms/boundary at 22.05 kHz, ~35 ms at 44.1 kHz). The symmetric 1 s + 50 ms/chapter content window let that surplus cancel real loss (80 chapters, last one read short → verified) and failed correct merges past ~56 chapters (and short-chapter merges at the 2% check). Fixed: copy verified by exact packet count (same frame); re-encode shortfall capped at 1 s. VBR MP3 without a Xing header placed later chapters at ffprobe's estimate (holes, markers off) yet the merge succeeded: a timeline with gaps or an end far from the audio now fails the merge. Re-encodes of chapters with one decoded format get `asetpts=N/SR/TB` (ADTS `.aac`, Xing-less VBR MP3 verify instead of failing on estimate drift that grows with chapter length); mixed formats keep container timestamps (a filter-graph rebuild restarts the count). A re-encode over 1 s short fails the merge (rebuilt timestamps leave no gap to catch a short read)
+**14. ASIN never written into .m4b/.m4a; tagging dropped faststart (#208)** - ffmpeg's mp4 muxer silently dropped `-metadata ----:com.apple.iTunes:ASIN=…` (tagger and merger), so Audiobookshelf got no ASIN from RMAB imports (the default `{title} {asin}` folder has no `[ASIN]` brackets). The tagger also had no `+faststart`, so every tagged MP4 (merged ones included) ended moov last, undoing the merger's playback-delay fix. Fixed: MP4 Freeform Tags post-step (moov first, verified) as one organizer step on the file being placed, so the ASIN also survives a failed tagging pass after a merge; the tagger always uses `+faststart`
+**15. Long non-Latin titles failed the import with ENAMETOOLONG (#264)** - The 200-char cap counted characters, not bytes (Cyrillic 2, CJK 3, emoji 4 per char), and nothing capped a joined component (`{title} - {series}`). Fixed: final 255-byte cap per component (see Path Sanitization)
+**16. The 200-unit cap could split an emoji or drop an ebook's extension (#474)** - `.slice(0, 200)` (template and `FileOrganizer.sanitizePath`) cut UTF-16 code units, leaving half a surrogate pair or a broken joined emoji, and cut an ebook source name of 201+ characters through its extension. Fixed: cut between grapheme clusters; the ebook name cuts the stem only (see Path Sanitization)
 
 ## Tech Stack
 

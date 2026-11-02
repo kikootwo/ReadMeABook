@@ -380,7 +380,7 @@ describe('SABnzbdService', () => {
     expect(extracting.state).toBe('extracting');
   });
 
-  it('maps completed status when percentage is 100', () => {
+  it('maps a 100 percent queue item to extracting, not completed', () => {
     const service = new SABnzbdService('http://sab', 'key');
     const progress = service.getDownloadProgress({
       nzbId: 'nzb-7',
@@ -394,8 +394,74 @@ describe('SABnzbdService', () => {
       priority: 'Normal',
     });
 
-    expect(progress.state).toBe('completed');
+    expect(progress.state).toBe('extracting');
     expect(progress.percent).toBe(1);
+  });
+
+  it('reports completed only once history says Completed, with its storage path', async () => {
+    // 100% in the queue is the tail of file assembly. SAB then moves the job to history,
+    // where post-processing (Verifying, Repairing, Extracting, Moving, Running) is reported;
+    // only a Completed history slot is done and has the final path.
+    const finalPath = '/downloads/readmeabook/Post Processing Book';
+    let historyStatus: string | null = null; // null: still in the queue
+    clientMock.get.mockImplementation(async (_url: string, config: { params: { mode: string } }) => {
+      if (config.params.mode === 'queue') {
+        return {
+          data: {
+            queue: {
+              slots: historyStatus !== null ? [] : [{
+                nzo_id: 'nzb-pp',
+                filename: 'Post Processing Book',
+                mb: '100',
+                mbleft: '0',
+                percentage: '100',
+                status: 'Downloading',
+                timeleft: '0:00:00',
+                cat: 'readmeabook',
+              }],
+            },
+          },
+        };
+      }
+      if (config.params.mode === 'history') {
+        return {
+          data: {
+            history: {
+              slots: historyStatus === null ? [] : [{
+                nzo_id: 'nzb-pp',
+                name: 'Post Processing Book',
+                category: 'readmeabook',
+                status: historyStatus,
+                bytes: '104857600',
+                // Even a known path must not complete the job before SAB says Completed.
+                storage: historyStatus === 'Extracting' ? '' : finalPath,
+                completed: historyStatus === 'Completed' ? '1700000000' : '0',
+              }],
+            },
+          },
+        };
+      }
+      throw new Error(`Unexpected SABnzbd mode: ${config.params.mode}`);
+    });
+
+    const service = new SABnzbdService('http://sab', 'key');
+
+    // Still in the queue at 100%: keep monitoring, there is no path to organize yet.
+    const assembling = await service.getDownload('nzb-pp');
+    expect(assembling).toMatchObject({ status: 'processing', progress: 1 });
+    expect(assembling?.downloadPath).toBeUndefined();
+
+    // Post-processing in history: neither completed nor failed, so the monitor keeps polling.
+    for (const status of ['Extracting', 'Moving']) {
+      historyStatus = status;
+      const postProcessing = await service.getDownload('nzb-pp');
+      expect(postProcessing, status).not.toBeNull();
+      expect(['completed', 'failed'], status).not.toContain(postProcessing?.status);
+    }
+
+    historyStatus = 'Completed';
+    const done = await service.getDownload('nzb-pp');
+    expect(done).toMatchObject({ status: 'completed', downloadPath: finalPath });
   });
 
   it('creates the default category when missing', async () => {
