@@ -1,6 +1,6 @@
 /**
  * Component: Request Cancel Service
- * Documentation: documentation/admin-features/request-deletion.md
+ * Documentation: documentation/admin-features/request-cancel.md
  *
  * The one cancel path (web UI, admin table, API tokens, Discord). Authorization stays with the
  * caller. Order: one conditional write flips the status (committed before any client call), the

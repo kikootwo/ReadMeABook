@@ -1,6 +1,6 @@
 /**
  * Component: Cancelled Request - Download Handling
- * Documentation: documentation/admin-features/request-deletion.md
+ * Documentation: documentation/admin-features/request-cancel.md
  *
  * What a cancel does with the request's newest selected download: remove a partial torrent RMAB
  * added, keep a finished one until its indexer's seeding rule is met, leave anything unclear alone.

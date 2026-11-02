@@ -186,7 +186,8 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 - Not owned → no remove call at all; no post-import `setCategory`; no Transmission seed-limit rewrite on `torrent-duplicate`
 - Post-import category (`applyPostImportCategory()`, `src/lib/processors/post-import-category.ts`, reads the same row as organize-files: `requestId`, newest `createdAt`): `null`/`false` skip; `true` → one strict probe (error / not found → skip) → `resolveOwnership()` (removed, re-added, older copy → skip). Info log on every skip. Downloads in flight at upgrade (`null`) never get the post-import category
 - Deluge `setCategory` replaces the torrent's label (one label per torrent); now only on RMAB's own torrents
-- **Strict probe** `probeDownload(id)` (seeding cleanup only; one request, qBittorrent: plus one unfiltered lookup after an empty answer, for a hybrid stored by its v1 hash; no not-found retries, unlike `getDownload()`): `{found:true, info}` | `{found:false}` | throws
+- **Cancel (#228):** the cancel's download step and the seeding cleanup's cancelled-download pass follow the same rule (`knownNotOwned` before any call, strict probe, `resolveOwnership`, `recordNotOwned`); see [request-cancel.md](../admin-features/request-cancel.md). NZBGet cancel uses `deleteQueuedDownload()` (queue only, name or category must match), never `deleteDownload()`
+- **Strict probe** `probeDownload(id)` (seeding cleanup and cancel; one request, qBittorrent: plus one unfiltered lookup after an empty answer, for a hybrid stored by its v1 hash; no not-found retries, unlike `getDownload()`): `{found:true, info}` | `{found:false}` | throws
 
 | Client | `found:false` only for | Throws |
 |---|---|---|

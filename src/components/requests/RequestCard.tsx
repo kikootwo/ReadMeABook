@@ -289,7 +289,7 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
         message={
           isAwaitingApproval
             ? 'This request is pending admin approval and will be withdrawn. You can request it again later.'
-            : 'This request has already been approved and is actively being processed. Cancelling will stop the download.'
+            : "RMAB stops this request's download and removes what it downloaded so far, unless another request still uses it. A download that already finished may stay in the download client to seed."
         }
         confirmText={isAwaitingApproval ? 'Withdraw request' : 'Cancel request'}
         cancelText="Keep request"

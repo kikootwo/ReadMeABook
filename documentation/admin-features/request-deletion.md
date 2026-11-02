@@ -12,6 +12,8 @@ Allows admins to delete requests from the admin dashboard with smart handling of
 - Torrent seeding management
 - Orphaned download tracking
 
+**Cancel vs Delete:** cancel stops the download and keeps the request (`cancelled`); see [request-cancel.md](request-cancel.md).
+
 ## Key Features
 
 1. **Soft Delete** - Preserves request history, allows re-requesting
@@ -400,6 +402,7 @@ Queries Updated (deletedAt: null filters):
 
 ## Related
 
+- [Request Cancel](request-cancel.md) - What a cancel does to the download
 - [Admin Dashboard](../admin-dashboard.md) - Dashboard overview
 - [Scheduler](../backend/services/scheduler.md) - Cleanup job details
 - [File Organization](../phase3/file-organization.md) - Media directory structure

@@ -551,7 +551,7 @@ export function RequestActionsDropdown({
         message={
           isAwaitingApproval
             ? `"${request.title}" is pending admin approval and will be withdrawn. The user can request it again later.`
-            : `"${request.title}" has already been approved and is actively being processed. Cancelling will stop the download.`
+            : `Cancel "${request.title}"? RMAB stops this request's download and removes what it downloaded so far, unless another request still uses it. A download that already finished may stay in the download client to seed.`
         }
         confirmText={isAwaitingApproval ? 'Withdraw request' : 'Cancel request'}
         cancelText="Keep request"

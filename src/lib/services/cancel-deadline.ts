@@ -1,6 +1,6 @@
 /**
  * Component: Cancel Deadline
- * Documentation: documentation/admin-features/request-deletion.md
+ * Documentation: documentation/admin-features/request-cancel.md
  *
  * The cancel answers within a few seconds. Its download step checks the deadline right before
  * every client delete and every row write: once it has passed, nothing more is changed and the

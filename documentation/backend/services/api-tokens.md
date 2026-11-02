@@ -24,6 +24,7 @@ Static `rmab_`-prefixed tokens act with the owner's full user-level permissions 
 | GET | `/api/requests` | List requests | | |
 | POST | `/api/requests` | Create request | ✓ | |
 | GET | `/api/requests/:id` | Get request by ID | | |
+| POST | `/api/requests/:id/cancel` | Cancel request | ✓ | |
 | GET | `/api/admin/metrics` | System metrics | | ✓ |
 | GET | `/api/admin/downloads/active` | Active downloads | | ✓ |
 | GET | `/api/admin/requests/recent` | Recent requests | | ✓ |
@@ -53,6 +54,13 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 
 ## Fixed Issues
 - **#261 GET `/api/requests/:id` 500 `FetchError` for any request with a selected download:** `NextResponse.json` threw `Do not know how to serialize a BigInt` on `DownloadHistory.torrentSizeBytes`. Fix: response passes through `toJsonSafe()` (BigInt → number; Dates/Decimals untouched). Other routes `select` around the BigInt columns or convert with `Number()`; routes with a full `audiobook` include carry `fileSizeBytes`, which nothing writes yet (always null), so they serialize today.
+
+## POST `/api/requests/:id/cancel` (Write, #228)
+- Route: `src/app/api/requests/[id]/cancel/route.ts` → `cancelLoadedRequest()` ([request-cancel.md](../../admin-features/request-cancel.md)).
+- Owner, or effective role admin (a token acts with its owner's current role); 403 otherwise; 404 missing or soft-deleted; 400 status not cancellable.
+- `200 { success, request: {id, status, cancelledAt}, download, message }`: no `selectedTorrent`, no download internals. Non-admin messages never name the client or a sharing request.
+- Stops RMAB's own partial download; a finished one may stay to seed; never deletes library files.
+- `PATCH`/`DELETE /api/requests/:id` are NOT on the allowlist. The raw `DELETE /api/requests/:id` handler was removed (405); admin delete is `DELETE /api/admin/requests/:id` (JWT only).
 
 ## GET `/api/audiobooks/search`
 - Auth is optional (route never calls `requireAuth`). An API token counts only on allowlisted endpoints (this one is listed); elsewhere `getOptionalAuthUser` treats it as no caller.
@@ -84,6 +92,7 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - `tests/constants/api-tokens.test.ts` — matcher: positive matches, negative matches, sub-route exclusion, method case-insensitivity, allowlist/docs parity.
 - `tests/middleware/auth.middleware.test.ts` — middleware token auth path, allowlist enforcement (incl. dynamic ID match), sibling-route blocking, `getOptionalAuthUser`.
 - `tests/api/requests-id.route.test.ts` — owner GET 200, cross-user GET 403.
+- `tests/api/requests-cancel.route.test.ts` — cancel route: owner 200 minimal body, cross-user 403, admin any, 404, 400.
 - `tests/api/requests-id.bigint.route.test.ts` — owner/admin GET 200 with BigInt sizes as numbers (#261).
 - `tests/utils/json-safe.test.ts` — `toJsonSafe()` BigInt conversion, Date/Decimal passthrough.
 

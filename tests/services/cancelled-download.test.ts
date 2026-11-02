@@ -1,6 +1,6 @@
 /**
  * Component: Cancelled Request - Download Handling Tests (torrent)
- * Documentation: documentation/admin-features/request-deletion.md
+ * Documentation: documentation/admin-features/request-cancel.md
  *
  * Fails on main: a cancel never touched the client (the module is new).
  */

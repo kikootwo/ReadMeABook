@@ -1,6 +1,6 @@
 /**
  * Component: Cancelled Request - Usenet Download Handling
- * Documentation: documentation/admin-features/request-deletion.md
+ * Documentation: documentation/admin-features/request-cancel.md
  *
  * Cancel time only (no strict lookup for usenet, and NZBGet reuses ids): a job RMAB added that is
  * still queued, downloading or paused is deleted from the queue with its files. A finished job

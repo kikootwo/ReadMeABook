@@ -1,6 +1,6 @@
 /**
  * Component: Request Cancel Service Tests
- * Documentation: documentation/admin-features/request-deletion.md
+ * Documentation: documentation/admin-features/request-cancel.md
  *
  * Fails on main: the cancel wrote `status` by id (overwriting a status that moved on) and never
  * touched the download.

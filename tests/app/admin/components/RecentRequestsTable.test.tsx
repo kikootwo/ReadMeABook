@@ -390,6 +390,21 @@ describe('RecentRequestsTable', () => {
     });
   });
 
+  it('shows what the server says happened to the download after a cancel', async () => {
+    fetchWithAuthMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, download: 'kept_seeding', message: 'Request cancelled. Its finished download stays in qBittorrent until it has seeded.' }),
+    });
+
+    render(<RecentRequestsTable />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel Trigger' }));
+
+    await waitFor(() => {
+      expect(toastMock.success).toHaveBeenCalledWith('Request cancelled. Its finished download stays in qBittorrent until it has seeded.');
+    });
+  });
+
   it('shows pagination info', () => {
     const { container } = render(<RecentRequestsTable />);
 
