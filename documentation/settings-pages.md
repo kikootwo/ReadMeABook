@@ -478,6 +478,7 @@ src/app/admin/settings/
 - Enable/disable toggle
 - Test button (sends sample notification)
 - Password masking for sensitive values
+- Field help text from provider `configFields[].helpText`; Apprise Tag: `{user}` = requester's tag-safe username, Config Key only (see notifications.md)
 
 **Event Types:**
 - Request Pending Approval - Admin approval required
