@@ -162,6 +162,36 @@ model Audiobook {
 - **Ambiguous:** no link, the ASIN match still runs; warn once per audiobook per process, then debug. Each run with any link outcome logs `Library link: N by path, N by hash, N ambiguous, N left for the next run`.
 - **Upgrade:** the first full scan fills `file_path` for every ABS row; requests stuck in `downloaded` then go `available` with one notification each.
 
+### Delivered requests follow the library ASIN (#325a)
+- **Why:** a linked book kept showing the requested edition (X) after ABS matched the item to another one (Y), and after later rematches (Z).
+- **Column:** `audiobooks.library_asin` (nullable, no index). Written only by `followLibraryAsins(backendMode, logger)` (`src/lib/services/library/follow-library-asin.ts`) and cleared by the link resets below. `audible_asin`, title, author, narrator, series and year are never written after delivery.
+- **When:** both scan jobs, right after `matchRequestsToLibrary` (a request linked in this run is followed in the same run). ABS only: Plex returns before any query. Database only: reads `plex_library.asin`, so a rematch shows after the next full scan (6 h), a manual library scan, or a recently-added check that lists the item (top 10).
+- **Which books:** `absItemId` set and at least one live `type:'audiobook'` request in `available`. One `audiobook.findMany`, one `plexLibrary.findMany({plexGuid in ids})`.
+
+| ABS item ASIN (trimmed, `ASIN_PATTERN`) | `library_asin` |
+|---|---|
+| differs from `audible_asin` (case-insensitive) | that ASIN (Y, later Z) |
+| equals `audible_asin` again (any case) | null (cleared only if set) |
+| equals the stored `library_asin` (any case) | no write |
+| empty, null, ISBN-13, hyphenated ISBN, or no `plex_library` row | no write (never blanked by a missing value) |
+
+- **Write:** compare-and-set `updateMany({where:{id, absItemId, libraryAsin: <read>}, data:{libraryAsin, updatedAt}})`; a lost race is a no-op. Log: `Following Audiobookshelf: "<title>" library ASIN A -> B`.
+- **Cleared:** with the item id in stale removal and the orphan reset (`scan-plex.processor.ts`), and on every link / ASIN-match write of `absItemId` (`match-requests.ts recordItem`; the follow refills it in the same run). A book whose `absItemId` was cleared elsewhere (request delete, replace) keeps no value: each follow run first clears `library_asin` where `abs_item_id` is null, and nothing shows it meanwhile (the overlay needs a linked row).
+- **Display:** `src/lib/services/library/library-display.ts`. Applies only to an audiobook request whose book has `libraryAsin` AND an existing linked `plex_library` row; everything else is shown as stored.
+
+| Field | Shown when overlaid |
+|---|---|
+| title, author, narrator | the `plex_library` row (non-empty; `'Unknown Author'` counts as empty), else the request's |
+| cover | `/api/cache/library/<file>` from `cachedLibraryCoverPath`, else `coverArtUrl` |
+| `audibleAsin`, series, year, description | as requested (the detail can mix two editions) |
+| `libraryAsin` (responses) | effective: the stored value when overlaid, else null |
+
+- **Surfaces:** `GET /api/requests` (one row query per page), `GET /api/admin/requests` (`title`, `author` overlaid; `asin` stays requested; new `libraryAsin`), `GET /api/requests/:id` (`withRequestLibraryDisplay`, `request-detail-query.ts`). The request card and the admin row show it through these responses.
+- **Kept on the requested ASIN:** the details modal from the card and the admin list, and every action in it (Get ebook, Report issue, Replace, Download, Manual Import): they look the book up by ASIN, and Y has no row. The ebook search and the folder an ebook lands in. Ownership: X stays owned through the row, Y through `plex_library`; no ownership check reads `library_asin`.
+- **Admin text filter:** matches the requested title/author, or (audiobook requests with `libraryAsin` set) the linked row's title/author (`plexLibrary` pre-query, at most 500 ids). The title sort stays on the requested title, so a followed row sorts by a title it doesn't show.
+- **Downgrade:** the startup `db push --accept-data-loss` drops the column; cards and the admin list show the requested edition again, nothing is re-requested. After a re-upgrade the first scan of either kind fills it again.
+- **Not done here:** a details view of Y's Audible page from the card (a display-only modal prop no action reads).
+
 **Phase 2 (Request Match):** Match requests, no metadata triggering
 - Match requests to library items by ASIN/title/author
 - Update request status to 'available'

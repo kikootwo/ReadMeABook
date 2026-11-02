@@ -51,6 +51,7 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - `id` (UUID PK), `audible_asin` (nullable), `title`, `author`, `narrator`, `description`
 - `cover_art_url`, `file_path`, `file_format`, `file_size_bytes`
 - `plex_guid` (nullable), `plex_library_id` (nullable), `abs_item_id` (nullable)
+- `library_asin` (nullable, #325a) - ASIN of the linked ABS item when it differs from `audible_asin`; written only by the library scans' follow ([fixes/file-hash-matching.md](../fixes/file-hash-matching.md#delivered-requests-follow-the-library-asin-325a)); display only
 - `files_hash` (nullable) - SHA256 hash of sorted audio filenames for library matching
 - `status` ('requested'|'downloading'|'processing'|'completed'|'failed')
 - `created_at`, `updated_at`, `completed_at`
