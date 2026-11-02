@@ -51,6 +51,8 @@ All-in-one Docker image for simple deployment. PostgreSQL + Redis + App in singl
 - Build guard: ELF arch byte of each binary must match `uname -m`, and `-version` must equal `FFMPEG_VERSION`
 - License: GPLv3 build (no nonfree/libfdk-aac); bundled lib versions at `/usr/local/share/ffmpeg/versions.json`
 - Bump: change tag + digest on the `FROM` line AND `ARG FFMPEG_VERSION` together, plus `FFMPEG_IMAGE` + `FFMPEG_VERSION` in `.github/workflows/pr-ci.yml` (PR Tests uses the same binaries)
+- 9.x MP4 remuxes need `-movie_timescale 1000` (#511: the LCM default overflows long chapters next to a cover); RMAB passes it when the mp4 muxer lists it ([file-organization.md](../phase3/file-organization.md#mp4-movie-timescale-511)). On any bump, run `tests/utils/metadata-tagger.chapters.integration.test.ts` and the e2e `511-chapters-cover` spec against the new binary
+- Outside the image: FFmpeg 5.0 or newer recommended; older builds work without the flag (they already write 1000)
 - **Fixed (#230):** previously an unpinned amd64-only tarball from johnvansickle.com (host outages broke builds; arm64 got amd64 binaries)
 
 **Stages (multi-stage, from PR #279 by ChaoticSciuridae):**

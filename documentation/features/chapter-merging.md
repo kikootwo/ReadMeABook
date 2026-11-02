@@ -152,6 +152,7 @@ ffmpeg -y -f concat -safe 0 -protocol_whitelist file -i filelist.txt \
   -map_metadata 1 \
   -map 0:a \
   -codec copy \
+  -movie_timescale 1000 \          # #511: chapter-safe timescale (only when the muxer lists it)
   -movflags +faststart \           # NEW: Index at beginning (instant playback)
   -fflags +genpts \                 # NEW: Regenerate timestamps
   -avoid_negative_ts make_zero \    # NEW: Handle negative timestamps
@@ -176,6 +177,7 @@ ffmpeg -y -f concat -safe 0 -protocol_whitelist file -i filelist.txt \
   -map 0:a \
   -af asetpts=N/SR/TB \              # Timestamps from the sample count (only when all chapters decode alike)
   -c:a libfdk_aac -vbr 4 \          # High quality AAC (or: -c:a aac -q:a <quality> -profile:a aac_low)
+  -movie_timescale 1000 \            # #511 (only when the muxer lists it)
   -movflags +faststart \             # CRITICAL: Instant playback
   -fflags +genpts \                  # Fix timestamps (regenerates presentation timestamps)
   -avoid_negative_ts make_zero \     # Handle edge cases
@@ -199,6 +201,7 @@ ffmpeg -y -f concat -safe 0 -protocol_whitelist file -i filelist.txt \
 
 **Critical Flags (v2):**
 - **`-movflags +faststart`**: Moves moov atom to file beginning → instant playback (fixes 1-min delay)
+- **`-movie_timescale 1000`** (#511): FFmpeg 9's default timescale (LCM of the stream time bases) overflows a merged chapter longer than 12.4 h at 48 kHz (13.5 h at 44.1 kHz) and drops it from the chapter track. `movieTimescaleArgs()` adds it when `ffmpeg -h muxer=mp4` lists it (FFmpeg 5.0+); the ffmetadata is already 1/1000, so chapter times are unchanged ([file-organization.md](../phase3/file-organization.md#mp4-movie-timescale-511))
 - **ASIN:** not passed to ffmpeg (its mp4 muxer drops freeform keys) and not written by the merger: file-organizer adds it to the file it places (the merged file, or its tagged copy) with the MP4 freeform post-step ([file-organization.md](../phase3/file-organization.md#mp4-freeform-tags)), after the merge's own checks. A failed merge deletes its output only once ffmpeg has started writing it (an earlier failure leaves a file already at that path alone). Codec-copy timeout: at least `ffmpegRemuxTimeoutMs(estimated size)`. The organizer's disk check counts 1x the merged size, +1x with an ASIN (post-step copy), +1x with tagging on (tagged copy)
 - **`-fflags +genpts`**: Regenerates presentation timestamps for audio/video → fixes seeking/timing issues at concat boundaries
 - **`-avoid_negative_ts make_zero`**: Handles negative timestamps at concat boundaries

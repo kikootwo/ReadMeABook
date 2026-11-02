@@ -89,6 +89,7 @@
 - **Verified import (atomic copy, placement records, delete only what reached the library)** → [phase3/file-organization.md](phase3/file-organization.md#verified-import-delete-only-what-reached-the-library)
 - **Custom M4B tags (ASIN, publisher, subtitle, language as iTunes freeform `----` atoms), tagged MP4 faststart** → [phase3/file-organization.md](phase3/file-organization.md#mp4-freeform-tags)
 - **Tagging changed an M4B's chapters (zero-length chapters, cover + chapters, ffmpeg 9.0.2), chapter guard (#511)** → [phase3/file-organization.md](phase3/file-organization.md#chapter-guard-511)
+- **ffmpeg 9 movie timescale, `-movie_timescale 1000`, chapters over 487 s with a cover, checking a file's chapter track (#511)** → [phase3/file-organization.md](phase3/file-organization.md#mp4-movie-timescale-511)
 - **Chapter merging (auto-merge to M4B)** → [features/chapter-merging.md](features/chapter-merging.md)
 - **Multi-disc (CD1/Disc 1) folders: disc names, import order, disc/track tags, Manual/Bulk Import, in-place stop** → [features/multi-disc-folders.md](features/multi-disc-folders.md)
 
