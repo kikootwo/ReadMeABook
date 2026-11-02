@@ -15,7 +15,7 @@ import { book, ebookRequest, entryFor, imported, makeLibrary, snapshot, write, t
 
 const prismaMock = createPrismaMock();
 const configServiceMock = { get: vi.fn(), getBackendMode: vi.fn() };
-const unlinkState = vi.hoisted(() => ({ error: null as NodeJS.ErrnoException | null }));
+const unlinkState = vi.hoisted(() => ({ error: null as NodeJS.ErrnoException | null, rmdirError: null as NodeJS.ErrnoException | null }));
 
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => configServiceMock }));
@@ -26,7 +26,11 @@ vi.mock('fs/promises', async (importOriginal) => {
     if (unlinkState.error) throw unlinkState.error;
     return actual.unlink(...args);
   }) as typeof actual.unlink;
-  return { ...actual, default: { ...actual, unlink }, unlink };
+  const rmdir = (async (...args: Parameters<typeof actual.rmdir>) => {
+    if (unlinkState.rmdirError) throw unlinkState.rmdirError;
+    return actual.rmdir(...args);
+  }) as typeof actual.rmdir;
+  return { ...actual, default: { ...actual, unlink, rmdir }, unlink, rmdir };
 });
 
 const { deleteRequest } = await import('@/lib/services/request-delete.service');
@@ -51,6 +55,7 @@ function load(filePath: string | null, placedEbookFiles: unknown, overrides: Rec
 beforeEach(() => {
   vi.clearAllMocks();
   unlinkState.error = null;
+  unlinkState.rmdirError = null;
   lib = makeLibrary('rmab-497-guard-');
   downloadDir = lib.downloads;
   otherBooks = [];
@@ -156,6 +161,20 @@ describe('#497: the recorded file must still be what RMAB placed', () => {
 
     expect(result.filesKeptReason).toBe('Book.epub could not be removed (permission denied)');
     expect(fs.existsSync(file)).toBe(true);
+  });
+
+  it('a failed rmdir of the emptied ebook folder (EBUSY) is not "files kept": the file is gone, success (#526)', async () => {
+    const dir = path.join(lib.media, 'Ebooks', 'Book');
+    const file = write(path.join(dir, 'Book.epub'), 'rmab epub');
+    unlinkState.rmdirError = Object.assign(new Error('EBUSY: resource busy'), { code: 'EBUSY' });
+    load(dir, [entryFor(file)], { filesHash: null, fileFormat: 'epub' });
+
+    const result = await deleteRequest('req-1', 'admin-1');
+
+    expect(result).toMatchObject({ success: true, filesDeleted: true, message: 'Request deleted successfully' });
+    expect(result.filesKeptReason).toBeUndefined();
+    expect(fs.existsSync(file)).toBe(false);
+    expect(fs.readdirSync(dir)).toEqual([]);
   });
 });
 

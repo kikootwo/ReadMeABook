@@ -183,6 +183,7 @@ export async function replaceAudiobook(
   });
 
   // Step 2: Delete old content
+  let ebookStays = false;
   if (existingRequest) {
     // The old files must go before new ones are fetched: when the library delete
     // guard would keep them, stop before touching anything
@@ -206,6 +207,12 @@ export async function replaceAudiobook(
       // Continue anyway - we want replacement to proceed
     }
     logger.info(`Deleted existing request ${existingRequest.id} for replacement`);
+    // A delivered ebook request outlives the delete (#526): the book keeps the stored
+    // path deleteRequest pointed at its ebook's folder, so the ebook stays downloadable
+    if (deleteResult.success) {
+      const { hasDeliveredEbookRequest } = await import('./request-delete-children');
+      ebookStays = await hasDeliveredEbookRequest(audiobook.id);
+    }
   } else {
     // No active request. A stored folder (e.g. an earlier delete kept the files) goes
     // through the library delete guard; only a book added outside RMAB is removed via
@@ -219,15 +226,14 @@ export async function replaceAudiobook(
     logger.info(`Deleted library content for "${audiobook.title}" (no active request)`);
   }
 
-  // Step 3: Reset audiobook record for new request
+  // Step 3: Reset audiobook record for new request (the stored path stays when a delivered ebook request remains)
   await prisma.audiobook.update({
     where: { id: audiobook.id },
     data: {
       status: 'requested',
       plexGuid: null,
       absItemId: null,
-      filePath: null,
-      fileFormat: null,
+      ...(ebookStays ? {} : { filePath: null, fileFormat: null }),
       fileSizeBytes: null,
       filesHash: null,
     },

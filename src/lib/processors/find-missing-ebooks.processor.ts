@@ -110,7 +110,9 @@ export async function processFindMissingEbooks(payload: FindMissingEbooksPayload
       return zeroResult('No ebook sources enabled, skipping', 'skipped-no-source');
     }
 
-    // Anti-join: most-recent non-deleted ebook child per in-scope audiobook.
+    // Anti-join: the non-deleted ebook request of each in-scope audiobook request's book
+    // (this request's own child first, then the newest; by book, so one that outlived a
+    // deleted audiobook request gets no second one, #526).
     // Broad form — branch fully in JS so per-skip counters and log lines are
     // observable. LIMIT is the per-run scan cap. A deleted user's requests are
     // left out here, so they get no ebook request and use no slot of the cap (#504).
@@ -133,10 +135,10 @@ export async function processFindMissingEbooks(payload: FindMissingEbooksPayload
       LEFT JOIN LATERAL (
         SELECT id, status, ebook_auto_retry_count
         FROM requests
-        WHERE parent_request_id = p.id
+        WHERE audiobook_id = p.audiobook_id
           AND type = 'ebook'
           AND deleted_at IS NULL
-        ORDER BY created_at DESC
+        ORDER BY (parent_request_id = p.id) DESC NULLS LAST, created_at DESC
         LIMIT 1
       ) e ON TRUE
       WHERE p.status IN ('downloaded', 'available')
