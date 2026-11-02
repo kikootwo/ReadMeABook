@@ -14,6 +14,52 @@ import { RMABLogger } from '../utils/logger';
 export const POPULAR_CATEGORY_ID = '__popular__';
 export const NEW_RELEASES_CATEGORY_ID = '__new_releases__';
 
+/**
+ * Most distinct category sections refreshed per run. Each costs a 10-20 s cooldown and
+ * up to 4 search pages; 30 covers every top-level category (24 on audible.com) with
+ * room for sub-categories, and keeps the category pass to roughly 15-25 minutes.
+ */
+export const MAX_REFRESHED_CATEGORIES = 30;
+
+/**
+ * Distinct category ids to refresh this run, stalest first: never stored, then the one
+ * stored longest ago (`lastSyncedAt`), then the most users, then id. A refreshed id moves
+ * to the back, so over the cap every category refreshes within ceil(N / cap) runs.
+ * The rest are skipped this run and keep their data.
+ */
+export function selectCategoriesToRefresh(
+  chosenIds: (string | null)[],
+  lastSyncedAt: ReadonlyMap<string, Date> = new Map(),
+  cap: number = MAX_REFRESHED_CATEGORIES,
+): { categoryIds: string[]; skipped: string[] } {
+  const counts = new Map<string, number>();
+  for (const id of chosenIds) {
+    if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  // Never stored (-1) sorts before any stored time.
+  const storedAt = (id: string) => lastSyncedAt.get(id)?.getTime() ?? -1;
+  const ranked = [...counts.entries()]
+    .sort(([a, na], [b, nb]) =>
+      storedAt(a) - storedAt(b) || nb - na || (a < b ? -1 : a > b ? 1 : 0))
+    .map(([id]) => id);
+  return { categoryIds: ranked.slice(0, cap), skipped: ranked.slice(cap) };
+}
+
+/** When each category's books were last stored: one row per category that has any. */
+async function loadLastSyncedAt(categoryIds: string[]): Promise<Map<string, Date>> {
+  if (categoryIds.length === 0) return new Map();
+  const rows = await prisma.audibleCacheCategory.groupBy({
+    by: ['categoryId'],
+    where: { categoryId: { in: categoryIds } },
+    _max: { lastSyncedAt: true },
+  });
+  const stored = new Map<string, Date>();
+  for (const row of rows) {
+    if (row._max.lastSyncedAt) stored.set(row.categoryId, row._max.lastSyncedAt);
+  }
+  return stored;
+}
+
 export interface AudibleRefreshPayload {
   jobId?: string;
   scheduledJobId?: string;
@@ -58,18 +104,27 @@ export async function processAudibleRefresh(payload: AudibleRefreshPayload): Pro
     logger.info(`Saved ${popularSaved} popular and ${newReleasesSaved} new releases`);
 
     // --- Category scraping ---
-    // Query distinct categoryIds from all users' home sections
+    // Distinct categoryIds from all users' home sections, capped per run
     let categoriesSynced = 0;
+    let categoriesSkipped = 0;
     try {
       const categorySections = await prisma.userHomeSection.findMany({
         where: { sectionType: 'category', categoryId: { not: null } },
         select: { categoryId: true },
-        distinct: ['categoryId'],
       });
 
-      const categoryIds = categorySections
-        .map((s) => s.categoryId)
-        .filter((id): id is string => id !== null);
+      const chosenIds = categorySections.map((s) => s.categoryId);
+      const distinctIds = [...new Set(chosenIds.filter((id): id is string => !!id))];
+      const lastSyncedAt = distinctIds.length > MAX_REFRESHED_CATEGORIES
+        ? await loadLastSyncedAt(distinctIds)
+        : new Map<string, Date>();
+      const { categoryIds, skipped } = selectCategoriesToRefresh(chosenIds, lastSyncedAt);
+      categoriesSkipped = skipped.length;
+      if (skipped.length > 0) {
+        logger.warn(
+          `${skipped.length} category section(s) over the ${MAX_REFRESHED_CATEGORIES}-category refresh cap wait for a later run (stalest first), keeping their previous data: ${skipped.join(', ')}`,
+        );
+      }
 
       if (categoryIds.length > 0) {
         logger.info(`Refreshing ${categoryIds.length} user-configured categories...`);
@@ -117,6 +172,7 @@ export async function processAudibleRefresh(payload: AudibleRefreshPayload): Pro
       popularSaved,
       newReleasesSaved,
       categoriesSynced,
+      categoriesSkipped,
       thumbnailsDeleted: deletedCount,
     };
   } catch (error) {
