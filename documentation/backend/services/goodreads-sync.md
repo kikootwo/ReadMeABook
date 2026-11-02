@@ -38,7 +38,9 @@ Syncs user-subscribed Goodreads shelves via RSS feeds, resolves books to Audible
 - **Fetch:** a 404/410 page throws `GoodreadsFeedEndedError` (`goodreads-rss-url.ts`, `.status`); `validateStatus` admits 404/410 so axios hands them back instead of a generic error. Other statuses unchanged
 - **Add (POST):** → 400 `{ error: 'GoodreadsFeedsEnded', message: GOODREADS_FEEDS_ENDED_ADD_MESSAGE }`, nothing saved. Other feed failures keep 400 `InvalidRSS` "Could not fetch or parse the RSS feed: ..."
 - **Sync:** an ended feed counts in `stats.errors`, logs per shelf at debug only, then one `warn` per run: `Goodreads no longer serves shelf RSS feeds: N shelf(s) skipped (HTTP 404/410)...`. No shelf write (`lastSyncAt` stays). Other fetch failures still log `error` per shelf. Hardcover sync unchanged
-- **UI:** every Goodreads shelf card shows `GOODREADS_FEEDS_ENDED_NOTICE` (`role="note"`). Unconditional: `GoodreadsShelf` stores no sync error, so no schema change
+- **UI:** every Goodreads shelf card shows `GoodreadsFeedEndedNotice` (`GOODREADS_FEEDS_ENDED_NOTICE`, `role="note"`) as its own full-width row under the title/actions row (not in the info column, so it stays readable at 375 px). Unconditional: `GoodreadsShelf` stores no sync error, so no schema change
+- **UI status:** Goodreads cards get a neutral (gray) sync dot, and a never-synced one shows "Never synced" instead of the pulsing "Syncing..." and cover skeletons. Hardcover status unchanged
+- **Add Shelf modal:** the Goodreads tab (still the default) shows the notice with `GOODREADS_FEEDS_ENDED_ADD_MESSAGE` before submitting; hidden while the add error already shows that text
 - Code and shelves are kept in case Goodreads brings the feeds back; then drop the notice
 
 ## Shared Sync Core

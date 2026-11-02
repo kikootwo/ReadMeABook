@@ -321,7 +321,9 @@ function ShelfCard({
     0,
     (shelf.bookCount || 0) - displayBooks.length,
   );
-  const isSyncing = !shelf.lastSyncAt;
+  const isGoodreads = shelf.type === 'goodreads';
+  // Goodreads feeds are gone (#514): a never-synced Goodreads shelf is not "syncing", and a synced one is not healthy
+  const isSyncing = !isGoodreads && !shelf.lastSyncAt;
 
   const providerIcon =
     shelf.type === 'goodreads' ? (
@@ -349,7 +351,7 @@ function ShelfCard({
       <div
         className={cn(
           'flex items-start justify-between',
-          (hasCovers || isSyncing) && 'mb-5',
+          isGoodreads ? 'mb-4' : (hasCovers || isSyncing) && 'mb-5',
         )}
       >
         <div className="min-w-0 flex-1">
@@ -386,15 +388,23 @@ function ShelfCard({
                 </>
               ) : shelf.lastSyncAt ? (
                 <>
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  <span
+                    data-testid="shelf-sync-dot"
+                    className={cn(
+                      'inline-block w-1.5 h-1.5 rounded-full',
+                      isGoodreads ? 'bg-gray-300 dark:bg-gray-600' : 'bg-emerald-500',
+                    )}
+                  />
                   Synced {formatRelativeTime(shelf.lastSyncAt)}
                 </>
               ) : (
-                'Pending sync'
+                <>
+                  <span data-testid="shelf-sync-dot" className="inline-block w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-600" />
+                  Never synced
+                </>
               )}
             </span>
           </div>
-          {shelf.type === 'goodreads' && <GoodreadsFeedEndedNotice />}
         </div>
 
         {/* Delete action */}
@@ -507,6 +517,9 @@ function ShelfCard({
           )}
         </div>
       </div>
+
+      {/* Full-width row (text aligned with the title, box bleeding into the padding) so it reads at phone width (#514) */}
+      {isGoodreads && <GoodreadsFeedEndedNotice className={cn('-mx-3', hasCovers && 'mb-5')} />}
 
       {/* Bottom: Stacked book covers */}
       <div className={cn(!shelf.autoRequest && 'opacity-50 grayscale-[30%]')}>

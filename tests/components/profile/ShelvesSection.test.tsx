@@ -2,8 +2,8 @@
  * Component: Shelves Section Tests (Goodreads feeds ended notice, #514)
  * Documentation: documentation/backend/services/goodreads-sync.md
  *
- * Goodreads no longer serves shelf RSS feeds, so every Goodreads shelf card says so.
- * Hardcover cards do not.
+ * Goodreads no longer serves shelf RSS feeds, so every Goodreads shelf card says so, in a
+ * full-width row, with a neutral sync status. Hardcover cards do not change.
  */
 
 // @vitest-environment jsdom
@@ -38,8 +38,10 @@ import { ShelvesSection } from '@/components/profile/ShelvesSection';
 const SYNCED = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
 const NOTICE = /^Goodreads no longer serves shelf RSS feeds, so this shelf has stopped syncing/;
 
-const shelf = (id: string, type: GenericShelf['type'], name: string): GenericShelf => ({
-  id, type, name, sourceId: id, lastSyncAt: SYNCED, createdAt: SYNCED, bookCount: 12, autoRequest: true, books: [],
+const shelf = (
+  id: string, type: GenericShelf['type'], name: string, lastSyncAt: string | null = SYNCED,
+): GenericShelf => ({
+  id, type, name, sourceId: id, lastSyncAt, createdAt: SYNCED, bookCount: 12, autoRequest: true, books: [],
 });
 
 const card = (name: string) => screen.getByRole('heading', { name: new RegExp(`^${name} `) }).closest('.group') as HTMLElement;
@@ -65,5 +67,40 @@ describe('ShelvesSection', () => {
 
     expect(screen.queryByRole('note')).not.toBeInTheDocument();
     expect(screen.queryByText(/Goodreads no longer serves/)).not.toBeInTheDocument();
+  });
+
+  it('puts the notice in its own row of the card, not in the info column beside the actions', () => {
+    state.shelves = [shelf('g1', 'goodreads', 'Read')];
+    render(<ShelvesSection />);
+
+    const goodreadsCard = card('Read');
+    const infoColumn = screen.getByRole('heading', { name: /^Read / }).parentElement as HTMLElement;
+    const note = within(goodreadsCard).getByRole('note');
+    expect(infoColumn.contains(note)).toBe(false);
+    expect(note.parentElement).toBe(goodreadsCard);
+  });
+
+  it('gives Goodreads shelves a neutral status: no green dot, no endless "Syncing" pulse', () => {
+    state.shelves = [shelf('g1', 'goodreads', 'Read'), shelf('g2', 'goodreads', 'To Read', null)];
+    render(<ShelvesSection />);
+
+    const synced = card('Read');
+    expect(within(synced).getByText(/Synced 3d ago/)).toBeInTheDocument();
+    expect(within(synced).getByTestId('shelf-sync-dot')).not.toHaveClass('bg-emerald-500');
+
+    const neverSynced = card('To Read');
+    expect(within(neverSynced).queryByText(/Syncing/)).not.toBeInTheDocument();
+    expect(within(neverSynced).getByText(/Never synced/)).toBeInTheDocument();
+    expect(neverSynced.querySelector('.animate-ping, .animate-pulse')).toBeNull();
+  });
+
+  it('keeps the Hardcover status as it was: green when synced, "Syncing" before the first sync', () => {
+    state.shelves = [shelf('h1', 'hardcover', 'Want to Read'), shelf('h2', 'hardcover', 'Owned', null)];
+    render(<ShelvesSection />);
+
+    expect(within(card('Want to Read')).getByTestId('shelf-sync-dot')).toHaveClass('bg-emerald-500');
+    const pending = card('Owned');
+    expect(within(pending).getByText(/Syncing/)).toBeInTheDocument();
+    expect(pending.querySelector('.animate-ping')).not.toBeNull();
   });
 });

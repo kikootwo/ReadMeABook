@@ -189,7 +189,7 @@ export async function processGoodreadsShelves(
   log.info(`Processing ${shelves.length} Goodreads shelf(s)${maxLookups > 0 ? ` (max ${maxLookups} lookups/shelf)` : ' (unlimited lookups)'}`);
 
   // Shelves whose feed Goodreads answered 404/410: one warning for the whole run, not one per shelf (#514)
-  const endedFeeds: string[] = [];
+  let endedFeeds = 0;
 
   for (const shelf of shelves) {
     try {
@@ -201,7 +201,7 @@ export async function processGoodreadsShelves(
       } catch (error) {
         stats.errors++;
         if (error instanceof GoodreadsFeedEndedError) {
-          endedFeeds.push(shelf.name);
+          endedFeeds++;
           log.debug(`Goodreads answered HTTP ${error.status} for shelf "${shelf.name}" (user: ${shelf.user.plexUsername})`);
         } else {
           log.error(`Failed to fetch RSS for shelf "${shelf.name}": ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -231,9 +231,9 @@ export async function processGoodreadsShelves(
     }
   }
 
-  if (endedFeeds.length > 0) {
+  if (endedFeeds > 0) {
     log.warn(
-      `Goodreads no longer serves shelf RSS feeds: ${endedFeeds.length} shelf(s) skipped (HTTP 404/410). ` +
+      `Goodreads no longer serves shelf RSS feeds: ${endedFeeds} shelf(s) skipped (HTTP 404/410). ` +
       'They will not sync again unless Goodreads brings the feeds back; Hardcover lists still work.'
     );
   }
