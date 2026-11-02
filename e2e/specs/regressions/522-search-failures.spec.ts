@@ -3,10 +3,11 @@
  * Documentation: documentation/testing/e2e-harness.md
  *
  * Fake Prowlarr answers HTTP 400 to every search (all failed), then only to the "title author"
- * query (one failed, "title" answers with the release). Automatic search: the request message says
+ * query (one failed, "title" answers with the release), then the same with no releases (one failed,
+ * the rest found nothing). Automatic search: the request message says
  * every indexer search failed and the job log (System Logs) has one warn line per failed query plus
  * the summary. Interactive search from the admin requests table: the warning replaces the empty
- * state, then sits above the results that came back. On main the request read "No torrents/nzbs
+ * state, then sits above the results that came back, then above "No results found". On main the request read "No torrents/nzbs
  * found" and the modal "No results found". Uses martian (smoke uses phm). Exec bridge required.
  */
 
@@ -25,8 +26,8 @@ async function loadScenario(definition: Record<string, unknown>) {
   expect(res.ok, await res.clone().text()).toBe(true);
 }
 const allFail = () => loadScenario({ name: 'search-all-fail-522', book: 'martian', search: { statuses: [400] }, releases: [RELEASE] });
-const partialFail = (book: Book) =>
-  loadScenario({ name: 'search-partial-522', book: 'martian', search: { queryStatuses: [{ contains: book.author, status: 400 }] }, releases: [RELEASE] });
+const partialFail = (book: Book, releases = [RELEASE]) =>
+  loadScenario({ name: 'search-partial-522', book: 'martian', search: { queryStatuses: [{ contains: book.author, status: 400 }] }, releases });
 
 const requestRow = (id: string) => psql(`select coalesce(status,'') || '|' || coalesce(error_message,'') from requests where id = ${sqlStr(id)}`);
 const searchWarnings = () =>
@@ -100,16 +101,32 @@ for (const view of [
       await expect(notice.getByRole('button', { name: 'Search Again' })).toHaveCount(0);
       await settledShot(page, `search-partial-failure${view.suffix}`);
 
+      // some failed, the rest found nothing: the notice above "No results found", whose Search Again is the only one
+      await partialFail(book, []);
+      const emptyP = page.waitForResponse((r) => r.url().endsWith(`/api/requests/${requestId}/interactive-search`), { timeout: 60_000 });
+      await page.getByRole('button', { name: 'Refresh' }).click();
+      const partialEmpty = await (await emptyP).json();
+      await expect(page.getByText('No results found')).toBeVisible();
+      await expect(notice).toContainText(`${partialEmpty.searchFailures?.failed} of ${partialEmpty.searchFailures?.total} indexer searches failed, so results may be incomplete.`);
+      await expect(page.getByRole('button', { name: 'Search Again' })).toHaveCount(1);
+      await expect(notice.getByRole('button', { name: 'Search Again' })).toHaveCount(0);
+      const [noticeBox, emptyBox] = [await notice.boundingBox(), await page.getByText('No results found').boundingBox()];
+      expect(noticeBox && emptyBox && noticeBox.y + noticeBox.height <= emptyBox.y, `notice above the empty state: ${JSON.stringify([noticeBox, emptyBox])}`).toBe(true);
+      await settledShot(page, `search-partial-failure-empty${view.suffix}`);
+
       writeEvidence(`${DIR}/interactive${view.suffix || '-1280'}.json`, {
         all: { searchFailures: all.searchFailures, results: all.results?.length },
         partial: { searchFailures: partial.searchFailures, results: partial.results?.map((r: { title: string }) => r.title) },
+        partialEmpty: { searchFailures: partialEmpty.searchFailures, results: partialEmpty.results?.length },
       });
       expect(all.searchFailures.failed).toBe(all.searchFailures.total);
       expect(all.results).toEqual([]);
       expect(partial.searchFailures.failed).toBeGreaterThan(0);
       expect(partial.searchFailures.failed).toBeLessThan(partial.searchFailures.total);
       expect(partial.results.length).toBeGreaterThan(0);
-      expect(JSON.stringify([all, partial])).not.toContain(env('PROWLARR_API_KEY'));
+      expect(partialEmpty.searchFailures.failed).toBeLessThan(partialEmpty.searchFailures.total);
+      expect(partialEmpty.results).toEqual([]);
+      expect(JSON.stringify([all, partial, partialEmpty])).not.toContain(env('PROWLARR_API_KEY'));
       const box = await notice.boundingBox();
       expect(box && box.x >= 0 && box.x + box.width <= view.width, `notice inside the ${view.width} px viewport: ${JSON.stringify(box)}`).toBe(true);
     } finally {

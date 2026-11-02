@@ -64,7 +64,7 @@ interface TorrentResult {
 ## Failed Searches (#522)
 
 A query that throws is counted, never taken for "nothing found". Helpers: `src/lib/utils/indexer-search-failures.ts`.
-- **Stats out-param:** `SearchStats { queriesSent, queriesFailed, failures: [{ query, message }] }`, filled by `searchWithVariations`; callers pass one per indexer group and sum them (`addGroupSearch`). A group whose call throws counts as one failed search, query `(whole group)`; an ebook route whose whole indexer search throws, `(indexer search)`
+- **Stats out-param:** `SearchStats { queriesSent, queriesFailed, failures: [{ query, message }] }`, filled by `searchWithVariations`; callers pass one per indexer group and sum them (`addGroupSearch`). A group whose call throws counts as one failed search, query `(whole group)`; an ebook route whose whole indexer search throws before any group was counted, `(indexer search)` (`recordRunFailure`; a throw after the groups, in ranking say, adds nothing)
 - **Message:** error message only (`Request failed with status code 400`, `timeout of 30000ms exceeded`): the `Failed to search Prowlarr: ` prefix dropped, any `scheme://…` masked as `[url]`, 200 chars max. Never the API key, the request URL or the response body
 - **Automatic search** (audiobook `SearchIndexers`, ebook `SearchEbook` job loggers, so in System Logs): one `warn` per failed search `Indexer search failed: "<query>" (<group description>): <message>`, then `warn` `N of M indexer searches failed`. Results from the searches that answered are ranked and used as before
 - **Request `errorMessage`** (`noResultsMessage`), only when nothing usable was found:
@@ -77,7 +77,7 @@ A query that throws is counted, never taken for "nothing found". Helpers: `src/l
 | all blocked | unchanged (`No usable releases — N candidates tried, all blocked`) |
 
 - **Interactive search** (all four routes: `requests/[id]/interactive-search`, `audiobooks/search-torrents`, both `interactive-search-ebook`): response `searchFailures: { failed, total, errors }` (up to 3 distinct messages), absent when none failed. Route loggers write the same warn lines to the container log (not System Logs: only job loggers persist)
-- **UI:** `SearchFailureNotice` (amber, `role="status"`) in `InteractiveTorrentSearchModal`: `2 of 5 indexer searches failed, so results may be incomplete.` above the results, or `All N indexer searches failed, so no indexer results could be fetched.` with "Search Again" in place of the empty state; `Error: <messages>` below. Hooks (`useRequests.ts`) expose `searchFailures` next to `error`
+- **UI:** `SearchFailureNotice` (amber, `role="status"`) in `InteractiveTorrentSearchModal`: `2 of 5 indexer searches failed, so results may be incomplete.` above the results (or above "No results found" when the rest found nothing), or `All N indexer searches failed, so no indexer results could be fetched.` with "Search Again" in place of the empty state; `Error: <messages>` below. Hooks (`useRequests.ts`) expose `searchFailures` next to `error`
 
 ## Config
 
