@@ -50,6 +50,8 @@ Result: Douglas Preston, Lincoln Child/Pendergast/01 - Relic/
 
 **Rationale:** Template system allows customization for different metadata agent configurations and user preferences while maintaining backward compatibility.
 
+**What a request delete removes from the book folder (#526):** an audiobook request delete removes the audio this import hashed (`filesHash`), stale `.rmab-partial-*` copies, and `cover.jpg` plus OS/ABS junk only when nothing else is left but ebooks recorded by active ebook requests; the folder goes only when empty. Ebooks of another request, user files and subfolders stay and are listed. An ebook request delete removes only its recorded files (#497). Details: [request-deletion.md](../admin-features/request-deletion.md)
+
 ## Process
 
 1. Download completes in `/downloads/[torrent-name]/` or `/downloads/[filename]` (single file)

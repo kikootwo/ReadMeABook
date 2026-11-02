@@ -161,10 +161,12 @@ Ebook torrent ranking uses unified algorithm with ebook-specific scoring:
 
 **Ebook deletion is different from audiobook deletion:**
 - Deletes only the ebook files this request's imports placed (`Request.placedEbookFiles`, written by the ebook organize for a `copied` file), each only while unchanged (size + sha256) and in a folder the library delete guard allows (#497). A user's own ebook in the book folder is never removed. No record (imported before the field, or the file was already there): nothing removed, the admin sees why. See [request-deletion.md](../admin-features/request-deletion.md) D2
-- Does NOT delete the title folder (audiobook files remain)
+- Does NOT delete the title folder while it holds anything else (audiobook files remain); a folder this delete left holding only OS/ABS junk (`.DS_Store`, `@eaDir/`, `metadata.json`, ...) goes, and the book's stored path is cleared when it was that folder (#526)
 - Does NOT delete from backend library (Plex/ABS)
 - Does NOT clear audiobook availability linkage
 - Soft-deletes the ebook request record
+
+**Audiobook request delete (#526):** removes its audio (cover and junk only when nothing else is left), never the ebook request's recorded file (listed as `ebook of another request`). A delivered ebook request stays, unlinked (`parentRequestId = null`), and the book keeps that ebook's folder and format; undelivered ebook requests are soft-deleted with it. The automatic ebook request and `find_missing_ebooks` check for an active ebook request by book (`audiobookId`), so a surviving one gets no duplicate. See [request-deletion.md](../admin-features/request-deletion.md) D1
 - Torrents left to seed (respects seeding limits)
 
 ## UI Representation

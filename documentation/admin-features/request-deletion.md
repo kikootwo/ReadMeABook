@@ -108,22 +108,33 @@ model Request {
 
 3. **Library Delete Guard** (`src/lib/utils/library-delete-guard.ts`, run from `src/lib/services/request-delete-files.ts`)
    - Path: persisted `Audiobook.filePath` only (never rebuilt from `media_dir` or a template)
-   - The stored folder is removed (`rm -rf`) only when ALL hold, else nothing is removed:
+   - Files are removed from the stored folder (D1 below) only when ALL hold, else nothing is removed:
      | Rule | Refusal reason (`filesKeptReason`) |
      |------|------------------------------------|
      | a. strictly inside `media_dir` | `it is the media library root` / `it is outside the media library (...)` |
      | b. equals/contains no configured root (download dirs, client paths, mapped paths, `/bookdrop`) | `it is a configured root (...)` / `it contains a configured root (...)` |
      | c. equals/contains no other book's `filePath` (each row canonicalized: realpath + dev/ino; missing rows skipped) | `it is also the folder of "<title>"` / `it contains the folder of "<title>"` |
      | evidence: audio directly in the folder hashes to `filesHash` | `folder contents changed since import` / `there is no import record (files hash) for this folder` |
-     | evidence: no audio in any subfolder (the removal is recursive) | `it has audio files in a subfolder` |
+     | evidence: no audio in any subfolder | `it has audio files in a subfolder` |
    - Roots are read strictly from the DB (`collectGuardRoots`, fail closed: any error refuses)
    - Symlinked title folder: rules a-c on the target AND the link location; only the link is removed
+   - **What D1 removes (#526, `src/lib/utils/book-folder-delete.ts`):** one `readdir` of the canonical folder; every decision by name inside it (`unlink` never follows a link in the last component; a parent swapped mid-delete is followed, a smaller exposure than the former `rm -rf`)
+     | Entry | Action | Kept `why` |
+     |-------|--------|------------|
+     | direct non-folder entries with an audio name | unlinked first, only when they still hash to `filesHash` (else nothing removed: `folder contents changed since import`); ENOENT = already gone | |
+     | `.rmab-partial-*.part` regular file (`PARTIAL_FILE_PATTERN`) | older than 24 h: unlinked; newer: kept | `an import is still writing it` |
+     | `cover.jpg` (regular file, never a link) and the junk list | unlinked only when nothing else is left but these and ebooks recorded by active ebook requests | `RMAB has no record that it placed it` |
+     | ebook file named by an active ebook request's `placedEbookFiles` (canonical folder + name; a label, never a delete input) | kept; does not keep the cover | `ebook of another request` |
+     | anything else (user files, unrecorded/legacy ebooks, subfolders `name/`, links) | kept; never entered | `RMAB has no record that it placed it` |
+   - Junk list (`src/lib/utils/book-folder-junk.ts`): files `.DS_Store`, `Thumbs.db`, `desktop.ini`, `._*`, `metadata.json`, `metadata.abs` (exact names, regular files); folders `@eaDir`, `.@__thumb` through a limited walk (lstat, links never followed, files unlinked and folders rmdir'd one by one, each folder re-checked by dev/ino first); a junk folder holding a link, special file, audio or ebook file, deeper than 3 levels or more than 500 entries is kept whole (`RMAB has no record that it placed it (<why>)`)
+   - Audio unlink failure: stop; outcome kept (library untouched): `<name> could not be removed (<why>)`, or `the folder was partly removed (<why>); remove the rest manually` after ≥1 file; a failed first `readdir`: kept, nothing removed. Cover/junk/partial unlink failure: listed `could not be removed (<why>)`
+   - Then the folder: empty → `rmdir` (non-recursive) + empty-parent sweep; every rmdir error ignored (a non-ENOTEMPTY one listed as `<folder>/` `could not be removed (<code>)`); not empty → stays, result `folderKept`
    - No stored path but a library item (`absItemId`/`plexGuid`): kept (`RMAB has no stored folder ...`); no path and no item: nothing to remove
    - Missing folder: "already gone" only when the library looks mounted (`media_dir` readable and not empty, and some other stored book folder exists when other rows have one); otherwise kept (`the folder is missing and ... is the media volume mounted?`): no backend call, row untouched (protects against a media volume not mounted yet)
    - Mount-check limit: a mount point that received new imports while the share was unmounted is not empty, so it passes; a missing folder there then counts as gone (no Plex delete; ABS `hard=0` only for an item inside that path; row cleared)
    - Stale record: the stored folder is gone AND outside the current `media_dir` (library moved): nothing removed or protected; the delete clears only `filePath`/`filesHash`/`fileFormat` (no backend call, records and status kept; message says so), a replace goes on
-   - `rm` failure: kept (`the folder was partly removed (permission denied); remove the rest manually`); `fs.rm` stops at the first error, so earlier files are gone; backend and row untouched
-   - After removal: empty parents swept up to the nearest root (`sweepEmptyParents`)
+   - Symlinked title folder `rm` failure: kept (`the folder was partly removed (permission denied); remove the rest manually`); backend and row untouched
+   - After the folder is removed: empty parents swept up to the nearest root (`sweepEmptyParents`)
    - **Ebook requests (D2, #497):** only the files the request's imports recorded in `Request.placedEbookFiles` (`[{ path, size, sha256, placedAt }]`, `src/lib/utils/ebook-placement.ts`); status and the rest of the folder never count. `Audiobook.filePath` is not read. Per entry, in order (kept reasons joined `; `, each reason once):
      | Check | Kept reason |
      |-------|-------------|
@@ -139,6 +150,7 @@ model Request {
    - Earlier-import marker `{ "earlierImport": "unrecorded" }` (first item; `recordEbookPlacement` writes it when the stored value is NULL but `completedAt` is already set, i.e. the request delivered before: a pre-upgrade import or a failed record write, then a re-import such as Manual Import): never removable; adds `an earlier import of this request has no record (it was imported before RMAB kept one, or the record could not be saved), so its ebook file was not removed`; the recorded entries after it are still removed
    - Never a folder sweep: a flat `Ebooks`/shelf folder loses only the recorded file (foreign ebooks stay); a folder another book stores still fails rule c
    - Not handled (needs a separate ebook location, PR2): an ebook in a separate folder (custom `ebook_path_template`) is not removed by the audiobook delete
+   - D2 empty-folder step (#526): after unlinking ≥1 file, that file's folder (only when the recorded folder is a real folder, not a link, at the canonical path rules a-c passed on) goes when nothing but the junk list is left (a written exception to "D2 removes only recorded files"), then empty parents are swept; every rmdir error ignored (non-ENOTEMPTY added to the reason). When that folder was `Audiobook.filePath`, `filePath`/`fileFormat`/`filesHash` are cleared
 
 4. **Files kept: library left exactly as it is**
    - No backend delete, no plex_library cleanup, no status reset, linkage and stored paths kept
@@ -151,8 +163,8 @@ model Request {
 
 6. **plex_library records, linkage, stored paths** (only after removal / already gone)
    - plex_library delete by ASIN, fallback exact title/author
-   - Audiobook: `status = 'requested'`, clear `absItemId` (ABS) or `plexGuid` (Plex), clear `filePath`, `filesHash`, `fileFormat`
-   - Child requests soft-deleted: `parentRequestId = id`, and ebook requests with no parent on the same book row
+   - Audiobook: `status = 'requested'`, clear `absItemId` (ABS) or `plexGuid` (Plex), clear `filesHash`; `filePath`/`fileFormat` cleared, or, when a delivered ebook request stays and its newest recorded ebook is still on disk, set to that ebook's folder and format (the state an ebook-only import leaves; status stays `requested`). Same in the stale branch
+   - Child requests (`parentRequestId = id`, and ebook requests with no parent on the same book row; `src/lib/services/request-delete-children.ts`): undelivered ones soft-deleted; delivered ones (`placedEbookFiles` not NULL, `status = 'downloaded'` or `completedAt`) stay with `parentRequestId = null` (their file stays, so select-ebook, the list's `downloadAvailable` and the download route keep working)
 
 7. **Soft Delete Request**
    - UPDATE: `deletedAt = NOW(), deletedBy = adminUserId`
@@ -206,11 +218,13 @@ where: {
     "torrentsKeptUnlimited": 0,
     "torrentsKeptShared": 0,
     "torrentsKeptNotOwned": 0,
-    "filesKeptReason": "folder contents changed since import"
+    "filesKeptReason": "folder contents changed since import",
+    "folderKept": { "folder": "/media/Author/Book", "files": [{ "name": "Book.epub", "why": "ebook of another request" }], "more": 0 }
   }
 }
 ```
-- `filesKeptReason` present only when library files were kept; the request is still deleted (HTTP 200)
+- `filesKeptReason` present only when library files were kept (nothing removed); the request is still deleted (HTTP 200)
+- `folderKept` (#526) present only when the audio was removed but the folder stays: first 20 entries, `more` = the rest; message `Request deleted; the book folder stays because it still holds: Book.epub (ebook of another request), notes.txt (RMAB has no record that it placed it)`; `filesDeleted: true`. The reported-issue replace stops only on `filesKeptReason`
 - `torrentsKeptNotOwned`: torrents left in the client because RMAB did not add them (or can't tell that it did)
 
 **Errors:**
@@ -232,6 +246,7 @@ where: {
 - SWR cache invalidation after deletion
 - Loading states during deletion
 - Files kept: warning toast `Request deleted; files kept: <reason>` (10 s) instead of the success toast
+- Folder kept (#526): warning toast with the result message (10 s)
 
 ## Re-Requesting After Deletion
 
@@ -333,6 +348,12 @@ where: {
   - A flat ebook shelf stored by two books (`ebook_path_template = Ebooks`): rule c keeps every recorded file there (`it is also the folder of "<title>"`)
   - After `media_dir` moves, recorded paths under the old location fail rule a (`it is outside the media library (...)`) and are kept
   - The ebook's own folder (custom `ebook_path_template`) is left empty after its only file goes (no empty-parent sweep)
+
+**9. Audiobook Request Delete Removed the Whole Book Folder (#526)**
+- **Issue:** after the guard passed, `fs.rm(folder, { recursive })` removed everything in it: the ebook the same book's ebook request placed, the user's own files, NAS/ABS leftovers
+- **Cause:** the evidence check proves only that the folder's direct audio is this import; nothing limited the removal to it
+- **Fix:** D1 table above (audio of the hashed set; cover and junk only when nothing else is left; folder only when empty; `folderKept` lists what stayed); delivered ebook children stay, unlinked, the book keeps their folder; D2 empty-folder step. The automatic ebook request (`createEbookRequestIfEnabled`) and `find_missing_ebooks` look for an active ebook request by book (`audiobookId`), not by parent
+- **Limits:** other users' audiobook requests for the same book still lose the shared audio (per-user duplicate check, `request-creator.service.ts`; as before); a user-customized `cover.jpg` in a folder with nothing else of theirs is removed; folders holding other user files now stay (listed); `requests/[id]/fetch-ebook`, `interactive-search-ebook`, `select-ebook` still find an audiobook request's ebook request by parent
 
 ## File Structure
 
