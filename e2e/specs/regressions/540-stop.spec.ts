@@ -54,13 +54,15 @@ function stopReport(k: number) {
   const seg = segments();
   const stop = seg[k] ?? '';
   const next = seg[k + 1] ?? '';
-  const at = (needle: string) => stop.indexOf(needle);
+  // PostgreSQL also stops at container start (entrypoint init) and a crash restarts node: look after the last stop request
+  const from = Math.max(0, stop.lastIndexOf('[App] Stop requested'));
+  const atAfter = (needle: string) => stop.indexOf(needle, from);
   return {
     timing: stops.find((s) => s.cycle === k) ?? null,
     shutdown: lines(stop, /\[Shutdown\]|\[App\] (Stop requested|node exited|Ending leftover)/),
     order: {
-      sigterm: at('[Shutdown] SIGTERM received'), done: at('[Shutdown] Done in'), nodeExited: at('[App] node exited'),
-      pgFastShutdown: at('received fast shutdown request'), pgDown: at('database system is shut down'),
+      sigterm: atAfter('[Shutdown] SIGTERM received'), done: atAfter('[Shutdown] Done in'), nodeExited: atAfter('[App] node exited'),
+      pgFastShutdown: atAfter('received fast shutdown request'), pgDown: atAfter('database system is shut down'),
     },
     terminatingConnections: count(stop, 'terminating connection due to administrator command'),
     recoveryNextStart: count(next, 'database system was not properly shut down') + count(next, 'automatic recovery in progress'),
@@ -74,7 +76,7 @@ const organizeJobs = (id: string) =>
 const pids = (comm: string) =>
   sh(`for d in /proc/[0-9]*; do c=$(cat "$d/comm" 2>/dev/null) || continue; case "$c" in "${comm}"*) echo "\${d#/proc/}" ;; esac; done; true`).split(/\s+/).filter(Boolean);
 const NODE = 'next-server';
-const healthy = () => poll(() => sh('curl -sf --max-time 2 http://localhost:3030/api/health >/dev/null && echo ok || true') === 'ok', 120_000);
+const healthy = () => poll(() => sh('curl -sf --max-time 2 http://localhost:3030/api/health >/dev/null && echo ok || true').trim() === 'ok', 120_000);
 
 /** Hold the next merge's ffmpeg (SIGSTOP) once it starts; its PID lands in /tmp/e2e-ffpid. */
 function holdNextMerge() {
@@ -146,18 +148,19 @@ test('#540 stop phases', async () => {
     const held = await requestHeld(rmab, 'asin-merge', 'artemis');
     const nodeBefore = pids(NODE);
     sh(`for p in ${nodeBefore.join(' ')}; do kill -KILL "$p"; done`);
+    // Second cut: the rerun starts within seconds of the restart, so hold it now
+    holdNextMerge();
     const restarted = await poll(() => {
       const now = pids(NODE);
       return now.length > 0 && now.every((p) => !nodeBefore.includes(p)) ? now : null;
     }, 60_000, 1000);
-    const ffmpegAfterCrash = pids('ffmpeg');
+    const ffmpegAfterCrash = pids('ffmpeg').filter((p) => p === held.pid); // the held rerun is a new PID
     out.crash = {
       ...held, nodeBefore, nodeAfter: restarted, ffmpegAfterCrash, healthy: await healthy(),
       wrapperLines: lines(stackLogsSync('rmab'), /\[App\] (node exited|ERROR|Ending leftover)/).slice(-4),
     };
     save();
-    // Second cut: hold the rerun (after Bull's stall check, 30-60 s), then the harness stops the container
-    holdNextMerge();
+    // The harness then stops the container while the rerun is held
     const rerun = await heldPid();
     out.crash = { ...(out.crash as object), rerunHeld: rerun, jobs: organizeJobs(held.id) };
     expect.soft(ffmpegAfterCrash, 'no ffmpeg left after the crash').toEqual([]);
