@@ -9,15 +9,7 @@
 import { PermissionFlagsBits, SlashCommandBuilder, type SlashCommandOptionsOnlyBuilder } from 'discord.js';
 import type { DeletePermission } from './discord-config';
 
-/**
- * @param ebookEnabled whether any e-book source is configured. When false the E-book choice is
- * omitted entirely, so users are never offered a request type that cannot succeed. The request
- * path still guards independently, for clients holding a stale command list.
- */
-export function buildCommandDefinitions(
-  deletePermission: DeletePermission,
-  ebookEnabled: boolean
-) {
+export function buildCommandDefinitions(deletePermission: DeletePermission) {
   const commands: (SlashCommandBuilder | SlashCommandOptionsOnlyBuilder)[] = [
     new SlashCommandBuilder()
       .setName('request')
@@ -29,7 +21,7 @@ export function buildCommandDefinitions(
           .setRequired(true)
           .addChoices(
             { name: 'Audiobook', value: 'audiobook' },
-            ...(ebookEnabled ? [{ name: 'E-book', value: 'ebook' }] : [])
+            { name: 'E-book', value: 'ebook' }
           )
       )
       .addStringOption((option) =>
