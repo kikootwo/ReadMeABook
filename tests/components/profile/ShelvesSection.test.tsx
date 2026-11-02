@@ -86,11 +86,13 @@ describe('ShelvesSection', () => {
 
     const synced = card('Read');
     expect(within(synced).getByText(/Synced 3d ago/)).toBeInTheDocument();
-    expect(within(synced).getByTestId('shelf-sync-dot')).not.toHaveClass('bg-emerald-500');
+    expect(synced.querySelector('.rounded-full.bg-gray-300')).not.toBeNull();
+    expect(synced.querySelector('.bg-emerald-500')).toBeNull();
 
     const neverSynced = card('To Read');
     expect(within(neverSynced).queryByText(/Syncing/)).not.toBeInTheDocument();
     expect(within(neverSynced).getByText(/Never synced/)).toBeInTheDocument();
+    expect(neverSynced.querySelector('.bg-emerald-500')).toBeNull();
     expect(neverSynced.querySelector('.animate-ping, .animate-pulse')).toBeNull();
   });
 
@@ -98,7 +100,9 @@ describe('ShelvesSection', () => {
     state.shelves = [shelf('h1', 'hardcover', 'Want to Read'), shelf('h2', 'hardcover', 'Owned', null)];
     render(<ShelvesSection />);
 
-    expect(within(card('Want to Read')).getByTestId('shelf-sync-dot')).toHaveClass('bg-emerald-500');
+    const synced = card('Want to Read');
+    expect(within(synced).getByText(/Synced 3d ago/)).toBeInTheDocument();
+    expect(synced.querySelector('.bg-emerald-500')).not.toBeNull();
     const pending = card('Owned');
     expect(within(pending).getByText(/Syncing/)).toBeInTheDocument();
     expect(pending.querySelector('.animate-ping')).not.toBeNull();

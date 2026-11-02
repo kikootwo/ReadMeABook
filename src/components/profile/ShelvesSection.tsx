@@ -389,7 +389,6 @@ function ShelfCard({
               ) : shelf.lastSyncAt ? (
                 <>
                   <span
-                    data-testid="shelf-sync-dot"
                     className={cn(
                       'inline-block w-1.5 h-1.5 rounded-full',
                       isGoodreads ? 'bg-gray-300 dark:bg-gray-600' : 'bg-emerald-500',
@@ -399,7 +398,7 @@ function ShelfCard({
                 </>
               ) : (
                 <>
-                  <span data-testid="shelf-sync-dot" className="inline-block w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-600" />
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-600" />
                   Never synced
                 </>
               )}
