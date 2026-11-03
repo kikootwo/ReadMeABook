@@ -67,7 +67,7 @@ export function Modal({
 
   return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
-      {/* Backdrop */}
+      {/* Backdrop (translucent so the page behind stays partly visible) */}
       <div
         className="fixed inset-0 bg-black/50 transition-opacity"
         onClick={handleClose}

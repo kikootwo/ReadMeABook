@@ -466,13 +466,7 @@ describe('Admin requests routes', () => {
       user: { id: 'u3', plexUsername: 'user3' },
       userId: 'u3',
     });
-    prismaMock.request.update.mockResolvedValueOnce({
-      id: 'req-3',
-      status: 'downloading',
-      audiobook: { id: 'ab-3', title: 'Title', author: 'Author' },
-      user: { id: 'u3', plexUsername: 'user3' },
-      userId: 'u3',
-    });
+    prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 });
     const request = { json: vi.fn().mockResolvedValue({ action: 'approve' }) };
 
     const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
@@ -493,13 +487,7 @@ describe('Admin requests routes', () => {
       user: { id: 'u4', plexUsername: 'user4' },
       userId: 'u4',
     });
-    prismaMock.request.update.mockResolvedValueOnce({
-      id: 'req-4',
-      status: 'pending',
-      audiobook: { id: 'ab-4', title: 'Title', author: 'Author', audibleAsin: 'ASIN4' },
-      user: { id: 'u4', plexUsername: 'user4' },
-      userId: 'u4',
-    });
+    prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 });
     const request = { json: vi.fn().mockResolvedValue({ action: 'approve' }) };
 
     const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
@@ -520,13 +508,7 @@ describe('Admin requests routes', () => {
       user: { id: 'u5', plexUsername: 'user5' },
       userId: 'u5',
     });
-    prismaMock.request.update.mockResolvedValueOnce({
-      id: 'req-5',
-      status: 'denied',
-      audiobook: { id: 'ab-5', title: 'Title', author: 'Author' },
-      user: { id: 'u5', plexUsername: 'user5' },
-      userId: 'u5',
-    });
+    prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 });
     const request = { json: vi.fn().mockResolvedValue({ action: 'deny' }) };
 
     const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');

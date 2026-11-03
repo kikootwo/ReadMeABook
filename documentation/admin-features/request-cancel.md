@@ -3,7 +3,7 @@
 **Status:** ✅ Implemented | One cancel path; stops and removes RMAB's own partial download (#228, credit #506)
 
 ## Overview
-Cancel (web UI, admin table, API token route) runs `cancelRequest()` / `cancelLoadedRequest()` in `src/lib/services/request-cancel.service.ts`. Callers authorize (owner, or effective role admin). Cancel never touches library files. Delete is a different action: [request-deletion.md](request-deletion.md).
+Cancel (web UI, admin table, API token route, Discord card button and `/status`) runs `cancelRequest()` / `cancelLoadedRequest()` in `src/lib/services/request-cancel.service.ts`. Callers authorize (owner, or effective role admin). Cancel never touches library files. Delete is a different action: [request-deletion.md](request-deletion.md).
 
 ## Cancel vs Delete
 | | Cancel | Delete (admin) |
@@ -19,6 +19,7 @@ Cancel (web UI, admin table, API token route) runs `cancelRequest()` / `cancelLo
 2. `updateMany where {id, deletedAt:null, status:<status read>}` sets `status`, `cancelledAt`, `updatedAt` (+ `selectedTorrent: DbNull` for `awaiting_approval`). Count 0: re-read; `cancelled` = idempotent success, else 400 / 404. Committed before any client call; no transaction.
 3. Queue `request_cancelled` notification (failure logged only).
 4. Download step inline (`handleCancelledDownload`, `src/lib/services/cancelled-download.ts`) on the newest `selected` row only, under `CANCEL_STEP_BUDGET_MS` (10 s, `cancel-deadline.ts`). Deadline checked right before every `deleteDownload` and every row write; once passed: no delete, no write (the seeding cleanup's cancelled pass takes over). Lookups race the deadline (no abort signal; a late answer is ignored). An in-flight delete is awaited.
+5. Discord sync (`syncDiscordOnCancel`, never throws): card rendered cancelled; a pending approval message is retracted, crediting `options.actor` (Discord id, else the RMAB user's linked Discord account). Skipped for an already-cancelled request.
 
 ## Download step rules (torrent)
 | Case | Result |

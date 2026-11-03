@@ -13,10 +13,12 @@ import { createPrismaMock } from '../helpers/prisma';
 const prismaMock = createPrismaMock();
 const jobQueueMock = vi.hoisted(() => ({ addNotificationJob: vi.fn() }));
 const stepMock = vi.hoisted(() => ({ handleCancelledDownload: vi.fn(), newestSelectedRow: vi.fn() }));
+const discordSyncMock = vi.hoisted(() => ({ syncDiscordOnCancel: vi.fn() }));
 
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/services/job-queue.service', () => ({ getJobQueueService: () => jobQueueMock }));
 vi.mock('@/lib/services/cancelled-download', () => stepMock);
+vi.mock('@/lib/services/discord/discord-cancel-sync', () => discordSyncMock);
 
 const record = (status = 'downloading') => ({
   id: 'req-1', status, audiobookId: 'ab-1', type: 'audiobook',
@@ -82,6 +84,21 @@ describe('cancelLoadedRequest', () => {
     expect(res).toMatchObject({ success: true, alreadyCancelled: true, download: 'none', message: 'This request was already cancelled.' });
     expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
     expect(stepMock.handleCancelledDownload).not.toHaveBeenCalled();
+    expect(discordSyncMock.syncDiscordOnCancel).not.toHaveBeenCalled();
+  });
+
+  it('rewrites the Discord card and credits the actor on a withdrawn approval message', async () => {
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    const { cancelLoadedRequest } = await import('@/lib/services/request-cancel.service');
+
+    await cancelLoadedRequest(record('awaiting_approval'), {
+      audience: 'owner',
+      actor: { userId: 'user-1', discordUserId: 'discord-1' },
+    });
+    await cancel(record('downloading'));
+
+    expect(discordSyncMock.syncDiscordOnCancel).toHaveBeenNthCalledWith(1, 'req-1', true, 'user-1', 'discord-1');
+    expect(discordSyncMock.syncDiscordOnCancel).toHaveBeenNthCalledWith(2, 'req-1', false, null, undefined);
   });
 
   it('two cancels at once: one flips and runs the step, the other gets the idempotent answer', async () => {

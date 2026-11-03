@@ -16,6 +16,7 @@ import {
   removeEbookFiles,
 } from './request-delete-files';
 import { cleanUpRequestDownload, emptyDownloadCleanupCounts } from './request-delete-download';
+import { syncDiscordOnCancel } from './discord/discord-cancel-sync';
 import { clearRemovedEbookFolder, findChildRequests, keepDeliveredChildren, type ChildRequests } from './request-delete-children';
 import type { KeptFile } from '../utils/book-folder-delete';
 
@@ -79,7 +80,11 @@ export interface DeleteRequestResult {
  */
 export async function deleteRequest(
   requestId: string,
-  adminUserId: string
+  adminUserId: string,
+  // Discord ID of the acting user when the deletion originated in Discord. Used only to attribute
+  // the "Cancelled by" mention on the approval embed; Web UI deletions omit it and
+  // fall back to the deleting user's linked Discord account.
+  actorDiscordUserId?: string | null
 ): Promise<DeleteRequestResult> {
   try {
     // 1. Find request (only active, non-deleted)
@@ -232,6 +237,14 @@ export async function deleteRequest(
 
     logger.info(
       `Request ${requestId} soft-deleted by admin ${adminUserId}`
+    );
+
+    // 7. Converge the Discord surfaces so no deletion path leaves live buttons behind.
+    await syncDiscordOnCancel(
+      requestId,
+      request.status === 'awaiting_approval',
+      adminUserId,
+      actorDiscordUserId
     );
 
     return {

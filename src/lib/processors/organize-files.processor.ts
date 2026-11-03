@@ -27,6 +27,7 @@ import {
 } from './organize-evidence';
 import { getAudibleService } from '../integrations/audible.service';
 import { addAutoBlock } from '../services/blocklist.service';
+import { getDiscordBotService } from '../services/discord/discord-bot.service';
 import { updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { createAudibleDetailsLoader, readMetadataTaggingEnabled, resolveTagDetails } from './organize-tag-details';
 import { applyPostImportCategory } from './post-import-category';
@@ -319,6 +320,22 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
         updatedAt: new Date(),
       },
     });
+
+    // Refresh any live Discord request card to "Download Complete". The successful import sends no
+    // user-facing notification (those only fire at 'available' via the Plex/ABS match), so without
+    // this the card stays frozen on its last notified state ("Downloading") until a scan matches it.
+    // Gated on the bot running so discord.js stays unloaded when the bot is disabled (lazy import).
+    if (getDiscordBotService().getClient()) {
+      try {
+        const { editRequestCards } = await import('../services/discord/discord-cards');
+        await editRequestCards(requestId);
+      } catch (error) {
+        logger.warn('Failed to refresh Discord request card at downloaded', {
+          requestId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
 
     // Apply post-import category to torrent client if configured
     await applyPostImportCategory(requestId, logger);

@@ -127,7 +127,10 @@ export async function PATCH(
       }
 
       if (action === 'cancel') {
-        return cancelResponse(await cancelLoadedRequest(requestRecord, { audience: req.user.role === 'admin' ? 'admin' : 'owner' }));
+        return cancelResponse(await cancelLoadedRequest(requestRecord, {
+          audience: req.user.role === 'admin' ? 'admin' : 'owner',
+          actor: { userId: req.user.id },
+        }));
       } else if (action === 'retry') {
         // Retry failed request - allow users to retry their own warn/failed requests
         // Only allow retry for failed, warn, or awaiting_* statuses
