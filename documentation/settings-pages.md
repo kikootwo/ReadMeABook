@@ -73,6 +73,7 @@ src/app/admin/settings/
 6. **E-book Sidecar** - Multi-source ebook downloads (Anna's Archive + Indexer Search), preferred format
 7. **BookDate** - AI provider, API key (encrypted), model selection, library scope, custom prompt, swipe history
 8. **Notifications** - Multiple backends (Discord, Pushover), event subscriptions, test functionality
+9. **API** - Token management for all users; "Allow API tokens to approve or deny requests" switch (`api_tokens.allow_request_approval`, off by default, saves on toggle via `PATCH /api/admin/settings/api-tokens`). See [backend/services/api-tokens.md](backend/services/api-tokens.md#request-approval-opt-in)
 
 **Active tab:** in the address, `/admin/settings?tab=<id>`: `library` (default, no param), `auth` (Audiobookshelf mode only), `prowlarr`, `download`, `paths`, `ebook`, `bookdate`, `notifications`, `api`. A click pushes a history entry (`window.history.pushState`, synced by Next.js, no server round trip), so reload, back/forward and links keep the tab; an unknown tab or one `getTabs(backendMode)` doesn't offer shows `library` and the URL is left alone (`hooks/useSettingsTabUrlState.ts`).
 

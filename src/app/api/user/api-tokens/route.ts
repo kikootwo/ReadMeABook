@@ -13,12 +13,14 @@ import { generateApiToken } from '@/lib/utils/api-token';
 import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { approvalTokenCreateRefusal, isTokenApprovalEnabled } from '@/lib/services/api-token-approval';
 
 const logger = RMABLogger.create('API.User.ApiTokens');
 
 const CreateTokenSchema = z.object({
   name: z.string().min(1).max(100),
   expiresAt: z.string().datetime().nullable().optional(),
+  canApproveRequests: z.boolean().optional(),
 });
 
 /**
@@ -38,12 +40,16 @@ export async function GET(request: NextRequest) {
         name: t.name,
         tokenPrefix: t.tokenPrefix,
         role: t.role,
+        canApproveRequests: t.canApproveRequests,
         lastUsedAt: t.lastUsedAt,
         expiresAt: t.expiresAt,
         createdAt: t.createdAt,
       }));
 
-      return NextResponse.json({ tokens: sanitized });
+      // Whether the create form may offer "Can approve requests" (admins only, while the setting is on)
+      const approvalTokensAvailable = req.user!.role === 'admin' && (await isTokenApprovalEnabled());
+
+      return NextResponse.json({ tokens: sanitized, approvalTokensAvailable });
     } catch (error) {
       logger.error('Failed to list user API tokens', { error: errorForLog(error) });
       return NextResponse.json({ error: 'Failed to list API tokens' }, { status: 500 });
@@ -74,7 +80,7 @@ export async function POST(request: NextRequest) {
       const bodyResult = await readJsonBody(req);
       if (!bodyResult.ok) return bodyResult.response;
       const body = bodyResult.data;
-      const { name, expiresAt } = CreateTokenSchema.parse(body);
+      const { name, expiresAt, canApproveRequests = false } = CreateTokenSchema.parse(body);
 
       // Look up the user's actual role from the database
       const user = await prisma.user.findUnique({
@@ -84,6 +90,15 @@ export async function POST(request: NextRequest) {
 
       if (!user) {
         return NextResponse.json({ error: 'User not found' }, { status: 404 });
+      }
+
+      if (canApproveRequests) {
+        const refusal = await approvalTokenCreateRefusal({
+          creatorId: req.user!.id,
+          targetUserId: req.user!.id,
+          targetRole: user.role,
+        });
+        if (refusal) return NextResponse.json({ error: refusal }, { status: 403 });
       }
 
       // Enforce per-user token cap (count only active, non-expired tokens)
@@ -116,10 +131,17 @@ export async function POST(request: NextRequest) {
           createdById: req.user!.id,
           userId: req.user!.id, // Token acts as the current user
           expiresAt: expiresAt ? new Date(expiresAt) : null,
+          canApproveRequests,
         },
       });
 
-      logger.info('User API token created', { tokenId: apiToken.id, name, userId: req.user!.id });
+      logger.info('User API token created', {
+        tokenId: apiToken.id,
+        name,
+        userId: req.user!.id,
+        canApproveRequests,
+        expiresAt: apiToken.expiresAt,
+      });
 
       return NextResponse.json({
         token: {
@@ -127,6 +149,7 @@ export async function POST(request: NextRequest) {
           name: apiToken.name,
           tokenPrefix: apiToken.tokenPrefix,
           role: apiToken.role,
+          canApproveRequests: apiToken.canApproveRequests,
           expiresAt: apiToken.expiresAt,
           createdAt: apiToken.createdAt,
         },

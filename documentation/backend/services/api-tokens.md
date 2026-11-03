@@ -1,6 +1,6 @@
 # API Tokens
 
-**Status:** ✅ Implemented | Personal long-lived tokens, allowlisted endpoints, write capability per issue #169
+**Status:** ✅ Implemented | Personal long-lived tokens, allowlisted endpoints, write capability per issue #169, opt-in request approval
 
 ## Overview
 Static `rmab_`-prefixed tokens act with the owner's full user-level permissions on a fixed allowlist of endpoints. JWT sessions are NOT restricted by the allowlist.
@@ -11,6 +11,7 @@ Static `rmab_`-prefixed tokens act with the owner's full user-level permissions 
 - **Role binding:** Token `role` matches token owner's role at creation time; per request the effective role is capped by the owner's current role (admin token of a demoted owner acts as `user`; a `user` token is not raised on promotion); admin tokens require admin-created
 - **Per-user cap:** 25 active (non-expired) tokens (`MAX_TOKENS_PER_USER`)
 - **Expiry:** Optional (`never`, `30d`, `90d`, `1y`)
+- **`canApproveRequests`** (bool, default false, column `can_approve_requests`): set once at creation, never edited. See [Request approval (opt-in)](#request-approval-opt-in)
 - **Soft-deleted users:** Tokens reject if `tokenUser.deletedAt` is set
 - **Unapproved accounts:** Tokens reject if the owner's `registrationStatus` is `pending_approval` or `rejected` (null counts as approved); `POST /api/admin/api-tokens` for such a target returns 403
 - **Identity attribution:** `req.user.id` resolves to `apiToken.userId` (target user), NOT `apiToken.createdById`
@@ -28,6 +29,7 @@ Static `rmab_`-prefixed tokens act with the owner's full user-level permissions 
 | GET | `/api/admin/metrics` | System metrics | | ✓ |
 | GET | `/api/admin/downloads/active` | Active downloads | | ✓ |
 | GET | `/api/admin/requests/recent` | Recent requests | | ✓ |
+| POST | `/api/admin/requests/:id/approve` | Approve or deny request (**opt-in**, `permission: 'approve_requests'`) | ✓ | ✓ |
 
 Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS`, `API_TOKEN_ENDPOINT_DOCS`).
 
@@ -36,6 +38,7 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - `path` entries containing `:name` are converted to anchored regexes where each placeholder matches `[^/]+` (a single segment).
 - Sibling sub-routes (e.g. `/api/requests/:id/select-torrent`) are NOT matched by the `/api/requests/:id` entry — they require their own allowlist entry.
 - Method comparison is case-insensitive.
+- An entry may carry `permission` (`ApiTokenPermission`); `getEndpointPermission(method, path)` returns it and the middleware checks it after the allowlist (403 with the reason, logged as a warning). `getOptionalAuthUser` returns no caller for a refused token.
 
 ## POST `/api/requests` (Write)
 - Body: `{ "audiobook": { "asin", "title", "author", "narrator?", "description?", "coverArtUrl?" } }`
@@ -62,6 +65,24 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - Stops RMAB's own partial download; a finished one may stay to seed; never deletes library files.
 - `PATCH`/`DELETE /api/requests/:id` are NOT on the allowlist. The raw `DELETE /api/requests/:id` handler was removed (405); admin delete is `DELETE /api/admin/requests/:id` (JWT only).
 
+## Request approval (opt-in)
+Lets an app approve or deny `awaiting_approval` requests away from the web UI (e.g. the Absorb mobile client, pounat/absorb#286: RMAB has no mobile app). Delete stays JWT-only (#228); this right is far narrower: approving starts a search or a download of the requester's own pick and never removes anything, and a denied request can be requested again.
+
+**Gates (all must pass, every call; `src/lib/services/api-token-approval.ts`):**
+| # | Gate | Where | Refusal |
+|---|---|---|---|
+| 1 | Admin setting `api_tokens.allow_request_approval` = `'true'` (absent = off). Read from the DB on every call (no config cache), so off applies at once and stops every approval token; on again restores them | middleware | 403 "An admin has not allowed…" |
+| 2 | Token created with `canApproveRequests` | middleware | 403 "This API token cannot approve requests…" |
+| 3 | Effective role admin (token role admin AND owner still admin) | middleware + route `requireAdmin` | 403 |
+| 4 | No `selectedTorrent` in the body: approves with the requester's stored pick (same `guardTorrentSelection`/`guardEbookSelection` as the web) or an automatic search, so a leaked token can't send a download link of its choosing to the client | approve route (`req.apiToken`) | 400 ValidationError |
+
+- **Creation** (`POST /api/user/api-tokens` or `POST /api/admin/api-tokens`, body `canApproveRequests: true`): only an admin, for their own account (`createdById = userId`), while the setting is on; otherwise 403 (`approvalTokenCreateRefusal`). Any expiry is accepted. List responses carry `canApproveRequests` per token and `approvalTokensAvailable` (user route: caller is admin AND setting on; admin route: setting on).
+- **UI:** Profile → API Tokens and Settings → API show a "Can approve requests" checkbox only when `approvalTokensAvailable` (admin tab: only for "Current user"; a token for another user is sent with `canApproveRequests: false`). Ticking it moves a "Never" expiry to 90 days; the admin can still pick any expiry, and "Never" adds a warning. Token lists show a "Can approve requests" badge; `/api-docs` shows an **Opt-in** badge (`EndpointDoc.permission`).
+- **Audit:** every token approve/deny logs `API token "<name>" (<prefix>) approving|denying request <id>` with token id, admin id and username; refused calls log a warning with the reason.
+- **Listing waiting requests:** `GET /api/requests?status=awaiting_approval` (admin tokens see every user's). `GET /api/admin/requests/pending-approval` stays off the allowlist.
+- **Settings route:** `GET /api/admin/settings/api-tokens` → `{ allowRequestApproval }`; `PATCH` `{ allowRequestApproval: boolean }` (400 otherwise). Admin JWT only.
+- `req.apiToken` (`ApiTokenInfo { id, name, tokenPrefix, canApproveRequests }`) is set on every token-authenticated request; unset for sessions.
+
 ## GET `/api/audiobooks/search`
 - Auth is optional (route never calls `requireAuth`). An API token counts only on allowlisted endpoints (this one is listed); elsewhere `getOptionalAuthUser` treats it as no caller.
 - Uses `getOptionalAuthUser` to recognize both JWT sessions AND API tokens (same account checks as `requireAuth`) for per-user enrichment (request status, ignore status).
@@ -71,7 +92,7 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 ## Auth flow
 1. Request hits route; `requireAuth` extracts `Authorization: Bearer ...` token.
 2. If token starts with `rmab_` → `authenticateApiToken` (SHA-256 lookup, expiry + soft-delete check, fire-and-forget `lastUsedAt` update).
-3. If on the allowlist → handler runs with `req.user = { sub, id, plexId, username, role }`.
+3. If on the allowlist and the entry's `permission` (if any) passes → handler runs with `req.user = { sub, id, plexId, username, role }` and `req.apiToken`.
 4. If not on the allowlist → 403 "This endpoint is not available via API token authentication".
 5. JWT tokens skip the allowlist entirely.
 
@@ -82,6 +103,7 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 
 ## Files
 - Constants + matcher: `src/lib/constants/api-tokens.ts`
+- Approval gates: `src/lib/services/api-token-approval.ts`; setting route `src/app/api/admin/settings/api-tokens/route.ts`; UI `src/components/api-tokens/ApprovalTokenOption.tsx`, `src/app/admin/settings/tabs/ApiTab/TokenApprovalSetting.tsx`
 - Middleware: `src/lib/middleware/auth.ts` (`requireAuth`, `getOptionalAuthUser`)
 - Routes:
   - `src/app/api/user/api-tokens/route.ts` (user create/list/revoke)
@@ -92,6 +114,10 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - `tests/constants/api-tokens.test.ts` — matcher: positive matches, negative matches, sub-route exclusion, method case-insensitivity, allowlist/docs parity.
 - `tests/middleware/auth.middleware.test.ts` — middleware token auth path, allowlist enforcement (incl. dynamic ID match), sibling-route blocking, `getOptionalAuthUser`.
 - `tests/api/requests-id.route.test.ts` — owner GET 200, cross-user GET 403.
+- `tests/middleware/api-token-approval.test.ts` — approval gates (setting, token flag, demoted owner, sessions untouched, pending-approval still closed).
+- `tests/api/requests-approve-token.route.test.ts` — token approve: body release refused, audit log, deny.
+- `tests/api/api-token-approval-create.routes.test.ts` — creation rules, `approvalTokensAvailable`, setting route.
+- `tests/components/api-tokens/ApprovalTokenOption.test.tsx` — 90-day default, flag sent only when offered, admin tab hides it for other users.
 - `tests/api/requests-cancel.route.test.ts` — cancel route: owner 200 minimal body, cross-user 403, admin any, 404, 400.
 - `tests/api/requests-id.bigint.route.test.ts` — owner/admin GET 200 with BigInt sizes as numbers (#261).
 - `tests/utils/json-safe.test.ts` — `toJsonSafe()` BigInt conversion, Date/Decimal passthrough.

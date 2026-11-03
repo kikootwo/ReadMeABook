@@ -176,7 +176,7 @@ Fetch all requests with status 'awaiting_approval'
 ### POST /api/admin/requests/[id]/approve
 Approve or deny a specific request
 
-**Auth:** Admin only
+**Auth:** Admin only. An API token reaches it only through the opt-in in [api-tokens.md](../backend/services/api-tokens.md#request-approval-opt-in): such a token can't send `selectedTorrent` (400), and every token approve/deny is logged with the token's name and prefix.
 
 **Request:**
 ```json
@@ -226,6 +226,8 @@ Approve or deny a specific request
 - `404` - Request not found
 - `400` - Request not in 'awaiting_approval' status
 - `400` - Invalid action (must be 'approve' or 'deny')
+- `400` - `selectedTorrent` sent with an API token
+- `403` - API token without the approval opt-in (setting off, token not created for it, or owner no longer admin)
 
 ### GET /api/admin/settings/auto-approve
 Get global auto-approve setting

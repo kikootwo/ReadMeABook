@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   API_TOKEN_ALLOWED_ENDPOINTS,
   API_TOKEN_ENDPOINT_DOCS,
+  getEndpointPermission,
   isEndpointAllowed,
 } from '@/lib/constants/api-tokens';
 
@@ -23,6 +24,7 @@ describe('isEndpointAllowed', () => {
       ['GET', '/api/admin/metrics'],
       ['GET', '/api/admin/downloads/active'],
       ['GET', '/api/admin/requests/recent'],
+      ['POST', '/api/admin/requests/abc-uuid-123/approve'],
     ];
 
     it.each(cases)('%s %s is allowed', (method, path) => {
@@ -52,7 +54,7 @@ describe('isEndpointAllowed', () => {
       expect(isEndpointAllowed('POST', '/api/requests/abc/select-torrent')).toBe(false);
     });
 
-    it('the cancel route is the only token path that changes a request; nothing deletes one (#228)', () => {
+    it('cancel and the opt-in approve route are the only token paths that change a request; nothing deletes one (#228)', () => {
       expect(isEndpointAllowed('DELETE', '/api/requests/abc')).toBe(false);
       expect(isEndpointAllowed('PATCH', '/api/requests/abc')).toBe(false);
       expect(isEndpointAllowed('GET', '/api/requests/abc/cancel')).toBe(false);
@@ -60,6 +62,9 @@ describe('isEndpointAllowed', () => {
       expect(isEndpointAllowed('POST', '/api/requests/abc/def/cancel')).toBe(false);
       expect(isEndpointAllowed('POST', '/api/requests//cancel')).toBe(false);
       expect(isEndpointAllowed('DELETE', '/api/admin/requests/abc')).toBe(false);
+      expect(isEndpointAllowed('GET', '/api/admin/requests/pending-approval')).toBe(false);
+      expect(isEndpointAllowed('POST', '/api/admin/requests/abc/approve/extra')).toBe(false);
+      expect(isEndpointAllowed('POST', '/api/admin/requests/bulk-approve')).toBe(false);
     });
 
     it('the cancel route\'s description names every cancellable status and the owner `kept` value', async () => {
@@ -89,6 +94,23 @@ describe('isEndpointAllowed', () => {
       expect(isEndpointAllowed('Get', '/api/requests')).toBe(true);
       expect(isEndpointAllowed('post', '/api/requests')).toBe(true);
       expect(isEndpointAllowed('PoSt', '/api/requests')).toBe(true);
+    });
+  });
+
+  describe('getEndpointPermission', () => {
+    it('the approve route needs the approve_requests right; nothing else needs one', () => {
+      expect(getEndpointPermission('POST', '/api/admin/requests/abc/approve')).toBe('approve_requests');
+      expect(getEndpointPermission('post', '/api/admin/requests/abc/approve')).toBe('approve_requests');
+      expect(getEndpointPermission('POST', '/api/requests/abc/cancel')).toBeNull();
+      expect(getEndpointPermission('GET', '/api/requests')).toBeNull();
+      expect(getEndpointPermission('GET', '/api/admin/settings')).toBeNull();
+    });
+
+    it('the docs page shows the same permission as the allowlist', () => {
+      for (const ep of API_TOKEN_ALLOWED_ENDPOINTS) {
+        const doc = API_TOKEN_ENDPOINT_DOCS.find((d) => d.method === ep.method && d.path === ep.path);
+        expect(doc?.permission, `${ep.method} ${ep.path}`).toBe(ep.permission);
+      }
     });
   });
 

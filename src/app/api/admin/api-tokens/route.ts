@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { getRegistrationRefusal } from '@/lib/services/auth/local-account-status';
+import { approvalTokenCreateRefusal, isTokenApprovalEnabled } from '@/lib/services/api-token-approval';
 
 const logger = RMABLogger.create('API.Admin.ApiTokens');
 
@@ -22,6 +23,7 @@ const CreateTokenSchema = z.object({
   expiresAt: z.string().datetime().nullable().optional(),
   userId: z.string().guid().optional(), // Admin can specify which user the token acts as
   role: z.enum(['admin', 'user']).optional(), // Accepted for compatibility, but cannot differ from target user role
+  canApproveRequests: z.boolean().optional(), // Only for the admin's own token, while the admin setting is on
 });
 
 /**
@@ -49,6 +51,7 @@ export async function GET(request: NextRequest) {
           name: t.name,
           tokenPrefix: t.tokenPrefix,
           role: t.role,
+          canApproveRequests: t.canApproveRequests,
           createdBy: t.createdBy.plexUsername,
           createdById: t.createdBy.id,
           tokenUser: t.tokenUser.plexUsername,
@@ -58,7 +61,8 @@ export async function GET(request: NextRequest) {
           createdAt: t.createdAt,
         }));
 
-        return NextResponse.json({ tokens: sanitized });
+        // Whether the create form may offer "Can approve requests" (own token, while the setting is on)
+        return NextResponse.json({ tokens: sanitized, approvalTokensAvailable: await isTokenApprovalEnabled() });
       } catch (error) {
         logger.error('Failed to list API tokens', { error: errorForLog(error) });
         return NextResponse.json({ error: 'Failed to list API tokens' }, { status: 500 });
@@ -93,7 +97,7 @@ export async function POST(request: NextRequest) {
         const bodyResult = await readJsonBody(req);
         if (!bodyResult.ok) return bodyResult.response;
         const body = bodyResult.data;
-        const { name, expiresAt, userId, role } = CreateTokenSchema.parse(body);
+        const { name, expiresAt, userId, role, canApproveRequests = false } = CreateTokenSchema.parse(body);
 
         // Determine target user (defaults to the admin themselves)
         const targetUserId = userId || req.user!.id;
@@ -153,6 +157,15 @@ export async function POST(request: NextRequest) {
 
         const tokenRole = targetUser.role;
 
+        if (canApproveRequests) {
+          const refusal = await approvalTokenCreateRefusal({
+            creatorId: req.user!.id,
+            targetUserId,
+            targetRole: tokenRole,
+          });
+          if (refusal) return NextResponse.json({ error: refusal }, { status: 403 });
+        }
+
         // Generate the token
         const { fullToken, tokenHash, tokenPrefix } = generateApiToken();
 
@@ -165,6 +178,7 @@ export async function POST(request: NextRequest) {
             createdById: req.user!.id,
             userId: targetUserId,
             expiresAt: expiresAt ? new Date(expiresAt) : null,
+            canApproveRequests,
           },
         });
 
@@ -174,6 +188,8 @@ export async function POST(request: NextRequest) {
           createdBy: req.user!.username,
           targetUser: targetUser.plexUsername,
           role: tokenRole,
+          canApproveRequests,
+          expiresAt: apiToken.expiresAt,
         });
 
         return NextResponse.json({
@@ -182,6 +198,7 @@ export async function POST(request: NextRequest) {
             name: apiToken.name,
             tokenPrefix: apiToken.tokenPrefix,
             role: apiToken.role,
+            canApproveRequests: apiToken.canApproveRequests,
             expiresAt: apiToken.expiresAt,
             createdAt: apiToken.createdAt,
           },

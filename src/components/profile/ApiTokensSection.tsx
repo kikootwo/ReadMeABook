@@ -10,6 +10,7 @@ import { useApiTokens } from '@/lib/hooks/useApiTokens';
 import { getInstanceUrl } from '@/lib/utils/client-url';
 import Link from 'next/link';
 import type { ApiToken } from '@/lib/types/api-tokens';
+import { ApprovalTokenBadge, ApprovalTokenOption } from '@/components/api-tokens/ApprovalTokenOption';
 
 export function ApiTokensSection() {
   const api = useApiTokens<ApiToken>({ basePath: '/api/user/api-tokens' });
@@ -114,6 +115,13 @@ export function ApiTokensSection() {
                   </select>
                 </div>
               </div>
+              {api.approvalTokensAvailable && (
+                <ApprovalTokenOption
+                  checked={api.newTokenCanApprove}
+                  onChange={api.setNewTokenCanApprove}
+                  expiry={api.newTokenExpiry}
+                />
+              )}
               <div className="flex gap-2">
                 <button
                   onClick={() => api.handleCreate()}
@@ -167,7 +175,10 @@ export function ApiTokensSection() {
                 <tbody>
                   {api.tokens.map((token) => (
                     <tr key={token.id} className="border-b border-gray-100 dark:border-gray-800">
-                      <td className="py-3 px-2 text-gray-900 dark:text-gray-100 font-medium">{token.name}</td>
+                      <td className="py-3 px-2 text-gray-900 dark:text-gray-100 font-medium">
+                        {token.name}
+                        {token.canApproveRequests && <ApprovalTokenBadge />}
+                      </td>
                       <td className="py-3 px-2">
                         <code className="text-xs bg-gray-100 dark:bg-gray-900 px-2 py-1 rounded text-gray-600 dark:text-gray-400 font-mono">
                           {token.tokenPrefix}...
