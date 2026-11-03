@@ -181,11 +181,13 @@ Ebook torrent ranking uses unified algorithm with ebook-specific scoring:
 ## Delete Behavior
 
 **Ebook deletion is different from audiobook deletion:**
-- Only deletes ebook files (`.epub`, `.pdf`, `.mobi`, etc.)
-- Does NOT delete the title folder (audiobook files remain)
+- Deletes only the ebook files this request's imports placed (`Request.placedEbookFiles`, written by the ebook organize for a `copied` file), each only while unchanged (size + sha256) and in a folder the library delete guard allows (#497). A user's own ebook in the book folder is never removed. No record (imported before the field, or the file was already there): nothing removed, the admin sees why. See [request-deletion.md](../admin-features/request-deletion.md) D2
+- Does NOT delete the title folder while it holds anything else (audiobook files remain); a folder this delete left holding only OS/ABS junk (`.DS_Store`, `@eaDir/`, `metadata.json`, ...) goes, and the book's stored path is cleared when it was that folder (#526)
 - Does NOT delete from backend library (Plex/ABS)
 - Does NOT clear audiobook availability linkage
 - Soft-deletes the ebook request record
+
+**Audiobook request delete (#526):** removes its audio (cover and junk only when nothing else is left), never the ebook request's recorded file (listed as `ebook of another request`). A delivered ebook request stays, unlinked (`parentRequestId = null`), and the book keeps that ebook's folder and format; undelivered ebook requests are soft-deleted with it. The automatic ebook request and `find_missing_ebooks` check for an active ebook request by book (`audiobookId`), so a surviving one gets no duplicate; the book's next audiobook import links it to the new audiobook request (compare-and-set on `parentRequestId: null`), so Fetch e-book, select-ebook and interactive search on that request find it by parent and create none. The by-book check also sees other users' ebook requests on the book. See [request-deletion.md](../admin-features/request-deletion.md) D1
 - Torrents left to seed (respects seeding limits)
 
 ## UI Representation
@@ -313,6 +315,8 @@ Categories are configured per-indexer via the tabbed interface in the Edit Index
 **3. Manual Import from an ebook request imported audio into the audiobook (#278)** - the details modal opened the audiobook Manual Import for an ebook card: audio only, and the book's audiobook request (even `available`) was recycled and re-organized. Fixed: an ebook card's Manual Import lists and accepts ebook files and creates or reuses the ebook request; the ebook organize branch imports the selected file (see [manual-import.md](../features/manual-import.md))
 
 **4. Auto-grab re-fetched an ebook the user already put next to the audiobook (#313, part b)** - neither the post-import auto-grab nor `find_missing_ebooks` looked at the book folder, so a book with a user-placed ebook got an ebook request after import and a nightly retry after each failure. Fixed: both check the folder first (see On-Disk Check); a lone PDF or a folder another book also stores does not count. Bulk-importing standalone ebooks (#313 part a) is not covered
+
+**5. A FlareSolverr URL ending in `/` failed (#236)** - the endpoint was built as `${flaresolverrUrl}/v1`, so `http://host:8191/` became `http://host:8191//v1`. Fixed: trailing slashes are trimmed when the URL is used (`trimTrailingSlashes` in `src/lib/utils/url.ts`) for page fetches and the settings connection test; the Anna's Archive base URL is trimmed the same way for search, `/md5/` and slow-link URLs and the interactive-search info link. Saved values are not rewritten
 
 ## Limitations
 

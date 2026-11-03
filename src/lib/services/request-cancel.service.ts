@@ -1,104 +1,190 @@
 /**
  * Component: Request Cancel Service
- * Documentation: documentation/admin-features/request-deletion.md
+ * Documentation: documentation/admin-features/request-cancel.md
  *
- * Shared cancel logic, extracted from PATCH /api/requests/[id] ({ action: 'cancel' }) so the Web UI
- * and the Discord bot's Cancel button and /status menu run an identical code path. Cancelling only
- * stops the request: status → 'cancelled', and the guarded background jobs (request-stop-guard)
- * stop without importing. Unlike deleteRequest, no files, library items or downloads are removed.
+ * The one cancel path (web UI, admin table, API tokens, the Discord bot). Authorization stays with
+ * the caller. Order: one conditional write flips the status (committed before any client call), the
+ * notification is queued, then the download step runs inline under a deadline and never throws.
  */
 
 import { Prisma } from '@/generated/prisma/client';
-import { prisma } from '@/lib/db';
-import { CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
-import { syncDiscordOnCancel } from '@/lib/services/discord/discord-cancel-sync';
-import { RMABLogger } from '@/lib/utils/logger';
+import { prisma } from '../db';
+import { RMABLogger } from '../utils/logger';
+import { CANCELLABLE_STATUSES } from '../constants/request-statuses';
+import { CANCEL_STEP_BUDGET_MS, CancelDeadline } from './cancel-deadline';
+import { handleCancelledDownload, newestSelectedRow, type CancelDownloadOutcome } from './cancelled-download';
+import { syncDiscordOnCancel } from './discord/discord-cancel-sync';
 
-const logger = RMABLogger.create('Service.RequestCancel');
+const logger = RMABLogger.create('RequestCancel');
 
-/** The fields cancelling reads; PATCH /api/requests/[id] already loads them. */
+/** What a cancel needs from the request (the caller has usually loaded it to authorize) */
 export interface CancellableRequest {
   id: string;
   status: string;
+  audiobookId: string;
+  type: string;
   audiobook: { title: string; author: string };
   user: { plexUsername: string | null };
 }
 
-export interface CancelActor {
-  /** RMAB user cancelling; attributes the Discord "Cancelled by" mention via their linked account */
-  userId: string | null;
-  /** Discord user cancelling, when the cancel came from Discord */
-  discordUserId?: string | null;
+/** `admin`: messages may name the download client and another request sharing the download */
+export type CancelAudience = 'admin' | 'owner';
+
+/**
+ * The `download` value a caller sees. Owners get `kept` for `kept_shared` and `kept_not_owned`, so
+ * they can't tell that another request (maybe another user's) uses the download.
+ */
+export type CancelDownloadReport = CancelDownloadOutcome | 'kept';
+
+export interface CancelOptions {
+  audience: CancelAudience;
+  /** Who cancelled, for the "Cancelled by" mention on a retracted Discord approval message */
+  actor?: { userId: string | null; discordUserId?: string | null };
+  /** Tests only */
+  budgetMs?: number;
 }
 
 export type CancelResult =
-  | { success: true; request: any }
-  | { success: false; reason: 'not_found' | 'not_cancellable'; message: string };
+  | {
+      success: true;
+      request: { id: string; status: 'cancelled'; cancelledAt: Date | null };
+      download: CancelDownloadReport;
+      message: string;
+      /** A second cancel of an already-cancelled request */
+      alreadyCancelled?: boolean;
+    }
+  | { success: false; reason: 'not_found' }
+  | { success: false; reason: 'not_cancellable'; status: string };
 
-export function isCancellableStatus(status: string): boolean {
-  return (CANCELLABLE_STATUSES as readonly string[]).includes(status);
+const CANCEL_SELECT = {
+  id: true,
+  status: true,
+  audiobookId: true,
+  type: true,
+  audiobook: { select: { title: true, author: true } },
+  user: { select: { plexUsername: true } },
+} as const;
+
+/** Load (not deleted) and cancel. The caller must have checked the user may cancel it */
+export async function cancelRequest(requestId: string, options: CancelOptions): Promise<CancelResult> {
+  const record = await prisma.request.findFirst({ where: { id: requestId, deletedAt: null }, select: CANCEL_SELECT });
+  if (!record) return { success: false, reason: 'not_found' };
+  return cancelLoadedRequest(record, options);
 }
 
-/** Cancel a request the caller has already loaded and authorized. */
-export async function cancelLoadedRequest(
-  requestRecord: CancellableRequest,
-  actor: CancelActor
-): Promise<CancelResult> {
-  if (!isCancellableStatus(requestRecord.status)) {
-    return {
-      success: false,
-      reason: 'not_cancellable',
-      message: `Cannot cancel request with status: ${requestRecord.status}`,
-    };
+export async function cancelLoadedRequest(record: CancellableRequest, options: CancelOptions): Promise<CancelResult> {
+  if (!(CANCELLABLE_STATUSES as readonly string[]).includes(record.status)) {
+    return alreadyCancelledOr(record.id, record.status);
   }
 
-  const isAwaitingApproval = requestRecord.status === 'awaiting_approval';
-
-  const updated = await prisma.request.update({
-    where: { id: requestRecord.id },
+  // Only from the exact status read: a request that moved on meanwhile (e.g. to processing) is not cancelled
+  const cancelledAt = new Date();
+  const { count } = await prisma.request.updateMany({
+    where: { id: record.id, deletedAt: null, status: record.status },
     data: {
       status: 'cancelled',
-      updatedAt: new Date(),
-      ...(isAwaitingApproval && { selectedTorrent: Prisma.DbNull }),
-    },
-    include: {
-      audiobook: true,
+      cancelledAt,
+      updatedAt: cancelledAt,
+      ...(record.status === 'awaiting_approval' && { selectedTorrent: Prisma.DbNull }),
     },
   });
+  if (count === 0) {
+    const current = await prisma.request.findFirst({ where: { id: record.id, deletedAt: null }, select: { status: true } });
+    if (!current) return { success: false, reason: 'not_found' };
+    return alreadyCancelledOr(record.id, current.status);
+  }
 
   try {
-    const { getJobQueueService } = await import('@/lib/services/job-queue.service');
-    const jobQueue = getJobQueueService();
-    await jobQueue.addNotificationJob(
+    const { getJobQueueService } = await import('./job-queue.service');
+    await getJobQueueService().addNotificationJob(
       'request_cancelled',
-      updated.id,
-      updated.audiobook.title,
-      updated.audiobook.author,
-      requestRecord.user.plexUsername || 'Unknown User'
+      record.id,
+      record.audiobook.title,
+      record.audiobook.author,
+      record.user.plexUsername || 'Unknown User'
     );
   } catch (error) {
-    logger.error('Failed to queue cancellation notification', { error });
+    logger.error('Failed to queue cancellation notification', { error: error instanceof Error ? error.message : String(error) });
   }
 
-  // Render the request card as cancelled and retract a pending approval message, from any surface.
-  await syncDiscordOnCancel(updated.id, isAwaitingApproval, actor.userId, actor.discordUserId);
+  const deadline = CancelDeadline.in(options.budgetMs ?? CANCEL_STEP_BUDGET_MS);
+  const step = await handleCancelledDownload(
+    { id: record.id, audiobookId: record.audiobookId, type: record.type },
+    await newestSelectedRow(record.id),
+    { mode: 'cancel', deadline }
+  );
+  logger.info(`Cancelled request ${record.id}: download ${step.outcome} (${step.detail})`);
 
-  return { success: true, request: updated };
+  // Render the Discord request card as cancelled and retract a pending approval message. Never throws.
+  await syncDiscordOnCancel(
+    record.id,
+    record.status === 'awaiting_approval',
+    options.actor?.userId ?? null,
+    options.actor?.discordUserId
+  );
+
+  return {
+    success: true,
+    request: { id: record.id, status: 'cancelled', cancelledAt },
+    download: reportedOutcome(step.outcome, options.audience),
+    message: cancelMessage(step.outcome, options.audience, step.clientName),
+  };
 }
 
-/** Load a live request and cancel it. Authorization is the caller's job. */
-export async function cancelRequest(requestId: string, actor: CancelActor): Promise<CancelResult> {
-  const requestRecord = await prisma.request.findFirst({
-    where: { id: requestId, deletedAt: null },
-    include: {
-      audiobook: true,
-      user: { select: { plexUsername: true } },
-    },
-  });
+export function reportedOutcome(outcome: CancelDownloadOutcome, audience: CancelAudience): CancelDownloadReport {
+  return audience === 'owner' && (outcome === 'kept_shared' || outcome === 'kept_not_owned') ? 'kept' : outcome;
+}
 
-  if (!requestRecord) {
-    return { success: false, reason: 'not_found', message: 'Request not found or already deleted' };
+async function alreadyCancelledOr(requestId: string, status: string): Promise<CancelResult> {
+  if (status !== 'cancelled') return { success: false, reason: 'not_cancellable', status };
+  const row = await prisma.request.findFirst({ where: { id: requestId }, select: { cancelledAt: true } });
+  return {
+    success: true,
+    alreadyCancelled: true,
+    request: { id: requestId, status: 'cancelled', cancelledAt: row?.cancelledAt ?? null },
+    download: 'none',
+    message: 'This request was already cancelled.',
+  };
+}
+
+/** Why a cancel didn't happen, for callers that show a message */
+export function cancelFailureMessage(result: Extract<CancelResult, { success: false }>): string {
+  return result.reason === 'not_found' ? 'Request not found' : `Cannot cancel request with status: ${result.status}`;
+}
+
+/** Non-admins never see the client name or that another request shares the download */
+export function cancelMessage(outcome: CancelDownloadOutcome, audience: CancelAudience, clientName?: string): string {
+  const admin = audience === 'admin';
+  const client = admin && clientName ? clientName : 'the download client';
+  switch (outcome) {
+    case 'removed':
+      return `Request cancelled. Its download was removed from ${client}.`;
+    case 'kept_seeding':
+      return `Request cancelled. Its finished download stays in ${client} until it has seeded.`;
+    case 'kept_unlimited':
+      return admin
+        ? `Request cancelled. Its finished download stays in ${client}: its indexer has no seeding limit.`
+        : 'Request cancelled. Its finished download stays in the download client to seed.';
+    // Owners get one message for both (as for the `kept` value)
+    case 'kept_shared':
+      return admin
+        ? `Request cancelled. Its download stays in ${client}: another request still uses it.`
+        : 'Request cancelled. Its download stays in the download client.';
+    case 'kept_not_owned':
+      return admin
+        ? `Request cancelled. Its download stays in ${client}: RMAB did not add it.`
+        : 'Request cancelled. Its download stays in the download client.';
+    case 'kept_finished':
+      return `Request cancelled. Its download had already finished and stays in ${client}.`;
+    case 'retry_later':
+      return admin
+        ? `Request cancelled. Its download was not removed from ${client} yet; RMAB tries again on its next seeding cleanup.`
+        : 'Request cancelled. RMAB tries again to remove its download on its next seeding cleanup.';
+    case 'not_removed':
+      return admin
+        ? `Request cancelled. Its download could not be removed from ${client}; remove it there if it is no longer needed.`
+        : 'Request cancelled. Its download could not be removed; an admin can remove it from the download client.';
+    default:
+      return 'Request cancelled.';
   }
-
-  return cancelLoadedRequest(requestRecord, actor);
 }

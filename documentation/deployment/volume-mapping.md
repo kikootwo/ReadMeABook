@@ -87,6 +87,7 @@ readmeabook:
    - Request an audiobook
    - Check RMAB logs for path information
    - Look for `organizePath` in logs — should show a valid path
+   - A `warn` that qBittorrent "didn't move it from ... to the save path" means qBittorrent finished in its incomplete folder and couldn't move the files: make RMAB's download directory (after remote path mapping) writable by qBittorrent ([qbittorrent.md](../phase3/qbittorrent.md#completion--relocation-grace))
 
 ---
 

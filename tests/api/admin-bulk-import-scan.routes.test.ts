@@ -145,7 +145,7 @@ describe('Admin bulk-import scan route: ASIN in the folder name', () => {
     const result = await scanOne('A Quiet Harbor [0062976583]');
 
     expect(audibleMock.getAudiobookDetails).toHaveBeenCalledWith('0062976583', { fillSeries: false });
-    expect(audibleMock.search).toHaveBeenCalledWith(TAG_SEARCH_TERM);
+    expect(audibleMock.search).toHaveBeenCalledWith(TAG_SEARCH_TERM, 1, { ignoreLanguageFilter: true });
     expect(result.match.asin).toBe(TEXT_MATCH.asin);
     expect(result.extractedAsin).toBeUndefined();
   });
@@ -159,7 +159,7 @@ describe('Admin bulk-import scan route: ASIN in the folder name', () => {
     const result = await scanOne('A Quiet Harbor 0062976583');
 
     expect(audibleMock.getAudiobookDetails).toHaveBeenCalledWith('0062976583', { fillSeries: false });
-    expect(audibleMock.search).toHaveBeenCalledWith(TAG_SEARCH_TERM);
+    expect(audibleMock.search).toHaveBeenCalledWith(TAG_SEARCH_TERM, 1, { ignoreLanguageFilter: true });
     expect(result.match.asin).toBe(TEXT_MATCH.asin);
     expect(result.extractedAsin).toBeUndefined();
   });
@@ -179,7 +179,7 @@ describe('Admin bulk-import scan route: ASIN in the folder name', () => {
     const result = await scanOne(folderName);
 
     expect(audibleMock.getAudiobookDetails).not.toHaveBeenCalled();
-    expect(audibleMock.search).toHaveBeenCalledWith(TAG_SEARCH_TERM);
+    expect(audibleMock.search).toHaveBeenCalledWith(TAG_SEARCH_TERM, 1, { ignoreLanguageFilter: true });
     expect(result.extractedAsin).toBeUndefined();
   });
 
@@ -210,7 +210,7 @@ describe('Admin bulk-import scan route: ASIN in the folder name', () => {
 
     const result = await scanOne('A Quiet Harbor [B019NOKST6]');
 
-    expect(audibleMock.search).toHaveBeenCalledWith('A Quiet Harbor');
+    expect(audibleMock.search).toHaveBeenCalledWith('A Quiet Harbor', 1, { ignoreLanguageFilter: true });
     expect(result.extractedAsin).toBe('B019NOKST6');
   });
 });

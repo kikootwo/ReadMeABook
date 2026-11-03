@@ -11,6 +11,7 @@ import { persistDedupGroups, collapseByExistingWorks } from '@/lib/services/work
 import { getOptionalAuthUser } from '@/lib/middleware/auth';
 import { RMABLogger } from '@/lib/utils/logger';
 import { annotateWithIgnoreStatus } from '@/lib/utils/ignored-audiobooks';
+import { LANGUAGE_DISPLAY_NAMES } from '@/lib/constants/language-config';
 
 const logger = RMABLogger.create('API.Audiobooks.Search');
 
@@ -64,6 +65,11 @@ export async function GET(request: NextRequest) {
       totalResults: enrichedResults.length,
       page: results.page,
       hasMore: results.hasMore,
+      // Only while the admin language filter is on: a page can then be empty with hasMore
+      ...(results.languageFilter && {
+        hiddenCount: results.languageFilter.hiddenCount,
+        filterLanguage: LANGUAGE_DISPLAY_NAMES[results.languageFilter.language],
+      }),
     });
   } catch (error) {
     logger.error('Failed to search audiobooks', { error: error instanceof Error ? error.message : String(error) });

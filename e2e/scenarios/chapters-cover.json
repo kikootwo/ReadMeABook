@@ -1,0 +1,9 @@
+{
+  "name": "chapters-cover",
+  "description": "#511: one m4b release for book 'martian' with a cover and chapters over 487 s (tagging remux).",
+  "book": "martian",
+  "indexers": [{ "id": 1, "name": "E2E Torrents", "protocol": "torrent", "priority": 25 }],
+  "releases": [
+    { "id": "good", "title": "{{author}} - {{title}} (Unabridged) [M4B]", "sizeMB": 300, "seeders": 50, "fixture": "martian-m4b-cover" }
+  ]
+}

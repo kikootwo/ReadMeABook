@@ -117,8 +117,8 @@ describe('processMonitorDownload', () => {
       undefined,
       'dh-1'
     );
-    // Verify downloadPath is stored in download history on completion
-    expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith(
+    // Verify downloadPath is stored in download history on completion (never over a removed row)
+    expect(prismaMock.downloadHistory.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           downloadStatus: 'completed',
@@ -333,8 +333,8 @@ describe('processMonitorDownload', () => {
       undefined,
       'dh-4'
     );
-    // Verify downloadPath is stored in download history on completion
-    expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith(
+    // Verify downloadPath is stored in download history on completion (never over a removed row)
+    expect(prismaMock.downloadHistory.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           downloadStatus: 'completed',
@@ -707,6 +707,138 @@ describe('processMonitorDownload', () => {
     expect(jobQueueMock.addMonitorJob).toHaveBeenCalledWith(
       'req-reloc', 'dh-reloc', 'hash-reloc', 'qbittorrent', 2, 100, 0, 1
     );
+  });
+
+  // ---------------------------------------------------------------------------
+  // Relocation grace (#520): qBittorrent can finish a torrent in its incomplete
+  // folder and never move it to the save path. The wait is a short grace
+  // (5 re-checks, 2+4+6+8+10 = 30 s), then one actionable warning, then the
+  // import runs from wherever the files are.
+  // ---------------------------------------------------------------------------
+
+  const TEMP_SAVE = '/data/downloads/readmeabook';
+  const TEMP_DOWNLOAD = '/data/incomplete/readmeabook/Book';
+
+  const runMonitor = async (pathWaitCount?: number) => {
+    const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+    return processMonitorDownload({
+      requestId: 'req-reloc',
+      downloadHistoryId: 'dh-reloc',
+      downloadClientId: 'hash-reloc',
+      downloadClient: 'qbittorrent',
+      jobId: 'job-reloc',
+      pathWaitCount,
+    });
+  };
+
+  it('waits about 30 s for a torrent left in the temp folder, then organizes from there (#520)', async () => {
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(
+      relocationClientMock(TEMP_SAVE, TEMP_DOWNLOAD)
+    );
+    stubCompletionDeps();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Follow the re-queue chain the way the job queue would, feeding each
+    // check's pathWaitCount into the next. Capped so a long wait fails fast.
+    const delays: number[] = [];
+    let pathWaitCount: number | undefined;
+    let result: { completed: boolean; pathWaitCount?: number } = { completed: false };
+    for (let check = 0; check < 40; check++) {
+      jobQueueMock.addMonitorJob.mockClear();
+      result = await runMonitor(pathWaitCount);
+      if (result.completed) break;
+      const call = jobQueueMock.addMonitorJob.mock.calls[0];
+      delays.push(call[4]);
+      pathWaitCount = call[7];
+      expect(result.pathWaitCount).toBe(pathWaitCount);
+    }
+
+    expect(delays).toEqual([2, 4, 6, 8, 10]);
+    expect(delays.reduce((a, b) => a + b, 0)).toBe(30);
+    expect(result.completed).toBe(true);
+    // Organized exactly as before: from the temp path, no mapping configured.
+    expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledTimes(1);
+    expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
+      'req-reloc', 'a-reloc', TEMP_DOWNLOAD, undefined, undefined, undefined, 'dh-reloc'
+    );
+    warn.mockRestore();
+  });
+
+  it('re-queues within the grace and does not warn yet (#520)', async () => {
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(
+      relocationClientMock(TEMP_SAVE, TEMP_DOWNLOAD)
+    );
+    stubCompletionDeps();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await runMonitor(4);
+
+    expect(result).toMatchObject({ success: true, completed: false, pathWaitCount: 5 });
+    expect(jobQueueMock.addMonitorJob).toHaveBeenCalledWith(
+      'req-reloc', 'dh-reloc', 'hash-reloc', 'qbittorrent', 10, 100, 0, 5
+    );
+    expect(jobQueueMock.addOrganizeJob).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('warns once, naming both paths and the save path to fix, when the grace runs out (#520)', async () => {
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(
+      relocationClientMock(TEMP_SAVE, TEMP_DOWNLOAD)
+    );
+    stubCompletionDeps();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await runMonitor(5);
+
+    expect(result.completed).toBe(true);
+    expect(jobQueueMock.addMonitorJob).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    const message = String(warn.mock.calls[0][0]);
+    expect(message).toContain('[WARN] [MonitorDownload]');
+    expect(message).toContain(`didn't move it from ${TEMP_DOWNLOAD} to the save path ${TEMP_SAVE}`);
+    expect(message).toContain('organizing it from the incomplete folder');
+    expect(message).toMatch(/check that qBittorrent can write to that save path/i);
+    warn.mockRestore();
+  });
+
+  it('organizes a relocated torrent on the first check, with no wait or warning (#520)', async () => {
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(
+      relocationClientMock(TEMP_SAVE, `${TEMP_SAVE}/Book`)
+    );
+    stubCompletionDeps();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await runMonitor();
+
+    expect(result.completed).toBe(true);
+    expect(jobQueueMock.addMonitorJob).not.toHaveBeenCalled();
+    expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith(
+      'req-reloc', 'a-reloc', `${TEMP_SAVE}/Book`, undefined, undefined, undefined, 'dh-reloc'
+    );
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('keeps monitoring a torrent qBittorrent is moving, without counting a path wait (#520)', async () => {
+    // qBittorrent's `moving` state reaches the monitor as `downloading`
+    // (mapping covered in qbittorrent.service.test.ts).
+    const client = relocationClientMock(TEMP_SAVE, TEMP_DOWNLOAD);
+    client.getDownload.mockResolvedValue({
+      ...(await client.getDownload()),
+      status: 'downloading',
+    });
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(client);
+    stubCompletionDeps();
+
+    const result = await runMonitor(3);
+
+    expect(result).toMatchObject({ success: true, completed: false, state: 'downloading' });
+    expect(result).not.toHaveProperty('pathWaitCount');
+    expect(jobQueueMock.addOrganizeJob).not.toHaveBeenCalled();
+    expect(jobQueueMock.addMonitorJob).toHaveBeenCalledTimes(1);
+    // The progress branch re-queues without a pathWaitCount argument.
+    expect(jobQueueMock.addMonitorJob.mock.calls[0]).toHaveLength(7);
   });
 
   it('converts SABnzbd progress from 0.0-1.0 to 0-100 percentage', async () => {

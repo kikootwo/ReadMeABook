@@ -220,9 +220,10 @@ export async function processRequestApproval(
       const claim = await prisma.request.updateMany({
         where: { id, status: 'awaiting_approval', deletedAt: null },
         data: selectedTorrent
-          ? { status: 'downloading', selectedTorrent: null as any }
+          ? { status: 'downloading', selectedTorrent: null as any, approvalBypassedBy: null }
           : {
               status: 'pending',
+              approvalBypassedBy: null, // approved now: clears an earlier record
               // Drop an unusable stored pick so it can't be approved again
               ...(existingRequest.selectedTorrent ? { selectedTorrent: Prisma.DbNull } : {}),
             },

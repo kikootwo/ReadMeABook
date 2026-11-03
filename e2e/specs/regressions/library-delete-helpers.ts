@@ -112,6 +112,11 @@ export async function importEbook(c: Case, audiobookId: string, downloadPath: st
     `insert into requests (id, user_id, audiobook_id, type, status, progress, created_at, updated_at)
      values (gen_random_uuid(), ${sqlStr(adminUserId())}, ${sqlStr(audiobookId)}, 'ebook', 'downloaded', 100, now(), now()) returning id`
   ).split('\n')[0];
+  return organizeEbookInto(c, reqId, audiobookId, downloadPath, label);
+}
+
+/** Queue the organize_files job for an existing ebook request (no new requests row) and wait for it. */
+export async function organizeEbookInto(c: Case, reqId: string, audiobookId: string, downloadPath: string, label = 'ebook') {
   const payload = { requestId: reqId, audiobookId, downloadPath, cleanupSource: false };
   const bullId = `e2e-libdel-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
   const mark = markJobs();

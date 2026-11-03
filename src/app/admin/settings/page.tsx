@@ -8,7 +8,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 import Link from 'next/link';
 import { fetchWithAuth } from '@/lib/utils/api';
@@ -26,8 +26,9 @@ import { DiscordTab } from './tabs/DiscordTab';
 import { ApiTab } from './tabs/ApiTab/ApiTab';
 
 // Types and Helpers
-import type { Settings, SettingsTab, Message } from './lib/types';
+import type { Settings, Message } from './lib/types';
 import { isIndexerLoadFailureMessage, useConfiguredIndexers } from './lib/useConfiguredIndexers';
+import { useSettingsTabUrlState } from './hooks/useSettingsTabUrlState';
 
 import { parseArrayToCommaSeparated, saveTabSettings, validateAuthSettings, getTabValidation, getTabs } from './lib/helpers';
 
@@ -37,7 +38,13 @@ const INDEXERS_NOT_LOADED_MESSAGE =
   'Click "Test Connection" on this tab once Prowlarr is reachable to edit them.';
 const INDEXERS_STILL_LOADING_MESSAGE = 'Settings saved. The indexer list was still loading, so the saved indexers were left as they are.';
 
-export default function AdminSettings() {
+const loadingScreen = (
+  <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+  </div>
+);
+
+function AdminSettingsContent() {
   // Core state
   const [settings, setSettings] = useState<Settings | null>(null);
   const [originalSettings, setOriginalSettings] = useState<Settings | null>(null);
@@ -51,7 +58,9 @@ export default function AdminSettings() {
     const timer = setTimeout(() => setMessage(null), 3000);
     return () => clearTimeout(timer);
   }, [message]);
-  const [activeTab, setActiveTab] = useState<SettingsTab>('library');
+  // Dynamic tabs (empty while loading); the active one comes from `?tab=`, limited to these
+  const tabs = settings ? getTabs(settings.backendMode) : [];
+  const { activeTab, selectTab } = useSettingsTabUrlState(tabs.map((tab) => tab.id));
 
   // Validation state (tracks if each tab's settings are valid)
   const [validated, setValidated] = useState({
@@ -159,15 +168,10 @@ export default function AdminSettings() {
 
   // Loading state
   if (loading || !settings) {
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    );
+    return loadingScreen;
   }
 
-  // Dynamic tabs, validation, and change detection
-  const tabs = getTabs(settings.backendMode);
+  // Validation and change detection
   const currentTabValidation = getTabValidation(activeTab, settings, originalSettings, validated);
 
   // Check for unsaved changes in settings and indexer-specific state
@@ -212,7 +216,7 @@ export default function AdminSettings() {
             {tabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => selectTab(tab.id)}
                 className={`
                   whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2
                   ${
@@ -361,5 +365,14 @@ export default function AdminSettings() {
         </div>
       </div>
     </div>
+  );
+}
+
+// useSearchParams (the tab in `?tab=`) needs a Suspense boundary for the static build
+export default function AdminSettings() {
+  return (
+    <Suspense fallback={loadingScreen}>
+      <AdminSettingsContent />
+    </Suspense>
   );
 }

@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { RMABLogger } from '@/lib/utils/logger';
 import { goodreadsRssUrlSchema } from '@/lib/utils/goodreads-rss-url.schema';
+import { GOODREADS_FEEDS_ENDED_ADD_MESSAGE, GoodreadsFeedEndedError } from '@/lib/utils/goodreads-rss-url';
 import { DUPLICATE_SHELF_MESSAGE, findShelfWithSameFeed, isUniqueConstraintError } from '@/lib/services/goodreads-shelf-match';
 import { readJsonBody } from '@/lib/utils/request-body';
 
@@ -118,6 +119,12 @@ export async function POST(request: NextRequest) {
           .slice(0, 8)
           .map(b => ({ coverUrl: b.coverUrl!, asin: null, title: b.title, author: b.author }));
       } catch (error) {
+        if (error instanceof GoodreadsFeedEndedError) {
+          return NextResponse.json(
+            { error: 'GoodreadsFeedsEnded', message: GOODREADS_FEEDS_ENDED_ADD_MESSAGE },
+            { status: 400 }
+          );
+        }
         return NextResponse.json(
           {
             error: 'InvalidRSS',

@@ -330,3 +330,27 @@ export function isAcceptedLanguage(languageValue: string, config: LanguageConfig
 export function keepsLanguage(language: string | undefined | null, config: LanguageConfig): boolean {
   return !language || !language.trim() || isAcceptedLanguage(language, config);
 }
+
+/** English name of each language, for the language filter's label and messages */
+export const LANGUAGE_DISPLAY_NAMES: Record<SupportedLanguage, string> = {
+  en: 'English',
+  de: 'German',
+  es: 'Spanish',
+  fr: 'French',
+  it: 'Italian',
+};
+
+/**
+ * The admin language filter's split (#259): an item whose language is listed and not the
+ * region's is hidden; an item with no language listed is kept (keepsLanguage).
+ */
+export function partitionByLanguage<T>(
+  items: T[],
+  languageOf: (item: T) => string | undefined | null,
+  config: LanguageConfig,
+): { kept: T[]; hidden: T[] } {
+  const kept: T[] = [];
+  const hidden: T[] = [];
+  for (const item of items) (keepsLanguage(languageOf(item), config) ? kept : hidden).push(item);
+  return { kept, hidden };
+}

@@ -15,6 +15,7 @@ import { walkFiles, ORGANIZER_EBOOK_FORMATS, type ImportInventory, type Placemen
 import { getMediaDir } from './media-dir';
 import { orderDiscImport } from './disc-layout-fs';
 import { probeStreamDurationMs } from './audio-duration';
+import { checkTaggedChapters, CHAPTER_TABLE_CHANGED } from './chapter-guard';
 import { MAX_COVER_ART_BYTES, MAX_COVER_ART_REDIRECTS, cachedThumbnailPath, isAllowedRemoteCoverUrl, isLibraryCoverSource } from './cover-art-url';
 
 const moduleLogger = RMABLogger.create('FileOrganizer');
@@ -440,7 +441,13 @@ export class FileOrganizer {
         if (freeform?.warning) await logger?.warn(`${path.basename(audioFile)}: ${freeform.warning}`);
         if (freeform?.written) await logger?.info(`Embedded ${freeformLabel} in ${path.basename(audioFile)}`);
 
-        const placed: AudioPlacement = await placeAudio(originalSourcePath, taggedFilePath, targetFilePath, {
+        // #511: the final tagged copy must keep the source's chapter table; if not, it is dropped (removed below)
+        // and the original placed exactly as with tagging off
+        const chapters = taggedFilePath ? await checkTaggedChapters(originalSourcePath, taggedFilePath, path.basename(audioFile)) : null;
+        if (chapters && chapters.outcome !== 'kept') await logger?.warn(chapters.warning);
+        const chaptersChanged = chapters?.outcome === 'changed';
+
+        let placed: AudioPlacement = await placeAudio(originalSourcePath, chaptersChanged ? undefined : taggedFilePath, targetFilePath, {
           fileMode: this.fileMode,
           // Coercion renames only this import's content, so a retry must know whether a same-size
           // .mp4/.m4a already there is ours (identical) rather than just present
@@ -449,6 +456,9 @@ export class FileOrganizer {
             COERCION_CANDIDATE_EXTENSIONS.includes(path.extname(targetFilePath).toLowerCase()),
           probeDuration: probeStreamDurationMs,
         });
+        if (chaptersChanged && placed.status === 'copied') {
+          placed = { ...placed, tagsDropped: CHAPTER_TABLE_CHANGED, reason: placed.reason ?? `${CHAPTER_TABLE_CHANGED}; original placed without metadata tags` };
+        }
 
         // Records are keyed on the original source; a merged file stands for all its chapters
         const sources = tempMergedFile && originalSourcePath === tempMergedFile ? mergedInputs : [originalSourcePath];

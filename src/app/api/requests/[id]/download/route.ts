@@ -14,7 +14,7 @@ import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
 import fs from 'fs';
 import path from 'path';
 import { ZipArchive } from 'archiver';
-import { PassThrough } from 'stream';
+import { PassThrough, Readable } from 'stream';
 
 const logger = RMABLogger.create('API.Download');
 
@@ -24,6 +24,99 @@ function sanitizeFilename(name: string): string {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 200);
+}
+
+/**
+ * Zips the files as the client reads the response. A cancel or a failure closes every file the
+ * zip opened; a failure is logged once and ends the response with an error.
+ */
+function streamZip(requestId: string, filePaths: string[]): ReadableStream<Uint8Array> {
+  // Flat entry names: '/' or '\' becomes '_', so each file stays at the zip root; so does ':',
+  // since archiver drops a leading 'word:' from entry names. Stat first, so a file that is gone
+  // fails the request before the zip starts.
+  const entries = filePaths.map(filePath => ({
+    filePath,
+    name: path.basename(filePath).replace(/[\\/:]/g, '_'),
+    stats: fs.lstatSync(filePath),
+  }));
+
+  const output = new PassThrough();
+  const archive = new ZipArchive({ zlib: { level: 6 } });
+  let current: fs.ReadStream | null = null;
+  let failed = false;
+  const fail = (err: Error) => {
+    if (failed) return;
+    failed = true;
+    logger.error('Zip download failed', { requestId, error: err.message });
+    output.destroy(err);
+  };
+  archive.on('error', fail);
+  // A file archiver can't add: fail rather than send a zip without it
+  archive.on('warning', fail);
+  // Done, cancelled or failed: stop the archive and close the file being read, if any
+  output.once('close', () => {
+    archive.abort();
+    current?.destroy();
+  });
+  archive.pipe(output);
+
+  // One entry at a time: archiver starts reading a stream as soon as it is appended, so the next
+  // file is opened only when the previous entry is written, and only one file is open at a time
+  let next = 0;
+  const appendNext = () => {
+    if (failed || output.destroyed) return;
+    if (next === entries.length) {
+      // Failures arrive on 'error'; the promise only repeats them
+      archive.finalize().catch(() => {});
+      return;
+    }
+    const { filePath, name, stats } = entries[next++];
+    if (stats.isFile()) {
+      current = fs.createReadStream(filePath);
+      current.on('error', fail);
+      archive.append(current, { name, stats });
+    } else {
+      // A directory or symlink: archiver writes the entry without opening a file
+      current = null;
+      archive.file(filePath, { name, stats });
+    }
+  };
+  archive.on('entry', appendNext);
+  appendNext();
+
+  return pullFrom(output);
+}
+
+/**
+ * Sends one file as the client reads the response. A cancel closes the file; a read error is
+ * logged and ends the response with an error.
+ */
+function streamFile(requestId: string, filePath: string): ReadableStream<Uint8Array> {
+  const fileStream = fs.createReadStream(filePath);
+  // A cancel destroys the stream without an error, so only a real read error is logged
+  fileStream.on('error', err => {
+    logger.error('File stream error', { requestId, error: err.message });
+  });
+  return pullFrom(fileStream);
+}
+
+/**
+ * Pull-based: the next chunk is read only when the client has taken the last one, so a slow
+ * reader holds the source back instead of it queueing in memory. A cancel destroys the source;
+ * a source error ends the response with that error.
+ */
+function pullFrom(source: Readable): ReadableStream<Uint8Array> {
+  const chunks = source[Symbol.asyncIterator]();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { value, done } = await chunks.next();
+      if (done) controller.close();
+      else controller.enqueue(new Uint8Array(value));
+    },
+    cancel() {
+      source.destroy();
+    },
+  });
 }
 
 /**
@@ -116,23 +209,8 @@ export async function GET(
       const filePath = matchingFiles[0];
       const ext = path.extname(filePath);
       const stat = fs.statSync(filePath);
-      const fileStream = fs.createReadStream(filePath);
 
-      const readableStream = new ReadableStream({
-        start(controller) {
-          fileStream.on('data', chunk => controller.enqueue(chunk));
-          fileStream.on('end', () => controller.close());
-          fileStream.on('error', err => {
-            logger.error('File stream error', { error: err.message });
-            controller.error(err);
-          });
-        },
-        cancel() {
-          fileStream.destroy();
-        },
-      });
-
-      return new NextResponse(readableStream, {
+      return new NextResponse(streamFile(id, filePath), {
         headers: {
           'Content-Type': 'application/octet-stream',
           'Content-Disposition': `attachment; filename="${sanitizedTitle}${ext}"`,
@@ -141,32 +219,8 @@ export async function GET(
       });
     }
 
-    // Multiple files — stream zip via archiver (avoids loading all files into memory)
-    const passThrough = new PassThrough();
-    const archive = new ZipArchive({ zlib: { level: 6 } });
-    archive.pipe(passThrough);
-    for (const filePath of matchingFiles) {
-      // Flat entry names: '/' or '\' becomes '_', so each file stays at the zip root; so does ':',
-      // since archiver drops a leading 'word:' from entry names
-      archive.file(filePath, { name: path.basename(filePath).replace(/[\\/:]/g, '_') });
-    }
-    archive.finalize();
-
-    const zipReadable = new ReadableStream({
-      start(controller) {
-        passThrough.on('data', chunk => controller.enqueue(new Uint8Array(chunk)));
-        passThrough.on('end', () => controller.close());
-        passThrough.on('error', err => {
-          logger.error('Zip stream error', { error: err.message });
-          controller.error(err);
-        });
-      },
-      cancel() {
-        archive.abort();
-      },
-    });
-
-    return new NextResponse(zipReadable, {
+    // Multiple files: a zip built as the client reads it
+    return new NextResponse(streamZip(id, matchingFiles), {
       headers: {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="${sanitizedTitle}.zip"`,

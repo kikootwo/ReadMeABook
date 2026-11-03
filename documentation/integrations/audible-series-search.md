@@ -6,7 +6,7 @@
 `/series` page search. `GET /api/series/search?q=` → `searchForSeries()` finds series through the catalog API (`api.audible.<tld>`), never the `www` storefront. The series detail page (`/series/{asin}`) still scrapes HTML ([audible.md](./audible.md)).
 
 ## Flow
-- Page `src/app/series/page.tsx` (500 ms debounce, trimmed query) → `useSeriesSearch` (`src/lib/hooks/useSeries.ts`) → route `src/app/api/series/search/route.ts` → `searchForSeries(query, { languageFilter })` (`src/lib/integrations/audible-series-search.ts`, re-exported by `audible-series.ts`) → ranking in `audible-series-rank.ts`.
+- Page `src/app/series/page.tsx` (500 ms debounce, trimmed query) → `useSeriesSearch` (`src/lib/hooks/useSeries.ts`) → route `src/app/api/series/search/route.ts` → `searchSeries(query)` (`src/lib/integrations/audible-series-search.ts`, re-exported by `audible-series.ts`; `searchForSeries(query, { languageFilter })` returns its `.series`) → ranking in `audible-series-rank.ts`.
 - Calls go through `AudibleService.fetch(url, config, { catalog: true })`: one attempt on `apiClient`, error rethrown; the caller owns retries.
 
 ## Catalog calls
@@ -25,7 +25,7 @@
 - Every `products[].series[]` entry counts (not `pickCatalogSeries`); entries without `asin` or `title` skipped; a product counts once per series.
 - **Match share:** query words via `normalizeForMatching(text, characterReplacements)`, region `stopWords` dropped unless nothing else is left; share = words found as whole title words (`isWordInTitle`, CJK substring rule); the last word may also be a prefix ("expeditionary fo").
 - **Sort:** match share desc → language tier (series with ≥1 product passing `keepsLanguage`) → product count desc → first-seen index asc. Cap `MAX_SERIES_RESULTS = 15`. Share-0 series stay, below every match (author/book-title queries).
-- **Language filter seam (#352):** `languageFilter: true` drops products failing `keepsLanguage` before aggregation. The route passes nothing today (no setting yet); the admin language filter wires in here: `{ languageFilter: await getConfigService().getAudibleLanguageFilter() }`.
+- **Language filter seam (#352):** `languageFilter: true` drops products failing `keepsLanguage` before aggregation. Wired to the admin language filter: `searchSeries()` reads the setting when the option is undefined and reports `hiddenCount` ([audible-language-filter.md](audible-language-filter.md)).
 
 ## Card fields (`SeriesSummary`)
 | Field | Source |

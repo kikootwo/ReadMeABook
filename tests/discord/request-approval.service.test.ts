@@ -81,7 +81,7 @@ describe('processRequestApproval', () => {
     expect(result.success).toBe(true);
     // The transition is claimed atomically, gated on the current status.
     expect(prismaMock.request.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'req-1', status: 'awaiting_approval', deletedAt: null }, data: { status: 'pending' } })
+      expect.objectContaining({ where: { id: 'req-1', status: 'awaiting_approval', deletedAt: null }, data: { status: 'pending', approvalBypassedBy: null } })
     );
     expect(jobQueueMock.addSearchJob).toHaveBeenCalledTimes(1);
     expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();

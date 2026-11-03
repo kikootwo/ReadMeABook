@@ -15,6 +15,7 @@ import { createRequestForUser } from '@/lib/services/request-creator.service';
 import { getSiblingAsins } from '@/lib/services/works.service';
 import { booksForWatch, dedupeAndPersist, delay, scanAuthorLegs } from '@/lib/services/watched-lists-releases';
 import { RMABLogger } from '@/lib/utils/logger';
+import { SYNC_USER_SELECT, withoutDeletedUsers } from '@/lib/utils/deleted-user-skip';
 
 const logger = RMABLogger.create('WatchedLists');
 
@@ -97,10 +98,12 @@ async function processAllWatchedSeries(
   const whereClause: any = {};
   if (options.userId) whereClause.userId = options.userId;
   if (options.seriesAsin) whereClause.seriesAsin = options.seriesAsin;
-  const watchedSeries = await prisma.watchedSeries.findMany({
-    where: whereClause,
-    include: { user: { select: { id: true, plexUsername: true } } },
-  });
+  // A deleted user's watches get no scrape, request or write (#504)
+  const watchedSeries = withoutDeletedUsers(
+    await prisma.watchedSeries.findMany({ where: whereClause, include: { user: { select: SYNC_USER_SELECT } } }),
+    'watched series',
+    log
+  );
 
   if (watchedSeries.length === 0) {
     log.info('No watched series to process');
@@ -141,20 +144,32 @@ async function processSeriesForUsers(
   const title = subscriptions[0].seriesTitle;
   log.info(`Scraping watched series: "${title}" (${seriesAsin})`);
 
-  // Scrape all pages of the series (up to MAX_BOOKS_PER_SERIES)
+  // Scrape all pages of the series (up to MAX_BOOKS_PER_SERIES rows as listed, before the
+  // language filter hides any: a fully hidden page is not the end of the series)
   const allBooks: AudibleAudiobook[] = [];
+  let rowsSeen = 0;
   let page = 1;
   let hasMore = true;
 
-  while (hasMore && allBooks.length < MAX_BOOKS_PER_SERIES) {
+  while (hasMore && rowsSeen < MAX_BOOKS_PER_SERIES) {
     const result = await scrapeSeriesPage(seriesAsin, page);
-    if (!result || result.books.length === 0) break;
+    const rows = result ? (result.rawCount ?? result.books.length) : 0;
+    if (!result || rows === 0) break;
 
     allBooks.push(...result.books);
+    rowsSeen += rows;
     hasMore = result.hasMore;
     page++;
 
     if (hasMore) await delay(1000);
+  }
+
+  if (allBooks.length === 0 && rowsSeen > 0) {
+    // The language filter hid every book: the series was checked, nothing to request
+    log.info(`All ${rowsSeen} books in series "${title}" are in other languages (hidden by the language filter); nothing to request`);
+    await markSeriesChecked(subscriptions);
+    stats.seriesChecked++;
+    return;
   }
 
   if (allBooks.length === 0) {
@@ -164,7 +179,7 @@ async function processSeriesForUsers(
   }
 
   stats.booksFound += allBooks.length;
-  if (hasMore && allBooks.length >= MAX_BOOKS_PER_SERIES && subscriptions.some((s) => s.newReleasesSince != null)) {
+  if (hasMore && rowsSeen >= MAX_BOOKS_PER_SERIES && subscriptions.some((s) => s.newReleasesSince != null)) {
     log.warn(`Series "${title}" has more than ${MAX_BOOKS_PER_SERIES} books; only the first ${MAX_BOOKS_PER_SERIES} in series order are checked, so new-only watches may miss its newest books`);
   }
 
@@ -181,14 +196,20 @@ async function processSeriesForUsers(
       stats
     );
 
-    // Update lastCheckedAt
+    await markSeriesChecked([subscription]);
+  }
+
+  stats.seriesChecked++;
+}
+
+/** Update lastCheckedAt on each watch */
+async function markSeriesChecked(subscriptions: Array<{ id: string }>): Promise<void> {
+  for (const subscription of subscriptions) {
     await prisma.watchedSeries.update({
       where: { id: subscription.id },
       data: { lastCheckedAt: new Date() },
     }).catch(() => {});
   }
-
-  stats.seriesChecked++;
 }
 
 // ---------------------------------------------------------------------------
@@ -203,10 +224,12 @@ async function processAllWatchedAuthors(
   const whereClause: any = {};
   if (options.userId) whereClause.userId = options.userId;
   if (options.authorAsin) whereClause.authorAsin = options.authorAsin;
-  const watchedAuthors = await prisma.watchedAuthor.findMany({
-    where: whereClause,
-    include: { user: { select: { id: true, plexUsername: true } } },
-  });
+  // A deleted user's watches get no scrape, request or write (#504)
+  const watchedAuthors = withoutDeletedUsers(
+    await prisma.watchedAuthor.findMany({ where: whereClause, include: { user: { select: SYNC_USER_SELECT } } }),
+    'watched authors',
+    log
+  );
 
   if (watchedAuthors.length === 0) {
     log.info('No watched authors to process');

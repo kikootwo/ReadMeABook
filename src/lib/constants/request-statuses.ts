@@ -17,6 +17,23 @@ export const CANCELLABLE_STATUSES = [
 ] as const;
 
 /**
+ * Statuses a request has before (or instead of) an approval. A request that leaves one of
+ * these without being approved is recorded in Request.approvalBypassedBy.
+ */
+export const UNAPPROVED_STATUSES = ['awaiting_approval', 'denied', 'cancelled'] as const;
+
+/** The paths that can complete a request without its approval (ASIN match, manual and bulk import). */
+export type ApprovalBypassPath = 'asin_match' | 'manual_import' | 'bulk_import';
+
+/**
+ * The Request.approvalBypassedBy value (`<path>:<fromStatus>`) for a request taken out of
+ * `fromStatus` by `path`, or null when `fromStatus` is not an unapproved status.
+ */
+export function approvalBypassMark(path: ApprovalBypassPath, fromStatus: string): string | null {
+  return (UNAPPROVED_STATUSES as readonly string[]).includes(fromStatus) ? `${path}:${fromStatus}` : null;
+}
+
+/**
  * Statuses where an own (or admin-acted) request can be advanced via Interactive
  * Search → Download by routing to /api/requests/[id]/select-torrent.
  * Outside this set, the modal falls back to today's create-new-request path.

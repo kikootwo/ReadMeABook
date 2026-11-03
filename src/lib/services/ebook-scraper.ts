@@ -10,6 +10,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { RMABLogger } from '../utils/logger';
 import { capGraphemeUnits, capTitleAuthorBytes } from '../utils/path-component';
+import { trimTrailingSlashes } from '../utils/url';
 
 // Module-level logger (renamed to avoid shadowing function parameter 'logger')
 const moduleLogger = RMABLogger.create('EbookScraper');
@@ -64,9 +65,8 @@ async function fetchViaFlareSolverr(
     maxTimeout: timeout,
   };
 
-  const normalizedUrl = flaresolverrUrl.replace(/\/+$/, '');
   const response = await axios.post<FlareSolverrResponse>(
-    `${normalizedUrl}/v1`,
+    `${trimTrailingSlashes(flaresolverrUrl)}/v1`,
     requestBody,
     {
       headers: { 'Content-Type': 'application/json' },
@@ -136,7 +136,7 @@ export async function testFlareSolverrConnection(
 
   try {
     // Test with a simple request to the configured Anna's Archive base URL
-    const testUrl = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+    const testUrl = `${trimTrailingSlashes(baseUrl)}/`;
     const html = await fetchViaFlareSolverr(testUrl, flaresolverrUrl, 30000);
     const responseTime = Date.now() - startTime;
 
@@ -331,7 +331,7 @@ export async function searchByAsin(
   try {
     // Build search URL with ASIN and optional format filter
     const formatParam = format && format !== 'any' ? `ext=${format}&` : '';
-    const searchUrl = `${baseUrl}/search?${formatParam}lang=${languageCode}&q=%22asin:${asin}%22`;
+    const searchUrl = `${trimTrailingSlashes(baseUrl)}/search?${formatParam}lang=${languageCode}&q=%22asin:${asin}%22`;
 
     moduleLogger.debug(`ASIN search URL: ${searchUrl}`);
 
@@ -427,7 +427,7 @@ export async function searchByTitle(
     const encodedTitle = encodeURIComponent(title);
 
     // Use Anna's Archive advanced search with specific term types
-    let searchUrl = `${baseUrl}/search?termtype_1=author&termval_1=${encodedAuthor}&termtype_2=title&termval_2=${encodedTitle}`;
+    let searchUrl = `${trimTrailingSlashes(baseUrl)}/search?termtype_1=author&termval_1=${encodedAuthor}&termtype_2=title&termval_2=${encodedTitle}`;
 
     // Add format filter if not 'any'
     if (format && format !== 'any') {
@@ -511,8 +511,9 @@ export async function getSlowDownloadLinks(
   flaresolverrUrl?: string,
   options: { throwOnError?: boolean } = {}
 ): Promise<string[]> {
+  const base = trimTrailingSlashes(baseUrl);
   try {
-    const md5Url = `${baseUrl}/md5/${md5}`;
+    const md5Url = `${base}/md5/${md5}`;
 
     moduleLogger.debug(`Fetching MD5 page: ${md5Url}`);
 
@@ -560,7 +561,7 @@ export async function getSlowDownloadLinks(
       if (linkText.includes('no waitlist') || parentText.includes('no waitlist')) {
         if (href) {
           // Convert relative URL to absolute
-          const fullUrl = href.startsWith('http') ? href : `${baseUrl}${href}`;
+          const fullUrl = href.startsWith('http') ? href : `${base}${href}`;
           slowLinks.push(fullUrl);
           moduleLogger.debug(`Added slow link (no waitlist): ${fullUrl}`);
         }

@@ -78,6 +78,14 @@ export async function POST(
         );
       }
 
+      // A denied request stays denied: only an admin can pick a release for it
+      if (requestRecord.status === 'denied' && req.user.role !== 'admin') {
+        return NextResponse.json(
+          { error: 'RequestDenied', message: 'This request was denied by an admin. You cannot download a release for it.' },
+          { status: 403 }
+        );
+      }
+
       // Re-check if approval is needed based on CURRENT settings (security: settings may have changed)
       const user = await prisma.user.findUnique({
         where: { id: req.user.id },

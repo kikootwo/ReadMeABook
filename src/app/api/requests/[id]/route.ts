@@ -9,7 +9,8 @@ import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '@/lib/interfaces/download-client.interface';
 import { cancelLoadedRequest } from '@/lib/services/request-cancel.service';
-import { ADMIN_REQUEST_DETAIL_INCLUDE, OWNER_REQUEST_DETAIL_SELECT } from '@/lib/services/request-detail-query';
+import { cancelResponse } from '@/lib/utils/cancel-response';
+import { ADMIN_REQUEST_DETAIL_INCLUDE, OWNER_REQUEST_DETAIL_SELECT, hidePlacementRecord } from '@/lib/services/request-detail-query';
 import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { toJsonSafe } from '@/lib/utils/json-safe';
@@ -61,7 +62,7 @@ export async function GET(
       // Sizes are BigInt columns, which JSON.stringify cannot serialize (#261)
       return NextResponse.json({
         success: true,
-        request: toJsonSafe(isAdmin ? requestRecord : await stripProwlarrKeyFromResults(requestRecord)),
+        request: toJsonSafe(isAdmin ? hidePlacementRecord(requestRecord) : await stripProwlarrKeyFromResults(requestRecord)),
       });
     } catch (error) {
       logger.error('Failed to get request', { error: error instanceof Error ? error.message : String(error) });
@@ -126,23 +127,10 @@ export async function PATCH(
       }
 
       if (action === 'cancel') {
-        // Shared with the Discord Cancel button and /status menu (request-cancel.service.ts)
-        const result = await cancelLoadedRequest(requestRecord, { userId: req.user.id });
-        if (!result.success) {
-          return NextResponse.json(
-            {
-              error: 'ValidationError',
-              message: result.message,
-            },
-            { status: 400 }
-          );
-        }
-
-        return NextResponse.json({
-          success: true,
-          request: result.request,
-          message: 'Request cancelled successfully',
-        });
+        return cancelResponse(await cancelLoadedRequest(requestRecord, {
+          audience: req.user.role === 'admin' ? 'admin' : 'owner',
+          actor: { userId: req.user.id },
+        }));
       } else if (action === 'retry') {
         // Retry failed request - allow users to retry their own warn/failed requests
         // Only allow retry for failed, warn, or awaiting_* statuses
@@ -308,7 +296,7 @@ export async function PATCH(
 
         return NextResponse.json({
           success: true,
-          request: updated,
+          request: hidePlacementRecord(updated),
           message: `Request retry initiated (${jobType})`,
         });
       }
@@ -326,53 +314,6 @@ export async function PATCH(
         {
           error: 'UpdateError',
           message: 'Failed to update request',
-        },
-        { status: 500 }
-      );
-    }
-  });
-}
-
-/**
- * DELETE /api/requests/[id]
- * Delete a request (admin only)
- */
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  return requireAuth(request, async (req: AuthenticatedRequest) => {
-    try {
-      if (!req.user) {
-        return NextResponse.json(
-          { error: 'Unauthorized', message: 'User not authenticated' },
-          { status: 401 }
-        );
-      }
-
-      if (req.user.role !== 'admin') {
-        return NextResponse.json(
-          { error: 'Forbidden', message: 'Admin access required' },
-          { status: 403 }
-        );
-      }
-
-      const { id } = await params;
-
-      await prisma.request.delete({
-        where: { id },
-      });
-
-      return NextResponse.json({
-        success: true,
-        message: 'Request deleted successfully',
-      });
-    } catch (error) {
-      logger.error('Failed to delete request', { error: error instanceof Error ? error.message : String(error) });
-      return NextResponse.json(
-        {
-          error: 'DeleteError',
-          message: 'Failed to delete request',
         },
         { status: 500 }
       );

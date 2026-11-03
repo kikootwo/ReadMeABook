@@ -1,0 +1,1214 @@
+{
+  "total_results": 251,
+  "products": [
+    {
+      "asin": "B078KCYQS6",
+      "title": "Red Rising",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown",
+          "asin": "B00EDBZVNI"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Tim Gerard Reynolds"
+        }
+      ],
+      "runtime_length_min": 972,
+      "release_date": "2014-01-28",
+      "publisher_name": "Recorded Books"
+    },
+    {
+      "asin": "B0BVGRZ354",
+      "title": "Red Rising (Part 1 of 2) (Dramatized Adaptation)",
+      "subtitle": "Red Rising, Book 1",
+      "language": "english",
+      "content_type": "Performance",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "full cast"
+        },
+        {
+          "name": "Stewart Crank"
+        },
+        {
+          "name": "John Kielty"
+        },
+        {
+          "name": "Richard Rohan"
+        },
+        {
+          "name": "Stephanie Németh-Parker"
+        },
+        {
+          "name": "Jenna Sharpe"
+        },
+        {
+          "name": "Kay Eluvian"
+        },
+        {
+          "name": "Jon Vertullo"
+        },
+        {
+          "name": "Ian Russell"
+        },
+        {
+          "name": "Alejandro Ruiz"
+        },
+        {
+          "name": "Andrew Colford"
+        },
+        {
+          "name": "Bradley Foster Smith"
+        }
+      ],
+      "runtime_length_min": 451,
+      "release_date": "2023-04-03",
+      "publisher_name": "Graphic Audio LLC"
+    },
+    {
+      "asin": "B0C4LTRBD2",
+      "title": "Red Rising (Part 2 of 2) (Dramatized Adaptation)",
+      "subtitle": "Red Rising, Book 1",
+      "language": "english",
+      "content_type": "Performance",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Alejandro Ruiz"
+        },
+        {
+          "name": "Richard Rohan"
+        },
+        {
+          "name": "John Kielty"
+        },
+        {
+          "name": "Kay Eluvian"
+        },
+        {
+          "name": "Ian Russell"
+        },
+        {
+          "name": "Jenna Sharpe"
+        },
+        {
+          "name": "Stewart Crank"
+        },
+        {
+          "name": "Andrew Colford"
+        },
+        {
+          "name": "Jon Vertullo"
+        },
+        {
+          "name": "Andrew James Spooner"
+        },
+        {
+          "name": "Stephanie Németh-Parker"
+        }
+      ],
+      "runtime_length_min": 499,
+      "release_date": "2023-05-17",
+      "publisher_name": "Graphic Audio LLC"
+    },
+    {
+      "asin": "B079TLXHYF",
+      "title": "Golden Son",
+      "subtitle": "Book II of the Red Rising Trilogy",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown",
+          "asin": "B00EDBZVNI"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Tim Gerard Reynolds"
+        }
+      ],
+      "runtime_length_min": 1143,
+      "release_date": "2015-01-06",
+      "publisher_name": "Recorded Books"
+    },
+    {
+      "asin": "B078RQ9KSQ",
+      "title": "Iron Gold",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown",
+          "asin": "B00EDBZVNI"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Tim Gerard Reynolds"
+        },
+        {
+          "name": "John Curless"
+        },
+        {
+          "name": "Julian Elfer"
+        },
+        {
+          "name": "Aedin Moloney"
+        }
+      ],
+      "runtime_length_min": 1403,
+      "release_date": "2018-01-16",
+      "publisher_name": "Recorded Books"
+    },
+    {
+      "asin": "B0791JYY6V",
+      "title": "Morning Star",
+      "subtitle": "Book III of the Red Rising Trilogy",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown",
+          "asin": "B00EDBZVNI"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Tim Gerard Reynolds"
+        }
+      ],
+      "runtime_length_min": 1310,
+      "release_date": "2016-02-09",
+      "publisher_name": "Recorded Books"
+    },
+    {
+      "asin": "B0C28XPKN6",
+      "title": "Light Bringer",
+      "subtitle": "Red Rising, Book 6",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown",
+          "asin": "B00EDBZVNI"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Tim Gerard Reynolds"
+        }
+      ],
+      "runtime_length_min": 1808,
+      "release_date": "2023-07-25",
+      "publisher_name": "Recorded Books"
+    },
+    {
+      "asin": "B0FF5FWF2G",
+      "title": "Dark Age (1 of 3) [Dramatized Adaptation]",
+      "subtitle": "Red Rising 5",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Full Cast"
+        },
+        {
+          "name": "Stewart Crank"
+        },
+        {
+          "name": "Jenna Sharpe"
+        },
+        {
+          "name": "Christopher Tester"
+        },
+        {
+          "name": "Rayner Gabriel"
+        },
+        {
+          "name": "Alex Hill-Knight"
+        },
+        {
+          "name": "Jon Vertullo"
+        },
+        {
+          "name": "Ian Putnam"
+        },
+        {
+          "name": "Jessica Threet"
+        },
+        {
+          "name": "Elena Anderson"
+        },
+        {
+          "name": "Natalie Van Sistine"
+        },
+        {
+          "name": "Jonathan David Bullock"
+        }
+      ],
+      "runtime_length_min": 684,
+      "release_date": "2025-08-29",
+      "publisher_name": "GraphicAudio"
+    },
+    {
+      "asin": "B0G4SN8TF2",
+      "title": "Dark Age (2 of 3) [Dramatized Adaptation]",
+      "subtitle": "Red Rising 5",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Full Cast"
+        },
+        {
+          "name": "Jenna Sharpe"
+        },
+        {
+          "name": "Stewart Crank"
+        },
+        {
+          "name": "Tia Shearer"
+        },
+        {
+          "name": "Elena Anderson"
+        },
+        {
+          "name": "Alex Hill-Knight"
+        },
+        {
+          "name": "Christopher Tester"
+        },
+        {
+          "name": "Chris Davenport"
+        },
+        {
+          "name": "Robb Moreira"
+        },
+        {
+          "name": "Karen Novack"
+        },
+        {
+          "name": "Stephanie Németh-Parker"
+        },
+        {
+          "name": "Andrew James Spooner"
+        }
+      ],
+      "runtime_length_min": 665,
+      "release_date": "2026-01-09",
+      "publisher_name": "GraphicAudio"
+    },
+    {
+      "asin": "B0D5DK1CY8",
+      "title": "Morning Star (2 of 2) (Dramatized Adaptation)",
+      "subtitle": "Red Rising Saga, Book 3",
+      "language": "english",
+      "content_type": "Performance",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Andrew James Spooner"
+        },
+        {
+          "name": "Julie-Ann Elliott"
+        },
+        {
+          "name": "Jenna Sharpe"
+        },
+        {
+          "name": "John Kielty"
+        },
+        {
+          "name": "Stewart Crank"
+        },
+        {
+          "name": "Kay Eluvian"
+        },
+        {
+          "name": "Nhea Durousseau"
+        },
+        {
+          "name": "Jon Vertullo"
+        },
+        {
+          "name": "Andy Brownstein"
+        },
+        {
+          "name": "Jeff Baker"
+        },
+        {
+          "name": "full cast"
+        },
+        {
+          "name": "Karen Novak"
+        }
+      ],
+      "runtime_length_min": 629,
+      "release_date": "2024-05-29",
+      "publisher_name": "GraphicAudio"
+    },
+    {
+      "asin": "B07JHL4M32",
+      "title": "Dark Age",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown",
+          "asin": "B00EDBZVNI"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Tim Gerard Reynolds"
+        },
+        {
+          "name": "John Curless"
+        },
+        {
+          "name": "Moira Quirk"
+        },
+        {
+          "name": "James Langton"
+        },
+        {
+          "name": "Rendah Heywood"
+        }
+      ],
+      "runtime_length_min": 2038,
+      "release_date": "2019-07-31",
+      "publisher_name": "Recorded Books"
+    },
+    {
+      "asin": "B0DWVDL2S4",
+      "title": "Iron Gold (Part 2 of 2) (Dramatized Adaptation)",
+      "subtitle": "Red Rising, Book 4",
+      "language": "english",
+      "content_type": "Performance",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Christopher Tester"
+        },
+        {
+          "name": "Jenna Sharpe"
+        },
+        {
+          "name": "Alex Hill-Knight"
+        },
+        {
+          "name": "Elena Anderson"
+        },
+        {
+          "name": "Todd Scofield"
+        },
+        {
+          "name": "Richard Rohan"
+        },
+        {
+          "name": "Melody Muze"
+        },
+        {
+          "name": "Jon Vertullo"
+        },
+        {
+          "name": "Eva Wilhelm"
+        },
+        {
+          "name": "John Kielty"
+        },
+        {
+          "name": "Stewart Crank"
+        },
+        {
+          "name": "Full Cast"
+        }
+      ],
+      "runtime_length_min": 688,
+      "release_date": "2025-04-30",
+      "publisher_name": "Graphic Audio LLC"
+    },
+    {
+      "asin": "B0DJMYT51Y",
+      "title": "Iron Gold (Part 1 of 2) (Dramatized Adaptation)",
+      "subtitle": "Red Rising, Book 4",
+      "language": "english",
+      "content_type": "Performance",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Jenna Sharpe"
+        },
+        {
+          "name": "Alex Hill-Knight"
+        },
+        {
+          "name": "Todd Scofield"
+        },
+        {
+          "name": "full cast"
+        },
+        {
+          "name": "John Kielty"
+        },
+        {
+          "name": "Stewart Crank"
+        },
+        {
+          "name": "Richard Rohan"
+        },
+        {
+          "name": "Melody Muze"
+        },
+        {
+          "name": "Jon Vertullo"
+        },
+        {
+          "name": "Elena Anderson"
+        },
+        {
+          "name": "Ian Putnam"
+        },
+        {
+          "name": "Christopher Tester"
+        }
+      ],
+      "runtime_length_min": 674,
+      "release_date": "2024-11-21",
+      "publisher_name": "Graphic Audio"
+    },
+    {
+      "asin": "B0CGG2WYRZ",
+      "title": "Golden Son (Part 1 of 2) (Dramatized Adaptation)",
+      "subtitle": "Red Rising Saga, Book 2",
+      "language": "english",
+      "content_type": "Performance",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Amanda Forstrom"
+        },
+        {
+          "name": "Andy Clemence"
+        },
+        {
+          "name": "Julie-Ann Elliott"
+        },
+        {
+          "name": "Laura C. Harris"
+        },
+        {
+          "name": "Richard Rohan"
+        },
+        {
+          "name": "Kay Eluvian"
+        },
+        {
+          "name": "Ian Russell"
+        },
+        {
+          "name": "Jenna Sharpe"
+        },
+        {
+          "name": "Stewart Crank"
+        },
+        {
+          "name": "Jon Vertullo"
+        },
+        {
+          "name": "Andrew James Spooner"
+        }
+      ],
+      "runtime_length_min": 531,
+      "release_date": "2023-08-30",
+      "publisher_name": "Graphic Audio LLC"
+    },
+    {
+      "asin": "8427222157",
+      "title": "Amanecer Rojo (Narración en Castellano) [Red Rising]",
+      "subtitle": "Amanecer Rojo, Libro 1 [Red Rising, Book 1]",
+      "language": "spanish",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown",
+          "asin": "B00EDBZVNI"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Lluis Torrelles"
+        }
+      ],
+      "runtime_length_min": 997,
+      "release_date": "2020-06-16",
+      "publisher_name": "Audible Studios"
+    },
+    {
+      "asin": "B0CKY43T25",
+      "title": "Golden Son (Part 2 of 2) (Dramatized Adaptation)",
+      "subtitle": "Red Rising Saga, Book 2",
+      "language": "english",
+      "content_type": "Performance",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Amanda Forstrom"
+        },
+        {
+          "name": "Andy Clemence"
+        },
+        {
+          "name": "Julie-Ann Elliott"
+        },
+        {
+          "name": "Laura C. Harris"
+        },
+        {
+          "name": "Richard Rohan"
+        },
+        {
+          "name": "Kay Eluvian"
+        },
+        {
+          "name": "Ian Russell"
+        },
+        {
+          "name": "Jenna Sharpe"
+        },
+        {
+          "name": "Stewart Crank"
+        },
+        {
+          "name": "Jon Vertullo"
+        },
+        {
+          "name": "Andrew James Spooner"
+        }
+      ],
+      "runtime_length_min": 508,
+      "release_date": "2023-10-17",
+      "publisher_name": "Graphic Audio LLC"
+    },
+    {
+      "asin": "B0CTWFVJZM",
+      "title": "Morning Star (Part 1 of 2) (Dramatized Adaptation)",
+      "subtitle": "Red Rising Saga, Book 3",
+      "language": "english",
+      "content_type": "Performance",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "full cast"
+        },
+        {
+          "name": "Chris Davenport"
+        },
+        {
+          "name": "Colleen Delany"
+        },
+        {
+          "name": "Danny Gavigan"
+        },
+        {
+          "name": "Stewart Crank"
+        },
+        {
+          "name": "Jon Vertullo"
+        },
+        {
+          "name": "Jenna Sharpe"
+        },
+        {
+          "name": "Andrew James Spooner"
+        },
+        {
+          "name": "Laura C. Harris"
+        },
+        {
+          "name": "Kimberly Gilbert"
+        },
+        {
+          "name": "Bradley Foster Smith"
+        },
+        {
+          "name": "Andy Brownstein"
+        }
+      ],
+      "runtime_length_min": 586,
+      "release_date": "2024-02-08",
+      "publisher_name": "Graphic Audio LLC"
+    },
+    {
+      "asin": "1648814956",
+      "title": "Red Rising: Sons of Ares: Volume 2: Wrath (Dramatized Adaptation)",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown"
+        },
+        {
+          "name": "Rik Hoskin"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "full cast"
+        },
+        {
+          "name": "Richard Rohan"
+        },
+        {
+          "name": "Holly Adams"
+        },
+        {
+          "name": "John Kielty"
+        },
+        {
+          "name": "Zeke Alton"
+        },
+        {
+          "name": "Matthew Pauli"
+        },
+        {
+          "name": "Eva Wilhelm"
+        },
+        {
+          "name": "Jessica Lauren Ball"
+        },
+        {
+          "name": "Andy Brownstein"
+        },
+        {
+          "name": "Kay Eluvian"
+        },
+        {
+          "name": "Marni Penning"
+        },
+        {
+          "name": "Elizabeth Jernigan"
+        }
+      ],
+      "runtime_length_min": 192,
+      "release_date": "2021-02-01",
+      "publisher_name": "GraphicAudio"
+    },
+    {
+      "asin": "1648814948",
+      "title": "Red Rising: Sons Of Ares Volume 1 [Dramatized Adaptation]",
+      "subtitle": "Red Rising: Sons Of Ares, Book 1",
+      "language": "english",
+      "content_type": "Performance",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown"
+        },
+        {
+          "name": "Rik Hoskin"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "full cast"
+        }
+      ],
+      "runtime_length_min": 269,
+      "release_date": "2021-01-02",
+      "publisher_name": "GraphicAudio"
+    },
+    {
+      "asin": "B0GS4QM7GY",
+      "title": "Dark Age (3 of 3) [Dramatized Adaptation]",
+      "subtitle": "Red Rising 5",
+      "language": "english",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Full Cast"
+        },
+        {
+          "name": "Alex Hill-Knight"
+        },
+        {
+          "name": "Elena Anderson"
+        },
+        {
+          "name": "Stewart Crank"
+        },
+        {
+          "name": "Jenna Sharpe"
+        },
+        {
+          "name": "Laura C. Harris"
+        },
+        {
+          "name": "Christopher Tester"
+        },
+        {
+          "name": "Peter Holdway"
+        },
+        {
+          "name": "Danny Montooth"
+        },
+        {
+          "name": "Tia Shearer"
+        },
+        {
+          "name": "Elizabeth Jernigan"
+        },
+        {
+          "name": "R.J. Bayley"
+        }
+      ],
+      "runtime_length_min": 661,
+      "release_date": "2026-06-18",
+      "publisher_name": "GraphicAudio"
+    },
+    {
+      "asin": "B08J89ZYS7",
+      "title": "Mañana Azul [Morning Star]",
+      "subtitle": "Amanecer Rojo, Libro 3 [Red Rising, Book 3]",
+      "language": "spanish",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown",
+          "asin": "B00EDBZVNI"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Carlos Torres"
+        }
+      ],
+      "runtime_length_min": 1400,
+      "release_date": "2020-09-18",
+      "publisher_name": "Audible Studios"
+    },
+    {
+      "asin": "8427222165",
+      "title": "Hijo Dorado [Golden Son]",
+      "subtitle": "Amanecer Rojo, Libro 2 [Red Rising, Book 2]",
+      "language": "spanish",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown",
+          "asin": "B00EDBZVNI"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Luís Torrelles"
+        }
+      ],
+      "runtime_length_min": 1187,
+      "release_date": "2020-07-21",
+      "publisher_name": "Audible Studios"
+    },
+    {
+      "asin": "B08FJGMLXW",
+      "title": "Hijo Dorado [Golden Son]",
+      "subtitle": "Amanecer Rojo, Libro 2 [Red Rising, Book 2]",
+      "language": "spanish",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown",
+          "asin": "B00EDBZVNI"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Carlos Torres"
+        }
+      ],
+      "runtime_length_min": 1185,
+      "release_date": "2020-08-11",
+      "publisher_name": "Audible Studios"
+    },
+    {
+      "asin": "B0C8WQ9JVP",
+      "title": "Forbidden Song (Dramatized Adaptation)",
+      "subtitle": "Red Rising: Sons of Ares, Volume 3",
+      "language": "english",
+      "content_type": "Performance",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown"
+        },
+        {
+          "name": "Rik Hoskin"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Andy Brownstein"
+        },
+        {
+          "name": "David Jourdan"
+        },
+        {
+          "name": "Holly Adams"
+        },
+        {
+          "name": "Lise Bruneau"
+        },
+        {
+          "name": "Nick DePinto"
+        },
+        {
+          "name": "Richard Rohan"
+        },
+        {
+          "name": "Todd Scofield"
+        },
+        {
+          "name": "Ian Russell"
+        },
+        {
+          "name": "Jenna Sharpe"
+        },
+        {
+          "name": "Stephanie Németh-Parker"
+        },
+        {
+          "name": "Peter Stanley"
+        }
+      ],
+      "runtime_length_min": 219,
+      "release_date": "2023-07-12",
+      "publisher_name": "Graphic Audio LLC"
+    },
+    {
+      "asin": "8427222181",
+      "title": "Oro y Ceniza [Iron Gold]",
+      "subtitle": "Amanecer Rojo, Libro 4 [Red Rising, Book 4]",
+      "language": "spanish",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown",
+          "asin": "B00EDBZVNI"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Carlos Torres"
+        }
+      ],
+      "runtime_length_min": 1674,
+      "release_date": "2020-10-27",
+      "publisher_name": "Audible Studios"
+    },
+    {
+      "asin": "842722219X",
+      "title": "Edad Oscura [Dark Age]",
+      "subtitle": "Amanecer Rojo, Libro 5 [Red Rising, Book 5]",
+      "language": "spanish",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown",
+          "asin": "B00EDBZVNI"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Carlos Torres"
+        }
+      ],
+      "runtime_length_min": 2334,
+      "release_date": "2020-12-15",
+      "publisher_name": "Audible Studios"
+    },
+    {
+      "asin": "B0CYXQ9DP8",
+      "title": "Red Rising by Pierce Brown",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 60,
+      "release_date": "2024-03-24"
+    },
+    {
+      "asin": "B0C1MGZSWS",
+      "title": "Red Rising by Pierce Brown",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 73,
+      "release_date": "2023-04-06"
+    },
+    {
+      "asin": "B08RMJ18QH",
+      "title": "Red Rising by Pierce Brown",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 66,
+      "release_date": "2021-01-01"
+    },
+    {
+      "asin": "B0GKF44FFB",
+      "title": "Red Rising by Pierce Brown",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 25,
+      "release_date": "2026-01-29"
+    },
+    {
+      "asin": "B0FJQFZ3C2",
+      "title": "Red Rising by Pierce Brown",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 67,
+      "release_date": "2025-07-23"
+    },
+    {
+      "asin": "B0F7K9L5RW",
+      "title": "Red Rising by Pierce Brown",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 45,
+      "release_date": "2025-05-06"
+    },
+    {
+      "asin": "B0D9FJ8HPV",
+      "title": "Red Rising (Part 2) by Pierce Brown",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 60,
+      "release_date": "2024-07-14"
+    },
+    {
+      "asin": "B09SQXXT3K",
+      "title": "RED RISING- PIERCE BROWN SAGA.",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 37,
+      "release_date": "2022-02-18"
+    },
+    {
+      "asin": "B0DRZRT43Z",
+      "title": "Red Rising by Pierce Brown - A Review",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 120,
+      "release_date": "2025-01-01"
+    },
+    {
+      "asin": "B0FLYL6G73",
+      "title": "Red Rising by Pierce Brown: Space Opera, Roman Myth, and a Dystopian Revolution",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 10,
+      "release_date": "2025-08-19"
+    },
+    {
+      "asin": "B0BR2N179X",
+      "title": "33 - Red Rising by Pierce Brown",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 59,
+      "release_date": "2022-12-25"
+    },
+    {
+      "asin": "B0B8XM5699",
+      "title": "048 Red Rising by Pierce Brown",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 58,
+      "release_date": "2022-08-07"
+    },
+    {
+      "asin": "B09RJPHTVJ",
+      "title": "Red Rising - Pierce Brown - Episode 22",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 69,
+      "release_date": "2022-01-30"
+    },
+    {
+      "asin": "B0DB26RWT1",
+      "title": "The Ark - Red Rising by Pierce Brown",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 89,
+      "release_date": "2024-07-25"
+    },
+    {
+      "asin": "B0CKF3NBG3",
+      "title": "Red Rising by Pierce Brown with Allison Eisner",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 38,
+      "release_date": "2023-10-04"
+    },
+    {
+      "asin": "B0C7CXGPLV",
+      "title": "Red Rising 1",
+      "language": "french",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "authors": [
+        {
+          "name": "Pierce Brown",
+          "asin": "B00EDBZVNI"
+        },
+        {
+          "name": "H. Lenoir - traducteur"
+        }
+      ],
+      "narrators": [
+        {
+          "name": "Pierre-Henri Prunel"
+        }
+      ],
+      "runtime_length_min": 866,
+      "release_date": "2023-07-19",
+      "publisher_name": "Audiolib"
+    },
+    {
+      "asin": "B0GWLHHWMT",
+      "title": "Gwiazda zaranna (Red Rising 3) - Pierce Brown",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 1336,
+      "release_date": "2016-06-09"
+    },
+    {
+      "asin": "B0FFWT2FS8",
+      "title": "\"Red Rising\" by Pierce Brown - Part 1/2",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 53,
+      "release_date": "2025-06-27"
+    },
+    {
+      "asin": "B0BXN546PQ",
+      "title": "Red Rising By Pierce Brown Shows The Glimpses of a Budding Sci-Fi Epic With A Great First Step (Spoiler-Free Review of Red Rising #1)",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 23,
+      "release_date": "2023-03-07"
+    },
+    {
+      "asin": "B0BRQSDBX1",
+      "title": "Book Club - Red Rising – Pierce Brown",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 50,
+      "release_date": "2023-01-05"
+    },
+    {
+      "asin": "B0DHWCXG6N",
+      "title": "RED RISING By Pierce Brown | A Deep Dive on Our Favorite Sci-Fi Series",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 41,
+      "release_date": "2024-09-24"
+    },
+    {
+      "asin": "B09VDDCQ3S",
+      "title": "Ep 542 - Red Rising, by Pierce Brown (Red Rising series #1)",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 65,
+      "release_date": "2022-07-18"
+    },
+    {
+      "asin": "B0HJWKHPBB",
+      "title": "Red Rising Author Pierce Brown Joins the Wildmen",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 73,
+      "release_date": "2026-09-15"
+    },
+    {
+      "asin": "B0FHC4T2JD",
+      "title": "\"Red Rising\" by Pierce Brown - Part 2/2",
+      "content_type": "Podcast",
+      "format_type": "original_recording",
+      "runtime_length_min": 61,
+      "release_date": "2025-07-11"
+    }
+  ]
+}

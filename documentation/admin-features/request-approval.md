@@ -42,6 +42,7 @@ Allows admins to review and approve/deny user requests before they are processed
 
 - **Via POST /api/requests/{id}/select-torrent** (existing request):
   1. Check if request already in 'awaiting_approval' status → Block with 403 error
+  1a. A non-admin can't pick for a `denied` request → 403 `RequestDenied` (#232; the UI never offers it; admins unchanged)
   2. Check approval requirements based on CURRENT settings
   3. If approval needed → Set status to 'awaiting_approval', store torrent in `selectedTorrent`, send pending notification
   4. If auto-approved → Set status to 'downloading', start download immediately, send approved notification
@@ -52,7 +53,8 @@ Allows admins to review and approve/deny user requests before they are processed
   - Admin-provided and stored picks pass the same check as user picks (`guardTorrentSelection` / `guardEbookSelection`); Anna's Archive picks get links rebuilt from `md5`; an unusable admin-provided pick → 400 (request stays `awaiting_approval`); an unusable stored user pick, or an Anna's Archive pick with no links left, is cleared with a warning and approval falls back to the automatic search
   - If no `selectedTorrent` → Trigger automatic search job (status: 'pending')
   - Send approved notification
-- **Deny:** → Change status to 'denied', no further processing
+- **Deny:** → Change status to 'denied', no further processing. A denied request stays denied for its user: `select-torrent` and `interactive-search` answer a non-admin 403 `RequestDenied` (#232)
+- **Approve** also writes `Request.approvalBypassedBy = NULL` (clears an earlier record of a completion without approval, [database.md](../backend/database.md#requests)); deny leaves it
 
 **Approval guards (`processRequestApproval`, `src/lib/services/request-approval.service.ts`):**
 - **Soft-delete:** fetch is `findFirst` on `{ id, deletedAt: null }`, and both atomic claims carry
@@ -133,6 +135,7 @@ Select torrent for existing request (request page interactive search)
 
 **Approval Check:**
 - Blocks if already in 'awaiting_approval' status
+- Blocks a non-admin on a `denied` request: 403 `{ error: 'RequestDenied' }` (#232); admins can still pick
 - Re-checks approval requirements based on CURRENT settings
 - If needed → Status 'awaiting_approval', stores torrent, sends pending notification
 - If auto-approved → Status 'downloading', starts download, sends approved notification
@@ -349,6 +352,7 @@ Update user (includes autoApproveRequests field)
 - `select-torrent` endpoint re-checks approval requirements based on CURRENT settings
 - Prevents bypass: User with auto-approve enabled creates request → Admin disables auto-approve → User tries to download
 - If settings changed, torrent is stored and request enters approval queue
+- A `denied` request can't be revived by its user after their setting changes to auto-approve: `select-torrent` and `interactive-search` refuse a non-admin with 403 `RequestDenied` (#232)
 
 **Notification Timing:**
 - Automatic search: Notification sent immediately on request creation

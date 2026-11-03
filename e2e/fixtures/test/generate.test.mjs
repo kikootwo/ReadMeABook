@@ -68,6 +68,20 @@ test('m4b has one chapter per manifest chapter and book-level tags', () => {
   assert.equal(tags.album, 'Fixture Book One');
 });
 
+test('#511 m4b: cover, long chapters (one 1/1000 chapter-track sample each), tags that are not the book\'s', () => {
+  const fx = index.fixtures['martian-m4b-cover'];
+  const file = path.join(out, 'martian-m4b-cover', fx.files[0].rel);
+  assert.deepEqual(fs.readdirSync(path.join(out, 'martian-m4b-cover')), [fx.files[0].rel]);
+  const { chapters } = probe(file, ['-show_chapters']);
+  assert.deepEqual(chapters.map((c) => [c.tags.title, Number(c.start_time), Number(c.end_time)]), [['One', 0, 100], ['第二章', 100, 700], ['Глава 3', 700, 1300]]);
+  const { streams } = probe(file, ['-show_entries', 'stream=codec_type,nb_frames,time_base:stream_disposition=attached_pic']);
+  assert.ok(streams.some((s) => s.codec_type === 'video' && s.disposition.attached_pic === 1));
+  assert.deepEqual(streams.filter((s) => s.codec_type === 'data').map((s) => [s.nb_frames, s.time_base]), [['3', '1/1000']]);
+  const tags = probe(file, ['-show_entries', 'format_tags']).format.tags;
+  assert.equal(tags.title, 'Fixture Source Title');
+  assert.notEqual(tags.album_artist, index.books.martian.author);
+});
+
 test('ASIN folder fixture is named "<title> [<ASIN>]"', () => {
   assert.equal(index.fixtures['phm-asin'].folder, 'Fixture Book One [B08G9PRS1K]');
   assert.match(index.fixtures['phm-asin'].folder, /\[B0[A-Z0-9]{8}\]$/);

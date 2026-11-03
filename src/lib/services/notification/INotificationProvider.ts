@@ -41,6 +41,13 @@ export interface NotificationPayload {
   timestamp: Date;
 }
 
+/** A provider's answer when it deliberately sent nothing for a payload (logged as skipped, not sent) */
+export interface NotificationSkipped {
+  skipped: true;
+  /** Why, for the log: no URLs, tokens, keys or usernames */
+  reason: string;
+}
+
 // Provider config field definition for dynamic UI rendering
 export interface ProviderConfigField {
   name: string;
@@ -93,6 +100,6 @@ export interface INotificationProvider {
    */
   liftStoredSecrets?(config: Record<string, any>): { config: Record<string, any>; password: string | null; passwordField: string } | null;
 
-  /** Send notification with already-decrypted config */
-  send(config: Record<string, any>, payload: NotificationPayload): Promise<void>;
+  /** Send notification with already-decrypted config; resolves to a skip when it deliberately sent nothing */
+  send(config: Record<string, any>, payload: NotificationPayload): Promise<void | NotificationSkipped>;
 }

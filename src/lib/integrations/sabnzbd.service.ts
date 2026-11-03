@@ -27,6 +27,7 @@ import {
   ProtocolType,
   DownloadInfo,
   DownloadStatus,
+  QueuedDeleteResult,
   AddDownloadOptions,
   AddDownloadResult,
   ConnectionTestResult,
@@ -837,6 +838,31 @@ export class SABnzbdService implements IDownloadClient {
     if (response.data?.status === false) {
       throw new Error(response.data.error || `Failed to delete NZB ${nzbId} from queue`);
     }
+  }
+
+  /**
+   * Cancel: queue delete with the job's files, never history. 'deleted' only when SABnzbd confirms
+   * it: its answer's nzo_ids name this job, or (an answer that names none, older versions) a re-read
+   * finds the job nowhere. Still queued after the delete: 'unconfirmed'; it had left the queue first
+   * (post-processing or history): 'not_queued'.
+   */
+  async deleteQueuedDownload(nzbId: string): Promise<QueuedDeleteResult> {
+    logger.info(`Deleting NZB from queue (cancel): ${nzbId}`);
+    const response = await this.client.get('/api', {
+      params: { mode: 'queue', name: 'delete', value: nzbId, del_files: '1', output: 'json', apikey: this.apiKey },
+    });
+    const data = response.data;
+    logger.info(`SABnzbd queue delete response: ${JSON.stringify(data)}`);
+
+    const deletedIds: unknown[] | null = Array.isArray(data?.nzo_ids) ? data.nzo_ids : null;
+    if (deletedIds?.includes(nzbId)) return 'deleted';
+    if (!deletedIds && data?.status === false) {
+      throw new Error(data.error || `Failed to delete NZB ${nzbId} from queue`);
+    }
+    if ((await this.getQueue()).some((item) => item.nzbId === nzbId)) return 'unconfirmed';
+    // It named the jobs it deleted, not this one: the job had left the queue
+    if (deletedIds) return 'not_queued';
+    return (await this.getNZB(nzbId)) ? 'not_queued' : 'deleted';
   }
 
   /**

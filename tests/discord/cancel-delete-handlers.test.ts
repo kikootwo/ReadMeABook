@@ -3,7 +3,7 @@
  * Documentation: documentation/integrations/discord-bot.md
  *
  * Non-admins may cancel their own requests from Discord but never delete: the card's Cancel button
- * and the /status menu go through cancelRequest (nothing removed), and /delete is for linked RMAB
+ * and the /status menu go through cancelRequest (no library files removed), and /delete is for linked RMAB
  * admins only, re-checked on every click since customIds are untrusted. Approving, or cancelling
  * someone else's request, needs a Discord user linked to an RMAB admin: the admin role alone is
  * only used for pings.
@@ -25,7 +25,10 @@ const helpersMock = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
-vi.mock('@/lib/services/request-cancel.service', () => ({ cancelRequest: cancelRequestMock }));
+vi.mock('@/lib/services/request-cancel.service', async (importOriginal) => ({
+  cancelFailureMessage: (await importOriginal<typeof import('@/lib/services/request-cancel.service')>()).cancelFailureMessage,
+  cancelRequest: cancelRequestMock,
+}));
 vi.mock('@/lib/services/request-delete.service', () => ({ deleteRequest: deleteRequestMock }));
 vi.mock('@/lib/services/request-approval.service', () => ({ processRequestApproval: processRequestApprovalMock }));
 vi.mock('@/lib/services/discord/discord-user.resolver', () => ({ resolveRmabUser: resolveRmabUserMock }));
@@ -71,7 +74,7 @@ describe('Discord cancel and delete', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaMock.request.findFirst.mockResolvedValue({ userId: 'user-1', status: 'downloading' });
-    cancelRequestMock.mockResolvedValue({ success: true, request: {} });
+    cancelRequestMock.mockResolvedValue({ success: true, request: {}, download: 'removed', message: 'Request cancelled.' });
     deleteRequestMock.mockResolvedValue({ success: true });
   });
 
@@ -82,7 +85,7 @@ describe('Discord cancel and delete', () => {
 
       await handleCancelRequestButton(interaction(), 'req-1');
 
-      expect(cancelRequestMock).toHaveBeenCalledWith('req-1', { userId: 'user-1', discordUserId: 'discord-1' });
+      expect(cancelRequestMock).toHaveBeenCalledWith('req-1', { audience: 'owner', actor: { userId: 'user-1', discordUserId: 'discord-1' } });
       expect(deleteRequestMock).not.toHaveBeenCalled();
     });
 
@@ -91,7 +94,7 @@ describe('Discord cancel and delete', () => {
       cancelRequestMock.mockResolvedValue({
         success: false,
         reason: 'not_cancellable',
-        message: 'Cannot cancel request with status: processing',
+        status: 'processing',
       });
       const { handleCancelRequestButton } = await import('@/lib/services/discord/handlers/approval.handler');
       const i = interaction();
@@ -99,6 +102,17 @@ describe('Discord cancel and delete', () => {
       await handleCancelRequestButton(i, 'req-1');
 
       expect(embedText(i.followUp)).toContain('Cannot cancel request with status: processing');
+    });
+
+    it('tells the user what happened to the download', async () => {
+      resolveRmabUserMock.mockResolvedValue(owner);
+      const { handleCancelRequestButton } = await import('@/lib/services/discord/handlers/approval.handler');
+      const i = interaction();
+
+      await handleCancelRequestButton(i, 'req-1');
+
+      expect(embedText(i.followUp)).toContain('Request cancelled.');
+      expect(i.followUp.mock.calls[0][0].ephemeral).toBe(true);
     });
   });
 
@@ -152,7 +166,7 @@ describe('Discord cancel and delete', () => {
 
       await handleCancelRequestButton(interaction(), 'req-1');
 
-      expect(cancelRequestMock).toHaveBeenCalledWith('req-1', { userId: 'admin-1', discordUserId: 'discord-1' });
+      expect(cancelRequestMock).toHaveBeenCalledWith('req-1', { audience: 'admin', actor: { userId: 'admin-1', discordUserId: 'discord-1' } });
     });
   });
 
@@ -163,7 +177,7 @@ describe('Discord cancel and delete', () => {
 
       await handleStatusCancel(interaction({ values: ['req-1'] }), 0, false);
 
-      expect(cancelRequestMock).toHaveBeenCalledWith('req-1', { userId: 'user-1', discordUserId: 'discord-1' });
+      expect(cancelRequestMock).toHaveBeenCalledWith('req-1', { audience: 'owner', actor: { userId: 'user-1', discordUserId: 'discord-1' } });
       expect(deleteRequestMock).not.toHaveBeenCalled();
     });
 

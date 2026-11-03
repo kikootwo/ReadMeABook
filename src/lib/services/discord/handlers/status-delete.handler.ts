@@ -14,7 +14,7 @@ import type {
 } from 'discord.js';
 import { prisma } from '@/lib/db';
 import { deleteRequest } from '@/lib/services/request-delete.service';
-import { cancelRequest } from '@/lib/services/request-cancel.service';
+import { cancelFailureMessage, cancelRequest } from '@/lib/services/request-cancel.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { resolveRmabUser, type ResolvedDiscordUser } from '../discord-user.resolver';
 import {
@@ -109,13 +109,18 @@ export async function handleStatusCancel(
     return;
   }
 
-  const result = await cancelRequest(requestId, { userId: resolved.user.id, discordUserId: interaction.user.id });
+  const result = await cancelRequest(requestId, {
+    audience: resolved.isAdmin ? 'admin' : 'owner',
+    actor: { userId: resolved.user.id, discordUserId: interaction.user.id },
+  });
   logger.info('Request cancelled via /status', { ...meta, requestId, success: result.success });
 
   if (!result.success) {
-    await interaction.followUp({ embeds: [errorEmbed(result.message || 'Could not cancel the request.')], ephemeral: true });
+    await interaction.followUp({ embeds: [errorEmbed(cancelFailureMessage(result))], ephemeral: true });
     return;
   }
+
+  await interaction.followUp({ embeds: [infoEmbed('Request cancelled', result.message)], ephemeral: true });
 
   // Card + approval-embed rewrites are handled inside cancelRequest for every surface.
 

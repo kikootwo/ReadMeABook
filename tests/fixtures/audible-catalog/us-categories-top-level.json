@@ -1,0 +1,23 @@
+{
+  "categories": [
+    {
+      "id": "24427740011",
+      "name": "Comedy & Humor"
+    },
+    {
+      "id": "18574426011",
+      "name": "Literature & Fiction"
+    },
+    {
+      "id": "18574597011",
+      "name": "Mystery, Thriller & Suspense"
+    },
+    {
+      "id": "18580606011",
+      "name": "Science Fiction & Fantasy"
+    }
+  ],
+  "response_groups": [
+    "always-returned"
+  ]
+}

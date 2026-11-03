@@ -12,7 +12,14 @@ import { XMLParser } from 'fast-xml-parser';
 import { prisma } from '@/lib/db';
 import { Prisma } from '@/generated/prisma/client';
 import { RMABLogger } from '@/lib/utils/logger';
-import { GOODREADS_RSS_URL_HINT, isGoodreadsHttpsUrl, toGoodreadsRssUrl } from '@/lib/utils/goodreads-rss-url';
+import { SYNC_USER_SELECT, withoutDeletedUsers } from '@/lib/utils/deleted-user-skip';
+import {
+  GOODREADS_FEED_ENDED_STATUSES,
+  GOODREADS_RSS_URL_HINT,
+  GoodreadsFeedEndedError,
+  isGoodreadsHttpsUrl,
+  toGoodreadsRssUrl,
+} from '@/lib/utils/goodreads-rss-url';
 import {
   ShelfBook,
   ShelfSyncStats,
@@ -81,6 +88,7 @@ const FETCH_TIMEOUT_MS = 15000;
 /**
  * GET one feed page. Redirects are followed by hand so each hop's target is checked
  * before it is requested: only https Goodreads hosts are ever contacted.
+ * A 404/410 throws GoodreadsFeedEndedError: Goodreads no longer serves shelf feeds (#514).
  */
 async function getGoodreadsPage(pageUrl: string): Promise<string> {
   let current = pageUrl;
@@ -92,8 +100,11 @@ async function getGoodreadsPage(pageUrl: string): Promise<string> {
       timeout: FETCH_TIMEOUT_MS,
       headers: { 'User-Agent': RMAB_USER_AGENT },
       maxRedirects: 0,
-      validateStatus: (status) => status >= 200 && status < 400,
+      validateStatus: (status) => (status >= 200 && status < 400) || GOODREADS_FEED_ENDED_STATUSES.includes(status),
     });
+    if (GOODREADS_FEED_ENDED_STATUSES.includes(response.status)) {
+      throw new GoodreadsFeedEndedError(response.status);
+    }
     const isRedirect = response.status >= 300 && response.status < 400;
     if (!isRedirect) return response.data;
 
@@ -163,17 +174,22 @@ export async function processGoodreadsShelves(
   if (options.shelfId) whereClause.id = options.shelfId;
   if (options.userId) whereClause.userId = options.userId;
 
-  const shelves = await prisma.goodreadsShelf.findMany({
+  const found = await prisma.goodreadsShelf.findMany({
     where: whereClause,
-    include: { user: { select: { id: true, plexUsername: true } } },
+    include: { user: { select: SYNC_USER_SELECT } },
   });
+  // A deleted user's shelves get no fetch, lookup, request or write (#504)
+  const shelves = withoutDeletedUsers(found, 'Goodreads shelf(s)', log);
 
   if (shelves.length === 0) {
-    log.info(options.shelfId ? 'Shelf not found' : 'No Goodreads shelves configured, skipping');
+    if (found.length === 0) log.info(options.shelfId ? 'Shelf not found' : 'No Goodreads shelves configured, skipping');
     return stats;
   }
 
   log.info(`Processing ${shelves.length} Goodreads shelf(s)${maxLookups > 0 ? ` (max ${maxLookups} lookups/shelf)` : ' (unlimited lookups)'}`);
+
+  // Shelves whose feed Goodreads answered 404/410: one warning for the whole run, not one per shelf (#514)
+  let endedFeeds = 0;
 
   for (const shelf of shelves) {
     try {
@@ -183,8 +199,13 @@ export async function processGoodreadsShelves(
       try {
         rssData = await fetchAndValidateRss(shelf.rssUrl);
       } catch (error) {
-        log.error(`Failed to fetch RSS for shelf "${shelf.name}": ${error instanceof Error ? error.message : 'Unknown error'}`);
         stats.errors++;
+        if (error instanceof GoodreadsFeedEndedError) {
+          endedFeeds++;
+          log.debug(`Goodreads answered HTTP ${error.status} for shelf "${shelf.name}" (user: ${shelf.user.plexUsername})`);
+        } else {
+          log.error(`Failed to fetch RSS for shelf "${shelf.name}": ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
         continue;
       }
 
@@ -208,6 +229,13 @@ export async function processGoodreadsShelves(
       stats.errors++;
       log.error(`Failed to process shelf "${shelf.name}" for user ${shelf.user.plexUsername}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  if (endedFeeds > 0) {
+    log.warn(
+      `Goodreads no longer serves shelf RSS feeds: ${endedFeeds} shelf(s) skipped (HTTP 404/410). ` +
+      'They will not sync again unless Goodreads brings the feeds back; Hardcover lists still work.'
+    );
   }
 
   log.info(`Goodreads sync complete: ${stats.shelvesProcessed} shelves, ${stats.booksFound} books, ${stats.lookupsPerformed} lookups, ${stats.requestsCreated} requests created, ${stats.errors} errors`);

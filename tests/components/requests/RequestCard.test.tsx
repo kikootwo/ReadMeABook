@@ -118,6 +118,38 @@ describe('RequestCard', () => {
     });
   });
 
+  it('the cancel confirmation promises only what a cancel does to the download', async () => {
+    const { RequestCard } = await import('@/components/requests/RequestCard');
+
+    render(<RequestCard request={{ ...baseRequest, status: 'downloading' }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(await screen.findByText("RMAB stops this request's download and removes what it downloaded so far, unless another request still uses it. A download that already finished may stay in the download client to seed.")).toBeInTheDocument();
+    expect(screen.queryByText(/Cancelling will stop the download/)).toBeNull();
+  });
+
+  it.each(['pending', 'searching', 'awaiting_search', 'awaiting_release'])(
+    'a %s request has no download yet: the confirmation is the short line', async (status) => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+
+      render(<RequestCard request={{ ...baseRequest, status }} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+      expect(await screen.findByText('RMAB stops looking for this book.')).toBeInTheDocument();
+      expect(screen.queryByText(/this request's download/)).toBeNull();
+    }
+  );
+
+  it('a downloading ebook is not promised that its file is removed', async () => {
+    const { RequestCard } = await import('@/components/requests/RequestCard');
+
+    render(<RequestCard request={{ ...baseRequest, status: 'downloading', type: 'ebook' as const }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(await screen.findByText("RMAB stops this request's download. What it already downloaded may stay in the download client or the downloads folder.")).toBeInTheDocument();
+    expect(screen.queryByText(/removes what it downloaded/)).toBeNull();
+  });
+
   it('does not show manual search or interactive search buttons', async () => {
     const { RequestCard } = await import('@/components/requests/RequestCard');
 

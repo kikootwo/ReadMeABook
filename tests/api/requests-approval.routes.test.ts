@@ -554,7 +554,7 @@ describe('Request Approval Workflow', () => {
       // The transition is claimed atomically, gated on the current status.
       expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
         where: { id: 'req-1', status: 'awaiting_approval', deletedAt: null },
-        data: { status: 'pending' },
+        data: { status: 'pending', approvalBypassedBy: null },
       });
       expect(jobQueueMock.addSearchJob).toHaveBeenCalledWith('req-1', {
         id: 'ab-1',

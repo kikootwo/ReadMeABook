@@ -153,6 +153,21 @@ describe('fetchDownloadSource', () => {
     expect(logged.join('\n')).not.toContain('S3cret');
   });
 
+  it('fetches a proxy link Prowlarr published on another address from the configured Prowlarr only', async () => {
+    // The "other" server stands in for the address a reverse proxy put in the link
+    servers.on('prowlarr', '/1/download', serve(TEST_TORRENT));
+    servers.on('other', '/otherapp/1/download', serve(TEST_TORRENT));
+    const published = `${servers.otherUrl}/otherapp/1/download?link=a&file=Book`;
+
+    const grabUrl = toConfiguredProwlarrUrl(published, parseProwlarrBase(servers.prowlarrUrl), { withCredentials: true })!;
+    const result = await fetchTorrent(grabUrl);
+
+    expect(result.kind).toBe('file');
+    expect(servers.requests.map((r) => [r.server, new URL(r.url, 'http://x').pathname])).toEqual([['prowlarr', '/1/download']]);
+    expect(servers.keyed('prowlarr')).toHaveLength(1);
+    expect(servers.keyed('other')).toHaveLength(0);
+  });
+
   it('rejects redirects to non-http schemes', async () => {
     servers.on('other', '/bad', redirectTo('file:///etc/passwd'));
     await expect(fetchTorrent(`${servers.otherUrl}/bad`)).rejects.toThrow('Invalid redirect location');

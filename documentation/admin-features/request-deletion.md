@@ -12,6 +12,8 @@ Allows admins to delete requests from the admin dashboard with smart handling of
 - Torrent seeding management
 - Orphaned download tracking
 
+**Cancel vs Delete:** cancel stops the download and keeps the request (`cancelled`); see [request-cancel.md](request-cancel.md).
+
 ## Key Features
 
 1. **Soft Delete** - Preserves request history, allows re-requesting
@@ -47,6 +49,8 @@ model Request {
 ```
 
 **Unique Constraint:** Removed from schema, enforced in application code
+
+**Ebook placement record (#497):** `placedEbookFiles Json? @map("placed_ebook_files")` on Request: the ebook files the request's imports copied (D2 below). Nullable, no default (added by `prisma db push`; existing rows NULL)
 
 ### Deletion Logic Flow
 
@@ -106,24 +110,50 @@ model Request {
 
 3. **Library Delete Guard** (`src/lib/utils/library-delete-guard.ts`, run from `src/lib/services/request-delete-files.ts`)
    - Path: persisted `Audiobook.filePath` only (never rebuilt from `media_dir` or a template)
-   - The stored folder is removed (`rm -rf`) only when ALL hold, else nothing is removed:
+   - Files are removed from the stored folder (D1 below) only when ALL hold, else nothing is removed:
      | Rule | Refusal reason (`filesKeptReason`) |
      |------|------------------------------------|
      | a. strictly inside `media_dir` | `it is the media library root` / `it is outside the media library (...)` |
      | b. equals/contains no configured root (download dirs, client paths, mapped paths, `/bookdrop`) | `it is a configured root (...)` / `it contains a configured root (...)` |
      | c. equals/contains no other book's `filePath` (each row canonicalized: realpath + dev/ino; missing rows skipped) | `it is also the folder of "<title>"` / `it contains the folder of "<title>"` |
      | evidence: audio directly in the folder hashes to `filesHash` | `folder contents changed since import` / `there is no import record (files hash) for this folder` |
-     | evidence: no audio in any subfolder (the removal is recursive) | `it has audio files in a subfolder` |
+     | evidence: no audio in any subfolder | `it has audio files in a subfolder` |
    - Roots are read strictly from the DB (`collectGuardRoots`, fail closed: any error refuses)
    - Symlinked title folder: rules a-c on the target AND the link location; only the link is removed
+   - **What D1 removes (#526, `src/lib/utils/book-folder-delete.ts`):** one `readdir` of the canonical folder; every decision by name inside it (`unlink` never follows a link in the last component; a parent swapped mid-delete is followed, a smaller exposure than the former `rm -rf`)
+     | Entry | Action | Kept `why` |
+     |-------|--------|------------|
+     | direct non-folder entries with an audio name | unlinked first, only when they still hash to `filesHash` (else nothing removed: `folder contents changed since import`); ENOENT = already gone | |
+     | `.rmab-partial-*.part` regular file (`PARTIAL_FILE_PATTERN`) | older than 24 h: unlinked; newer: kept | `an import is still writing it` |
+     | `cover.jpg` (regular file, never a link) and the junk list | unlinked only when nothing else is left but these and ebooks recorded by active ebook requests | `kept with the other files` |
+     | ebook file named by an active ebook request's `placedEbookFiles` (canonical folder + name; a label, never a delete input) | kept; does not keep the cover | `ebook of another request` |
+     | anything else (user files, unrecorded/legacy ebooks, subfolders `name/`, links) | kept; never entered | `RMAB has no record that it placed it` |
+   - Junk list (`src/lib/utils/book-folder-junk.ts`): files `.DS_Store`, `Thumbs.db`, `desktop.ini`, `._*`, `metadata.json`, `metadata.abs` (exact names, regular files); folders `@eaDir`, `.@__thumb` through a limited walk (lstat, links never followed, files unlinked and folders rmdir'd one by one, each folder re-checked by dev/ino first and held open from the walk until its own rmdir, so on a local filesystem a folder made in its place can't pass the re-check with a reused inode number (not covered: a swap after the re-check, or mergerfs/NFS, where a folder remade at the same path can keep its number); every plan is released on all paths); a junk folder holding a link, special file, audio or ebook file, deeper than 3 levels or more than 500 entries is kept whole (`RMAB has no record that it placed it (<why>)`)
+   - Audio unlink failure: stop; outcome kept (library untouched): `<name> could not be removed (<why>)`, or `the folder was partly removed (<why>); remove the rest manually` after ≥1 file; a failed first `readdir`: kept, nothing removed. Cover/junk/partial unlink failure: listed `could not be removed (<why>)`
+   - Then the folder: empty → `rmdir` (non-recursive) + empty-parent sweep; every rmdir error ignored; a non-ENOTEMPTY one is logged and returned as `folderKept.error` (`could not be removed (<code>)`; message `Request deleted; the emptied book folder could not be removed (<code>)` when nothing else is listed), never listed as the folder's content; not empty → stays, result `folderKept`
+   - AppleDouble files with an audio extension (`._Book.m4b`) count as audio (guard hash and D1), not junk: a folder holding one fails the hash check and is kept whole
    - No stored path but a library item (`absItemId`/`plexGuid`): kept (`RMAB has no stored folder ...`); no path and no item: nothing to remove
    - Missing folder: "already gone" only when the library looks mounted (`media_dir` readable and not empty, and some other stored book folder exists when other rows have one); otherwise kept (`the folder is missing and ... is the media volume mounted?`): no backend call, row untouched (protects against a media volume not mounted yet)
    - Mount-check limit: a mount point that received new imports while the share was unmounted is not empty, so it passes; a missing folder there then counts as gone (no Plex delete; ABS `hard=0` only for an item inside that path; row cleared)
    - Stale record: the stored folder is gone AND outside the current `media_dir` (library moved): nothing removed or protected; the delete clears only `filePath`/`filesHash`/`fileFormat` (no backend call, records and status kept; message says so), a replace goes on
-   - `rm` failure: kept (`the folder was partly removed (permission denied); remove the rest manually`); `fs.rm` stops at the first error, so earlier files are gone; backend and row untouched
-   - After removal: empty parents swept up to the nearest root (`sweepEmptyParents`)
-   - **Ebook requests (D2):** rules a-c on `filePath`, then unlink every ebook file directly in it if the folder passes the evidence rule, or the only one if it holds exactly one; otherwise kept (`it holds N ebook files and is not provably this book's folder (...)`). A shared `{author}` or flat `Ebooks` folder fails rule c when another book points at it. Never a sweep of other books' ebooks
+   - Symlinked title folder `rm` failure: kept (`the folder was partly removed (permission denied); remove the rest manually`); backend and row untouched
+   - After the folder is removed: empty parents swept up to the nearest root (`sweepEmptyParents`)
+   - **Ebook requests (D2, #497):** only the files the request's imports recorded in `Request.placedEbookFiles` (`[{ path, size, sha256, placedAt }]`, `src/lib/utils/ebook-placement.ts`); status and the rest of the folder never count. `Audiobook.filePath` is not read. Per entry, in order (kept reasons joined `; `, each reason once):
+     | Check | Kept reason |
+     |-------|-------------|
+     | entry well-formed: absolute path, no NUL, ebook extension (`isEbookFile`), safe-integer size ≥ 0, 64-hex sha256 (non-array value = one bad entry) | `the placement record could not be read` |
+     | rules a-c on the file's folder (`assertSafeLibraryDelete(dir, book, { evidence: false })`; symlinked folder: target + link location) | rule a-c reasons above |
+     | `lstat` regular file (not a symlink/folder) | `<name> is no longer the file RMAB placed` |
+     | size and sha256 match the entry | `<name> changed since RMAB placed it` |
+     | not the same file as an entry of another active (`deletedAt null`) ebook request, any book: same sha256 + size and its path reaches the same file (`lstat` dev/ino, so a symlinked folder or another spelling of the folder counts; a stale entry with other bytes does not) | `<name> is also the ebook of another request` (that lstat fails other than ENOENT/ENOTDIR: `<name> could not be compared with another request's record (<code>)`) |
+     | `unlink` | `<name> could not be removed (<why>)` |
+   - File or its folder already gone (library mounted): nothing, no reason
+   - No record: SQL NULL or JSON null (imported before the field, a record write that failed, or never imported). Kept reason only when the request ever delivered (`status = 'downloaded'` or `completedAt`): `RMAB has no record of the ebook files this request placed (it was imported before RMAB kept one, or the record could not be saved), so no ebook file was removed`; otherwise none (`Request deleted successfully`)
+   - `[]` (the import found the file already in the library: `identical`/`present`/`differs`): `RMAB has no record that this request placed the ebook (its import found it already in the library), so it was not removed`
+   - Earlier-import marker `{ "earlierImport": "unrecorded" }` (first item; `recordEbookPlacement` writes it when the stored value is NULL but `completedAt` is already set, i.e. the request delivered before: a pre-upgrade import or a failed record write, then a re-import such as Manual Import): never removable; adds `an earlier import of this request has no record (it was imported before RMAB kept one, or the record could not be saved), so its ebook file was not removed`; the recorded entries after it are still removed
+   - Never a folder sweep: a flat `Ebooks`/shelf folder loses only the recorded file (foreign ebooks stay); a folder another book stores still fails rule c
    - Not handled (needs a separate ebook location, PR2): an ebook in a separate folder (custom `ebook_path_template`) is not removed by the audiobook delete
+   - D2 empty-folder step (#526): after unlinking ≥1 file, that file's folder (only when the recorded folder is a real folder, not a link, at the canonical path rules a-c passed on) goes when nothing but the junk list is left (a written exception to "D2 removes only recorded files"), then empty parents are swept; every rmdir error ignored (a non-ENOTEMPTY one is only logged: the recorded files are gone, so it is not `filesKeptReason`; `filesDeleted: true`, success toast). When that folder was `Audiobook.filePath`, `filePath`/`fileFormat`/`filesHash` are cleared. Main's ebook delete removed only recorded files; this step also unlinks the junk files (`metadata.json`, `desktop.ini`, `._*`, ...) and empties junk folders (`@eaDir`, `.@__thumb`) of a folder nothing else is left in
 
 4. **Files kept: library left exactly as it is**
    - No backend delete, no plex_library cleanup, no status reset, linkage and stored paths kept
@@ -136,8 +166,10 @@ model Request {
 
 6. **plex_library records, linkage, stored paths** (only after removal / already gone)
    - plex_library delete by ASIN, fallback exact title/author
-   - Audiobook: `status = 'requested'`, clear `absItemId` (ABS) or `plexGuid` (Plex), clear `filePath`, `filesHash`, `fileFormat`
-   - Child requests soft-deleted: `parentRequestId = id`, and ebook requests with no parent on the same book row
+   - Audiobook: `status = 'requested'`, clear `absItemId` (ABS) or `plexGuid` (Plex), clear `filesHash`; `filePath`/`fileFormat` cleared, or, when a delivered ebook request stays and its newest recorded ebook is still on disk, set to that ebook's folder and format (the state an ebook-only import leaves; status stays `requested`). Same in the stale branch. Several delivered ones: the newest (`createdAt desc`) whose recorded ebook is on disk. A delivered legacy child (no record) stays with `filePath` null: its download 404s until the book is imported again
+   - Child requests (`parentRequestId = id`, and ebook requests with no parent on the same book row; `src/lib/services/request-delete-children.ts`): undelivered ones soft-deleted; delivered ones (`placedEbookFiles` not NULL, `status = 'downloaded'` or `completedAt`) stay with `parentRequestId = null` (their file stays, so select-ebook, the list's `downloadAvailable` and the download route keep working)
+   - Re-request: the next audiobook import of the book (`createEbookRequestIfEnabled` → `relinkParentlessEbookRequest`, whatever the ebook settings) sets the newest parentless active ebook request's `parentRequestId` to the new request (compare-and-set on `parentRequestId: null`; skipped when the new request already has one), so fetch-ebook, select-ebook and interactive-search-ebook find it by parent and open no second one
+   - "This book already has an ebook request" (automatic request, `find_missing_ebooks`) is checked by book (`audiobookId`), so it also sees other users' ebook requests on the book: one user's cancelled/denied ebook request skips another user's audiobook request, and a parentless failed one is retried automatically
 
 7. **Soft Delete Request**
    - UPDATE: `deletedAt = NOW(), deletedBy = adminUserId`
@@ -191,11 +223,13 @@ where: {
     "torrentsKeptUnlimited": 0,
     "torrentsKeptShared": 0,
     "torrentsKeptNotOwned": 0,
-    "filesKeptReason": "folder contents changed since import"
+    "filesKeptReason": "folder contents changed since import",
+    "folderKept": { "folder": "/media/Author/Book", "files": [{ "name": "Book.epub", "why": "ebook of another request" }], "more": 0 }
   }
 }
 ```
-- `filesKeptReason` present only when library files were kept; the request is still deleted (HTTP 200)
+- `filesKeptReason` present only when library files were kept (nothing removed); the request is still deleted (HTTP 200)
+- `folderKept` (#526) present only when the audio was removed but the folder stays: first 20 entries, `more` = the rest; message `Request deleted; the book folder stays because it still holds: Book.epub (ebook of another request), cover.jpg (kept with the other files), notes.txt (RMAB has no record that it placed it)`; `filesDeleted: true`; `error` when only the emptied folder's own rmdir failed. The reported-issue replace stops only on `filesKeptReason`
 - `torrentsKeptNotOwned`: torrents left in the client because RMAB did not add them (or can't tell that it did)
 
 **Errors:**
@@ -217,6 +251,7 @@ where: {
 - SWR cache invalidation after deletion
 - Loading states during deletion
 - Files kept: warning toast `Request deleted; files kept: <reason>` (10 s) instead of the success toast
+- Folder kept (#526): warning toast with the result message (10 s)
 
 ## Re-Requesting After Deletion
 
@@ -272,18 +307,17 @@ where: {
 | | Cancel | Delete |
 |---|---|---|
 | Who | Requester (own) or admin | Admin only (web, API, Discord `/delete`) |
-| Entry points | `PATCH /api/requests/:id {action:'cancel'}`, Discord card Cancel button, `/status` menu | `DELETE /api/admin/requests/:id`, Discord `/delete` |
-| Effect | `status → 'cancelled'` (+ `selectedTorrent` cleared if awaiting approval), `request_cancelled` notification | Soft delete + files, library item, download cleanup (below) |
-| Files / download | Untouched; guarded jobs stop ([jobs.md](../backend/services/jobs.md)) | Removed per the rules below |
+| Entry points | `PATCH /api/requests/:id {action:'cancel'}`, `POST /api/requests/:id/cancel`, Discord card Cancel button, `/status` menu | `DELETE /api/admin/requests/:id`, Discord `/delete` |
+| Effect | `status → 'cancelled'`, `cancelledAt`, `request_cancelled` notification | Soft delete + files, library item, download cleanup (below) |
+| Files / download | Library files untouched; the download is stopped/removed under the seeding rules ([request-cancel.md](request-cancel.md)) | Removed per the rules below |
 
-- Shared service: `cancelRequest(id, actor)` / `cancelLoadedRequest(record, actor)` in [request-cancel.service.ts](../../src/lib/services/request-cancel.service.ts); allowed statuses = `CANCELLABLE_STATUSES` (`src/lib/constants/request-statuses.ts`). Authorization stays with the caller.
-- Returns `{ success: true, request }` or `{ success: false, reason: 'not_found' | 'not_cancellable', message }` (route → 400 ValidationError).
+- Shared service: `cancelRequest(id, options)` / `cancelLoadedRequest(record, options)` in [request-cancel.service.ts](../../src/lib/services/request-cancel.service.ts); `options.actor` attributes the Discord "Cancelled by" mention. Details: [request-cancel.md](request-cancel.md). Discord shows the result's `message` ephemerally (`audience` admin for linked RMAB admins, else owner).
 
 ## Discord Convergence
 
-`deleteRequest()` and `cancelRequest()` rewrite the Discord surfaces themselves via the shared
+`deleteRequest()` and `cancelLoadedRequest()` rewrite the Discord surfaces themselves via the shared
 `syncDiscordOnCancel()` ([discord-cancel-sync.ts](../../src/lib/services/discord/discord-cancel-sync.ts)),
-so every path converges — Web UI cancel, Web UI admin route, the Discord Cancel button, `/status`,
+so every path converges — Web UI cancel, the token cancel route, Web UI admin route, the Discord Cancel button, `/status`,
 `/delete`, and the reported-issue cleanup.
 
 - `editRequestCards(requestId, 'cancelled')` — soft delete leaves `status` untouched, so the
@@ -337,7 +371,27 @@ argument attributes the "Cancelled by" mention for Discord-initiated deletes; ot
 - **Issue:** `select-torrent`, `interactive-search`, `manual-search` and `fetch-ebook` (`/api/requests/[id]/`) and admin approve/deny (`/api/admin/requests/[id]/approve`) loaded the request by id only, so a deleted request could still start a download or a search
 - **Fix:** each loads with `deletedAt: null` (as `select-ebook`/`interactive-search-ebook` do since #463); a deleted request answers that route's usual "Request not found" 404
 
-**8. Web/API Deletions Left Live Discord Buttons**
+**8. Ebook Request Delete Removed the User's Own Ebook (#497)**
+- **Issue:** every ebook request delete (any status, e.g. a `failed` one that never downloaded) unlinked the only ebook in `Audiobook.filePath`, or every ebook there when the folder passed the audio evidence rule: the user's own epub beside an imported audiobook went
+- **Cause:** nothing recorded which file an ebook import placed; `planEbookDelete` guessed from the folder
+- **Fix:** the ebook organize records the file it copied (`Request.placedEbookFiles`, only for placeFile `copied`); the delete removes only recorded, unchanged files behind rules a-c (D2 above). `planEbookDelete` removed
+- **Responses:** the record holds absolute library paths and is read only by the delete: every response that returns a request row leaves it out, for admins too (`hidePlacementRecord()`/`hideStoredPick()` in `src/lib/services/request-detail-query.ts`; `GET /api/requests` sets it `undefined` as it does `audiobook.filePath`)
+- **Limits** (none removes more than before #497; all but the second keep the file):
+  - Ebook requests imported before this version have no record: their delete removes no ebook file (reason shown; remove by hand). A crash between the copy and the record write, or a failed record write, leaves that file unrecorded (kept)
+  - Another active ebook request on the same book whose import found this file already there (`[]`) does not hold it: deleting the request that placed it removes it, and the other request still shows `downloaded` (as before #497)
+  - A delete while the request's import is still running: the file that import places afterwards is not recorded on a live request, so RMAB never removes it
+  - Two organizes of one request at once (e.g. a Manual Import while a stalled job re-runs) can lose one entry: that file is kept
+  - A flat ebook shelf stored by two books (`ebook_path_template = Ebooks`): rule c keeps every recorded file there (`it is also the folder of "<title>"`)
+  - After `media_dir` moves, recorded paths under the old location fail rule a (`it is outside the media library (...)`) and are kept
+  - The ebook's own folder (custom `ebook_path_template`) is left empty after its only file goes (no empty-parent sweep)
+
+**9. Audiobook Request Delete Removed the Whole Book Folder (#526)**
+- **Issue:** after the guard passed, `fs.rm(folder, { recursive })` removed everything in it: the ebook the same book's ebook request placed, the user's own files, NAS/ABS leftovers
+- **Cause:** the evidence check proves only that the folder's direct audio is this import; nothing limited the removal to it
+- **Fix:** D1 table above (audio of the hashed set; cover and junk only when nothing else is left; folder only when empty; `folderKept` lists what stayed); delivered ebook children stay, unlinked, the book keeps their folder; D2 empty-folder step. The automatic ebook request (`createEbookRequestIfEnabled`) and `find_missing_ebooks` look for an active ebook request by book (`audiobookId`), not by parent; a re-request's import links the surviving ebook request to the new audiobook request (the manual ebook routes look it up by parent). A reported-issue replace keeps the stored ebook path while a delivered ebook request remains
+- **Limits:** other users' audiobook requests for the same book still lose the shared audio (per-user duplicate check, `request-creator.service.ts`; as before); a user-customized `cover.jpg` in a folder with nothing else of theirs is removed; folders holding other user files now stay (listed); a delivered legacy ebook child (no record) survives with `filePath` null, so its download 404s until the book is imported again; another user's completed audiobook request on the same book keeps a Download button that 404s after the delete (the stored path now points at the ebook folder, the download serves audio only)
+
+**10. Web/API Deletions Left Live Discord Buttons**
 - **Issue:** Deleting from the Web UI or via an API token never touched Discord: the request card
   kept a working Cancel Request button and the approval embed kept working Approve/Deny buttons
 - **Impact:** The stale approval embed made approving an already-deleted request reachable
@@ -357,7 +411,8 @@ Backend:
 - src/lib/services/request-delete-download.ts (download in the client: remove / keep seeding / leave alone)
 - src/lib/utils/torrent-ownership.ts (whether RMAB added the torrent)
 - src/lib/services/request-delete-files.ts (library files, backend items, plex_library records)
-- src/lib/utils/library-delete-guard.ts (assertSafeLibraryDelete, planEbookDelete)
+- src/lib/utils/library-delete-guard.ts (assertSafeLibraryDelete)
+- src/lib/utils/ebook-placement.ts (Request.placedEbookFiles: record write, read, per-file delete checks)
 - src/lib/services/replace-library-content.ts (replace with no active request)
 - src/app/api/admin/requests/[id]/route.ts (DELETE endpoint)
 - src/lib/processors/cleanup-seeded-torrents.processor.ts (orphaned cleanup)
@@ -413,6 +468,7 @@ Queries Updated (deletedAt: null filters):
 
 ## Related
 
+- [Request Cancel](request-cancel.md) - What a cancel does to the download
 - [Admin Dashboard](../admin-dashboard.md) - Dashboard overview
 - [Scheduler](../backend/services/scheduler.md) - Cleanup job details
 - [File Organization](../phase3/file-organization.md) - Media directory structure

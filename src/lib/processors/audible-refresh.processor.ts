@@ -9,10 +9,59 @@
 
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
+import { getLanguageForRegion, partitionByLanguage } from '../constants/language-config';
+import { isLanguageFilterOn } from '../integrations/audible-language-filter';
+import type { AudibleRegion } from '../types/audible';
 
 /** Reserved category IDs for built-in home sections */
 export const POPULAR_CATEGORY_ID = '__popular__';
 export const NEW_RELEASES_CATEGORY_ID = '__new_releases__';
+
+/**
+ * Most distinct category sections refreshed per run. Each costs a 10-20 s cooldown and
+ * up to 4 search pages; 30 covers every top-level category (24 on audible.com) with
+ * room for sub-categories, and keeps the category pass to roughly 15-25 minutes.
+ */
+export const MAX_REFRESHED_CATEGORIES = 30;
+
+/**
+ * Distinct category ids to refresh this run, stalest first: never stored, then the one
+ * stored longest ago (`lastSyncedAt`), then the most users, then id. A refreshed id moves
+ * to the back, so over the cap every category refreshes within ceil(N / cap) runs.
+ * The rest are skipped this run and keep their data.
+ */
+export function selectCategoriesToRefresh(
+  chosenIds: (string | null)[],
+  lastSyncedAt: ReadonlyMap<string, Date> = new Map(),
+  cap: number = MAX_REFRESHED_CATEGORIES,
+): { categoryIds: string[]; skipped: string[] } {
+  const counts = new Map<string, number>();
+  for (const id of chosenIds) {
+    if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  // Never stored (-1) sorts before any stored time.
+  const storedAt = (id: string) => lastSyncedAt.get(id)?.getTime() ?? -1;
+  const ranked = [...counts.entries()]
+    .sort(([a, na], [b, nb]) =>
+      storedAt(a) - storedAt(b) || nb - na || (a < b ? -1 : a > b ? 1 : 0))
+    .map(([id]) => id);
+  return { categoryIds: ranked.slice(0, cap), skipped: ranked.slice(cap) };
+}
+
+/** When each category's books were last stored: one row per category that has any. */
+async function loadLastSyncedAt(categoryIds: string[]): Promise<Map<string, Date>> {
+  if (categoryIds.length === 0) return new Map();
+  const rows = await prisma.audibleCacheCategory.groupBy({
+    by: ['categoryId'],
+    where: { categoryId: { in: categoryIds } },
+    _max: { lastSyncedAt: true },
+  });
+  const stored = new Map<string, Date>();
+  for (const row of rows) {
+    if (row._max.lastSyncedAt) stored.set(row.categoryId, row._max.lastSyncedAt);
+  }
+  return stored;
+}
 
 export interface AudibleRefreshPayload {
   jobId?: string;
@@ -32,44 +81,56 @@ export async function processAudibleRefresh(payload: AudibleRefreshPayload): Pro
 
   try {
     const syncTime = new Date();
+    const inLanguage = await languageFilterForRows(() => audibleService.getRegion(), logger);
 
     // Fetch popular and new releases - 200 items each
-    const popular = await audibleService.getPopularAudiobooks(200);
+    const popularFetched = await audibleService.getPopularAudiobooks(200);
+    const popular = inLanguage(popularFetched, 'popular');
 
     // Batch cooldown between popular and new releases to reduce detection
     const batchCooldownMs = 15000 + Math.floor(Math.random() * 15000);
     logger.info(`Batch cooldown: waiting ${Math.round(batchCooldownMs / 1000)}s before fetching new releases...`);
     await new Promise(resolve => setTimeout(resolve, batchCooldownMs));
 
-    const newReleases = await audibleService.getNewReleases(200);
+    const newReleasesFetched = await audibleService.getNewReleases(200);
+    const newReleases = inLanguage(newReleasesFetched, 'new releases');
 
     logger.info(`Fetched ${popular.length} popular, ${newReleases.length} new releases from Audible`);
 
     // Persist popular audiobooks via AudibleCacheCategory
-    const popularSaved = await persistSectionBooks(
-      popular, POPULAR_CATEGORY_ID, syncTime, thumbnailCache, logger, 'popular audiobook'
+    const { saved: popularSaved } = await persistSectionBooks(
+      popular, popularFetched.length, POPULAR_CATEGORY_ID, syncTime, thumbnailCache, logger, 'popular audiobook'
     );
 
     // Persist new releases via AudibleCacheCategory
-    const newReleasesSaved = await persistSectionBooks(
-      newReleases, NEW_RELEASES_CATEGORY_ID, syncTime, thumbnailCache, logger, 'new release'
+    const { saved: newReleasesSaved } = await persistSectionBooks(
+      newReleases, newReleasesFetched.length, NEW_RELEASES_CATEGORY_ID, syncTime, thumbnailCache, logger, 'new release'
     );
 
     logger.info(`Saved ${popularSaved} popular and ${newReleasesSaved} new releases`);
 
     // --- Category scraping ---
-    // Query distinct categoryIds from all users' home sections
+    // Distinct categoryIds from all users' home sections, capped per run
     let categoriesSynced = 0;
+    let categoriesSkipped = 0;
     try {
       const categorySections = await prisma.userHomeSection.findMany({
         where: { sectionType: 'category', categoryId: { not: null } },
         select: { categoryId: true },
-        distinct: ['categoryId'],
       });
 
-      const categoryIds = categorySections
-        .map((s) => s.categoryId)
-        .filter((id): id is string => id !== null);
+      const chosenIds = categorySections.map((s) => s.categoryId);
+      const distinctIds = [...new Set(chosenIds.filter((id): id is string => !!id))];
+      const lastSyncedAt = distinctIds.length > MAX_REFRESHED_CATEGORIES
+        ? await loadLastSyncedAt(distinctIds)
+        : new Map<string, Date>();
+      const { categoryIds, skipped } = selectCategoriesToRefresh(chosenIds, lastSyncedAt);
+      categoriesSkipped = skipped.length;
+      if (skipped.length > 0) {
+        logger.warn(
+          `${skipped.length} category section(s) over the ${MAX_REFRESHED_CATEGORIES}-category refresh cap wait for a later run (stalest first), keeping their previous data: ${skipped.join(', ')}`,
+        );
+      }
 
       if (categoryIds.length > 0) {
         logger.info(`Refreshing ${categoryIds.length} user-configured categories...`);
@@ -82,15 +143,19 @@ export async function processAudibleRefresh(payload: AudibleRefreshPayload): Pro
             await new Promise(resolve => setTimeout(resolve, catCooldownMs));
 
             // Scrape category books
-            const books = await audibleService.getCategoryBooks(catId, 200);
+            const fetched = await audibleService.getCategoryBooks(catId, 200);
+            const books = inLanguage(fetched, `category ${catId}`);
             logger.info(`Category ${catId}: fetched ${books.length} books`);
 
-            const saved = await persistSectionBooks(
-              books, catId, syncTime, thumbnailCache, logger, 'category book'
+            const { saved, keptPrevious } = await persistSectionBooks(
+              books, fetched.length, catId, syncTime, thumbnailCache, logger, 'category book'
             );
 
-            categoriesSynced++;
-            logger.info(`Category ${catId}: saved ${saved} entries`);
+            // A fetch that returned nothing kept the previous list: not synced
+            if (!keptPrevious) {
+              categoriesSynced++;
+              logger.info(`Category ${catId}: saved ${saved} entries`);
+            }
           } catch (error) {
             logger.error(`Failed to refresh category ${catId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
           }
@@ -117,6 +182,7 @@ export async function processAudibleRefresh(payload: AudibleRefreshPayload): Pro
       popularSaved,
       newReleasesSaved,
       categoriesSynced,
+      categoriesSkipped,
       thumbnailsDeleted: deletedCount,
     };
   } catch (error) {
@@ -126,18 +192,43 @@ export async function processAudibleRefresh(payload: AudibleRefreshPayload): Pro
 }
 
 /**
+ * The admin language filter for the home rows: storefront rows carry a "Language:" label,
+ * so rows listed in another language are left out (rows without one are kept). Off: as is.
+ */
+async function languageFilterForRows(
+  region: () => AudibleRegion,
+  logger: ReturnType<typeof RMABLogger.forJob>,
+): Promise<<T extends { language?: string }>(books: T[], section: string) => T[]> {
+  if (!(await isLanguageFilterOn())) return (books) => books;
+  // The region is read per section: the service only loads it on its first fetch
+  return (books, section) => {
+    const { kept, hidden } = partitionByLanguage(books, (book) => book.language, getLanguageForRegion(region()));
+    if (hidden.length > 0) logger.info(`Language filter: ${hidden.length} ${section} rows in other languages left out`);
+    return kept;
+  };
+}
+
+/**
  * Wipe previous entries for a category, upsert book metadata into AudibleCache,
  * and insert ranked entries into AudibleCacheCategory.
- * Returns the number of books successfully saved.
+ * `fetchedCount` is the scrape's size before the language filter: 0 means the fetch
+ * failed or found nothing (scrapers return [] then), so the previous entries are kept.
+ * A fetch whose rows the language filter all left out still replaces them.
  */
 async function persistSectionBooks(
   books: any[],
+  fetchedCount: number,
   categoryId: string,
   syncTime: Date,
   thumbnailCache: { cacheThumbnail: (asin: string, url: string) => Promise<string | null> },
   logger: ReturnType<typeof RMABLogger.forJob>,
   labelForErrors: string,
-): Promise<number> {
+): Promise<{ saved: number; keptPrevious: boolean }> {
+  if (fetchedCount === 0) {
+    logger.warn(`Section ${categoryId}: the fetch returned no books, its previous list was kept`);
+    return { saved: 0, keptPrevious: true };
+  }
+
   // Defensive dedup: the (asin, categoryId) unique constraint means a duplicate ASIN
   // in `books` crashes the second .create() with P2002. The HTML parser already dedupes
   // per page and across pages against the cumulative accumulator, but a warn-on-fire
@@ -227,5 +318,5 @@ async function persistSectionBooks(
     }
   }
 
-  return saved;
+  return { saved, keptPrevious: false };
 }

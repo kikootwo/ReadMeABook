@@ -14,6 +14,7 @@ import { getConfigService } from '@/lib/services/config.service';
 import { getProwlarrService } from '@/lib/integrations/prowlarr.service';
 import { rankEbookTorrents, RankedEbookTorrent } from '@/lib/utils/ranking-algorithm';
 import { groupIndexersByCategories, getGroupDescription } from '@/lib/utils/indexer-grouping';
+import { addGroupSearch, logSearchSummary, newSearchStats, recordFailure, recordRunFailure, searchFailureSummary, type SearchStats } from '@/lib/utils/indexer-search-failures';
 import { RMABLogger } from '@/lib/utils/logger';
 import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { getLanguageForRegion } from '@/lib/constants/language-config';
@@ -24,6 +25,7 @@ import {
   getSlowDownloadLinks,
 } from '@/lib/services/ebook-scraper';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { trimTrailingSlashes } from '@/lib/utils/url';
 
 const logger = RMABLogger.create('API.InteractiveSearchEbook');
 
@@ -207,15 +209,18 @@ export async function POST(
           );
         }
 
+        const indexerSearchStats = newSearchStats(); // failed searches are reported, not taken for "nothing found" (#522)
         if (isIndexerSearchEnabled) {
           searchPromises.push(
             searchIndexersForInteractive(
               searchTitle,
               audiobook.author,
               format,
-              Boolean(customTitle)
+              Boolean(customTitle),
+              indexerSearchStats
             ).catch((err) => {
               logger.error(`Indexer search failed: ${err.message}`);
+              recordRunFailure(indexerSearchStats, err);
               return null;
             })
           );
@@ -248,6 +253,7 @@ export async function POST(
 
         return NextResponse.json({
           results: await stripProwlarrKeyFromResults(combinedResults),
+          searchFailures: searchFailureSummary(indexerSearchStats),
           searchTitle,
           preferredFormat: format,
         });
@@ -321,7 +327,7 @@ async function searchAnnasArchiveForInteractive(
     indexer: "Anna's Archive",
     publishDate: new Date(),
     downloadUrl: slowLinks[0],
-    infoUrl: `${baseUrl}/md5/${md5}`,
+    infoUrl: `${trimTrailingSlashes(baseUrl)}/md5/${md5}`,
 
     score,
     finalScore: score,
@@ -351,7 +357,8 @@ async function searchIndexersForInteractive(
   title: string,
   author: string,
   preferredFormat: string,
-  exactTitle: boolean // a custom title: sent as given, no fallback queries (#316)
+  exactTitle: boolean, // a custom title: sent as given, no fallback queries (#316)
+  searchStats: SearchStats
 ): Promise<EbookSearchResult[]> {
   const configService = getConfigService();
 
@@ -394,6 +401,7 @@ async function searchIndexersForInteractive(
   const allResults = [];
 
   for (const group of groups) {
+    const groupStats = newSearchStats();
     try {
       // "title author" then "title", deduped (same as audiobook search)
       const groupResults = await prowlarr.searchWithVariations(title, author, {
@@ -401,12 +409,15 @@ async function searchIndexersForInteractive(
         indexerIds: group.indexerIds,
         minSeeders: 0,
         maxResults: 100,
-      }, { exactTitle });
+      }, { exactTitle }, groupStats);
       allResults.push(...groupResults);
     } catch (error) {
       logger.error(`Group search failed: ${error instanceof Error ? error.message : 'Unknown'}`);
+      recordFailure(groupStats, '(whole group)', error);
     }
+    addGroupSearch(searchStats, groupStats, getGroupDescription(group), logger);
   }
+  logSearchSummary(logger, searchStats);
 
   logger.info(`Found ${allResults.length} results from indexers`);
 

@@ -172,13 +172,8 @@ describe('processAudibleRefresh', () => {
     expect(result.categoriesSynced).toBe(1);
     expect(audibleServiceMock.getCategoryBooks).toHaveBeenCalledWith('node-42', 200);
 
-    // Should wipe entries for __popular__, __new_releases__, and node-42
-    expect(prismaMock.audibleCacheCategory.deleteMany).toHaveBeenCalledWith({
-      where: { categoryId: '__popular__' },
-    });
-    expect(prismaMock.audibleCacheCategory.deleteMany).toHaveBeenCalledWith({
-      where: { categoryId: '__new_releases__' },
-    });
+    // Only node-42 is wiped: popular and new releases fetched nothing and keep their rows
+    expect(prismaMock.audibleCacheCategory.deleteMany).toHaveBeenCalledTimes(1);
     expect(prismaMock.audibleCacheCategory.deleteMany).toHaveBeenCalledWith({
       where: { categoryId: 'node-42' },
     });
@@ -190,13 +185,49 @@ describe('processAudibleRefresh', () => {
 
   it('rethrows fatal errors', async () => {
     // Mock audible service to return data so we reach the DB calls
-    audibleServiceMock.getPopularAudiobooks.mockResolvedValue([]);
+    audibleServiceMock.getPopularAudiobooks.mockResolvedValue([
+      { asin: 'ASIN-1', title: 'Popular One', author: 'Author A' },
+    ]);
     audibleServiceMock.getNewReleases.mockResolvedValue([]);
-    // First DB call is now audibleCacheCategory.deleteMany (for __popular__)
+    // First DB call is audibleCacheCategory.deleteMany (for __popular__)
     prismaMock.audibleCacheCategory.deleteMany.mockRejectedValue(new Error('DB down'));
 
     const { processAudibleRefresh } = await import('@/lib/processors/audible-refresh.processor');
     await expect(processAudibleRefresh({ jobId: 'job-2' })).rejects.toThrow('DB down');
+  });
+
+  it('keeps the previous rows of a section whose fetch returns no books, and replaces those that got books', async () => {
+    audibleServiceMock.getPopularAudiobooks.mockResolvedValue([]);
+    audibleServiceMock.getNewReleases.mockResolvedValue([
+      { asin: 'NEW-1', title: 'New One', author: 'Author N', coverArtUrl: null },
+    ]);
+    audibleServiceMock.getCategoryBooks.mockImplementation(async (catId: string) =>
+      catId === 'node-ok'
+        ? [{ asin: 'CAT-OK', title: 'Cat Book', author: 'Author', coverArtUrl: null }]
+        : [],
+    );
+    thumbnailCacheMock.cleanupUnusedThumbnails.mockResolvedValue(0);
+    prismaMock.audibleCacheCategory.deleteMany.mockResolvedValue({ count: 3 });
+    prismaMock.audibleCacheCategory.create.mockResolvedValue({});
+    prismaMock.audibleCache.upsert.mockResolvedValue({});
+    prismaMock.userHomeSection.findMany.mockResolvedValue([
+      { categoryId: 'node-failed' },
+      { categoryId: 'node-ok' },
+    ]);
+    prismaMock.audibleCache.findMany.mockResolvedValue([]);
+
+    const { processAudibleRefresh } = await import('@/lib/processors/audible-refresh.processor');
+    const result = await processAudibleRefresh({ jobId: 'job-empty' });
+
+    expect(result.success).toBe(true);
+    expect(result.popularSaved).toBe(0);
+    expect(result.newReleasesSaved).toBe(1);
+    // node-failed fetched nothing: not counted
+    expect(result.categoriesSynced).toBe(1);
+    const wiped = prismaMock.audibleCacheCategory.deleteMany.mock.calls.map(([arg]) => arg.where.categoryId);
+    expect(wiped).toEqual(['__new_releases__', 'node-ok']);
+    const created = prismaMock.audibleCacheCategory.create.mock.calls.map(([arg]) => [arg.data.categoryId, arg.data.asin]);
+    expect(created).toEqual([['__new_releases__', 'NEW-1'], ['node-ok', 'CAT-OK']]);
   });
 
   it('deduplicates ASINs in the input list before persisting, preserving order', async () => {

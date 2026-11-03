@@ -15,10 +15,21 @@ Provides template variable substitution, validation, and preview generation for 
 
 ## Supported Variables
 
-- `{author}` - Audiobook author name
+- `{author}` - Full author string
+- `{primaryAuthor}` - First author: `author` split on `,` `;` `&`, first entry that sanitizes to something (`and` does not split; `Martin Luther King, Jr.` gives `Martin Luther King`)
 - `{title}` - Audiobook title
 - `{narrator}` - Audiobook narrator (optional)
 - `{asin}` - Amazon ASIN identifier (optional)
+- `{year}` - Release year (optional)
+- `{series}` - Series name (optional)
+- `{seriesPart}` - Series part or position (optional)
+
+### Formats
+
+- `{seriesPart:00}`, `{seriesPart:000}`, `{seriesPart:0000}` pad a numeric part to 2, 3 or 4 digits: `1` → `01`, `1.5` → `01.5`, `1-3` → `01-03`, `100` → `100`
+- Other shapes (`Book 1`, `1a`, `1, 2`) are left as they are; an empty part is removed like `{seriesPart}`
+- Works in conditional blocks: `{Book seriesPart:00 - }`
+- Only `seriesPart` takes a format; the validators reject any other (`{seriesPart:x}`, `{year:00}`)
 
 ## API Reference
 
@@ -65,7 +76,7 @@ const result = validateTemplate('{author}/{title}');
 // Returns: { valid: true }
 
 const invalid = validateTemplate('{invalid}/{title}');
-// Returns: { valid: false, error: "Unknown variable: {invalid}. Valid variables are: {author}, {title}, {narrator}, {asin}" }
+// Returns: { valid: false, error: "No valid variable found in conditional block: {invalid}. Valid variables are: {author}, {primaryAuthor}, {title}, {narrator}, {asin}, {year}, {series}, {seriesPart}" }
 ```
 
 ### `generateMockPreviews(template: string): string[]`
@@ -95,7 +106,7 @@ Get list of valid template variable names.
 **Example:**
 ```typescript
 const variables = getValidVariables();
-// Returns: ['author', 'title', 'narrator', 'asin']
+// Returns: ['author', 'primaryAuthor', 'title', 'narrator', 'asin', 'year', 'series', 'seriesPart']
 ```
 
 ## Usage Examples

@@ -7,7 +7,8 @@
  */
 
 import { getAudibleService } from './audible.service';
-import { getLanguageForRegion } from '../constants/language-config';
+import { getLanguageForRegion, partitionByLanguage } from '../constants/language-config';
+import { isLanguageFilterOn, type LanguageFilterInfo } from './audible-language-filter';
 import { RMABLogger } from '../utils/logger';
 import { randomDelay } from '../utils/scrape-resilience';
 import { catalogBudget, isAbort, type CatalogFetchProfile, type FetchError } from './audible-series-fill';
@@ -127,18 +128,38 @@ async function fetchBookCounts(seriesAsins: string[]): Promise<Map<string, numbe
   return counts;
 }
 
+export interface SeriesSearchResult {
+  series: SeriesSummary[];
+  /** Only while the language filter is on; hiddenCount = series listed by hidden products only */
+  languageFilter?: LanguageFilterInfo;
+}
+
+/** Series listed only by hidden products on the keyword page */
+function countHiddenSeries(kept: CatalogSeriesProduct[], hidden: CatalogSeriesProduct[]): number {
+  const asins = (products: CatalogSeriesProduct[]) =>
+    new Set(products.flatMap((p) => (p.series ?? []).map((s) => s?.asin?.trim()).filter(Boolean)));
+  const shown = asins(kept);
+  return [...asins(hidden)].filter((asin) => !shown.has(asin)).length;
+}
+
+/** searchSeries without the hidden count */
+export async function searchForSeries(query: string, options: { languageFilter?: boolean } = {}): Promise<SeriesSummary[]> {
+  return (await searchSeries(query, options)).series;
+}
+
 /**
  * Series matching a query, best match first (at most 15). Throws
  * SeriesSearchUnavailableError when the catalog keyword call fails.
- * `languageFilter` (the admin language filter) drops products in other languages;
- * without it they only rank lower.
+ * With the admin language filter on, products in other languages are dropped; with it
+ * off they only rank lower. `languageFilter` overrides the setting (tests only).
  */
-export async function searchForSeries(
+export async function searchSeries(
   query: string,
-  { languageFilter = false }: { languageFilter?: boolean } = {},
-): Promise<SeriesSummary[]> {
+  { languageFilter }: { languageFilter?: boolean } = {},
+): Promise<SeriesSearchResult> {
   const keywords = query.trim();
-  if (!keywords) return [];
+  if (!keywords) return { series: [] };
+  const filterOn = languageFilter ?? (await isLanguageFilterOn());
 
   let envelope: { products?: unknown } | undefined;
   try {
@@ -164,21 +185,30 @@ export async function searchForSeries(
   const langConfig = getLanguageForRegion(region);
 
   const products = envelope.products as CatalogSeriesProduct[];
-  const ranked = rankSeries(aggregateSeries(products, langConfig, { languageFilter }), keywords, langConfig);
+  const ranked = rankSeries(aggregateSeries(products, langConfig, { languageFilter: filterOn }), keywords, langConfig);
+  let filterInfo: LanguageFilterInfo | undefined;
+  if (filterOn) {
+    const { kept, hidden } = partitionByLanguage(products, (product) => product.language, langConfig);
+    filterInfo = { language: langConfig.code, hiddenCount: countHiddenSeries(kept, hidden) };
+  }
+  const result = (series: SeriesSummary[]): SeriesSearchResult => ({ series, ...(filterInfo && { languageFilter: filterInfo }) });
+
   if (ranked.length === 0) {
     logger.info(`No series found for "${keywords}" (region: ${region}, ${products.length} products)`);
-    return [];
+    return result([]);
   }
 
   const bookCounts = await fetchBookCounts(ranked.map((series) => series.asin));
   logger.info(`Series search complete: "${keywords}" -> ${ranked.length} results (region: ${region})`);
 
-  return ranked.map((series) => ({
-    asin: series.asin,
-    title: series.title,
-    bookCount: bookCounts.get(series.asin) ?? 0,
-    tags: series.tags,
-    coverArtUrl: series.coverArtUrl,
-    audibleUrl: `${baseUrl}/series/${series.asin}`,
-  }));
+  return result(
+    ranked.map((series) => ({
+      asin: series.asin,
+      title: series.title,
+      bookCount: bookCounts.get(series.asin) ?? 0,
+      tags: series.tags,
+      coverArtUrl: series.coverArtUrl,
+      audibleUrl: `${baseUrl}/series/${series.asin}`,
+    })),
+  );
 }

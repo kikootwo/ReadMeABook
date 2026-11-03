@@ -26,6 +26,7 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 - **Generic folder detection:** disc/part folder names ([multi-disc-folders.md](multi-disc-folders.md)) + `(cd|disc|disk|part|vol|volume) N` with any number of digits (`isGenericFolderName`) — skipped as search terms
 - **Author/narrator dedup:** Splits on `,;& ` delimiters, removes names appearing in both fields
 - **Scan depth:** Max 10 levels recursion
+- **Language filter:** never applied; scan text searches pass `ignoreLanguageFilter: true` ([audible-language-filter.md](../integrations/audible-language-filter.md))
 - **Rate limiting:** 1.5s delay between Audible searches (same as existing scraping rate limit)
 - **Library check:** Uses `findPlexMatch()` for ASIN-based availability detection
 - **Import:** Reuses existing `organize_files` job queue (same as manual import)
@@ -42,6 +43,8 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 **POST /api/admin/bulk-import/execute**
 - Body: `{ imports: Array<{ folderPath: string, asin: string }> }`
 - Creates audiobook records + requests, queues organize_files jobs
+- Recycles the book's newest audiobook request of **any** user (`failed`/`warn`/`cancelled`/`denied`/`pending`/`awaiting_search`/`awaiting_approval`/`downloaded`/`available`), else creates one for the admin. Guarded on the exact status that was read: a row that changed meanwhile -> that item `{ success: false, error: 'Request changed while importing; try again' }`, no job queued, other items continue (#232)
+- Recycling another user's `awaiting_approval`, `denied` or `cancelled` request sets `Request.approvalBypassedBy = bulk_import:<status>` (status, notifications and delivery unchanged); the importing admin's own request is never recorded. See [database.md](../backend/database.md#requests)
 - Returns: `{ success, results[], summary: { total, succeeded, failed } }`
 
 ## SSE Event Types

@@ -7,10 +7,12 @@ import { SearchIndexersPayload, getJobQueueService } from '../services/job-queue
 import { prisma } from '../db';
 import { getProwlarrService } from '../integrations/prowlarr.service';
 import { getRankingAlgorithm, AUTO_SEARCH_MIN_MB_PER_MINUTE } from '../utils/ranking-algorithm';
+import { drmReleaseMarker } from '../utils/drm-release';
 import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer-grouping';
 import { RMABLogger } from '../utils/logger';
 import { getLanguageForRegion } from '../constants/language-config';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
+import { addGroupSearch, logSearchSummary, newSearchStats, noResultsMessage, recordFailure } from '../utils/indexer-search-failures';
 import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import type { AudibleRegion } from '../types/audible';
 
@@ -95,25 +97,30 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
 
     // Search Prowlarr for each group and combine results
     const allResults = [];
+    const searchStats = newSearchStats(); // failed searches are reported, not taken for "nothing found" (#522)
 
     for (let i = 0; i < groups.length; i++) {
       const group = groups[i];
       logger.info(`Searching group ${i + 1}/${groups.length}: ${getGroupDescription(group)}`);
+      const groupStats = newSearchStats();
 
       try {
         const groupResults = await prowlarr.searchWithVariations(effectiveSearchTitle, audiobook.author, {
           categories: group.categories,
           indexerIds: group.indexerIds,
           minSeeders: 1, // Only torrents with at least 1 seeder
-        }, { exactTitle: Boolean(requestRecord?.customSearchTerms) }); // custom terms: sent as given (#316)
+        }, { exactTitle: Boolean(requestRecord?.customSearchTerms) }, groupStats); // custom terms: sent as given (#316)
 
         logger.info(`Group ${i + 1} returned ${groupResults.length} results`);
         allResults.push(...groupResults);
       } catch (error) {
         logger.error(`Group ${i + 1} search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        recordFailure(groupStats, '(whole group)', error);
         // Continue with other groups even if one fails
       }
+      addGroupSearch(searchStats, groupStats, getGroupDescription(group), logger);
     }
+    logSearchSummary(logger, searchStats);
 
     const preBlocklistCount = allResults.length;
     const { kept: searchResults, blockedCount } = await filterBlockedResults(requestId, allResults);
@@ -129,7 +136,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       const allBlocked = blockedCount > 0 && preBlocklistCount > 0;
       const errorMessage = allBlocked
         ? `No usable releases — ${preBlocklistCount} candidates tried, all blocked`
-        : 'No torrents/nzbs found. Will retry automatically.';
+        : noResultsMessage('No torrents/nzbs found', searchStats);
 
       logger.warn(`${errorMessage} for request ${requestId}, marking as awaiting_search`);
 
@@ -183,6 +190,15 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     if (seriesPart) {
       logger.info(`Series position: ${series ? `"${series}" ` : ''}#${seriesPart}, releases naming another book are skipped`);
     }
+    // rejectDrm: automatic only, a release marked as Audible DRM can't be played (#518)
+    let drmRejected = 0;
+    for (const result of searchResults) {
+      const marker = drmReleaseMarker(result.title);
+      if (marker) {
+        drmRejected++;
+        logger.info(`Skipping "${result.title}" (${result.indexer}): Audible DRM release (${marker}), can't be played`);
+      }
+    }
     const rankedResults = ranker.rankTorrents(searchResults, {
       title: effectiveSearchTitle,
       author: audiobook.author,
@@ -196,13 +212,14 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       stopWords: langConfig.stopWords,
       characterReplacements: langConfig.characterReplacements,
       minMBPerMinute: AUTO_SEARCH_MIN_MB_PER_MINUTE,  // Automatic only; interactive lists everything
+      rejectDrm: true,  // Automatic only; interactive lists everything
     });
 
-    // Log filter results (the floor applies only when the runtime is known)
-    const postFilterCount = rankedResults.length;
-    if (postFilterCount < preFilterCount) {
+    // Log size filter results (the floor applies only when the runtime is known); DRM rejects are logged above
+    const sizeFilteredCount = preFilterCount - drmRejected - rankedResults.length;
+    if (sizeFilteredCount > 0) {
       const floorNote = durationMinutes ? ` or < ${AUTO_SEARCH_MIN_MB_PER_MINUTE} MB/min` : '';
-      logger.info(`Filtered out ${preFilterCount - postFilterCount} results < ${sizeMBThreshold} MB${floorNote}`);
+      logger.info(`Filtered out ${sizeFilteredCount} results < ${sizeMBThreshold} MB${floorNote}`);
     }
 
     // Dual threshold filtering:
@@ -232,7 +249,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
 
       if (!(await updateRequestUnlessStopped(requestId, {
         status: 'awaiting_search',
-        errorMessage: 'No quality matches found. Will retry automatically.',
+        errorMessage: noResultsMessage('No quality matches found', searchStats),
         lastSearchAt: new Date(),
       }))) {
         logger.info(`Request ${requestId} was cancelled or deleted during the search, not re-queued`);

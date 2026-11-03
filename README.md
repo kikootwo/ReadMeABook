@@ -102,6 +102,7 @@ services:
     image: ghcr.io/kikootwo/readmeabook:latest
     container_name: readmeabook
     restart: unless-stopped
+    stop_grace_period: 90s                  # lets PostgreSQL shut down cleanly on stop/update
     ports:
       - "3030:3030"
     volumes:

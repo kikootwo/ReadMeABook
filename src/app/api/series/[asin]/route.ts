@@ -11,6 +11,7 @@ import { enrichAudiobooksWithMatches } from '@/lib/utils/audiobook-matcher';
 import { deduplicateAndCollectGroups } from '@/lib/utils/deduplicate-audiobooks';
 import { persistDedupGroups, collapseByExistingWorks } from '@/lib/services/works.service';
 import { annotateWithIgnoreStatus } from '@/lib/utils/ignored-audiobooks';
+import { LANGUAGE_DISPLAY_NAMES } from '@/lib/constants/language-config';
 
 const logger = RMABLogger.create('API.Series.Detail');
 
@@ -65,14 +66,22 @@ export async function GET(
 
       logger.info(`Series detail complete: "${detail.title}" (${annotatedBooks.length} books, page ${page})`);
 
+      // rawCount and languageFilter are set only while the admin language filter is on
+      const { languageFilter, ...seriesDetail } = detail;
+      delete seriesDetail.rawCount;
+
       return NextResponse.json({
         success: true,
         series: {
-          ...detail,
+          ...seriesDetail,
           books: annotatedBooks,
         },
         hasMore: detail.hasMore,
         page: detail.page,
+        ...(languageFilter && {
+          hiddenCount: languageFilter.hiddenCount,
+          filterLanguage: LANGUAGE_DISPLAY_NAMES[languageFilter.language],
+        }),
       });
     } catch (error) {
       logger.error('Failed to fetch series detail', {

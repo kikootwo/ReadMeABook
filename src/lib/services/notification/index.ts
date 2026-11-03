@@ -10,6 +10,7 @@ export type {
   NotificationBackendType,
   NotificationPayload,
   NotificationBookMeta,
+  NotificationSkipped,
   ProviderConfigField,
   ProviderMetadata,
 } from './INotificationProvider';

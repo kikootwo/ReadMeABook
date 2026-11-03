@@ -11,6 +11,7 @@ import useSWRInfinite from 'swr/infinite';
 import { useAuth } from '@/contexts/AuthContext';
 import { fetchWithAuth } from '@/lib/utils/api';
 import { Audiobook } from './useAudiobooks';
+import type { SearchFailureSummary } from '@/lib/utils/indexer-search-failures';
 
 export interface Request {
   id: string;
@@ -312,6 +313,7 @@ export function useInteractiveSearch() {
   const { accessToken } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchFailures, setSearchFailures] = useState<SearchFailureSummary | null>(null);
 
   const searchTorrents = async (requestId: string, customTitle?: string) => {
     if (!accessToken) {
@@ -320,6 +322,7 @@ export function useInteractiveSearch() {
 
     setIsLoading(true);
     setError(null);
+    setSearchFailures(null);
 
     try {
       const response = await fetchWithAuth(`/api/requests/${requestId}/interactive-search`, {
@@ -336,6 +339,7 @@ export function useInteractiveSearch() {
         throw new Error(data.message || 'Failed to search for torrents');
       }
 
+      setSearchFailures(data.searchFailures ?? null); // some indexer searches failed (#522)
       return data.results || [];
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -346,7 +350,7 @@ export function useInteractiveSearch() {
     }
   };
 
-  return { searchTorrents, isLoading, error };
+  return { searchTorrents, isLoading, error, searchFailures };
 }
 
 export function useSelectTorrent() {
@@ -397,6 +401,7 @@ export function useSearchTorrents() {
   const { accessToken } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchFailures, setSearchFailures] = useState<SearchFailureSummary | null>(null);
 
   /** exactTitle: the user edited the title, so it is sent as given (no fallback queries, #316) */
   const searchTorrents = async (title: string, author: string, asin?: string, exactTitle?: boolean) => {
@@ -406,6 +411,7 @@ export function useSearchTorrents() {
 
     setIsLoading(true);
     setError(null);
+    setSearchFailures(null);
 
     try {
       const response = await fetchWithAuth('/api/audiobooks/search-torrents', {
@@ -422,6 +428,7 @@ export function useSearchTorrents() {
         throw new Error(data.message || 'Failed to search for torrents');
       }
 
+      setSearchFailures(data.searchFailures ?? null); // some indexer searches failed (#522)
       return data.results || [];
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -432,7 +439,7 @@ export function useSearchTorrents() {
     }
   };
 
-  return { searchTorrents, isLoading, error };
+  return { searchTorrents, isLoading, error, searchFailures };
 }
 
 export function useRequestWithTorrent() {
@@ -493,6 +500,7 @@ export function useInteractiveSearchEbook() {
   const { accessToken } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchFailures, setSearchFailures] = useState<SearchFailureSummary | null>(null);
 
   const searchEbooks = async (requestId: string, customTitle?: string) => {
     if (!accessToken) {
@@ -501,6 +509,7 @@ export function useInteractiveSearchEbook() {
 
     setIsLoading(true);
     setError(null);
+    setSearchFailures(null);
 
     try {
       const response = await fetchWithAuth(`/api/requests/${requestId}/interactive-search-ebook`, {
@@ -517,6 +526,7 @@ export function useInteractiveSearchEbook() {
         throw new Error(data.error || data.message || 'Failed to search for ebooks');
       }
 
+      setSearchFailures(data.searchFailures ?? null); // some indexer searches failed (#522)
       return data.results || [];
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -527,7 +537,7 @@ export function useInteractiveSearchEbook() {
     }
   };
 
-  return { searchEbooks, isLoading, error };
+  return { searchEbooks, isLoading, error, searchFailures };
 }
 
 export function useSelectEbook() {
@@ -670,6 +680,7 @@ export function useInteractiveSearchEbookByAsin() {
   const { accessToken } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchFailures, setSearchFailures] = useState<SearchFailureSummary | null>(null);
 
   const searchEbooks = async (asin: string, customTitle?: string) => {
     if (!accessToken) {
@@ -678,6 +689,7 @@ export function useInteractiveSearchEbookByAsin() {
 
     setIsLoading(true);
     setError(null);
+    setSearchFailures(null);
 
     try {
       const response = await fetchWithAuth(`/api/audiobooks/${asin}/interactive-search-ebook`, {
@@ -694,6 +706,7 @@ export function useInteractiveSearchEbookByAsin() {
         throw new Error(data.error || data.message || 'Failed to search for ebooks');
       }
 
+      setSearchFailures(data.searchFailures ?? null); // some indexer searches failed (#522)
       return data.results || [];
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -704,7 +717,7 @@ export function useInteractiveSearchEbookByAsin() {
     }
   };
 
-  return { searchEbooks, isLoading, error };
+  return { searchEbooks, isLoading, error, searchFailures };
 }
 
 export function useSelectEbookByAsin() {

@@ -16,11 +16,11 @@ import {
 } from 'discord.js';
 import { prisma } from '@/lib/db';
 import { processRequestApproval, type ApprovalAction } from '@/lib/services/request-approval.service';
-import { cancelRequest } from '@/lib/services/request-cancel.service';
+import { cancelFailureMessage, cancelRequest } from '@/lib/services/request-cancel.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { getDiscordConfig, getApprovalChannelId } from '../discord-config';
 import { resolveRmabUser } from '../discord-user.resolver';
-import { buildApprovalMessage, errorEmbed } from '../embeds';
+import { buildApprovalMessage, errorEmbed, infoEmbed } from '../embeds';
 import {
   editRequestCards,
   recordApprovalMessage,
@@ -172,8 +172,8 @@ export async function handleApprovalButton(
 /**
  * Handle the "Cancel Request" button on a live request card. Authorized for the original requester
  * or a Discord user linked to an RMAB admin. Cancels via the shared cancelRequest service (status →
- * 'cancelled', background jobs stop; nothing is deleted) and re-renders the card(s) to the
- * cancelled state.
+ * 'cancelled', its download is stopped and removed under the seeding rules; no library files are
+ * deleted) and re-renders the card(s) to the cancelled state.
  */
 export async function handleCancelRequestButton(
   interaction: ButtonInteraction,
@@ -215,7 +215,10 @@ export async function handleCancelRequestButton(
   }
 
   // The Discord id attributes the "Cancelled by" mention on a pending approval message.
-  const result = await cancelRequest(requestId, { userId: resolved.user.id, discordUserId: interaction.user.id });
+  const result = await cancelRequest(requestId, {
+    audience: resolved.isAdmin ? 'admin' : 'owner',
+    actor: { userId: resolved.user.id, discordUserId: interaction.user.id },
+  });
   logger.info('Request cancelled via Discord', {
     ...actorMeta(interaction.user, rmabUserId),
     requestId,
@@ -224,11 +227,13 @@ export async function handleCancelRequestButton(
 
   if (!result.success) {
     await interaction.followUp({
-      embeds: [errorEmbed(result.message || 'Could not cancel the request.')],
+      embeds: [errorEmbed(cancelFailureMessage(result))],
       ephemeral: true,
     });
     return;
   }
+
+  await interaction.followUp({ embeds: [infoEmbed('Request cancelled', result.message)], ephemeral: true });
 
   // The card and approval-embed rewrites live inside cancelRequest, so every cancel path
   // (Web UI, card button, /status) converges on the same cleanup.

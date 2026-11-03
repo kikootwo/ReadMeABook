@@ -10,12 +10,15 @@ import { RMABLogger } from '../utils/logger';
 import {
   deleteBackendItem,
   deleteLibraryRecords,
+  describeKept,
   type LibraryFilesOutcome,
   removeAudiobookFolder,
   removeEbookFiles,
 } from './request-delete-files';
 import { cleanUpRequestDownload, emptyDownloadCleanupCounts } from './request-delete-download';
 import { syncDiscordOnCancel } from './discord/discord-cancel-sync';
+import { clearRemovedEbookFolder, findChildRequests, keepDeliveredChildren, type ChildRequests } from './request-delete-children';
+import type { KeptFile } from '../utils/book-folder-delete';
 
 const logger = RMABLogger.create('RequestDelete');
 
@@ -28,6 +31,12 @@ export interface DeleteRequestResult {
   torrentsKeptUnlimited: number;
   /** Set when library files were kept (the guard refused, or the removal failed): why. */
   filesKeptReason?: string;
+  /**
+   * Set when an audiobook delete removed the audio but the book folder stays (#526):
+   * what it still holds and why (first 20, `more` for the rest); `error` when the
+   * emptied folder itself could not be removed (e.g. `could not be removed (EBUSY)`).
+   */
+  folderKept?: { folder: string; files: KeptFile[]; more: number; error?: string };
   /** Torrents left in the client because another active request still uses them. */
   torrentsKeptShared: number;
   /** Torrents left in the client because RMAB did not add them (it never removes those). */
@@ -49,16 +58,23 @@ export interface DeleteRequestResult {
  *    - If incomplete download, or every set limit met: delete torrent + files,
  *      unless another active request still uses the torrent
  *    - Otherwise: keep in the client for the cleanup job
- * 3. Delete the stored title folder, only when the library delete guard allows it
+ * 3. Remove what the import placed in the stored folder (its audio; cover and junk
+ *    only when nothing else is left; the folder only when empty, #526), only when the
+ *    library delete guard allows it; folderKept lists what stayed
  * 4. If RMAB removed it: delete the backend item (ABS without files, Plex only
  *    when its files were inside the folder), plex_library records, linkage and
- *    stored paths. If files were kept: none of that, and filesKeptReason says why
- * 5. Soft delete child ebook requests (linked, or parentless on the same book)
+ *    stored paths (a delivered ebook request that stays: its ebook's folder and
+ *    format). If files were kept: none of that, and filesKeptReason says why
+ * 5. Child ebook requests (linked, or parentless on the same book): undelivered ones
+ *    are soft-deleted; delivered ones stay, unlinked (parentRequestId null)
  * 6. Soft delete request (set deletedAt, deletedBy)
  *
  * Logic (ebook requests):
  * 1. Check if request exists and is not already deleted
- * 2. Delete ebook files only, when the guard allows it (leave audiobook files intact)
+ * 2. Delete only the ebook files this request's imports recorded (Request.placedEbookFiles),
+ *    each still unchanged and in a folder the guard allows (audiobook files never touched).
+ *    No record: nothing removed (filesKeptReason says why for a delivered request).
+ *    A folder left with nothing but junk goes; the book's stored path is cleared if it was that folder
  * 3. Soft delete request (set deletedAt, deletedBy)
  * Note: No backend library deletion or audiobook linkage clearing for ebooks
  */
@@ -132,20 +148,36 @@ export async function deleteRequest(
 
     // 3. Library files, behind the library delete guard
     // Audiobooks: the stored folder, only when it provably holds this import
-    // Ebooks: ebook files in it (leave audiobook files intact), never a shared-folder sweep
+    // Ebooks: only the ebook files this request's imports placed (#497), never a folder sweep
     const book = request.audiobook;
     let filesDeleted = false;
     let filesKeptReason: string | undefined;
     let outcome: LibraryFilesOutcome | null = null;
+    let children: ChildRequests = { delivered: [], undelivered: [], survivorFolder: null };
     if (isEbook) {
-      const ebook = await removeEbookFiles(book);
+      const ebook = await removeEbookFiles(book, request);
       filesDeleted = ebook.deleted > 0;
       filesKeptReason = ebook.keptReason;
+      await clearRemovedEbookFolder(book, ebook.removedFolders ?? []);
     } else {
       outcome = await removeAudiobookFolder(book);
       filesDeleted = outcome.kind === 'removed';
       if (outcome.kind === 'kept') filesKeptReason = outcome.reason;
+      children = await findChildRequests(requestId, book.id);
     }
+    const kept = outcome?.kind === 'removed' && outcome.kept?.length ? outcome.kept : null;
+    const folderError = outcome?.kind === 'removed' ? outcome.folderError : undefined;
+    const folderKept = (kept || folderError) && outcome && outcome.kind === 'removed'
+      ? {
+        folder: outcome.folder,
+        files: (kept ?? []).slice(0, 20),
+        more: Math.max(0, (kept?.length ?? 0) - 20),
+        ...(folderError && { error: folderError }),
+      }
+      : undefined;
+    // A delivered ebook request that stays: the book keeps its ebook's folder and format (as an ebook import leaves it)
+    const survivor = children.survivorFolder;
+    const storedPath = { filePath: survivor?.folder ?? null, filesHash: null, fileFormat: survivor?.format ?? null };
 
     // 4. Backend item, plex_library records and availability (audiobooks only).
     // When files were kept, the library stays exactly as it is: no backend
@@ -155,7 +187,7 @@ export async function deleteRequest(
       // Only the stored path is cleared; backend item, records and status stay.
       await prisma.audiobook.update({
         where: { id: book.id },
-        data: { filePath: null, filesHash: null, fileFormat: null, updatedAt: new Date() },
+        data: { ...storedPath, updatedAt: new Date() },
       });
     } else if (outcome && outcome.kind !== 'kept') {
       try {
@@ -175,9 +207,7 @@ export async function deleteRequest(
             status: 'requested',
             updatedAt: new Date(),
             ...(backendMode === 'audiobookshelf' ? { absItemId: null } : { plexGuid: null }),
-            filePath: null,
-            filesHash: null,
-            fileFormat: null,
+            ...storedPath,
           },
         });
         logger.info(`Cleared availability status for audiobook ${book.id}`);
@@ -193,39 +223,8 @@ export async function deleteRequest(
       logger.warn(`Files kept for request ${requestId}: ${filesKeptReason}; backend item and library records left as they are`);
     }
 
-    // 5. Delete child requests: ebook requests linked to this audiobook request,
-    // and ebook requests with no parent on the same book row
-    if (!isEbook) {
-      try {
-        const childWhere = {
-          deletedAt: null,
-          OR: [
-            { parentRequestId: requestId },
-            { type: 'ebook', parentRequestId: null, audiobookId: book.id },
-          ],
-        };
-        const childRequests = await prisma.request.findMany({
-          where: childWhere,
-          select: { id: true, type: true },
-        });
-
-        if (childRequests.length > 0) {
-          logger.info(`Found ${childRequests.length} child request(s) to delete`);
-          await prisma.request.updateMany({
-            where: { id: { in: childRequests.map((c) => c.id) } },
-            data: { deletedAt: new Date(), deletedBy: adminUserId },
-          });
-          logger.info(`Soft-deleted ${childRequests.length} child request(s)`);
-        }
-      } catch (error) {
-        logger.error(
-          `Error deleting child requests for ${requestId}`,
-          { error: error instanceof Error ? error.message : String(error) }
-        );
-        // Continue with parent deletion even if child deletion fails
-      }
-    }
-
+    // 5. Child ebook requests: undelivered ones go with this request; delivered ones stay, unlinked
+    if (!isEbook) await keepDeliveredChildren(children, adminUserId);
 
     // 6. Soft delete request
     await prisma.request.update({
@@ -254,9 +253,14 @@ export async function deleteRequest(
         ? `Request deleted; files kept: ${filesKeptReason}`
         : outcome?.kind === 'stale'
           ? 'Request deleted; its stored folder no longer exists outside the current media library, nothing was removed'
-          : 'Request deleted successfully',
+          : kept
+            ? `Request deleted; the book folder stays because it still holds: ${describeKept(kept)}`
+            : folderError
+              ? `Request deleted; the emptied book folder ${folderError}`
+              : 'Request deleted successfully',
       filesDeleted,
       ...(filesKeptReason && { filesKeptReason }),
+      ...(folderKept && { folderKept }),
       ...downloadCounts,
     };
   } catch (error) {

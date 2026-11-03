@@ -3,9 +3,11 @@
  * Documentation: documentation/admin-features/request-deletion.md
  *
  * Removes what a deleted request put in the library, behind the library
- * delete guard: the audiobook's stored folder (audiobook requests) or ebook
- * files in it (ebook requests). Backend items (Audiobookshelf, Plex) are
- * deleted only after RMAB removed the folder itself, and only when the item's
+ * delete guard: the audio of the audiobook's stored folder, RMAB's cover and
+ * junk only when nothing else is left, and the folder only when empty (audiobook
+ * requests, #526, utils/book-folder-delete.ts); or the ebook files the request's
+ * imports recorded (ebook requests, #497). Backend items (Audiobookshelf, Plex)
+ * are deleted only after RMAB removed the audio itself, and only when the item's
  * files lived inside that folder; ABS is never asked to delete files.
  */
 
@@ -14,13 +16,21 @@ import * as path from 'path';
 import { prisma } from '../db';
 import { RMABLogger } from '../utils/logger';
 import { canonicalPath, UnsafeDeleteError } from '../utils/delete-guard';
-import { assertSafeLibraryDelete, isStaleStoredFolder, planEbookDelete, type LibraryBook } from '../utils/library-delete-guard';
-import { sweepEmptyParents } from '../processors/organize-cleanup-guard';
-import { isPathBelowBoundary, normalizePath } from '../utils/cleanup-helpers';
+import { assertSafeLibraryDelete, isStaleStoredFolder, type LibraryBook } from '../utils/library-delete-guard';
+import { activeRecordedEntries, otherRecordedEntries, planPlacedEbookDelete, readPlacements } from '../utils/ebook-placement';
+import { removeBookFolderFiles, removeFolderIfOnlyJunk, type KeptFile } from '../utils/book-folder-delete';
+import { collectGuardRoots, sweepEmptyParents } from '../processors/organize-cleanup-guard';
+import { isPathBelowBoundary } from '../utils/cleanup-helpers';
+import { libraryRelativePath, normalizeRelPath } from '../utils/library-item-path';
 
 const logger = RMABLogger.create('RequestDelete');
 
 const NO_FOLDER_REASON = 'RMAB has no stored folder for this book, so its library files were not removed';
+const NO_RECORD_WHY = 'it was imported before RMAB kept one, or the record could not be saved';
+const LEGACY_EBOOK_REASON = `RMAB has no record of the ebook files this request placed (${NO_RECORD_WHY}), so no ebook file was removed`;
+const EARLIER_IMPORT_REASON = `an earlier import of this request has no record (${NO_RECORD_WHY}), so its ebook file was not removed`;
+const EBOOK_ALREADY_THERE_REASON = 'RMAB has no record that this request placed the ebook (its import found it already in the library), so it was not removed';
+const UNREADABLE_RECORD_REASON = 'the placement record could not be read';
 
 export interface DeleteBook extends LibraryBook {
   title: string;
@@ -29,8 +39,12 @@ export interface DeleteBook extends LibraryBook {
 }
 
 export type LibraryFilesOutcome =
-  /** RMAB removed the folder ('removed') or found it already gone ('gone'); `folder` is canonical. */
-  | { kind: 'removed' | 'gone'; folder: string; mediaDir: string }
+  /**
+   * RMAB removed the book's audio ('removed') or found the folder already gone ('gone'); `folder` is canonical.
+   * `kept`: the folder stays because it still holds these (files of another request, or with no record).
+   * `folderError`: the emptied folder's own rmdir failed (not ENOTEMPTY), e.g. `could not be removed (EBUSY)`.
+   */
+  | { kind: 'removed' | 'gone'; folder: string; mediaDir: string; kept?: KeptFile[]; folderError?: string }
   /** No stored folder and no library linkage: nothing in the library belongs to this request. */
   | { kind: 'none' }
   /** The stored folder no longer exists and lies outside media_dir (e.g. the library moved): a stale record. */
@@ -43,7 +57,7 @@ function refusal(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** D1: remove the audiobook's stored folder when the guard allows it. */
+/** D1: remove what the audiobook's import placed in its stored folder when the guard allows it. */
 export async function removeAudiobookFolder(book: DeleteBook): Promise<LibraryFilesOutcome> {
   if (!book.filePath) {
     if (book.absItemId || book.plexGuid) {
@@ -71,52 +85,148 @@ export async function removeAudiobookFolder(book: DeleteBook): Promise<LibraryFi
     return { kind: 'gone', folder: safe.canonicalPath, mediaDir: safe.roots.mediaDir };
   }
 
-  try {
-    await fs.rm(safe.deletePath, { recursive: true, force: true });
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code ?? 'error';
-    logger.error(`Could not remove ${safe.deletePath} (${code}); keeping the library entry`, {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    // fs.rm stops at the first error: files before it are already gone
-    const why = code === 'EACCES' || code === 'EPERM' ? 'permission denied' : code;
-    return { kind: 'kept', reason: `the folder was partly removed (${why}); remove the rest manually` };
-  }
-  logger.info(`Deleted media directory: ${safe.deletePath}`);
-  await sweepEmptyParents(safe.deletePath, safe.roots, undefined, logger, 'RequestDeleteParents').catch((error) => {
-    logger.warn(`Empty parent sweep failed: ${error instanceof Error ? error.message : String(error)}`);
-  });
-  return { kind: 'removed', folder: safe.canonicalPath, mediaDir: safe.roots.mediaDir };
-}
-
-/** D2: unlink the ebook files the guard allows (never a sweep of a shared folder). */
-export async function removeEbookFiles(book: DeleteBook): Promise<{ deleted: number; keptReason?: string }> {
-  if (!book.filePath) {
-    logger.warn(`Skipping ebook file deletion for "${book.title}": no stored file path`);
-    return { deleted: 0 };
-  }
-  let files: string[];
-  try {
-    files = await planEbookDelete(book.filePath, book);
-  } catch (error) {
-    const reason = refusal(error);
-    logger.warn(`Keeping ebook files in ${book.filePath} for "${book.title}": ${reason}`);
-    return { deleted: 0, keptReason: reason };
-  }
-  let deleted = 0;
-  for (const file of files) {
+  if (safe.deletePath !== safe.canonicalPath) {
+    // Symlinked title folder: only the link is removed, nothing inside its target
     try {
-      await fs.unlink(file);
-      logger.info(`Deleted ebook file: ${path.basename(file)}`);
-      deleted++;
+      await fs.rm(safe.deletePath, { recursive: true, force: true });
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code ?? 'error';
+      logger.error(`Could not remove the link ${safe.deletePath} (${code}); keeping the library entry`);
       const why = code === 'EACCES' || code === 'EPERM' ? 'permission denied' : code;
-      return { deleted, keptReason: `${path.basename(file)} could not be removed (${why})` };
+      return { kind: 'kept', reason: `the folder was partly removed (${why}); remove the rest manually` };
+    }
+    logger.info(`Deleted the link to the media directory: ${safe.deletePath}`);
+    await sweepParents(safe.deletePath, safe.roots);
+    return { kind: 'removed', folder: safe.canonicalPath, mediaDir: safe.roots.mediaDir };
+  }
+
+  const result = await removeBookFolderFiles(safe.canonicalPath, book.filesHash, await activeRecordedEntries());
+  if (result.kind === 'kept') {
+    logger.warn(`Keeping library folder ${safe.canonicalPath} for "${book.title}": ${result.reason}`);
+    return { kind: 'kept', reason: result.reason };
+  }
+  if (result.folderRemoved) {
+    logger.info(`Deleted media directory: ${safe.canonicalPath} (${result.removed} file(s))`);
+    await sweepParents(safe.canonicalPath, safe.roots);
+    return { kind: 'removed', folder: safe.canonicalPath, mediaDir: safe.roots.mediaDir };
+  }
+  if (result.folderError) {
+    logger.warn(`Removed ${result.removed} file(s) from ${safe.canonicalPath} for "${book.title}"; the emptied folder ${result.folderError}`);
+  }
+  if (result.kept.length > 0) {
+    logger.info(
+      `Removed ${result.removed} file(s) from ${safe.canonicalPath} for "${book.title}"; the folder stays: ${describeKept(result.kept, result.kept.length)}`
+    );
+  }
+  return {
+    kind: 'removed',
+    folder: safe.canonicalPath,
+    mediaDir: safe.roots.mediaDir,
+    kept: result.kept,
+    ...(result.folderError && { folderError: result.folderError }),
+  };
+}
+
+/** `a (why), b (why)`, at most `limit` entries, then `and N more`. */
+export function describeKept(kept: KeptFile[], limit = 20): string {
+  const shown = kept.slice(0, limit).map((k) => `${k.name} (${k.why})`);
+  const more = kept.length - shown.length;
+  return more > 0 ? `${shown.join(', ')} and ${more} more` : shown.join(', ');
+}
+
+async function sweepParents(deleted: string, roots: Parameters<typeof sweepEmptyParents>[1]): Promise<void> {
+  await sweepEmptyParents(deleted, roots, undefined, logger, 'RequestDeleteParents').catch((error) => {
+    logger.warn(`Empty parent sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
+}
+
+/** The ebook request fields the D2 delete reads (scalars deleteRequest already loads). */
+export interface EbookDeleteRequest {
+  id: string;
+  status: string;
+  completedAt: Date | null;
+  placedEbookFiles: unknown;
+}
+
+/**
+ * D2 (#497): unlink only the ebook files this request's imports placed
+ * (Request.placedEbookFiles), each only while it is still the exact file RMAB
+ * placed and its folder passes rules a-c. No record removes nothing.
+ */
+export async function removeEbookFiles(
+  book: DeleteBook,
+  request: EbookDeleteRequest
+): Promise<{ deleted: number; keptReason?: string; removedFolders?: string[] }> {
+  const record = readPlacements(request.placedEbookFiles);
+  if (!record) {
+    const delivered = request.status === 'downloaded' || !!request.completedAt;
+    logger.info(`No ebook placement record for request ${request.id} ("${book.title}"); no ebook file removed`);
+    return delivered ? { deleted: 0, keptReason: LEGACY_EBOOK_REASON } : { deleted: 0 };
+  }
+  if (record.entries.length === 0 && record.unreadable === 0 && !record.unrecordedEarlier) {
+    logger.info(`Request ${request.id} placed no ebook file ("${book.title}": the library already had it); none removed`);
+    return { deleted: 0, keptReason: EBOOK_ALREADY_THERE_REASON };
+  }
+
+  const reasons: string[] = [];
+  if (record.unrecordedEarlier) reasons.push(EARLIER_IMPORT_REASON);
+  if (record.unreadable > 0) reasons.push(UNREADABLE_RECORD_REASON);
+  const others = record.entries.length > 0 ? await otherRecordedEntries(request.id) : [];
+  let deleted = 0;
+  const emptied = new Map<string, string>(); // canonical folder -> the recorded folder spelling
+  for (const entry of record.entries) {
+    const decision = await planPlacedEbookDelete(entry, book, others);
+    if (decision.kind === 'kept') {
+      reasons.push(decision.reason);
+    } else if (decision.kind === 'gone') {
+      logger.info(`Recorded ebook file already gone: ${entry.path}`);
+    } else {
+      try {
+        await fs.unlink(decision.file);
+        logger.info(`Deleted ebook file: ${decision.file}`);
+        deleted++;
+        emptied.set(path.dirname(decision.file), path.dirname(entry.path));
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code ?? 'error';
+        const why = code === 'EACCES' || code === 'EPERM' ? 'permission denied' : code;
+        reasons.push(`${path.basename(decision.file)} could not be removed (${why})`);
+      }
     }
   }
-  logger.info(`Deleted ${deleted} ebook file(s) from: ${book.filePath}`);
-  return { deleted };
+  const removedFolders = await removeEmptiedFolders(emptied);
+  const folders = removedFolders.length > 0 ? { removedFolders } : {};
+  if (reasons.length === 0) return { deleted, ...folders };
+  // Several entries can share one reason (e.g. two files in a folder that fails rule c): each shows once
+  const keptReason = [...new Set(reasons)].join('; ');
+  logger.warn(`Keeping ebook file(s) of request ${request.id} ("${book.title}"): ${keptReason}`);
+  return { deleted, keptReason, ...folders };
+}
+
+/**
+ * D2's empty-folder step (#526): each folder this delete unlinked a file from goes
+ * when nothing but the junk list is left, only when the recorded folder is itself
+ * a real folder (not a link) at the canonical path rules a-c passed on; then empty
+ * parents are swept. Returns the canonical folders removed. A failed rmdir is only
+ * logged: the recorded files are gone, so it is not "files kept".
+ */
+async function removeEmptiedFolders(emptied: Map<string, string>): Promise<string[]> {
+  const removed: string[] = [];
+  for (const [checkedDir, recordedDir] of emptied) {
+    const entry = await fs.lstat(recordedDir).catch(() => null);
+    const folder = await canonicalPath(checkedDir).catch(() => null);
+    if (!folder || !entry?.isDirectory() || (await canonicalPath(recordedDir).catch(() => null)) !== folder) continue;
+    const result = await removeFolderIfOnlyJunk(folder);
+    if (result.error) logger.warn(`The emptied ebook folder ${folder} ${result.error}; it stays`);
+    if (!result.removed) continue;
+    logger.info(`Deleted the emptied ebook folder: ${folder}`);
+    removed.push(folder);
+    try {
+      await sweepParents(folder, await collectGuardRoots());
+    } catch (error) {
+      logger.warn(`Empty parent sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return removed;
 }
 
 /** True when `candidate` equals or sits inside the canonical `folder`. */
@@ -134,9 +244,9 @@ async function isInsideFolder(candidate: string, folder: string): Promise<boolea
 async function absItemInside(item: { path?: string; relPath?: string }, folder: string, mediaDir: string): Promise<boolean> {
   if (item.path && (await isInsideFolder(item.path, folder))) return true;
   if (!item.relPath) return false;
-  const relFolder = normalizePath(path.posix.relative(await canonicalPath(mediaDir), folder));
-  const rel = normalizePath(item.relPath).replace(/^\/+/, '');
-  return !!relFolder && !relFolder.startsWith('..') && (rel === relFolder || rel.startsWith(`${relFolder}/`));
+  const relFolder = await libraryRelativePath(folder, mediaDir);
+  const rel = normalizeRelPath(item.relPath);
+  return !!relFolder && (rel === relFolder || rel.startsWith(`${relFolder}/`));
 }
 
 type ConfigReader = { get(key: string): Promise<string | null> };

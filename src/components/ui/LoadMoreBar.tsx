@@ -14,6 +14,8 @@ interface LoadMoreBarProps {
   isLoading: boolean;
   onLoadMore: () => void;
   itemLabel?: string;
+  /** Shows the bar with nothing loaded yet (the language filter hid every result so far) */
+  emptyText?: string;
 }
 
 export function LoadMoreBar({
@@ -23,14 +25,17 @@ export function LoadMoreBar({
   isLoading,
   onLoadMore,
   itemLabel = 'books',
+  emptyText,
 }: LoadMoreBarProps) {
-  if (loadedCount === 0) return null;
+  if (loadedCount === 0 && !emptyText) return null;
 
   const allLoaded = !hasMore && !isLoading;
 
   // Count text
   let countText: string;
-  if (allLoaded) {
+  if (loadedCount === 0 && emptyText) {
+    countText = emptyText;
+  } else if (allLoaded) {
     countText = `All ${loadedCount.toLocaleString()} ${itemLabel} loaded`;
   } else if (totalCount && totalCount > loadedCount) {
     countText = `Showing ${loadedCount.toLocaleString()} of ${totalCount.toLocaleString()} ${itemLabel}`;

@@ -102,7 +102,11 @@ Detection now uses a **permissive heuristic** instead of strict filename pattern
 2. **From metadata:** Use embedded title tag (only if chapter-specific)
    - Automatically detects if title metadata is the book title (appears in >80% of files)
    - Skips metadata that matches the book title to avoid "every chapter named the same"
-3. **Fallback numbering:** "Chapter 1", "Chapter 2" if no name found
+   - Embedded numbered tags (`Chapter 1`, `Chapter 01`, `CHAPTER 10`) are kept as written, so an intro does not shift the numbers: `Intro & Dedication`, `Chapter 1`, `Chapter 2` stay unchanged (#509)
+   - Set check (`analyzeChapterFiles`, after ordering): numbered tags are kept only if every title in the set is distinct, compared case- and space-folded with the number parsed (`Chapter 01` = `Chapter 1`), fallback titles of untagged files included. Any repeat (per-disc tags restarting at `Chapter 1`, an untagged intro whose fallback is `Chapter 1`) → the whole set uses fallback numbering, as before #509
+   - Log: `Chapter titles: keeping N embedded "Chapter N" title(s) ...` or `Chapter titles: "<title>" repeats across the set - dropping embedded "Chapter N" titles, numbering chapters by position`
+   - `Track N`, bare numbers and `Part N` tags still use fallback numbering
+3. **Fallback numbering:** "Chapter 1", "Chapter 2" if no name found (by position in the chosen order)
 
 **Book Title Detection (NEW):**
 - Analyzes all files to detect if title metadata contains the book title instead of chapter names
@@ -152,6 +156,7 @@ ffmpeg -y -f concat -safe 0 -protocol_whitelist file -i filelist.txt \
   -map_metadata 1 \
   -map 0:a \
   -codec copy \
+  -movie_timescale 1000 \          # #511: chapter-safe timescale (only when the muxer lists it)
   -movflags +faststart \           # NEW: Index at beginning (instant playback)
   -fflags +genpts \                 # NEW: Regenerate timestamps
   -avoid_negative_ts make_zero \    # NEW: Handle negative timestamps
@@ -176,6 +181,7 @@ ffmpeg -y -f concat -safe 0 -protocol_whitelist file -i filelist.txt \
   -map 0:a \
   -af asetpts=N/SR/TB \              # Timestamps from the sample count (only when all chapters decode alike)
   -c:a libfdk_aac -vbr 4 \          # High quality AAC (or: -c:a aac -q:a <quality> -profile:a aac_low)
+  -movie_timescale 1000 \            # #511 (only when the muxer lists it)
   -movflags +faststart \             # CRITICAL: Instant playback
   -fflags +genpts \                  # Fix timestamps (regenerates presentation timestamps)
   -avoid_negative_ts make_zero \     # Handle edge cases
@@ -199,6 +205,7 @@ ffmpeg -y -f concat -safe 0 -protocol_whitelist file -i filelist.txt \
 
 **Critical Flags (v2):**
 - **`-movflags +faststart`**: Moves moov atom to file beginning → instant playback (fixes 1-min delay)
+- **`-movie_timescale 1000`** (#511): FFmpeg 9's default timescale (LCM of the stream time bases) overflows a merged chapter longer than 12.4 h at 48 kHz (13.5 h at 44.1 kHz) and drops it from the chapter track. `movieTimescaleArgs()` adds it when `ffmpeg -h muxer=mp4` lists it (FFmpeg 5.0+); the ffmetadata is already 1/1000, so chapter times are unchanged ([file-organization.md](../phase3/file-organization.md#mp4-movie-timescale-511))
 - **ASIN:** not passed to ffmpeg (its mp4 muxer drops freeform keys) and not written by the merger: file-organizer adds it to the file it places (the merged file, or its tagged copy) with the MP4 freeform post-step ([file-organization.md](../phase3/file-organization.md#mp4-freeform-tags)), after the merge's own checks. A failed merge deletes its output only once ffmpeg has started writing it (an earlier failure leaves a file already at that path alone). Codec-copy timeout: at least `ffmpegRemuxTimeoutMs(estimated size)`. The organizer's disk check counts 1x the merged size, +1x with an ASIN (post-step copy), +1x with tagging on (tagged copy)
 - **`-fflags +genpts`**: Regenerates presentation timestamps for audio/video → fixes seeking/timing issues at concat boundaries
 - **`-avoid_negative_ts make_zero`**: Handles negative timestamps at concat boundaries
@@ -664,6 +671,10 @@ All merged files are validated before marked successful:
 - [ ] Preview merged file before finalizing
 - [ ] Manual chapter editing UI
 - [ ] Parallel chapter processing (analyze while downloading)
+
+## Fixed Issues
+
+- **#509 Intro shifted chapter numbers:** files tagged `Intro`, `Chapter 1`, `Chapter 2` with no titles in their names were merged as `Intro`, `Chapter 2`, `Chapter 3` (every `Chapter N` tag counted as generic and replaced by position). Fix: numbered tags are kept when the set's titles are distinct (see Chapter Naming Strategy); repeated tags fall back to position numbering. Tests: `tests/utils/chapter-merger.titles.test.ts`
 
 ## Related Documentation
 

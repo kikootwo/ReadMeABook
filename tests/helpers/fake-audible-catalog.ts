@@ -7,6 +7,8 @@
  *
  *   vi.mock('@/lib/integrations/audible.service', async () =>
  *     (await import('../helpers/fake-audible-catalog')).audibleServiceModule);
+ *   vi.mock('@/lib/services/config.service', async () =>
+ *     (await import('../helpers/fake-audible-catalog')).configServiceModule);
  */
 
 import fs from 'fs';
@@ -34,12 +36,15 @@ export function loadCatalogFixture(name: string): Json {
 export const fakeCatalog = {
   region: 'us',
   baseUrl: 'https://www.audible.com',
+  /** The admin language filter setting (#259) */
+  languageFilter: false,
   calls: [] as CatalogCall[],
   keyword: (async () => ({ products: [] })) as Handler,
   batch: (async () => ({ products: [] })) as Handler,
   reset() {
     this.region = 'us';
     this.baseUrl = 'https://www.audible.com';
+    this.languageFilter = false;
     this.calls = [];
     this.keyword = async () => ({ products: [] });
     this.batch = async () => ({ products: [] });
@@ -66,6 +71,11 @@ const fakeService = {
 };
 
 export const audibleServiceModule = { getAudibleService: () => fakeService };
+
+/** Stands in for getConfigService(): only the language filter setting */
+export const configServiceModule = {
+  getConfigService: () => ({ getAudibleLanguageFilter: async () => fakeCatalog.languageFilter }),
+};
 
 /** An axios-shaped HTTP error */
 export function httpError(status: number) {

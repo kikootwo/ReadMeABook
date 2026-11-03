@@ -61,6 +61,9 @@ export function useSeriesSearch(query: string) {
   return {
     series: (data?.series || []) as SeriesSummary[],
     query: data?.query || '',
+    /** Set only while the admin language filter is on */
+    filterLanguage: data?.filterLanguage as string | undefined,
+    hiddenCount: (data?.hiddenCount ?? 0) as number,
     isLoading: !!endpoint && isLoading,
     hasData: data !== undefined,
     error: error as FetchJSONError | undefined,
@@ -112,6 +115,9 @@ export function useSeriesDetail(asin: string | null) {
     : null;
 
   const hasMore = !!(data && data.length > 0 && data[data.length - 1]?.hasMore);
+  // Set only while the admin language filter is on
+  const filterLanguage: string | undefined = data?.find(page => page?.filterLanguage)?.filterLanguage;
+  const hiddenCount = data ? data.reduce((sum, page) => sum + (page?.hiddenCount ?? 0), 0) : 0;
   const isLoadingInitial = !data && !error && !!asin;
   const isLoadingMore = !!(data && typeof data[size - 1] === 'undefined' && isValidating);
 
@@ -126,5 +132,7 @@ export function useSeriesDetail(asin: string | null) {
     isLoadingMore,
     loadMore,
     error,
+    filterLanguage,
+    hiddenCount,
   };
 }

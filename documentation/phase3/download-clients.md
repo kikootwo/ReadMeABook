@@ -186,7 +186,8 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 - Not owned → no remove call at all; no post-import `setCategory`; no Transmission seed-limit rewrite on `torrent-duplicate`
 - Post-import category (`applyPostImportCategory()`, `src/lib/processors/post-import-category.ts`, reads the same row as organize-files: `requestId`, newest `createdAt`): `null`/`false` skip; `true` → one strict probe (error / not found → skip) → `resolveOwnership()` (removed, re-added, older copy → skip). Info log on every skip. Downloads in flight at upgrade (`null`) never get the post-import category
 - Deluge `setCategory` replaces the torrent's label (one label per torrent); now only on RMAB's own torrents
-- **Strict probe** `probeDownload(id)` (seeding cleanup only; one request, qBittorrent: plus one unfiltered lookup after an empty answer, for a hybrid stored by its v1 hash; no not-found retries, unlike `getDownload()`): `{found:true, info}` | `{found:false}` | throws
+- **Cancel (#228):** the cancel's download step and the seeding cleanup's cancelled-download pass follow the same rule (`knownNotOwned` before any call, strict probe, `resolveOwnership`, `recordNotOwned`); see [request-cancel.md](../admin-features/request-cancel.md). NZBGet cancel uses `deleteQueuedDownload()` (queue only, name or category must match), never `deleteDownload()`
+- **Strict probe** `probeDownload(id)` (seeding cleanup and cancel; one request, qBittorrent: plus one unfiltered lookup after an empty answer, for a hybrid stored by its v1 hash; no not-found retries, unlike `getDownload()`): `{found:true, info}` | `{found:false}` | throws
 
 | Client | `found:false` only for | Throws |
 |---|---|---|
@@ -225,13 +226,17 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 ### User-Picked Releases
 **File:** `src/lib/services/download-selection-guard.ts`
 - Torrent/NZB picks (`request-with-torrent`, `select-torrent`, `select-ebook` indexer source, admin `replace`, admin `approve` incl. stored picks, admin `retry-download` when it re-adds a stored link): `downloadUrl` must be a `magnet:?` URI or a Prowlarr download link → else 400 `ValidationError`
-- Prowlarr link match (`toConfiguredProwlarrUrl`): same host name as `prowlarr_url` (case-insensitive) + base path (case-insensitive) + `/{indexerId}/download`; tolerates http↔https (TLS proxy without `X-Forwarded-Proto`) and default-port differences, never a different host or non-default port. The pick is then **rewritten** onto the configured base (scheme, port, base path) **without credentials** (candidate credentials discarded), so stored picks, `DownloadHistory.magnetLink` and job payloads never hold them; non-admin pick responses omit `selectedTorrent` (`hideStoredPick`)
+- Prowlarr link match (`toConfiguredProwlarrUrl`), either:
+  - **Configured address:** same host name as `prowlarr_url` (case-insensitive) + port + base path (case-insensitive) + `/{indexerId}/download`; tolerates http↔https (TLS proxy without `X-Forwarded-Proto`) and default-port differences
+  - **Proxy link on any address (#298):** http(s), path ends in `/{digits}/download`, non-empty `link=` query. Prowlarr builds result links from the Host header it received (no setting for it), so behind a reverse proxy that rewrites Host they name an address RMAB can't reach (e.g. `https://127.0.0.1:9663`). The link's host, port, credentials and path prefix are dropped, never fetched
+  - Anything else (another host without `link=`, `/{id}/download/x`, `/download`, `/abc/download`, empty `link=`) → rejected
+- Either way the pick is **rewritten** to `{configured scheme}//{configured host}{configured base path}/{indexerId}/download{query}{hash}` **without credentials** (candidate credentials discarded), so stored picks, `DownloadHistory.magnetLink` and job payloads never hold them; non-admin pick responses omit `selectedTorrent` (`hideStoredPick`). The automatic grab uses the same rewrite; a non-Prowlarr link there is fetched as-is (no key: `isProwlarrDownloadUrl` is unchanged)
 - Approve: an unusable stored user pick (or Anna's Archive with no links left) → warning, pick cleared, approve falls back to automatic search and the response says so (`selectionDropped`); Anna's Archive/FlareSolverr unreachable (`getSlowDownloadLinks(..., { throwOnError: true })`) → 503 `SourceUnavailable`, pick kept; an unusable admin-provided pick → 400. E-book pick routes also answer 503 when the source can't be reached
 - Magnets are accepted as-is, so a user can choose a magnet's tracker list (accepted)
 - Anna's Archive picks: only `md5` (32 hex) is trusted; links rebuilt with `getSlowDownloadLinks(md5, ebook_sidecar_base_url, flaresolverr)`; client `downloadUrl(s)` ignored
 - Search responses (`search-torrents`, `requests/[id]/interactive-search`, both `interactive-search-ebook`): `stripProwlarrKeyFromResults()` removes any `apikey=<configured key>` on any origin from every string field (fetcher restores it for Prowlarr hops)
 - Interactive search permission (`denyWithoutInteractiveSearchAccess`, `src/lib/middleware/interactive-search-access.ts`) enforced on all search + pick routes above (user routes) → 403
-- Known limit: if Prowlarr publishes links on a different host name (or non-default port) than `prowlarr_url`, interactive picks get 400 (automatic grabs still work); set `prowlarr_url` to the host Prowlarr links use
+- Visibility: when a search's results carry proxy links on another origin, `prowlarr.service.ts` logs one info line per Prowlarr query (a request search runs several): `Prowlarr published download links on <scheme://host:port>; using the configured address <origin> instead` (origin only, no path/query/key)
 
 ### Migration
 **Auto-migration** from legacy single-client config to new JSON array format on first access:

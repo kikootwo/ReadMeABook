@@ -259,7 +259,7 @@ describe.skipIf(skipReal)('m4b ASIN and layout (real ffmpeg)', () => {
     expect(topLevelTypes(tagged).slice(0, 2)).toEqual(['ftyp', 'moov']);
     const after = await probe(tagged);
     expect(after.streams).toEqual(before.streams);
-    // ffmpeg's re-mux may change the chapter time base (9.0.2 does): compare times and titles
+    // Times and titles (long chapters, the chapter track's sample count and time base: metadata-tagger.chapters.integration.test.ts)
     const marks = (p: typeof before) => p.chapters.map((c) => [c.start_time, c.end_time, c.tags?.title]);
     expect(marks(after)).toEqual(marks(before));
     expect(marks(after).map((m) => m[2])).toEqual(['Chapter One', 'Chapter Two']);

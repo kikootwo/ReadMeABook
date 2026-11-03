@@ -1,10 +1,9 @@
 /**
  * Component: Request Cancel Service Tests
- * Documentation: documentation/admin-features/request-deletion.md
+ * Documentation: documentation/admin-features/request-cancel.md
  *
- * cancelRequest() is the path behind the Web UI cancel, the Discord card's Cancel button and the
- * /status cancel menu. Cancelling must only stop the request: status → 'cancelled', no files,
- * library items or downloads removed. It must also converge the Discord surfaces from any caller.
+ * Fails on main: the cancel wrote `status` by id (overwriting a status that moved on) and never
+ * touched the download.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,131 +11,162 @@ import { Prisma } from '@/generated/prisma/client';
 import { createPrismaMock } from '../helpers/prisma';
 
 const prismaMock = createPrismaMock();
-const jobQueueMock = vi.hoisted(() => ({ addNotificationJob: vi.fn(() => Promise.resolve()) }));
-const botMock = vi.hoisted(() => ({ getClient: vi.fn<() => unknown>(() => ({})) }));
-const cardsMock = vi.hoisted(() => ({
-  editRequestCards: vi.fn(() => Promise.resolve()),
-  cancelApprovalMessage: vi.fn(() => Promise.resolve()),
-}));
-const deleteRequestMock = vi.hoisted(() => vi.fn());
+const jobQueueMock = vi.hoisted(() => ({ addNotificationJob: vi.fn() }));
+const stepMock = vi.hoisted(() => ({ handleCancelledDownload: vi.fn(), newestSelectedRow: vi.fn() }));
+const discordSyncMock = vi.hoisted(() => ({ syncDiscordOnCancel: vi.fn() }));
 
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/services/job-queue.service', () => ({ getJobQueueService: () => jobQueueMock }));
-vi.mock('@/lib/services/discord/discord-bot.service', () => ({ getDiscordBotService: () => botMock }));
-vi.mock('@/lib/services/discord/discord-cards', () => cardsMock);
-vi.mock('@/lib/services/request-delete.service', () => ({ deleteRequest: deleteRequestMock }));
-vi.mock('@/lib/utils/logger', () => ({
-  RMABLogger: {
-    create: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
-  },
-}));
+vi.mock('@/lib/services/cancelled-download', () => stepMock);
+vi.mock('@/lib/services/discord/discord-cancel-sync', () => discordSyncMock);
 
-const liveRequest = (status: string) => ({
-  id: 'req-1',
-  userId: 'user-1',
-  status,
-  audiobook: { id: 'ab-1', title: 'Red Rising', author: 'Pierce Brown' },
-  user: { plexUsername: 'reader' },
+const record = (status = 'downloading') => ({
+  id: 'req-1', status, audiobookId: 'ab-1', type: 'audiobook',
+  audiobook: { title: 'Book', author: 'Author' }, user: { plexUsername: 'reader' },
 });
 
-const loadService = () => import('@/lib/services/request-cancel.service');
+beforeEach(() => {
+  vi.clearAllMocks();
+  jobQueueMock.addNotificationJob.mockResolvedValue(undefined);
+  stepMock.newestSelectedRow.mockResolvedValue({ id: 'dh-1' });
+  stepMock.handleCancelledDownload.mockResolvedValue({ outcome: 'removed', clientName: 'qBittorrent', detail: 'partial' });
+});
 
-describe('cancelRequest', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    botMock.getClient.mockReturnValue({});
-    prismaMock.request.update.mockImplementation(async ({ where }: any) => ({
-      id: where.id,
-      status: 'cancelled',
-      audiobook: { title: 'Red Rising', author: 'Pierce Brown' },
-    }));
-    prismaMock.user.findUnique.mockResolvedValue({ discordUserId: 'discord-linked' });
-  });
+async function cancel(rec = record(), audience: 'admin' | 'owner' = 'admin') {
+  const { cancelLoadedRequest } = await import('@/lib/services/request-cancel.service');
+  return cancelLoadedRequest(rec, { audience });
+}
 
-  it('only sets the status to cancelled and never deletes anything', async () => {
-    prismaMock.request.findFirst.mockResolvedValue(liveRequest('downloading'));
-    const { cancelRequest } = await loadService();
+describe('cancelLoadedRequest', () => {
+  it('flips only from the status it read, sets cancelledAt, then runs the download step', async () => {
+    const order: string[] = [];
+    prismaMock.request.updateMany.mockImplementationOnce(async () => { order.push('flip'); return { count: 1 }; });
+    stepMock.handleCancelledDownload.mockImplementationOnce(async () => { order.push('client'); return { outcome: 'removed', clientName: 'qBittorrent', detail: '' }; });
 
-    const result = await cancelRequest('req-1', { userId: 'user-1' });
+    const res = await cancel();
 
-    expect(result.success).toBe(true);
-    const { data } = prismaMock.request.update.mock.calls[0][0];
-    expect(data.status).toBe('cancelled');
-    expect(data).not.toHaveProperty('deletedAt');
-    expect(deleteRequestMock).not.toHaveBeenCalled();
-    expect(jobQueueMock.addNotificationJob).toHaveBeenCalledWith(
-      'request_cancelled',
-      'req-1',
-      'Red Rising',
-      'Pierce Brown',
-      'reader'
-    );
-  });
-
-  it('renders the Discord card cancelled without touching an approval message it does not have', async () => {
-    prismaMock.request.findFirst.mockResolvedValue(liveRequest('searching'));
-    const { cancelRequest } = await loadService();
-
-    await cancelRequest('req-1', { userId: 'user-1' });
-
-    expect(cardsMock.editRequestCards).toHaveBeenCalledWith('req-1', 'cancelled');
-    expect(cardsMock.cancelApprovalMessage).not.toHaveBeenCalled();
-  });
-
-  it('clears the pick and retracts the approval message when cancelled while awaiting approval', async () => {
-    prismaMock.request.findFirst.mockResolvedValue(liveRequest('awaiting_approval'));
-    const { cancelRequest } = await loadService();
-
-    await cancelRequest('req-1', { userId: 'user-1', discordUserId: 'discord-actor' });
-
-    expect(prismaMock.request.update.mock.calls[0][0].data.selectedTorrent).toBe(Prisma.DbNull);
-    // The Discord actor from the interaction wins over the user's linked account.
-    expect(cardsMock.cancelApprovalMessage).toHaveBeenCalledWith('req-1', 'discord-actor');
-  });
-
-  it('attributes a Web UI cancel to the user\'s linked Discord account', async () => {
-    prismaMock.request.findFirst.mockResolvedValue(liveRequest('awaiting_approval'));
-    const { cancelRequest } = await loadService();
-
-    await cancelRequest('req-1', { userId: 'user-1' });
-
-    expect(cardsMock.cancelApprovalMessage).toHaveBeenCalledWith('req-1', 'discord-linked');
-  });
-
-  it('refuses statuses the server does not cancel (an import already under way)', async () => {
-    prismaMock.request.findFirst.mockResolvedValue(liveRequest('processing'));
-    const { cancelRequest } = await loadService();
-
-    const result = await cancelRequest('req-1', { userId: 'user-1' });
-
-    expect(result).toEqual({
-      success: false,
-      reason: 'not_cancellable',
-      message: 'Cannot cancel request with status: processing',
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+      where: { id: 'req-1', deletedAt: null, status: 'downloading' },
+      data: { status: 'cancelled', cancelledAt: expect.any(Date), updatedAt: expect.any(Date) },
     });
-    expect(prismaMock.request.update).not.toHaveBeenCalled();
+    expect(order).toEqual(['flip', 'client']);
+    expect(res).toMatchObject({ success: true, download: 'removed', request: { id: 'req-1', status: 'cancelled', cancelledAt: expect.any(Date) } });
+    expect(res.success && res.message).toBe('Request cancelled. Its download was removed from qBittorrent.');
+    expect(jobQueueMock.addNotificationJob).toHaveBeenCalledWith('request_cancelled', 'req-1', 'Book', 'Author', 'reader');
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 
-  it('reports a missing or deleted request', async () => {
-    prismaMock.request.findFirst.mockResolvedValue(null);
-    const { cancelRequest } = await loadService();
-
-    const result = await cancelRequest('gone', { userId: 'user-1' });
-
-    expect(result).toMatchObject({ success: false, reason: 'not_found' });
-    expect(prismaMock.request.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'gone', deletedAt: null } })
-    );
+  it('clears the pre-selected torrent only when withdrawing an awaiting_approval request', async () => {
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    await cancel(record('awaiting_approval'));
+    expect(prismaMock.request.updateMany.mock.calls[0][0].data.selectedTorrent).toBe(Prisma.DbNull);
+    await cancel(record('searching'));
+    expect(prismaMock.request.updateMany.mock.calls[1][0].data).not.toHaveProperty('selectedTorrent');
   });
 
-  it('still cancels when the bot is not running', async () => {
-    botMock.getClient.mockReturnValue(null);
-    prismaMock.request.findFirst.mockResolvedValue(liveRequest('pending'));
-    const { cancelRequest } = await loadService();
+  it('a status that moved on (downloading -> processing) is not cancelled: no client call', async () => {
+    prismaMock.request.updateMany.mockResolvedValueOnce({ count: 0 });
+    prismaMock.request.findFirst.mockResolvedValueOnce({ status: 'processing' });
 
-    const result = await cancelRequest('req-1', { userId: 'user-1' });
+    expect(await cancel()).toEqual({ success: false, reason: 'not_cancellable', status: 'processing' });
+    expect(stepMock.handleCancelledDownload).not.toHaveBeenCalled();
+    expect(jobQueueMock.addNotificationJob).not.toHaveBeenCalled();
+  });
 
-    expect(result.success).toBe(true);
-    expect(cardsMock.editRequestCards).not.toHaveBeenCalled();
+  it('a non-cancellable status is refused without a write', async () => {
+    expect(await cancel(record('available'))).toEqual({ success: false, reason: 'not_cancellable', status: 'available' });
+    expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('a second cancel of a cancelled request succeeds without doing anything again', async () => {
+    prismaMock.request.findFirst.mockResolvedValueOnce({ cancelledAt: new Date('2026-11-01T00:00:00Z') });
+    const res = await cancel(record('cancelled'));
+    expect(res).toMatchObject({ success: true, alreadyCancelled: true, download: 'none', message: 'This request was already cancelled.' });
+    expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
+    expect(stepMock.handleCancelledDownload).not.toHaveBeenCalled();
+    expect(discordSyncMock.syncDiscordOnCancel).not.toHaveBeenCalled();
+  });
+
+  it('rewrites the Discord card and credits the actor on a withdrawn approval message', async () => {
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    const { cancelLoadedRequest } = await import('@/lib/services/request-cancel.service');
+
+    await cancelLoadedRequest(record('awaiting_approval'), {
+      audience: 'owner',
+      actor: { userId: 'user-1', discordUserId: 'discord-1' },
+    });
+    await cancel(record('downloading'));
+
+    expect(discordSyncMock.syncDiscordOnCancel).toHaveBeenNthCalledWith(1, 'req-1', true, 'user-1', 'discord-1');
+    expect(discordSyncMock.syncDiscordOnCancel).toHaveBeenNthCalledWith(2, 'req-1', false, null, undefined);
+  });
+
+  it('two cancels at once: one flips and runs the step, the other gets the idempotent answer', async () => {
+    let flipped = false;
+    prismaMock.request.updateMany.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+      if (flipped) return { count: 0 };
+      flipped = true;
+      return { count: 1 };
+    });
+    prismaMock.request.findFirst.mockImplementation(async (args: any) =>
+      (args.select.status ? { status: 'cancelled' } : { cancelledAt: new Date() }));
+
+    const [a, b] = await Promise.all([cancel(), cancel()]);
+
+    expect([a, b].filter((r) => r.success && !r.alreadyCancelled)).toHaveLength(1);
+    expect([a, b].filter((r) => r.success && r.alreadyCancelled)).toHaveLength(1);
+    expect(stepMock.handleCancelledDownload).toHaveBeenCalledTimes(1);
+    expect(jobQueueMock.addNotificationJob).toHaveBeenCalledTimes(1);
+  });
+
+  it('a request deleted between the read and the flip is not found', async () => {
+    prismaMock.request.updateMany.mockResolvedValueOnce({ count: 0 });
+    prismaMock.request.findFirst.mockResolvedValueOnce(null);
+    expect(await cancel()).toEqual({ success: false, reason: 'not_found' });
+  });
+
+  it.each(['kept_shared', 'kept_not_owned'] as const)('%s: an owner gets `kept`, an admin the detailed value', async (outcome) => {
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    stepMock.handleCancelledDownload.mockResolvedValue({ outcome, clientName: 'qBittorrent', detail: '' });
+
+    const owner = await cancel(record(), 'owner');
+    expect(owner).toMatchObject({ success: true, download: 'kept', message: 'Request cancelled. Its download stays in the download client.' });
+
+    const admin = await cancel(record(), 'admin');
+    expect(admin).toMatchObject({ success: true, download: outcome });
+    expect(admin.success && admin.message).toMatch(/qBittorrent/);
+  });
+
+  it('every other outcome reaches an owner unchanged', async () => {
+    const { reportedOutcome } = await import('@/lib/services/request-cancel.service');
+    for (const outcome of ['removed', 'kept_seeding', 'kept_unlimited', 'kept_finished', 'retry_later', 'not_removed', 'none'] as const) {
+      expect(reportedOutcome(outcome, 'owner')).toBe(outcome);
+    }
+  });
+
+  it('a notification failure does not fail the cancel', async () => {
+    prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 });
+    jobQueueMock.addNotificationJob.mockRejectedValueOnce(new Error('redis down'));
+    expect((await cancel()).success).toBe(true);
+  });
+});
+
+describe('cancelMessage', () => {
+  it.each([
+    'removed', 'kept_seeding', 'kept_unlimited', 'kept_shared', 'kept_not_owned', 'kept_finished', 'retry_later', 'not_removed', 'none',
+  ] as const)('owner message for %s never names the client or another request', async (outcome) => {
+    const { cancelMessage } = await import('@/lib/services/request-cancel.service');
+    const message = cancelMessage(outcome, 'owner', 'qBittorrent');
+    expect(message).not.toMatch(/qBittorrent|another request|30 minutes/i);
+    expect(message.startsWith('Request cancelled.')).toBe(true);
+  });
+
+  it('admin messages name the client; retry says "next seeding cleanup"; usenet errors promise no retry', async () => {
+    const { cancelMessage } = await import('@/lib/services/request-cancel.service');
+    expect(cancelMessage('kept_shared', 'admin', 'qBittorrent')).toBe('Request cancelled. Its download stays in qBittorrent: another request still uses it.');
+    expect(cancelMessage('retry_later', 'admin', 'qBittorrent')).toMatch(/on its next seeding cleanup\.$/);
+    expect(cancelMessage('not_removed', 'admin', 'NZBGet')).not.toMatch(/again|retry|later/i);
+    expect(cancelMessage('not_removed', 'owner')).not.toMatch(/again|retry|later/i);
   });
 });

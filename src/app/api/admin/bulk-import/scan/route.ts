@@ -213,7 +213,8 @@ export async function POST(request: NextRequest) {
                   const textSearchTerm = book.extractedAsin
                     ? cleanSearchString(book.folderName)
                     : book.searchTerm;
-                  const searchResult = await audibleService.search(textSearchTerm);
+                  // The files are already on disk: match them in any language
+                  const searchResult = await audibleService.search(textSearchTerm, 1, { ignoreLanguageFilter: true });
                   if (searchResult.results.length > 0) {
                     match = searchResult.results[0];
                   }

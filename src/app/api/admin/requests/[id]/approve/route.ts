@@ -15,6 +15,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { hidePlacementRecord } from '@/lib/services/request-detail-query';
 
 const logger = RMABLogger.create('API.Admin.Requests.Approve');
 
@@ -90,7 +91,7 @@ export async function POST(
           success: true,
           message: result.message,
           ...(result.selectionDropped ? { selectionDropped: result.selectionDropped } : {}),
-          request: result.request,
+          request: hidePlacementRecord(result.request),
         });
       } catch (error) {
         logger.error('Failed to process approval action', {
