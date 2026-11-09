@@ -148,7 +148,7 @@
 - **Docker Compose setup (multi-container)** → [deployment/docker.md](deployment/docker.md)
 - **Unified container (all-in-one)** → [deployment/unified.md](deployment/unified.md)
 - **Image build stages, runtime image contents, Prisma CLI in the image, build guards** → [deployment/unified.md](deployment/unified.md#dockerfile-structure)
-- **Container stop, app/job queue shutdown (SIGTERM, 5 s drain, jobs left for retry), PostgreSQL clean shutdown, stop_grace_period ("database system was not properly shut down")** → [deployment/unified.md](deployment/unified.md#shutdown-sequence), [backend/services/jobs.md](backend/services/jobs.md#shutdown-and-cut-jobs)
+- **Container stop, app/job queue shutdown (SIGTERM, 3.5 s drain, HTTP keep-alive drain, jobs left for retry), PostgreSQL clean shutdown, stop_grace_period ("database system was not properly shut down")** → [deployment/unified.md](deployment/unified.md#shutdown-sequence), [backend/services/jobs.md](backend/services/jobs.md#shutdown-and-cut-jobs)
 - **Environment variables, volumes** → [deployment/docker.md](deployment/docker.md)
 - **TLS errors after upgrading to Node 24 (`dh key too small`, `EE certificate key too weak`, `Issuer.discover() failed.`, SABnzbd/NZBGet "SSL/TLS certificate error")** → [deployment/unified.md](deployment/unified.md#tls-errors-after-upgrading-to-node-24)
 - **Volume mapping (download clients)** → [deployment/volume-mapping.md](deployment/volume-mapping.md)
