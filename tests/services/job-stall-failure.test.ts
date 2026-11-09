@@ -115,8 +115,20 @@ describe('handleStallLimitFailure', () => {
         data: expect.objectContaining({ status: 'failed', errorMessage: INTERRUPTED_DOWNLOAD_MESSAGE }),
       });
       expect(prismaMock.downloadHistory.updateMany).toHaveBeenCalledWith({
-        where: { id: 'hist-1' },
+        where: expect.objectContaining({ id: 'hist-1' }),
         data: { downloadStatus: 'failed', downloadError: INTERRUPTED_DOWNLOAD_MESSAGE },
+      });
+    });
+
+    it('never marks a download row recorded as removed (a cancel in the same instant wins)', async () => {
+      prismaMock.downloadHistory.findFirst.mockResolvedValue({ id: 'hist-1' });
+
+      await handleStallLimitFailure({ id: '5', name: 'start_direct_download', data }, stalled(), tracker);
+
+      expect(prismaMock.downloadHistory.updateMany).toHaveBeenCalledTimes(1);
+      expect(prismaMock.downloadHistory.updateMany.mock.calls[0][0].where).toEqual({
+        id: 'hist-1',
+        OR: [{ downloadStatus: null }, { downloadStatus: { not: 'removed' } }],
       });
     });
 

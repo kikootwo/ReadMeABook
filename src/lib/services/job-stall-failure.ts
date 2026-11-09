@@ -22,6 +22,9 @@ export const STALL_LIMIT_MESSAGE = 'job stalled more than allowable limit';
 /** Job types that move a request into a status only they move it out of */
 const GUARDED_TYPES = ['organize_files', 'start_direct_download'] as const;
 
+/** A download row recorded as gone stays gone (a bare `not` would skip NULL statuses too) */
+const NOT_REMOVED = { OR: [{ downloadStatus: null }, { downloadStatus: { not: 'removed' } }] };
+
 export const INTERRUPTED_IMPORT_MESSAGE = 'Import was interrupted when the app stopped; it will be retried';
 export const INTERRUPTED_DOWNLOAD_MESSAGE = 'Download was interrupted when the app stopped. Try the download again.';
 
@@ -138,8 +141,9 @@ async function failInterruptedDirectDownload(requestId: string, data: Record<str
   logOutcome(requestId, count, 'failed (direct download)');
   if (count === 0) return;
 
+  // Never over a row a cancel or cleanup recorded as gone (same rule as monitor-download)
   await prisma.downloadHistory.updateMany({
-    where: { id: downloadHistoryId },
+    where: { id: downloadHistoryId, ...NOT_REMOVED },
     data: { downloadStatus: 'failed', downloadError: INTERRUPTED_DOWNLOAD_MESSAGE },
   });
 }
