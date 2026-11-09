@@ -91,7 +91,7 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - Clears errorMessage and retry counters on match
 - Use case: Manual library imports automatically complete stuck requests
 - ABS: items without ASIN → ABS match → ASIN from the response stored before request matching (#287, [file-hash-matching.md](../../fixes/file-hash-matching.md#asin-read-back-287))
-- Request matching (step 6) is `matchRequestsToLibrary` (`src/lib/services/library/match-requests.ts`), shared with the recently-added check; ABS: stores `plex_library.file_path`, and a `downloaded` request RMAB delivered links to the item holding its folder by path or files hash first (#284); requests go `available` by compare-and-set (one notification per request)
+- Request matching (step 6) is `matchRequestsToLibrary` (`src/lib/services/library/match-requests.ts`), shared with the recently-added check; ABS: stores `plex_library.file_path`, and a `downloaded` request RMAB delivered links to the item holding its folder by path or files hash first (#284); requests go `available` by compare-and-set (one notification per request); then `followLibraryAsins` (ABS) sets `audiobooks.library_asin` from the linked item's current ASIN (#325a; the recently-added check only for books linked to the items it listed); stale removal and the orphan reset clear it with `abs_item_id`. ABS covers are cached as `<hash>-<ASIN>.<ext>` and fetched again under the new name when the item's ASIN changes (`library-cover.ts`)
 
 **plex_recently_added_check:**
 - Polls recently added items (top 10) every 5 minutes

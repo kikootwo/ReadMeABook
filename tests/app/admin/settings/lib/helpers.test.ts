@@ -24,7 +24,7 @@ const baseSettings = {
 
   audibleLanguageFilter: false,
   plex: { url: 'http://plex', token: 'token', libraryId: 'lib', triggerScanAfterImport: false },
-  audiobookshelf: { serverUrl: 'http://abs', apiToken: 'abs-token', libraryId: 'abs-lib', triggerScanAfterImport: false },
+  audiobookshelf: { serverUrl: 'http://abs', apiToken: 'abs-token', libraryId: 'abs-lib', ebookLibraryId: '', triggerScanAfterImport: false },
   oidc: {
     enabled: true,
     providerName: 'OIDC',

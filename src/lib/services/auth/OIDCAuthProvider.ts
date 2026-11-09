@@ -372,13 +372,15 @@ export class OIDCAuthProvider implements IAuthProvider {
   }
 
   /**
-   * Find user by OIDC subject
+   * Find the live user for an OIDC subject (a deleted account never counts, so it can
+   * never let a returning user skip approval)
    */
   private async findUserByOIDCSubject(oidcSubject: string) {
     return await prisma.user.findFirst({
       where: {
         oidcSubject,
         authProvider: 'oidc',
+        deletedAt: null,
       },
     });
   }

@@ -32,7 +32,7 @@ const baseSettings = {
 
   audibleLanguageFilter: false,
   plex: { url: '', token: '', libraryId: '', triggerScanAfterImport: false },
-  audiobookshelf: { serverUrl: '', apiToken: '', libraryId: '', triggerScanAfterImport: false },
+  audiobookshelf: { serverUrl: '', apiToken: '', libraryId: '', ebookLibraryId: '', triggerScanAfterImport: false },
   oidc: {
     enabled: false,
     providerName: '',

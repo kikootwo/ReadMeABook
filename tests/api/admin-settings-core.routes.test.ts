@@ -414,6 +414,7 @@ describe('Admin settings core routes', () => {
         serverUrl: 'http://abs',
         apiToken: 'token',
         libraryId: 'lib',
+        ebookLibraryId: 'ebook-lib',
         triggerScanAfterImport: true,
       }),
     };
@@ -423,7 +424,10 @@ describe('Admin settings core routes', () => {
     const payload = await response.json();
 
     expect(payload.success).toBe(true);
-    expect(configServiceMock.setMany).toHaveBeenCalled();
+    expect(configServiceMock.setMany).toHaveBeenCalledWith(expect.arrayContaining([
+      { key: 'audiobookshelf.library_id', value: 'lib' },
+      { key: 'audiobookshelf.ebook_library_id', value: 'ebook-lib' },
+    ]));
   });
 });
 

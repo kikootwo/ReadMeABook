@@ -9,11 +9,10 @@
 
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
-import { getConfigService } from '@/lib/services/config.service';
 import { findPlexMatch } from '@/lib/utils/audiobook-matcher';
 import { getAudibleService } from '@/lib/integrations/audible.service';
 import { RMABLogger } from '@/lib/utils/logger';
-import { shouldSkipAutoSearch } from '@/lib/utils/release-date';
+import { shouldWaitForRelease } from '@/lib/services/release-gate';
 import { seedAsin, getSiblingAsins } from '@/lib/services/works.service';
 import { isLibraryCoverSource, sanitizeCoverArtUrl } from '@/lib/utils/cover-art-url';
 import { createRequestReplacing, RE_REQUESTABLE_STATUSES, RequestAlreadyReplacedError } from '@/lib/services/request-rerequest';
@@ -269,18 +268,8 @@ export async function createRequestForUser(
     }
   }
 
-  // Evaluate release-date gate (skip-unreleased-auto-search)
-  let releaseGateSkip = false;
-  if (!needsApproval && !skipAutoSearch) {
-    try {
-      const configService = getConfigService();
-      const skipUnreleasedSetting = (await configService.get('indexer.skip_unreleased')) !== 'false';
-      const gate = shouldSkipAutoSearch({ releaseDate }, skipUnreleasedSetting);
-      releaseGateSkip = gate.skip;
-    } catch (error) {
-      logger.warn(`Failed to evaluate release-date gate: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
+  // Evaluate release-date gate (skip-unreleased-auto-search); admin approval applies the same check
+  const releaseGateSkip = !needsApproval && !skipAutoSearch && await shouldWaitForRelease(releaseDate);
 
   let initialStatus: string;
   if (needsApproval) {

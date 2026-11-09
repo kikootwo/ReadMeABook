@@ -77,6 +77,7 @@ A query that throws is counted, never taken for "nothing found". Helpers: `src/l
 | all blocked | unchanged (`No usable releases — N candidates tried, all blocked`) |
 
 - **Interactive search** (all four routes: `requests/[id]/interactive-search`, `audiobooks/search-torrents`, both `interactive-search-ebook`): response `searchFailures: { failed, total, errors }` (up to 3 distinct messages), absent when none failed. Route loggers write the same warn lines to the container log (not System Logs: only job loggers persist)
+- **Failed grab (download link fetch, #298):** the message names Prowlarr when the configured Prowlarr address answered (401/403 add a reverse-proxy login hint: search uses `<base>/api/v1`, grabs use `<base>/<number>/download`), the indexer when a redirect target answered; host, redirect count and `WWW-Authenticate` scheme go to the job log only. See [download-clients.md](download-clients.md#source-fetch--prowlarr-key-scoping)
 - **UI:** `SearchFailureNotice` (amber, `role="status"`) in `InteractiveTorrentSearchModal`: `2 of 5 indexer searches failed, so results may be incomplete.` above the results (or above "No results found" when the rest found nothing), or `All N indexer searches failed, so no indexer results could be fetched.` with "Search Again" in place of the empty state; `Error: <messages>` below. Hooks (`useRequests.ts`) expose `searchFailures` next to `error`
 
 ## Config

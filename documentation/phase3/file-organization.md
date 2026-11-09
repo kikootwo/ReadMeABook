@@ -77,12 +77,13 @@ Result: Douglas Preston, Lincoln Child/Pendergast/01 - Relic/
 **Configuration:**
 - Plex: `plex.trigger_scan_after_import` (boolean, default: false)
 - Audiobookshelf: `audiobookshelf.trigger_scan_after_import` (boolean, default: false)
+- Audiobookshelf: `audiobookshelf.ebook_library_id` (optional) — library scanned after an ebook import; empty scans the audiobook library (for ebook templates that place ebooks outside the audiobook library's folders)
 
 **Flow:**
 1. Files organized to media directory
 2. Request status updated to `downloaded`
 3. Check config setting (backend-specific)
-4. If enabled: Call `ILibraryService.triggerLibraryScan(libraryId)`
+4. If enabled: Call `ILibraryService.triggerLibraryScan(libraryId)` via `triggerScanAfterImport(kind)` (`post-import-scan.ts`), shared by audiobook and ebook organize
 5. Media server scans filesystem (async operation)
 6. RMAB's scheduled check eventually detects new book
 7. Request status updates to `available`
@@ -90,12 +91,14 @@ Result: Douglas Preston, Lincoln Child/Pendergast/01 - Relic/
 **Implementation:**
 - Uses existing `ILibraryService` abstraction
 - `PlexLibraryService.triggerLibraryScan()` → `POST /library/sections/{id}/refresh`
-- `AudiobookshelfLibraryService.triggerLibraryScan()` → `POST /api/libraries/{id}/scan`
+- `AudiobookshelfLibraryService.triggerLibraryScan()` → `POST /api/libraries/{id}/scan` (`triggerABSScan`: id URL-encoded as one path segment; empty, `.`, `..` refused before any request)
 - Called from `organize-files.processor.ts` after status update
 - Backend-agnostic using factory pattern
 
 **Error Handling:**
-- Scan failures logged but don't fail organize job
+- Scan failures logged but don't fail organize job (incl. a refused library id)
+- Library id missing (Plex or Audiobookshelf): warn `Library ID not configured for <backend>, skipping <kind> scan` (was an error for audiobook imports)
+- Scan after import off: info `<backend> filesystem scan trigger disabled (relying on filesystem watcher)` for both kinds (ebook imports logged it at debug)
 - Graceful degradation: scheduled scans eventually detect the book
 - Non-blocking: async operation doesn't delay other jobs
 
