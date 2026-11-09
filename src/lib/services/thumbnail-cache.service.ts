@@ -62,9 +62,10 @@ export class ThumbnailCacheService {
    * Generate a unique filename for a library cover using SHA-256 hash
    * @param plexGuid - Plex/ABS unique identifier (may contain special chars)
    * @param url - Original URL (used for extension)
+   * @param variant - ABS: the item's ASIN, so a rematched item gets a new file and URL (#325a)
    * @returns Filename for cached library cover
    */
-  private generateLibraryFilename(plexGuid: string, url: string): string {
+  private generateLibraryFilename(plexGuid: string, url: string, variant?: string): string {
     // Hash the plexGuid to handle special characters (://, ?, etc.)
     const hash = crypto.createHash('sha256').update(plexGuid).digest('hex').substring(0, 16);
 
@@ -77,7 +78,8 @@ export class ThumbnailCacheService {
       // If URL parsing fails, use default extension
     }
 
-    return `${hash}${ext}`;
+    const suffix = variant && /^[A-Z0-9]{10}$/.test(variant) ? `-${variant}` : '';
+    return `${hash}${suffix}${ext}`;
   }
 
   /**
@@ -143,6 +145,7 @@ export class ThumbnailCacheService {
    * @param backendBaseUrl - Base URL of backend (Plex or ABS server)
    * @param authToken - Authentication token
    * @param backendMode - 'plex' or 'audiobookshelf'
+   * @param options - variant: file name suffix (ABS item ASIN, #325a); refresh: download even if the file exists
    * @returns Local file path of cached thumbnail, or null if failed
    */
   async cacheLibraryThumbnail(
@@ -150,7 +153,8 @@ export class ThumbnailCacheService {
     coverUrl: string,
     backendBaseUrl: string,
     authToken: string,
-    backendMode: 'plex' | 'audiobookshelf'
+    backendMode: 'plex' | 'audiobookshelf',
+    options: { variant?: string; refresh?: boolean } = {}
   ): Promise<string | null> {
     if (!coverUrl || !plexGuid || !backendBaseUrl || !authToken) {
       return null;
@@ -159,16 +163,18 @@ export class ThumbnailCacheService {
     try {
       await this.ensureLibraryCacheDir();
 
-      const filename = this.generateLibraryFilename(plexGuid, coverUrl);
+      const filename = this.generateLibraryFilename(plexGuid, coverUrl, options.variant);
       const filePath = path.join(LIBRARY_CACHE_DIR, filename);
 
       // Check if file already exists (skip download for subsequent scans)
-      try {
-        await fs.access(filePath);
-        // File exists, return path immediately
-        return filePath;
-      } catch {
-        // File doesn't exist, proceed with download
+      if (!options.refresh) {
+        try {
+          await fs.access(filePath);
+          // File exists, return path immediately
+          return filePath;
+        } catch {
+          // File doesn't exist, proceed with download
+        }
       }
 
       // Construct full URL based on backend mode
@@ -210,6 +216,23 @@ export class ThumbnailCacheService {
       // Log warning but don't throw - graceful degradation
       logger.warn(`Failed to cache library thumbnail for ${plexGuid}: ${error instanceof Error ? error.message : String(error)}`);
       return null;
+    }
+  }
+
+  /**
+   * Delete a cached library cover (best effort). Only the file name is used, inside the library cache.
+   * @param cachedPath - cachedLibraryCoverPath as stored
+   */
+  async deleteLibraryThumbnail(cachedPath: string | null | undefined): Promise<void> {
+    const filename = cachedPath ? path.basename(cachedPath) : '';
+    if (!filename || filename.startsWith('.')) return;
+    try {
+      await fs.unlink(path.join(LIBRARY_CACHE_DIR, filename));
+      logger.info(`Deleted library thumbnail: ${filename}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+        logger.warn(`Failed to delete library thumbnail ${filename}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
 
@@ -286,8 +309,8 @@ export class ThumbnailCacheService {
       }
 
       for (const file of files) {
-        // Extract hash from filename (remove extension)
-        const hash = path.parse(file).name;
+        // Extract hash from filename (remove extension and the ABS ASIN suffix, #325a)
+        const hash = path.parse(file).name.split('-')[0];
 
         // If hash is not in active set, delete the file
         if (!activeHashes.has(hash)) {

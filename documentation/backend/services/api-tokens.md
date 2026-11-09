@@ -43,10 +43,16 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - Optional query param: `?skipAutoSearch=true` defers search-job creation.
 - Side effects (identical to UI): duplicate detection, library check, Audnexus enrichment, audiobook upsert, ignore-list check (bypassed), per-user dedup, auto-approve gating, release-date gate, notification queue, search-job queue.
 - Auto-approve: follows the token owner's per-user `autoApproveRequests` setting, then global. No bypass.
-- Response: `201 { success: true, request }` or named error: `{ error: "AlreadyAvailable" | "BeingProcessed" | "DuplicateRequest" | "Ignored" | "UserNotFound" | "ValidationError", message }`
+- Response: `201 { success: true, request }` (`request.audiobook` is stored values, no `libraryAsin`) or named error: `{ error: "AlreadyAvailable" | "BeingProcessed" | "DuplicateRequest" | "Ignored" | "UserNotFound" | "ValidationError", message }`
+
+## GET `/api/requests`
+- Query: `status` (group `active`|`waiting`|`completed`|`failed`|`cancelled`, or one status), `cursor`, `take` (default 20, max 100; legacy `limit`), `myOnly`, `type` (`audiobook`|`ebook`). Response: `{ requests, nextCursor, counts }`; users see their own, admins all (`myOnly=true` for their own).
+- Each `request.audiobook` is shown as the card shows it (#325a): for an `available` audiobook request that follows its Audiobookshelf item, `title`, `author`, `narrator` are the linked item's, `coverArtUrl` is a relative `/api/cache/library/<file>` (the cached library cover, served without auth; null when none is cached), and `libraryAsin` is the effective library ASIN. Every other request: stored values, `libraryAsin: null`. `audibleAsin`, series, year, description stay the requested ones. See [fixes/file-hash-matching.md](../../fixes/file-hash-matching.md#delivered-requests-follow-the-library-asin-325a).
+- Never included: `audiobook.filePath`, `placedEbookFiles`; `selectedTorrent` for admins only.
 
 ## GET `/api/requests/:id`
 - Returns request including `audiobook`, `downloadHistory` (selected), and recent `jobs`.
+- `audiobook` (#325a): the same overlay as `GET /api/requests` (title, author, narrator, relative `coverArtUrl`, effective `libraryAsin`), applied after the ownership check. `audiobook.audibleAsin` stays the requested ASIN. See [fixes/file-hash-matching.md](../../fixes/file-hash-matching.md#delivered-requests-follow-the-library-asin-325a).
 - Non-admin callers (owner sessions, user-role tokens): explicit field list `OWNER_REQUEST_DETAIL_SELECT` (`src/lib/services/request-detail-query.ts`) — omits `Request.selectedTorrent`, `DownloadHistory.magnetLink/torrentUrl/downloadPath`, `Audiobook.filePath`, `Job.payload/result/stackTrace`; remaining strings pass through `stripProwlarrKeyFromResults()`. Admins get the full include, minus `Request.placedEbookFiles` and `Request.approvalBypassedBy` (#232) (never returned by any request response: `GET /api/requests` list, `POST /api/requests` and this route included).
 - Ownership enforced: `requestRecord.userId === req.user.id || role === 'admin'` → otherwise 403.
 - Soft-deleted requests (`deletedAt != null`) return 404.

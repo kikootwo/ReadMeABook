@@ -222,6 +222,15 @@ finalPath = config.customPath ? path.join(downloadDir, config.customPath) : down
 - **Prowlarr key:** `AddDownloadOptions.sourceAuth = { prowlarrBaseUrl, apiKey }` (built in `download-torrent.processor.ts` from `getProwlarrConnection()`). Key sent (`X-Api-Key` + `apikey` query restored if missing) **only** when the hop is exactly the configured scheme/host/port/credentials + `<base path>/{indexerId}/download` (`isProwlarrDownloadUrl`). Any other origin or Prowlarr path gets no key. Every grab is rewritten onto the configured base first (`toConfiguredProwlarrUrl(..., { withCredentials: true })`), which is the only place configured `user:pass@` is added
 - Logs/errors: `urlForLog()` keeps scheme + host only (`magnet:` for magnets); `DownloadSourceError.sourceUrl` uses the same form
 - HTTP error from source → `DownloadSourceError` (processor tries next ranked release on 429/5xx)
+- **Which server answered (#298):** `DownloadSourceError.failure = { hop, redirects, authScheme? }` set by the fetcher. `hop`: `prowlarr` (failing hop on the configured Prowlarr origin), `redirect` (another host after ≥1 redirect), `direct` (another host, no redirect). `authScheme`: first word of `WWW-Authenticate` only (`Basic`), never realm/params. Messages built in `src/lib/utils/grab-failure.ts`:
+
+| hop | Request `errorMessage` (no host ever) |
+|---|---|
+| prowlarr | `Grab failed: Prowlarr returned HTTP 401 for "<title>" (<indexer>)`; on 401/403 adds `This usually means a reverse proxy asks for a login on Prowlarr's download links (<Prowlarr URL>/<number>/download) while <Prowlarr URL>/api is open.` |
+| redirect | `Grab failed: <indexer> returned HTTP 401 for "<title>" after a redirect` |
+| direct / unknown | `Grab failed: <indexer> returned HTTP <status> while fetching "<title>" through Prowlarr` (unchanged) |
+
+- Job log (`DownloadTorrent` job logger, so System Logs), one `warn` per failed fetch: `Download link answered HTTP 401 from <scheme://host> (the configured Prowlarr address | a redirect target | the download link host) after N redirects; WWW-Authenticate: Basic` (or `no WWW-Authenticate`). Usenet clients pass the fetcher's error through unchanged, so SABnzbd/NZBGet get the same messages
 
 ### User-Picked Releases
 **File:** `src/lib/services/download-selection-guard.ts`
