@@ -118,9 +118,9 @@ test('244: an admin deletes a Plex user and an OIDC user from the Users page', a
   result.oidcRow = oidcRow;
   writeEvidence(`${DIR}/result.json`, result);
 
-  expect.soft(result.plexConfirm).toContain(`Delete "${plexUser.name}"? The account is removed and can no longer sign in. Their 2 request(s) are kept.`);
+  expect.soft(result.plexConfirm).toContain(`Delete "${plexUser.name}"? This account is closed and signed out everywhere. Their 2 requests are kept.`);
   expect.soft(result.plexConfirm).toContain('If they sign in with Plex again, they get a new account');
-  expect.soft(result.oidcConfirm).toContain('Their 1 request(s) are kept.');
+  expect.soft(result.oidcConfirm).toContain('Their 1 request is kept.');
   expect.soft(result.oidcConfirm).toContain('If they sign in with single sign-on again, they get a new account');
   for (const row of [plexRow, oidcRow]) {
     expect.soft(row.deletedAt).not.toBe('');

@@ -373,7 +373,7 @@ describe('AdminUsersPage', () => {
       fireEvent.click(deleteIn('PlexPat')!);
 
       const message = await screen.findByText((text) => text.startsWith('Delete "PlexPat"?'));
-      expect(message).toHaveTextContent('Delete "PlexPat"? The account is removed and can no longer sign in. Their 4 request(s) are kept.');
+      expect(message).toHaveTextContent('Delete "PlexPat"? This account is closed and signed out everywhere. Their 4 requests are kept.');
       expect(message).toHaveTextContent('If they sign in with Plex again, they get a new account with the User role');
       fireEvent.click(screen.getByRole('button', { name: 'Delete User' }));
 
@@ -392,7 +392,7 @@ describe('AdminUsersPage', () => {
       fireEvent.click(deleteIn('OidcOlive')!);
 
       const message = await screen.findByText((text) => text.startsWith('Delete "OidcOlive"?'));
-      expect(message).toHaveTextContent('Their 1 request(s) are kept.');
+      expect(message).toHaveTextContent('Their 1 request is kept.');
       expect(message).toHaveTextContent('If they sign in with single sign-on again, they get a new account with the User role');
       expect(message).toHaveTextContent('waits for approval when OIDC access is set to admin approval');
     });

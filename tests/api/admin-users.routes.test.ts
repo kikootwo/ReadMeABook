@@ -331,7 +331,7 @@ describe('Admin users routes', () => {
     const { status, payload, data } = await deleteRow({ authProvider, plexId });
 
     expect(status).toBe(200);
-    expect(payload).toEqual({ success: true, message: 'User "pat" has been deleted. Their 3 request(s) have been preserved.' });
+    expect(payload).toEqual({ success: true, message: 'User "pat" has been deleted. Their 3 requests have been preserved.' });
     expect(data).toMatchObject({ deletedAt: expect.any(Date), deletedBy: 'admin-1', oidcSubject: null, loginTokenHash: null, authToken: null });
     expect(data.plexId.startsWith(`${plexId}-deleted-`)).toBe(true);
     expect(data.plexId).toMatch(FREED_KEY);

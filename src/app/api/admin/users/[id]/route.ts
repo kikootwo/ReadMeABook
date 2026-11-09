@@ -12,6 +12,12 @@ import { freedAccountKeys } from '@/lib/services/auth/deleted-account-keys';
 
 const logger = RMABLogger.create('API.Admin.Users');
 
+/** Tail of the delete message: what happened to the user's requests (empty when they had none). */
+function requestsPreservedText(count: number): string {
+  if (count === 0) return '';
+  return count === 1 ? ' Their 1 request has been preserved.' : ` Their ${count} requests have been preserved.`;
+}
+
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -255,7 +261,7 @@ export async function DELETE(
 
         return NextResponse.json({
           success: true,
-          message: `User "${targetUser.plexUsername}" has been deleted. Their ${targetUser._count.requests} request(s) have been preserved.`
+          message: `User "${targetUser.plexUsername}" has been deleted.${requestsPreservedText(targetUser._count.requests)}`
         });
       } catch (error) {
         logger.error('Failed to delete user', { error: error instanceof Error ? error.message : String(error) });

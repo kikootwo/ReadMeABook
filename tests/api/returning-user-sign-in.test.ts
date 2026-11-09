@@ -132,7 +132,7 @@ describe('a deleted user signing in again gets a new account', () => {
     expect(oldRow.plexId).toMatch(/^1001/);
     expect(oldRow.plexId).toMatch(FREED_KEY);
     expect(usersDb.requestOwnerIds()).toEqual([old.id]);
-    expect(deleted).toMatchObject({ status: 200, body: { success: true, message: expect.stringContaining('1 request(s)') } });
+    expect(deleted).toMatchObject({ status: 200, body: { success: true, message: expect.stringContaining('Their 1 request has been preserved.') } });
 
     // Same status as a Plex user who was never here (Plex sign-in has no approval step)
     await plexCallback(1002, 'newcomer');

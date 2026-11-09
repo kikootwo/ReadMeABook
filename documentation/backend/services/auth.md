@@ -290,7 +290,7 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 - Freed keys (`freedAccountKeys`, `src/lib/services/auth/deleted-account-keys.ts`):
   - local: `plexId` = `local-<username>-deleted-<ms>` (stays in the `local-` space; admin login looks up `local-<username>`, Plex and OIDC sign-in refuse `local-` keys)
   - Plex, OIDC, null provider: `plexId` = `<plexId>-deleted-<uuid v4>`; `oidcSubject` (when set) = `<oidcSubject>-deleted-<same uuid>`. Random part: no Plex id or IdP subject can equal it
-  - `loginTokenHash` cleared
+  - `loginTokenHash` and `authToken` (the Plex account token or the local password hash) cleared
 - `OIDCAuthProvider.findUserByOIDCSubject` skips deleted rows (`deletedAt: null`)
 - Returning user (new row, role from the new-account rule: `user`, or `admin` from the OIDC admin claim; permissions reset to defaults):
 

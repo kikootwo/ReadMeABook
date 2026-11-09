@@ -39,9 +39,15 @@ function returningUserText(authProvider: string | null): string {
   return 'If they sign in with Plex again, they get a new account with the User role and default permissions.';
 }
 
+/** What happens to the user's requests, with a real singular and plural. */
+function requestsKeptText(count: number): string {
+  if (count === 0) return 'They have no requests.';
+  return count === 1 ? 'Their 1 request is kept.' : `Their ${count} requests are kept.`;
+}
+
 /** Confirmation text for deleting a user (any provider). */
 export function deleteUserConfirmMessage(user: UserActionsTarget): string {
-  return `Delete "${user.plexUsername}"? The account is removed and can no longer sign in. Their ${user._count.requests} request(s) are kept. ${returningUserText(user.authProvider)} This cannot be undone.`;
+  return `Delete "${user.plexUsername}"? This account is closed and signed out everywhere. ${requestsKeptText(user._count.requests)} ${returningUserText(user.authProvider)} This cannot be undone.`;
 }
 
 /**
@@ -53,11 +59,14 @@ export function UserActionsCell<T extends UserActionsTarget>({
   currentUserId,
   onEdit,
   onDelete,
+  className = '',
 }: {
   user: T;
   currentUserId: string | null;
   onEdit: (u: T) => void;
   onDelete: (u: T) => void;
+  /** Extra classes for the action group (the table right-aligns it; the mobile card doesn't). */
+  className?: string;
 }) {
   if (user.isSetupAdmin) {
     return (
@@ -71,7 +80,7 @@ export function UserActionsCell<T extends UserActionsTarget>({
   const canDelete = user.id !== currentUserId;
 
   return (
-    <div className="flex items-center gap-3">
+    <div className={`flex items-center gap-3 ${className}`.trim()}>
       {user.authProvider === 'oidc' ? (
         <span className="inline-flex items-center gap-1 text-gray-400 dark:text-gray-600 cursor-not-allowed" title="OIDC user roles are managed by the identity provider">
           <Icon d={INFO_ICON} />
