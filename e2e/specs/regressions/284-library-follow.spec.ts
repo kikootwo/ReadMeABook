@@ -20,20 +20,15 @@
  * so a run on main (no column) shows every value.
  */
 
-import crypto from 'node:crypto';
-import { test, expect, type Browser } from '@playwright/test';
-import { Abs, authState, ctl, evidencePath, execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rmab, snap, stackExecSync, stackLogsSync, urls, waitFor, writeEvidence } from '../../lib/harness';
+import { test, expect } from '@playwright/test';
+import { Abs, authState, ctl, execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rmab, stackExecSync, stackLogsSync, urls, waitFor, writeEvidence } from '../../lib/harness';
 import { dbNow, markJobs, MEDIA, psql, sqlStr, waitOrganized } from './242-helpers';
+import { absItem, disableSchedules, FAKE_PROXY, printenv, rmabCover, SCAN_TYPES, session, waitStartupSettled, type FixtureBook } from './284-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
 
-const SCHEDULES = ['plex_recently_added_check', 'plex_library_scan', 'audible_refresh'];
-const SCAN_TYPES = `('scan_plex','plex_library_scan')`;
-const FAKE_PROXY = 'http://fake-arr:9898';
 const DIR = '284b';
 const EBOOK_KEY = 'ebook_indexer_search_enabled';
-
-type FixtureBook = { asin: string; title: string; author: string; narrator: string };
 
 /** Schedules this spec turned off; afterAll turns them back on for later specs in the stack. */
 const disabledJobs: string[] = [];
@@ -42,16 +37,6 @@ test.afterAll(async () => {
   const rmab = await Rmab.loginAdmin();
   for (const id of disabledJobs.splice(0)) await rmab.raw('PUT', `/api/admin/jobs/${id}`, { enabled: true });
 });
-
-const printenv = (service: string, name: string) => {
-  try {
-    return stackExecSync(service, ['printenv', name]).trim();
-  } catch {
-    return '';
-  }
-};
-
-const sha256 = (data: ArrayBuffer | Buffer) => crypto.createHash('sha256').update(Buffer.from(data as ArrayBuffer)).digest('hex');
 
 /** psql trims, so multi-column reads join with '|' (an empty first column would shift a tab split). */
 const bookRow = (requestId: string) => {
@@ -65,31 +50,6 @@ const counts = () => ({
   audiobooks: Number(psql('select count(*) from audiobooks')),
   searchJobs: Number(psql(`select count(*) from jobs where type = 'search_indexers'`)),
 });
-
-async function session(browser: Browser, width: number, height: number, dark: boolean) {
-  const ctx = await browser.newContext({
-    baseURL: process.env.E2E_BASE_URL, viewport: { width, height }, colorScheme: dark ? 'dark' : 'light',
-    storageState: evidencePath('storage-state.json'),
-  });
-  const page = await ctx.newPage();
-  /** Shots wait for finite CSS transitions/animations (the cards fade in) and images to finish. */
-  const settled = async (dir: string, name: string) => {
-    await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity)
-      && Array.from(document.images).every((i) => i.complete));
-    await page.waitForTimeout(300);
-    await snap(page, dir, name);
-  };
-  return { ctx, page, settled };
-}
-
-/** A generated square cover: a colour field with a big letter (no real artwork). */
-async function generatedCover(browser: Browser, color: string, label: string): Promise<Buffer> {
-  const page = await browser.newPage({ viewport: { width: 400, height: 400 } });
-  await page.setContent(`<body style="margin:0;width:400px;height:400px;background:${color};display:flex;align-items:center;justify-content:center;font:bold 220px sans-serif;color:#fff">${label}</body>`);
-  const jpeg = await page.screenshot({ type: 'jpeg', quality: 90 });
-  await page.close();
-  return jpeg;
-}
 
 test('#325a: a delivered request follows the ASIN Audiobookshelf holds now', async ({ browser }) => {
   test.setTimeout(1_500_000);
@@ -105,25 +65,8 @@ test('#325a: a delivered request follows the ASIN Audiobookshelf holds now', asy
 
   // 0. Schedules off (back on in afterAll); wait out the boot burst (as 284-library-link).
   const rmab = await Rmab.loginAdmin();
-  const { jobs } = await rmab.get<{ jobs: { id: string; type: string }[] }>('/api/admin/jobs');
-  for (const type of SCHEDULES) {
-    const job = jobs.find((j) => j.type === type);
-    expect((await rmab.raw('PUT', `/api/admin/jobs/${job!.id}`, { enabled: false })).status, `disable ${type}`).toBe(200);
-    disabledJobs.push(job!.id);
-  }
-  let lastOverdue = -1;
-  let changedAt = Date.now();
-  await waitFor('RMAB startup jobs settled', async () => {
-    const logs = stackLogsSync('rmab');
-    const overdue = (logs.match(/is overdue, triggering now/g) || []).length;
-    if (overdue !== lastOverdue) {
-      lastOverdue = overdue;
-      changedAt = Date.now();
-    }
-    const refresh = [/\[AudibleRefresh\] Starting Audible data refresh/g, /\[AudibleRefresh\] (Cleanup complete|Error:)/g].map((r) => (logs.match(r) || []).length);
-    const scans = [/\[ScanLibrary\] Scanning library/g, /\[ScanLibrary\] (Matched \d+\/\d+ requests|Error:)/g].map((r) => (logs.match(r) || []).length);
-    return Date.now() - changedAt > 20_000 && refresh[1] >= refresh[0] && scans[1] >= scans[0] ? true : null;
-  }, { timeoutMs: 420_000, intervalMs: 3_000 });
+  await disableSchedules(rmab, disabledJobs);
+  await waitStartupSettled();
 
   // 1a. Deliver martian (X) for real up to `downloaded`.
   const def = {
@@ -148,29 +91,7 @@ test('#325a: a delivered request follows the ASIN Audiobookshelf holds now', asy
   expect((await fetch(`${urls.abs()}/api/libraries/${libraryId}/scan`, { method: 'POST', headers: { Authorization: `Bearer ${abs.token}` } })).ok).toBe(true);
   const item = await waitFor('ABS item for RMAB folder', async () =>
     (await abs.libraryItems(libraryId)).find((i) => String(i.relPath || '').replace(/\/+$/, '') === rel) || null, { timeoutMs: 180_000, intervalMs: 2_000 });
-  const rematch = async (asin: string) => {
-    await abs.req('POST', `/api/items/${item.id}/match`, { provider: 'audible', asin, overrideDefaults: true, overrideDetails: true });
-    const now = (await abs.req('GET', `/api/items/${item.id}`)).media?.metadata?.asin || '';
-    expect(now, `precondition: the ABS item now holds ${asin}`).toBe(asin);
-  };
-  const absAuth = { Authorization: `Bearer ${abs.token}` };
-  /** Give the ABS item a generated cover; returns the sha256 of the cover ABS now serves. */
-  const setCover = async (color: string, label: string) => {
-    const form = new FormData();
-    form.append('cover', new Blob([new Uint8Array(await generatedCover(browser, color, label))], { type: 'image/jpeg' }), `cover-${label}.jpg`);
-    const res = await fetch(`${urls.abs()}/api/items/${item.id}/cover`, { method: 'POST', headers: absAuth, body: form });
-    expect(res.ok, `precondition: ABS took cover ${label} (${res.status})`).toBe(true);
-    // ABS picks the cover format from Accept (a bare */* gets webp); ask as RMAB's axios download does.
-    const served = await fetch(`${urls.abs()}/api/items/${item.id}/cover`, { headers: { ...absAuth, Accept: 'application/json, text/plain, */*' } });
-    expect(served.ok, `precondition: ABS serves cover ${label}`).toBe(true);
-    return sha256(await served.arrayBuffer());
-  };
-  /** The cover RMAB serves at a card's coverArtUrl. */
-  const rmabCover = async (url: unknown) => {
-    if (typeof url !== 'string' || !url.startsWith('/')) return { url, status: 0, sha: null as string | null };
-    const res = await fetch(`${urls.rmab()}${url}`);
-    return { url, status: res.status, sha: res.ok ? sha256(await res.arrayBuffer()) : null };
-  };
+  const { rematch, setCover } = absItem(browser, abs, item.id);
   const oneScan = async (label: string) => {
     const before = counts();
     const t0 = dbNow();
