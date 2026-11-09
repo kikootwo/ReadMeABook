@@ -51,7 +51,7 @@ When a requested audiobook becomes `available`, RMAB adds `req:<username>` to it
 
 ## Privacy
 - Opt-in, off by default, admin-only, ABS only. Nothing leaves the box except to the configured ABS server; RMAB never creates ABS users or sets their tag permissions
-- Inside ABS: anyone who can see an item sees its requester; **every ABS user of the library sees every `req:` tag** in the tag filter (`/api/libraries/:id/filterdata` is not filtered per user); OIDC users without a username get an email-derived tag (or their sign-in ID). Tags persist in ABS's database, metadata.json and backups
+- Inside ABS: anyone who can see an item sees its requester; **every ABS user of the library sees every `req:` tag** in the tag filter (`/api/libraries/:id/filterdata` is not filtered per user; ABS 2.37.1 caches that list per library for 30 minutes, so a new tag shows there within 30 minutes); OIDC users without a username get an email-derived tag (or their sign-in ID). Tags persist in ABS's database, metadata.json and backups
 - Turning it off writes nothing new and removes nothing: delete tags in ABS (Settings → Tags; `DELETE /api/tags/:tag`)
 
 ## Critical Issues

@@ -15,7 +15,8 @@
  *    log `Not tagging with req:johnsmith`; the settings warnings list the shared tag and 李小雷.
  * 4. Tagging off; bob's made-up book delivered (manual import) untagged. On → the backfill job tags it
  *    (`tagged` >= 1). Off and on again → `tagged` 0, `alreadyTagged` >= 2, the item's updatedAt unchanged.
- * 5. An ABS user limited to `req:alice` lists only alice's book; its filterdata lists every `req:` tag.
+ * 5. An ABS user limited to `req:alice` lists only alice's book and gets the same library-wide filterdata as
+ *    root. Not covered: `req:` tags in that list (ABS caches it per library for 30 min from the first scan).
  * 6. carol (approval required) requests a made-up book, the admin denies it, then manual-imports that book
  *    without naming the request (POST /api/admin/manual-import): `available`, recorded
  *    `manual_import:denied`, no `req:carol` after the recently-added check, a full scan, or a backfill
@@ -179,12 +180,17 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
   const login = await (await fetch(`${urls.abs()}/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(absUser) })).json();
   const reader = new Abs(login.user.accessToken || login.user.token);
   const readerItems = (await reader.libraryItems(libraryId)).map((i) => i.id);
-  const asReader = (p: string) => fetch(`${urls.abs()}${p}`, { headers: { Authorization: `Bearer ${reader.token}` } });
-  const fd = await asReader(`/api/libraries/${libraryId}/filterdata`);
-  const filterTags: string[] = fd.ok
-    ? ((await fd.json()).tags ?? [])
-    : ((await (await asReader(`/api/libraries/${libraryId}?include=filterdata`)).json()).filterdata?.tags ?? []);
-  writeEvidence(`${DIR}/step5-exposure.json`, { readerItems, aliceItem: aliceItem.id, filterTags });
+  // ABS 2.37.1 builds filterdata per library (no user argument) and caches it for 30 minutes from the
+  // first scan; tags written through the API join it only when that cache is rebuilt. Recorded, not
+  // asserted: within one run the reader and root both see the cache built before any req: tag existed.
+  const fdOf = async (token: string) => {
+    const res = await fetch(`${urls.abs()}/api/libraries/${libraryId}/filterdata`, { headers: { Authorization: `Bearer ${token}` } });
+    return { status: res.status, tags: res.ok ? ((await res.json()).tags ?? null) : null };
+  };
+  const readerFilter = await fdOf(reader.token);
+  const rootFilter = await fdOf(abs.token);
+  test.info().annotations.push({ type: 'not covered', description: 'step 5: req: tags in the filterdata tag list (ABS caches it per library for 30 min); same list for reader and root recorded' });
+  writeEvidence(`${DIR}/step5-exposure.json`, { readerItems, aliceItem: aliceItem.id, readerFilter, rootFilter });
 
   // 6. carol's denied request, imported by the admin without naming it: never tagged
   const carolReq = (await carol.rmab.requestBook(madeUpBook('B0E2E232C6', 'Carolwords'))).request.id;
@@ -232,7 +238,8 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
   expect.soft(Number(backfill2.result?.alreadyTagged), 'step 4: alice and bob already tagged').toBeGreaterThanOrEqual(2);
   expect.soft(s4Again.updatedAt, 'step 4: the item was not saved again').toBe(s4On.updatedAt);
   expect.soft(readerItems, 'step 5: the limited user lists only alice\'s book').toEqual([aliceItem.id]);
-  expect.soft(filterTags, 'step 5: filterdata lists every req: tag').toEqual(expect.arrayContaining(['req:alice', 'req:bob']));
+  expect.soft(readerFilter, 'step 5: the limited user gets the library-wide filterdata, the same as root').toEqual(rootFilter);
+  expect.soft(readerFilter.status, 'step 5: filterdata answers the limited user').toBe(200);
   expect.soft([carolWaiting, deny.success, carolDenied], 'step 6 precondition: denied').toEqual(['awaiting_approval', true, 'denied']);
   expect.soft(s6Delivered, 'step 6: delivered, recorded').toMatchObject({ status: 'available', mark: 'manual_import:denied' });
   expect.soft(s6Delivered.tags, 'step 6: no req:carol on delivery').not.toContain('req:carol');
