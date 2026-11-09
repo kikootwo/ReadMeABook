@@ -4,7 +4,7 @@
  *
  * Run with: --offline-fixtures --overrides abs-fake-metadata (real ABS; fake Audible/Audnexus answers;
  * generated audio). Schedules off (back on at the end). Local users registered with no approval:
- * alice, bob, john.smith, johnsmith, 李雷 (auto-approve), carol (approval required).
+ * alice, bob, john.smith, johnsmith, 李小雷 (auto-approve), carol (approval required).
  * 1. Tagging on through the settings checkbox (amber box: 1280 light, 375 dark). alice's martian runs a
  *    real download to `downloaded`; the ABS scan adds the item; a manual ABS tag `keepme` is added before
  *    RMAB's first write; ONE recently-added check → the item holds `keepme` then `req:alice`.
@@ -12,7 +12,7 @@
  *    the Audible tag present and `req:alice` gone. ONE full scan → `req:alice` back, Audible tag kept. A
  *    match without override flags and an ABS `scan?force=1` keep it.
  * 3. john.smith's artemis (manual import of generated audio, unnamed) → available, no `req:johnsmith`;
- *    log `Not tagging with req:johnsmith`; the settings warnings list the shared tag and 李雷.
+ *    log `Not tagging with req:johnsmith`; the settings warnings list the shared tag and 李小雷.
  * 4. Tagging off; bob's made-up book delivered (manual import) untagged. On → the backfill job tags it
  *    (`tagged` >= 1). Off and on again → `tagged` 0, `alreadyTagged` >= 2, the item's updatedAt unchanged.
  * 5. An ABS user limited to `req:alice` lists only alice's book; its filterdata lists every `req:` tag.
@@ -66,7 +66,7 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
   const bob = await registerUser(admin, 'bob', true);
   const js1 = await registerUser(admin, 'john.smith', true);
   await registerUser(admin, 'johnsmith', true);
-  await registerUser(admin, '李雷', true);
+  await registerUser(admin, '李小雷', true);
   const carol = await registerUser(admin, 'carol', false);
 
   // 1a. Tagging on through the checkbox; the amber box at 1280 light and 375 dark
@@ -208,7 +208,7 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
   expect.soft(ui.putTagRequester, 'the page sends tagRequester').toBe(true);
   expect.soft(ui.putStatus).toBe(200);
   expect.soft(String(ui.warningText), 'amber box: shared tag').toContain('req:johnsmith is shared by "john.smith", "johnsmith"');
-  expect.soft(String(ui.warningText), 'amber box: untaggable').toContain('"李雷" has no letters or digits');
+  expect.soft(String(ui.warningText), 'amber box: untaggable').toContain('"李小雷" has no letters or digits');
   expect.soft(ui.overflowX, '375: no horizontal overflow').toBe(0);
   expect.soft(settingsAfterUi.tagRequester, 'saved').toBe(true);
   expect.soft(aliceStatusBefore, 'precondition: delivered, not yet available').toBe('downloaded');
