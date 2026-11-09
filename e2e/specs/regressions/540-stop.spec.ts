@@ -2,7 +2,7 @@
  * Component: E2E regression #540 (the app stops cleanly when the container stops)
  * Documentation: documentation/testing/e2e-harness.md
  *
- * run.mjs --stop-specs 540-stop --stop-cycles 3 --stop-time 10 runs the phases below; between two
+ * run.mjs --stop-specs 540-stop --stop-cycles 4 --stop-time 10 runs the phases below; between two
  * phases the harness runs a timed `docker stop --time 10` on this run's rmab container and starts it
  * again (stop/stop-<n>.json). A merge is held busy by SIGSTOPping its ffmpeg (generated audio, short
  * fixtures), so a job is reliably running when the stop lands.
@@ -11,7 +11,12 @@
  *   stop-2  E2 log lines, rerun → downloaded, temp leftovers; artemis merge held, node SIGKILLed
  *           (crash: no ffmpeg left, app restarted), rerun held again     → stop 3 (second cut)
  *   stop-3  E4: the request cut twice is reset and imported by retry_failed_imports; E3: phm merge
- *           held, released together with a SIGTERM to app-start.sh, so the job finishes in the window
+ *           held, released together with a SIGTERM sent straight to app-start.sh (app restart with
+ *           the database up, not supervisorctl); passes whether the import ends inside the drain
+ *           or is left for retry and rerun once, as long as it ends in one import; then node is
+ *           frozen (SIGSTOP)                                             → stop 4 (E5: node frozen)
+ *   stop-4  E5: the wrapper SIGKILLs node at 6 s by wall clock; the container exits before Docker's
+ *           kill, PostgreSQL shuts down cleanly, no recovery on the next start
  * Values are read first and checked with expect.soft, so a run on main records every difference.
  * Exec bridge required.
  */
@@ -59,9 +64,10 @@ function stopReport(k: number) {
   const atAfter = (needle: string) => stop.indexOf(needle, from);
   return {
     timing: stops.find((s) => s.cycle === k) ?? null,
-    shutdown: lines(stop, /\[Shutdown\]|\[App\] (Stop requested|node exited|Ending leftover)/),
+    shutdown: lines(stop, /\[Shutdown\]|\[App\] (Stop requested|node did not stop|node exited|Ending leftover)/),
     order: {
       sigterm: atAfter('[Shutdown] SIGTERM received'), done: atAfter('[Shutdown] Done in'), nodeExited: atAfter('[App] node exited'),
+      watchdog: atAfter('[App] node did not stop within'),
       pgFastShutdown: atAfter('received fast shutdown request'), pgDown: atAfter('database system is shut down'),
     },
     terminatingConnections: count(stop, 'terminating connection due to administrator command'),
@@ -180,7 +186,10 @@ test('#540 stop phases', async () => {
     expect.soft(reset, 'request cut twice is reset').toBe('awaiting_import');
     expect.soft(imported, 'retried import completes').toBeTruthy();
 
-    // E3: the held merge is released together with the stop, so it finishes inside the window
+    // E3: app restart with PostgreSQL and Redis still up. SIGTERM goes straight to app-start.sh (what
+    // supervisord sends it), not through supervisorctl; supervisord's autorestart starts it again.
+    // The held merge is released at the same moment. Whether the import ends inside the 3.5 s drain
+    // depends on the host, so both outcomes pass if they end consistently in one import.
     const held = await requestHeld(rmab, 'asin-merge-tagged', 'phm');
     const nodeBefore = pids(NODE);
     const wrapper = pids('app-start.sh');
@@ -193,18 +202,39 @@ test('#540 stop phases', async () => {
     }, 60_000, 1000);
     await healthy();
     const logs = stackLogsSync('rmab');
+    const done = lines(logs, /\[Shutdown\] Done in/).at(-1) ?? '';
+    const finishedInWindow = /finished 1, left 0 for retry/.test(done);
+    const leftForRetry = /finished 0, left 1 for retry/.test(done);
     const statusRightAfter = status(held.id);
-    await sleep(75_000); // a job left active would rerun through the stall check by now
+    await sleep(75_000); // a job left active reruns through the stall check by now
+    const final = await poll(() => (['downloaded', 'available'].includes(status(held.id)) ? status(held.id) : null), 180_000);
     const jobs = organizeJobs(held.id);
     const stalled = jobs.map((j) => count(stackLogsSync('rmab'), `Job ${j.split(':')[0]} stalled`));
     out.e3 = {
-      ...held, wrapper, restarted, statusRightAfter, final: status(held.id), jobs, stalled,
+      ...held, wrapper, restarted, outcome: finishedInWindow ? 'finished in the drain' : leftForRetry ? 'left for retry' : 'neither',
+      statusRightAfter, final: final ?? status(held.id), jobs, stalled,
       shutdown: lines(logs, /\[Shutdown\] (SIGTERM|Done|Job )|\[App\] node exited/).slice(-5),
     };
-    expect.soft(lines(logs, /\[Shutdown\] Done in/).at(-1) ?? '', 'job finished in the window').toMatch(/finished 1, left 0/);
-    expect.soft(statusRightAfter, 'request imported before node exited').toMatch(/^(downloaded|available)$/);
-    expect.soft(jobs.map((j) => j.split(':')[1]), 'jobs row completed').toEqual(['completed']);
-    expect.soft(stalled, 'not rerun after the restart').toEqual([0]);
+    expect.soft(restarted, 'app started again').toBeTruthy();
+    expect.soft(done, 'stop reports the job finished or left for retry').toMatch(/finished 1, left 0 for retry|finished 0, left 1 for retry/);
+    expect.soft(final, 'request imported').toMatch(/^(downloaded|available)$/);
+    expect.soft(jobs.map((j) => j.split(':')[1]), 'one jobs row, completed').toEqual(['completed']);
+    if (finishedInWindow) {
+      expect.soft(statusRightAfter, 'imported before node exited').toMatch(/^(downloaded|available)$/);
+      expect.soft(stalled, 'not rerun after the restart').toEqual([0]);
+    } else {
+      expect.soft(stalled, 'rerun once after the restart').toEqual([1]);
+    }
+
+    // E5: node frozen (SIGSTOP), so it cannot run its shutdown; the harness then stops the container
+    const frozen = pids(NODE);
+    sh(`for p in ${frozen.join(' ')}; do kill -STOP "$p"; done`);
+    out.e5Frozen = { node: frozen, state: frozen.map((p) => sh(`cut -d' ' -f3 /proc/${p}/stat 2>/dev/null || true`).trim()) };
+    expect(frozen.length, 'node found to freeze').toBeGreaterThan(0);
+  }
+
+  if (phase === 'stop-4') {
+    out.e5 = stopReport(4);
   }
 
   save();
@@ -221,5 +251,19 @@ test('#540 stop phases', async () => {
     expect.soft(e.terminatingConnections, 'no sessions left for PostgreSQL to end').toBe(0);
     expect.soft(e.recoveryNextStart, 'no crash recovery on the next start').toBe(0);
     if (phase !== 'stop-1') expect.soft(e.shutdown.join('\n'), 'job left for retry').toContain('left for retry on next start');
+  }
+  const f = out.e5 as ReturnType<typeof stopReport> | undefined;
+  if (f) {
+    // Frozen node: the wrapper's wall-clock watchdog ends it, so PostgreSQL and Redis still stop cleanly
+    expect.soft(f.timing?.stopSeconds ?? 99, "container exited before Docker's kill").toBeLessThan(10);
+    expect.soft(f.timing?.exitCode, "exit 0, not 137 from Docker's SIGKILL").toBe(0);
+    expect.soft(f.timing?.health.at(-1), 'healthy again after start').toBe('healthy');
+    expect.soft(f.order.sigterm, 'frozen node ran no shutdown').toBe(-1);
+    expect.soft(f.order.watchdog, 'wrapper SIGKILLed node by wall clock').toBeGreaterThanOrEqual(0);
+    expect.soft(f.order.nodeExited, 'node exited after the watchdog').toBeGreaterThan(f.order.watchdog);
+    expect.soft(f.shutdown.join('\n'), 'node status 137').toContain('node exited (status 137)');
+    expect.soft(f.order.pgFastShutdown, 'PostgreSQL stopped after node').toBeGreaterThan(f.order.nodeExited);
+    expect.soft(f.order.pgDown, 'PostgreSQL shut down cleanly').toBeGreaterThan(f.order.pgFastShutdown);
+    expect.soft(f.recoveryNextStart, 'no crash recovery on the next start').toBe(0);
   }
 });
