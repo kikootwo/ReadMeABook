@@ -97,7 +97,8 @@ Result: Douglas Preston, Lincoln Child/Pendergast/01 - Relic/
 
 **Error Handling:**
 - Scan failures logged but don't fail organize job (incl. a refused library id)
-- Audiobookshelf library id missing: warn `Library ID not configured for audiobookshelf, skipping <kind> scan` (was an error for audiobook imports)
+- Library id missing (Plex or Audiobookshelf): warn `Library ID not configured for <backend>, skipping <kind> scan` (was an error for audiobook imports)
+- Scan after import off: info `<backend> filesystem scan trigger disabled (relying on filesystem watcher)` for both kinds (ebook imports logged it at debug)
 - Graceful degradation: scheduled scans eventually detect the book
 - Non-blocking: async operation doesn't delay other jobs
 
