@@ -10,10 +10,15 @@ import { asApp, dbNow, markJobs, MEDIA, psql, q, sh, sqlStr, waitOrganized } fro
 export const TAG_KEY = 'audiobookshelf.tag_requester';
 const PASSWORD = 'e2e-232-tags-pass';
 
-/** Register a local user (registration on, no approval) and set its auto-approve. */
+/**
+ * Register a local user (registration on, no approval) and set its auto-approve. The register route
+ * allows 5 attempts an hour per X-Forwarded-For value, so each user sends its own.
+ */
 export async function registerUser(admin: Rmab, username: string, autoApproveRequests: boolean): Promise<{ id: string; rmab: Rmab }> {
   const res = await fetch(`${urls.rmab()}/api/auth/register`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: PASSWORD }),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': `e2e-232-${encodeURIComponent(username)}` },
+    body: JSON.stringify({ username, password: PASSWORD }),
   });
   const body = await res.json();
   expect(res.status, `register ${username}: ${JSON.stringify(body)}`).toBe(200);
