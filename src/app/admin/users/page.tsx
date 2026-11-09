@@ -14,6 +14,7 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { GlobalUserSettingsModal } from '@/components/admin/users/GlobalUserSettingsModal';
 import { UserPermissionsModal } from '@/components/admin/users/UserPermissionsModal';
 import { UserActionsCell, deleteUserConfirmMessage } from '@/components/admin/users/UserActionsCell';
+import { AddUserButton, AddUserDialog } from '@/components/admin/users/AddUserDialog';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface User {
@@ -164,6 +165,7 @@ function AdminUsersPageContent() {
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [permissionsUserId, setPermissionsUserId] = useState<string | null>(null);
   const [generatedToken, setGeneratedToken] = useState<string | null>(null);
+  const [addUserOpen, setAddUserOpen] = useState(false);
   const toast = useToast();
   const currentUserId = useAuth().user?.id ?? null;
 
@@ -472,6 +474,7 @@ function AdminUsersPageContent() {
               </p>
             </div>
             <div className="flex items-center gap-2 self-start sm:self-auto flex-shrink-0">
+              {data?.localLoginEnabled === true && <AddUserButton onClick={() => setAddUserOpen(true)} />}
               <button
                 onClick={() => setGlobalSettingsOpen(true)}
                 className="inline-flex items-center gap-2 px-3 sm:px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium"
@@ -916,6 +919,17 @@ function AdminUsersPageContent() {
           isLoading={deleting}
           variant="danger"
         />
+
+        {addUserOpen && (
+          <AddUserDialog
+            onClose={() => setAddUserOpen(false)}
+            onAdded={(username) => {
+              setAddUserOpen(false);
+              toast.success(`User "${username}" added`);
+              mutate();
+            }}
+          />
+        )}
 
         {/* Global User Settings Modal */}
         <GlobalUserSettingsModal
