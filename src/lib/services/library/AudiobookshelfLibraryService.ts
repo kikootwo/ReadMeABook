@@ -180,7 +180,8 @@ export class AudiobookshelfLibraryService implements ILibraryService {
       updatedAt: new Date(item.updatedAt),
       path: item.path || undefined,
       isMissing: typeof item.isMissing === 'boolean' ? item.isMissing : undefined,
-      tags: Array.isArray(item.media.tags) && item.media.tags.every((t) => typeof t === 'string') ? [...item.media.tags] : undefined,
+      // Only when the listing carries tags (the requester tagger reads them; no key otherwise)
+      ...(Array.isArray(item.media.tags) && item.media.tags.every((t) => typeof t === 'string') ? { tags: [...item.media.tags] } : {}),
     };
   }
 }
