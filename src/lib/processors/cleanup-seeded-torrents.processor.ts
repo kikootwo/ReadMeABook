@@ -6,6 +6,7 @@
  * Uses the IDownloadClient interface for client-agnostic operation.
  * Checks every candidate (keyset pages of 100), removes only torrents RMAB added,
  * and marks a row 'removed' once its torrent is definitely gone from the client.
+ * Then, unless it stopped early, the cancelled-download pass (cleanup-cancelled-downloads.ts).
  */
 
 import type { Prisma } from '@/generated/prisma';
@@ -16,6 +17,7 @@ import { evaluateSeeding, isUnlimitedSeeding } from '../utils/seeding-policy';
 import { FINISHED_REQUESTS, otherActiveRequestsSharingTorrent, siblingKeepsTorrent } from '../utils/shared-torrent';
 import { createIndexerConfigLookup, describeIgnoredIndexerId, parseSavedIndexers } from '../utils/indexer-config';
 import { knownNotOwned, resolveOwnership } from '../utils/torrent-ownership';
+import { cleanUpCancelledDownloads } from './cleanup-cancelled-downloads';
 
 export interface CleanupSeededTorrentsPayload {
   jobId?: string;
@@ -320,6 +322,13 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
       lastId = page[page.length - 1].id;
     }
 
+    // Requests cancelled after the upgrade: what the cancel could not remove (skipped when the client stopped answering)
+    const cancelled = stoppedEarly
+      ? null
+      : await cleanUpCancelledDownloads({
+        lookupIndexer, deletedHashes, pageSize: CLEANUP_PAGE_SIZE, maxProbeErrorsInARow: MAX_PROBE_ERRORS_IN_A_ROW, logger,
+      });
+
     logger.info(`Indexer config matches: ${matchCounts.id} by id, ${matchCounts.name} by name, ${matchCounts.none} not configured`);
     if (counts.otherClient > 0) {
       logger.warn(`${counts.otherClient} download(s) were recorded for another client type than the one configured now: left as they are`);
@@ -349,6 +358,7 @@ export async function processCleanupSeededTorrents(payload: CleanupSeededTorrent
       errors: counts.errors,
       otherClient: counts.otherClient,
       stoppedEarly,
+      cancelled,
     };
   } catch (error) {
     logger.error(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);

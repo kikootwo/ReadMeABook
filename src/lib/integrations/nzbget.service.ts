@@ -21,6 +21,8 @@ import {
   AddDownloadResult,
   ConnectionTestResult,
   DownloadSourceError,
+  QueuedJobMatch,
+  QueuedDeleteResult,
 } from '../interfaces/download-client.interface';
 
 const logger = RMABLogger.create('NZBGet');
@@ -397,6 +399,32 @@ export class NZBGetService implements IDownloadClient {
       throw new Error(`Failed to delete download ${id} from history`);
     }
     logger.info(`Deleted download ${id} from history`);
+  }
+
+  /**
+   * Cancel: GroupFinalDelete (job and its files) only while the job is in the queue and its name or
+   * category matches. Never deletes from history: NZBGet reuses ids after a reinstall.
+   */
+  async deleteQueuedDownload(id: string, expected: QueuedJobMatch): Promise<QueuedDeleteResult> {
+    const nzbId = parseInt(id, 10);
+    const groups = await this.rpc<NZBGetGroupItem[]>('listgroups', [0]);
+    const group = groups?.find(g => g.NZBID === nzbId);
+    if (!group) return 'not_queued';
+
+    const bare = (name: string | null | undefined) => (name ?? '').trim().replace(/\.nzb$/i, '').toLowerCase();
+    const nameMatches = !!expected.name && bare(group.NZBName) === bare(expected.name);
+    const categoryMatches = !!expected.category && (group.Category ?? '') === expected.category;
+    if (!nameMatches && !categoryMatches) {
+      logger.warn(`Queued job ${id} ("${group.NZBName}", category "${group.Category}") does not match the cancelled download; left as it is`);
+      return 'mismatch';
+    }
+
+    const result = await this.rpc<boolean>('editqueue', ['GroupFinalDelete', '', [nzbId]]);
+    if (!result) {
+      throw new Error(`Failed to delete download ${id} from queue`);
+    }
+    logger.info(`Deleted queued download ${id} and its files (cancelled)`);
+    return 'deleted';
   }
 
   /**

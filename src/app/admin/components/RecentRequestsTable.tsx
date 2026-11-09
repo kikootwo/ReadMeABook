@@ -386,6 +386,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       }
       const result = await response.json().catch(() => null);
       const filesKeptReason: string | undefined = result?.details?.filesKeptReason;
+      const folderKept = !!result?.details?.folderKept;
 
       // Refresh the requests list
       await mutate(apiUrl);
@@ -396,6 +397,9 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       setSelectedRequest(null);
       if (filesKeptReason) {
         toast.warning(`Request deleted; files kept: ${filesKeptReason}`, 10000);
+      } else if (folderKept) {
+        // The audio went; the book folder stays with what it still holds (#526)
+        toast.warning(result.message, 10000);
       } else {
         toast.success('Request deleted successfully');
       }
@@ -444,12 +448,19 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
         body: JSON.stringify({ action: 'cancel' }),
       });
 
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to cancel request');
+        throw new Error(data.message || 'Failed to cancel request');
       }
 
-      toast.success('Request cancelled');
+      // The server says what happened to the download (removed, kept to seed, ...); a download it
+      // could not remove is a warning, not a success
+      const message = data.message || 'Request cancelled';
+      if (data.download === 'retry_later' || data.download === 'not_removed') {
+        toast.warning(message);
+      } else {
+        toast.success(message);
+      }
       await mutate(apiUrl);
     } catch (error) {
       console.error('[Admin] Failed to cancel request:', error);

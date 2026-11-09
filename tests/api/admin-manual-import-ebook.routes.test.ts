@@ -78,7 +78,7 @@ async function browse(dir: string, type?: string) {
   return { status: response.status, payload: await response.json() };
 }
 
-const updatedIds = () => prismaMock.request.update.mock.calls.map((c: Array<{ where: { id: string } }>) => c[0].where.id);
+const updatedIds = () => prismaMock.request.updateMany.mock.calls.map((c: Array<{ where: { id: string } }>) => c[0].where.id);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -103,7 +103,8 @@ beforeEach(() => {
   prismaMock.request.findFirst.mockImplementation(async ({ where }: { where?: Record<string, unknown> } = {}) =>
     rows.filter((r) => matches(r, where)).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null
   );
-  prismaMock.request.update.mockImplementation(async ({ where }: { where: { id: string } }) => rows.find((r) => r.id === where.id));
+  prismaMock.request.updateMany.mockImplementation(async ({ where }: { where: { id: string; status: string } }) =>
+    ({ count: rows.some((r) => r.id === where.id && r.status === where.status) ? 1 : 0 }));
   prismaMock.request.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'req-new', ...data }));
 });
 
@@ -140,8 +141,8 @@ describe('manual import from an ebook request', () => {
     expect(status).toBe(200);
     expect(payload.requestId).toBe('req-eb');
     expect(updatedIds()).toEqual(['req-eb']);
-    expect(prismaMock.request.update).toHaveBeenCalledWith({
-      where: { id: 'req-eb' },
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+      where: { id: 'req-eb', status: 'failed' },
       data: expect.objectContaining({ status: 'processing', errorMessage: null }),
     });
     expect(jobQueueMock.addOrganizeJob).toHaveBeenCalledWith('req-eb', 'ab-1', fwd(book), undefined, false, ['Book.epub']);
@@ -151,7 +152,7 @@ describe('manual import from an ebook request', () => {
     const { status, payload } = await postImport({ requestId: 'req-eb', requestType: 'ebook', selectedFiles: ['Book.mp3'] });
     expect(status).toBe(400);
     expect(payload.error).toBe('Not an ebook file: Book.mp3');
-    expect(prismaMock.request.update).not.toHaveBeenCalled();
+    expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
     expect(jobQueueMock.addOrganizeJob).not.toHaveBeenCalled();
   });
 
@@ -169,7 +170,7 @@ describe('manual import from an ebook request', () => {
   it('takes the type from the stored request: an audiobook request id flagged ebook is a 400', async () => {
     const { status } = await postImport({ requestId: 'req-ab', requestType: 'ebook', selectedFiles: ['Book.mp3'] });
     expect(status).toBe(400);
-    expect(prismaMock.request.update).not.toHaveBeenCalled();
+    expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
     expect(jobQueueMock.addOrganizeJob).not.toHaveBeenCalled();
   });
 
@@ -195,7 +196,7 @@ describe('manual import from an ebook request', () => {
     rows[1].status = 'downloading';
     const { status } = await postImport({ requestId: 'req-eb', requestType: 'ebook', selectedFiles: ['Book.epub'] });
     expect(status).toBe(409);
-    expect(prismaMock.request.update).not.toHaveBeenCalled();
+    expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
     expect(jobQueueMock.addOrganizeJob).not.toHaveBeenCalled();
   });
 

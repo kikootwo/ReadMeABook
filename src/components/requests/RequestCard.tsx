@@ -15,6 +15,7 @@ import { usePreferences } from '@/contexts/PreferencesContext';
 import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsModal';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { COMPLETED_STATUSES, CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
+import { cancelConfirmText } from '@/lib/utils/cancel-confirm-text';
 
 interface RequestCardProps {
   request: {
@@ -289,7 +290,7 @@ export function RequestCard({ request, showActions = true }: RequestCardProps) {
         message={
           isAwaitingApproval
             ? 'This request is pending admin approval and will be withdrawn. You can request it again later.'
-            : 'This request has already been approved and is actively being processed. Cancelling will stop the download.'
+            : cancelConfirmText(request.status, requestType)
         }
         confirmText={isAwaitingApproval ? 'Withdraw request' : 'Cancel request'}
         cancelText="Keep request"

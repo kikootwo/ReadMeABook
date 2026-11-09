@@ -66,6 +66,7 @@ export async function DELETE(
             torrentsKeptShared: result.torrentsKeptShared,
             torrentsKeptNotOwned: result.torrentsKeptNotOwned,
             ...(result.filesKeptReason && { filesKeptReason: result.filesKeptReason }),
+            ...(result.folderKept && { folderKept: result.folderKept }),
           },
         });
       } catch (error) {

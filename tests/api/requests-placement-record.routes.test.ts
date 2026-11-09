@@ -106,7 +106,8 @@ describe('other responses that return a request row', () => {
   it('PATCH /api/requests/[id] (cancel)', async () => {
     authRequest.json.mockResolvedValue({ action: 'cancel' });
     prismaMock.request.findFirst.mockResolvedValueOnce(row({ status: 'pending' }));
-    prismaMock.request.update.mockResolvedValueOnce(row({ status: 'cancelled' }));
+    prismaMock.request.updateMany.mockResolvedValueOnce({ count: 1 });
+    prismaMock.downloadHistory.findFirst.mockResolvedValueOnce(null);
 
     const { PATCH } = await import('@/app/api/requests/[id]/route');
     const payload = await (await PATCH({} as never, { params: Promise.resolve({ id: 'req-1' }) })).json();

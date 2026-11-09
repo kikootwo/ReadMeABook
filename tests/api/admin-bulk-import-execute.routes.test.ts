@@ -87,7 +87,7 @@ describe('Admin bulk-import execute route: request size limit (32 MB)', () => {
     fsMock.stat.mockResolvedValue({ isDirectory: () => true });
     prismaMock.audiobook.findFirst.mockResolvedValue({ id: 'ab-1', audibleAsin: 'B000000409' });
     prismaMock.request.findFirst.mockResolvedValue({ id: 'req-old', status: 'failed', autoRerequestCount: 4 });
-    prismaMock.request.update.mockResolvedValue({ id: 'req-old' });
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     const { POST } = await import('@/app/api/admin/bulk-import/execute/route');
 
     const response = await POST(post(JSON.stringify({
@@ -97,8 +97,8 @@ describe('Admin bulk-import execute route: request size limit (32 MB)', () => {
     expect(response.status).toBe(200);
     expect((await response.json()).results[0]).toMatchObject({ success: true, requestId: 'req-old' });
     expect(prismaMock.request.create).not.toHaveBeenCalled();
-    expect(prismaMock.request.update).toHaveBeenCalledWith({
-      where: { id: 'req-old' },
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+      where: { id: 'req-old', status: 'failed' },
       data: expect.objectContaining({ status: 'processing', autoRerequestCount: 0 }),
     });
   });

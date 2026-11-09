@@ -183,6 +183,7 @@ export async function POST(
               data: {
                 status: 'downloading',
                 selectedTorrent: null as any, // Clear after use
+                approvalBypassedBy: null, // approved now: clears an earlier record (#232)
               },
               include: {
                 audiobook: true,
@@ -235,6 +236,7 @@ export async function POST(
               where: { id },
               data: {
                 status: 'pending',
+                approvalBypassedBy: null, // approved now: clears an earlier record (#232)
                 // Drop an unusable stored pick so it can't be approved again
                 ...(existingRequest.selectedTorrent ? { selectedTorrent: Prisma.DbNull } : {}),
               },

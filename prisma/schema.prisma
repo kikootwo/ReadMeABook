@@ -242,6 +242,10 @@ model Request {
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
   completedAt      DateTime? @map("completed_at")
+  // When the request was cancelled (#228). Set by every cancel; meaningful only while status = 'cancelled'.
+  // NULL on a cancelled request = cancelled before this field existed: the cancelled-download cleanup never
+  // touches those. No default on purpose: a default would fill old rows on upgrade.
+  cancelledAt      DateTime? @map("cancelled_at")
   releaseDate      DateTime? @map("release_date") @db.Date // Book release date (copied from Audnexus on creation). Used by skip-unreleased-auto-search gate.
 
   // Request type: 'audiobook' (default) or 'ebook'
@@ -252,6 +256,10 @@ model Request {
   // the import copied the file (placeFile 'copied'); [] when the import found it already there. NULL = no record
   // (imported before this field existed, or never imported). A request delete removes only these files.
   placedEbookFiles Json?     @map("placed_ebook_files")
+  // Set when the request left awaiting_approval/denied/cancelled without an approval (`<path>:<fromStatus>`,
+  // e.g. asin_match:awaiting_approval, manual_import:denied, bulk_import:cancelled); the approve route and a
+  // manual import that names the request clear it. NULL = no record (approved, or before this field existed).
+  approvalBypassedBy String? @map("approval_bypassed_by")
 
   // Soft delete support
   deletedAt DateTime? @map("deleted_at")

@@ -111,6 +111,7 @@ A query that throws is counted, never taken for "nothing found". Helpers: `src/l
 - Shows table with: rank, title, size, quality score, seeders, indexer, publish date
 - Editable title field allows search refinement
 - Available for same statuses as manual search
+- A non-admin on a `denied` request → 403 `RequestDenied` (also for Select Torrent, #232); admins can search and pick for it
 - User clicks "Download" button to select specific torrent
 
 **Select Torrent** (`POST /api/requests/{id}/select-torrent`)

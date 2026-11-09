@@ -134,6 +134,7 @@
 - **Bulk import (scan folders, match Audible, batch import)** → [features/bulk-import.md](features/bulk-import.md)
 - **Jobs management UI** → [backend/services/scheduler.md](backend/services/scheduler.md)
 - **Request deletion (soft delete, seeding awareness, library delete guard, files kept reason)** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
+- **Request cancel (stops the download, cancelled-download cleanup pass, token cancel route)** → [admin-features/request-cancel.md](admin-features/request-cancel.md)
 - **Request approval system, auto-approve settings** → [admin-features/request-approval.md](admin-features/request-approval.md)
 - **Release blocklist (auto-block failed releases, /admin/blocklist)** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md)
 
@@ -184,6 +185,7 @@
 **"Local admin can't log in / 'Invalid username or password' with correct credentials"** → [admin-features/credential-recovery.md](admin-features/credential-recovery.md)
 **"How do I recover from a lost CONFIG_ENCRYPTION_KEY?"** → [admin-features/credential-recovery.md](admin-features/credential-recovery.md)
 **"How do I delete requests?"** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
+**"Does cancelling a request stop its download?" / "Can an API token cancel a request?"** → [admin-features/request-cancel.md](admin-features/request-cancel.md) (partial removed, finished seeds first, cleanup pass for post-upgrade cancels; `POST /api/requests/:id/cancel`), [backend/services/api-tokens.md](backend/services/api-tokens.md)
 **"How do I approve/deny user requests?"** → [admin-features/request-approval.md](admin-features/request-approval.md)
 **"How do I enable auto-approve for requests?"** → [admin-features/request-approval.md](admin-features/request-approval.md)
 **"How does the release blocklist work?"** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md)
