@@ -11,8 +11,18 @@ Target directory read from database config `media_dir` (configurable in setup wi
 **Template-based organization:**
 - Config key: `audiobook_path_template`
 - Default: `{author}/{title} {asin}`
-- Variables: `{author}`, `{title}`, `{narrator}`, `{asin}`, `{year}`
-- Optional variables (narrator, asin, year) are removed if not available
+- Variables: `{author}`, `{primaryAuthor}`, `{title}`, `{narrator}`, `{asin}`, `{year}`, `{series}`, `{seriesPart}` (`src/lib/utils/path-template.util.ts`)
+- Optional variables (narrator, asin, year, series, seriesPart) are removed if not available
+- `{primaryAuthor}`: first entry of `author`, split on `,` `;` `&` (the bulk import set), skipping entries that sanitize to nothing; derived in `src/lib/utils/path-template-variables.ts`. `and` does not split. A comma always splits, so `Martin Luther King, Jr.` gives `Martin Luther King` and `Tolkien, J.R.R.` gives `Tolkien`. Role text stays (`Birgit Schmitz - Übersetzer`). No usable entry → empty, like an empty `{narrator}`
+- Paths are built at organize time only: a template change applies to books organized afterward. Existing folders are not moved; re-importing a book after a change lands it in the new folder
+
+**Formats (`{seriesPart:00}`, #250):**
+- `{seriesPart:00}`, `{seriesPart:000}`, `{seriesPart:0000}` pad the part to 2, 3 or 4 digits. Only `seriesPart` takes a format
+- Pads only a number (`1`, `1.5`) or a range with `-` (`1-3`, `1 - 3`): each integer part gets leading zeros, digits are never cut, the separator stays as written. `1`→`01`, `1.5`→`01.5`, `10`→`10`, `100`→`100`, `1-3`→`01-03`. Other shapes stay as they are (`Book 1`, `1a`, `1, 2`, `-1`, an en dash range). Empty → removed, like `{seriesPart}`
+- Plain or in a conditional block: `{Book seriesPart:00 - }` → `Book 01 - `
+- Grammar: brace content is one reference (`name` or `name:format`; the format is the letters and digits after `:`) or a conditional block (literal text + references). Both validators reject any other format (`{seriesPart:x}`, `{seriesPart:0}`, `{year:00}`) with `Unsupported format: {...}`. A `:` with no letter or digit after it (`{seriesPart:}`, `{Part: seriesPart}`) is still `Invalid characters found: :`
+- Resolver: only brace content with a supported format takes the format path (`usesFormat`, `resolveFormattedBlock` in `src/lib/utils/path-template-variables.ts`); order per value is trim → pad → sanitize. Every other brace resolves exactly as before, including a saved invalid template (`{seriesPart:x}` → `1:x`, `{seriesPart:year}` → `1:2006`)
+- Unchanged output for every other template is pinned by `tests/lib/utils/path-template.golden.test.ts` (fixture captured before formats)
 
 **Examples:**
 ```
@@ -24,6 +34,12 @@ Result: Douglas Adams/The Hitchhiker's Guide to the Galaxy (2005)/
 
 Template: {author}/{narrator}/{title}
 Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
+
+Template: {primaryAuthor}/{title}   (author "Douglas Preston, Lincoln Child")
+Result: Douglas Preston/Relic/
+
+Template: {author}/{series}/{seriesPart:00} - {title}
+Result: Douglas Preston, Lincoln Child/Pendergast/01 - Relic/
 ```
 
 **Legacy behavior (hardcoded):**
@@ -33,6 +49,8 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
 - Fallback: `Book Title`
 
 **Rationale:** Template system allows customization for different metadata agent configurations and user preferences while maintaining backward compatibility.
+
+**What a request delete removes from the book folder (#526):** an audiobook request delete removes the audio this import hashed (`filesHash`), stale `.rmab-partial-*` copies, and `cover.jpg` plus OS/ABS junk only when nothing else is left but ebooks recorded by active ebook requests; the folder goes only when empty. Ebooks of another request, user files and subfolders stay and are listed; this never removes more than the former whole-folder delete. An ebook request delete removes its recorded files (#497) and, when nothing else is left in that folder, also the junk files (`.DS_Store`, `metadata.json`, `desktop.ini`, `._*`, ...) and junk folders (`@eaDir`, `.@__thumb`), then the emptied folder and empty parents (before #526 it removed only the recorded files). Details: [request-deletion.md](../admin-features/request-deletion.md)
 
 ## Process
 
@@ -113,7 +131,7 @@ Result: Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/
   - M4B/M4A/MP4: `description` (`desc`) + `synopsis` (`ldes`), each capped
   - MP3: `description` (TXXX); FLAC: `comment` (= Vorbis `DESCRIPTION`; replaces the source's DESCRIPTION/COMMENT, which ffmpeg reads as one `comment`; a `description` key would add a second one, read as "old;new")
 - `genre` - top-level genres (`primaryGenres`, no sub-genre tags) joined with `; `; `/` or `;` in a name → ` & ` (split/trim/join; Audiobookshelf splits on `/`, `//`, `;`)
-- M4B/M4A/MP4 only: `media_type=2` (`stik` Audiobook), `gapless_playback=1` (`pgap`) - always written, before `-movflags +faststart`
+- M4B/M4A/MP4 only: `media_type=2` (`stik` Audiobook), `gapless_playback=1` (`pgap`) - always written, before `-movie_timescale 1000` (see MP4 Movie Timescale) and `-movflags +faststart`
 - Publisher, subtitle, language - from the lookup only (`publisherName`, `subtitle`, `language`; the book row stores none). `sanitizeShortTagValue` (`metadata-text.ts`; `bookDetailValues` applies it to all three): non-strings ignored, bounded, whitespace runs → one space, C0 controls dropped, lone surrogates and U+FFFE/U+FFFF → U+FFFD (ffprobe reads neither back as written, which would fail the post-step for every tag, the ASIN included), capped at `MAX_SHORT_TAG_BYTES` (1 KiB). Language: first letter capitalized (`languageTagValue`, "english" → "English", as Audiobookshelf shows it; not an ISO 639 code). Empty → not written (MP3/FLAC keep the source's; an MP4's remux drops the source's freeform tags)
   - M4B/M4A/MP4: freeform `PUBLISHER`, `SUBTITLE`, `LANGUAGE` (ASIN step; ffmpeg drops them)
   - MP3: `publisher` (TPUB), `TIT3` (the ID3 subtitle frame) plus `subtitle=` (clears a source `TXXX:SUBTITLE`, which would sit next to TIT3), `language` (TLAN, the name; ID3 expects ISO 639-2 there)
@@ -142,7 +160,7 @@ ffprobe -v quiet -print_format json -show_format "audiobook.m4b" | grep -i asin
 exiftool "audiobook.m4b" | grep -i asin
 ```
 
-**MP4 layout:** every tagged MP4 is written moov first: ffmpeg `-movflags +faststart` on the tagging pass (always), and the freeform post-step also writes moov first. A post-step that refuses or fails leaves ffmpeg's output as it is (moov first, no freeform tags) and logs a warning.
+**MP4 layout:** every tagged MP4 is written with movie timescale 1000 (when the muxer has the option) and moov first: ffmpeg `-movflags +faststart` on the tagging pass (always), and the freeform post-step also writes moov first. A post-step that refuses or fails leaves ffmpeg's output as it is (moov first, no freeform tags) and logs a warning.
 
 ### MP4 Freeform Tags
 
@@ -171,13 +189,47 @@ exiftool "audiobook.m4b" | grep -i asin
 
 **Fields (#208):** `ASIN` always; `PUBLISHER`, `SUBTITLE`, `LANGUAGE` with tagging on (Audiobookshelf 2.37.1 reads `publisher`, `subtitle`, `language` from these names). New fields go in `buildMp4FreeformTags`; a value empty after sanitizing is left out (the post-step writes all tags or none, so one bad value must not cost the ASIN).
 
+### MP4 Movie Timescale (#511)
+
+**Code:** `src/lib/utils/mp4-movie-timescale.ts`; used by both ffmpeg MP4 writers: the tagger's MP4 argv (`metadata-tagger.ts`) and the chapter merger (`chapter-merger.ts`, copy and re-encode)
+- Cause: FFmpeg 9 (commit 51f5f60443, n9.0+, still on master) sets the mov muxer's default `movie_timescale` to the LCM of every stream's time base. The QuickTime chapter (text) track takes that timescale; `ff_mov_check_timestamp` drops a chapter sample whose duration is over INT_MAX ("Application provided duration ... is invalid") and clamps a dts jump of INT_MAX or more to the previous dts + 1 ("out of range"). ffmpeg still exits 0
+- A demuxed `covr` cover has time base 1/90000, so the limit per chapter is (2^31-1)/timescale:
+
+| Audio | With cover | Without cover |
+|---|---|---|
+| 22.05 / 44.1 kHz | 4,410,000 → 487 s | sample rate → 27.1 h / 13.5 h |
+| 48 kHz | 720,000 → 2983 s | 48000 → 12.4 h |
+
+- Readers: ffprobe (and Audiobookshelf) build chapters from Nero `chpl`, then overwrite them by index from the chapter track's samples: dropped samples shift later titles up, clamped ones start near 0 with zero length. When only trailing chapters are long, the table reads intact but the track has fewer samples (players that read the track lose chapters)
+- Fix: `movieTimescaleArgs()` → `['-movie_timescale', '1000']` (`MOVIE_TIMESCALE`, ffmpeg 8's default: movie-level durations and chapter times in ms, limit 24.8 days per chapter) or `[]`. Placed before `-movflags +faststart`; never in MP3/FLAC argv
+- Gate: `ffmpeg -hide_banner -h muxer=mp4` (execFile, 15 s timeout) once per process; the flag only when a line starts with `-movie_timescale` (9.0.2 lists it "(default 0)", 8.1.2 "(default 1000)"). The option exists from FFmpeg 5.0; an older build would reject it at argv parse (every MP4 tag and merge failing) and already writes 1000. A failed probe gives `[]`, is logged once at debug and is run again on the next call
+- Check a placed file: `ffprobe -v error -select_streams d -show_entries stream=nb_frames,time_base -of csv=p=0 book.m4b` must give one frame per chapter (`ffprobe -v error -show_chapters -of csv=p=0 book.m4b | wc -l`). The frame count is the check: an intact file tagged by v1.2.4-v1.2.12 can show `1/4410000` or `1/22050`; files tagged after this fix show `1/1000`
+- Tests: `tests/utils/mp4-movie-timescale.test.ts` (probe, argv of both sites), `tests/utils/metadata-tagger.chapters.integration.test.ts` (real ffmpeg: cover + 100/600/600 s and cover + 6 mixed chapters at 22.05 kHz; table, track sample count and time base, cover, audio packets), e2e `regressions/511-chapters-cover.spec.ts`. Re-run them on any ffmpeg bump
+
+### Chapter Guard (#511)
+
+**Code:** `src/lib/utils/chapter-guard.ts`; call site `file-organizer.ts`, per audio file after the MP4 freeform step and before placement (checks the final tagged copy)
+- Why: ffmpeg 9.x's tagging remux broke chapter tables of MP4s with a cover and long chapters (see MP4 Movie Timescale); with that fix the guard should not fire for #511, and it stays as the safety net for the next muxer change
+- Blind spot: it compares the ffprobe chapter table only, so a chapter track that lost trailing samples while `chpl` keeps the table intact passes as `kept`
+- `probeChapters(file)` → `{ title, start, end }[]` (seconds): `ffprobe -v error -show_chapters -of json`, execFile argv (no shell), 60 s timeout, 16 MiB maxBuffer; title key case-insensitive
+- `firstChapterDifference(before, after)` → 1-based first differing chapter, 0 = same: count, titles (exact, in order), start and end each within `CHAPTER_TOLERANCE_S` (0.1 s; NaN differs)
+- `checkTaggedChapters(source, tagged, name)` → `kept` | `unchecked` | `changed` (+ `warning`), runs on every tagged copy (all formats; only `organize()` tags: download imports, Manual/Bulk Import, request retries)
+
+| Case | Result |
+|------|--------|
+| source has no chapters | `kept` (tagged copy not probed) |
+| tables match | `kept`, tagged copy placed |
+| tables differ, or ffprobe fails on the tagged copy | `changed`: original placed exactly as with tagging off (`placeAudio` without a derivative), `.tmp` removed, record `tagsDropped: 'tagging changed the chapter table'`, `result.errors` reason; warn `Tagging changed the chapter table of <file> (N chapters before, M after, first change at chapter K), so it was imported without tags` |
+| ffprobe fails on the source | `unchecked`: tagged copy placed as before; warn `Could not read the chapter table of <file> (<msg>); the tagged copy is used without a chapter check` |
+
+
 **Configuration:**
 - Key: `metadata_tagging_enabled` (Configuration table)
 - Default: `true`
 - Configurable in: Setup wizard (Paths step), Admin settings (Paths tab)
 
 **Implementation:**
-- Uses ffmpeg with `-codec copy -movflags +faststart` for MP4 (no re-encoding, metadata only); timeout scales with the file size
+- Uses ffmpeg with `-codec copy -movie_timescale 1000 -movflags +faststart` for MP4 (no re-encoding, metadata only; the timescale only when the muxer lists it); timeout scales with the file size
 - The ASIN step (MP4 Freeform Tags) runs later, on the file being placed; its warnings are logged and do not fail the import
 - Fast (no audio transcoding)
 - Lossless (original audio preserved)
@@ -200,7 +252,7 @@ exiftool "audiobook.m4b" | grep -i asin
 - `src/lib/processors/organize-tag-details.ts` - description/genres for the tags
 
 **Requirements:**
-- ffmpeg + ffprobe must be on PATH (`/usr/local/bin`)
+- ffmpeg + ffprobe must be on PATH (`/usr/local/bin`); outside the image, FFmpeg 5.0 or newer is recommended (older builds work, without the timescale flag, which they do not need)
 - **Image install** (`dockerfile.unified`): see [deployment/unified.md](../deployment/unified.md) → ffmpeg (pinned static 9.0.2, amd64 + arm64)
 - Codecs/formats RMAB needs: demux concat/ffmetadata/mov/mp3/flac/aac/ogg; decode mp3/flac/aac/alac/ogg (vorbis, opus); encode aac (libfdk_aac optional, not in image); mux mp4/ipod/mp3/flac/null; bsf aac_adtstoasc
 - **Verify installation:** `docker exec readmeabook ffmpeg -version`
@@ -326,6 +378,8 @@ When user deletes and re-requests the same audiobook:
 - Permissions (`applyFileMode` → `applied` / `refused` / `missing`): after a copy is published, `chmod(file_chmod)` is best-effort. mergerfs/NFS/FUSE/SMB often refuse it (EPERM, ENOTSUP, EACCES, …) though the write succeeded → placement stays `copied` with `PlaceResult.warning` (path, octal mode, code). ENOENT/ENOTDIR mean no file at the path → `failed`, never verified. Same for downloaded/cached cover art (missing = cover failed). No `chown` is done
 - Warnings collect in `OrganizationResult.permissionWarnings` / `EbookOrganizationResult.permissionWarnings` (never in `errors`); `reportImportStatus` logs one summary per job (`summarizePermissionWarnings`) and the request message gets `permissions could not be applied to <n> file(s)`
 
+**Ebook placement record (#497):** after a successful ebook organize, `recordEbookPlacement` (`src/lib/utils/ebook-placement.ts`, one call in `processEbookOrganization`) appends `{ path, size, sha256, placedAt }` of the placed target to `Request.placedEbookFiles`, only when placeFile returned `copied` (RMAB created the file; hash read from the placed bytes, after the Kindle fix). `identical`/`present`/`differs` add nothing (field becomes at least `[]`). Append-only, same path replaced by the newest entry; a NULL record on a request whose `completedAt` is already set (an earlier delivery with no record) starts with `{ earlierImport: 'unrecorded' }`; never fails the import (a hash or DB error is a warning and leaves the field as it was). The ebook request delete removes only these files ([request-deletion.md](../admin-features/request-deletion.md) D2).
+
 **Stale partials:** before placing, regular files in that one target folder matching the exact pattern are removed when they belong to this target name or are older than 24 h.
 
 **`placeFile(source, target)` statuses** (records keyed on the original source path):
@@ -341,7 +395,7 @@ When user deletes and re-requests the same audiobook:
 | larger | `differs` |
 
 - `.mp4` / `.m4a` targets also match an existing `<name>.m4b` (Plex format coercion rename).
-- Tagged derivative (`<source>.tmp`): checked before it is placed: its audio duration must be within 1 s of the original's, both measured from the first audio stream's packets (`probeStreamDurationMs`; `format.duration` is an estimate for e.g. VBR MP3 without a Xing header). Otherwise (or on probe failure) the original is placed untagged (byte-checked) and the record carries `tagsDropped` (short reason, shown on the request). A derivative that fails or differs at placement falls back to the original (`tagsDropped` when the original was copied). After a failed derivative copy the fallback runs with `resumeInterrupted: false`: an existing target (the failed copy may have landed) is never replaced. If the target was not there before the tagged attempt, what is there now is RMAB's own unverified copy → `failed` (not `differs`); the reason keeps both parts (`Tagged copy failed (…); original not placed (…)`). The check runs on every import, torrents included: seeded-torrent cleanup removes the download later without import evidence, so the library copy must already be right. Tagging does not use `-xerror` (codec copy would turn benign timestamp warnings into lost tags).
+- Tagged derivative (`<source>.tmp`): checked before it is placed: its audio duration must be within 1 s of the original's, both measured from the first audio stream's packets (`probeStreamDurationMs`; `format.duration` is an estimate for e.g. VBR MP3 without a Xing header). Otherwise (or on probe failure) the original is placed untagged (byte-checked) and the record carries `tagsDropped` (short reason, shown on the request). Before that, the organizer's chapter guard drops a tagged copy whose chapter table changed (see Chapter Guard). A derivative that fails or differs at placement falls back to the original (`tagsDropped` when the original was copied). After a failed derivative copy the fallback runs with `resumeInterrupted: false`: an existing target (the failed copy may have landed) is never replaced. If the target was not there before the tagged attempt, what is there now is RMAB's own unverified copy → `failed` (not `differs`); the reason keeps both parts (`Tagged copy failed (…); original not placed (…)`). The check runs on every import, torrents included: seeded-torrent cleanup removes the download later without import evidence, so the library copy must already be right. Tagging does not use `-xerror` (codec copy would turn benign timestamp warnings into lost tags).
 - Chapter merge: inputs map to the merged target; verified only if the merged file holds all the chapters' audio, both measured from packets (`MergeResult.durationVerified`, `verifyMergedContent` in `merge-verification.ts`; see [chapter-merging.md](../features/chapter-merging.md)): codec copy → output packet count == sum of the chapters' (exact, no window); re-encode → content at most 1 s short (up to 1 s + 50 ms/chapter long); no timeline gap. Otherwise the merged file and all sources are kept. Fails the merge (`checkMergedOutput`) → files organized individually: a merged timeline with gaps or an end more than 1 s + 50 ms/chapter from its audio, or a re-encode more than 1 s short. Re-encodes rebuild timestamps from the sample count (`-af asetpts=N/SR/TB`) when every chapter decodes to the same rate/channels/layout/sample format: covers ADTS `.aac` and VBR MP3 without a Xing/VBRI header, whose container durations are estimates. Merges do not use `-xerror` (one bad frame must not drop the merge; `durationVerified` guards deletes).
 - Book row after an audio import: `filePath` = title folder, `fileFormat` = extension of the placed audio (most common one for multi-file), `filesHash` = `generateFilesHash` of this import's audio AFTER format coercion (`copied`/`identical`/`present`; `differs` targets, files the library already held, are excluded and never coerced). An all-`differs` import stores no hash, so an admin request delete keeps the folder ([request-deletion.md](../admin-features/request-deletion.md)); library matching then falls back to ASIN/title
 - Compare cost: same-size compares run only when a delete may follow (manual `cleanupSource`, or a download that cleanup would remove: `downloadCleanupKind` ≠ `none`; a failed lookup counts as may-follow), except for `.mp4`/`.m4a` targets, which are always compared (also against an existing same-size coerced `.m4b`) so coercion can tell this import's copy (`identical`) from another file; compares stop at the first differing chunk.
@@ -360,7 +414,7 @@ When user deletes and re-requests the same audiobook:
 | merge kept but not verified (audio missing or not measurable) | `merged file kept; sources kept` |
 | file permissions refused (appended to any of the above, or alone) | `permissions could not be applied to <n> file(s)` |
 | source folder not fully readable | `... source folder could not be fully read; source files kept` |
-| tagged file failed its length check or could not be saved (untagged original copied) | `the file was imported without metadata tags (<reasons>)` (one-file book), `1 file imported ...`, or `<n> of <m> files imported ...`; counted per library file (a merge is one), every distinct reason listed (`the length could not be checked`, `the tagged version had a different length`, `the tagged version could not be saved to the library`); appended with `; ` to any message above |
+| tagged file failed its length check or could not be saved (untagged original copied) | `the file was imported without metadata tags (<reasons>)` (one-file book), `1 file imported ...`, or `<n> of <m> files imported ...`; counted per library file (a merge is one), every distinct reason listed (`the length could not be checked`, `the tagged version had a different length`, `the tagged version could not be saved to the library`, `tagging changed the chapter table`); appended with `; ` to any message above |
 | ebook download that cleanup would remove (`downloadCleanupKind` = `indexer`) holds more ebook files than were imported; import itself complete | `download kept: it holds several ebook formats and only one was imported; remove it from the download client once you no longer need the others` (`several ebook files` when they share one extension) |
 | Kindle-fixed EPUB failed its read-back check (ebooks) | `Kindle fix could not be verified; original imported` (placed before any message above, joined with `; `) |
 
@@ -425,6 +479,7 @@ async function organize(
 **14. ASIN never written into .m4b/.m4a; tagging dropped faststart (#208)** - ffmpeg's mp4 muxer silently dropped `-metadata ----:com.apple.iTunes:ASIN=…` (tagger and merger), so Audiobookshelf got no ASIN from RMAB imports (the default `{title} {asin}` folder has no `[ASIN]` brackets). The tagger also had no `+faststart`, so every tagged MP4 (merged ones included) ended moov last, undoing the merger's playback-delay fix. Fixed: MP4 Freeform Tags post-step (moov first, verified) as one organizer step on the file being placed, so the ASIN also survives a failed tagging pass after a merge; the tagger always uses `+faststart`
 **15. Long non-Latin titles failed the import with ENAMETOOLONG (#264)** - The 200-char cap counted characters, not bytes (Cyrillic 2, CJK 3, emoji 4 per char), and nothing capped a joined component (`{title} - {series}`). Fixed: final 255-byte cap per component (see Path Sanitization)
 **16. The 200-unit cap could split an emoji or drop an ebook's extension (#474)** - `.slice(0, 200)` (template and `FileOrganizer.sanitizePath`) cut UTF-16 code units, leaving half a surrogate pair or a broken joined emoji, and cut an ebook source name of 201+ characters through its extension. Fixed: cut between grapheme clusters; the ebook name cuts the stem only (see Path Sanitization)
+**17. Tagging damaged M4B chapter tables (#511)** - Since v1.2.4 (ffmpeg 9.0.2), the tagging remux of an MP4 with an embedded cover and chapters wrote zero-length chapters; the damaged tagged copy was placed, the import reported success, and cleanup later removed the good original. Guarded: a tagged copy whose chapter table differs from the source's is discarded and the original imported untagged, with a warning (see Chapter Guard). Fixed: root cause was FFmpeg 9's LCM movie timescale (4,410,000 with a cover at 22.05/44.1 kHz, so chapters over 487 s overflow; trailing long chapters also left a short chapter track behind an intact-looking table, which the guard missed). Both MP4 writers pass `-movie_timescale 1000` (see MP4 Movie Timescale). Files placed by v1.2.4-v1.2.12 are not repaired: delete the book's file and import it again (or re-download)
 
 ## Tech Stack
 

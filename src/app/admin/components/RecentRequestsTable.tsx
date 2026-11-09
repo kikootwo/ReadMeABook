@@ -52,6 +52,13 @@ interface RecentRequestsTableProps {
   annasArchiveBaseUrl?: string;
 }
 
+// Shown even with the ebook sidecar off: earlier ebook requests stay listed
+const TYPE_OPTIONS = [
+  { value: 'all', label: 'All Types' },
+  { value: 'audiobook', label: 'Audiobooks' },
+  { value: 'ebook', label: 'Ebooks' },
+];
+
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All Statuses' },
   { value: 'pending', label: 'Pending' },
@@ -141,6 +148,7 @@ function getInitialParams(): {
   pageSize: number;
   search: string;
   status: string;
+  type: string;
   userId: string;
   sortBy: SortField;
   sortOrder: SortOrder;
@@ -151,6 +159,7 @@ function getInitialParams(): {
       pageSize: 25,
       search: '',
       status: 'all',
+      type: 'all',
       userId: '',
       sortBy: 'createdAt',
       sortOrder: 'desc',
@@ -162,6 +171,7 @@ function getInitialParams(): {
     pageSize: parseInt(params.get('pageSize') || '25', 10),
     search: params.get('search') || '',
     status: params.get('status') || 'all',
+    type: params.get('type') || 'all',
     userId: params.get('userId') || '',
     sortBy: (params.get('sortBy') || 'createdAt') as SortField,
     sortOrder: (params.get('sortOrder') || 'desc') as SortOrder,
@@ -178,6 +188,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
   const [searchInput, setSearchInput] = useState(initialParams.search);
   const [debouncedSearch, setDebouncedSearch] = useState(initialParams.search);
   const [status, setStatus] = useState(initialParams.status);
+  const [type, setType] = useState(initialParams.type);
   const [userId, setUserId] = useState(initialParams.userId);
   const [sortBy, setSortBy] = useState<SortField>(initialParams.sortBy);
   const [sortOrder, setSortOrder] = useState<SortOrder>(initialParams.sortOrder);
@@ -202,7 +213,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
   const [viewDetailsUserId, setViewDetailsUserId] = useState<string | null>(null);
 
   // Build API URL with current local filters
-  const apiUrl = `/api/admin/requests?page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(debouncedSearch)}&status=${status}&userId=${userId}&sortBy=${sortBy}&sortOrder=${sortOrder}`;
+  const apiUrl = `/api/admin/requests?page=${page}&pageSize=${pageSize}&search=${encodeURIComponent(debouncedSearch)}&status=${encodeURIComponent(status)}&type=${encodeURIComponent(type)}&userId=${encodeURIComponent(userId)}&sortBy=${encodeURIComponent(sortBy)}&sortOrder=${encodeURIComponent(sortOrder)}`;
 
   // Fetch requests with SWR
   const { data, error, isLoading } = useSWR<RequestsResponse>(apiUrl, authenticatedFetcher, {
@@ -219,6 +230,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     pageSize: number;
     search: string;
     status: string;
+    type: string;
     userId: string;
     sortBy: string;
     sortOrder: string;
@@ -229,6 +241,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     if (params.pageSize !== 25) urlParams.set('pageSize', String(params.pageSize));
     if (params.search) urlParams.set('search', params.search);
     if (params.status !== 'all') urlParams.set('status', params.status);
+    if (params.type !== 'all') urlParams.set('type', params.type);
     if (params.userId) urlParams.set('userId', params.userId);
     if (params.sortBy !== 'createdAt') urlParams.set('sortBy', params.sortBy);
     if (params.sortOrder !== 'desc') urlParams.set('sortOrder', params.sortOrder);
@@ -247,6 +260,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       pageSize,
       search: debouncedSearch,
       status,
+      type,
       userId,
       sortBy,
       sortOrder,
@@ -256,7 +270,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       lastSyncedUrl.current = newUrl;
       window.history.replaceState(null, '', newUrl);
     }
-  }, [page, pageSize, debouncedSearch, status, userId, sortBy, sortOrder, buildUrlString]);
+  }, [page, pageSize, debouncedSearch, status, type, userId, sortBy, sortOrder, buildUrlString]);
 
   // Handle browser back/forward navigation
   useEffect(() => {
@@ -268,6 +282,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       setSearchInput(newSearch);
       setDebouncedSearch(newSearch);
       setStatus(params.get('status') || 'all');
+      setType(params.get('type') || 'all');
       setUserId(params.get('userId') || '');
       setSortBy((params.get('sortBy') || 'createdAt') as SortField);
       setSortOrder((params.get('sortOrder') || 'desc') as SortOrder);
@@ -294,6 +309,10 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     switch (key) {
       case 'status':
         setStatus(value as string);
+        setPage(1);
+        break;
+      case 'type':
+        setType(value as string);
         setPage(1);
         break;
       case 'userId':
@@ -323,11 +342,12 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     setSearchInput('');
     setDebouncedSearch('');
     setStatus('all');
+    setType('all');
     setUserId('');
     setPage(1);
   };
 
-  const hasActiveFilters = debouncedSearch || status !== 'all' || userId;
+  const hasActiveFilters = debouncedSearch || status !== 'all' || type !== 'all' || userId;
 
   // Action handlers
   const handleViewDetails = (
@@ -366,6 +386,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       }
       const result = await response.json().catch(() => null);
       const filesKeptReason: string | undefined = result?.details?.filesKeptReason;
+      const folderKept = !!result?.details?.folderKept;
 
       // Refresh the requests list
       await mutate(apiUrl);
@@ -376,6 +397,9 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
       setSelectedRequest(null);
       if (filesKeptReason) {
         toast.warning(`Request deleted; files kept: ${filesKeptReason}`, 10000);
+      } else if (folderKept) {
+        // The audio went; the book folder stays with what it still holds (#526)
+        toast.warning(result.message, 10000);
       } else {
         toast.success('Request deleted successfully');
       }
@@ -424,12 +448,19 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
         body: JSON.stringify({ action: 'cancel' }),
       });
 
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to cancel request');
+        throw new Error(data.message || 'Failed to cancel request');
       }
 
-      toast.success('Request cancelled');
+      // The server says what happened to the download (removed, kept to seed, ...); a download it
+      // could not remove is a warning, not a success
+      const message = data.message || 'Request cancelled';
+      if (data.download === 'retry_later' || data.download === 'not_removed') {
+        toast.warning(message);
+      } else {
+        toast.success(message);
+      }
       await mutate(apiUrl);
     } catch (error) {
       console.error('[Admin] Failed to cancel request:', error);
@@ -523,9 +554,9 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
     <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
       {/* Filter Bar */}
       <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
-        <div className="flex flex-col sm:flex-row gap-3">
-          {/* Search Input */}
-          <div className="flex-1 relative">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3">
+          {/* Search Input (wraps the filters onto a second line rather than shrinking below 240px) */}
+          <div className="flex-1 relative sm:min-w-[240px]">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -547,6 +578,20 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
             className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm min-w-[160px]"
           >
             {STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+
+          {/* Type Filter */}
+          <select
+            value={type}
+            onChange={(e) => updateFilter('type', e.target.value)}
+            aria-label="Filter by type"
+            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm min-w-[140px]"
+          >
+            {TYPE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>

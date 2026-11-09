@@ -67,6 +67,7 @@ export class State {
    */
   resetScenario() {
     this.scenario = null;
+    this.qbitFaults = new Map(); // qBit route -> { status, remaining } (POST /__control/qbit-fault)
     this.releases = new Map(); // id -> release (with derived torrent/nzb data)
     this.byHash = new Map(); // infoHash -> release id
   }

@@ -12,6 +12,7 @@ import { AudibleRegion, AUDIBLE_REGIONS, DEFAULT_AUDIBLE_REGION } from '../types
 import {
   getLanguageForRegion,
   isAcceptedLanguage,
+  partitionByLanguage,
   stripPrefixes,
   buildContainsSelector,
   type LanguageConfig,
@@ -35,6 +36,13 @@ import {
   type CatalogFetchProfile,
   type CatalogSeriesEntry,
 } from './audible-series-fill';
+import { isLanguageFilterOn, type SearchLanguageFilterInfo } from './audible-language-filter';
+import {
+  CATALOG_CATEGORY_LEVELS,
+  parseCatalogCategories,
+  type AudibleCategoryNode,
+} from './audible-categories';
+import { CATEGORY_FALLBACK_PATH, fetchCategoryBooksFromCatalog } from './audible-category-fallback';
 
 const logger = RMABLogger.create('Audible');
 
@@ -82,6 +90,8 @@ export interface AudibleSearchResult {
   totalResults: number;
   page: number;
   hasMore: boolean;
+  /** Only while the admin language filter is on */
+  languageFilter?: SearchLanguageFilterInfo;
 }
 
 export interface AuthorBooksResult {
@@ -140,10 +150,6 @@ interface CatalogProductResponse {
   product: CatalogProduct;
 }
 
-interface CatalogCategoriesResponse {
-  categories?: Array<{ id: string; name: string }>;
-}
-
 function mapCatalogProduct(product: CatalogProduct): AudibleAudiobook {
   const author = product.authors?.map((a) => a.name).join(', ') ?? '';
   const authorAsin = product.authors?.[0]?.asin ?? undefined;
@@ -197,6 +203,11 @@ function mapCatalogProduct(product: CatalogProduct): AudibleAudiobook {
     formatType: product.format_type ?? undefined,
     publisherName: product.publisher_name ?? undefined,
   };
+}
+
+/** A storefront row's language, from its "Language: English" label (#259), or undefined */
+function rowLanguage(labelText: string): string | undefined {
+  return labelText.replace(/\s+/g, ' ').trim().replace(/^[^:]*:\s*/, '') || undefined;
 }
 
 /**
@@ -537,7 +548,12 @@ export class AudibleService {
     return audiobooks;
   }
 
-  async search(query: string, page: number = 1): Promise<AudibleSearchResult> {
+  /** Applies the admin language filter; bulk import opts out with `ignoreLanguageFilter` */
+  async search(
+    query: string,
+    page: number = 1,
+    { ignoreLanguageFilter = false }: { ignoreLanguageFilter?: boolean } = {},
+  ): Promise<AudibleSearchResult> {
     await this.initialize();
 
     try {
@@ -561,20 +577,33 @@ export class AudibleService {
       const products = envelope.products ?? [];
       const totalResults = envelope.total_results ?? 0;
 
-      const results = products.map(mapCatalogProduct);
+      const langConfig = this.getLangConfig();
+      const filterOn = !ignoreLanguageFilter && (await isLanguageFilterOn());
+      const { kept, hidden } = filterOn
+        ? partitionByLanguage(products, (p) => p.language, langConfig)
+        : { kept: products, hidden: [] };
+      const results = kept.map(mapCatalogProduct);
 
-      logger.info(` Found ${results.length} results for "${query}"`);
+      logger.info(` Found ${results.length} results for "${query}"${hidden.length ? ` (${hidden.length} in other languages hidden)` : ''}`);
 
+      // From the raw page: a page whose books were all hidden is not the last one
       return {
         query,
         results,
         totalResults,
         page,
         hasMore:
-          results.length > 0 &&
+          products.length > 0 &&
           (totalResults > 0
             ? totalResults > page * AUDIBLE_PAGE_SIZE
-            : results.length >= AUDIBLE_PAGE_SIZE),
+            : products.length >= AUDIBLE_PAGE_SIZE),
+        ...(filterOn && {
+          languageFilter: {
+            language: langConfig.code,
+            hiddenCount: hidden.length,
+            firstResultHidden: products.length > 0 && hidden[0] === products[0],
+          },
+        }),
       };
     } catch (error) {
       logger.error('Search failed', {
@@ -805,7 +834,11 @@ export class AudibleService {
     }
   }
 
-  async getCategories(): Promise<{ id: string; name: string }[]> {
+  /**
+   * Top-level categories, each with its sub-categories, from one catalog request
+   * (`categories_num_levels=2`).
+   */
+  async getCategories(): Promise<AudibleCategoryNode[]> {
     await this.initialize();
 
     logger.info('Fetching Audible categories...');
@@ -813,18 +846,15 @@ export class AudibleService {
     try {
       const { data: response } = await this.fetchWithRetry(
         '/1.0/catalog/categories',
-        {},
+        { params: { categories_num_levels: CATALOG_CATEGORY_LEVELS } },
         5,
         this.apiClient,
       );
 
-      const envelope: CatalogCategoriesResponse = response.data;
-      const categories = (envelope.categories ?? []).map((c) => ({
-        id: c.id,
-        name: c.name,
-      }));
+      const categories = parseCatalogCategories(response.data);
+      const subCount = categories.reduce((n, c) => n + c.subcategories.length, 0);
 
-      logger.info(`Found ${categories.length} top-level categories`);
+      logger.info(`Found ${categories.length} top-level categories, ${subCount} sub-categories`);
       return categories;
     } catch (error) {
       logger.error('Failed to fetch categories', {
@@ -837,7 +867,9 @@ export class AudibleService {
   /**
    * Category audiobooks from Audible's HTML /search?node=<categoryId> page,
    * sorted by popularity-rank. Uses HTML scraping (not the catalog API) so
-   * results match Audible's curated category-storefront ordering.
+   * results match Audible's curated category-storefront ordering. When the
+   * storefront yields no books (empty page, or every retry failed), falls back
+   * to the catalog API's bestsellers for the category (audible-category-fallback.ts).
    */
   async getCategoryBooks(categoryId: string, limit: number = 200): Promise<AudibleAudiobook[]> {
     await this.initialize();
@@ -895,7 +927,22 @@ export class AudibleService {
     logger.info(
       `Category ${categoryId}: collected ${audiobooks.length} books across ${page - 1} pages`,
     );
-    return audiobooks;
+    if (audiobooks.length > 0) return audiobooks;
+
+    return fetchCategoryBooksFromCatalog<CatalogProduct, AudibleAudiobook>(categoryId, limit, {
+      fetchProducts: async (params) => {
+        const { data: response } = await this.fetchWithRetry(
+          CATEGORY_FALLBACK_PATH,
+          { params: { ...params, response_groups: CATALOG_RESPONSE_GROUPS } },
+          5,
+          this.apiClient,
+        );
+        return response.data as CatalogProductsResponse;
+      },
+      mapProduct: mapCatalogProduct,
+      langConfig: this.getLangConfig(),
+      pageSize: AUDIBLE_PAGE_SIZE,
+    });
   }
 
   private getLangConfig(): LanguageConfig {
@@ -954,6 +1001,7 @@ export class AudibleService {
 
       const ratingText = $el.find('.ratingsLabel').text().trim();
       const rating = ratingText ? parseFloat(ratingText.split(' ')[0]) : undefined;
+      const language = rowLanguage($el.find('.languageLabel').first().text());
 
       audiobooks.push({
         asin,
@@ -963,6 +1011,7 @@ export class AudibleService {
         narrator: stripPrefixes(narratorText, langConfig.scraping.narratorPrefixes),
         coverArtUrl: coverArtUrl.replace(/\._.*_\./, '._SL500_.'),
         rating,
+        ...(language && { language }),
       });
 
       foundOnPage++;
@@ -1024,6 +1073,7 @@ export class AudibleService {
         $el.find('.ratingsLabel').text().trim() ||
         $el.find('.a-icon-star span').first().text().trim();
       const rating = ratingText ? parseFloat(ratingText.split(' ')[0]) : undefined;
+      const language = rowLanguage($el.find('.languageLabel').first().text());
 
       audiobooks.push({
         asin,
@@ -1034,6 +1084,7 @@ export class AudibleService {
         coverArtUrl: coverArtUrl.replace(/\._.*_\./, '._SL500_.'),
         durationMinutes,
         rating,
+        ...(language && { language }),
       });
 
       foundOnPage++;

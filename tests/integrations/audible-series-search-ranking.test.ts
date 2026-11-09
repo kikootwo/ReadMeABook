@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeCatalog, loadCatalogFixture } from '../helpers/fake-audible-catalog';
 
 vi.mock('@/lib/integrations/audible.service', async () => (await import('../helpers/fake-audible-catalog')).audibleServiceModule);
+vi.mock('@/lib/services/config.service', async () => (await import('../helpers/fake-audible-catalog')).configServiceModule);
 
 const EF_PAGE = 'us-keywords-expeditionary-force.json';
 const COSMERE_PAGE = 'uk-keywords-cosmere.json';

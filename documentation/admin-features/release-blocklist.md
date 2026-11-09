@@ -37,7 +37,7 @@ Unique constraint: `(requestId, releaseKey)` — idempotent upsert under concurr
 
 Delete behavior:
 - **Soft-delete of request** → blocklist rows survive (no cascade).
-- **Hard-delete of request** → blocklist rows wiped via `onDelete: Cascade` (admin `DELETE /api/requests/[id]`, seeded-torrent cleanup of soft-deleted requests).
+- **Hard-delete of request** → blocklist rows wiped via `onDelete: Cascade` (seeded-torrent cleanup of soft-deleted requests; the raw admin `DELETE /api/requests/[id]` was removed in #228).
 - **Re-request** of a `failed`/`warn`/`cancelled` request (user re-request, interactive pick; shelf sync and watched lists only as [Automatic re-requests](#automatic-re-requests-409) allow; `src/lib/services/request-rerequest.ts` `createRequestReplacing`): one transaction creates the new request, moves the old request's rows to it (`updateMany`, same row ids), then deletes the old request guarded by status. The new request starts with the old blocklist and `customSearchTerms`; jobs and notifications run after commit. A concurrent re-request finds nothing to delete, rolls back and gets `duplicate` (no second request).
 - Effect (#312): a re-created request whose candidates are all blocked goes to `awaiting_search` ("all blocked"), which is not re-requestable, so shelf sync stops re-grabbing the dead release. Failures that add no block are rate-limited by the backoff below (#409).
 

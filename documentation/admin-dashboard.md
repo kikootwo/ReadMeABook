@@ -26,10 +26,11 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - Request ID, title, progress %, speed, ETA, user
 
 **GET /api/admin/requests** (Paginated)
-- Query params: `page`, `pageSize` (10|25|50|100), `search`, `status`, `userId`, `sortBy`, `sortOrder`
+- Query params: `page`, `pageSize` (10|25|50|100), `search`, `status`, `type` (`audiobook`|`ebook`), `userId`, `sortBy`, `sortOrder`
 - Returns: `requests[]`, `total`, `page`, `pageSize`, `totalPages`
 - Sorting: createdAt (default), completedAt, title, user, status
-- Filtering: by status, by user, text search (title/author)
+- Filtering: by status, by type, by user, text search (title/author)
+- `type`: allowlist (`VALID_TYPES`); `all`, missing or any other value = no type filter (never reaches Prisma)
 
 **GET /api/admin/requests/recent** (Legacy)
 - Request ID, title, user, status, created/completed dates
@@ -80,11 +81,14 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - **Filter Bar:**
   - Text search (title/author, 300ms debounce)
   - Status dropdown (all statuses)
+  - Type dropdown (All Types / Audiobooks / Ebooks; shown even with the ebook sidecar off, since earlier ebook requests stay listed)
   - User dropdown (all users)
-  - Clear filters button
+  - Clear filters button (shown when search, status, type or user is set)
+  - Layout: stacked below 640px; from 640px one row that wraps (`sm:flex-wrap`) instead of shrinking the search box below 240px, so no control is clipped by the card
 - **Sortable Columns:** Click headers to sort by title, user, status, requested, completed
 - **Pagination:** Page navigation, page size selector (10/25/50/100), results count
-- **URL State:** Filters/sort/page stored in URL query params (shareable, bookmarkable)
+- **URL State:** Filters/sort/page stored in URL query params (shareable, bookmarkable); defaults left out (`status`/`type` = all, page 1, pageSize 25); back/forward restores them; changing a filter resets to page 1
+- **API URL:** every string filter (`search`, `status`, `type`, `userId`, `sortBy`, `sortOrder`) is `encodeURIComponent`-encoded, so a crafted page URL cannot add API params
 - **Actions:** Delete, cancel, manual search, fetch ebook (via dropdown)
 
 ## Features

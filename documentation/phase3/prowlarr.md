@@ -18,9 +18,9 @@ Indexer aggregator for searching multiple torrent/usenet indexers simultaneously
 
 ## Search Strategy
 
-**Search Query:** `searchWithVariations(title, author, filters, { exactTitle })` (`src/lib/integrations/prowlarr.service.ts`, query helpers in `prowlarr-query-variations.ts`)
+**Search Query:** `searchWithVariations(title, author, filters, { exactTitle }, stats?)` (`src/lib/integrations/prowlarr.service.ts`, query helpers in `prowlarr-query-variations.ts`)
 - First pass, per indexer group, sequentially: `"title author"` then `"title"`; results merged and deduplicated by guid
-- The second query runs even when the first returns results; a failed query is logged and skipped
+- The second query runs even when the first returns results; a failed query is skipped and counted in `stats` (see Failed Searches)
 - Blank author (or both queries identical after trimming, ignoring case) → `"title"` once; a blank query is never sent
 - **Fallback pass (#316):** only when the first pass returned nothing that names the title (no result holds 80% of the title's words before its subtitle; close to ranking's Stage 1 coverage, with apostrophes and numbers folded the same way, but always with English stop words, and a number's `. ` also starts a subtitle, where ranking splits at `:` only). Variations, each as `"variation author"` then `"variation"`, skipping any query already sent; stops at the first query whose results name the title:
   1. Stripped: only when a word has punctuation inside it; apostrophes fold (`Anarchist's` → `Anarchists`, `L'intruse` → `L intruse`), other punctuation → space (`Op-Center` → `Op Center`)
@@ -61,6 +61,24 @@ interface TorrentResult {
 }
 ```
 
+## Failed Searches (#522)
+
+A query that throws is counted, never taken for "nothing found". Helpers: `src/lib/utils/indexer-search-failures.ts`.
+- **Stats out-param:** `SearchStats { queriesSent, queriesFailed, failures: [{ query, message }] }`, filled by `searchWithVariations`; callers pass one per indexer group and sum them (`addGroupSearch`). A group whose call throws counts as one failed search, query `(whole group)`; an ebook route whose whole indexer search throws before any group was counted, `(indexer search)` (`recordRunFailure`; a throw after the groups, in ranking say, adds nothing)
+- **Message:** error message only (`Request failed with status code 400`, `timeout of 30000ms exceeded`): the `Failed to search Prowlarr: ` prefix dropped, any `scheme://…` masked as `[url]`, 200 chars max. Never the API key, the request URL or the response body
+- **Automatic search** (audiobook `SearchIndexers`, ebook `SearchEbook` job loggers, so in System Logs): one `warn` per failed search `Indexer search failed: "<query>" (<group description>): <message>`, then `warn` `N of M indexer searches failed`. Results from the searches that answered are ranked and used as before
+- **Request `errorMessage`** (`noResultsMessage`), only when nothing usable was found:
+
+| Case | errorMessage |
+|---|---|
+| none failed | unchanged (`No torrents/nzbs found. Will retry automatically.`, `No quality matches found. …`, `No ebook found on <sources>. …`) |
+| some failed | `No torrents/nzbs found (2 of 5 indexer searches failed; see System Logs). Will retry automatically.` (same suffix on the quality and ebook messages) |
+| all failed | `All 5 indexer searches failed (see System Logs). Will retry automatically.` (`The indexer search failed …` for 1); ebook with Anna's Archive on: prefixed `No ebook found on Anna's Archive. ` |
+| all blocked | unchanged (`No usable releases — N candidates tried, all blocked`) |
+
+- **Interactive search** (all four routes: `requests/[id]/interactive-search`, `audiobooks/search-torrents`, both `interactive-search-ebook`): response `searchFailures: { failed, total, errors }` (up to 3 distinct messages), absent when none failed. Route loggers write the same warn lines to the container log (not System Logs: only job loggers persist)
+- **UI:** `SearchFailureNotice` (amber, `role="status"`) in `InteractiveTorrentSearchModal`: `2 of 5 indexer searches failed, so results may be incomplete.` above the results (or above "No results found" when the rest found nothing), or `All N indexer searches failed, so no indexer results could be fetched.` with "Search Again" in place of the empty state; `Error: <messages>` below. Hooks (`useRequests.ts`) expose `searchFailures` next to `error`
+
 ## Config
 
 - `indexer.prowlarr_url`
@@ -93,6 +111,7 @@ interface TorrentResult {
 - Shows table with: rank, title, size, quality score, seeders, indexer, publish date
 - Editable title field allows search refinement
 - Available for same statuses as manual search
+- A non-admin on a `denied` request → 403 `RequestDenied` (also for Select Torrent, #232); admins can search and pick for it
 - User clicks "Download" button to select specific torrent
 
 **Select Torrent** (`POST /api/requests/{id}/select-torrent`)
@@ -122,6 +141,7 @@ interface TorrentResult {
 - First match triggers search job (no duplicates)
 
 ## Fixed Issues
+- **#522** (#224 follow-up): a failed indexer query was logged by the module logger only (not in System Logs) and dropped, so the request read "No torrents/nzbs found" and interactive search "No results found". Failures are now counted, logged to the job and shown (see Failed Searches)
 - **#316:** titles with an apostrophe ("The Dungeon Anarchist's Cookbook") found nothing on indexers whose names drop it. Fallback pass sends the stripped title; ranking folds apostrophes (#466). Includes PR #304's subtitle-free query (colon split, guarded against an empty base, custom terms left intact)
 
 ## Tech Stack

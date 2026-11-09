@@ -1,7 +1,7 @@
 # Intelligent Ranking Algorithm
 
 **Status:** ✅ Implemented | Comprehensive edge case test coverage
-**Tests:** tests/utils/ranking-algorithm.test.ts, ranking-non-latin.test.ts, ranking-match-gates.test.ts, ranking-oracle-223.test.ts, match-gates.test.ts, match-normalize.test.ts, ranking-size-floor.test.ts, ranking-series-part.test.ts, ranking-size-score.test.ts, ranking-subtitle-split.test.ts, tests/processors/search-indexers-non-latin.test.ts, search-indexers-size-floor.test.ts, search-indexers-series-part.test.ts
+**Tests:** tests/utils/ranking-algorithm.test.ts, ranking-non-latin.test.ts, ranking-match-gates.test.ts, ranking-oracle-223.test.ts, match-gates.test.ts, match-normalize.test.ts, ranking-size-floor.test.ts, ranking-series-part.test.ts, ranking-size-score.test.ts, ranking-subtitle-split.test.ts, drm-release.test.ts, tests/processors/search-indexers-non-latin.test.ts, search-indexers-size-floor.test.ts, search-indexers-series-part.test.ts, search-indexers-drm.test.ts
 **Automatic-search gates (#223):** [match-gates.md](match-gates.md): one-word titles, required numbers, author whole words, volume conflict (title, plus the catalog series part in automatic search, #330)
 
 Evaluates and scores torrents to automatically select best audiobook download.
@@ -155,7 +155,12 @@ Evaluates and scores torrents to automatically select best audiobook download.
 - **Size floor (`minMBPerMinute`, opt-in):** with a known runtime, drops results under `minMBPerMinute` MB per minute. No runtime: no change
 - **Who sets it:** only automatic search (`search-indexers.processor.ts`), with `AUTO_SEARCH_MIN_MB_PER_MINUTE = 0.15` (about 21 kbps). Every automatic path (request create, approve, watched lists, RSS, retries, admin re-search) runs through that processor. Interactive search (`requests/[id]/interactive-search`, `audiobooks/search-torrents`) doesn't set it, so it still lists undersized results
 - **Why 0.15:** one file of a multi-file Usenet post (57 MB for a 1182-min book, 0.05 MB/min) scored over 50 and was grabbed as the whole book; a complete 0.21 MB/min release must still pass
-- **Log:** `Filtered out N results < 20 MB` gains `or < 0.15 MB/min` only when a runtime is known
+- **Log:** `Filtered out N results < 20 MB` gains `or < 0.15 MB/min` only when a runtime is known; the count excludes DRM rejects
+- **Audible DRM (`rejectDrm`, opt-in, #518):** drops a release whose title marks it as an Audible DRM container (`drmReleaseMarker`, `src/lib/utils/drm-release.ts`). Why: `.aa`/`.aax`/`.aaxc` are locked to the buying Audible account, so the requester can't play them; the download would import and fail at playback
+  - **Marker:** a file extension from `DRM_EXTENSIONS` (`.aa`, `.aax`, `.aaxc`) ending a word and not followed by another dotted word (`Dune.aax`, `dune.aaxc-GRP`), or a bracketed tag holding only the format (`[AAX]`, `(AA)`, `{AAXC}`, `[.aax]`)
+  - **Not a marker:** any title also naming a playable format (`m4b`, `mp3`, `m4a`, `flac`, `opus`, `ogg`) as a word: `Dune [M4B] (from AAX)`, `AAX to M4B`, `AAX-M4B`. A bare `AAX` word (`Frank Herbert - Dune AAX`, `ripped from Audible AAX`, `Dune.AAX.2007`): converted releases name their source that way, and a false reject costs the book. Also `Isaac and the Aardvark`, `AA Milne`, `Pooh.AA.Milne`
+  - **Who sets it:** only automatic search (`search-indexers.processor.ts`, same paths as the size floor). Interactive search doesn't, so it still lists DRM releases
+  - **Log:** one line per release before ranking: `Skipping "<title>" (<indexer>): Audible DRM release (<marker>), can't be played`
 
 ## Bonus Points System
 
@@ -239,6 +244,7 @@ interface RankTorrentsOptions {
   flagConfigs?: IndexerFlagConfig[];        // Flag bonus configurations
   requireAuthor?: boolean;                  // Enforce author check (default: true)
   minMBPerMinute?: number;                  // Size floor when runtime known (automatic search: 0.15)
+  rejectDrm?: boolean;                      // Drop Audible DRM releases (automatic search: true; default false)
 }
 
 interface AudiobookRequest {
@@ -393,6 +399,7 @@ const bestEbook = ranked[0];  // Safe to auto-download
 
 ## Fixed Issues
 - **#311 (single-file grabs):** automatic search grabbed one 57 MB chapter file of a 97-file Usenet post for a 1182-min book (score 79.7) and imported it as the book. Fixed by the size floor above; pinned in `tests/utils/ranking-size-floor.test.ts` and `tests/processors/search-indexers-size-floor.test.ts`
+- **#518 (Audible DRM grabs):** automatic search could grab an `.aax`/`[AAX]` release that imports and then can't be played. Fixed by `rejectDrm` (automatic only); pinned in `tests/utils/drm-release.test.ts` and `tests/processors/search-indexers-drm.test.ts`
 - **#330 (wrong book in a series):** automatic search could grab `Azarinth Healer 03` for "Azarinth Healer: Book One": the title names no number, so G4c had nothing to compare. Fixed by passing the catalog `series`/`seriesPart` into G4c ([match-gates.md](match-gates.md)); pinned in `tests/utils/ranking-series-part.test.ts`, `tests/utils/match-gates.test.ts` and `tests/processors/search-indexers-series-part.test.ts`
 - **#323 (large ebooks hidden):** interactive ebook search dropped results > 20 MB, so a large PDF that was the only result showed nothing. Fixed by `enforceSizeCap` (automatic only); pinned in `tests/utils/ranking-ebook-size-cap.test.ts`, `tests/api/interactive-search-ebook-size-cap.routes.test.ts` and `tests/processors/search-ebook-size-cap.test.ts`
 - **#318 (size score comment):** the `scoreSize` comment called 1.0 MB/min "~64 kbps"; it is about 140 kbps, so a 64 kbps release gets 6.9/15. Comment and docs now describe the code; scoring unchanged (moving the baseline goes with the #223 threshold work, which kept it). Pinned in `tests/utils/ranking-size-score.test.ts`

@@ -61,6 +61,8 @@ vi.mock('@/lib/integrations/audible.service', () => ({
 vi.mock('@/lib/integrations/audible-series', () => ({
   scrapeSeriesPage: catalog.scrapeSeriesPage,
   searchForSeries: catalog.searchForSeries,
+  // The route calls searchSeries (filtered result plus hidden count), answered from the same lookup
+  searchSeries: async (query: string, options?: unknown) => ({ series: await catalog.searchForSeries(query, options) }),
   SeriesSearchUnavailableError: class SeriesSearchUnavailableError extends Error {},
 }));
 vi.mock('@/lib/services/works.service', () => ({

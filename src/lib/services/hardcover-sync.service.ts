@@ -10,6 +10,7 @@ import { prisma } from '@/lib/db';
 import { Prisma } from '@/generated/prisma/client';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { SYNC_USER_SELECT, withoutDeletedUsers } from '@/lib/utils/deleted-user-skip';
 import { fetchHardcoverList, HardcoverApiBook } from '@/lib/services/hardcover-api.service';
 import {
   ShelfSyncStats,
@@ -43,17 +44,21 @@ export async function processHardcoverShelves(
   if (options.shelfId) whereClause.id = options.shelfId;
   if (options.userId) whereClause.userId = options.userId;
 
-  const shelves = await prisma.hardcoverShelf.findMany({
+  const found = await prisma.hardcoverShelf.findMany({
     where: whereClause,
-    include: { user: { select: { id: true, plexUsername: true } } },
+    include: { user: { select: SYNC_USER_SELECT } },
   });
+  // A deleted user's shelves get no fetch, lookup, request or write (#504)
+  const shelves = withoutDeletedUsers(found, 'Hardcover list(s)', log);
 
   if (shelves.length === 0) {
-    log.info(
-      options.shelfId
-        ? 'Hardcover list not found'
-        : 'No Hardcover lists configured, skipping',
-    );
+    if (found.length === 0) {
+      log.info(
+        options.shelfId
+          ? 'Hardcover list not found'
+          : 'No Hardcover lists configured, skipping',
+      );
+    }
     return stats;
   }
 

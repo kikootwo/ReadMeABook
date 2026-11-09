@@ -595,13 +595,14 @@ describe('getValidVariables', () => {
     const variables = getValidVariables();
 
     expect(variables).toContain('author');
+    expect(variables).toContain('primaryAuthor');
     expect(variables).toContain('title');
     expect(variables).toContain('narrator');
     expect(variables).toContain('asin');
     expect(variables).toContain('year');
     expect(variables).toContain('series');
     expect(variables).toContain('seriesPart');
-    expect(variables).toHaveLength(7);
+    expect(variables).toHaveLength(8);
   });
 
   it('should return a new array each time (not mutate original)', () => {

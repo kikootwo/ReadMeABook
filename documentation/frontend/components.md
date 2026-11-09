@@ -46,7 +46,7 @@ src/components/
 - **Button** - Variants (primary/secondary/outline/ghost/danger), sizes (sm/md/lg), loading state
 - **Input** - Label, error display, validation, icons
 - **Select** - Custom styling, search/filter
-- **Modal** ✅ - Dialog overlay with backdrop, sizes (sm/md/lg/xl/full), ESC to close, body scroll lock
+- **Modal** ✅ - Dialog overlay with dimmed backdrop (`bg-black/50`: Tailwind v4 has no `*-opacity-<n>` utilities, use the slash form; `tests/components/tailwind-opacity-utilities.test.ts` guards `src`), sizes (sm/md/lg/xl/full), ESC to close, body scroll lock
 - **ConfirmModal** ✅ - Confirmation dialog with customizable title, message (string or node), buttons, loading state, `confirmDisabled`, and variant (primary/danger)
 - **WatchModeChoice** ✅ - `src/components/ui/WatchModeChoice.tsx`: fieldset radio group "Entire catalog / New releases only" for watched authors/series (Watch dialog, Profile Change dialog); backlog note on New → Entire. See [features/watched-lists.md](../features/watched-lists.md)
 - **WatchModeControl** ✅ - `src/components/profile/WatchModeControl.tsx`: watched card mode line (cutoff shown as its UTC day) + bordered Change button → dialog (Save disabled until changed, PATCH; a failed Save shows a `role="alert"` message)

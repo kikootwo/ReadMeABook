@@ -32,6 +32,8 @@ import { createAudibleDetailsLoader, readMetadataTaggingEnabled, resolveTagDetai
 import { applyPostImportCategory } from './post-import-category';
 import { preferredEbookFile } from '../utils/import-inventory';
 import { findEbookOnDisk } from '../utils/ebook-on-disk';
+import { recordEbookPlacement } from '../utils/ebook-placement';
+import { relinkParentlessEbookRequest } from '../services/request-delete-children';
 
 /**
  * Process organize files job
@@ -927,6 +929,9 @@ async function processEbookOrganization(
 
   logger.info(`Successfully moved ebook to ${result.targetPath}`);
 
+  // #497: record the ebook file this import placed (only a 'copied' file is RMAB's); never throws
+  await recordEbookPlacement(requestId, result.record, logger);
+
   // The organizer reads a temp copy when the Kindle fix ran; the original is epubFilePath
   const importedFile = fixedEpubPath ? epubFilePath : result.sourceFile;
   const ebookEvidence = await buildEbookEvidence(result, importedFile ?? undefined, downloadPath);
@@ -1053,7 +1058,8 @@ async function processEbookOrganization(
 /**
  * Create ebook request if ebook downloads are enabled
  * Called after audiobook organization completes. Skipped when the book folder
- * (targetPath) already holds an ebook file (#313).
+ * (targetPath) already holds an ebook file (#313), or when the book already has an
+ * active ebook request (a parentless one is first linked to this request, #526).
  *
  * Supports two ebook sources:
  * - Anna's Archive (ebook_annas_archive_enabled) - Currently implemented
@@ -1067,6 +1073,10 @@ async function createEbookRequestIfEnabled(
   logger: RMABLogger
 ): Promise<void> {
   try {
+    // An ebook request that outlived an earlier audiobook request delete (#526) becomes this
+    // request's child, whatever the ebook settings: the manual ebook routes find it by parent
+    await relinkParentlessEbookRequest(parentRequestId, audiobook.id);
+
     const configService = getConfigService();
 
     // Check if auto-grab is enabled (default: true for backward compatibility)
@@ -1094,17 +1104,18 @@ async function createEbookRequestIfEnabled(
 
     // At least one source is enabled - proceed with ebook request creation
 
-    // Check if an ebook request already exists for this parent
+    // Any active ebook request on this book counts, linked or not: one that outlived a
+    // deleted audiobook request (#526) must not get a second one beside it
     const existingEbookRequest = await prisma.request.findFirst({
       where: {
-        parentRequestId,
+        audiobookId: audiobook.id,
         type: 'ebook',
         deletedAt: null,
       },
     });
 
     if (existingEbookRequest) {
-      logger.info(`Ebook request already exists for parent ${parentRequestId}: ${existingEbookRequest.id}`);
+      logger.info(`Ebook request already exists for this book: ${existingEbookRequest.id}`);
       return;
     }
 

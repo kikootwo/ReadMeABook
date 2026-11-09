@@ -7,8 +7,10 @@
  * deletes a request through DELETE /api/admin/requests/<id> (or the admin table, E-h) and checks
  * /media by sha256, the ABS item, the book row and the API's filesKeptReason.
  * Cases: E-a..E-h (plan), R1 ABS second copy, R3 coerced .m4a, R4 re-run organize, R5 flat ebook
- * folder with foreign ebooks, R6 removal failure (EACCES), R7 media volume not mounted (emptied),
- * E-g2 replace after a refused delete. Plex mode: library-delete-plex.spec.ts.
+ * folder with foreign ebooks (only the recorded RMAB ebook goes, #497), R6 a subfolder is never entered (#526),
+ * R7 media volume not mounted (emptied), E-g2 replace after a refused delete. Plex mode: library-delete-plex.spec.ts.
+ * Since #526 the audiobook delete removes the audio (and the cover and junk when nothing else is left), and the
+ * folder only when empty: E-a/E-b keep the ebook request's recorded epub and the folder (details in 526-audiobook-delete).
  */
 
 import { test, expect } from '@playwright/test';
@@ -43,6 +45,15 @@ function expectRemoved(c: Case, label: string, res: { details: { filesDeleted?: 
   c.check(`${label}: title folder removed`, !exists(folder), 'safety');
 }
 
+/** The audio is gone; the folder stays holding exactly `left` (sorted names), listed in details.folderKept. */
+function expectFolderStays(c: Case, label: string, res: { details: { filesDeleted?: boolean; filesKeptReason?: string } }, folder: string, left: string[]) {
+  const kept = (res.details as { folderKept?: { files: Array<{ name: string }> } }).folderKept;
+  const names = sh(`ls -A ${q(folder)} | sort`).trim().split('\n').filter(Boolean);
+  c.check(`${label}: filesDeleted true, no filesKeptReason`, res.details.filesDeleted === true && !res.details.filesKeptReason, 'safety', JSON.stringify(res.details));
+  c.check(`${label}: folder holds ${left.join(', ')} (${names.join(', ')})`, JSON.stringify(names) === JSON.stringify(left), 'safety');
+  c.check(`${label}: folderKept lists them`, JSON.stringify((kept?.files || []).map((f) => f.name.replace(/\/$/, '')).sort()) === JSON.stringify(left), 'safety', JSON.stringify(kept));
+}
+
 function expectKept(c: Case, label: string, res: { details: { filesDeleted?: boolean; filesKeptReason?: string } }, reason: string) {
   c.check(`${label}: filesKeptReason contains "${reason}"`, (res.details.filesKeptReason || '').includes(reason), 'safety', JSON.stringify(res.details));
 }
@@ -52,7 +63,7 @@ test.beforeEach(() => {
   sh(`mkdir -p ${q(SRC)}\nchown ${PUID}:${PGID} /downloads/manual ${q(SRC)} 2>/dev/null || true`);
 });
 
-test('E-a default template, ebook imported after the audio (row overwritten): delete removes only the title folder; ABS item gone', async () => {
+test('E-a default template, ebook imported after the audio (row overwritten): delete removes the audio, the recorded epub and folder stay; ABS item gone', async () => {
   const c = new Case('E-a-default-ebook-after-audio');
   const rmab = await Rmab.loginAdmin();
   const b = await importedBook(c, rmab, 'ea', 'Guard Book Alpha', 'Guard Author Alpha', 'B0LDGTEA01');
@@ -64,14 +75,15 @@ test('E-a default template, ebook imported after the audio (row overwritten): de
   const before = mediaShas([b.folder]);
 
   const res = await deleteRequest(c, rmab, b.requestId, 'delete');
-  expectRemoved(c, 'delete', res, b.folder);
+  expectFolderStays(c, 'delete', res, b.folder, ['Guard Book Alpha.epub']);
   c.check('nothing else under /media changed', sameShas(before, mediaShas([b.folder])), 'safety');
   c.check('ABS item deleted', !(await absItemExists(abs)), 'control');
-  c.check('row cleared (file_path, files_hash)', !bookRow(b.audiobookId).filePath && !bookRow(b.audiobookId).filesHash, 'control');
+  const after = bookRow(b.audiobookId);
+  c.check(`row: the ebook's folder, no files hash (${JSON.stringify(after)})`, after.filePath === b.folder && after.fileFormat === 'epub' && !after.filesHash, 'control');
   finish(c);
 });
 
-test('E-b default template, ebook imported before the audio: delete removes the title folder', async () => {
+test('E-b default template, ebook imported before the audio: delete removes the audio, the recorded epub and folder stay', async () => {
   const c = new Case('E-b-default-ebook-before-audio');
   const rmab = await Rmab.loginAdmin();
   const audiobookId = newBook('Guard Book Bravo', 'Guard Author Bravo', 'B0LDGTEB01');
@@ -84,7 +96,7 @@ test('E-b default template, ebook imported before the audio: delete removes the 
   const before = mediaShas([row.filePath]);
 
   const res = await deleteRequest(c, rmab, requestId, 'delete');
-  expectRemoved(c, 'delete', res, row.filePath);
+  expectFolderStays(c, 'delete', res, row.filePath, ['Guard Book Bravo.epub']);
   c.check('nothing else under /media changed', sameShas(before, mediaShas([row.filePath])), 'safety');
   finish(c);
 });
@@ -264,7 +276,7 @@ test('R4 a re-run organize of the same source (files already in place): delete r
   finish(c);
 });
 
-test('R5 ebook delete in a flat folder holding one RMAB ebook and foreign ebooks: refused; every ebook stays', async () => {
+test('R5 ebook delete in a flat folder holding one RMAB ebook and foreign ebooks: only the RMAB ebook goes (#497)', async () => {
   const c = new Case('R5-flat-folder-foreign-ebooks');
   const rmab = await Rmab.loginAdmin();
   const b = await importedBook(c, rmab, 'r5', 'Guard Book Lima', 'Guard Author Lima', 'B0LDGTRL01');
@@ -274,28 +286,33 @@ test('R5 ebook delete in a flat folder holding one RMAB ebook and foreign ebooks
   setConfig('ebook_path_template', 'Shelf');
   genEbook(`${SRC}/r5-ebook`, 'Lima.epub');
   const ebookReq = await importEbook(c, b.audiobookId, `${SRC}/r5-ebook`);
-  const before = mediaShas();
+  const lima = `${shelf}/Lima.epub`;
+  c.check('Lima.epub placed in the shelf', exists(lima), 'control');
+  const before = mediaShas([lima]);
 
   const res = await deleteRequest(c, rmab, ebookReq, 'delete-ebook');
-  expectKept(c, 'delete-ebook', res, 'holds 3 ebook files');
-  c.check('/media unchanged (all three ebooks, the audio folder)', sameShas(before, mediaShas()), 'safety');
+  c.check('delete-ebook: filesDeleted true, no filesKeptReason', res.details.filesDeleted === true && !res.details.filesKeptReason, 'safety', JSON.stringify(res.details));
+  c.check('Lima.epub (placed by this request) removed', !exists(lima), 'safety');
+  c.check('everything else under /media unchanged (Calibre One and Two, the audio folder)', sameShas(before, mediaShas()), 'safety');
   finish(c);
 });
 
-test('R6 the folder cannot be removed (EACCES): no backend delete, row fields stay', async () => {
-  const c = new Case('R6-remove-fails-eacces');
+test('R6 a root-owned, read-only subfolder: never entered, kept and listed; the audio goes', async () => {
+  const c = new Case('R6-subfolder-kept');
   const rmab = await Rmab.loginAdmin();
   const b = await importedBook(c, rmab, 'r6', 'Guard Book Mike', 'Guard Author Mike', 'B0LDGTRM01');
   const abs = await linkAbs(b.audiobookId, b.folder);
   // A root-owned, read-only subfolder (no audio): the app user cannot remove what is inside it
   sh(`mkdir -p ${q(`${b.folder}/locked`)}\necho note > ${q(`${b.folder}/locked/note.txt`)}\nchown -R 0:0 ${q(`${b.folder}/locked`)}\nchmod 0555 ${q(`${b.folder}/locked`)}`);
 
+  const lockedSha = sh(`sha256sum ${q(`${b.folder}/locked/note.txt`)}`);
   const res = await deleteRequest(c, rmab, b.requestId, 'delete');
-  expectKept(c, 'delete', res, 'partly removed (permission denied); remove the rest manually');
-  c.check('ABS item still there', await absItemExists(abs), 'safety');
+  const cover = exists(`${b.folder}/cover.jpg`) ? ['cover.jpg'] : [];
+  expectFolderStays(c, 'delete', res, b.folder, [...cover, 'locked']);
+  c.check('locked subfolder byte for byte', sh(`sha256sum ${q(`${b.folder}/locked/note.txt`)}`) === lockedSha, 'safety');
+  c.check('ABS item deleted (its audio is gone)', !(await absItemExists(abs)), 'control');
   const row = bookRow(b.audiobookId);
-  c.check('row keeps file_path, files_hash and linkage', row.filePath === b.folder && !!row.filesHash && row.absItemId === abs, 'safety', JSON.stringify(row));
-  c.check('locked subfolder still there', exists(`${b.folder}/locked/note.txt`), 'control');
+  c.check('row cleared (file_path, files_hash)', !row.filePath && !row.filesHash, 'control', JSON.stringify(row));
   sh(`chmod 0755 ${q(`${b.folder}/locked`)}`);
   finish(c);
 });

@@ -21,6 +21,8 @@ const baseSettings = {
   hasLocalUsers: true,
   hasLocalAdmins: true,
   audibleRegion: 'us',
+
+  audibleLanguageFilter: false,
   plex: { url: 'http://plex', token: 'token', libraryId: 'lib', triggerScanAfterImport: false },
   audiobookshelf: { serverUrl: 'http://abs', apiToken: 'abs-token', libraryId: 'abs-lib', triggerScanAfterImport: false },
   oidc: {

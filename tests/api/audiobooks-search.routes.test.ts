@@ -4,6 +4,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SearchStats } from '@/lib/utils/indexer-search-failures';
 
 let authRequest: any;
 
@@ -113,8 +114,9 @@ describe('Audiobooks search torrents route', () => {
     expect(payload.success).toBe(true);
     expect(payload.results[0].rank).toBe(1);
     expect(rankTorrentsMock).toHaveBeenCalled();
-    // Interactive search shows undersized releases too: only automatic search sets the size floor
+    // Interactive search shows undersized and Audible DRM releases too: only automatic search drops them
     expect(rankTorrentsMock.mock.calls[0][2]).not.toHaveProperty('minMBPerMinute');
+    expect(rankTorrentsMock.mock.calls[0][2]).not.toHaveProperty('rejectDrm');
   });
 
   it('ranks all candidates before returning the top 100 with truncation metadata', async () => {
@@ -149,7 +151,7 @@ describe('Audiobooks search torrents route', () => {
     expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith('Title', 'Author', {
       categories: [3030],
       indexerIds: [1],
-    }, { exactTitle: false });
+    }, { exactTitle: false }, expect.any(Object));
     expect(payload.results).toHaveLength(100);
     expect(payload.results[0]).toEqual(expect.objectContaining({ title: 'Best result', rank: 1 }));
     expect(payload.truncated).toBe(true);
@@ -170,8 +172,44 @@ describe('Audiobooks search torrents route', () => {
     expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith('Custom Title', 'Author', {
       categories: [3030],
       indexerIds: [1],
-    }, { exactTitle: true });
+    }, { exactTitle: true }, expect.any(Object));
+  });
+
+  it('carries the failure count when indexer searches failed, not a bare "nothing found" (#522)', async () => {
+    authRequest.json.mockResolvedValue({ title: 'Title', author: 'Author' });
+    configServiceMock.get
+      .mockResolvedValueOnce(JSON.stringify([{ id: 1, name: 'Indexer', protocol: 'torrent', priority: 10 }]))
+      .mockResolvedValueOnce(null);
+    groupIndexersMock.mockReturnValue({ groups: [{ categories: [3030], indexerIds: [1] }], skippedIndexers: [] });
+    prowlarrMock.searchWithVariations.mockImplementation(async (_t: string, _a: string, _f: unknown, _o: unknown, stats: SearchStats) => {
+      stats.queriesSent += 2;
+      stats.queriesFailed += 2;
+      stats.failures.push(
+        { query: 'Title Author', message: 'Request failed with status code 400' },
+        { query: 'Title', message: 'Request failed with status code 400' },
+      );
+      return [];
+    });
+
+    const { POST } = await import('@/app/api/audiobooks/search-torrents/route');
+    const payload = await (await POST({} as never)).json();
+
+    expect(payload.results).toEqual([]);
+    expect(payload.searchFailures).toEqual({ failed: 2, total: 2, errors: ['Request failed with status code 400'] });
+    expect(JSON.stringify(payload)).not.toContain('test-prowlarr-key');
+  });
+
+  it('has no failure count when every search answered', async () => {
+    authRequest.json.mockResolvedValue({ title: 'Title', author: 'Author' });
+    configServiceMock.get
+      .mockResolvedValueOnce(JSON.stringify([{ id: 1, name: 'Indexer', protocol: 'torrent', priority: 10 }]))
+      .mockResolvedValueOnce(null);
+    groupIndexersMock.mockReturnValue({ groups: [{ categories: [3030], indexerIds: [1] }], skippedIndexers: [] });
+    prowlarrMock.searchWithVariations.mockResolvedValue([]);
+
+    const { POST } = await import('@/app/api/audiobooks/search-torrents/route');
+    const payload = await (await POST({} as never)).json();
+
+    expect(payload).not.toHaveProperty('searchFailures');
   });
 });
-
-

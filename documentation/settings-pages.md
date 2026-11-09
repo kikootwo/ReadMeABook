@@ -17,7 +17,8 @@ src/app/admin/settings/
 │   ├── types.ts                  # Shared TypeScript interfaces
 │   └── helpers.ts                # Business logic (206 lines)
 ├── hooks/
-│   └── useSettings.ts            # Global settings hook
+│   ├── useSettings.ts            # Global settings hook
+│   └── useSettingsTabUrlState.ts # Active tab <-> ?tab=
 └── tabs/                         # Feature modules
     ├── LibraryTab/               # Plex/Audiobookshelf config
     │   ├── LibraryTab.tsx
@@ -72,6 +73,8 @@ src/app/admin/settings/
 6. **E-book Sidecar** - Multi-source ebook downloads (Anna's Archive + Indexer Search), preferred format
 7. **BookDate** - AI provider, API key (encrypted), model selection, library scope, custom prompt, swipe history
 8. **Notifications** - Multiple backends (Discord, Pushover), event subscriptions, test functionality
+
+**Active tab:** in the address, `/admin/settings?tab=<id>`: `library` (default, no param), `auth` (Audiobookshelf mode only), `prowlarr`, `download`, `paths`, `ebook`, `bookdate`, `notifications`, `api`. A click pushes a history entry (`window.history.pushState`, synced by Next.js, no server round trip), so reload, back/forward and links keep the tab; an unknown tab or one `getTabs(backendMode)` doesn't offer shows `library` and the URL is left alone (`hooks/useSettingsTabUrlState.ts`).
 
 ## E-book Sidecar
 
@@ -158,6 +161,7 @@ src/app/admin/settings/
 - Supported regions: any key of `AUDIBLE_REGIONS` (see [integrations/audible.md](integrations/audible.md#region-configuration))
 - UI: Dropdown selector in Library tab (both Plex and Audiobookshelf settings), built from `AUDIBLE_REGIONS`; non-English regions show ` *` + amber warning
 - No validation required (immediate save)
+- **Language filter:** checkbox `Only show books in {Language}` under the region (`audible.language_filter`, off by default), saved with the region ([audible-language-filter.md](integrations/audible-language-filter.md))
 
 **Why It Matters:**
 - Each Audible region uses different ASINs for the same audiobook
@@ -186,8 +190,10 @@ src/app/admin/settings/
 
 **Configuration:**
 - Key: `audiobook_path_template` (string, default: `{author}/{title} {asin}`)
-- Variables: `{author}`, `{title}`, `{narrator}`, `{asin}`, `{year}`
-- Optional variables (narrator, asin, year) removed if not available
+- Variables: `{author}`, `{primaryAuthor}`, `{title}`, `{narrator}`, `{asin}`, `{year}`, `{series}`, `{seriesPart}`
+- `{primaryAuthor}`: first author of `{author}` (split on `,` `;` `&`; see [file-organization.md](phase3/file-organization.md#target-structure))
+- `{seriesPart:00}` / `:000` / `:0000`: series part padded to 2, 3 or 4 digits (`1` → `01`, `1-3` → `01-03`); other shapes unchanged
+- Optional variables removed if not available
 - Template validated on test, shows preview examples
 
 **UI (PathsTab):**
@@ -198,15 +204,19 @@ src/app/admin/settings/
 - Preview examples showing 2-3 sample paths with actual data
 
 **Validation:**
-- Must contain at least `{author}` or `{title}` (required variables)
-- Cannot be empty or only contain optional variables
-- Invalid templates show error message
+- Cannot be empty; must be a relative path (no leading `/`, `\`, `C:`)
+- Every `{...}` must be a supported variable or a conditional block holding one
+- Only `seriesPart` takes a format, and only `00`, `000` or `0000`; any other `{name:format}` gives `Unsupported format`
+- `< > : " | ? *` outside variables are rejected; use `/`, not `\`
+- Invalid templates show an error message in the Paths tab (saving is not blocked)
 - Valid templates show preview paths
 
 **Examples:**
 - `{author}/{title} {asin}` → `Douglas Adams/The Hitchhiker's Guide to the Galaxy B0009JKV9W/`
 - `{author}/{title} ({year})` → `Douglas Adams/The Hitchhiker's Guide to the Galaxy (2005)/`
 - `{author}/{narrator}/{title}` → `Douglas Adams/Stephen Fry/The Hitchhiker's Guide to the Galaxy/`
+- `{primaryAuthor}/{title}` with author `Douglas Preston, Lincoln Child` → `Douglas Preston/Relic/`
+- `{author}/{series}/{seriesPart:00} - {title}` → `Douglas Preston, Lincoln Child/Pendergast/01 - Relic/`
 
 ## Filesystem Scan Trigger
 
@@ -326,7 +336,7 @@ src/app/admin/settings/
 
 **PUT /api/admin/settings/audible**
 - Updates Audible region
-- Body: `{ region: string }` (any key of `AUDIBLE_REGIONS`, see [integrations/audible.md](integrations/audible.md#region-configuration))
+- Body: `{ region: string, languageFilter?: boolean }` (any key of `AUDIBLE_REGIONS`, see [integrations/audible.md](integrations/audible.md#region-configuration)); non-boolean `languageFilter` → 400 before any write
 - Unknown region → 400 listing valid codes; success clears config cache, re-inits AudibleService, queues `audible_refresh` (job errors logged, not returned)
 
 **PUT /api/admin/settings/prowlarr/indexers**
@@ -468,6 +478,7 @@ src/app/admin/settings/
 - Enable/disable toggle
 - Test button (sends sample notification)
 - Password masking for sensitive values
+- Field help text from provider `configFields[].helpText`; Apprise Tag: `{user}` = requester's tag-safe username, Config Key only (see notifications.md)
 
 **Event Types:**
 - Request Pending Approval - Admin approval required

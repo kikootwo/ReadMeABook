@@ -17,6 +17,7 @@ import { EBOOK_MAX_SIZE_MB, rankEbookTorrents, RankedEbookTorrent } from '../uti
 import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer-grouping';
 import { getLanguageForRegion } from '../constants/language-config';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
+import { addGroupSearch, logSearchSummary, newSearchStats, noResultsMessage, recordFailure, type SearchStats } from '../utils/indexer-search-failures';
 import type { AudibleRegion } from '../types/audible';
 
 // Import ebook scraper functions for Anna's Archive
@@ -69,6 +70,7 @@ export async function processSearchEbook(payload: SearchEbookPayload): Promise<a
     // Track whether we found a result
     let annasArchiveResult: EbookSearchResult | null = null;
     let indexerResult: RankedEbookTorrent | null = null;
+    const indexerSearchStats = newSearchStats(); // failed searches are reported, not taken for "nothing found" (#522)
 
     // ========== STEP 1: Try Anna's Archive (if enabled) ==========
     if (annasArchiveEnabled) {
@@ -85,7 +87,7 @@ export async function processSearchEbook(payload: SearchEbookPayload): Promise<a
     // ========== STEP 2: Try Indexer Search (if enabled and no Anna's Archive result) ==========
     if (!annasArchiveResult && indexerSearchEnabled) {
       logger.info(`Searching indexers...`);
-      indexerResult = await searchIndexers(requestId, searchAudiobook, preferredFormat, logger);
+      indexerResult = await searchIndexers(requestId, searchAudiobook, preferredFormat, logger, indexerSearchStats);
 
       if (indexerResult) {
         logger.info(`Found ebook via indexer search (score: ${indexerResult.finalScore.toFixed(1)})`);
@@ -102,7 +104,8 @@ export async function processSearchEbook(payload: SearchEbookPayload): Promise<a
       if (indexerSearchEnabled) enabledSources.push("Indexer Search");
 
       const message = enabledSources.length > 0
-        ? `No ebook found on ${enabledSources.join(' or ')}. Will retry automatically.`
+        ? noResultsMessage(`No ebook found on ${enabledSources.join(' or ')}`, indexerSearchStats,
+          annasArchiveEnabled ? "No ebook found on Anna's Archive. " : '')
         : 'No ebook sources enabled. Enable Anna\'s Archive or Indexer Search in settings.';
 
       logger.warn(`No ebook found for request ${requestId}, marking as awaiting_search`);
@@ -232,7 +235,8 @@ async function searchIndexers(
   requestId: string,
   audiobook: { title: string; author: string },
   preferredFormat: string,
-  logger: RMABLogger
+  logger: RMABLogger,
+  searchStats: SearchStats
 ): Promise<RankedEbookTorrent | null> {
   const configService = getConfigService();
 
@@ -286,6 +290,7 @@ async function searchIndexers(
   for (let i = 0; i < groups.length; i++) {
     const group = groups[i];
     logger.info(`Searching group ${i + 1}/${groups.length}: ${getGroupDescription(group)}`);
+    const groupStats = newSearchStats();
 
     try {
       // "title author" then "title", deduped (same as audiobooks): a title-only
@@ -295,15 +300,18 @@ async function searchIndexers(
         indexerIds: group.indexerIds,
         minSeeders: 0, // Ebooks may have fewer seeders
         maxResults: 100,
-      });
+      }, undefined, groupStats);
 
       logger.info(`Group ${i + 1} returned ${groupResults.length} results`);
       allResults.push(...groupResults);
     } catch (error) {
       logger.error(`Group ${i + 1} search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      recordFailure(groupStats, '(whole group)', error);
       // Continue with other groups even if one fails
     }
+    addGroupSearch(searchStats, groupStats, getGroupDescription(group), logger);
   }
+  logSearchSummary(logger, searchStats);
 
   logger.info(`Found ${allResults.length} total results from ${groups.length} group${groups.length > 1 ? 's' : ''}`);
 

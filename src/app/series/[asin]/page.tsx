@@ -10,6 +10,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Header } from '@/components/layout/Header';
 import { AudiobookGrid } from '@/components/audiobooks/AudiobookGrid';
 import { LoadMoreBar } from '@/components/ui/LoadMoreBar';
+import { LanguageHiddenNote } from '@/components/ui/LanguageHiddenNote';
 import { SeriesDetailCard, SeriesDetailSkeleton } from '@/components/series/SeriesDetailCard';
 import { SimilarSeriesRow, SimilarSeriesSkeleton } from '@/components/series/SimilarSeriesRow';
 import { useSeriesDetail } from '@/lib/hooks/useSeries';
@@ -27,7 +28,7 @@ export default function SeriesDetailPage({
   const router = useRouter();
   const searchParams = useSearchParams();
   const fromSeriesTitle = searchParams.get('from');
-  const { series, hasMore, isLoading: seriesLoading, isLoadingMore, loadMore } = useSeriesDetail(asin);
+  const { series, hasMore, isLoading: seriesLoading, isLoadingMore, loadMore, filterLanguage, hiddenCount } = useSeriesDetail(asin);
   const { cardSize, setCardSize, squareCovers, setSquareCovers, hideAvailable, setHideAvailable } = usePreferences();
 
   const handleBack = useCallback(() => {
@@ -47,11 +48,24 @@ export default function SeriesDetailPage({
     [series, hideAvailable]
   );
 
+  // Language filter on: nothing in the language yet, but Audible has more pages. Read
+  // before hide-available, which empties the list for its own reason.
+  const loadedBooks = series?.books.length ?? 0;
+  const awaitingMore = !!filterLanguage && loadedBooks === 0 && hasMore;
+  const languageEmpty = !!filterLanguage && hiddenCount > 0 && loadedBooks === 0;
+  // Filter on, hide-available hid every loaded book, Audible has more: the bar, not "No books found"
+  const allLoadedAvailable = !!filterLanguage && loadedBooks > 0 && filteredBooks.length === 0 && hasMore;
+  const barEmptyText = awaitingMore
+    ? `No books in ${filterLanguage} so far`
+    : allLoadedAvailable ? 'All books so far are already available' : undefined;
+  // Audible's series total counts other-language books too: not shown while the filter is on
+  const totalBooks = !filterLanguage && series && series.bookCount > 0 ? series.bookCount : undefined;
+
   // Header count text: reflects filtered counts
   const visibleCount = filteredBooks.length;
   const booksCountText = series
-    ? hasMore && series.bookCount > series.books.length
-      ? `${visibleCount.toLocaleString()} of ${series.bookCount.toLocaleString()} title${series.bookCount !== 1 ? 's' : ''}`
+    ? hasMore && totalBooks && totalBooks > series.books.length
+      ? `${visibleCount.toLocaleString()} of ${totalBooks.toLocaleString()} title${totalBooks !== 1 ? 's' : ''}`
       : visibleCount > 0
         ? `${visibleCount.toLocaleString()} title${visibleCount !== 1 ? 's' : ''}`
         : ''
@@ -123,23 +137,32 @@ export default function SeriesDetailPage({
                 </div>
               </div>
 
-              {/* Books Grid */}
-              <AudiobookGrid
-                audiobooks={filteredBooks}
-                isLoading={seriesLoading}
-                emptyMessage={`No books found for ${series.title}`}
-                cardSize={cardSize}
-                squareCovers={squareCovers}
-              />
+              <LanguageHiddenNote hiddenCount={hiddenCount} />
+
+              {/* Books Grid (language filter on with nothing shown yet and more pages: the bar only) */}
+              {!barEmptyText && (
+                <AudiobookGrid
+                  audiobooks={filteredBooks}
+                  isLoading={seriesLoading}
+                  emptyMessage={
+                    languageEmpty
+                      ? `No books in ${filterLanguage} found for ${series.title}`
+                      : `No books found for ${series.title}`
+                  }
+                  cardSize={cardSize}
+                  squareCovers={squareCovers}
+                />
+              )}
 
               {/* Load More Bar */}
-              {filteredBooks.length > 0 && (
+              {(filteredBooks.length > 0 || barEmptyText) && (
                 <LoadMoreBar
                   loadedCount={filteredBooks.length}
-                  totalCount={series.bookCount > 0 ? series.bookCount : undefined}
+                  totalCount={totalBooks}
                   hasMore={hasMore}
                   isLoading={isLoadingMore}
                   onLoadMore={loadMore}
+                  emptyText={barEmptyText}
                 />
               )}
             </div>

@@ -18,7 +18,8 @@ const prismaMock = createPrismaMock();
 const configServiceMock = { get: vi.fn(), getBackendMode: vi.fn() };
 const absMock = vi.hoisted(() => ({ getABSItem: vi.fn(), deleteABSItem: vi.fn() }));
 const plexMock = vi.hoisted(() => ({ getItemFilePaths: vi.fn(), deleteItem: vi.fn() }));
-const rmState = vi.hoisted(() => ({ error: null as NodeJS.ErrnoException | null }));
+/** Injected failures: `error` fails the n-th unlink (1-based, `at`); `rmdirError` fails every rmdir. */
+const rmState = vi.hoisted(() => ({ error: null as NodeJS.ErrnoException | null, at: 1, calls: 0, rmdirError: null as NodeJS.ErrnoException | null }));
 
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => configServiceMock }));
@@ -26,11 +27,19 @@ vi.mock('@/lib/services/audiobookshelf/api', () => absMock);
 vi.mock('@/lib/integrations/plex.service', () => ({ getPlexService: () => plexMock }));
 vi.mock('fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs/promises')>();
-  const rm = (async (...args: Parameters<typeof actual.rm>) => {
-    if (rmState.error) throw rmState.error;
-    return actual.rm(...args);
-  }) as typeof actual.rm;
-  return { ...actual, default: { ...actual, rm }, rm };
+  const unlink = (async (...args: Parameters<typeof actual.unlink>) => {
+    if (rmState.error && ++rmState.calls === rmState.at) {
+      // ENOENT: someone else removed it first
+      if (rmState.error.code === 'ENOENT') await actual.unlink(...args);
+      throw rmState.error;
+    }
+    return actual.unlink(...args);
+  }) as typeof actual.unlink;
+  const rmdir = (async (...args: Parameters<typeof actual.rmdir>) => {
+    if (rmState.rmdirError) throw rmState.rmdirError;
+    return actual.rmdir(...args);
+  }) as typeof actual.rmdir;
+  return { ...actual, default: { ...actual, unlink, rmdir }, unlink, rmdir };
 });
 
 const { deleteRequest } = await import('@/lib/services/request-delete.service');
@@ -85,7 +94,7 @@ function expectLibraryUntouched() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  rmState.error = null;
+  Object.assign(rmState, { error: null, at: 1, calls: 0, rmdirError: null });
   root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rmab-delete-guard-')));
   media = path.join(root, 'media');
   downloads = path.join(root, 'downloads');
@@ -113,8 +122,8 @@ afterEach(() => {
 });
 
 describe('deleteRequest (audiobook): stored folder behind the guard', () => {
-  it('removes a default-template folder (ebook inside too), sweeps the empty author folder, ABS without files, clears the row', async () => {
-    const dir = imported('Author/Book B0TEST0001', ['Book.m4b'], ['Book.epub']);
+  it('removes a default-template folder (audio + cover), sweeps the empty author folder, ABS without files, clears the row', async () => {
+    const dir = imported('Author/Book B0TEST0001');
     absMock.getABSItem.mockResolvedValue({ path: dir, relPath: 'Author/Book B0TEST0001' });
     request(book(dir, { fileFormat: 'epub' }));
 
@@ -183,16 +192,44 @@ describe('deleteRequest (audiobook): stored folder behind the guard', () => {
     expectLibraryUntouched();
   });
 
-  it('keeps everything when the folder cannot be removed (EACCES): no backend delete, fields stay', async () => {
+  it('keeps everything when the first audio file cannot be removed (EACCES): no backend delete, fields stay', async () => {
     const dir = imported('Author/Book');
     rmState.error = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
     request(book(dir));
 
     const result = await deleteRequest('req-1', 'admin-1');
 
-    expect(result.filesKeptReason).toBe('the folder was partly removed (permission denied); remove the rest manually');
-    expect(fs.existsSync(dir)).toBe(true);
+    expect(result.filesKeptReason).toBe('Book.m4b could not be removed (permission denied)');
+    expect(fs.readdirSync(dir).sort()).toEqual(['Book.m4b', 'cover.jpg']);
     expectLibraryUntouched();
+  });
+
+  it('a later audio file that cannot be removed: "partly removed", library untouched', async () => {
+    const dir = imported('Author/Book', ['Part 1.m4b', 'Part 2.m4b']);
+    Object.assign(rmState, { error: Object.assign(new Error('EPERM'), { code: 'EPERM' }), at: 2 });
+    request(book(dir, { filesHash: generateFilesHash(['Part 1.m4b', 'Part 2.m4b']) }));
+    const result = await deleteRequest('req-1', 'admin-1');
+    expect(result.filesKeptReason).toBe('the folder was partly removed (permission denied); remove the rest manually');
+    expect(fs.readdirSync(dir).length).toBe(2);
+    expectLibraryUntouched();
+  });
+
+  it('an audio file already gone at unlink (ENOENT) counts as removed', async () => {
+    request(book(imported('Author/Book')));
+    rmState.error = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    const result = await deleteRequest('req-1', 'admin-1');
+    expect(result).toMatchObject({ filesDeleted: true, message: 'Request deleted successfully' });
+    expect(result.filesKeptReason).toBeUndefined();
+  });
+
+  it('a book folder rmdir error (EBUSY, a mount point) is reported as the folder error, not as its content; the audio is gone', async () => {
+    const dir = imported('Author/Book');
+    rmState.rmdirError = Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+    request(book(dir));
+    const result = await deleteRequest('req-1', 'admin-1');
+    expect(result).toMatchObject({ filesDeleted: true, message: 'Request deleted; the emptied book folder could not be removed (EBUSY)', folderKept: { files: [], more: 0, error: 'could not be removed (EBUSY)' } });
+    expect(result.filesKeptReason).toBeUndefined();
+    expect(fs.readdirSync(dir)).toEqual([]);
   });
 
   it('keeps library files when RMAB has no stored folder but the book is linked to a library item', async () => {
@@ -359,55 +396,5 @@ describe('deleteRequest (audiobook): stored folder behind the guard', () => {
       where: { id: { in: ['ebook-1', 'ebook-2'] } },
       data: expect.objectContaining({ deletedBy: 'admin-1' }),
     });
-  });
-});
-
-describe('deleteRequest (ebook): ebook files behind the guard', () => {
-  it('removes the ebooks in a folder that passes the evidence rule; audio stays; no backend or row changes', async () => {
-    const dir = imported('Author/Book', ['Book.m4b'], ['Book.epub']);
-    request(book(dir), 'ebook');
-
-    const result = await deleteRequest('req-1', 'admin-1');
-
-    expect(result.filesDeleted).toBe(true);
-    expect(fs.existsSync(path.join(dir, 'Book.epub'))).toBe(false);
-    expect(fs.existsSync(path.join(dir, 'Book.m4b'))).toBe(true);
-    expectLibraryUntouched();
-  });
-
-  it('removes the only ebook in a flat Ebooks folder', async () => {
-    const dir = path.join(media, 'Ebooks');
-    write(path.join(dir, 'Book.epub'));
-    request(book(dir, { filesHash: null }), 'ebook');
-
-    const result = await deleteRequest('req-1', 'admin-1');
-
-    expect(result.filesDeleted).toBe(true);
-    expect(fs.existsSync(path.join(dir, 'Book.epub'))).toBe(false);
-  });
-
-  it('keeps a flat folder holding foreign ebooks besides this one, and says why', async () => {
-    const dir = path.join(media, 'Ebooks');
-    write(path.join(dir, 'Book.epub'));
-    write(path.join(dir, 'Calibre Book.epub'));
-    request(book(dir, { filesHash: null }), 'ebook');
-
-    const result = await deleteRequest('req-1', 'admin-1');
-
-    expect(result.filesDeleted).toBe(false);
-    expect(result.filesKeptReason).toContain('holds 2 ebook files');
-    expect(fs.readdirSync(dir).sort()).toEqual(['Book.epub', 'Calibre Book.epub']);
-  });
-
-  it('keeps a folder another book also points at', async () => {
-    const dir = path.join(media, 'Ebooks');
-    write(path.join(dir, 'Book.epub'));
-    otherBooks = [{ id: 'book-2', title: 'Second', filePath: dir }];
-    request(book(dir, { filesHash: null }), 'ebook');
-
-    const result = await deleteRequest('req-1', 'admin-1');
-
-    expect(result.filesKeptReason).toBe('it is also the folder of "Second"');
-    expect(fs.existsSync(path.join(dir, 'Book.epub'))).toBe(true);
   });
 });

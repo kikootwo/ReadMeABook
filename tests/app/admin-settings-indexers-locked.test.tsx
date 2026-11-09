@@ -13,6 +13,7 @@ import React from 'react';
 import path from 'path';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { setMockUrl } from '../helpers/mock-next-url-history';
 
 const fetchWithAuthMock = vi.hoisted(() => vi.fn());
 const configStore = vi.hoisted(() => new Map<string, string>());
@@ -42,6 +43,8 @@ const settingsFixture = {
   backendMode: 'plex',
   hasLocalUsers: true,
   audibleRegion: 'us',
+
+  audibleLanguageFilter: false,
   prowlarr: { url: 'http://old-prowlarr:9696', apiKey: '••••••••' },
   indexerOptions: { skipUnreleased: true },
 };
@@ -79,6 +82,8 @@ const lockedNote = () => screen.queryByText(/could not be loaded from Prowlarr, 
 describe('Indexers tab while the saved list is not loaded', () => {
   beforeEach(() => {
     vi.resetModules();
+    // The active tab comes from ?tab=: start every test on the default one
+    setMockUrl('/admin/settings');
     fetchWithAuthMock.mockReset();
     configStore.clear();
     configStore.set('prowlarr_indexers', JSON.stringify(savedIndexers));

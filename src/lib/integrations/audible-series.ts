@@ -12,8 +12,9 @@
 
 import * as cheerio from 'cheerio';
 import { getAudibleService } from './audible.service';
-import { getLanguageForRegion } from '../constants/language-config';
+import { getLanguageForRegion, partitionByLanguage } from '../constants/language-config';
 import { RMABLogger } from '../utils/logger';
+import { isLanguageFilterOn, type LanguageFilterInfo } from './audible-language-filter';
 import {
   parseSeriesBooks,
   parseSeriesDescription,
@@ -27,7 +28,7 @@ export type {
   SimilarSeries,
   SeriesDetail,
 } from './audible-series-parsers';
-export { searchForSeries, SeriesSearchUnavailableError } from './audible-series-search';
+export { searchForSeries, searchSeries, SeriesSearchUnavailableError } from './audible-series-search';
 
 const logger = RMABLogger.create('Audible.Series');
 
@@ -37,11 +38,22 @@ const AUDIBLE_PAGE_SIZE = 50;
 // Series page scraping
 // ---------------------------------------------------------------------------
 
+/** Set only while the admin language filter is on */
+export interface SeriesPageLanguageFilter {
+  /** Book rows on the page before the filter (paging and caps count these) */
+  rawCount?: number;
+  languageFilter?: LanguageFilterInfo;
+}
+
 /**
  * Scrape a series page for full detail data including books and similar series.
- * Used by the detail API endpoint.
+ * Used by the detail API endpoint. Counts, paging and the drift warning come from the
+ * rows as listed; the admin language filter then hides other-language rows.
  */
-export async function scrapeSeriesPage(asin: string, page: number = 1): Promise<(SeriesDetail & { hasMore: boolean; page: number }) | null> {
+export async function scrapeSeriesPage(
+  asin: string,
+  page: number = 1,
+): Promise<(SeriesDetail & SeriesPageLanguageFilter & { hasMore: boolean; page: number }) | null> {
   const service = getAudibleService();
   const region = service.getRegion();
   const baseUrl = service.getBaseUrl();
@@ -86,7 +98,12 @@ export async function scrapeSeriesPage(asin: string, page: number = 1): Promise<
     // Parse similar series ("Listeners also enjoyed" or similar section)
     const similarSeries = parseSimilarSeries($);
 
-    logger.info(`Series detail complete: "${summary.title}" (${books.length} books, page ${page}, hasMore: ${hasMore})`);
+    const filterOn = await isLanguageFilterOn();
+    const { kept, hidden } = filterOn
+      ? partitionByLanguage(books, (book) => book.language, langConfig)
+      : { kept: books, hidden: [] };
+
+    logger.info(`Series detail complete: "${summary.title}" (${kept.length} books, page ${page}, hasMore: ${hasMore})`);
 
     return {
       asin,
@@ -96,11 +113,12 @@ export async function scrapeSeriesPage(asin: string, page: number = 1): Promise<
       ratingCount: summary.ratingCount,
       description,
       tags: summary.tags,
-      books,
+      books: kept,
       similarSeries,
       audibleUrl: `${baseUrl}/series/${asin}`,
       hasMore,
       page,
+      ...(filterOn && { rawCount: books.length, languageFilter: { language: langConfig.code, hiddenCount: hidden.length } }),
     };
   } catch (error) {
     logger.error(`Failed to scrape series detail ${asin}`, {

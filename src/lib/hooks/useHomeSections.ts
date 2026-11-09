@@ -25,9 +25,17 @@ export interface HomeSectionsResponse {
   nextRefresh: string | null;
 }
 
+export interface AudibleSubcategory {
+  id: string;
+  name: string;
+  parentId: string;
+}
+
+/** A top-level Audible category with its sub-categories (GET /api/audible/categories). */
 export interface AudibleCategory {
   id: string;
   name: string;
+  subcategories?: AudibleSubcategory[];
 }
 
 const HOME_SECTIONS_KEY = '/api/user/home-sections';

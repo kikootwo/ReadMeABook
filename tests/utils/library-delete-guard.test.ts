@@ -13,7 +13,7 @@ import { generateFilesHash } from '@/lib/utils/files-hash';
 const prismaMock = createPrismaMock();
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 
-const { assertSafeLibraryDelete, isStaleStoredFolder, planEbookDelete } = await import('@/lib/utils/library-delete-guard');
+const { assertSafeLibraryDelete, isStaleStoredFolder } = await import('@/lib/utils/library-delete-guard');
 
 let root: string;
 let media: string;
@@ -191,45 +191,6 @@ describe('assertSafeLibraryDelete', () => {
     prismaMock.configuration.findUnique.mockRejectedValue(new Error('db down'));
     const { dir, book } = titleFolder('Author/Book');
     expect(await refusal(assertSafeLibraryDelete(dir, book))).toContain('nothing deleted: db down');
-  });
-});
-
-describe('planEbookDelete', () => {
-  it('returns every ebook directly in a folder that passes the evidence rule', async () => {
-    const { dir, book } = titleFolder('Author/Book');
-    write(path.join(dir, 'Book.epub'));
-    write(path.join(dir, 'Book.pdf'));
-    const files = await planEbookDelete(dir, book);
-    expect(files.map((f) => path.basename(f)).sort()).toEqual(['Book.epub', 'Book.pdf']);
-  });
-
-  it('returns the only ebook in a folder without audio evidence (ebook-only book)', async () => {
-    const dir = path.join(media, 'Ebooks');
-    write(path.join(dir, 'Mine.epub'));
-    const files = await planEbookDelete(dir, { id: 'b', filePath: dir, filesHash: null });
-    expect(files.map((f) => path.basename(f))).toEqual(['Mine.epub']);
-  });
-
-  it('refuses a flat folder with several ebooks that is not provably this book\'s', async () => {
-    const dir = path.join(media, 'Ebooks');
-    write(path.join(dir, 'Mine.epub'));
-    write(path.join(dir, 'Calibre Book.epub'));
-    const reason = await refusal(planEbookDelete(dir, { id: 'b', filePath: dir, filesHash: null }));
-    expect(reason).toContain('holds 2 ebook files');
-    expect(fs.existsSync(path.join(dir, 'Calibre Book.epub'))).toBe(true);
-  });
-
-  it('refuses a folder shared with another book (rule c), even with one ebook', async () => {
-    const dir = path.join(media, 'Ebooks');
-    write(path.join(dir, 'Mine.epub'));
-    otherBooks = [{ id: 'book-2', title: 'Second', filePath: dir }];
-    expect(await refusal(planEbookDelete(dir, { id: 'b', filePath: dir, filesHash: null }))).toBe('it is also the folder of "Second"');
-  });
-
-  it('returns nothing for a missing folder (library mounted)', async () => {
-    write(path.join(media, 'Other', 'x.epub'));
-    const dir = path.join(media, 'Author', 'Gone');
-    await expect(planEbookDelete(dir, { id: 'b', filePath: dir, filesHash: null })).resolves.toEqual([]);
   });
 });
 

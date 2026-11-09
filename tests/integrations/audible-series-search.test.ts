@@ -17,6 +17,7 @@ import {
 } from '../helpers/fake-audible-catalog';
 
 vi.mock('@/lib/integrations/audible.service', async () => (await import('../helpers/fake-audible-catalog')).audibleServiceModule);
+vi.mock('@/lib/services/config.service', async () => (await import('../helpers/fake-audible-catalog')).configServiceModule);
 
 const EF_PAGE = 'us-keywords-expeditionary-force.json';
 const SERIES_BATCH = 'us-asins-series-batch.json';

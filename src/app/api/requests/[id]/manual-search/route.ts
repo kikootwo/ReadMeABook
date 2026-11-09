@@ -8,6 +8,7 @@ import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { hidePlacementRecord } from '@/lib/services/request-detail-query';
 
 const logger = RMABLogger.create('API.ManualSearch');
 
@@ -97,7 +98,7 @@ export async function POST(
 
       return NextResponse.json({
         success: true,
-        request: updated,
+        request: hidePlacementRecord(updated),
         message: 'Manual search initiated',
       });
     } catch (error) {

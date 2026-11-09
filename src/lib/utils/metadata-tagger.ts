@@ -9,6 +9,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { METADATA_TAG_FORMATS, MP4_CONTAINER_FORMATS } from '../constants/audio-formats';
 import { addFreeformTags, type FreeformTag, type FreeformTagResult } from './mp4-freeform-tags';
+import { movieTimescaleArgs } from './mp4-movie-timescale';
 import { TAG_TEMP_SUFFIX } from './path-component';
 import {
   bookDetailValues,
@@ -197,8 +198,8 @@ export async function tagAudioFileMetadata(
         '-metadata', 'gapless_playback=1'
       );
 
-      // moov first (faststart), also when the freeform post-step later refuses the file
-      args.push('-movflags', '+faststart');
+      // Chapter-safe movie timescale (#511), then moov first (faststart), also when the freeform post-step later refuses the file
+      args.push(...(await movieTimescaleArgs()), '-movflags', '+faststart');
 
       // Explicitly specify output format (fixes .tmp extension issue)
       args.push('-f', 'mp4');

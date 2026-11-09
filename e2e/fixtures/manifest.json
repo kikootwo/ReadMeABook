@@ -10,6 +10,7 @@
     "phm-m4b": { "book": "phm", "kind": "m4b-chapters", "chapters": 3, "seconds": 4, "folder": "{{title}}" },
     "phm-asin": { "book": "phm", "kind": "mp3-multi", "tracks": 2, "seconds": 5, "folder": "{{title}} [{{asin}}]" },
     "martian-m4b": { "book": "martian", "kind": "m4b-chapters", "chapters": 2, "seconds": 4, "folder": "{{title}}" },
+    "martian-m4b-cover": { "book": "martian", "kind": "m4b-cover-chapters", "chapters": [["One", 100], ["第二章", 600], ["Глава 3", 600]], "folder": "{{title}}" },
     "martian-mp3": { "book": "martian", "kind": "mp3-multi", "tracks": 2, "seconds": 5, "folder": "{{title}}" },
     "artemis-mp3": { "book": "artemis", "kind": "mp3-multi", "tracks": 2, "seconds": 5, "folder": "{{title}}" },
     "artemis-mp3-128": { "book": "artemis", "kind": "mp3-multi", "tracks": 3, "seconds": 5, "bitrate": "128k", "folder": "{{title}}" },

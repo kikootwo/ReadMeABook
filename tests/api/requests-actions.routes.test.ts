@@ -135,8 +135,9 @@ describe('Request action routes', () => {
       expect.objectContaining({ title: 'Title', author: 'Author', durationMinutes: 600 }),
       expect.any(Object)
     );
-    // Interactive search shows undersized releases too: only automatic search sets the size floor
+    // Interactive search shows undersized and Audible DRM releases too: only automatic search drops them
     expect(rankTorrentsMock.mock.calls[0][2]).not.toHaveProperty('minMBPerMinute');
+    expect(rankTorrentsMock.mock.calls[0][2]).not.toHaveProperty('rejectDrm');
   });
 
   it('performs interactive search without runtime when no ASIN', async () => {
@@ -209,7 +210,7 @@ describe('Request action routes', () => {
     expect(prowlarrMock.searchWithVariations).toHaveBeenCalledWith('Title', 'Author', {
       categories: [3030],
       indexerIds: [1],
-    }, { exactTitle: false });
+    }, { exactTitle: false }, expect.any(Object));
     expect(payload.results).toHaveLength(100);
     expect(payload.results[0]).toEqual(expect.objectContaining({ title: 'Best result', rank: 1 }));
     expect(payload.truncated).toBe(true);

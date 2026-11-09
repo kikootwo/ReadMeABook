@@ -85,6 +85,29 @@ describe('POST /api/user/goodreads-shelves', () => {
     expect(response.status).toBe(201);
   });
 
+  it('says Goodreads no longer serves shelf feeds when the feed is gone, and saves nothing (#514)', async () => {
+    const { GoodreadsFeedEndedError, GOODREADS_FEEDS_ENDED_ADD_MESSAGE } = await import('@/lib/utils/goodreads-rss-url');
+    fetchRssMock.mockRejectedValue(new GoodreadsFeedEndedError(404));
+    const response = await addShelf(FEED);
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe('GoodreadsFeedsEnded');
+    expect(body.message).toBe(GOODREADS_FEEDS_ENDED_ADD_MESSAGE);
+    expect(body.message).toMatch(/^Goodreads no longer serves shelf RSS feeds/);
+    expect(body.message).not.toContain('Could not fetch or parse');
+    expect(prismaMock.goodreadsShelf.create).not.toHaveBeenCalled();
+    expect(jobQueueMock.addSyncShelvesJob).not.toHaveBeenCalled();
+  });
+
+  it('keeps the fetch-or-parse message for other feed failures', async () => {
+    fetchRssMock.mockRejectedValue(new Error('Invalid Goodreads RSS: no channel element'));
+    const body = await (await addShelf(FEED)).json();
+
+    expect(body.error).toBe('InvalidRSS');
+    expect(body.message).toBe('Could not fetch or parse the RSS feed: Invalid Goodreads RSS: no channel element');
+  });
+
   it('returns 409 when a concurrent add wins the unique constraint', async () => {
     prismaMock.goodreadsShelf.create.mockRejectedValue(Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }));
     const response = await addShelf(FEED);

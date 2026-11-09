@@ -5,7 +5,8 @@
  * Non-admin callers (owners, API tokens) get an explicit field list that leaves out
  * internal job/download data: Job.payload/result/stackTrace,
  * DownloadHistory.magnetLink/torrentUrl/downloadPath, Audiobook.filePath and
- * Request.selectedTorrent.
+ * Request.selectedTorrent. Request.placedEbookFiles and Request.approvalBypassedBy are
+ * left out for every caller.
  */
 
 import type { Prisma } from '@/generated/prisma/client';
@@ -118,6 +119,18 @@ export const OWNER_REQUEST_DETAIL_SELECT = {
  * internal (download link) and only admins act on it.
  */
 export function hideStoredPick<T>(record: T, role: string | undefined): T {
-  if (role === 'admin' || !record || typeof record !== 'object') return record;
-  return { ...record, selectedTorrent: undefined };
+  const shown = hidePlacementRecord(record);
+  if (role === 'admin' || !shown || typeof shown !== 'object') return shown;
+  return { ...shown, selectedTorrent: undefined };
+}
+
+/**
+ * Drop the ebook placement record (Request.placedEbookFiles, #497: absolute
+ * library paths and hashes) and the approval record (Request.approvalBypassedBy,
+ * #232) from a request returned to any caller, admins included. Only the
+ * request delete reads the first; only the server reads the second.
+ */
+export function hidePlacementRecord<T>(record: T): T {
+  if (!record || typeof record !== 'object') return record;
+  return { ...record, placedEbookFiles: undefined, approvalBypassedBy: undefined };
 }

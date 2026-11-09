@@ -11,6 +11,7 @@ Sends notifications for audiobook request events (pending approval, approved, av
 - **Encryption:** AES-256-GCM for sensitive config (webhook URLs, API keys, notification URLs)
 - **Delivery:** Async via Bull job queue (priority 5)
 - **Failure Handling:** Non-blocking, Promise.allSettled (one backend fails, others succeed)
+- **Skips:** a provider's `send()` may resolve to `NotificationSkipped` (`{ skipped: true, reason }`) when it deliberately sent nothing; the service logs `Notification sent: N succeeded, N skipped, N failed` plus `Skipped backend <name>: <reason>` (reason never holds URLs, tokens, keys or usernames)
 
 ## Database Schema
 
@@ -126,6 +127,26 @@ model NotificationBackend {
 - Auth: optional Bearer token (`authToken`), else optional Basic auth (`basicAuthUser` / `basicAuthPassword`)
 - Format: Event title + book details + user + error (if applicable)
 
+**Apprise per-user Tag (`{user}`, Config Key mode only):** `providers/apprise-tag.ts` (`resolveAppriseTag`, `toAppriseUserTag`)
+- `{user}` in the Tag field is replaced by the requester's username in tag-safe form, so each user's notifications go to the URLs listed under their tag in the Apprise config
+- Tag-safe rule (Apprise's tag grammar `[a-z0-9][a-z0-9_-]*`): lowercase, accents removed, every run of characters other than a-z, 0-9 and `_` becomes one `-`, `-`/`_` trimmed from both ends. Never yields an Apprise separator/operator (`,` `|` `;` `&` `+` `[` `]` space `:`)
+  - `Jane Doe` → `jane-doe`; `José.O'Brien@example.com` (OIDC email username) → `jose-o-brien-example-com`
+  - Help text on the Tag field states the rule with the `Jane Doe` → `jane-doe` example
+- Username = `user.plexUsername` of the request's user (Plex username, OIDC `preferred_username`/email/sub, local username); for `issue_reported` it is the reporter
+- Tag split with apprise-api's own delimiters: OR groups on `/\s*[|,]\s*/`, AND terms on `/[\s&+]+/`. With `{user}` the Tag is rebuilt as `group, group` with `term term` inside (same meaning to Apprise, e.g. `admin|user-{user}` → `admin, user-jane`, `admin&user-{user}` → `admin user-jane`); a Tag with no `{user}` is sent byte for byte as typed
+- No requester: username empty, the `Unknown User` fallback queued when a request's user can't be loaded, or a name none of whose letters survive the rule (`李明` → nothing, `Дочь 1` → no requester rather than `1`). A digits-only name keeps its digits (`12345`)
+- No requester, or `{user}` would become the Apprise `all` tag (`All!`, fullwidth `ａｌｌ` included): every group containing `{user}` is dropped whole (an AND group never widens), whatever the separator; if nothing is left the notification is **not sent** through that backend (an untagged send goes to the config's untagged URLs, not the requester) and the service logs it as skipped with the reason (no requester / name would select every Apprise target)
+- Every event carries the request's user; only fallbacks (request/user row not found) reach the no-requester path. The Settings Test button sends as `Test User` (`{user}` → `test-user`, Apprise answers 424 if no URL has that tag)
+- Stateless mode (`urls`): Tag ignored as before; the field's help text says "Config Key only"
+- Use a prefix (`user-{user}`): a bare `{user}` collides with any other tag in the config that equals a username (user `admin` would get every admin notification)
+- Names that fold to the same tag share notifications (`Jane Doe`, `jane.doe`, `JANE-DOE` → `jane-doe`; `李明 Lee`, `王芳 Lee` → `lee`): the admin should check the tags of similar names
+- Example: events are chosen per backend, so use two Apprise backends on the same Config Key, (1) Tag `admin` with every event, (2) Tag `user-{user}` with Request Approved and Request Available only (users don't get Pending Approval, Request Error or Issue Reported). Apprise config (TEXT form, `tag=url`):
+```text
+admin=mailto://user:pass@mail.example.com?to=owner@example.com
+user-jane-doe=mailto://user:pass@mail.example.com?to=jane@example.com
+user-sam=mailto://user:pass@mail.example.com?to=sam@example.com
+```
+
 **Discord (Rich Embeds):**
 - Color-coded by event (yellow=pending, green=approved, blue=available, red=error, orange=issue)
 - Fields: Title, Author, Requested/Reported By, Error/Reason (if applicable)
@@ -222,6 +243,7 @@ src/lib/services/notification/
   providers/
     apprise.provider.ts             # Apprise API (100+ services)
     apprise-credentials.ts          # Credentials out of serverUrl (normalise, lift, split)
+    apprise-tag.ts                  # {user} in the Tag field → requester's tag-safe username
     discord.provider.ts             # Discord webhook
     ntfy.provider.ts                # ntfy API
     pushover.provider.ts            # Pushover API

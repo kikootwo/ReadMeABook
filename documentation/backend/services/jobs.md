@@ -57,6 +57,7 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - 10s delay between checks (prevents excessive logging)
 - Only logs progress at 5% intervals or first 5%
 - Auto-reschedules until complete/failed
+- qBittorrent finished but still outside its save path: 30 s grace (5 re-checks), then one `warn` and organize from the incomplete folder (#520, [qbittorrent.md](../../phase3/qbittorrent.md#completion--relocation-grace))
 - **Cancelled/deleted requests** (`src/lib/utils/request-stop-guard.ts`):
   - Guarded writes are one conditional `updateMany` (`where: { id, deletedAt: null, status: { not: 'cancelled' } }`); 0 rows → leave the request alone. No request id → writes nothing (an unfiltered `updateMany` would hit every row)
   - Guarded sites:
@@ -65,8 +66,10 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
     - `monitor_download`: each poll first reads the request (cancelled, soft-deleted or missing → stop: no client call, no write, no re-queue); re-checked before queuing `organize_files`; client-failure branch and PATH 3 `failed` writes (0 rows → no blocklist entry, no `request_error`)
     - `organize_files`: audiobook and ebook `processing` claim (0 rows → not imported)
     - `job-queue.service.ts` `failed` handlers for `monitor_download` (history `failed` only when the request row was written) and `download_torrent`
-  - Not guarded: the other status writes in the download, monitor and organize processors (e.g. organize `failed`/`warn`/`downloaded`), `search_ebook`, direct downloads
-  - Cancelling leaves the download in the client (seeded cleanup skips cancelled requests); delete the request to remove it under the seeding rule
+    - `download_torrent`: after creating its row, a cancel that landed during the add runs the cancel's download step (no monitor job)
+    - `start_direct_download`: `downloading`, `processing` and `failed` writes (0 rows → nothing downloaded / not imported)
+  - Not guarded: the other status writes in the download, monitor and organize processors (e.g. organize `failed`/`warn`/`downloaded`), `search_ebook`
+  - Cancelling stops the download: RMAB's own partial download is removed, a finished one seeds first ([request-cancel.md](../../admin-features/request-cancel.md)); the monitor never writes over a row recorded `removed`
 
 **search_indexers:**
 - No torrents found → 'awaiting_search' status (not failed)
@@ -88,13 +91,14 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - Clears errorMessage and retry counters on match
 - Use case: Manual library imports automatically complete stuck requests
 - ABS: items without ASIN → ABS match → ASIN from the response stored before request matching (#287, [file-hash-matching.md](../../fixes/file-hash-matching.md#asin-read-back-287))
+- Request matching (step 6) is `matchRequestsToLibrary` (`src/lib/services/library/match-requests.ts`), shared with the recently-added check; ABS: stores `plex_library.file_path`, and a `downloaded` request RMAB delivered links to the item holding its folder by path or files hash first (#284); requests go `available` by compare-and-set (one notification per request)
 
 **plex_recently_added_check:**
 - Polls recently added items (top 10) every 5 minutes
 - Matches all non-terminal request statuses against new library items
 - Same matching logic as scan_plex (ASIN priority, fuzzy fallback)
 - Clears error state and retry counters on match
-- ABS: same match + ASIN read-back as scan_plex (shared `matchItemsWithoutAsin`)
+- ABS: same match + ASIN read-back as scan_plex (shared `matchItemsWithoutAsin`), same request matching and #284 link (shared `matchRequestsToLibrary`)
 
 ## Job Payloads
 

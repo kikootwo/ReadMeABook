@@ -37,7 +37,7 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - `id` (UUID PK), `plex_guid` (unique, external ID from Plex or Audiobookshelf), `plex_rating_key`
 - `title`, `author`, `narrator`, `summary`, `duration` (BigInt, milliseconds), `year`, `user_rating` (0-10 scale)
 - **Universal identifiers:** `asin` (Audible ASIN), `isbn` (ISBN-10 or ISBN-13)
-- `file_path`, `thumb_url`, `cached_library_cover_path` (local cached cover path), `plex_library_id`, `added_at`
+- `file_path` (ABS: the item's folder as ABS sees it, `item.path`, written by both scan jobs, read by the delivered-request link #284; Plex: null), `thumb_url`, `cached_library_cover_path` (local cached cover path), `plex_library_id`, `added_at`
 - `last_scanned_at`, `created_at`, `updated_at`
 - Indexes: `plex_guid`, `title`, `author`, `plex_library_id`, `asin`, `isbn`
 - **Purpose:** Universal library cache for both Plex and Audiobookshelf backends
@@ -72,6 +72,9 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
 - `search_attempts`, `download_attempts`, `import_attempts`, `max_import_retries` (default 5)
 - `auto_rerequest_count` (Int, default 0) - Automatic re-requests after a failure with no new block (shelf sync / watched lists backoff step); user requests and retries reset it to 0. See [release-blocklist.md](../admin-features/release-blocklist.md#automatic-re-requests-409)
 - `last_search_at`, `last_import_at`, `created_at`, `updated_at`, `completed_at`
+- `cancelled_at` (DateTime, nullable, **no default**, #228) - Set by every cancel; meaningful only while `status = 'cancelled'`. NULL on a cancelled request = cancelled before the column existed: the cancelled-download cleanup never touches it ([request-cancel.md](../admin-features/request-cancel.md))
+- `placed_ebook_files` (Json, nullable) - Ebook requests: files this request's imports copied into the library, `[{ path, size, sha256, placedAt }]`; `[]` = imported but the file was already there; NULL = no record (pre-#497, a failed record write, or never imported); a first item `{ earlierImport: 'unrecorded' }` = the request delivered before its first recorded import. The request delete removes only these. Never in an API response. See [request-deletion.md](../admin-features/request-deletion.md)
+- `approval_bypassed_by` (String, nullable, no index) - Set when a request left `awaiting_approval`/`denied`/`cancelled` without an approval, in the same guarded write as the status change: `<path>:<fromStatus>` = `asin_match:awaiting_approval` (library scan ASIN match, `match-requests.ts`), `manual_import:<awaiting_approval|denied|cancelled>` (another user's request, none named, `manual-import.service.ts`), `bulk_import:<...>` (another user's request, `bulk-import/execute`). Cleared (NULL) by the approve route and by a manual import that names the request (API only). The importing admin's own request is never set. NULL = no record (approved, or delivered before this field existed). Status flow, notifications and delivery are unchanged; nothing reads it yet. Never in an API response (`hidePlacementRecord`, `GET /api/requests`). A downgrade drops the column (`db push --accept-data-loss`); upgrading again re-adds it NULL on every row, so earlier records are lost. Values: `src/lib/constants/request-statuses.ts` (`approvalBypassMark`)
 - Unique: `(user_id, audiobook_id)`
 - Indexes: `user_id`, `audiobook_id`, `status`, `created_at DESC`
 

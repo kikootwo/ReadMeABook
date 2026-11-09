@@ -15,6 +15,7 @@ import { checkMergedOutput, measureChapterContent, sameDecodedFormat, verifyMerg
 import { RMABLogger } from './logger';
 import { CHAPTER_MERGE_FORMATS } from '../constants/audio-formats';
 import { ffmpegRemuxTimeoutMs } from './metadata-tagger';
+import { movieTimescaleArgs } from './mp4-movie-timescale';
 
 // Media tools run via execFile/spawn with argv arrays (never a shell): file
 // names come from downloads and import folders and are untrusted.
@@ -33,10 +34,13 @@ const CHAPTER_PATTERNS = [
   /track\s*(\d+)/i,           // "Track 1.mp3"
 ];
 
+// A "Chapter N" tag: generic in a file name, but kept as a file's own title when the set allows
+const NUMBERED_CHAPTER_TITLE_PATTERN = /^chapter\s*(\d+)$/i;
+
 // Generic title patterns to ignore when extracting chapter names
 const GENERIC_TITLE_PATTERNS = [
   /^track\s*\d+$/i,
-  /^chapter\s*\d+$/i,
+  NUMBERED_CHAPTER_TITLE_PATTERN,
   /^\d+$/,
   /^part\s*\d+$/i,
 ];
@@ -234,9 +238,10 @@ function extractChapterNameFromFilename(filename: string): string | null {
 }
 
 /**
- * Get chapter title with priority: filename > metadata (if not book title) > fallback
+ * Get chapter title with priority: filename > metadata (if not book title) > fallback.
+ * `keepNumbered` also keeps an embedded "Chapter N" tag (analyzeChapterFiles decides per set).
  */
-function getChapterTitle(file: ChapterFile, index: number): string {
+function getChapterTitle(file: ChapterFile, index: number, keepNumbered = false): string {
   // Priority 1: Extract from filename (most reliable for chapter-specific names)
   const extracted = extractChapterNameFromFilename(file.filename);
   if (extracted) {
@@ -244,12 +249,27 @@ function getChapterTitle(file: ChapterFile, index: number): string {
   }
 
   // Priority 2: Title metadata (only if meaningful AND not the book title)
-  if (file.titleMetadata && !file.titleIsBookTitle && !isGenericTitle(file.titleMetadata)) {
-    return file.titleMetadata;
+  const title = file.titleMetadata;
+  if (title && !file.titleIsBookTitle &&
+      (!isGenericTitle(title) || (keepNumbered && NUMBERED_CHAPTER_TITLE_PATTERN.test(title.trim())))) {
+    return title;
   }
 
   // Priority 3: Fallback to "Chapter X"
   return `Chapter ${index + 1}`;
+}
+
+/** First title that repeats in the set, compared case- and space-folded ("Chapter 01" = "chapter 1"). */
+function firstRepeatedTitle(titles: string[]): string | null {
+  const seen = new Set<string>();
+  for (const title of titles) {
+    const folded = title.trim().replace(/\s+/g, ' ').toLowerCase();
+    const number = folded.match(NUMBERED_CHAPTER_TITLE_PATTERN);
+    const key = number ? `chapter ${parseInt(number[1], 10)}` : folded;
+    if (seen.has(key)) return title;
+    seen.add(key);
+  }
+  return null;
 }
 
 /**
@@ -341,10 +361,20 @@ export async function analyzeChapterFiles(filePaths: string[], logger?: RMABLogg
   const orderedFiles = keepOrder ? files : await chooseChapterOrder(files, logger);
   if (keepOrder) await logger?.info(`Using the multi-disc import order for ${orderedFiles.length} chapters`);
 
-  // Compute chapter titles
-  for (let i = 0; i < orderedFiles.length; i++) {
-    orderedFiles[i].chapterTitle = getChapterTitle(orderedFiles[i], i);
+  // Compute chapter titles. Embedded "Chapter N" tags are kept only when every title in the set
+  // stays distinct; repeated tags (per-disc "Chapter 1", an untagged intro) use position numbering.
+  const numbered = orderedFiles.map((f, i) => getChapterTitle(f, i, true));
+  const positional = orderedFiles.map((f, i) => getChapterTitle(f, i));
+  const taggedCount = orderedFiles.filter((f, i) =>
+    numbered[i] === f.titleMetadata && NUMBERED_CHAPTER_TITLE_PATTERN.test(numbered[i].trim())).length;
+  const repeated = taggedCount > 0 ? firstRepeatedTitle(numbered) : null;
+  if (taggedCount > 0) {
+    await logger?.info(repeated === null
+      ? `Chapter titles: keeping ${taggedCount} embedded "Chapter N" title(s) (every title in the set is distinct)`
+      : `Chapter titles: "${repeated}" repeats across the set - dropping embedded "Chapter N" titles, numbering chapters by position`);
   }
+  const titles = taggedCount > 0 && repeated === null ? numbered : positional;
+  orderedFiles.forEach((f, i) => { f.chapterTitle = titles[i]; });
 
   // Log sample chapter titles
   const sampleTitles = orderedFiles.slice(0, 3).map((f, i) => `Ch${i + 1}: "${f.chapterTitle}"`);
@@ -713,6 +743,7 @@ export async function mergeChapters(
     }
 
     // Add critical flags for reliability and performance
+    args.push(...(await movieTimescaleArgs())); // Chapter-safe movie timescale (#511): a long chapter overflows ffmpeg 9's default
     args.push('-movflags', '+faststart'); // CRITICAL: Move moov atom to beginning (fixes slow playback)
     args.push('-fflags', '+genpts'); // Regenerate presentation timestamps (fixes timing issues)
     args.push('-avoid_negative_ts', 'make_zero'); // Handle negative timestamps

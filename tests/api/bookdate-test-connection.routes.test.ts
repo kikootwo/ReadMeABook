@@ -107,56 +107,89 @@ describe('BookDate test connection route', () => {
     expect(response.status).toBe(400);
   });
 
-  it('returns filtered OpenAI models for unauthenticated requests', async () => {
+  async function listOpenAIModels(authorization: string | null, data: unknown[]) {
+    requireAuthMock.mockImplementation((_req: any, handler: any) => handler(_req));
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({
-        data: [
-          { id: 'gpt-4-1' },
-          { id: 'gpt-3.5-turbo' },
-          { id: 'gpt-4-0' },
-        ],
-      }),
+      json: vi.fn().mockResolvedValue({ data }),
       text: vi.fn().mockResolvedValue('ok'),
     });
     vi.stubGlobal('fetch', fetchMock);
 
     const { POST } = await import('@/app/api/bookdate/test-connection/route');
     const response = await POST({
-      headers: { get: () => null },
+      headers: { get: () => authorization },
       json: vi.fn().mockResolvedValue({ provider: 'openai', apiKey: 'key' }),
     } as any);
+    expect(fetchMock).toHaveBeenCalledWith('https://api.openai.com/v1/models', expect.anything());
+    return response;
+  }
+
+  it.each([
+    ['the setup wizard', null],
+    ['an admin', 'Bearer token'],
+  ])('lists GPT-4 and newer chat models, without specialized variants, for %s', async (_who, authorization) => {
+    const response = await listOpenAIModels(authorization, [
+      { id: 'gpt-5-mini' },
+      { id: 'gpt-4o' },
+      { id: 'gpt-6-luna' },
+      { id: 'gpt-4.1-2025-04-14' },
+      { id: 'gpt-5' },
+      { id: 'gpt-10-mini' },
+      { id: 'gpt-4o-mini-2024-07-18' },
+      { id: 'gpt-5.1' },
+      { id: 'gpt-4.1-nano' },
+      { id: 'gpt-5-chat-latest' },
+      { id: 'gpt-3.5-turbo' },
+      { id: 'gpt-3.5-turbo-instruct-0914' },
+      { id: 'gpt-4o-audio-preview' },
+      { id: 'gpt-4o-mini-audio-preview-2024-12-17' },
+      { id: 'gpt-4o-realtime-preview' },
+      { id: 'gpt-4o-mini-transcribe' },
+      { id: 'gpt-4o-transcribe-diarize' },
+      { id: 'gpt-4o-mini-tts' },
+      { id: 'gpt-4o-search-preview' },
+      { id: 'gpt-5-search-api' },
+      { id: 'gpt-5-codex' },
+      { id: 'gpt-5.1-codex-mini' },
+      { id: 'gpt-5-pro' },
+      { id: 'gpt-5-pro-2025-10-06' },
+      { id: 'gpt-image-1' },
+      { id: 'gpt-realtime' },
+      { id: 'chatgpt-4o-latest' },
+      { id: 'o4-mini' },
+      { id: 'text-embedding-3-small' },
+      { id: 'whisper-1' },
+    ]);
 
     const payload = await response.json();
+    expect(response.status).toBe(200);
     expect(payload.success).toBe(true);
-    expect(payload.models.map((m: any) => m.id)).toEqual(['gpt-4-0', 'gpt-4-1']);
+    expect(payload.models).toEqual([
+      'gpt-10-mini',
+      'gpt-4.1-2025-04-14',
+      'gpt-4.1-nano',
+      'gpt-4o',
+      'gpt-4o-mini-2024-07-18',
+      'gpt-5',
+      'gpt-5-chat-latest',
+      'gpt-5-mini',
+      'gpt-5.1',
+      'gpt-6-luna',
+    ].map((id) => ({ id, name: id })));
   });
 
-  it('returns filtered OpenAI models for authenticated requests', async () => {
-    requireAuthMock.mockImplementation((_req: any, handler: any) => handler(_req));
-
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        data: [
-          { id: 'gpt-4-2' },
-          { id: 'gpt-3.5-turbo' },
-          { id: 'gpt-4-1' },
-        ],
-      }),
-      text: vi.fn().mockResolvedValue('ok'),
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { POST } = await import('@/app/api/bookdate/test-connection/route');
-    const response = await POST({
-      headers: { get: () => 'Bearer token' },
-      json: vi.fn().mockResolvedValue({ provider: 'openai', apiKey: 'key' }),
-    } as any);
+  it('skips OpenAI model entries without a string id', async () => {
+    const response = await listOpenAIModels(null, [
+      { id: 42 },
+      {},
+      null,
+      { id: 'gpt-4o' },
+    ]);
 
     const payload = await response.json();
-    expect(payload.success).toBe(true);
-    expect(payload.models.map((m: any) => m.id)).toEqual(['gpt-4-1', 'gpt-4-2']);
+    expect(response.status).toBe(200);
+    expect(payload.models).toEqual([{ id: 'gpt-4o', name: 'gpt-4o' }]);
   });
 
   it('returns Claude models for unauthenticated requests', async () => {

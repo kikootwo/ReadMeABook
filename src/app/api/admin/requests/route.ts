@@ -14,9 +14,11 @@ const logger = RMABLogger.create('API.Admin.Requests');
 const VALID_SORT_FIELDS = ['createdAt', 'completedAt', 'title', 'user', 'status'] as const;
 const VALID_SORT_ORDERS = ['asc', 'desc'] as const;
 const VALID_PAGE_SIZES = [10, 25, 50, 100] as const;
+const VALID_TYPES = ['audiobook', 'ebook'] as const;
 
 type SortField = (typeof VALID_SORT_FIELDS)[number];
 type SortOrder = (typeof VALID_SORT_ORDERS)[number];
+type RequestType = (typeof VALID_TYPES)[number];
 
 export async function GET(request: NextRequest) {
   return requireAuth(request, async (req: AuthenticatedRequest) => {
@@ -32,6 +34,11 @@ export async function GET(request: NextRequest) {
           : 25;
         const search = searchParams.get('search')?.trim() || '';
         const status = searchParams.get('status') || '';
+        const typeParam = searchParams.get('type') || '';
+        // Allowlisted: 'all', missing or unknown values mean no type filter
+        const type: RequestType | null = VALID_TYPES.includes(typeParam as RequestType)
+          ? (typeParam as RequestType)
+          : null;
         const userId = searchParams.get('userId') || '';
         const sortByParam = searchParams.get('sortBy') || 'createdAt';
         const sortBy: SortField = VALID_SORT_FIELDS.includes(sortByParam as SortField)
@@ -50,6 +57,11 @@ export async function GET(request: NextRequest) {
         // Filter by status
         if (status && status !== 'all') {
           where.status = status;
+        }
+
+        // Filter by request type
+        if (type) {
+          where.type = type;
         }
 
         // Filter by user

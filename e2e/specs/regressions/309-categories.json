@@ -1,0 +1,164 @@
+{
+  "success": true,
+  "categories": [
+    {
+      "id": "24427740011",
+      "name": "Comedy & Humor",
+      "subcategories": [
+        {
+          "id": "18571986011",
+          "name": "Biographies & Memoirs",
+          "parentId": "24427740011"
+        },
+        {
+          "id": "18574496011",
+          "name": "Literature & Fiction",
+          "parentId": "24427740011"
+        },
+        {
+          "id": "18571927011",
+          "name": "Performing Arts",
+          "parentId": "24427740011"
+        }
+      ]
+    },
+    {
+      "id": "18574426011",
+      "name": "Literature & Fiction",
+      "subcategories": [
+        {
+          "id": "18574427011",
+          "name": "Action & Adventure",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18574542011",
+          "name": "African American",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18574435011",
+          "name": "Ancient, Classical & Medieval Literature",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18574446011",
+          "name": "Anthologies & Short Stories",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18574449011",
+          "name": "Classics",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18574450011",
+          "name": "Drama & Plays",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18573352011",
+          "name": "Erotica",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18574455011",
+          "name": "Essays",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18574456011",
+          "name": "Genre Fiction",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18574482011",
+          "name": "Historical Fiction",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18574490011",
+          "name": "Horror",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18574496011",
+          "name": "Humor & Satire",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18573754011",
+          "name": "LGBTQ+",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18574500011",
+          "name": "Literary History & Criticism",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18574501011",
+          "name": "Memoirs, Diaries & Correspondence",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18574505011",
+          "name": "Poetry",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18574520011",
+          "name": "Women's Fiction",
+          "parentId": "18574426011"
+        },
+        {
+          "id": "18574521011",
+          "name": "World Literature",
+          "parentId": "18574426011"
+        }
+      ]
+    },
+    {
+      "id": "18574597011",
+      "name": "Mystery, Thriller & Suspense",
+      "subcategories": [
+        {
+          "id": "18574598011",
+          "name": "Crime Fiction",
+          "parentId": "18574597011"
+        },
+        {
+          "id": "18574606011",
+          "name": "Mystery",
+          "parentId": "18574597011"
+        },
+        {
+          "id": "18574621011",
+          "name": "Thriller & Suspense",
+          "parentId": "18574597011"
+        },
+        {
+          "id": "18572017011",
+          "name": "True Crime",
+          "parentId": "18574597011"
+        }
+      ]
+    },
+    {
+      "id": "18580606011",
+      "name": "Science Fiction & Fantasy",
+      "subcategories": [
+        {
+          "id": "18580607011",
+          "name": "Fantasy",
+          "parentId": "18580606011"
+        },
+        {
+          "id": "18580628011",
+          "name": "Science Fiction",
+          "parentId": "18580606011"
+        }
+      ]
+    }
+  ]
+}

@@ -2,15 +2,17 @@
  * Component: Library Delete Guard (admin request deletes)
  * Documentation: documentation/admin-features/request-deletion.md
  *
- * Decides whether deleting a request may remove the book's stored library
- * folder (`Audiobook.filePath`), or ebook files in it. A folder is removed only
- * when it provably holds this book's import and nothing else:
+ * Decides whether deleting a request may remove anything from the book's stored
+ * library folder (`Audiobook.filePath`). An ebook request delete runs rules a-c on the
+ * folder of each file it recorded (utils/ebook-placement.ts). An audiobook request
+ * delete removes files only when the folder provably holds this book's import, and
+ * then only what that import placed (utils/book-folder-delete.ts, #526):
  *  a. strictly inside media_dir (never media_dir itself)
  *  b. equals or contains no configured root (download dirs, mapped paths, bookdrop)
  *  c. equals or contains no other book's stored folder (each row canonicalized;
  *     rows whose folder no longer exists are skipped)
  *  evidence: the audio files directly in the folder hash to the book's
- *     filesHash, and no subfolder holds audio (the removal is recursive)
+ *     filesHash, and no subfolder holds audio
  * A missing folder counts as already gone only when the library looks mounted
  * (media_dir readable and not empty, and some other stored folder exists).
  * Rules a-c apply to the canonical folder and, for a symlink, to the link's own
@@ -31,7 +33,7 @@ import {
   UnsafeDeleteError,
 } from './delete-guard';
 import { generateFilesHash } from './files-hash';
-import { isAudioFile, isEbookFile, walkFiles } from './import-inventory';
+import { isAudioFile, walkFiles } from './import-inventory';
 
 export interface LibraryBook {
   id: string;
@@ -215,25 +217,4 @@ export async function assertSafeLibraryDelete(
     if (blocker) throw new UnsafeDeleteError(filePath, blocker);
   }
   return { deletePath, canonicalPath: target.path, exists: true, roots };
-}
-
-/**
- * Ebook files an ebook request delete may unlink from `filePath`: rules a-c on
- * the folder, then every ebook file directly in it when the folder passes the
- * audio evidence rule, or the only one when it holds exactly one. Otherwise
- * (a shared or user folder with several ebooks) UnsafeDeleteError.
- */
-export async function planEbookDelete(filePath: string, book: LibraryBook): Promise<string[]> {
-  const safe = await assertSafeLibraryDelete(filePath, book, { evidence: false });
-  if (!safe.exists) return [];
-  const entries = await fs.readdir(safe.canonicalPath, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
-    throw new UnsafeDeleteError(filePath, `the folder could not be read (${error.code ?? 'error'})`);
-  });
-  const ebooks = entries.filter((e) => e.isFile() && isEbookFile(e.name)).map((e) => path.join(safe.canonicalPath, e.name));
-  if (ebooks.length <= 1) return ebooks;
-  const blocker = await folderEvidenceBlocker(safe.canonicalPath, book.filesHash);
-  if (blocker) {
-    throw new UnsafeDeleteError(filePath, `it holds ${ebooks.length} ebook files and is not provably this book's folder (${blocker})`);
-  }
-  return ebooks;
 }

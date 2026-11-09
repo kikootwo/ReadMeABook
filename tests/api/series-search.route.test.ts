@@ -23,8 +23,14 @@ vi.mock('@/lib/middleware/auth', async () => {
   };
 });
 vi.mock('@/lib/integrations/audible.service', async () => (await import('../helpers/fake-audible-catalog')).audibleServiceModule);
+vi.mock('@/lib/services/config.service', async () => (await import('../helpers/fake-audible-catalog')).configServiceModule);
 vi.mock('@/lib/integrations/audible-series', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/integrations/audible-series')>()),
+  // The route calls searchSeries (main called searchForSeries): both answer from state
+  searchSeries: async (query: string, options?: unknown) => {
+    state.queries.push(query);
+    return { series: await state.search(query, options) };
+  },
   searchForSeries: (query: string, options?: unknown) => {
     state.queries.push(query);
     return state.search(query, options);

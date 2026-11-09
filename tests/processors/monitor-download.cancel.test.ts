@@ -127,6 +127,7 @@ describe('processMonitorDownload with a cancelled or deleted request', () => {
     expect(prismaMock.request.update).not.toHaveBeenCalled();
     expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
     expect(prismaMock.downloadHistory.update).not.toHaveBeenCalled();
+    expect(prismaMock.downloadHistory.updateMany).not.toHaveBeenCalled();
     expect(jobQueueMock.addMonitorJob).not.toHaveBeenCalled();
     expect(jobQueueMock.addOrganizeJob).not.toHaveBeenCalled();
   });
@@ -217,6 +218,39 @@ describe('processMonitorDownload with a cancelled or deleted request', () => {
     });
     expect(jobQueueMock.addNotificationJob).toHaveBeenCalledWith(
       'request_error', 'req-1', 'Book', 'Author', 'user', 'No transmission client configured'
+    );
+  });
+});
+
+describe('processMonitorDownload never overwrites a row recorded as removed (#228)', () => {
+  const NOT_REMOVED = { OR: [{ downloadStatus: null }, { downloadStatus: { not: 'removed' } }] };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    jobQueueMock.addNotificationJob.mockResolvedValue(undefined);
+    prismaMock.request.findUnique.mockResolvedValue(activeRequest);
+    prismaMock.request.findFirst.mockResolvedValue(activeRequest);
+    prismaMock.request.update.mockResolvedValue({});
+    // A cancel recorded the row removed while this poll was in flight: the conditional writes match nothing
+    prismaMock.downloadHistory.updateMany.mockResolvedValue({ count: 0 });
+    downloadClientManagerMock.getClientForProtocol.mockResolvedValue({
+      id: 'client-1', type: 'transmission', name: 'Transmission', enabled: true, remotePathMappingEnabled: false,
+    });
+  });
+
+  it('the per-poll status write and the completion write both skip a removed row (NULL statuses still written)', async () => {
+    downloadClientManagerMock.getClientServiceForProtocol.mockResolvedValue(clientReporting('completed'));
+
+    const { processMonitorDownload } = await import('@/lib/processors/monitor-download.processor');
+    await processMonitorDownload(payload);
+
+    const writes = prismaMock.downloadHistory.updateMany.mock.calls.map(([args]: any[]) => args);
+    expect(writes.map((w: any) => w.data.downloadStatus)).toEqual(['completed', 'completed']);
+    for (const write of writes) {
+      expect(write.where).toEqual({ id: 'dh-1', ...NOT_REMOVED });
+    }
+    expect(prismaMock.downloadHistory.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ downloadStatus: expect.stringMatching(/^(downloading|completed|seeding)$/) }) })
     );
   });
 });

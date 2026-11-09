@@ -124,7 +124,7 @@ describe('processSearchIndexers', () => {
       categories: [3030],
       indexerIds: [1],
       minSeeders: 1,
-    }, { exactTitle: false });
+    }, { exactTitle: false }, expect.any(Object));
   });
 
   it('sends admin custom search terms exactly, with no fallback variations (#316)', async () => {
@@ -149,7 +149,7 @@ describe('processSearchIndexers', () => {
       categories: [3030],
       indexerIds: [1],
       minSeeders: 1,
-    }, { exactTitle: true });
+    }, { exactTitle: true }, expect.any(Object));
   });
 
   it('ranks all candidates before limiting automatic search to 100 results', async () => {

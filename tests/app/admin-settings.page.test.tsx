@@ -9,6 +9,7 @@ import React from 'react';
 import path from 'path';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { nextPopState, setMockUrl } from '../helpers/mock-next-url-history';
 
 const fetchWithAuthMock = vi.hoisted(() => vi.fn());
 const saveTabSettingsMock = vi.hoisted(() => vi.fn());
@@ -76,6 +77,8 @@ const settingsFixture = {
   backendMode: 'plex',
   hasLocalUsers: true,
   audibleRegion: 'us',
+
+  audibleLanguageFilter: false,
   plex: { url: '', token: '', libraryId: '', triggerScanAfterImport: false },
   audiobookshelf: { serverUrl: '', apiToken: '', libraryId: '', triggerScanAfterImport: false },
   oidc: {
@@ -125,6 +128,7 @@ describe('AdminSettings', () => {
     parseArrayToCommaSeparatedMock.mockReset();
     vi.resetModules();
     mockAdminSettingsModules();
+    setMockUrl('/admin/settings');
   });
 
   it('fetches settings and renders the settings shell', async () => {
@@ -216,5 +220,98 @@ describe('AdminSettings', () => {
 
     expect(screen.getByText('Connected to Plex. You can now save.')).toBeInTheDocument();
     vi.useRealTimers();
+  });
+
+  describe('the active tab lives in ?tab=', () => {
+    // The fixture is in Plex mode, so there is no 'auth' tab
+    const plexTabs = [
+      { id: 'library', label: 'Library', icon: 'L' },
+      { id: 'prowlarr', label: 'Indexers', icon: 'I' },
+      { id: 'paths', label: 'Paths', icon: 'P' },
+    ];
+
+    const renderSettings = async (url: string) => {
+      setMockUrl(url);
+      fetchWithAuthMock.mockResolvedValue({ ok: true, json: async () => settingsFixture });
+      getTabValidationMock.mockReturnValue(true);
+      getTabsMock.mockReturnValue(plexTabs);
+      const { default: AdminSettings } = await import('@/app/admin/settings/page');
+      render(<AdminSettings />);
+      await screen.findByRole('button', { name: /Paths/ });
+    };
+
+    it('opens the tab named in the address', async () => {
+      await renderSettings('/admin/settings?tab=paths');
+
+      expect(screen.getByText('Paths Tab')).toBeInTheDocument();
+      expect(screen.queryByText('Library Tab')).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ['a tab this backend mode does not show', 'auth'],
+      ['an unknown tab', 'nope'],
+    ])('falls back to the first tab for %s, without rewriting the address', async (_label, tab) => {
+      const historyLength = window.history.length;
+      await renderSettings(`/admin/settings?tab=${tab}`);
+
+      expect(screen.getByText('Library Tab')).toBeInTheDocument();
+      expect(getTabsMock).toHaveBeenCalledWith('plex');
+      expect(window.location.search).toBe(`?tab=${tab}`);
+      expect(window.history.length).toBe(historyLength);
+    });
+
+    it('puts the clicked tab in the address, and the first tab as no parameter', async () => {
+      await renderSettings('/admin/settings');
+      const historyLength = window.history.length;
+
+      fireEvent.click(screen.getByRole('button', { name: /Paths/ }));
+      expect(await screen.findByText('Paths Tab')).toBeInTheDocument();
+      expect(window.location.pathname).toBe('/admin/settings');
+      expect(window.location.search).toBe('?tab=paths');
+
+      // Clicking the open tab adds no history entry
+      fireEvent.click(screen.getByRole('button', { name: /Paths/ }));
+      expect(window.history.length).toBe(historyLength + 1);
+
+      fireEvent.click(screen.getByRole('button', { name: /Library/ }));
+      expect(await screen.findByText('Library Tab')).toBeInTheDocument();
+      expect(window.location.search).toBe('');
+      expect(window.history.length).toBe(historyLength + 2);
+    });
+
+    it('moves between tabs with back and forward', async () => {
+      await renderSettings('/admin/settings');
+      fireEvent.click(screen.getByRole('button', { name: /Paths/ }));
+      fireEvent.click(screen.getByRole('button', { name: /Indexers/ }));
+      expect(await screen.findByText('Indexers Tab')).toBeInTheDocument();
+      expect(window.location.search).toBe('?tab=prowlarr');
+
+      await act(async () => {
+        const popped = nextPopState();
+        window.history.back();
+        await popped;
+      });
+      expect(await screen.findByText('Paths Tab')).toBeInTheDocument();
+      expect(window.location.search).toBe('?tab=paths');
+
+      await act(async () => {
+        const popped = nextPopState();
+        window.history.forward();
+        await popped;
+      });
+      expect(await screen.findByText('Indexers Tab')).toBeInTheDocument();
+    });
+
+    it('keeps unsaved edits when switching tabs, as before', async () => {
+      await renderSettings('/admin/settings');
+      fireEvent.click(screen.getByRole('button', { name: 'Change Settings' }));
+      fireEvent.click(screen.getByRole('button', { name: /Paths/ }));
+      expect(await screen.findByText('Paths Tab')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /Library/ }));
+      expect(await screen.findByText('Library Tab')).toBeInTheDocument();
+
+      expect(screen.getByRole('button', { name: 'Save Settings' })).toBeEnabled();
+      expect(fetchWithAuthMock).toHaveBeenCalledTimes(1);
+    });
   });
 });

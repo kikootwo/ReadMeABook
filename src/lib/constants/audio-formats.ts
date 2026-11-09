@@ -101,9 +101,10 @@ export const COERCION_RENAME_MAP: Record<string, string> = {
 
 /**
  * DRM-protected formats that cannot be decoded without keys.
- * Plex format coercion logs a warning and skips these.
+ * Plex format coercion logs a warning and skips these; automatic search
+ * drops releases whose title marks them as one (drm-release.ts).
  */
-export const DRM_EXTENSIONS = ['.aa', '.aax'] as const;
+export const DRM_EXTENSIONS = ['.aa', '.aax', '.aaxc'] as const;
 
 /**
  * Formats that would require a full transcode to become Plex-compatible.
