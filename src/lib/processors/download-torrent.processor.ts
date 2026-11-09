@@ -14,6 +14,7 @@ import { RMABLogger } from '../utils/logger';
 import { isTransientConnectionError } from '../utils/connection-errors';
 import { getRequestStopReason, markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
 import { stopCancelledDownload } from '../services/cancelled-download';
+import { grabFailedMessage, grabFailureLogLine } from '../utils/grab-failure';
 import { addAutoBlock } from '../services/blocklist.service';
 import {
   DownloadSourceError,
@@ -170,11 +171,14 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload, at
         }
 
         const contextualError = new DownloadSourceError(
-          `Grab failed: ${candidate.indexer} returned HTTP ${error.status} while fetching "${candidate.title}" through Prowlarr`,
+          grabFailedMessage(error, candidate.indexer, candidate.title),
           error.status,
           error.sourceUrl,
-          error
+          error,
+          error.failure
         );
+        // The answering host goes to the job log only, never to the request's message
+        logger.warn(grabFailureLogLine(error), { indexer: candidate.indexer, candidate: candidateIndex + 1 });
 
         if (!isRetryableDownloadSourceError(error)) {
           throw contextualError;
