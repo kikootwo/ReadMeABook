@@ -67,7 +67,7 @@ PostgreSQL database storing users, audiobooks, requests, downloads, configuratio
   - **denied** - Request rejected by admin (terminal state)
   - **pending** - Request approved and queued for processing
   - **awaiting_release** - Book has a future release date; auto-search skipped until release (admin toggle controls behavior)
-- `release_date` (Date, nullable) - Book release date snapshot from Audnexus at request creation; used by skip-unreleased-auto-search gate
+- `release_date` (Date, nullable) - Book release date snapshot from Audnexus at request creation; used by skip-unreleased-auto-search gate (creation and admin approve read the setting through `shouldWaitForRelease`, `src/lib/services/release-gate.ts`)
 - `progress` (0-100), `priority`, `error_message`
 - `search_attempts`, `download_attempts`, `import_attempts`, `max_import_retries` (default 5)
 - `auto_rerequest_count` (Int, default 0) - Automatic re-requests after a failure with no new block (shelf sync / watched lists backoff step); user requests and retries reset it to 0. See [release-blocklist.md](../admin-features/release-blocklist.md#automatic-re-requests-409)

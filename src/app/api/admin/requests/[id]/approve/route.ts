@@ -15,8 +15,16 @@ import { z } from 'zod';
 import { errorForLog, zodIssueDetails } from '@/lib/utils/zod-validation';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { hidePlacementRecord } from '@/lib/services/request-detail-query';
+import { shouldWaitForRelease } from '@/lib/services/release-gate';
 
 const logger = RMABLogger.create('API.Admin.Requests.Approve');
+
+/** Release day as shown on the request card ("May 5, 2027"; UTC day, like the gate) */
+function formatReleaseDay(releaseDate: Date | null): string {
+  return releaseDate
+    ? releaseDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+    : 'unknown';
+}
 
 const ApprovalActionSchema = z.object({
   action: z.enum(['approve', 'deny']),
@@ -224,18 +232,24 @@ export async function POST(
               request: hidePlacementRecord(updatedRequest),
             });
           } else {
-            // No pre-selected torrent - use automatic search
-            logger.info(`Request ${id} using automatic search`, {
+            // No pre-selected torrent: automatic search, unless the book is unreleased and the
+            // release gate says wait (same check as request creation; ebook requests never wait there)
+            const waitForRelease = !isEbookRequest && await shouldWaitForRelease(existingRequest.releaseDate);
+            logger.info(waitForRelease
+              ? `Request ${id} is unreleased; waiting for its release date before searching`
+              : `Request ${id} using automatic search`, {
               requestId: id,
               userId: existingRequest.userId,
               adminId: req.user.sub,
               type: existingRequest.type,
+              ...(waitForRelease ? { releaseDate: existingRequest.releaseDate?.toISOString() ?? null } : {}),
             });
 
             const updatedRequest = await prisma.request.update({
               where: { id },
               data: {
-                status: 'pending',
+                // awaiting_release: retry_missing_torrents starts the search on release day
+                status: waitForRelease ? 'awaiting_release' : 'pending',
                 approvalBypassedBy: null, // approved now: clears an earlier record (#232)
                 // Drop an unusable stored pick so it can't be approved again
                 ...(existingRequest.selectedTorrent ? { selectedTorrent: Prisma.DbNull } : {}),
@@ -251,8 +265,10 @@ export async function POST(
               },
             });
 
-            // Trigger appropriate search job based on request type
-            if (isEbookRequest) {
+            // Trigger appropriate search job based on request type (none while waiting for release)
+            if (waitForRelease) {
+              // Searched later by the daily retry job
+            } else if (isEbookRequest) {
               await jobQueue.addSearchEbookJob(updatedRequest.id, {
                 id: updatedRequest.audiobook.id,
                 title: updatedRequest.audiobook.title,
@@ -287,14 +303,17 @@ export async function POST(
               type: existingRequest.type,
             });
 
-            const searchMessage = isEbookRequest
-              ? 'Ebook request approved and ebook search job triggered'
-              : 'Request approved and search job triggered';
+            const searchMessage = waitForRelease
+              ? `Request approved; it will be searched on its release date (${formatReleaseDay(existingRequest.releaseDate)})`
+              : isEbookRequest
+                ? 'Ebook request approved and ebook search job triggered'
+                : 'Request approved and search job triggered';
             return NextResponse.json({
               success: true,
               message: droppedPickReason
                 ? `The user's selected release could not be used (${droppedPickReason}). ${searchMessage} instead.`
                 : searchMessage,
+              ...(waitForRelease ? { awaitingRelease: true } : {}),
               ...(droppedPickReason ? { selectionDropped: droppedPickReason } : {}),
               request: hidePlacementRecord(updatedRequest),
             });
