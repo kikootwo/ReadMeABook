@@ -6,6 +6,7 @@
 import { expect } from '@playwright/test';
 import { Abs, authState, ctl, Rmab, urls, waitFor, type Book } from '../../lib/harness';
 import { asApp, dbNow, markJobs, MEDIA, psql, q, sh, sqlStr, waitOrganized } from './242-helpers';
+import { SCAN_TYPES } from './284-helpers';
 
 export const TAG_KEY = 'audiobookshelf.tag_requester';
 const PASSWORD = 'e2e-232-tags-pass';
@@ -36,12 +37,13 @@ export async function setTagging(admin: Rmab, on: boolean) {
   expect(res.status, `tagging ${on ? 'on' : 'off'}`).toBe(200);
 }
 
-/** Run a scheduled job once and wait until its job row is done. */
+/** Run a scheduled job once and wait until its job row is done (the full scan's row is `scan_plex`). */
 export async function runJob(admin: Rmab, type: string): Promise<string> {
   const t0 = dbNow();
   await admin.triggerScheduledJob(type);
+  const rowTypes = type === 'plex_library_scan' ? SCAN_TYPES : `(${sqlStr(type)})`;
   return waitFor(`${type} finished`, async () => {
-    const s = psql(`select status from jobs where type = ${sqlStr(type)} and created_at > ${sqlStr(t0)}::timestamp order by created_at desc limit 1`);
+    const s = psql(`select status from jobs where type in ${rowTypes} and created_at > ${sqlStr(t0)}::timestamp order by created_at desc limit 1`);
     return s === 'completed' || s === 'failed' ? s : null;
   }, { timeoutMs: 300_000, intervalMs: 2_000 });
 }
