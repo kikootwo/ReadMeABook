@@ -91,12 +91,13 @@ Result: Douglas Preston, Lincoln Child/Pendergast/01 - Relic/
 **Implementation:**
 - Uses existing `ILibraryService` abstraction
 - `PlexLibraryService.triggerLibraryScan()` → `POST /library/sections/{id}/refresh`
-- `AudiobookshelfLibraryService.triggerLibraryScan()` → `POST /api/libraries/{id}/scan`
+- `AudiobookshelfLibraryService.triggerLibraryScan()` → `POST /api/libraries/{id}/scan` (`triggerABSScan`: id URL-encoded as one path segment; empty, `.`, `..` refused before any request)
 - Called from `organize-files.processor.ts` after status update
 - Backend-agnostic using factory pattern
 
 **Error Handling:**
-- Scan failures logged but don't fail organize job
+- Scan failures logged but don't fail organize job (incl. a refused library id)
+- Audiobookshelf library id missing: warn `Library ID not configured for audiobookshelf, skipping <kind> scan` (was an error for audiobook imports)
 - Graceful degradation: scheduled scans eventually detect the book
 - Non-blocking: async operation doesn't delay other jobs
 

@@ -229,7 +229,8 @@ src/app/admin/settings/
 
 **UI:**
 - Checkbox toggle in both Plex and Audiobookshelf settings tabs
-- Audiobookshelf: "Ebook Library" dropdown under the checkbox, shown while it is on ("Same as audiobook library" = empty)
+- Audiobookshelf: "Ebook Library" dropdown under the checkbox, shown while it is on ("Same as audiobook library" = empty); a saved id not in the loaded list shows as "Unknown library (<id>)" so the stale value stays visible
+- `PUT /api/admin/settings/audiobookshelf` `ebookLibraryId`: string, trimmed, `''` clears; omitted keeps the saved value; any other type → 400, nothing saved. `GET /api/admin/settings` → `audiobookshelf.ebookLibraryId` (`''` when unset)
 - Default: Unchecked (disabled)
 - Help text: "Only enable this if you have [Plex/Audiobookshelf]'s filesystem watcher (automatic scanning) disabled. Most users should leave this disabled and rely on [Plex/Audiobookshelf]'s built-in automatic detection."
 

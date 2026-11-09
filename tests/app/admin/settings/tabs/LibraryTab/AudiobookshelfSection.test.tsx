@@ -74,5 +74,23 @@ describe('AudiobookshelfSection: ebook library', () => {
 
     expect(screen.queryByLabelText('Ebook Library')).not.toBeInTheDocument();
     expect(screen.getAllByText('Test your connection to load libraries.')).toHaveLength(2);
+    // The heading points at no control while there is none
+    expect(screen.getByText('Ebook Library')).not.toHaveAttribute('for');
+  });
+
+  it('a saved library missing from the loaded list shows as unknown, not as the default', () => {
+    renderSection(settings({ triggerScanAfterImport: true, ebookLibraryId: 'lib-gone' }));
+
+    const select = screen.getByLabelText('Ebook Library') as HTMLSelectElement;
+    expect(select.value).toBe('lib-gone');
+    expect(select.selectedOptions[0].textContent).toBe('Unknown library (lib-gone)');
+  });
+
+  it('a saved library in the loaded list shows by name, with no unknown option', () => {
+    renderSection(settings({ triggerScanAfterImport: true, ebookLibraryId: 'abs-ebooks' }));
+
+    const select = screen.getByLabelText('Ebook Library') as HTMLSelectElement;
+    expect(select.selectedOptions[0].textContent).toBe('Ebooks');
+    expect(screen.queryByRole('option', { name: /Unknown library/ })).not.toBeInTheDocument();
   });
 });

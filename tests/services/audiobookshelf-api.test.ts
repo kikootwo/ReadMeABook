@@ -141,6 +141,33 @@ describe('Audiobookshelf API client', () => {
     }));
   });
 
+  it('scan: the library id is one encoded path segment', async () => {
+    configServiceMock.get.mockImplementation(async (key: string) => {
+      if (key === 'audiobookshelf.server_url') return 'http://abs/';
+      if (key === 'audiobookshelf.api_token') return 'token';
+      return null;
+    });
+    fetchMock.mockResolvedValue({ ok: true, text: async () => 'OK' });
+
+    await triggerABSScan('../users?x=1#y');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://abs/api/libraries/..%2Fusers%3Fx%3D1%23y/scan',
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+
+  it.each(['', '.', '..'])('scan: refuses library id "%s" without a request', async (libraryId) => {
+    configServiceMock.get.mockImplementation(async (key: string) => {
+      if (key === 'audiobookshelf.server_url') return 'http://abs';
+      if (key === 'audiobookshelf.api_token') return 'token';
+      return null;
+    });
+
+    await expect(triggerABSScan(libraryId)).rejects.toThrow('Invalid Audiobookshelf library id');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('includes ASIN overrides in metadata match requests with US region', async () => {
     configServiceMock.get.mockImplementation(async (key: string) => {
       if (key === 'audiobookshelf.server_url') return 'http://abs';
