@@ -41,6 +41,8 @@ export interface AudiobookshelfSettings {
   serverUrl: string;
   apiToken: string;
   libraryId: string;
+  /** Library scanned after an ebook import; empty scans the audiobook library */
+  ebookLibraryId: string;
   triggerScanAfterImport: boolean;
 }
 

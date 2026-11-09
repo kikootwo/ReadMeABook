@@ -6,6 +6,7 @@
 - **Plex OAuth, JWT sessions, RBAC** → [backend/services/auth.md](backend/services/auth.md)
 - **Local admin authentication, password change** → [backend/services/auth.md](backend/services/auth.md)
 - **Admin-generated login token per user (URL-login)** → [backend/services/auth.md](backend/services/auth.md)
+- **Deleting users (any provider), returning user gets a new account** → [backend/services/auth.md](backend/services/auth.md#deleting-users), [admin-dashboard.md](admin-dashboard.md)
 - **Request file download link (token check, single file or zip, streaming backpressure #500)** → [backend/services/auth.md](backend/services/auth.md#request-file-download-link)
 - **API tokens, allowlist, GET /api/requests/:id (field list, BigInt sizes #261)** → [backend/services/api-tokens.md](backend/services/api-tokens.md)
 - **Route protection, auth guards** → [frontend/routing-auth.md](frontend/routing-auth.md)
@@ -38,6 +39,7 @@
 - **File hash matching for accurate ASIN** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md)
 - **ASIN read-back after the ABS match (#287)** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#asin-read-back-287)
 - **Delivered request stuck in `downloaded` when ABS holds another ASIN (#284), library link by path / files hash** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#delivered-requests-link-to-the-library-item-284)
+- **Request card shows the edition ABS matched (#325a), `audiobooks.library_asin`, follow on rematch** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#delivered-requests-follow-the-library-asin-325a)
 - **OIDC authentication** → [backend/services/auth.md](backend/services/auth.md)
 
 ## Reading Shelves (Goodreads, Hardcover)
