@@ -9,7 +9,8 @@
  *           plex_library_scan links it (`available`) and caches A under a legacy `<hash>.jpg` name.
  *           Then a real ABS rematch to artemis Y (B072R1CY4P) + cover B and one more scan: the row's
  *           ASIN is now Y while the file still holds A (the release image never fetches it again).
- *   verify: one plex_library_scan: library_asin Y; the card (API and page) shows cover B or none,
+ *   verify: (each phase has its own runner, so it reads the request, the legacy path, A's bytes from that
+ *           file and B from ABS back from the stack) one plex_library_scan: library_asin Y; the card (API and page) shows cover B or none,
  *           never A; the legacy file is gone. Screenshots of the upgraded card (1280 light, 375 dark).
  * Schedules stay off across the upgrade (turned back on at the end of verify). Values read first,
  * then expect.soft. Not named *upgrade.spec.ts (the stock run's filter is a path regex).
@@ -19,7 +20,7 @@ import fs from 'node:fs';
 import { test, expect } from '@playwright/test';
 import { Abs, authState, ctl, evidencePath, execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rmab, urls, waitFor, writeEvidence } from '../../lib/harness';
 import { dbNow, markJobs, MEDIA, psql, sh, sqlStr, waitOrganized } from './242-helpers';
-import { absItem, disableSchedules, FAKE_PROXY, fixtureBooks, printenv, rmabCover, SCAN_TYPES, SCHEDULES, session, waitStartupSettled } from './284-helpers';
+import { absItem, disableSchedules, FAKE_PROXY, fixtureBooks, printenv, rmabCover, SCAN_TYPES, SCHEDULES, session, sha256, waitStartupSettled } from './284-helpers';
 
 const phase = process.env.E2E_PHASE;
 const DIR = '284-cover-legacy';
@@ -118,11 +119,21 @@ test('284 upgrade-verify: after the upgrade the card shows cover B or none, neve
   test.skip(phase !== 'upgrade-verify');
   test.setTimeout(900_000);
   const { martian, artemis } = fixtureBooks();
-  const seeded = JSON.parse(fs.readFileSync(evidencePath(DIR, 'seed.json'), 'utf8')).seeded as Seeded;
-  const { requestId, legacyPath, coverA, coverB } = seeded;
+  fs.mkdirSync(evidencePath(DIR), { recursive: true });
+  // Each phase has its own runner (and evidence dir): read the seeded state back from the stack.
+  const requestId = psql(`select r.id from requests r join audiobooks a on a.id = r.audiobook_id where a.audible_asin = ${sqlStr(martian.asin)} and r.type = 'audiobook' and r.deleted_at is null`);
+  expect(requestId, 'the seeded request survived the upgrade').toMatch(/\S/);
   const rmab = await Rmab.loginAdmin();
   await waitStartupSettled();
   const before = rowOf(requestId);
+  const legacyPath = before.coverPath;
+  expect(legacyPath, 'precondition: the upgrade meets the legacy cover name').toMatch(LEGACY);
+  // A: the bytes the legacy file holds now; B: the cover ABS serves now (as RMAB's download asks for it)
+  const coverA = (await rmabCover(cacheUrl(legacyPath))).sha;
+  const abs = await Abs.login();
+  const absCover = await fetch(`${urls.abs()}/api/items/${before.absItemId}/cover`, { headers: { Authorization: `Bearer ${abs.token}`, Accept: 'application/json, text/plain, */*' } });
+  const coverB = absCover.ok ? sha256(await absCover.arrayBuffer()) : null;
+  expect(coverA && coverB && coverA !== coverB, `precondition: the legacy file (${coverA}) is not the cover ABS serves (${coverB})`).toBe(true);
 
   const s = await oneScan(rmab, requestId, 'verify-1');
   const listed = (await rmab.get<{ requests: { id: string; audiobook: Record<string, unknown> }[] }>('/api/requests?limit=100')).requests.find((r) => r.id === requestId)?.audiobook ?? {};
