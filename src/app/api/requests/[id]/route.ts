@@ -10,7 +10,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '@/lib/interfaces/download-client.interface';
 import { cancelLoadedRequest } from '@/lib/services/request-cancel.service';
 import { cancelResponse } from '@/lib/utils/cancel-response';
-import { ADMIN_REQUEST_DETAIL_INCLUDE, OWNER_REQUEST_DETAIL_SELECT, hidePlacementRecord } from '@/lib/services/request-detail-query';
+import { ADMIN_REQUEST_DETAIL_INCLUDE, OWNER_REQUEST_DETAIL_SELECT, hidePlacementRecord, withRequestLibraryDisplay } from '@/lib/services/request-detail-query';
 import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { toJsonSafe } from '@/lib/utils/json-safe';
@@ -59,10 +59,13 @@ export async function GET(
         );
       }
 
+      // A followed request shows the library's edition (#325a); applied after the ownership check
+      const shown = await withRequestLibraryDisplay(requestRecord);
+
       // Sizes are BigInt columns, which JSON.stringify cannot serialize (#261)
       return NextResponse.json({
         success: true,
-        request: toJsonSafe(isAdmin ? hidePlacementRecord(requestRecord) : await stripProwlarrKeyFromResults(requestRecord)),
+        request: toJsonSafe(isAdmin ? hidePlacementRecord(shown) : await stripProwlarrKeyFromResults(shown)),
       });
     } catch (error) {
       logger.error('Failed to get request', { error: error instanceof Error ? error.message : String(error) });

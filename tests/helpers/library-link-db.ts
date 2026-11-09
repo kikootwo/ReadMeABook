@@ -3,7 +3,8 @@
  * Documentation: documentation/fixes/file-hash-matching.md
  *
  * A plain holder wired into the prisma mock in beforeEach (never a vi.mock factory implementation):
- * plex_library, audiobooks and requests, with the subset of Prisma's where clause the scan jobs use.
+ * plex_library, audiobooks and requests, with the subset of Prisma's where clause the scan jobs use
+ * (the library ASIN follow's `requests: { some }` included).
  */
 
 import type { createPrismaMock } from './prisma';
@@ -81,13 +82,24 @@ export function wireLibraryDb(prismaMock: ReturnType<typeof createPrismaMock>, d
     return {};
   });
 
-  prismaMock.audiobook.findMany.mockImplementation(async (a?: Args) => db.audiobooks.filter((r) => matches(r, a?.where)).map((r) => {
+  // `requests: { some }` (the library ASIN follow) is answered from the requests table
+  const bookMatches = (r: Row, where: Where | undefined): boolean => {
+    const { requests, ...rest } = (where ?? {}) as Where & { requests?: { some?: Where } };
+    if (requests?.some && !db.requests.some((q) => q.audiobookId === r.id && matches(q, requests.some))) return false;
+    return matches(r, rest);
+  };
+  prismaMock.audiobook.findMany.mockImplementation(async (a?: Args) => db.audiobooks.filter((r) => bookMatches(r, a?.where)).map((r) => {
     const out = pick(r, a?.select);
     if (a?.include?.requests) out.requests = db.requests.filter((q) => q.audiobookId === r.id && q.deletedAt === null);
     return out;
   }));
   prismaMock.audiobook.findFirst.mockResolvedValue(null);
   prismaMock.audiobook.update.mockImplementation(async (a: Args) => assign(db.audiobooks.find((r) => r.id === a.where?.id), a.data));
+  prismaMock.audiobook.updateMany.mockImplementation(async (a: Args) => {
+    const rows = db.audiobooks.filter((r) => bookMatches(r, a.where));
+    rows.forEach((r) => assign(r, a.data));
+    return { count: rows.length };
+  });
 
   const withRequest = (r: Row): Row => ({ ...r, audiobook: { ...db.audiobooks.find((a) => a.id === r.audiobookId) }, user: { plexUsername: 'reader' } });
   let readers = 0;

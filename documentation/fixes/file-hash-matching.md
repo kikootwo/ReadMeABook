@@ -162,6 +162,38 @@ model Audiobook {
 - **Ambiguous:** no link, the ASIN match still runs; warn once per audiobook per process, then debug. Each run with any link outcome logs `Library link: N by path, N by hash, N ambiguous, N left for the next run`.
 - **Upgrade:** the first full scan fills `file_path` for every ABS row; requests stuck in `downloaded` then go `available` with one notification each.
 
+### Delivered requests follow the library ASIN (#325a)
+- **Why:** a linked book kept showing the requested edition (X) after ABS matched the item to another one (Y), and after later rematches (Z).
+- **Column:** `audiobooks.library_asin` (nullable, no index). Written only by `followLibraryAsins(backendMode, logger)` (`src/lib/services/library/follow-library-asin.ts`) and cleared by the link resets below. `audible_asin`, title, author, narrator, series and year are never written after delivery.
+- **When:** both scan jobs, right after `matchRequestsToLibrary` (a request linked in this run is followed in the same run). ABS only: Plex returns before any query. Database only: reads `plex_library.asin`, so a rematch shows after the next full scan (6 h), a manual library scan, or a recently-added check that lists the item (top 10).
+- **Which books:** `absItemId` set and at least one live `type:'audiobook'` request in `available`. One `audiobook.findMany`, one `plexLibrary.findMany({plexGuid in ids})`. The recently-added check passes `itemIds` (the items it listed): only books linked to them, and no unlinked sweep (the full scan runs it).
+- **Shape check:** `ASIN_PATTERN`, `asinShaped`, `sameAsin` in `src/lib/utils/asin.ts` (dependency-free, so the scan processors still load the ABS client lazily).
+
+| ABS item ASIN (trimmed, `ASIN_PATTERN`) | `library_asin` |
+|---|---|
+| differs from `audible_asin` (case-insensitive) | that ASIN (Y, later Z) |
+| equals `audible_asin` again (any case) | null (cleared only if set) |
+| equals the stored `library_asin` (any case) | no write |
+| empty, null, ISBN-13, hyphenated ISBN, or no `plex_library` row | no write (never blanked by a missing value) |
+
+- **Write:** compare-and-set `updateMany({where:{id, absItemId, libraryAsin: <read>}, data:{libraryAsin, updatedAt}})`; a lost race is a no-op. Log: `Following Audiobookshelf: "<title>" library ASIN A -> B`.
+- **Cleared:** with the item id in stale removal and the orphan reset (`scan-plex.processor.ts`), and when a link / ASIN-match write moves `absItemId` to another item (`match-requests.ts recordItem`; a re-link to the same item keeps it; the follow refills it in the same run). A book whose `absItemId` was cleared elsewhere (request delete, replace) keeps no value: each full-scan follow first clears `library_asin` where `abs_item_id` is null, and nothing shows it meanwhile (the overlay needs a linked row).
+- **Display:** `src/lib/services/library/library-display.ts`. Applies only to an `available` audiobook request (the only status the follow maintains; a re-request after a kept/stale delete shows as requested) whose book has `libraryAsin` AND an existing linked `plex_library` row; everything else is shown as stored.
+
+| Field | Shown when overlaid |
+|---|---|
+| title, author, narrator | the `plex_library` row (non-empty; `'Unknown Author'` counts as empty), else the request's |
+| cover | `/api/cache/library/<file>` from `cachedLibraryCoverPath`, else none (placeholder; never the requested edition's `coverArtUrl`) |
+| `audibleAsin`, series, year, description | as requested (the detail can mix two editions) |
+| `libraryAsin` (responses) | effective: the stored value when overlaid, else null |
+
+- **Surfaces:** `GET /api/requests` (one row query per page), `GET /api/requests/:id` (`withRequestLibraryDisplay`, `request-detail-query.ts`, after the ownership check), `GET /api/admin/requests` and `GET /api/admin/requests/recent` (`title`, `author`, `asin` stay requested, so every row action and both interactive search modals and Adjust Search Terms use them; shown values in `displayTitle`, `displayAuthor`; effective `libraryAsin`). The request card and the admin row show it through these responses.
+- **Never raw:** the Prisma client omits `libraryAsin` from every audiobook result (`src/lib/db.ts`, `omit: { audiobook: { libraryAsin: true } }`), so `include: { audiobook: true }` responses (`POST /api/requests` and the rest) carry no stored value. The overlay readers select it (`select`, or `omit: { libraryAsin: false }` on the include).
+- **Cover follows a rematch:** `src/lib/services/library/library-cover.ts`. ABS serves an item's cover at a fixed URL, so the scans name ABS covers `<sha256(itemId)[0,16]>-<ASIN>.<ext>`. When a scan sees the item's ASIN differ from the one in the cached name, it downloads the cover again under the new name, stores it and deletes the old file; the new name is a new URL, so the browser and Next's image cache never serve the old picture. An unchanged ASIN reuses the file. A legacy `<hash>.<ext>` name (cached before this change) counts as fetched for an unknown ASIN: the row's ASIN is rewritten on every scan, so it says nothing about the file. The first scan that sees the item with an ASIN downloads it again once under the new name (a one-time re-download of each such ABS cover after the upgrade); an item without an ASIN keeps its file. A failed download after a rematch or of a legacy file clears `cachedLibraryCoverPath` and deletes the old file (placeholder; the next scan fetches it as a new cover). Display guard (`library-display.ts`): a followed card shows the cached cover only when the ASIN in its file name equals `audiobooks.library_asin` (case-insensitive), else the placeholder; so an ASIN stored by the ABS match read-back (#287) shows the placeholder until the next scan fetches that cover. Plex: cache calls unchanged.
+- **Kept on the requested ASIN:** the details modal from the card and the admin list, and every action in it (Get ebook, Report issue, Replace, Download, Manual Import): they look the book up by ASIN, and Y has no row. The ebook search and the folder an ebook lands in. Ownership: X stays owned through the row, Y through `plex_library`; no ownership check reads `library_asin`.
+- **Admin text filter:** matches the requested title/author, or (ABS only, `available` audiobook requests with `libraryAsin` set) the linked row's title/author: `audiobook.findMany` of the followed books, then `plexLibrary.findMany({plexGuid in those, title/author contains}, orderBy plexGuid)`; Plex mode runs neither. The title sort stays on the requested title, so a followed row sorts by a title it doesn't show.
+- **Downgrade:** the startup `db push --accept-data-loss` drops the column; cards and the admin list show the requested edition again, nothing is re-requested. After a re-upgrade the first scan of either kind fills it again.
+
 **Phase 2 (Request Match):** Match requests, no metadata triggering
 - Match requests to library items by ASIN/title/author
 - Update request status to 'available'
