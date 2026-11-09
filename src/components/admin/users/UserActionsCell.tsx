@@ -41,7 +41,7 @@ function returningUserText(authProvider: string | null): string {
 
 /** Confirmation text for deleting a user (any provider). */
 export function deleteUserConfirmMessage(user: UserActionsTarget): string {
-  return `Delete "${user.plexUsername}"? Their ${user._count.requests} request(s) are kept. ${returningUserText(user.authProvider)} This cannot be undone.`;
+  return `Delete "${user.plexUsername}"? The account is removed and can no longer sign in. Their ${user._count.requests} request(s) are kept. ${returningUserText(user.authProvider)} This cannot be undone.`;
 }
 
 /**
