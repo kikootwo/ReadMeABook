@@ -227,8 +227,9 @@ export async function DELETE(
         }
 
         // Soft-delete user (preserves their requests and history). Any provider: the sign-in
-        // keys are renamed, so signing in again creates a new account (role user, approval
-        // as for any new account), and the login token is cleared.
+        // keys are renamed, so signing in again creates a new account (approval as for any
+        // new account). The login token and the stored credential (Plex account token or
+        // local password hash) are cleared: nothing reads them for a deleted row.
         const freedKeys = freedAccountKeys(targetUser);
         const deleted = await prisma.user.updateMany({
           where: { id, deletedAt: null },
@@ -238,6 +239,7 @@ export async function DELETE(
             plexId: freedKeys.plexId,
             oidcSubject: freedKeys.oidcSubject,
             loginTokenHash: null,
+            authToken: null,
           },
         });
 

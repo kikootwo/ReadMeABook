@@ -119,7 +119,7 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - Edit user roles (user/admin)
 - Cannot change own role (security)
 - Delete (`UserActionsCell`, `src/components/admin/users/UserActionsCell.tsx`): shown for local, Plex and OIDC users, never for the setup admin or yourself (current user from `useAuth`). OIDC rows show "OIDC Managed" instead of Edit Role
-- Delete confirmation (`deleteUserConfirmMessage`): request count kept + what signing in again does for that provider (Plex: new User account; OIDC: new User account, pending with admin approval; local: register again, pending when approval is required)
+- Delete confirmation (`deleteUserConfirmMessage`): request count kept + what signing in again does for that provider (Plex: new User account; OIDC: a new account (role from the OIDC admin mapping), pending with admin approval; local: register again, pending when approval is required)
 - Shows request count per user
 - Role badges (purple for admin, gray for user)
 - **Global Auto-Approve Toggle:**

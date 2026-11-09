@@ -117,6 +117,7 @@ describe('a deleted user signing in again gets a new account', () => {
   it('Plex OAuth callback: new row with role user and the status a new Plex user gets (approved)', async () => {
     const old = usersDb.addUser({
       plexId: '1001', plexUsername: 'pat', role: 'admin', authProvider: 'plex', autoApproveRequests: true, downloadAccess: true,
+      authToken: 'encrypted-plex-account-token',
     });
     usersDb.addRequest(old.id);
 
@@ -127,7 +128,7 @@ describe('a deleted user signing in again gets a new account', () => {
     expect(returning.status).toBe(200);
     expect(returning.body.user.id).not.toBe(old.id);
     expect(live).toMatchObject({ id: returning.body.user.id, role: 'user', registrationStatus: 'approved', autoApproveRequests: null, downloadAccess: null });
-    expect(oldRow).toMatchObject({ role: 'admin', deletedAt: expect.any(Date), plexUsername: 'pat' });
+    expect(oldRow).toMatchObject({ role: 'admin', deletedAt: expect.any(Date), plexUsername: 'pat', authToken: null });
     expect(oldRow.plexId).toMatch(/^1001/);
     expect(oldRow.plexId).toMatch(FREED_KEY);
     expect(usersDb.requestOwnerIds()).toEqual([old.id]);
@@ -177,6 +178,25 @@ describe('a deleted user signing in again gets a new account', () => {
     // Same status as an OIDC user who was never here
     await oidcCallback('sub-newcomer');
     expect(usersDb.findUser({ plexId: 'sub-newcomer' })).toMatchObject({ registrationStatus: 'pending_approval' });
+  });
+
+  it('OIDC callback with admin approval: a deleted row that still holds the raw subject never matches, so the returning user is pending', async () => {
+    config.values['oidc.access_control_method'] = 'admin_approval';
+    // A deleted, approved admin row whose plexId was freed but whose oidcSubject was not
+    // (written by hand or by an older delete): only the lookup's deletedAt filter keeps it out
+    const old = usersDb.addUser({
+      plexId: 'sub-olive-deleted-legacy', oidcSubject: 'sub-olive', plexUsername: 'olive', role: 'admin',
+      authProvider: 'oidc', registrationStatus: 'approved', deletedAt: new Date('2026-01-01'), deletedBy: 'someone',
+    });
+
+    const returning = await oidcCallback('sub-olive');
+
+    const live = usersDb.findUser({ plexId: 'sub-olive' });
+    expect(returning.location).toBe('http://localhost:3030/login?pending=approval');
+    expect(live).toMatchObject({ role: 'user', registrationStatus: 'pending_approval', oidcSubject: 'sub-olive', deletedAt: null });
+    expect(live!.id).not.toBe(old.id);
+    expect(usersDb.allUsers().filter((u) => u.registrationStatus === 'approved' && u.deletedAt === null && u.authProvider === 'oidc')).toEqual([]);
+    expect(usersDb.getUser(old.id)).toMatchObject({ role: 'admin', oidcSubject: 'sub-olive', plexId: 'sub-olive-deleted-legacy' });
   });
 
   it('OIDC callback with open access: new approved row with role user (the old admin role is not kept)', async () => {

@@ -769,7 +769,7 @@ function AdminUsersPageContent() {
             <li>• <strong>OIDC Users:</strong> Role management is handled by the identity provider. Can be deleted (requests are kept).</li>
             <li>• <strong>Plex Users:</strong> Role can be changed. Can be deleted (requests are kept).</li>
             <li>• <strong>Local Users:</strong> Can have roles freely assigned. Can be deleted (requests are kept).</li>
-            <li>• <strong>Deleted users:</strong> Signing in again creates a new account with the User role, which waits for approval when approval is on for that sign-in method</li>
+            <li>• <strong>Deleted users:</strong> Signing in again creates a new account, which waits for approval when approval is on for that sign-in method</li>
             <li>• You cannot change your own role or delete yourself for security reasons</li>
           </ul>
         </div>

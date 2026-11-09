@@ -251,7 +251,7 @@ describe('Admin users routes', () => {
 
     expect(payload.success).toBe(true);
     const write = (prismaMock.user.updateMany.mock.calls[0] ?? prismaMock.user.update.mock.calls[0])[0];
-    expect(write.data).toMatchObject({ deletedAt: expect.any(Date), deletedBy: 'admin-1', oidcSubject: null, loginTokenHash: null });
+    expect(write.data).toMatchObject({ deletedAt: expect.any(Date), deletedBy: 'admin-1', oidcSubject: null, loginTokenHash: null, authToken: null });
     expect(write.data.plexId).toMatch(/^local-user-deleted-\d+$/);
     expect(write.where).toEqual({ id: 'u4', deletedAt: null });
   });
@@ -332,7 +332,7 @@ describe('Admin users routes', () => {
 
     expect(status).toBe(200);
     expect(payload).toEqual({ success: true, message: 'User "pat" has been deleted. Their 3 request(s) have been preserved.' });
-    expect(data).toMatchObject({ deletedAt: expect.any(Date), deletedBy: 'admin-1', oidcSubject: null, loginTokenHash: null });
+    expect(data).toMatchObject({ deletedAt: expect.any(Date), deletedBy: 'admin-1', oidcSubject: null, loginTokenHash: null, authToken: null });
     expect(data.plexId.startsWith(`${plexId}-deleted-`)).toBe(true);
     expect(data.plexId).toMatch(FREED_KEY);
   });
