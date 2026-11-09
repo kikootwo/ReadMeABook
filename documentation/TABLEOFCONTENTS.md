@@ -39,6 +39,7 @@
 - **File hash matching for accurate ASIN** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md)
 - **ASIN read-back after the ABS match (#287)** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#asin-read-back-287)
 - **Delivered request stuck in `downloaded` when ABS holds another ASIN (#284), library link by path / files hash** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#delivered-requests-link-to-the-library-item-284)
+- **Request card shows the edition ABS matched (#325a), `audiobooks.library_asin`, follow on rematch** → [fixes/file-hash-matching.md](fixes/file-hash-matching.md#delivered-requests-follow-the-library-asin-325a)
 - **OIDC authentication** → [backend/services/auth.md](backend/services/auth.md)
 
 ## Reading Shelves (Goodreads, Hardcover)

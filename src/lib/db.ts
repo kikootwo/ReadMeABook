@@ -29,7 +29,10 @@ function getPooledDatabaseUrl(): string {
   return `${baseUrl}${separator}${params.join('&')}`;
 }
 
-// One Prisma Client per process (survives dev HMR and duplicate module evaluation)
+// One Prisma Client per process (survives dev HMR and duplicate module evaluation).
+// `audiobooks.library_asin` (#325a) is left out of every audiobook result unless a query selects it
+// (or sets `omit: { libraryAsin: false }`): responses show only the effective value, through
+// src/lib/services/library/library-display.ts.
 export const prisma = processSingleton('prisma', () =>
   new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
@@ -37,6 +40,9 @@ export const prisma = processSingleton('prisma', () =>
       db: {
         url: getPooledDatabaseUrl(),
       },
+    },
+    omit: {
+      audiobook: { libraryAsin: true },
     },
   })
 );
