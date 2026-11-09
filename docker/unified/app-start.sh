@@ -39,11 +39,19 @@ cd /app
 # SIGTERM/SIGINT to that coordinator instead of exiting at once.
 export NEXT_MANUAL_SIG_HANDLE=true
 
+# Node's deadline is a timer on its own event loop. A node too busy or stuck to run it
+# is SIGKILLed this many seconds after the stop by wall clock, so on Docker's and
+# Unraid's default 10 s stop Redis and PostgreSQL still get their stop signal.
+# Above node's 5 s deadline, below supervisord's stopwaitsecs=8 (tests/docker/supervisord-config.test.ts).
+APP_STOP_KILL_AFTER=6
+
 SERVER_PID=""
 STOPPING=0
 
 # shellcheck disable=SC2317 # reached through the trap below
 on_stop() {
+    # One forward and one watchdog per stop; node ignores a second signal anyway
+    if [ "$STOPPING" = "1" ]; then return 0; fi
     STOPPING=1
     # $! covers a signal that lands between starting node and recording its PID
     local pid="${SERVER_PID:-$!}"
@@ -54,6 +62,14 @@ on_stop() {
     SERVER_PID="$pid"
     echo "[App] Stop requested, sending SIGTERM to node (PID $SERVER_PID)"
     kill -TERM "$SERVER_PID" 2>/dev/null || true
+    # Watchdog in this process group: end_leftovers ends it once node is gone
+    (
+        sleep "$APP_STOP_KILL_AFTER"
+        if kill -0 "$SERVER_PID" 2>/dev/null; then
+            echo "[App] node did not stop within ${APP_STOP_KILL_AFTER}s, sending SIGKILL (PID $SERVER_PID)"
+            kill -KILL "$SERVER_PID" 2>/dev/null || true
+        fi
+    ) &
 }
 trap on_stop TERM INT
 
@@ -65,7 +81,8 @@ find_leftovers() {
     local stat line rest pid pgrp
     LEFTOVER=""
     for stat in /proc/[0-9]*/stat; do
-        read -r line < "$stat" 2>/dev/null || continue
+        # Braces: the redirect's own error (a process gone since the glob) goes to /dev/null too
+        { read -r line < "$stat"; } 2>/dev/null || continue
         pid="${stat#/proc/}"
         pid="${pid%/stat}"
         rest="${line##*) }"

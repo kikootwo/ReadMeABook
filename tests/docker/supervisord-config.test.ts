@@ -6,7 +6,10 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { SHUTDOWN_HARD_DEADLINE_MS } from '@/lib/constants/shutdown';
+import { SHUTDOWN_DRAIN_MS, SHUTDOWN_HARD_DEADLINE_MS, SHUTDOWN_STEP_LIMIT_MS } from '@/lib/constants/shutdown';
+
+/** Docker's `docker stop` default, also what the Unraid template gets (no --stop-timeout) */
+const DEFAULT_DOCKER_STOP_S = 10;
 
 const root = process.cwd();
 const read = (rel: string) => fs.readFileSync(path.join(root, rel), 'utf8').replace(/\r\n/g, '\n');
@@ -57,6 +60,35 @@ describe('Unified container stop settings', () => {
     const wait = stopWaitSecs(app);
     expect(wait, `${SUPERVISORD}: [program:app] has no stopwaitsecs=<n>`).toBeDefined();
     expect(wait!).toBeGreaterThanOrEqual(SHUTDOWN_HARD_DEADLINE_MS / 1000 + 3);
+  });
+
+  it(`${SUPERVISORD}: app's stopwaitsecs leaves Redis and PostgreSQL at least 2 s of a default 10 s stop`, () => {
+    expect(stopWaitSecs(app)!).toBeLessThanOrEqual(DEFAULT_DOCKER_STOP_S - 2);
+  });
+
+  it('node: the drain and three step limits end before the hard deadline, so every step warning prints', () => {
+    expect(SHUTDOWN_DRAIN_MS + 3 * SHUTDOWN_STEP_LIMIT_MS).toBeLessThan(SHUTDOWN_HARD_DEADLINE_MS);
+  });
+
+  it(`${APP_START}: a watchdog SIGKILLs node by wall clock after its deadline and before supervisord's backstop`, () => {
+    const m = appStart.match(/^APP_STOP_KILL_AFTER=(\d+)$/m);
+    expect(m, 'no APP_STOP_KILL_AFTER=<seconds>').not.toBeNull();
+    const killAfter = Number(m![1]);
+    expect(killAfter).toBeGreaterThan(SHUTDOWN_HARD_DEADLINE_MS / 1000);
+    expect(killAfter).toBeLessThan(stopWaitSecs(app)!);
+    // Started from the stop trap, in the background, after the SIGTERM is forwarded
+    const onStop = appStart.match(/^on_stop\(\) \{\n([\s\S]*?)^\}$/m)?.[1] ?? '';
+    expect(onStop, 'no on_stop() function').not.toBe('');
+    const forward = onStop.search(/kill -TERM "\$SERVER_PID"/);
+    const watchdog = onStop.search(/\(\n\s*sleep "\$APP_STOP_KILL_AFTER"\n[\s\S]*kill -KILL "\$SERVER_PID"[^\n]*\n[\s\S]*?\n\s*\) &$/m);
+    expect(forward).toBeGreaterThanOrEqual(0);
+    expect(watchdog, 'no `( sleep "$APP_STOP_KILL_AFTER"; ... kill -KILL "$SERVER_PID" ... ) &` in on_stop').toBeGreaterThan(forward);
+  });
+
+  it(`${APP_START}: a process gone between the /proc glob and the read logs nothing`, () => {
+    // `read < "$stat" 2>/dev/null` reports the failed input redirect before stderr is redirected
+    expect(appStart).toMatch(/\{ read -r line < "\$stat"; \} 2>\/dev\/null \|\| continue/);
+    expect(appStart).not.toMatch(/read -r line < "\$stat" 2>\/dev\/null/);
   });
 
   it(`${APP_START}: hands the signal to node's coordinator and forwards it before node starts`, () => {
