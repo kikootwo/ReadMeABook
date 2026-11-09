@@ -23,6 +23,7 @@ import { test, expect, type Browser, type Page } from '@playwright/test';
 import { Abs, authState, evidencePath, execBridgeAvailable, EXEC_BRIDGE_SKIP, Rmab, snap, waitFor } from '../../lib/harness';
 import { PUID, PGID, sh, asApp, q, psql, setConfig, newBook, genAudio, importAudio, importEbook, eventsSince, fmtEvents, exists, type Case } from './library-delete-helpers';
 import { markJobs } from './242-helpers';
+import { epubBytes } from './550-epub';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
 test.describe.configure({ mode: 'default' });
@@ -63,13 +64,10 @@ let ebookLib: string;
 const savedPaths: Record<string, string | null> = {};
 let watcherOff: unknown;
 
-/** A small valid EPUB (adm-zip from the app's own node_modules), owned by the app user. */
+/** A small valid EPUB (built in the runner), owned by the app user. */
 function genEpub(dir: string, name: string, title: string) {
-  const opf = `<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">e2e-550-${title}</dc:identifier><dc:title>${title}</dc:title><dc:language>en</dc:language></metadata><manifest><item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>`;
-  const container = '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>';
-  const page = `<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>${title}</title></head><body><p>${title}</p></body></html>`;
-  const js = `const Z=require('adm-zip');const z=new Z();z.addFile('mimetype',Buffer.from('application/epub+zip'));z.addFile('META-INF/container.xml',Buffer.from(${JSON.stringify(container)}));z.addFile('OEBPS/content.opf',Buffer.from(${JSON.stringify(opf)}));z.addFile('OEBPS/c1.xhtml',Buffer.from(${JSON.stringify(page)}));z.writeZip(${JSON.stringify(`${dir}/${name}`)});`;
-  asApp(`mkdir -p ${q(dir)}\ncd /app && node -e ${q(js)}`);
+  asApp(`mkdir -p ${q(dir)}
+echo ${epubBytes(title).toString('base64')} | base64 -d > ${q(`${dir}/${name}`)}`);
 }
 
 async function absSettings() {
@@ -197,8 +195,10 @@ async function view(browser: Browser, v: (typeof VIEWS)[number]): Promise<Page> 
 }
 
 async function shot(page: Page, name: string) {
-  await page.getByText('Ebook Library', { exact: true }).or(page.getByText('Trigger library scan after import')).first().scrollIntoViewIfNeeded();
-  await page.evaluate(() => window.scrollBy(0, -120));
+  // The Ebook Library block when shown, else the scan toggle, in the middle of the viewport
+  const ebook = page.getByText('Ebook Library', { exact: true });
+  const target = (await ebook.count()) > 0 ? ebook : page.getByText('Trigger library scan after import');
+  await target.first().evaluate((el) => el.scrollIntoView({ block: 'center' }));
   await page.evaluate(() => document.fonts.ready);
   await page.waitForFunction(() => document.getAnimations().every((a) => !(a instanceof CSSTransition) || a.playState !== 'running'));
   await snap(page, '550', name);
