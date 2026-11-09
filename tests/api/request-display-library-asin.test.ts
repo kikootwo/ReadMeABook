@@ -35,7 +35,7 @@ const BOOK = {
   title: 'The Martian', author: 'Andy Weir', narrator: 'R. C. Bray', coverArtUrl: 'https://m.media-amazon.com/m.jpg',
   series: null, year: 2014, description: 'Requested blurb',
 };
-const ROW = { plexGuid: 'abs-1', title: 'Artemis', author: 'Andy Weir', narrator: 'Rosario Dawson', cachedLibraryCoverPath: '/app/cache/library/abs-1.jpg' };
+const ROW = { plexGuid: 'abs-1', title: 'Artemis', author: 'Andy Weir', narrator: 'Rosario Dawson', cachedLibraryCoverPath: `/app/cache/library/0123456789abcdef-${Y}.jpg` };
 const request = (over: Record<string, unknown> = {}) => ({
   id: 'req-1', userId: 'user-1', type: 'audiobook', status: 'available', createdAt: new Date(), completedAt: new Date(),
   errorMessage: null, downloadAttempts: 0, customSearchTerms: null, selectedTorrent: null, placedEbookFiles: null,
@@ -67,7 +67,7 @@ describe('followed requests are shown as the library holds them (#325a)', () => 
     const payload = await (await GET({ nextUrl: authRequest.nextUrl } as never)).json();
 
     const [followed, plain, ebook, pending] = payload.requests.map((r: { audiobook: Record<string, unknown> }) => r.audiobook);
-    expect(followed).toMatchObject({ title: 'Artemis', author: 'Andy Weir', coverArtUrl: '/api/cache/library/abs-1.jpg', audibleAsin: X, libraryAsin: Y, year: 2014 });
+    expect(followed).toMatchObject({ title: 'Artemis', author: 'Andy Weir', coverArtUrl: `/api/cache/library/0123456789abcdef-${Y}.jpg`, audibleAsin: X, libraryAsin: Y, year: 2014 });
     expect(followed.filePath).toBeUndefined();
     expect(plain).toMatchObject({ title: 'The Martian', audibleAsin: X, libraryAsin: null });
     expect(ebook).toMatchObject({ title: 'The Martian', audibleAsin: X, libraryAsin: null });

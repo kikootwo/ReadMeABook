@@ -5,8 +5,9 @@
  * An `available` audiobook request whose book has a library ASIN (follow-library-asin.ts) shows
  * the linked Audiobookshelf item's title, author, narrator and cover. Applies only to that status
  * (the follow maintains no other) AND when the linked plex_library row exists; every other request
- * looks exactly as stored. The cover is the item's cached library cover or none (placeholder),
- * never the requested edition's. The returned `libraryAsin` is the effective value: set only when
+ * looks exactly as stored. The cover is the item's cached library cover when its file name carries
+ * the book's library ASIN, else none (placeholder); never the requested edition's, and never a
+ * file cached for another or an unknown ASIN (a legacy name). The returned `libraryAsin` is the effective value: set only when
  * the overlay applies, else null. `audibleAsin`, series, year and description stay as requested
  * (the details modal and its actions key on `audibleAsin`).
  * The stored `audiobooks.library_asin` never reaches a response raw: the Prisma client omits it
@@ -14,6 +15,8 @@
  */
 
 import { prisma } from '@/lib/db';
+import { sameAsin } from '@/lib/utils/asin';
+import { coverAsinOf } from './library-cover';
 
 export interface LibraryDisplayRow {
   plexGuid: string;
@@ -72,6 +75,11 @@ export function libraryCoverUrl(cachedPath: string | null | undefined): string |
   return filename ? `/api/cache/library/${filename}` : null;
 }
 
+/** The cover for a followed book: only a file fetched for its library ASIN (library-cover.ts names it), else none. */
+function followedCoverUrl(cachedPath: string | null | undefined, libraryAsin: string): string | null {
+  return sameAsin(coverAsinOf(cachedPath), libraryAsin) ? libraryCoverUrl(cachedPath) : null;
+}
+
 /** The audiobook as shown for `request`, with the effective `libraryAsin`. */
 export function withLibraryDisplay<T extends DisplayAudiobook>(
   audiobook: T,
@@ -86,7 +94,7 @@ export function withLibraryDisplay<T extends DisplayAudiobook>(
     title: shown(row.title) ?? audiobook.title,
     author: shown(row.author) ?? audiobook.author,
     narrator: shown(row.narrator) ?? audiobook.narrator ?? null,
-    coverArtUrl: libraryCoverUrl(row.cachedLibraryCoverPath),
+    coverArtUrl: followedCoverUrl(row.cachedLibraryCoverPath, audiobook.libraryAsin!),
   };
 }
 

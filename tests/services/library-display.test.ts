@@ -16,7 +16,7 @@ const BOOK = {
   title: 'Requested Title', author: 'Requested Author', narrator: 'Requested Reader', coverArtUrl: 'https://m.media-amazon.com/x.jpg',
   series: 'Saga', year: 2020, description: 'Requested blurb',
 };
-const ROW = { plexGuid: 'abs-1', title: 'Library Title', author: 'Library Author', narrator: 'Library Reader', cachedLibraryCoverPath: '/app/cache/library/abs-1.jpg' };
+const ROW = { plexGuid: 'abs-1', title: 'Library Title', author: 'Library Author', narrator: 'Library Reader', cachedLibraryCoverPath: '/app/cache/library/0123456789abcdef-B0LIBRARY2.jpg' };
 const rows = (row = ROW) => new Map([[row.plexGuid, row]]);
 const AVAILABLE = { type: 'audiobook', status: 'available' };
 
@@ -28,7 +28,7 @@ describe('withLibraryDisplay', () => {
       title: 'Library Title',
       author: 'Library Author',
       narrator: 'Library Reader',
-      coverArtUrl: '/api/cache/library/abs-1.jpg',
+      coverArtUrl: '/api/cache/library/0123456789abcdef-B0LIBRARY2.jpg',
     });
   });
 
@@ -47,6 +47,20 @@ describe('withLibraryDisplay', () => {
     ['a downloaded request', BOOK, rows(), { type: 'audiobook', status: 'downloaded' }],
   ])('%s: shown as stored, effective libraryAsin null', (_label, book, linked, request) => {
     expect(withLibraryDisplay(book, linked as never, request)).toEqual({ ...book, libraryAsin: null });
+  });
+
+  it.each([
+    ['a legacy name (cached before the upgrade, ASIN unknown)', '/app/cache/library/0123456789abcdef.jpg'],
+    ['a file cached for another ASIN', '/app/cache/library/0123456789abcdef-B0REQUEST1.jpg'],
+    ['a Plex-style name', '/app/cache/library/abs-1.jpg'],
+  ])('%s: no cover (placeholder), never that picture', (_label, cachedLibraryCoverPath) => {
+    const shown = withLibraryDisplay(BOOK, rows({ ...ROW, cachedLibraryCoverPath }), AVAILABLE);
+    expect(shown).toMatchObject({ title: 'Library Title', coverArtUrl: null, libraryAsin: 'B0LIBRARY2' });
+  });
+
+  it('the cover file name matches the library ASIN ignoring case', () => {
+    const shown = withLibraryDisplay({ ...BOOK, libraryAsin: 'b0library2' }, rows(), AVAILABLE);
+    expect(shown.coverArtUrl).toBe('/api/cache/library/0123456789abcdef-B0LIBRARY2.jpg');
   });
 
   it('a request without a type is an audiobook request', () => {

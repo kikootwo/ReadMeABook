@@ -234,6 +234,31 @@ describe('a delivered request follows the ASIN of its Audiobookshelf item (#325a
     expect(book().libraryAsin).toBe(Z);
   });
 
+  it('upgrade: a cover cached before the upgrade (legacy name) is fetched again once for the followed book; the old file is removed', async () => {
+    // 1.2.13 delivered X, linked the item, and cached its cover as <hash>.jpg; ABS was then rematched to Y
+    seedDelivered('available');
+    Object.assign(book(), { absItemId: 'abs-1' });
+    const legacy = '/app/cache/library/0123456789abcdef.jpg';
+    db.plex.push({ id: 'row-1', plexGuid: 'abs-1', title: 'Delivered Book', author: 'Author', asin: Y, filePath: `/audiobooks/${FOLDER}`, cachedLibraryCoverPath: legacy });
+    const cover = (asin: string) => `/app/cache/library/0123456789abcdef-${asin}.jpg`;
+    thumbnailCacheServiceMock.cacheLibraryThumbnail.mockImplementation(async (...args: unknown[]) =>
+      cover((args[5] as { variant: string }).variant));
+    libraryServiceMock.getLibraryItems.mockResolvedValue([{ ...item(Y), coverUrl: '/api/items/abs-1/cover' }]);
+    const { processScanPlex } = await import('@/lib/processors/scan-plex.processor');
+
+    await processScanPlex({ jobId: 'job-17' });
+    expect(thumbnailCacheServiceMock.cacheLibraryThumbnail.mock.calls[0][5]).toEqual({ variant: Y, refresh: true });
+    expect(thumbnailCacheServiceMock.deleteLibraryThumbnail).toHaveBeenCalledWith(legacy);
+    expect(db.plex[0].cachedLibraryCoverPath).toBe(cover(Y));
+    expect(book().libraryAsin).toBe(Y);
+
+    thumbnailCacheServiceMock.cacheLibraryThumbnail.mockClear();
+    thumbnailCacheServiceMock.deleteLibraryThumbnail.mockClear();
+    await processScanPlex({ jobId: 'job-18' }); // once only
+    expect(thumbnailCacheServiceMock.cacheLibraryThumbnail.mock.calls[0][5]).toEqual({ variant: Y, refresh: false });
+    expect(thumbnailCacheServiceMock.deleteLibraryThumbnail).not.toHaveBeenCalled();
+  });
+
   it('a re-link to another item starts with no library ASIN until that item has one', async () => {
     seedDelivered();
     Object.assign(book(), { absItemId: 'abs-old', libraryAsin: Y });

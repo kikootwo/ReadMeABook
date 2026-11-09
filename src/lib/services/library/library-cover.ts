@@ -7,7 +7,10 @@
  * `<hash>-<ASIN>.<ext>` (the item's ASIN when cached). When a scan sees the item's ASIN change,
  * it downloads the cover again under the new name and deletes the old file: a new name is a new
  * URL, so neither the browser nor Next's image cache serves the old picture. An unchanged ASIN
- * reuses the file (legacy `<hash>.<ext>` names too). Plex: unchanged.
+ * reuses the file. A legacy `<hash>.<ext>` name (cached before this change) was fetched for an
+ * unknown ASIN: the row's ASIN is rewritten on every scan, so it says nothing about the file. The
+ * next scan that sees the item with an ASIN downloads it again once under the new name. Plex:
+ * unchanged.
  */
 
 import type { ThumbnailCacheService } from '../thumbnail-cache.service';
@@ -21,7 +24,6 @@ export interface CoverCachingParams {
 
 /** What a scan knew about the item before this scan (its plex_library row), if anything. */
 export interface PreviousLibraryRow {
-  asin: string | null;
   cachedLibraryCoverPath: string | null;
 }
 
@@ -47,15 +49,15 @@ export function libraryCoverPlan(
   const coverAsin = coverAsinOf(previous?.cachedLibraryCoverPath);
   if (!asin) return { variant: coverAsin ?? undefined, refresh: false };
   if (!previous?.cachedLibraryCoverPath) return { variant: asin, refresh: false };
-  const cachedFor = coverAsin ?? asinShaped(previous.asin);
-  if (sameAsin(cachedFor, asin)) return { variant: coverAsin ?? undefined, refresh: false };
+  // Only the file name says which ASIN a file was fetched for; a legacy name (no ASIN) never matches
+  if (sameAsin(coverAsin, asin)) return { variant: coverAsin!, refresh: false };
   return { variant: asin, refresh: true };
 }
 
 /**
  * Cache the item's cover. Returns the path to store, null to clear the stored one (a rematched
- * item whose new cover could not be fetched: no card pairs the new edition with the old cover),
- * or undefined to leave the row as it is.
+ * item, or a legacy file, whose cover could not be fetched again: the old file is deleted, so no
+ * card pairs the item's edition with an older cover), or undefined to leave the row as it is.
  */
 export async function cacheLibraryCover(
   service: Pick<ThumbnailCacheService, 'cacheLibraryThumbnail' | 'deleteLibraryThumbnail'>,
