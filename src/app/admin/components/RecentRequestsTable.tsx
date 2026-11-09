@@ -18,8 +18,10 @@ import { BlockedReleasesChip } from './BlockedReleasesChip';
 
 interface RecentRequest {
   requestId: string;
-  title: string;
+  title: string; // requested: every row action uses it
   author: string;
+  displayTitle?: string; // shown: the library's edition of a followed request (#325a)
+  displayAuthor?: string;
   asin?: string | null;
   status: string;
   type?: 'audiobook' | 'ebook';
@@ -715,7 +717,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                            {request.title}
+                            {request.displayTitle ?? request.title}
                           </span>
                           {request.type === 'ebook' && (
                             <span
@@ -748,7 +750,7 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                           )}
                         </div>
                         <div className="text-sm text-gray-500 dark:text-gray-400">
-                          {request.author}
+                          {request.displayAuthor ?? request.author}
                         </div>
                         {request.errorMessage && (request.status === 'failed' || request.status === 'warn') && (
                           <div className="text-xs text-red-600 dark:text-red-400 mt-1">

@@ -15,6 +15,8 @@ import { RMABLogger } from '../utils/logger';
 import { resetRequestsAfterLibraryRemoval } from './library-removal';
 import { createLibraryRowUnlessPresent } from './library-row-insert';
 import { matchRequestsToLibrary } from '../services/library/match-requests';
+import { followLibraryAsins } from '../services/library/follow-library-asin';
+import { cacheLibraryCover } from '../services/library/library-cover';
 
 /**
  * Process library scan job
@@ -107,23 +109,13 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
           if (insert.created) {
             const newLibraryItem = insert.row;
 
-            // Cache library cover (synchronous with smart skip-if-exists logic)
-            if (item.coverUrl && item.externalId) {
-              const cachedPath = await thumbnailCacheService.cacheLibraryThumbnail(
-                item.externalId,
-                item.coverUrl,
-                coverCachingParams.backendBaseUrl,
-                coverCachingParams.authToken,
-                coverCachingParams.backendMode
-              );
-
-              // Update database with cached path if successful
-              if (cachedPath) {
-                await prisma.plexLibrary.update({
-                  where: { id: newLibraryItem.id },
-                  data: { cachedLibraryCoverPath: cachedPath },
-                });
-              }
+            // Cache library cover (synchronous with smart skip-if-exists logic; ABS: named by ASIN, #325a)
+            const cover = await cacheLibraryCover(thumbnailCacheService, coverCachingParams, item, null);
+            if (cover) {
+              await prisma.plexLibrary.update({
+                where: { id: newLibraryItem.id },
+                data: { cachedLibraryCoverPath: cover },
+              });
             }
 
             newCount++;
@@ -164,23 +156,13 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
           },
         });
 
-        // Cache library cover (synchronous with smart skip-if-exists logic)
-        if (item.coverUrl && item.externalId) {
-          const cachedPath = await thumbnailCacheService.cacheLibraryThumbnail(
-            item.externalId,
-            item.coverUrl,
-            coverCachingParams.backendBaseUrl,
-            coverCachingParams.authToken,
-            coverCachingParams.backendMode
-          );
-
-          // Update database with cached path if successful
-          if (cachedPath) {
-            await prisma.plexLibrary.update({
-              where: { id: existing.id },
-              data: { cachedLibraryCoverPath: cachedPath },
-            });
-          }
+        // Cache library cover (skip-if-exists; ABS: a changed item ASIN fetches it again, #325a)
+        const cover = await cacheLibraryCover(thumbnailCacheService, coverCachingParams, item, existing);
+        if (cover !== undefined) {
+          await prisma.plexLibrary.update({
+            where: { id: existing.id },
+            data: { cachedLibraryCoverPath: cover },
+          });
         }
 
         updatedCount++;
@@ -251,17 +233,10 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
 
           // Reset audiobook records and their requests
           for (const audiobook of linkedAudiobooks) {
-            // Clear library linkage
-            const updateData: any = {
-              status: 'requested',
-              plexGuid: null,
-              absItemId: null,
-              updatedAt: new Date(),
-            };
-
+            // Clear library linkage (and the library ASIN followed from that item, #325a)
             await prisma.audiobook.update({
               where: { id: audiobook.id },
-              data: updateData,
+              data: { status: 'requested', plexGuid: null, absItemId: null, libraryAsin: null, updatedAt: new Date() },
             });
 
             audiobooksReset++;
@@ -341,6 +316,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
             status: 'requested',
             plexGuid: null,
             absItemId: null,
+            libraryAsin: null,
             updatedAt: new Date(),
           },
         });
@@ -362,6 +338,7 @@ export async function processScanPlex(payload: ScanPlexPayload): Promise<any> {
 
     // 6. Match non-terminal audiobook requests (ASIN; ABS: delivered books by path/hash). Ebooks stop at 'downloaded'
     const matching = await matchRequestsToLibrary({ backendMode, libraryId: targetLibraryId, listedItems: libraryItems, logger });
+    await followLibraryAsins(backendMode, logger); // ABS: delivered requests show the item's current ASIN (#325a)
 
     logger.info(`Matched ${matching.matched}/${matching.total} requests`, {
       totalScanned: libraryItems.length,

@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
+import { loadLinkedRows, withLibraryDisplay } from '@/lib/services/library/library-display';
 
 const logger = RMABLogger.create('API.Admin.Requests.Recent');
 
@@ -25,6 +26,8 @@ export async function GET(request: NextRequest) {
             id: true,
             title: true,
             author: true,
+            absItemId: true,
+            libraryAsin: true,
           },
         },
         user: {
@@ -49,19 +52,27 @@ export async function GET(request: NextRequest) {
       take: 50,
     });
 
-    // Format response
-    const formatted = recentRequests.map((request) => ({
-      requestId: request.id,
-      title: request.audiobook.title,
-      author: request.audiobook.author,
-      status: request.status,
-      type: request.type, // 'audiobook' or 'ebook'
-      user: request.user.plexUsername,
-      createdAt: request.createdAt,
-      completedAt: request.completedAt,
-      errorMessage: request.errorMessage,
-      torrentUrl: request.downloadHistory[0]?.torrentUrl || null,
-    }));
+    // Format response. As GET /api/admin/requests: `title`/`author` are the requested ones,
+    // `displayTitle`/`displayAuthor` follow the library and `libraryAsin` is effective (#325a)
+    const rows = await loadLinkedRows(recentRequests);
+    const formatted = recentRequests.map((request) => {
+      const shown = withLibraryDisplay(request.audiobook, rows, request);
+      return {
+        requestId: request.id,
+        title: request.audiobook.title,
+        author: request.audiobook.author,
+        displayTitle: shown.title,
+        displayAuthor: shown.author,
+        libraryAsin: shown.libraryAsin,
+        status: request.status,
+        type: request.type, // 'audiobook' or 'ebook'
+        user: request.user.plexUsername,
+        createdAt: request.createdAt,
+        completedAt: request.completedAt,
+        errorMessage: request.errorMessage,
+        torrentUrl: request.downloadHistory[0]?.torrentUrl || null,
+      };
+    });
 
     return NextResponse.json({ requests: formatted });
       } catch (error) {

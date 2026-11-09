@@ -8,8 +8,15 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { freedAccountKeys } from '@/lib/services/auth/deleted-account-keys';
 
 const logger = RMABLogger.create('API.Admin.Users');
+
+/** Tail of the delete message: what happened to the user's requests (empty when they had none). */
+function requestsPreservedText(count: number): string {
+  if (count === 0) return '';
+  return count === 1 ? ' Their 1 request has been preserved.' : ` Their ${count} requests have been preserved.`;
+}
 
 export async function PUT(
   request: NextRequest,
@@ -190,7 +197,9 @@ export async function DELETE(
           where: { id },
           select: {
             id: true,
+            plexId: true,
             plexUsername: true,
+            oidcSubject: true,
             isSetupAdmin: true,
             authProvider: true,
             deletedAt: true,
@@ -223,34 +232,36 @@ export async function DELETE(
           );
         }
 
-        // Only allow deleting local users (manual registration)
-        if (targetUser.authProvider !== 'local') {
-          const providerName = targetUser.authProvider === 'plex' ? 'Plex' :
-                               targetUser.authProvider === 'oidc' ? 'OIDC' :
-                               targetUser.authProvider || 'external';
-          return NextResponse.json(
-            {
-              error: `Cannot delete ${providerName} users. User access is managed by ${providerName}.`
-            },
-            { status: 403 }
-          );
-        }
-
-        // Soft-delete user (preserves their requests and history)
-        // Append timestamp to plexId to free it up for reuse (allows username reuse)
-        const timestamp = Date.now();
-        await prisma.user.update({
-          where: { id },
+        // Soft-delete user (preserves their requests and history). Any provider: the sign-in
+        // keys are renamed, so signing in again creates a new account (approval as for any
+        // new account). The login token and the stored credential (Plex account token or
+        // local password hash) are cleared: nothing reads them for a deleted row.
+        const freedKeys = freedAccountKeys(targetUser);
+        const deleted = await prisma.user.updateMany({
+          where: { id, deletedAt: null },
           data: {
             deletedAt: new Date(),
             deletedBy: req.user?.sub || null,
-            plexId: `local-${targetUser.plexUsername}-deleted-${timestamp}`,
+            plexId: freedKeys.plexId,
+            oidcSubject: freedKeys.oidcSubject,
+            loginTokenHash: null,
+            authToken: null,
           },
         });
 
+        // Deleted by a concurrent request since the check above: same answer as above
+        if (deleted.count === 0) {
+          return NextResponse.json(
+            { error: 'User has already been deleted' },
+            { status: 400 }
+          );
+        }
+
+        logger.info('User deleted', { userId: id, authProvider: targetUser.authProvider, deletedBy: req.user?.sub });
+
         return NextResponse.json({
           success: true,
-          message: `User "${targetUser.plexUsername}" has been deleted. Their ${targetUser._count.requests} request(s) have been preserved.`
+          message: `User "${targetUser.plexUsername}" has been deleted.${requestsPreservedText(targetUser._count.requests)}`
         });
       } catch (error) {
         logger.error('Failed to delete user', { error: error instanceof Error ? error.message : String(error) });

@@ -29,11 +29,13 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - Query params: `page`, `pageSize` (10|25|50|100), `search`, `status`, `type` (`audiobook`|`ebook`), `userId`, `sortBy`, `sortOrder`
 - Returns: `requests[]`, `total`, `page`, `pageSize`, `totalPages`
 - Sorting: createdAt (default), completedAt, title, user, status
-- Filtering: by status, by type, by user, text search (title/author)
+- Filtering: by status, by type, by user, text search (title/author: the requested ones, or in Audiobookshelf mode the linked library item's for a followed `available` audiobook request, #325a)
+- Rows: `title`/`author`/`asin` are the requested ones (every row action, both interactive search modals and Adjust Search Terms use them); `displayTitle`/`displayAuthor` are the shown ones (the library's edition for a followed request, else the same); `libraryAsin` is the effective library ASIN or null. The table shows `displayTitle ?? title`. The title sort stays on the requested title.
 - `type`: allowlist (`VALID_TYPES`); `all`, missing or any other value = no type filter (never reaches Prisma)
 
 **GET /api/admin/requests/recent** (Legacy)
 - Request ID, title, user, status, created/completed dates
+- `title`/`author` requested, `displayTitle`/`displayAuthor` shown, `libraryAsin` effective: as the list above (#325a)
 - Limited to 50 entries, no filtering
 
 **GET /api/admin/requests/pending-approval**
@@ -50,6 +52,11 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 **PUT /api/admin/users/[id]**
 - Update user role (user/admin), autoApproveRequests (true/false/null)
 - Prevents self-demotion
+
+**DELETE /api/admin/users/[id]** (#244)
+- Soft delete for every provider (local, Plex, OIDC, older rows without a provider): sets `deletedAt`/`deletedBy`, frees the sign-in keys, clears `loginTokenHash` and `authToken` (Plex account token / local password hash); requests and history stay with the deleted row
+- Refused: own account (403, checked first, same rule for every provider), setup admin (403), missing (404), already deleted (400, also when a concurrent delete wins: `updateMany` on `deletedAt: null`)
+- Returning user: signing in again creates a new account. Rules + freed key format: [backend/services/auth.md](backend/services/auth.md#deleting-users)
 
 **GET /api/admin/settings/auto-approve**
 - Get global auto-approve setting (boolean)
@@ -113,6 +120,9 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 - List all users with avatar, email, role, request count, last login, autoApproveRequests
 - Edit user roles (user/admin)
 - Cannot change own role (security)
+- Delete (`UserActionsCell`, `src/components/admin/users/UserActionsCell.tsx`): shown for local, Plex and OIDC users, never for the setup admin or yourself (current user from `useAuth`). OIDC rows show "OIDC Managed" instead of Edit Role
+- Table (sm and up): `px-4` cells and the email truncated at 16rem (full address on hover), so the actions column (Edit Role or OIDC Managed, plus Delete) fits at 1280 px
+- Delete confirmation (`deleteUserConfirmMessage`): the account is closed and signed out everywhere + request count kept (singular/plural, or "no requests") + what signing in again does for that provider (Plex: new User account; OIDC: a new account (role from the OIDC admin mapping), pending with admin approval; local: register again, pending when approval is required)
 - Shows request count per user
 - Role badges (purple for admin, gray for user)
 - **Global Auto-Approve Toggle:**

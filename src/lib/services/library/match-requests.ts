@@ -88,12 +88,21 @@ const AVAILABLE_DATA = () => ({
   updatedAt: new Date(),
 });
 
-/** The book's library item id, written only by the job whose compare-and-set won. */
-async function recordItem(audiobookId: string, data: { absItemId: string } | { plexGuid: string }, logger: RMABLogger): Promise<void> {
+/**
+ * The book's library item id, written only by the job whose compare-and-set won. A book linked to
+ * a different ABS item starts with no library ASIN; the follow after the match fills it in the
+ * same run (#325a). A re-link to the same item keeps it.
+ */
+async function recordItem(
+  audiobook: { id: string; absItemId: string | null },
+  data: { absItemId: string } | { plexGuid: string },
+  logger: RMABLogger
+): Promise<void> {
+  const item = 'absItemId' in data && data.absItemId !== audiobook.absItemId ? { ...data, libraryAsin: null } : data;
   try {
-    await prisma.audiobook.update({ where: { id: audiobookId }, data: { ...data, updatedAt: new Date() } });
+    await prisma.audiobook.update({ where: { id: audiobook.id }, data: { ...item, updatedAt: new Date() } });
   } catch (error) {
-    logger.error(`Library item id of book ${audiobookId} not saved: ${error instanceof Error ? error.message : String(error)}`);
+    logger.error(`Library item id of book ${audiobook.id} not saved: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -107,7 +116,7 @@ async function completeLinked(request: MatchableRequest, plexGuid: string, via: 
     logger.debug(`Request ${request.id} was completed by another job; no second notification`);
     return false;
   }
-  await recordItem(request.audiobook.id, { absItemId: plexGuid }, logger);
+  await recordItem(request.audiobook, { absItemId: plexGuid }, logger);
   logger.info(`Linked "${request.audiobook.title}" to Audiobookshelf item ${plexGuid} by ${via} (delivered by RMAB)`);
   await notifyAvailable(request, logger);
   return true;
@@ -149,7 +158,7 @@ async function matchByAsin(request: MatchableRequest, backendMode: string, keepI
   }
   if (!keepItem) {
     // plexGuid field stores the externalId from either backend
-    await recordItem(audiobook.id, backendMode === 'audiobookshelf' ? { absItemId: match.plexGuid } : { plexGuid: match.plexGuid }, logger);
+    await recordItem(audiobook, backendMode === 'audiobookshelf' ? { absItemId: match.plexGuid } : { plexGuid: match.plexGuid }, logger);
   }
   await notifyAvailable(request, logger);
   return match.plexGuid;
