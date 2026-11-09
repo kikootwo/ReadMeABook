@@ -4,12 +4,12 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { Prisma } from '@/generated/prisma/client';
 import { requireAuth, AuthenticatedRequest } from '@/lib/middleware/auth';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '@/lib/interfaces/download-client.interface';
-import { CANCELLABLE_STATUSES } from '@/lib/constants/request-statuses';
+import { cancelLoadedRequest } from '@/lib/services/request-cancel.service';
+import { cancelResponse } from '@/lib/utils/cancel-response';
 import { ADMIN_REQUEST_DETAIL_INCLUDE, OWNER_REQUEST_DETAIL_SELECT, hidePlacementRecord, withRequestLibraryDisplay } from '@/lib/services/request-detail-query';
 import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { readJsonBody } from '@/lib/utils/request-body';
@@ -130,49 +130,7 @@ export async function PATCH(
       }
 
       if (action === 'cancel') {
-        if (!(CANCELLABLE_STATUSES as readonly string[]).includes(requestRecord.status)) {
-          return NextResponse.json(
-            {
-              error: 'ValidationError',
-              message: `Cannot cancel request with status: ${requestRecord.status}`,
-            },
-            { status: 400 }
-          );
-        }
-
-        const isAwaitingApproval = requestRecord.status === 'awaiting_approval';
-
-        const updated = await prisma.request.update({
-          where: { id },
-          data: {
-            status: 'cancelled',
-            updatedAt: new Date(),
-            ...(isAwaitingApproval && { selectedTorrent: Prisma.DbNull }),
-          },
-          include: {
-            audiobook: true,
-          },
-        });
-
-        try {
-          const { getJobQueueService } = await import('@/lib/services/job-queue.service');
-          const jobQueue = getJobQueueService();
-          await jobQueue.addNotificationJob(
-            'request_cancelled',
-            updated.id,
-            updated.audiobook.title,
-            updated.audiobook.author,
-            requestRecord.user.plexUsername || 'Unknown User'
-          );
-        } catch (error) {
-          logger.error('Failed to queue cancellation notification', { error });
-        }
-
-        return NextResponse.json({
-          success: true,
-          request: hidePlacementRecord(updated),
-          message: 'Request cancelled successfully',
-        });
+        return cancelResponse(await cancelLoadedRequest(requestRecord, { audience: req.user.role === 'admin' ? 'admin' : 'owner' }));
       } else if (action === 'retry') {
         // Retry failed request - allow users to retry their own warn/failed requests
         // Only allow retry for failed, warn, or awaiting_* statuses
@@ -356,53 +314,6 @@ export async function PATCH(
         {
           error: 'UpdateError',
           message: 'Failed to update request',
-        },
-        { status: 500 }
-      );
-    }
-  });
-}
-
-/**
- * DELETE /api/requests/[id]
- * Delete a request (admin only)
- */
-export async function DELETE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  return requireAuth(request, async (req: AuthenticatedRequest) => {
-    try {
-      if (!req.user) {
-        return NextResponse.json(
-          { error: 'Unauthorized', message: 'User not authenticated' },
-          { status: 401 }
-        );
-      }
-
-      if (req.user.role !== 'admin') {
-        return NextResponse.json(
-          { error: 'Forbidden', message: 'Admin access required' },
-          { status: 403 }
-        );
-      }
-
-      const { id } = await params;
-
-      await prisma.request.delete({
-        where: { id },
-      });
-
-      return NextResponse.json({
-        success: true,
-        message: 'Request deleted successfully',
-      });
-    } catch (error) {
-      logger.error('Failed to delete request', { error: error instanceof Error ? error.message : String(error) });
-      return NextResponse.json(
-        {
-          error: 'DeleteError',
-          message: 'Failed to delete request',
         },
         { status: 500 }
       );

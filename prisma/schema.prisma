@@ -245,6 +245,10 @@ model Request {
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
   completedAt      DateTime? @map("completed_at")
+  // When the request was cancelled (#228). Set by every cancel; meaningful only while status = 'cancelled'.
+  // NULL on a cancelled request = cancelled before this field existed: the cancelled-download cleanup never
+  // touches those. No default on purpose: a default would fill old rows on upgrade.
+  cancelledAt      DateTime? @map("cancelled_at")
   releaseDate      DateTime? @map("release_date") @db.Date // Book release date (copied from Audnexus on creation). Used by skip-unreleased-auto-search gate.
 
   // Request type: 'audiobook' (default) or 'ebook'

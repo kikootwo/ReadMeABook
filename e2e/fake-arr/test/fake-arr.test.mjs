@@ -493,3 +493,37 @@ test('qbit: a duplicate add answers Fails.; qbit-seed puts a finished, 2-day-old
   const after = await fetch(`${base('qbit')}/api/v2/torrents/info?hashes=${seedRes.torrent.hash}`, { headers: h }).then((r) => r.json());
   assert.equal(after[0].added_on, seedRes.torrent.addedOn, 'the duplicate add did not touch the existing torrent');
 });
+
+test('qbit-fault fails the next torrents/delete calls without deleting; torrents/info is never faulted (#228)', async () => {
+  await loadDef({ name: 'unit-fault', book: 'phm', releases: [{ id: 'f', title: '{{title}} fault', fixture: 'phm-mp3' }] });
+  const seeded = await fetch(`${base('control')}/__control/qbit-seed`, {
+    method: 'POST',
+    headers: { 'x-control-token': TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ release: 'f' }),
+  }).then((r) => r.json());
+  const hash = seeded.torrent.hash;
+  const arm = (body) =>
+    fetch(`${base('control')}/__control/qbit-fault`, {
+      method: 'POST',
+      headers: { 'x-control-token': TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  assert.equal((await arm({ path: 'torrents/info' })).status, 400, 'torrents/info cannot be faulted');
+  const armed = await (await arm({ path: '/api/v2/torrents/delete', status: 500, count: 1 })).json();
+  assert.deepEqual(armed.fault, { path: '/torrents/delete', status: 500, remaining: 1 });
+
+  const cookie = await qbitLogin();
+  const h = { Cookie: cookie };
+  const form = (o) => ({ method: 'POST', headers: { ...h, 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(o) });
+  const info = () => fetch(`${base('qbit')}/api/v2/torrents/info?hashes=${hash}`, { headers: h }).then((r) => r.json());
+  const since = (await control('/requests')).at(-1).seq;
+
+  assert.equal((await fetch(`${base('qbit')}/api/v2/torrents/delete`, form({ hashes: hash, deleteFiles: 'true' }))).status, 500);
+  assert.equal((await info()).length, 1, 'the faulted delete removed nothing');
+  assert.ok(fs.existsSync(path.join(seeded.torrent.contentPath, '01 - Chapter 1.mp3')), 'files stay on disk');
+
+  assert.equal((await fetch(`${base('qbit')}/api/v2/torrents/delete`, form({ hashes: hash, deleteFiles: 'true' }))).status, 200);
+  assert.equal((await info()).length, 0, 'the fault is spent after `count` calls');
+  const deletes = (await control(`/requests?since=${since}`)).filter((r) => r.service === 'qbit' && r.path.endsWith('/torrents/delete'));
+  assert.deepEqual(deletes.map((r) => r.fault ?? null), [500, null]);
+});

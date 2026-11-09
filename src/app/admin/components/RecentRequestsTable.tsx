@@ -450,12 +450,19 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
         body: JSON.stringify({ action: 'cancel' }),
       });
 
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to cancel request');
+        throw new Error(data.message || 'Failed to cancel request');
       }
 
-      toast.success('Request cancelled');
+      // The server says what happened to the download (removed, kept to seed, ...); a download it
+      // could not remove is a warning, not a success
+      const message = data.message || 'Request cancelled';
+      if (data.download === 'retry_later' || data.download === 'not_removed') {
+        toast.warning(message);
+      } else {
+        toast.success(message);
+      }
       await mutate(apiUrl);
     } catch (error) {
       console.error('[Admin] Failed to cancel request:', error);

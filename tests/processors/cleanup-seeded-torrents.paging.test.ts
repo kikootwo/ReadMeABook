@@ -82,6 +82,8 @@ describe('processCleanupSeededTorrents paging and marker', () => {
     const pageCalls: PageQuery[] = [];
     prismaMock.request.findMany.mockImplementation(async (arg: PageQuery) => {
       if (arg?.orderBy?.id !== 'asc') return [];
+      // The cancelled-download pass (its own tests) finds no candidates here
+      if ((arg as { where?: { AND?: Array<{ status?: string }> } }).where?.AND?.some((c) => c.status === 'cancelled')) return [];
       pageCalls.push(arg);
       return [all.slice(0, 100), all.slice(100, 200), all.slice(200)][pageCalls.length - 1] ?? [];
     });

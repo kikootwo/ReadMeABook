@@ -117,8 +117,8 @@ describe('processMonitorDownload', () => {
       undefined,
       'dh-1'
     );
-    // Verify downloadPath is stored in download history on completion
-    expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith(
+    // Verify downloadPath is stored in download history on completion (never over a removed row)
+    expect(prismaMock.downloadHistory.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           downloadStatus: 'completed',
@@ -333,8 +333,8 @@ describe('processMonitorDownload', () => {
       undefined,
       'dh-4'
     );
-    // Verify downloadPath is stored in download history on completion
-    expect(prismaMock.downloadHistory.update).toHaveBeenCalledWith(
+    // Verify downloadPath is stored in download history on completion (never over a removed row)
+    expect(prismaMock.downloadHistory.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           downloadStatus: 'completed',

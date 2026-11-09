@@ -71,6 +71,7 @@ describe('processStartDirectDownload', () => {
 
   it('updates request status to downloading', async () => {
     prismaMock.request.update.mockResolvedValue({});
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.downloadHistory.update.mockResolvedValue({});
     prismaMock.downloadHistory.findUnique.mockResolvedValue({
       torrentUrl: JSON.stringify(['https://slow.example.com/book']),
@@ -119,8 +120,8 @@ describe('processStartDirectDownload', () => {
     });
 
     // Check status updates
-    expect(prismaMock.request.update).toHaveBeenCalledWith({
-      where: { id: 'req-1' },
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+      where: { id: 'req-1', deletedAt: null, status: { not: 'cancelled' } },
       data: expect.objectContaining({
         status: 'downloading',
         progress: 0,
@@ -137,6 +138,7 @@ describe('processStartDirectDownload', () => {
 
   it('triggers organize job after successful download', async () => {
     prismaMock.request.update.mockResolvedValue({});
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.downloadHistory.update.mockResolvedValue({});
     prismaMock.downloadHistory.findUnique.mockResolvedValue({
       torrentUrl: JSON.stringify(['https://slow.example.com/book']),
@@ -196,6 +198,7 @@ describe('processStartDirectDownload', () => {
 
   it('marks request as failed when all download attempts fail', async () => {
     prismaMock.request.update.mockResolvedValue({});
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.downloadHistory.update.mockResolvedValue({});
     prismaMock.downloadHistory.findUnique.mockResolvedValue({
       torrentUrl: JSON.stringify([
@@ -219,8 +222,8 @@ describe('processStartDirectDownload', () => {
 
     expect(result.success).toBe(false);
     // Verify the second call (final failure status update)
-    expect(prismaMock.request.update).toHaveBeenLastCalledWith({
-      where: { id: 'req-3' },
+    expect(prismaMock.request.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'req-3', deletedAt: null, status: { not: 'cancelled' } },
       data: expect.objectContaining({
         status: 'failed',
       }),
@@ -235,6 +238,7 @@ describe('processStartDirectDownload', () => {
 
   it('uses FlareSolverr when configured', async () => {
     prismaMock.request.update.mockResolvedValue({});
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.downloadHistory.update.mockResolvedValue({});
     prismaMock.downloadHistory.findUnique.mockResolvedValue({
       torrentUrl: JSON.stringify(['https://slow.example.com/book']),
@@ -299,6 +303,7 @@ describe('processStartDirectDownload', () => {
 
   it('handles errors and updates request status', async () => {
     prismaMock.request.update.mockResolvedValue({});
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     prismaMock.downloadHistory.update.mockResolvedValue({});
     prismaMock.downloadHistory.findUnique.mockRejectedValue(new Error('Database error'));
 
@@ -312,8 +317,8 @@ describe('processStartDirectDownload', () => {
       jobId: 'job-5',
     })).rejects.toThrow('Database error');
 
-    expect(prismaMock.request.update).toHaveBeenCalledWith({
-      where: { id: 'req-5' },
+    expect(prismaMock.request.updateMany).toHaveBeenCalledWith({
+      where: { id: 'req-5', deletedAt: null, status: { not: 'cancelled' } },
       data: expect.objectContaining({
         status: 'failed',
         errorMessage: 'Database error',
@@ -330,6 +335,7 @@ describe('processMonitorDirectDownload', () => {
   it('returns completed status when download file exists', async () => {
     fsMock.stat.mockResolvedValue({ size: 1000000 });
     prismaMock.request.update.mockResolvedValue({});
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
 
     const { processMonitorDirectDownload } = await import('@/lib/processors/direct-download.processor');
 

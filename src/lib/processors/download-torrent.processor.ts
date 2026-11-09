@@ -12,7 +12,8 @@ import { getProwlarrConnection } from '../integrations/prowlarr-connection';
 import { isMagnetUri, toConfiguredProwlarrUrl } from '../utils/prowlarr-url';
 import { RMABLogger } from '../utils/logger';
 import { isTransientConnectionError } from '../utils/connection-errors';
-import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
+import { getRequestStopReason, markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
+import { stopCancelledDownload } from '../services/cancelled-download';
 import { addAutoBlock } from '../services/blocklist.service';
 import {
   DownloadSourceError,
@@ -240,6 +241,13 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload, at
       });
 
       logger.info(`Created download history record: ${downloadHistory.id}`);
+
+      // A cancel that landed during the add found no download to stop: stop it now
+      if ((await getRequestStopReason(requestId)) === 'cancelled') {
+        const step = await stopCancelledDownload(requestId);
+        logger.info(`Request ${requestId} was cancelled while its download was added: download ${step.outcome} (${step.detail})`);
+        return { success: true, message: 'Request cancelled while its download was added', requestId, download: step.outcome };
+      }
 
       // Send grab notification (non-blocking — failures here don't fail the download)
       const jobQueue = getJobQueueService();
