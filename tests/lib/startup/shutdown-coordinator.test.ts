@@ -3,7 +3,9 @@
  * Documentation: documentation/deployment/unified.md
  */
 
+import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { HttpDrain } from '@/lib/startup/http-drain';
 import {
   captureHttpServer,
   createShutdownHandler,
@@ -259,13 +261,12 @@ describe('shutdown coordinator', () => {
 });
 
 describe('captureHttpServer', () => {
-  it('keeps only the server from the first request, then unsubscribes', () => {
+  it('wraps the server from the first request and counts only its responses until they close', () => {
     const listeners: Array<(message: unknown, name: string | symbol) => void> = [];
     const channel = {
       subscribe: vi.fn((_name: string | symbol, fn: (message: unknown, name: string | symbol) => void) => {
         listeners.push(fn);
       }),
-      unsubscribe: vi.fn(() => true),
     };
     const getServer = captureHttpServer(channel);
     expect(channel.subscribe).toHaveBeenCalledWith(HTTP_REQUEST_CHANNEL, expect.any(Function));
@@ -274,13 +275,26 @@ describe('captureHttpServer', () => {
     listeners[0]({ request: { headers: { cookie: 'secret' } } }, HTTP_REQUEST_CHANNEL); // no server: ignored
     expect(getServer()).toBeUndefined();
 
-    const server = { close: vi.fn() };
-    listeners[0]({ server, request: { headers: { cookie: 'secret' } } }, HTTP_REQUEST_CHANNEL);
-    expect(getServer()).toBe(server);
-    expect(channel.unsubscribe).toHaveBeenCalledWith(HTTP_REQUEST_CHANNEL, listeners[0]);
+    const server = { close: vi.fn((cb?: () => void) => cb?.()), closeAllConnections: vi.fn() };
+    const responses = [new EventEmitter(), new EventEmitter()];
+    listeners[0]({ server, request: { headers: { cookie: 'secret' } }, response: responses[0] }, HTTP_REQUEST_CHANNEL);
+    const drain = getServer() as HttpDrain;
+    expect(drain.openResponses()).toBe(1);
 
-    listeners[0]({ server: { close: vi.fn() } }, HTTP_REQUEST_CHANNEL);
-    expect(getServer()).toBe(server);
+    listeners[0]({ server: { close: vi.fn() }, response: new EventEmitter() }, HTTP_REQUEST_CHANNEL); // other server
+    listeners[0]({ server, response: responses[1] }, HTTP_REQUEST_CHANNEL);
+    expect(getServer()).toBe(drain);
+    expect(drain.openResponses()).toBe(2);
+    responses[0].emit('close');
+    responses[1].emit('close');
+    expect(drain.openResponses()).toBe(0);
+
+    const closed = vi.fn();
+    drain.close(closed);
+    drain.closeAllConnections();
+    expect(server.close).toHaveBeenCalledTimes(1);
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(server.closeAllConnections).toHaveBeenCalledTimes(1);
   });
 });
 

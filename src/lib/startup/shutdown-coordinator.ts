@@ -19,6 +19,7 @@ import { SHUTDOWN_DRAIN_MS, SHUTDOWN_HARD_DEADLINE_MS, SHUTDOWN_STEP_LIMIT_MS } 
 import { JOB_QUEUE_SINGLETON_KEY, type ActiveJobInfo, type QueueShutdownTarget } from '@/lib/services/job-activity-tracker';
 import { oncePerProcess, peekProcessSingleton } from '@/lib/utils/process-singleton';
 import { markProcessStopping } from '@/lib/utils/process-stopping';
+import { createHttpDrain, type DrainableServer, type HttpDrain } from '@/lib/startup/http-drain';
 
 /** Node's built-in channel published at the start of every HTTP request (carries the server) */
 export const HTTP_REQUEST_CHANNEL = 'http.server.request.start';
@@ -60,7 +61,8 @@ async function within(work: () => Promise<unknown> | unknown, ms: number): Promi
 }
 
 function closeServer(server: ClosableServer): Promise<void> {
-  // Stops accepting connections and drops idle keep-alive ones; in-flight requests carry on
+  // Stops accepting connections; in-flight requests carry on (the captured server is an
+  // HttpDrain, which also closes keep-alive connections once no response is open)
   return new Promise((resolve) => {
     try {
       server.close(() => resolve());
@@ -162,19 +164,23 @@ export function createShutdownHandler(deps: ShutdownDeps): (signal: string) => v
 
 /**
  * Keep the HTTP server from the first request's diagnostics message (Next keeps its
- * handle local). Unsubscribes after the first capture and keeps nothing else: the
- * message also carries the request, with its cookies and tokens.
+ * handle local), wrapped in an HttpDrain that counts each of its responses until it
+ * closes. Keeps nothing else: the message also carries the request, with its cookies
+ * and tokens.
  */
-export function captureHttpServer(channel: Pick<typeof diagnosticsChannel, 'subscribe' | 'unsubscribe'> = diagnosticsChannel): () => ClosableServer | undefined {
-  let server: ClosableServer | undefined;
-  const onRequest = (message: unknown) => {
-    const candidate = (message as { server?: unknown } | null)?.server as ClosableServer | undefined;
-    if (server || !candidate || typeof candidate.close !== 'function') return;
-    server = candidate;
-    channel.unsubscribe(HTTP_REQUEST_CHANNEL, onRequest);
-  };
-  channel.subscribe(HTTP_REQUEST_CHANNEL, onRequest);
-  return () => server;
+export function captureHttpServer(channel: Pick<typeof diagnosticsChannel, 'subscribe'> = diagnosticsChannel): () => ClosableServer | undefined {
+  let server: DrainableServer | undefined;
+  let drain: HttpDrain | undefined;
+  channel.subscribe(HTTP_REQUEST_CHANNEL, (message: unknown) => {
+    const { server: candidate, response } = (message ?? {}) as { server?: DrainableServer; response?: unknown };
+    if (!server) {
+      if (!candidate || typeof candidate.close !== 'function') return;
+      server = candidate;
+      drain = createHttpDrain(candidate);
+    }
+    if (candidate === server) drain?.track(response);
+  });
+  return () => drain;
 }
 
 function consoleLog(level: Level, message: string): void {
