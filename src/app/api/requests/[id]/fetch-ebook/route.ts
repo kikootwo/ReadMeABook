@@ -10,6 +10,7 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
+import { EBOOK_FETCHABLE_STATUSES } from '@/lib/constants/request-statuses';
 
 const logger = RMABLogger.create('API.FetchEbook');
 
@@ -58,7 +59,7 @@ export async function POST(
         }
 
         // Check if parent request is in completed state
-        if (!['downloaded', 'available'].includes(parentRequest.status)) {
+        if (!(EBOOK_FETCHABLE_STATUSES as readonly string[]).includes(parentRequest.status)) {
           return NextResponse.json(
             { error: `Cannot fetch e-book for request in ${parentRequest.status} status` },
             { status: 400 }
