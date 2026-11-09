@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Settings, ABSLibrary } from '../../lib/types';
 import { AUDIBLE_REGIONS } from '@/lib/types/audible';
 import { AudibleLanguageFilterOption } from './AudibleLanguageFilterOption';
+import { RequesterTagOption } from './RequesterTagOption';
 
 interface AudiobookshelfSectionProps {
   settings: Settings;
@@ -148,6 +149,8 @@ export function AudiobookshelfSection({
           </div>
         </label>
       </div>
+
+      <RequesterTagOption settings={settings} onChange={onChange} />
 
       {/* Audible Region Selection */}
       <div className="border-t border-gray-200 dark:border-gray-700 pt-6 space-y-2">

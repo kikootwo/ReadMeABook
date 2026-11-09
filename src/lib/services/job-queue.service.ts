@@ -31,6 +31,7 @@ export type JobType =
   | 'monitor_rss_feeds'
   | 'sync_reading_shelves'
   | 'check_watched_lists'
+  | 'backfill_requester_tags'
   | 'send_notification'
   // Ebook-specific job types
   | 'search_ebook'
@@ -412,6 +413,12 @@ export class JobQueueService {
       const { processSyncShelves } = await import('../processors/sync-shelves.processor');
       const payloadWithJobId = await this.ensureJobRecord(job, 'sync_reading_shelves');
       return await processSyncShelves(payloadWithJobId);
+    });
+
+    this.queue.process('backfill_requester_tags', 1, async (job: BullJob<JobPayload>) => {
+      const { processBackfillRequesterTags } = await import('../processors/backfill-requester-tags.processor');
+      const payloadWithJobId = await this.ensureJobRecord(job, 'backfill_requester_tags');
+      return await processBackfillRequesterTags(payloadWithJobId);
     });
 
     this.queue.process('check_watched_lists', 1, async (job: BullJob<CheckWatchedListsPayload>) => {
@@ -842,6 +849,19 @@ export class JobQueueService {
         priority: 7,
       }
     );
+  }
+
+  /**
+   * Add the requester tag backfill (#232), at most one waiting or active; attempts 1 (no retry).
+   * Returns null when one is already queued.
+   */
+  async addBackfillRequesterTagsJob(): Promise<string | null> {
+    const pending = await this.queue.getJobs(['waiting', 'active', 'delayed']);
+    if (pending.some((job) => job?.name === 'backfill_requester_tags')) {
+      logger.info('Requester tag backfill already queued or running; not queuing another');
+      return null;
+    }
+    return await this.addJob('backfill_requester_tags', {}, { priority: 7, attempts: 1 });
   }
 
   /**

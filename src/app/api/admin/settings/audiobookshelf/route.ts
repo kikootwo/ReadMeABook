@@ -10,6 +10,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { resolveSecretForUrl } from '@/lib/utils/saved-credential';
 import { savedAudiobookshelfCredential } from '@/lib/services/saved-credentials.service';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { REQUESTER_TAG_SETTING_KEY } from '@/lib/constants/requester-tags';
 
 const logger = RMABLogger.create('API.Admin.Settings.Audiobookshelf');
 
@@ -20,7 +21,7 @@ export async function PUT(request: NextRequest) {
         const bodyResult = await readJsonBody(request);
         if (!bodyResult.ok) return bodyResult.response;
         const body = bodyResult.data;
-        const { serverUrl, apiToken, libraryId, triggerScanAfterImport } = body;
+        const { serverUrl, apiToken, libraryId, triggerScanAfterImport, tagRequester } = body;
 
         const { getConfigService } = await import('@/lib/services/config.service');
         const configService = getConfigService();
@@ -58,8 +59,26 @@ export async function PUT(request: NextRequest) {
           });
         }
 
+        // Requester tags (#232): written only when sent as a boolean; a saved off → on change
+        // queues the backfill once
+        let startBackfill = false;
+        if (typeof tagRequester === 'boolean') {
+          const wasOn = (await configService.get(REQUESTER_TAG_SETTING_KEY)) === 'true';
+          startBackfill = tagRequester && !wasOn;
+          updates.push({ key: REQUESTER_TAG_SETTING_KEY, value: tagRequester ? 'true' : 'false' });
+        }
+
         // Update configuration
         await configService.setMany(updates);
+
+        if (startBackfill) {
+          try {
+            const { getJobQueueService } = await import('@/lib/services/job-queue.service');
+            await getJobQueueService().addBackfillRequesterTagsJob();
+          } catch (error) {
+            logger.error('Failed to queue the requester tag backfill', { error: error instanceof Error ? error.message : String(error) });
+          }
+        }
 
         return NextResponse.json({
           success: true,
