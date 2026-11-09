@@ -2,8 +2,8 @@
  * Component: Request Cancel Service
  * Documentation: documentation/admin-features/request-cancel.md
  *
- * The one cancel path (web UI, admin table, API tokens). Authorization stays with the
- * caller. Order: one conditional write flips the status (committed before any client call), the
+ * The one cancel path (web UI, admin table, API tokens, the Discord bot). Authorization stays with
+ * the caller. Order: one conditional write flips the status (committed before any client call), the
  * notification is queued, then the download step runs inline under a deadline and never throws.
  */
 
@@ -13,6 +13,7 @@ import { RMABLogger } from '../utils/logger';
 import { CANCELLABLE_STATUSES } from '../constants/request-statuses';
 import { CANCEL_STEP_BUDGET_MS, CancelDeadline } from './cancel-deadline';
 import { handleCancelledDownload, newestSelectedRow, type CancelDownloadOutcome } from './cancelled-download';
+import { syncDiscordOnCancel } from './discord/discord-cancel-sync';
 
 const logger = RMABLogger.create('RequestCancel');
 
@@ -37,6 +38,8 @@ export type CancelDownloadReport = CancelDownloadOutcome | 'kept';
 
 export interface CancelOptions {
   audience: CancelAudience;
+  /** Who cancelled, for the "Cancelled by" mention on a retracted Discord approval message */
+  actor?: { userId: string | null; discordUserId?: string | null };
   /** Tests only */
   budgetMs?: number;
 }
@@ -112,6 +115,14 @@ export async function cancelLoadedRequest(record: CancellableRequest, options: C
   );
   logger.info(`Cancelled request ${record.id}: download ${step.outcome} (${step.detail})`);
 
+  // Render the Discord request card as cancelled and retract a pending approval message. Never throws.
+  await syncDiscordOnCancel(
+    record.id,
+    record.status === 'awaiting_approval',
+    options.actor?.userId ?? null,
+    options.actor?.discordUserId
+  );
+
   return {
     success: true,
     request: { id: record.id, status: 'cancelled', cancelledAt },
@@ -134,6 +145,11 @@ async function alreadyCancelledOr(requestId: string, status: string): Promise<Ca
     download: 'none',
     message: 'This request was already cancelled.',
   };
+}
+
+/** Why a cancel didn't happen, for callers that show a message */
+export function cancelFailureMessage(result: Extract<CancelResult, { success: false }>): string {
+  return result.reason === 'not_found' ? 'Request not found' : `Cannot cancel request with status: ${result.status}`;
 }
 
 /** Non-admins never see the client name or that another request shares the download */

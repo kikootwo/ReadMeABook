@@ -113,6 +113,15 @@
 - **Event types, triggers, message formatting** → [backend/services/notifications.md](backend/services/notifications.md)
 - **Notification settings UI** → [settings-pages.md](settings-pages.md)
 
+## Discord Bot (Slash-Command Requesting)
+- **In-Discord requesting (/request, /status, /delete)** → [integrations/discord-bot.md](integrations/discord-bot.md)
+- **Gateway bot architecture, startup, single-guild** → [integrations/discord-bot.md](integrations/discord-bot.md)
+- **Discord ↔ RMAB user mapping (discordUserId)** → [integrations/discord-bot.md](integrations/discord-bot.md)
+- **Discord approval flow (role ping, Approve/Deny buttons)** → [integrations/discord-bot.md](integrations/discord-bot.md)
+- **Shared approval service (web + Discord)** → [admin-features/request-approval.md](admin-features/request-approval.md)
+- **Discord settings tab (bot token, channel/role resolve)** → [settings-pages.md](settings-pages.md)
+- **Discord decisions sync to embeds/cards/DMs (any surface)** → [admin-features/request-approval.md](admin-features/request-approval.md)
+
 ## Frontend Components
 - **Component catalog (cards, badges, forms)** → [frontend/components.md](frontend/components.md)
 - **RequestCard, StatusBadge, ProgressBar** → [frontend/components.md](frontend/components.md)
@@ -134,6 +143,7 @@
 - **Bulk import (scan folders, match Audible, batch import)** → [features/bulk-import.md](features/bulk-import.md)
 - **Jobs management UI** → [backend/services/scheduler.md](backend/services/scheduler.md)
 - **Request deletion (soft delete, seeding awareness, library delete guard, files kept reason)** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
+- **Cancel vs delete (cancelRequest, who may do which)** → [admin-features/request-deletion.md](admin-features/request-deletion.md#cancel-vs-delete)
 - **Request cancel (stops the download, cancelled-download cleanup pass, token cancel route)** → [admin-features/request-cancel.md](admin-features/request-cancel.md)
 - **Request approval system, auto-approve settings** → [admin-features/request-approval.md](admin-features/request-approval.md)
 - **Release blocklist (auto-block failed releases, /admin/blocklist)** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md)

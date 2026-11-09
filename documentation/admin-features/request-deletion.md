@@ -299,6 +299,37 @@ where: {
 21. ✅ **Replace after a library move** - stale stored folder (gone, outside `media_dir`): no backend call, the replace resets the stored path and continues
 22. ✅ **Replace that keeps refusing** (e.g. a legacy row whose stored folder is shared with other books): every 409 names the way out: "Remove those files manually, then re-request the book after the next library scan."
 23. ✅ **ABS hard delete for a book added outside RMAB** (no stored folder, item looked up by ASIN in plex_library): refused when more than one library item matches the ASIN
+24. ✅ **Discord bot disabled or unreachable** - Discord sync is gated on a live client and never
+    throws, so deletion succeeds regardless
+
+## Cancel vs Delete
+
+| | Cancel | Delete |
+|---|---|---|
+| Who | Requester (own) or admin | Admin only (web, API, Discord `/delete`) |
+| Entry points | `PATCH /api/requests/:id {action:'cancel'}`, `POST /api/requests/:id/cancel`, Discord card Cancel button, `/status` menu | `DELETE /api/admin/requests/:id`, Discord `/delete` |
+| Effect | `status → 'cancelled'`, `cancelledAt`, `request_cancelled` notification | Soft delete + files, library item, download cleanup (below) |
+| Files / download | Library files untouched; the download is stopped/removed under the seeding rules ([request-cancel.md](request-cancel.md)) | Removed per the rules below |
+
+- Shared service: `cancelRequest(id, options)` / `cancelLoadedRequest(record, options)` in [request-cancel.service.ts](../../src/lib/services/request-cancel.service.ts); `options.actor` attributes the Discord "Cancelled by" mention. Details: [request-cancel.md](request-cancel.md). Discord shows the result's `message` ephemerally (`audience` admin for linked RMAB admins, else owner).
+
+## Discord Convergence
+
+`deleteRequest()` and `cancelLoadedRequest()` rewrite the Discord surfaces themselves via the shared
+`syncDiscordOnCancel()` ([discord-cancel-sync.ts](../../src/lib/services/discord/discord-cancel-sync.ts)),
+so every path converges — Web UI cancel, the token cancel route, Web UI admin route, the Discord Cancel button, `/status`,
+`/delete`, and the reported-issue cleanup.
+
+- `editRequestCards(requestId, 'cancelled')` — soft delete leaves `status` untouched, so the
+  cancelled render is forced.
+- `cancelApprovalMessage(...)` — only when the request was `awaiting_approval`; strips the
+  Approve/Deny buttons so a stale embed cannot approve a deleted request.
+- Gated on `getDiscordBotService().getClient()` and dynamically imported, so discord.js stays
+  unloaded when the bot is disabled. Best-effort: failures are logged, never surfaced.
+
+**Signature:** `deleteRequest(requestId, adminUserId, actorDiscordUserId?)`. The optional third
+argument attributes the "Cancelled by" mention for Discord-initiated deletes; other callers fall back to the deleting user's linked
+`discordUserId`, and the field is omitted entirely when neither exists.
 
 ## Fixed Issues ✅
 
@@ -359,6 +390,17 @@ where: {
 - **Cause:** the evidence check proves only that the folder's direct audio is this import; nothing limited the removal to it
 - **Fix:** D1 table above (audio of the hashed set; cover and junk only when nothing else is left; folder only when empty; `folderKept` lists what stayed); delivered ebook children stay, unlinked, the book keeps their folder; D2 empty-folder step. The automatic ebook request (`createEbookRequestIfEnabled`) and `find_missing_ebooks` look for an active ebook request by book (`audiobookId`), not by parent; a re-request's import links the surviving ebook request to the new audiobook request (the manual ebook routes look it up by parent). A reported-issue replace keeps the stored ebook path while a delivered ebook request remains
 - **Limits:** other users' audiobook requests for the same book still lose the shared audio (per-user duplicate check, `request-creator.service.ts`; as before); a user-customized `cover.jpg` in a folder with nothing else of theirs is removed; folders holding other user files now stay (listed); a delivered legacy ebook child (no record) survives with `filePath` null, so its download 404s until the book is imported again; another user's completed audiobook request on the same book keeps a Download button that 404s after the delete (the stored path now points at the ebook folder, the download serves audio only)
+
+**10. Web/API Deletions Left Live Discord Buttons**
+- **Issue:** Deleting from the Web UI or via an API token never touched Discord: the request card
+  kept a working Cancel Request button and the approval embed kept working Approve/Deny buttons
+- **Impact:** The stale approval embed made approving an already-deleted request reachable
+- **Fix:** Hoisted the card and approval-embed rewrites into `deleteRequest()` so all paths converge;
+  button handlers that find a request already gone now rewrite the card instead of leaving a dead
+  button
+- **Files updated:** `src/lib/services/request-delete.service.ts`,
+  `src/lib/services/discord/handlers/{approval,status-delete}.handler.ts`,
+  `src/lib/services/discord/{discord-cards,embeds/approval}.ts`
 
 ## File Structure
 

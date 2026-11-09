@@ -89,8 +89,37 @@ describe('Admin users routes', () => {
     expect(payload.error).toMatch(/autoApproveRequests/);
   });
 
-  it('prevents changing your own role', async () => {
+  it('prevents changing your own role (compared against the DB role, not the JWT)', async () => {
+    // The caller's current DB role is 'admin'; they attempt to demote themselves to 'user'.
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      isSetupAdmin: false,
+      authProvider: 'local',
+      plexUsername: 'admin',
+      deletedAt: null,
+      role: 'admin',
+    });
     const request = { json: vi.fn().mockResolvedValue({ role: 'user' }) };
+
+    const { PUT } = await import('@/app/api/admin/users/[id]/route');
+    const response = await PUT(request as any, { params: Promise.resolve({ id: 'admin-1' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(payload.error).toMatch(/cannot change your own role/i);
+  });
+
+  it('re-promotion of self is blocked even when the JWT role is stale', async () => {
+    // Stale token claims admin, but the DB row has been demoted to 'user'. Re-promoting self must fail.
+    authRequest = { user: { sub: 'admin-1', role: 'admin' }, json: vi.fn() };
+    requireAuthMock.mockImplementation((_req: any, handler: any) => handler(authRequest));
+    prismaMock.user.findUnique.mockResolvedValueOnce({
+      isSetupAdmin: false,
+      authProvider: 'local',
+      plexUsername: 'admin',
+      deletedAt: null,
+      role: 'user',
+    });
+    const request = { json: vi.fn().mockResolvedValue({ role: 'admin' }) };
 
     const { PUT } = await import('@/app/api/admin/users/[id]/route');
     const response = await PUT(request as any, { params: Promise.resolve({ id: 'admin-1' }) });

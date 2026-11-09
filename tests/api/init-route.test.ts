@@ -10,6 +10,7 @@ const dbReady = vi.hoisted(() => ({ value: true }));
 const redisState = vi.hoisted(() => ({ value: 'ready' as 'ready' | 'loading' | 'silent', errorListeners: 0 }));
 const schedulerStart = vi.hoisted(() => vi.fn());
 const credentialMigration = vi.hoisted(() => vi.fn());
+const botStart = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/db', () => ({
   prisma: {
@@ -49,6 +50,7 @@ vi.mock('@/lib/constants/startup', async (importOriginal) => ({
 }));
 vi.mock('@/lib/services/scheduler.service', () => ({ getSchedulerService: () => ({ start: schedulerStart }) }));
 vi.mock('@/lib/services/credential-migration.service', () => ({ runCredentialMigration: credentialMigration }));
+vi.mock('@/lib/services/discord/discord-bot.service', () => ({ getDiscordBotService: () => ({ start: botStart }) }));
 
 const INIT_STATE = Symbol.for('rmab.singleton.startup-init-state');
 const SECRET = Symbol.for('rmab.singleton.startup-secret');
@@ -73,6 +75,7 @@ describe('/api/init', () => {
     redisState.value = 'ready';
     schedulerStart.mockResolvedValue(undefined);
     credentialMigration.mockResolvedValue(undefined);
+    botStart.mockReset().mockResolvedValue(undefined);
   });
 
   it('has no GET handler (Next answers 405)', async () => {
@@ -111,6 +114,34 @@ describe('/api/init', () => {
     expect(await second.json()).toMatchObject({ success: true, alreadyInitialized: true });
     expect(schedulerStart).toHaveBeenCalledTimes(1);
     expect(credentialMigration).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts the Discord bot once, after the scheduler', async () => {
+    const { route, secret } = await load();
+
+    await route.POST(post(secret));
+    await route.POST(post(secret));
+
+    expect(botStart).toHaveBeenCalledTimes(1);
+    expect(schedulerStart.mock.invocationCallOrder[0]).toBeLessThan(botStart.mock.invocationCallOrder[0]);
+  });
+
+  it('does not start the Discord bot when initialization fails', async () => {
+    const { route, secret } = await load();
+    schedulerStart.mockRejectedValueOnce(new Error('scheduler down'));
+
+    expect((await route.POST(post(secret))).status).toBe(500);
+    expect(botStart).not.toHaveBeenCalled();
+  });
+
+  it('a Discord bot failure does not fail startup', async () => {
+    const { route, secret } = await load();
+    botStart.mockRejectedValueOnce(new Error('invalid token'));
+
+    const response = await route.POST(post(secret));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ success: true, alreadyInitialized: false });
   });
 
   it('shares one run between concurrent calls', async () => {

@@ -7,7 +7,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import type { CancelResult } from '@/lib/services/request-cancel.service';
+import { cancelFailureMessage, type CancelResult } from '@/lib/services/request-cancel.service';
 
 export function cancelResponse(result: CancelResult): NextResponse {
   if (result.success) {
@@ -19,10 +19,7 @@ export function cancelResponse(result: CancelResult): NextResponse {
     });
   }
   if (result.reason === 'not_found') {
-    return NextResponse.json({ error: 'NotFound', message: 'Request not found' }, { status: 404 });
+    return NextResponse.json({ error: 'NotFound', message: cancelFailureMessage(result) }, { status: 404 });
   }
-  return NextResponse.json(
-    { error: 'ValidationError', message: `Cannot cancel request with status: ${result.status}` },
-    { status: 400 }
-  );
+  return NextResponse.json({ error: 'ValidationError', message: cancelFailureMessage(result) }, { status: 400 });
 }

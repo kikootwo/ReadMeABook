@@ -2,14 +2,16 @@
  * Component: One-time Application Initialization (runs inside the init route)
  * Documentation: documentation/backend/services/scheduler.md
  *
- * Readiness check (database + Redis), then credential migration and scheduler
- * start. Runs at most once per process; concurrent callers share one run.
+ * Readiness check (database + Redis), then credential migration, scheduler
+ * start and the Discord bot (when enabled). Runs at most once per process;
+ * concurrent callers share one run.
  */
 
 import Redis from 'ioredis';
 import { prisma } from '@/lib/db';
 import { getSchedulerService } from '@/lib/services/scheduler.service';
 import { runCredentialMigration } from '@/lib/services/credential-migration.service';
+import { getDiscordBotService } from '@/lib/services/discord/discord-bot.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { STARTUP_REDIS_PING_TIMEOUT_MS } from '@/lib/constants/startup';
 import { processSingleton } from '@/lib/utils/process-singleton';
@@ -90,6 +92,11 @@ async function runInit(): Promise<AppInitOutcome> {
     await getSchedulerService().start();
     state().done = true;
     logger.info('Application services initialized successfully');
+    // Optional Discord bot: gated on its own config (discord.js loads only when enabled). A bot
+    // failure is logged and never fails startup.
+    await getDiscordBotService().start().catch((error: unknown) => {
+      logger.error('Failed to start the Discord bot', { error: error instanceof Error ? error.message : String(error) });
+    });
     return 'initialized';
   } catch (error) {
     logger.error('Failed to initialize services', { error: error instanceof Error ? error.message : String(error) });

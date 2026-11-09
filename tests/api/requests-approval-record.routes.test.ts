@@ -72,7 +72,11 @@ beforeEach(() => {
 });
 
 describe('POST /api/admin/requests/[id]/approve', () => {
-  beforeEach(() => as('admin'));
+  beforeEach(() => {
+    as('admin');
+    // The approval service claims the transition with a status-guarded updateMany
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+  });
 
   it('approving with no stored pick clears the record (written as NULL)', async () => {
     prismaMock.request.findFirst.mockResolvedValueOnce(row({ status: 'awaiting_approval' }));
@@ -80,7 +84,7 @@ describe('POST /api/admin/requests/[id]/approve', () => {
     const res = await approve('approve');
 
     expect(res.status).toBe(200);
-    expect(prismaMock.request.update.mock.calls[0][0].data).toMatchObject({ status: 'pending', approvalBypassedBy: null });
+    expect(prismaMock.request.updateMany.mock.calls[0][0].data).toMatchObject({ status: 'pending', approvalBypassedBy: null });
     expect('approvalBypassedBy' in res.body.request).toBe(false);
   });
 
@@ -94,7 +98,7 @@ describe('POST /api/admin/requests/[id]/approve', () => {
 
     expect(res.status).toBe(200);
     expect(jobQueueMock.addDownloadJob).toHaveBeenCalledTimes(1);
-    expect(prismaMock.request.update.mock.calls[0][0].data).toMatchObject({ status: 'downloading', approvalBypassedBy: null });
+    expect(prismaMock.request.updateMany.mock.calls[0][0].data).toMatchObject({ status: 'downloading', approvalBypassedBy: null });
   });
 
   it('denying leaves the record alone', async () => {
@@ -103,7 +107,7 @@ describe('POST /api/admin/requests/[id]/approve', () => {
     const res = await approve('deny');
 
     expect(res.status).toBe(200);
-    expect(prismaMock.request.update.mock.calls[0][0].data).toEqual({ status: 'denied' });
+    expect(prismaMock.request.updateMany.mock.calls[0][0].data).toEqual({ status: 'denied' });
     expect('approvalBypassedBy' in res.body.request).toBe(false);
   });
 });

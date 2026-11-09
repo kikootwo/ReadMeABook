@@ -118,7 +118,7 @@ describe('download selection guard on routes', () => {
         audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
         user: { id: 'user-2', plexUsername: 'other' },
       });
-      prismaMock.request.update.mockResolvedValue({ id: 'req-1', userId: 'user-2', audiobook: { id: 'ab-1', title: 'Title', author: 'Author' }, user: {} });
+      prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
       const request = { json: async () => ({ action: 'approve' }) };
       const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
       const response = await POST(request as any, params('req-1'));
@@ -126,8 +126,8 @@ describe('download selection guard on routes', () => {
       expect(response.status).toBe(200);
       expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
       expect(jobQueueMock.addSearchJob).toHaveBeenCalled();
-      expect(prismaMock.request.update.mock.calls[0][0].data.status).toBe('pending');
-      expect(prismaMock.request.update.mock.calls[0][0].data.selectedTorrent).toBeDefined();
+      expect(prismaMock.request.updateMany.mock.calls[0][0].data.status).toBe('pending');
+      expect(prismaMock.request.updateMany.mock.calls[0][0].data.selectedTorrent).toBeDefined();
     });
 
     it('POST /api/admin/requests/[id]/approve with an admin-provided pick → 400', async () => {
@@ -142,7 +142,7 @@ describe('download selection guard on routes', () => {
 
       expect(response.status).toBe(400);
       expect(jobQueueMock.addDownloadJob).not.toHaveBeenCalled();
-      expect(prismaMock.request.update).not.toHaveBeenCalled();
+      expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
     });
   });
 
@@ -185,7 +185,7 @@ describe('download selection guard on routes', () => {
       user: { id: 'user-2', plexUsername: 'other' },
     });
     prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-2' });
-    prismaMock.request.update.mockResolvedValue({ id: 'req-2', audiobook: { title: 'Title', author: 'Author' }, user: {} });
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     const request = { json: async () => ({ action: 'approve' }) };
 
     const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
@@ -203,7 +203,7 @@ describe('download selection guard on routes', () => {
       audiobook: { id: 'ab-1', title: 'Title', author: 'Author' },
       user: { id: 'user-2', plexUsername: 'other' },
     });
-    prismaMock.request.update.mockResolvedValue({ id: 'req-3', userId: 'user-2', audiobook: { id: 'ab-1', title: 'Title', author: 'Author' }, user: {} });
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     const request = { json: async () => ({ action: 'approve' }) };
 
     const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
@@ -234,7 +234,7 @@ describe('download selection guard on routes', () => {
 
     expect(response.status).toBe(503);
     expect(body.message).toContain('Try again');
-    expect(prismaMock.request.update).not.toHaveBeenCalled();
+    expect(prismaMock.request.updateMany).not.toHaveBeenCalled();
     expect(jobQueueMock.addSearchEbookJob).not.toHaveBeenCalled();
     expect(jobQueueMock.addStartDirectDownloadJob).not.toHaveBeenCalled();
   });

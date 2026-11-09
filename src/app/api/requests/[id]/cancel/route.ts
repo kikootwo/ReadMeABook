@@ -48,7 +48,7 @@ export async function POST(
         return NextResponse.json({ error: 'Forbidden', message: 'You do not have access to this request' }, { status: 403 });
       }
 
-      return cancelResponse(await cancelLoadedRequest(record, { audience: isAdmin ? 'admin' : 'owner' }));
+      return cancelResponse(await cancelLoadedRequest(record, { audience: isAdmin ? 'admin' : 'owner', actor: { userId: req.user.id } }));
     } catch (error) {
       logger.error('Failed to cancel request', { error: error instanceof Error ? error.message : String(error) });
       return NextResponse.json({ error: 'CancelError', message: 'Failed to cancel request' }, { status: 500 });

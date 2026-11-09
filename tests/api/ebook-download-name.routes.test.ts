@@ -83,7 +83,7 @@ describe('Anna\'s Archive download name at the routes (#474)', () => {
       user: { id: 'user-2', plexUsername: 'other' },
     });
     prismaMock.downloadHistory.create.mockResolvedValue({ id: 'dh-2' });
-    prismaMock.request.update.mockResolvedValue({ id: 'req-2', audiobook: { title: TITLE, author: AUTHOR }, user: {} });
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
     const request = { json: async () => ({ action: 'approve' }) };
 
     const { POST } = await import('@/app/api/admin/requests/[id]/approve/route');
