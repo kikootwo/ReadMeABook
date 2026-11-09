@@ -158,7 +158,7 @@ describe('shutdown coordinator', () => {
     expect(t.logs.some((l) => l.startsWith('warn:') && l.endsWith(': timeout'))).toBe(true);
   });
 
-  it('exits 1 at the hard deadline when every step hangs', async () => {
+  it('cuts every hanging step at its limit, prints each warning and exits 0 before the hard deadline', async () => {
     const t = setup();
     t.server.close.mockImplementation(() => undefined);
     t.queue.pauseLocal.mockImplementation(never);
@@ -167,12 +167,48 @@ describe('shutdown coordinator', () => {
     t.prisma.$disconnect.mockImplementation(never);
 
     createShutdownHandler(t.deps)('SIGTERM');
-    await vi.advanceTimersByTimeAsync(SHUTDOWN_HARD_DEADLINE_MS - 1);
-    expect(t.exit).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(SHUTDOWN_DRAIN_MS + 3 * SHUTDOWN_STEP_LIMIT_MS + 10);
+
+    expect(t.exit.mock.calls).toEqual([[0]]);
+    expect(t.logs).toEqual(expect.arrayContaining([
+      'warn: Job queue close: timeout',
+      'warn: Job status writes: timeout',
+      'warn: Disconnect: timeout',
+    ]));
+    expect(t.logs).not.toContain(`error: Stop did not finish within ${SHUTDOWN_HARD_DEADLINE_MS} ms; exiting now`);
+  });
+
+  it('exits 1 at the hard deadline when the event loop runs late', async () => {
+    const t = setup();
+    // A step that blocks the event loop past the deadline: the timers due meanwhile fire late
+    t.queue.close.mockImplementation(() => {
+      vi.advanceTimersByTime(SHUTDOWN_HARD_DEADLINE_MS);
+      return never();
+    });
+
+    createShutdownHandler(t.deps)('SIGTERM');
+    await vi.advanceTimersByTimeAsync(10);
 
     expect(t.exit.mock.calls[0]).toEqual([1]);
     expect(t.logs).toContain(`error: Stop did not finish within ${SHUTDOWN_HARD_DEADLINE_MS} ms; exiting now`);
+  });
+
+  it('still gives running jobs the drain window when the local pause fails', async () => {
+    const t = setup();
+    t.setActive([organizeJob]);
+    t.queue.pauseLocal.mockRejectedValue(new Error('Connection is closed.'));
+    t.queue.whenCurrentJobsFinished.mockImplementation(async () => {
+      await after(1000);
+      t.setActive([]);
+    });
+
+    createShutdownHandler(t.deps)('SIGTERM');
+    await vi.advanceTimersByTimeAsync(1050);
+
+    expect(t.queue.whenCurrentJobsFinished).toHaveBeenCalledTimes(1);
+    expect(t.logs).toContain('warn: Job queue pause failed (Connection is closed.); still waiting for running jobs');
+    expect(t.logs.at(-1)).toMatch(/\(finished 1, left 0 for retry\)$/);
+    expect(t.exit.mock.calls).toEqual([[0]]);
   });
 
   it('ignores a second signal while stopping', async () => {

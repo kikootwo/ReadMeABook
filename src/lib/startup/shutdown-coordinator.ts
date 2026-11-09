@@ -6,7 +6,9 @@
  * read by Next before register() runs). Order, all within SHUTDOWN_HARD_DEADLINE_MS:
  * stop HTTP + new jobs → running jobs and requests get SHUTDOWN_DRAIN_MS → close the queue
  * (only when nothing is left running) → flush job-row writes → disconnect Prisma and
- * Redis → exit 0. The hard deadline exits 1 whatever still hangs.
+ * Redis → exit 0. Every step is bounded and they end before the hard deadline, which
+ * exits 1 if the event loop ran late. A blocked event loop fires no timer at all:
+ * app-start.sh then SIGKILLs node by wall clock (APP_STOP_KILL_AFTER).
  * Only peeks the process singletons: never creates the job queue (that starts workers)
  * or Prisma, and imports neither, so the instrumentation bundle stays small.
  * Dependency-light like startup-trigger.ts: console logging, no Prisma/logger imports.
@@ -95,7 +97,12 @@ async function runShutdown(signal: string, deps: ShutdownDeps): Promise<void> {
     server ? within(() => closeServer(server), remaining(SHUTDOWN_DRAIN_MS)) : Promise.resolve<Outcome>('done'),
     queue
       ? within(async () => {
-          await queue.pauseLocal();
+          try {
+            await queue.pauseLocal();
+          } catch (error) {
+            // Bull's blocking client reconnecting, or Redis down: running jobs still get the window
+            log('warn', `Job queue pause failed (${error instanceof Error ? error.message : String(error)}); still waiting for running jobs`);
+          }
           await queue.whenCurrentJobsFinished();
         }, remaining(SHUTDOWN_DRAIN_MS))
       : Promise.resolve<Outcome>('done'),
