@@ -78,7 +78,7 @@ trap on_stop TERM INT
 # counted. Node's ffmpeg children (chapter merge, tagging) are not detached and stay here.
 LEFTOVER=""
 find_leftovers() {
-    local stat line rest pid pgrp
+    local stat line rest pid state pgrp
     LEFTOVER=""
     for stat in /proc/[0-9]*/stat; do
         # Braces: the redirect's own error (a process gone since the glob) goes to /dev/null too
@@ -87,7 +87,10 @@ find_leftovers() {
         pid="${pid%/stat}"
         rest="${line##*) }"
         # rest: state ppid pgrp ...
-        read -r _ _ pgrp _ <<< "$rest" || continue
+        read -r state _ pgrp _ <<< "$rest" || continue
+        # A zombie has already exited: an orphan (the watchdog's sleep, an ffmpeg) waits for
+        # supervisord's next reap, up to 1 s later, and must not hold up the stop
+        if [ "$state" = "Z" ]; then continue; fi
         if [ "$pgrp" = "$$" ] && [ "$pid" != "$$" ]; then
             LEFTOVER="$LEFTOVER $pid"
         fi

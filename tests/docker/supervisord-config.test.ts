@@ -91,6 +91,12 @@ describe('Unified container stop settings', () => {
     expect(appStart).not.toMatch(/read -r line < "\$stat" 2>\/dev\/null/);
   });
 
+  it(`${APP_START}: zombies (exited, waiting for supervisord to reap them) are not counted as leftovers`, () => {
+    // The watchdog's orphaned sleep is reaped on supervisord's next tick; counting it cost every stop 1 s
+    expect(appStart).toMatch(/read -r state _ pgrp _ <<< "\$rest"/);
+    expect(appStart).toMatch(/if \[ "\$state" = "Z" \]; then continue; fi/);
+  });
+
   it(`${APP_START}: hands the signal to node's coordinator and forwards it before node starts`, () => {
     expect(appStart).toMatch(/^export NEXT_MANUAL_SIG_HANDLE=true$/m);
     const trap = appStart.search(/^trap on_stop TERM INT$/m);
