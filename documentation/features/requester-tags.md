@@ -23,7 +23,7 @@ When a requested audiobook becomes `available`, RMAB adds `req:<username>` to it
 - `cancelled` counts as unapproved even when the request had been approved before it was cancelled (e.g. auto-approved, cancelled while downloading, then imported by an admin without naming it): not tagged. Errs on the side of not tagging
 - The record is sticky: a marked request later delivered by its own user's download (import failed → `failed` → the user's pick) stays untagged
 - The denied gate reads only the current status: a download started while the request was approved still completes it after it was sent back to approval and denied (the download job stops only for `cancelled`); its record stays NULL, so it is tagged
-- **Legacy rows:** rows from before the column existed are NULL and eligible. Books imported before this version for a user whose request was denied, cancelled or awaiting approval may be tagged for that user
+- **Legacy rows:** rows from before the column existed (before v1.2.13) are NULL and eligible. Books imported or matched before v1.2.13 for a user whose request was denied, cancelled or awaiting approval may be tagged for that user
 - **Downgrade:** a downgrade drops the column (`db push --accept-data-loss`); upgrading again re-adds it NULL, so formerly marked requests become eligible and the repair/backfill tag them
 
 ## Repair (an ABS re-match drops the tag)
