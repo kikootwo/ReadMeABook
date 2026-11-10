@@ -2,6 +2,7 @@
  * Component: E2E helpers for the Library API specs (#177: 177-library-api, 177-library-perf)
  * Documentation: documentation/testing/e2e-harness.md
  */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { expect } from '@playwright/test';
 import { Rmab, urls } from '../../lib/harness';

@@ -12,6 +12,7 @@
  * matches nothing for anyone. Evidence: `177/<viewer>-full.json`, `177/<viewer>-live.json`,
  * `177/result.json`. Values read first, then `expect.soft`.
  */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { test, expect } from '@playwright/test';
 import { execBridgeAvailable, EXEC_BRIDGE_SKIP, Rmab, writeEvidence } from '../../lib/harness';

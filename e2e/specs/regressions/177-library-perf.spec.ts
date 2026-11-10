@@ -131,7 +131,12 @@ test('#177: Library full and live modes at 10k and 30k library rows under a 2-CP
   for (const id of disabled) await admin.raw('PUT', `/api/admin/jobs/${id}`, { enabled: true });
 
   for (const size of [10_000, 30_000]) {
-    const r = result[`rows${size}`] as any;
+    const r = result[`rows${size}`] as {
+      counts: { libraryRows: number; total: number };
+      loaded: { errors: string[]; full: { p95: number }; live: { p95: number } };
+      healthP95Ratio: number;
+      lagP99Ms: number;
+    };
     expect.soft(r.counts.libraryRows, `${size}: rows seeded`).toBe(size);
     expect.soft(r.counts.total, `${size}: entries (library rows + 1000 request-only books)`).toBe(size + 1000);
     expect.soft(r.loaded.errors, `${size}: no failed call`).toEqual([]);
