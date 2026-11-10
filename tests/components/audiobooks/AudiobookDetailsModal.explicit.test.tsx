@@ -118,5 +118,23 @@ describe('AudiobookDetailsModal Explicit checkbox', () => {
 
     expect(box()).toBeChecked();
     expect(box()).toBeDisabled();
+    expect(screen.getByText('Only an admin can remove this')).toBeInTheDocument();
+  });
+
+  it('a requester can untick their own tick before sending: nothing is saved yet', async () => {
+    await open();
+
+    fireEvent.click(box()!);
+    fireEvent.click(screen.getByRole('button', { name: 'Mark explicit' }));
+    expect(box()).toBeChecked();
+    expect(box()).toBeEnabled();
+    expect(screen.queryByText('Only an admin can remove this')).toBeNull();
+
+    fireEvent.click(box()!);
+    expect(box()).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Request Audiobook' }));
+    await act(async () => {});
+
+    expect(createRequestMock).toHaveBeenCalledWith(expect.anything(), { explicit: false });
   });
 });

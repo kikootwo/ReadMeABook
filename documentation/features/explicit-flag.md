@@ -19,7 +19,7 @@ The requester or an admin ticks **Explicit** on an audiobook request. In ABS mod
 | My Requests (`RequestCard`) | `RequestExplicitControl` in the action row; saves at once | ABS mode, audiobook, not denied |
 | Admin Recent Requests (`RecentRequestsTable`) | rose "Explicit" pill by the title; `ExplicitMenuItem` in the actions menu ("Mark explicit" / "Remove explicit mark") | ABS mode, audiobook; the menu item is hidden on an unmarked denied request |
 - **Non-admin tick asks first** (`ConfirmModal`, "Mark as explicit?"): "Audiobookshelf will hide this book from accounts that can't see explicit content (which may include yours), and only an admin can remove the mark."
-- **Non-admin, already marked:** checkbox disabled, with the visible line "Only an admin can remove this" (`aria-describedby`), readable at phone width
+- **Non-admin, already marked:** checkbox disabled, with the visible line "Only an admin can remove this" (`aria-describedby`), readable at phone width. The details modal saves nothing until Request, so it locks the box only for a request already marked (`locked` prop); a fresh tick can be unticked before sending
 - A response `message` shows as a warning toast (10 s); an error as an error toast. My Requests is wrapped in `ToastProvider`
 - Backend mode comes from `GET /api/auth/providers` (`useBackendMode`, `src/lib/hooks/useExplicitMark.ts`)
 

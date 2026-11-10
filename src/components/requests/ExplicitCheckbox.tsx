@@ -3,8 +3,9 @@
  * Documentation: documentation/features/explicit-flag.md
  *
  * ExplicitCheckbox: one "Explicit" checkbox with a 44px touch target. A non-admin's tick asks first
- * (what it does in Audiobookshelf, and that only an admin can undo it); once checked, a non-admin
- * sees it disabled with the reason as visible text. Admins toggle without a confirm.
+ * (what it does in Audiobookshelf, and that only an admin can undo it); once a mark is saved, a
+ * non-admin sees it disabled with the reason as visible text (the details modal, which saves
+ * nothing until Request, locks it only for a request already marked). Admins toggle without a confirm.
  * RequestExplicitControl: the checkbox wired to an existing request (My Requests), with a toast for
  * the server's message.
  */
@@ -26,14 +27,16 @@ interface ExplicitCheckboxProps {
   isAdmin: boolean;
   /** While a save is in flight */
   busy?: boolean;
+  /** Disabled with the reason; default: checked and not an admin (a saved mark). A form that saves nothing yet passes its own. */
+  locked?: boolean;
   className?: string;
 }
 
-export function ExplicitCheckbox({ checked, onChange, isAdmin, busy = false, className }: ExplicitCheckboxProps) {
+export function ExplicitCheckbox({ checked, onChange, isAdmin, busy = false, locked: lockedProp, className }: ExplicitCheckboxProps) {
   const id = useId();
   const reasonId = `${id}-reason`;
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const locked = checked && !isAdmin;
+  const locked = lockedProp ?? (checked && !isAdmin);
 
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const next = event.target.checked;

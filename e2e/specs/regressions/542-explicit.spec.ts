@@ -120,6 +120,7 @@ test('#542: a request marked Explicit marks the Audiobookshelf item explicit', a
     await shot(DIR, 'confirm-1280-light');
     await page.getByRole('button', { name: 'Mark explicit' }).click();
     await expect(box).toBeChecked();
+    ui.untickableBeforeRequest = await box.isEnabled();
     await shot(DIR, 'modal-1280-light');
     const postP = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/requests');
     const resP = page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/requests');
@@ -287,6 +288,7 @@ test('#542: a request marked Explicit marks the Audiobookshelf item explicit', a
   const before = s2Before.a;
   expect.soft(ui.checkedAtOpen, 'step 1: the box starts unticked').toBe(false);
   expect.soft(ui.checkedWhileAsking, 'step 1: not ticked until confirmed').toBe(false);
+  expect.soft(ui.untickableBeforeRequest, 'step 1: nothing saved yet, so the tick can be undone before Request').toBe(true);
   expect.soft(String(ui.confirmText), 'step 1: the confirm sentence').toContain('only an admin can remove the mark');
   expect.soft([ui.postExplicit, ui.postStatus], 'step 1: Request sent explicit').toEqual([true, 201]);
   expect.soft(ui.modalOverflow375, '375: no horizontal overflow').toBe(0);

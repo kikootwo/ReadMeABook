@@ -673,7 +673,7 @@ export function AudiobookDetailsModal({
             style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
           >
             {showExplicit && (
-              <ExplicitCheckbox checked={explicit} onChange={setExplicit} isAdmin={user?.role === 'admin' && !requestExplicit} className="-mt-2 mb-1" />
+              <ExplicitCheckbox checked={explicit} onChange={setExplicit} isAdmin={user?.role === 'admin'} locked={requestExplicit} className="-mt-2 mb-1" />
             )}
             <div className="flex items-center gap-3">
               {/* Main Action */}
