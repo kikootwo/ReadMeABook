@@ -1,5 +1,5 @@
 /**
- * Component: Admin Bulk Import Scan API Route Tests (ASIN read from the folder name)
+ * Component: Admin Bulk Import Scan API Route Tests (ASIN read from the folder name, row flags)
  * Documentation: documentation/features/bulk-import.md
  */
 
@@ -13,7 +13,7 @@ const audibleMock = vi.hoisted(() => ({
   search: vi.fn(),
 }));
 const scannerMock = vi.hoisted(() => ({ discoverAudiobooks: vi.fn() }));
-const fsMock = vi.hoisted(() => ({ stat: vi.fn() }));
+const fsMock = vi.hoisted(() => ({ stat: vi.fn(), realpath: vi.fn() }));
 
 vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
 
@@ -32,10 +32,6 @@ vi.mock('@/lib/integrations/audible.service', () => ({
 
 vi.mock('@/lib/services/config.service', () => ({
   getConfigService: () => ({ getAudibleRegion: async () => 'us' }),
-}));
-
-vi.mock('@/lib/utils/audiobook-matcher', () => ({
-  findPlexMatch: async () => null,
 }));
 
 vi.mock('@/lib/utils/bulk-import-scanner', async (importOriginal) => {
@@ -96,7 +92,9 @@ describe('Admin bulk-import scan route: ASIN in the folder name', () => {
     prismaMock.configuration.findUnique.mockImplementation(async ({ where }: { where: { key: string } }) =>
       where.key === 'media_dir' ? { key: 'media_dir', value: '/media' } : null,
     );
-    prismaMock.request.findFirst.mockResolvedValue(null);
+    prismaMock.plexLibrary.findMany.mockResolvedValue([]);
+    prismaMock.request.findMany.mockResolvedValue([]);
+    fsMock.realpath.mockImplementation(async (p: string) => p);
     fsMock.stat.mockImplementation(async (target: string) => {
       if (String(target).replace(/\\/g, '/').endsWith('/media')) return { isDirectory: () => true };
       throw new Error('ENOENT');
@@ -212,5 +210,63 @@ describe('Admin bulk-import scan route: ASIN in the folder name', () => {
 
     expect(audibleMock.search).toHaveBeenCalledWith('A Quiet Harbor', 1, { ignoreLanguageFilter: true });
     expect(result.extractedAsin).toBe('B019NOKST6');
+  });
+});
+
+describe('Admin bulk-import scan route: row flags (#189)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prismaMock.configuration.findUnique.mockImplementation(async ({ where }: { where: { key: string } }) =>
+      ({ download_dir: { key: 'download_dir', value: '/data' }, media_dir: { key: 'media_dir', value: '/data/media' } } as Record<string, unknown>)[where.key] ?? null,
+    );
+    prismaMock.plexLibrary.findMany.mockResolvedValue([]);
+    prismaMock.request.findMany.mockResolvedValue([]);
+    fsMock.realpath.mockImplementation(async (p: string) => p);
+    fsMock.stat.mockImplementation(async (target: string) => {
+      if (/\/data$/.test(String(target).replace(/\\/g, '/'))) return { isDirectory: () => true };
+      throw new Error('ENOENT');
+    });
+    audibleMock.search.mockResolvedValue({ results: [TEXT_MATCH] });
+  });
+
+  /** Scan /data holding one discovered book at folderPath with these files; the book_matched payload. */
+  async function scanAt(folderPath: string, audioFiles = ['01.mp3']) {
+    scannerMock.discoverAudiobooks.mockResolvedValue([{ ...(await discovered('Plain Title')), folderPath, audioFiles }]);
+    const { POST } = await import('@/app/api/admin/bulk-import/scan/route');
+    const response = await POST(new NextRequest('http://localhost/api/admin/bulk-import/scan', {
+      method: 'POST',
+      body: JSON.stringify({ rootPath: '/data' }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    const text = await response.text();
+    const event = text.split('\n\n').find((chunk) => chunk.startsWith('event: book_matched'));
+    expect(event, text).toBeDefined();
+    return JSON.parse(event!.split('\ndata: ')[1]);
+  }
+
+  it.each([
+    ['a download folder', '/data/torrents/Book', ['01.mp3'], false],
+    ['a folder in the media folder (nested in downloads)', '/data/media/Author/Book', ['01.mp3'], true],
+    ['a merged entry with files in the media folder', '/data', ['torrents/Book/01.mp3', 'media/Author/Book/01.mp3'], true],
+  ])('marks %s inMediaFolder=%s', async (_label, folderPath, files, expected) => {
+    const result = await scanAt(folderPath as string, files as string[]);
+    expect(result.inMediaFolder).toBe(expected);
+  });
+
+  it('flags a book any user requested, from the shared check', async () => {
+    prismaMock.request.findMany.mockResolvedValue([{ audiobook: { audibleAsin: TEXT_MATCH.asin } }]);
+
+    const result = await scanAt('/data/torrents/Book');
+
+    expect(result).toMatchObject({ inLibrary: false, hasActiveRequest: true });
+  });
+
+  it('flags a book in the library and not as requested', async () => {
+    prismaMock.plexLibrary.findMany.mockResolvedValue([{ asin: TEXT_MATCH.asin, plexGuid: 'abs-1' }]);
+    prismaMock.request.findMany.mockResolvedValue([{ audiobook: { audibleAsin: TEXT_MATCH.asin } }]);
+
+    const result = await scanAt('/data/torrents/Book');
+
+    expect(result).toMatchObject({ inLibrary: true, hasActiveRequest: false });
   });
 });

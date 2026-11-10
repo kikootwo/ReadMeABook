@@ -13,6 +13,7 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { randomUUID } from 'crypto';
 import { MASKED_PASSWORD } from '@/lib/utils/saved-credential';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { CategoryChoiceError, resolveCategoryChoice } from '@/lib/utils/download-category';
 
 const logger = RMABLogger.create('API.Admin.Settings.DownloadClients');
 
@@ -154,6 +155,19 @@ export async function POST(request: NextRequest) {
             { status: 400 }
           );
         }
+
+        // Ownership: a new name missing in the client becomes ReadMeABook's own; an existing one is left alone
+        const choice = await resolveCategoryChoice(
+          { type, category },
+          () => manager.listCategories(newClient)
+        ).catch((error) => error as Error);
+        if (choice instanceof Error) {
+          if (!(choice instanceof CategoryChoiceError)) throw choice;
+          return NextResponse.json({ error: choice.message }, { status: 400 });
+        }
+        newClient.category = choice.category;
+        if (choice.ownedCategory) newClient.ownedCategory = choice.ownedCategory;
+        if (choice.existing) logger.info(`Category "${choice.category}" already exists in ${getClientDisplayName(type)}; used as is`);
 
         // Save updated clients array (passwords encrypted; existing clients come decrypted from getAllClients)
         await config.setMany([

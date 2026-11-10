@@ -16,6 +16,36 @@ function authorized(state, req) {
   return want.length >= 16 && got.length === want.length && timingSafeEqual(want, got);
 }
 
+/** A category another app made before RMAB (qbit: name kept as given; sab: lower-case, like SABnzbd). */
+function seedCategory(state, { client, name, path: dir = '' }) {
+  const given = String(name || '').trim();
+  if (!given || given === '*') throw new Error('category name required');
+  if (client !== 'qbit' && client !== 'sab') throw new Error("client must be 'qbit' or 'sab'");
+  const key = client === 'sab' ? given.toLowerCase() : given;
+  if (client === 'qbit') state.qbitCategories[key] = { name: key, savePath: String(dir) };
+  else state.sabCategories[key] = String(dir);
+  state.seededCategories.push({ client, name: key });
+  return { client, name: key, path: String(dir) };
+}
+
+/** Drop one category (seeded or created through the client API), so a spec can leave the client as it found it. */
+function removeCategory(state, { client, name }) {
+  if (client !== 'qbit' && client !== 'sab') throw new Error("client must be 'qbit' or 'sab'");
+  const key = client === 'sab' ? String(name || '').trim().toLowerCase() : String(name || '').trim();
+  const map = client === 'qbit' ? state.qbitCategories : state.sabCategories;
+  const existed = key in map;
+  delete map[key];
+  state.seededCategories = state.seededCategories.filter((c) => !(c.client === client && c.name === key));
+  return existed;
+}
+
+function removeSeededCategories(state) {
+  for (const { client, name } of state.seededCategories) {
+    delete (client === 'qbit' ? state.qbitCategories : state.sabCategories)[name];
+  }
+  state.seededCategories = [];
+}
+
 export async function handleControl(state, req, res, url) {
   const p = url.pathname.replace(/^\/__control/, '') || '/';
   try {
@@ -49,7 +79,13 @@ export async function handleControl(state, req, res, url) {
       const { params } = await readParams(req, url);
       return sendJson(res, 200, { ok: true, fault: armQbitFault(state, params) });
     }
+    if (p === '/categories' && req.method === 'POST') {
+      const { params } = await readParams(req, url);
+      if (params.remove) return sendJson(res, 200, { ok: true, removed: removeCategory(state, params) });
+      return sendJson(res, 200, { ok: true, category: seedCategory(state, params) });
+    }
     if (p === '/reset' && req.method === 'POST') {
+      removeSeededCategories(state);
       const name = state.scenario?.name;
       if (name && state.listScenarios().includes(name)) state.loadScenarioByName(name);
       else state.reset();

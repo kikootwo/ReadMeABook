@@ -5,7 +5,8 @@
  * Multi-step modal wizard for bulk importing audiobooks from server folders.
  * Step 1: Select root folder to scan.
  * Step 2: Scanning/matching progress.
- * Step 3: Review matches and start import.
+ * Step 3: Review matches (Change match / Find match per row) and start import.
+ * A backdrop click does nothing while the match dialog is open or a row is changed.
  */
 
 'use client';
@@ -16,7 +17,11 @@ import { XMarkIcon, FolderArrowDownIcon } from '@heroicons/react/24/outline';
 import { ScanFolderStep } from './bulk-import/ScanFolderStep';
 import { ScanProgressStep } from './bulk-import/ScanProgressStep';
 import { MatchReviewStep } from './bulk-import/MatchReviewStep';
-import { WizardStep, ScannedBook, ScanProgressEvent, MatchingProgressEvent } from './bulk-import/types';
+import {
+  WizardStep, ScannedBook, ScanProgressEvent, MatchingProgressEvent, MatchCandidate, ImportOutcome,
+} from './bulk-import/types';
+import { applyChosen, defaultSkipped, splitForImport, toImportItem, undoChosen } from './bulk-import/row-match';
+import { BULK_IMPORT_REFUSAL } from '@/lib/constants/bulk-import';
 import { fetchWithAuth } from '@/lib/utils/api';
 
 interface BulkImportWizardProps {
@@ -48,7 +53,8 @@ export function BulkImportWizard({ isOpen, onClose }: BulkImportWizardProps) {
 
   // Import state
   const [isImporting, setIsImporting] = useState(false);
-  const [importResults, setImportResults] = useState<any>(null);
+  const [importResults, setImportResults] = useState<ImportOutcome | null>(null);
+  const [matchDialogFor, setMatchDialogFor] = useState<number | null>(null);
 
   const resetWizard = useCallback(() => {
     setStep('select_folder');
@@ -60,6 +66,7 @@ export function BulkImportWizard({ isOpen, onClose }: BulkImportWizardProps) {
     setScanError(null);
     setIsImporting(false);
     setImportResults(null);
+    setMatchDialogFor(null);
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
@@ -151,10 +158,7 @@ export function BulkImportWizard({ isOpen, onClose }: BulkImportWizardProps) {
         break;
 
       case 'book_matched': {
-        const book: ScannedBook = {
-          ...data,
-          skipped: data.inLibrary || data.hasActiveRequest || data.match === null,
-        };
+        const book: ScannedBook = { ...data, skipped: defaultSkipped(data) };
         setScannedBooks((prev) => [...prev, book]);
         break;
       }
@@ -188,26 +192,30 @@ export function BulkImportWizard({ isOpen, onClose }: BulkImportWizardProps) {
     );
   }, []);
 
+  const handleChooseMatch = useCallback((index: number, candidate: MatchCandidate) => {
+    setScannedBooks((prev) => prev.map((book) => (book.index === index ? applyChosen(book, candidate) : book)));
+    setMatchDialogFor(null);
+  }, []);
+
+  const handleUndoMatch = useCallback((index: number) => {
+    setScannedBooks((prev) => prev.map((book) => (book.index === index ? undoChosen(book) : book)));
+  }, []);
+
   const handleStartImport = useCallback(async () => {
-    const booksToImport = scannedBooks.filter(
-      (b) => !b.skipped && b.match !== null
-    );
+    // Included rows naming the same book are held back (the server would refuse them all)
+    const { send: booksToImport, held } = splitForImport(scannedBooks);
+    const heldBack = held.map((b) => ({ path: b.relativePath, reason: BULK_IMPORT_REFUSAL.duplicate }));
 
     if (booksToImport.length === 0) return;
 
     setIsImporting(true);
+    setMatchDialogFor(null);
 
     try {
       const response = await fetchWithAuth('/api/admin/bulk-import/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imports: booksToImport.map((b) => ({
-            folderPath: b.folderPath,
-            asin: b.match!.asin,
-            audioFiles: b.audioFiles,
-          })),
-        }),
+        body: JSON.stringify({ imports: booksToImport.map(toImportItem) }),
       });
 
       const data = await response.json();
@@ -216,7 +224,7 @@ export function BulkImportWizard({ isOpen, onClose }: BulkImportWizardProps) {
         throw new Error(data.message || data.error || 'Import failed');
       }
 
-      setImportResults(data);
+      setImportResults({ ...data, sentPaths: booksToImport.map((b) => b.relativePath), heldBack });
     } catch (error) {
       setImportResults({
         success: false,
@@ -232,17 +240,22 @@ export function BulkImportWizard({ isOpen, onClose }: BulkImportWizardProps) {
     setScanError(null);
     setScannedBooks([]);
     setScanPhase('idle');
+    setMatchDialogFor(null);
   }, []);
 
   if (!isOpen) return null;
 
   const currentStepIndex = STEP_ORDER.indexOf(step);
+  // Keep the review's hand edits: no backdrop close while the dialog is open or a row is changed (until the import ran)
+  const guardBackdrop = !importResults && (matchDialogFor !== null || scannedBooks.some((b) => b.chosen));
 
   const modalContent = (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"
       style={{ height: '100dvh' }}
-      onClick={handleClose}
+      onClick={() => {
+        if (!guardBackdrop) handleClose();
+      }}
     >
       <div
         className="relative w-full max-w-4xl bg-white dark:bg-gray-900 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
@@ -338,6 +351,11 @@ export function BulkImportWizard({ isOpen, onClose }: BulkImportWizardProps) {
               importResults={importResults}
               onClose={handleClose}
               onBack={handleBackToFolderSelect}
+              matchDialogFor={matchDialogFor}
+              onOpenMatch={setMatchDialogFor}
+              onCloseMatch={() => setMatchDialogFor(null)}
+              onChooseMatch={handleChooseMatch}
+              onUndoMatch={handleUndoMatch}
             />
           )}
         </div>

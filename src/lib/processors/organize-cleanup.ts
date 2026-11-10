@@ -10,6 +10,7 @@ import { getDownloadClientManager } from '../services/download-client-manager.se
 import { CLIENT_PROTOCOL_MAP, DownloadClientType } from '../interfaces/download-client.interface';
 import { assertSafeToDelete, DeleteGuardContext, UnsafeDeleteError } from '../utils/delete-guard';
 import { collectGuardRoots, guardAllows, planDownloadCleanup, sweepEmptyParents } from './organize-cleanup-guard';
+import { chooseCleanupMode, removeImportedFilesOnly } from './shared-category-cleanup';
 import {
   folderRemovalBlocker,
   type ImportEvidence,
@@ -122,6 +123,15 @@ export async function cleanupDownloadAfterOrganize(params: DownloadCleanupParams
       return;
     }
 
+    // Decided from the job as the client reports it now; fails closed (shared-category-cleanup.ts)
+    const cleanup = await chooseCleanupMode(
+      downloadHistory.downloadClient, downloadHistory.downloadClientId, downloadHistory.downloadPath ?? '', configService
+    );
+    if (cleanup.mode === 'skip') {
+      logger.info(`Download cleanup skipped: ${cleanup.reason}; download kept`);
+      return;
+    }
+
     logger.info(`Cleaning up download ${downloadHistory.downloadClientId} (cleanup enabled for indexer ${plan.indexerId})`);
     logger.info(`Removing download files from filesystem: ${deletePath}`);
 
@@ -132,14 +142,19 @@ export async function cleanupDownloadAfterOrganize(params: DownloadCleanupParams
       const stats = await fs.lstat(deletePath);
 
       if (stats.isDirectory()) {
-        await fs.rm(deletePath, { recursive: true, force: true });
-        logger.info(`Removed directory: ${deletePath}`);
+        if (cleanup.mode === 'careful') {
+          // Not ReadMeABook's own category: the folder may hold another app's files
+          await removeImportedFilesOnly(downloadPath, deletePath, evidence, logger);
+        } else {
+          await fs.rm(deletePath, { recursive: true, force: true });
+          logger.info(`Removed directory: ${deletePath}`);
+        }
       } else {
         await fs.unlink(deletePath);
         logger.info(`Removed file: ${deletePath}`);
       }
-
-      await sweepEmptyParents(deletePath, roots, jobId, logger, 'CleanupParents');
+      // The careful mode never sweeps above the job (the other app's category folder stays)
+      if (cleanup.mode === 'full') await sweepEmptyParents(deletePath, roots, jobId, logger, 'CleanupParents');
     } catch (fsError) {
       if ((fsError as NodeJS.ErrnoException).code === 'ENOENT') {
         logger.info(`Download path already deleted: ${deletePath}`);

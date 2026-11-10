@@ -2,9 +2,10 @@
  * Component: Bulk import records another user's request it completes without approval (#232)
  * Documentation: documentation/features/bulk-import.md
  *
- * Bulk import recycles the book's newest request of any user, as before. When that is another
- * user's `awaiting_approval`, `denied` or `cancelled` request, the recycle records
- * `approvalBypassedBy = 'bulk_import:<status>'`; the importing admin's own request never is. Every
+ * Bulk import recycles the book's newest request of any user when it is `failed`, `warn`,
+ * `cancelled` or `denied`; a request in IMPORT_BLOCKING_STATUSES (the review screen's Requested)
+ * refuses the row (#189). When the recycled request is another user's `denied` or `cancelled`
+ * one, the recycle records `approvalBypassedBy = 'bulk_import:<status>'`; the importing admin's own request never is. Every
  * recycle is guarded on the exact status that was read; a row that changed meanwhile gives that
  * item an error before its job is queued, and the other items continue.
  */
@@ -69,6 +70,15 @@ describe('bulk import: approval record on a recycled request (#232)', () => {
       const found = rows.get(where.audiobookId);
       return found ? { ...found } : null;
     });
+    // The import's check for an active request (any user) reads the same rows; nothing is in the library
+    prismaMock.plexLibrary.findMany.mockResolvedValue([]);
+    prismaMock.request.findMany.mockImplementation(async ({ where }: { where: { audiobook: { audibleAsin: { in: string[] } }; status: { in: string[] } } }) =>
+      where.audiobook.audibleAsin.in
+        .filter((asin) => {
+          const found = rows.get(`ab-${asin.slice(-1)}`);
+          return found && where.status.in.includes(found.status as string);
+        })
+        .map((asin) => ({ audiobook: { audibleAsin: asin } })));
     prismaMock.request.updateMany.mockImplementation(async ({ where, data }: { where: Row; data: Row }) => {
       const target = [...rows.values()].find((r) => r.id === where.id);
       const run = target && beforeWrite.get(target.id as string);
@@ -79,7 +89,7 @@ describe('bulk import: approval record on a recycled request (#232)', () => {
     });
   });
 
-  it.each(['awaiting_approval', 'denied', 'cancelled'])('another user\'s %s request is recycled, recorded bulk_import:<status>, and its job queued', async (status) => {
+  it.each(['denied', 'cancelled'])('another user\'s %s request is recycled, recorded bulk_import:<status>, and its job queued', async (status) => {
     existing(1, { status });
 
     const res = await post([item(1)]);
@@ -91,7 +101,7 @@ describe('bulk import: approval record on a recycled request (#232)', () => {
     expect(prismaMock.request.create).not.toHaveBeenCalled();
   });
 
-  it.each(['failed', 'warn', 'pending', 'awaiting_search', 'downloaded', 'available'])('another user\'s %s request is recycled with no record', async (status) => {
+  it.each(['failed', 'warn'])('another user\'s %s request is recycled with no record', async (status) => {
     existing(1, { status });
 
     const res = await post([item(1)]);
@@ -104,14 +114,14 @@ describe('bulk import: approval record on a recycled request (#232)', () => {
   });
 
   it('an already recorded request keeps its record', async () => {
-    existing(1, { status: 'available', approvalBypassedBy: 'asin_match:awaiting_approval' });
+    existing(1, { status: 'failed', approvalBypassedBy: 'asin_match:awaiting_approval' });
 
     await post([item(1)]);
 
     expect(row(1)).toMatchObject({ status: 'processing', approvalBypassedBy: 'asin_match:awaiting_approval' });
   });
 
-  it.each(['cancelled', 'awaiting_approval', 'denied'])('the importing admin\'s own %s request is recycled as on main with no record', async (status) => {
+  it.each(['cancelled', 'denied'])('the importing admin\'s own %s request is recycled as on main with no record', async (status) => {
     existing(1, { status, userId: 'admin-1' });
 
     const res = await post([item(1)]);

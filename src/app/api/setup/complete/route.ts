@@ -12,11 +12,45 @@ import { serializeDownloadClients } from '@/lib/services/download-client-storage
 import { getPlexService } from '@/lib/integrations/plex.service';
 import { getClientDisplayName } from '@/lib/interfaces/download-client.interface';
 import { requireSetupIncomplete } from '@/lib/middleware/auth';
+import { getSchedulerService } from '@/lib/services/scheduler.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { toSavedIndexerConfig, type IndexerConfigInput } from '@/lib/utils/indexer-config';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { resolveSetupCategories, withSetupCategory } from '@/lib/services/setup-download-categories';
 
 const logger = RMABLogger.create('API.Setup.Complete');
+
+// Jobs created disabled at startup and turned on by setup
+const AUTO_JOB_TYPES = ['plex_library_scan', 'audible_refresh'];
+
+/**
+ * The scheduler registers repeating schedules only for jobs enabled when it starts, so
+ * schedule the auto jobs now through the same call the admin jobs page uses. Re-enabling
+ * replaces the job's repeatable under the same key, so repeats and app starts add no copy.
+ * Never fails setup.
+ */
+async function scheduleAutoJobs(): Promise<void> {
+  let jobs: { id: string; name: string }[] = [];
+  try {
+    jobs = await prisma.scheduledJob.findMany({
+      where: { type: { in: AUTO_JOB_TYPES }, enabled: true },
+      select: { id: true, name: true },
+    });
+  } catch (error) {
+    logger.warn('Could not load the auto jobs to schedule them; a restart schedules them', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  for (const job of jobs) {
+    try {
+      await getSchedulerService().enableJob(job.id);
+    } catch (error) {
+      logger.warn(`Could not schedule job "${job.name}"; a restart schedules it`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}
 
 export async function POST(request: NextRequest) {
   return requireSetupIncomplete(request, async (req) => {
@@ -130,6 +164,13 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
+    }
+
+    // Category ownership, decided here before anything is written (a sent ownedCategory or
+    // display-only categoryInClient is ignored)
+    const categoryChoices = await resolveSetupCategories(clients);
+    if (!categoryChoices.ok) {
+      return NextResponse.json({ success: false, error: categoryChoices.error }, { status: 400 });
     }
 
     // Create admin user (for Plex mode or ABS + Manual auth)
@@ -408,7 +449,9 @@ export async function POST(request: NextRequest) {
 
     if (Array.isArray(downloadClient)) {
       // New format: array of clients
-      downloadClientsArray = downloadClient;
+      downloadClientsArray = downloadClient.map((client: Record<string, unknown>, i: number) =>
+        withSetupCategory(client, categoryChoices.choices[i])
+      );
     } else if (downloadClient && typeof downloadClient === 'object') {
       // Legacy format: convert single client to array
       downloadClientsArray = [{
@@ -423,8 +466,7 @@ export async function POST(request: NextRequest) {
         remotePathMappingEnabled: downloadClient.remotePathMappingEnabled || false,
         remotePath: downloadClient.remotePath,
         localPath: downloadClient.localPath,
-        category: 'readmeabook',
-      }];
+      }].map((client) => withSetupCategory(client, categoryChoices.choices[0]));
     } else {
       throw new Error('Invalid download client configuration');
     }
@@ -540,7 +582,7 @@ export async function POST(request: NextRequest) {
     await prisma.scheduledJob.updateMany({
       where: {
         type: {
-          in: ['plex_library_scan', 'audible_refresh'],
+          in: AUTO_JOB_TYPES,
         },
       },
       data: {
@@ -549,6 +591,8 @@ export async function POST(request: NextRequest) {
     });
 
     logger.debug('Auto jobs enabled');
+
+    await scheduleAutoJobs();
 
     logger.info('Configuration saved successfully');
 

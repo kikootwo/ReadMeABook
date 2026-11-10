@@ -527,3 +527,65 @@ test('qbit-fault fails the next torrents/delete calls without deleting; torrents
   const deletes = (await control(`/requests?since=${since}`)).filter((r) => r.service === 'qbit' && r.path.endsWith('/torrents/delete'));
   assert.deepEqual(deletes.map((r) => r.fault ?? null), [500, null]);
 });
+
+test('categories (#46): seeded categories, SABnzbd lower-case names, autoTMM=false + savepath wins; reset removes seeded ones', async () => {
+  await loadDef({ name: 'unit-cat46', book: 'phm', indexers: [{ id: 1, name: 'T', protocol: 'torrent' }, { id: 2, name: 'U', protocol: 'usenet' }], releases: [
+    { id: 'q', title: '{{title}} [MP3]', fixture: 'phm-mp3', download: { completeMs: 300 } },
+    { id: 'n', protocol: 'usenet', indexerId: 2, title: '{{title}} nzb', fixture: 'phm-m4b', download: { completeMs: 300 } },
+  ] });
+  assert.equal((await control('/categories', { client: 'qbit', name: 'Books', path: '/other' })).ok, true);
+  assert.equal((await control('/categories', { client: 'sab', name: 'Books', path: 'other-app' })).category.name, 'books');
+  assert.equal((await control('/categories', { client: 'nzbget', name: 'x' })).ok, false);
+
+  const api = (q) => fetch(`${base('sab')}/api?${new URLSearchParams({ output: 'json', apikey: 'sabkey', ...q })}`).then((r) => r.json());
+  await api({ mode: 'set_config', section: 'categories', keyword: 'AudioBooks-E2E', dir: '' });
+  const names = (await api({ mode: 'get_config' })).config.categories.map((c) => c.name);
+  assert.ok(names.includes('books') && names.includes('audiobooks-e2e') && !names.some((n) => /[A-Z]/.test(n)), names.join(','));
+  const rels = await search('Fixture');
+  const nzb = Buffer.from(await (await fetch(rels.find((r) => r.protocol === 'usenet').downloadUrl)).arrayBuffer());
+  const fd = new FormData();
+  fd.append('nzbfile', new Blob([nzb], { type: 'application/x-nzb' }), 'x.nzb');
+  for (const [k, v] of Object.entries({ mode: 'addfile', cat: 'BOOKS', output: 'json', apikey: 'sabkey' })) fd.append(k, v);
+  const id = (await fetch(`${base('sab')}/api`, { method: 'POST', body: fd }).then((r) => r.json())).nzo_ids[0];
+  const slot = await waitFor(async () => (await api({ mode: 'history' })).history.slots.find((s) => s.nzo_id === id));
+  assert.equal(slot.category, 'books');
+  assert.equal(slot.storage, `${cfg.downloadsDir}/other-app/Fixture Book One`);
+
+  const h = { Cookie: await qbitLogin() };
+  const torrent = Buffer.from(await (await fetch(rels.find((r) => r.protocol === 'torrent').downloadUrl)).arrayBuffer());
+  const tfd = new FormData();
+  tfd.append('torrents', new Blob([torrent], { type: 'application/x-bittorrent' }), 'x.torrent');
+  for (const [k, v] of Object.entries({ category: 'Books', autoTMM: 'false', savepath: cfg.downloadsDir })) tfd.append(k, v);
+  assert.equal(await fetch(`${base('qbit')}/api/v2/torrents/add`, { method: 'POST', headers: h, body: tfd }).then((r) => r.text()), 'Ok.');
+  const [t] = await fetch(`${base('qbit')}/api/v2/torrents/info?category=Books`, { headers: h }).then((r) => r.json());
+  assert.equal(t.save_path, cfg.downloadsDir, 'the save path, not the category path /other');
+  const add = (await control('/requests')).filter((r) => r.service === 'qbit' && r.path.endsWith('/torrents/add')).at(-1);
+  assert.deepEqual(add.body, { category: 'Books', autoTMM: 'false', savepath: cfg.downloadsDir });
+
+  await control('/reset', {});
+  const st = await control('/state');
+  assert.equal(st.qbitCategories.Books, undefined);
+  assert.equal(st.sabCategories.books, undefined);
+});
+
+test('categories (#46): a SABnzbd dir ending in "*" has no job folder; a category can be removed', async () => {
+  await loadDef({ name: 'unit-cat46-flat', book: 'phm', indexers: [{ id: 2, name: 'U', protocol: 'usenet' }], releases: [
+    { id: 'n', protocol: 'usenet', indexerId: 2, title: '{{title}} nzb', fixture: 'phm-m4b', download: { completeMs: 300 } },
+  ] });
+  await control('/categories', { client: 'sab', name: 'Flat', path: 'flat-app*' });
+  const api = (q) => fetch(`${base('sab')}/api?${new URLSearchParams({ output: 'json', apikey: 'sabkey', ...q })}`).then((r) => r.json());
+  const rels = await search('Fixture');
+  const nzb = Buffer.from(await (await fetch(rels.find((r) => r.protocol === 'usenet').downloadUrl)).arrayBuffer());
+  const fd = new FormData();
+  fd.append('nzbfile', new Blob([nzb], { type: 'application/x-nzb' }), 'x.nzb');
+  for (const [k, v] of Object.entries({ mode: 'addfile', cat: 'flat', output: 'json', apikey: 'sabkey' })) fd.append(k, v);
+  const id = (await fetch(`${base('sab')}/api`, { method: 'POST', body: fd }).then((r) => r.json())).nzo_ids[0];
+  const slot = await waitFor(async () => (await api({ mode: 'history' })).history.slots.find((s) => s.nzo_id === id));
+  assert.equal(slot.storage, `${cfg.downloadsDir}/flat-app`);
+  assert.ok(fs.readdirSync(`${cfg.downloadsDir}/flat-app`).some((n) => n.endsWith('.m4b')), 'files straight in the category folder');
+  assert.equal((await api({ mode: 'get_config' })).config.categories.find((c) => c.name === 'flat').dir, 'flat-app*');
+
+  assert.equal((await control('/categories', { client: 'sab', name: 'FLAT', remove: true })).removed, true);
+  assert.equal((await control('/categories', { client: 'qbit', name: 'missing', remove: true })).removed, false);
+  assert.equal((await control('/state')).sabCategories.flat, undefined);
+});

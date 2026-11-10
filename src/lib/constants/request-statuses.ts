@@ -22,6 +22,16 @@ export const CANCELLABLE_STATUSES = [
  */
 export const UNAPPROVED_STATUSES = ['awaiting_approval', 'denied', 'cancelled'] as const;
 
+/**
+ * Bulk Import: a book with a request (any user's) in one of these statuses is shown as Requested
+ * on the review screen and refused by the import (documentation/features/bulk-import.md).
+ */
+export const IMPORT_BLOCKING_STATUSES = [
+  'pending', 'searching', 'downloading', 'processing',
+  'awaiting_search', 'awaiting_import', 'awaiting_approval',
+  'downloaded', 'available',
+] as const;
+
 /** The paths that can complete a request without its approval (ASIN match, manual and bulk import). */
 export type ApprovalBypassPath = 'asin_match' | 'manual_import' | 'bulk_import';
 

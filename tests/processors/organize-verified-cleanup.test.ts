@@ -16,6 +16,7 @@ import AdmZip from 'adm-zip';
 
 const prismaMock = createPrismaMock();
 const organizerMock = vi.hoisted(() => ({ organize: vi.fn(), organizeEbook: vi.fn() }));
+const clientJob = vi.hoisted(() => ({ path: '' }));
 const jobQueueMock = vi.hoisted(() => ({ addNotificationJob: vi.fn(() => Promise.resolve()) }));
 const configMock = vi.hoisted(() => ({ getBackendMode: vi.fn(), get: vi.fn() }));
 const postProcess = vi.hoisted(() => vi.fn(async () => undefined));
@@ -49,7 +50,9 @@ vi.mock('@/lib/utils/format-coercion', async (importOriginal) => ({
 vi.mock('@/lib/services/download-client-manager.service', () => ({
   getDownloadClientManager: () => ({
     getAllClients: async () => [],
-    getClientForProtocol: async () => null,
+    // The job is in ReadMeABook's own category, as SABnzbd reports it (shared-category-cleanup.ts)
+    getClientForProtocol: async () => ({ type: 'sabnzbd', category: 'readmeabook' }),
+    createFreshService: async () => ({ getDownload: async () => ({ category: 'readmeabook', downloadPath: clientJob.path }) }),
     getClientServiceForProtocol: async () => ({ clientType: 'sabnzbd', postProcess }),
   }),
 }));
@@ -70,6 +73,7 @@ function useCompletedDownload(downloadPath: string) {
     id: 'dh-1', requestId: 'req-1', indexerId: 7, downloadClientId: 'nzo_1', downloadClient: 'sabnzbd',
     downloadStatus: 'completed', downloadPath, createdAt: new Date(),
   };
+  clientJob.path = downloadPath; // the client reports the same job
   prismaMock.downloadHistory.findFirst.mockResolvedValue(row);
   prismaMock.downloadHistory.findUnique.mockImplementation(async ({ where }: { where?: { id?: string } }) =>
     where?.id === row.id ? row : null

@@ -11,6 +11,8 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { fetchDownloadSource } from '@/lib/integrations/download-source';
 import { urlForLog } from '@/lib/utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '@/lib/utils/path-mapper';
+import { findCategory, sameCategory } from '@/lib/utils/download-category';
+import { nzbgetCategoryFolder } from './nzbget-category-folder';
 import {
   IDownloadClient,
   DownloadClientType,
@@ -115,6 +117,7 @@ export class NZBGetService implements IDownloadClient {
   private username: string;
   private password: string;
   private defaultCategory: string;
+  private categoryOwned: boolean;
   private defaultDownloadDir: string;
   private disableSSLVerify: boolean;
   private httpsAgent?: https.Agent;
@@ -127,12 +130,14 @@ export class NZBGetService implements IDownloadClient {
     defaultCategory: string = 'readmeabook',
     defaultDownloadDir: string = '/downloads',
     disableSSLVerify: boolean = false,
-    pathMappingConfig?: PathMappingConfig
+    pathMappingConfig?: PathMappingConfig,
+    categoryOwned: boolean = true // false: the category already existed; never created or re-pathed
   ) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.username = username || '';
     this.password = password || '';
     this.defaultCategory = defaultCategory;
+    this.categoryOwned = categoryOwned;
     this.defaultDownloadDir = defaultDownloadDir;
     this.disableSSLVerify = disableSSLVerify;
     this.pathMappingConfig = pathMappingConfig || { enabled: false, remotePath: '', localPath: '' };
@@ -403,7 +408,8 @@ export class NZBGetService implements IDownloadClient {
 
   /**
    * Cancel: GroupFinalDelete (job and its files) only while the job is in the queue and its name or
-   * category matches. Never deletes from history: NZBGet reuses ids after a reinstall.
+   * category matches (any case; the caller passes a category only when it is ReadMeABook's own).
+   * Never deletes from history: NZBGet reuses ids after a reinstall.
    */
   async deleteQueuedDownload(id: string, expected: QueuedJobMatch): Promise<QueuedDeleteResult> {
     const nzbId = parseInt(id, 10);
@@ -413,7 +419,7 @@ export class NZBGetService implements IDownloadClient {
 
     const bare = (name: string | null | undefined) => (name ?? '').trim().replace(/\.nzb$/i, '').toLowerCase();
     const nameMatches = !!expected.name && bare(group.NZBName) === bare(expected.name);
-    const categoryMatches = !!expected.category && (group.Category ?? '') === expected.category;
+    const categoryMatches = sameCategory(group.Category, expected.category);
     if (!nameMatches && !categoryMatches) {
       logger.warn(`Queued job ${id} ("${group.NZBName}", category "${group.Category}") does not match the cancelled download; left as it is`);
       return 'mismatch';
@@ -450,9 +456,29 @@ export class NZBGetService implements IDownloadClient {
     }
   }
 
-  /** Not applicable for usenet clients */
+  /** NZBGet's category names in slot order; throws when they can't be read */
   async getCategories(): Promise<string[]> {
-    return [];
+    try {
+      const config = await this.rpc<NZBGetConfigItem[]>('config');
+      if (!Array.isArray(config)) throw new Error('no config returned');
+      const slot = (name: string) => parseInt(name.match(/^Category(\d+)\.Name$/)?.[1] || '0', 10);
+      return config
+        .filter((entry) => /^Category\d+\.Name$/.test(entry.Name))
+        .sort((a, b) => slot(a.Name) - slot(b.Name))
+        .map((entry) => entry.Value)
+        .filter(Boolean);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('Failed to get categories', { error: message });
+      throw new Error(`Failed to get NZBGet categories: ${message}`);
+    }
+  }
+
+  /** The folder `category` writes jobs to, as NZBGet sees it; null when unknown, throws when unreadable */
+  async getCategoryFolder(category: string): Promise<string | null> {
+    const config = await this.rpc<NZBGetConfigItem[]>('config');
+    if (!Array.isArray(config)) throw new Error('no config returned');
+    return nzbgetCategoryFolder(config, category);
   }
 
   /** Not applicable for usenet clients */
@@ -481,6 +507,10 @@ export class NZBGetService implements IDownloadClient {
    * Lightweight: reads config, writes only if category is missing or path changed.
    */
   async ensureCategory(): Promise<void> {
+    if (!this.categoryOwned) {
+      logger.debug(`Category "${this.defaultCategory}" already existed in NZBGet; left as is`);
+      return;
+    }
     try {
       logger.debug('ensureCategory() called - syncing category with NZBGet');
 
@@ -598,7 +628,7 @@ export class NZBGetService implements IDownloadClient {
     categoryName: string
   ): { existingSlot: number | null; nextSlot: number } {
     let maxSlot = 0;
-    let existingSlot: number | null = null;
+    const slots = new Map<string, number>(); // name → slot
 
     for (const entry of config) {
       const match = entry.Name.match(/^Category(\d+)\.Name$/);
@@ -607,13 +637,13 @@ export class NZBGetService implements IDownloadClient {
         if (slot > maxSlot) {
           maxSlot = slot;
         }
-        if (entry.Value === categoryName) {
-          existingSlot = slot;
-        }
+        if (!slots.has(entry.Value)) slots.set(entry.Value, slot);
       }
     }
 
-    return { existingSlot, nextSlot: maxSlot + 1 };
+    // Exact name first, then any case (NZBGet matches categories case-insensitively)
+    const existing = findCategory([...slots.keys()], categoryName);
+    return { existingSlot: existing === null ? null : slots.get(existing)!, nextSlot: maxSlot + 1 };
   }
 
   /**
