@@ -2,8 +2,9 @@
  * Component: E2E sign-in attempt limits through the real /login page
  * Documentation: documentation/testing/e2e-harness.md
  *
- * Run alone on its own stack (`--specs signin-limits --isolate-specs`): it leaves the admin
- * account at its limit for unknown browsers. Works in both backend modes (Audiobookshelf mode
+ * Runs only when it is the one spec of its runner phase (`--specs signin-limits`, or as one
+ * entry with `--isolate-specs`), and skips otherwise: it leaves the admin account at its limit
+ * for unknown browsers, which would refuse later specs on the same stack. Works in both backend modes (Audiobookshelf mode
  * signs in through /api/auth/local/login, Plex mode through /api/auth/admin/login).
  *   1  browser A signs in on /login and holds the known-browser cookie (httpOnly, Strict, /api/auth, not Secure over http)
  *   2  10 wrong passwords from a plain client (no cookie) get 401; the 11th gets 429
@@ -19,6 +20,14 @@ import { env, snap, urls, writeEvidence } from '../../lib/harness';
 const DIR = 'signin-limits';
 const COOKIE = 'rmab_known_browser';
 const ACCOUNT_LIMIT_TEXT = 'Too many sign-in attempts for this account.';
+
+/** True when this spec is the only one in this runner phase (E2E_RUN_SPECS, set by the harness) */
+const runsAlone = () => {
+  const specs = (process.env.E2E_RUN_SPECS ?? '').split(',').filter(Boolean);
+  return specs.length === 1 && specs[0].includes('signin-limits');
+};
+
+test.skip(!runsAlone(), 'leaves the admin at its sign-in limit; run it alone: --specs signin-limits (or with --isolate-specs)');
 
 const plexMode = () => env('E2E_BACKEND') === 'plex';
 const signInPath = () => (plexMode() ? '/api/auth/admin/login' : '/api/auth/local/login');
