@@ -22,6 +22,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rmab, waitFor, writeEvidence, type Book } from '../../lib/harness';
 import { asApp, psql, sqlStr } from './242-helpers';
+import { disableSchedules } from './284-helpers';
 import {
   absBookPageShot, absItemFor, adminPage, blocklistRows, bookFolder, devOf, elementShot, fileId, filesUnder, fullShot, loadRelease, openPaths,
   regionShot, requestAndWait, requestMessage, requestStatus, savePaths, seedBook, SHARED_DOWNLOADS, STOCK_DOWNLOADS, torrentOf,
@@ -41,6 +42,13 @@ async function testThenSave(page: Page) {
 }
 let books: Record<string, Book>;
 let rmab: Rmab;
+
+/** Scan schedules a leg turned off; turned back on by that leg or, after a failure, by afterEach. */
+const disabledSchedules: string[] = [];
+async function reenableSchedules() {
+  for (const id of disabledSchedules.splice(0)) await rmab.raw('PUT', `/api/admin/jobs/${id}`, { enabled: true });
+}
+test.afterEach(reenableSchedules);
 
 test.beforeAll(async () => {
   books = await fakeArr.books();
@@ -135,6 +143,8 @@ test('2: separate mounts, Hard link: the book is copied, and the Paths page keep
   expect((await savePaths(rmab, { ...OFF, downloadDir: STOCK_DOWNLOADS, filePlacement: 'hardlink', metadataOpfEnabled: true })).status).toBe(200);
   const book = books.artemis;
   await loadRelease('hardlink-exdev-68', 'artemis', 'artemis-mp3', '{{author}} - {{title}} (Unabridged) [MP3]');
+  // Scan schedules off until the request row is shot: the match would make it available and clear its message
+  await disableSchedules(rmab, disabledSchedules);
   const run = await requestAndWait(rmab, book, 'Test Author', ['downloaded', 'available']);
   expect(run.status, 'imported').toMatch(/downloaded|available/);
   const folder = bookFolder(run.requestId);
@@ -161,6 +171,7 @@ test('2: separate mounts, Hard link: the book is copied, and the Paths page keep
       await ctx.close();
     }
   }
+  await reenableSchedules();
 
   // Run the match so the request becomes available (which clears the request's message)
   await waitFor('request available', async () => {
