@@ -33,7 +33,7 @@
  * Values read first, then expect.soft; exec bridge required.
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Locator } from '@playwright/test';
 import { Abs, authState, ctl, execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rmab, stackLogsSync, urls, waitFor, writeEvidence } from '../../lib/harness';
 import { dbNow, markJobs, psql, sqlStr, waitOrganized } from './242-helpers';
 import { disableSchedules, FAKE_PROXY, printenv, session, waitStartupSettled, type FixtureBook } from './284-helpers';
@@ -56,6 +56,24 @@ const NAME = {
 const tag = (name: string) => `req:${name}`;
 const SHARED = tag(`johnsmith${RUN}`);
 const madeUpAsin = (end: string) => `B0E${RUN.toUpperCase()}${end}`;
+
+/**
+ * Scroll the setting to the top of the view, just below the sticky page header (the checkbox must be
+ * what a point on it hits, not the header), and report whether the checkbox and all its text are visible.
+ */
+async function showBelowHeader(box: Locator) {
+  return box.evaluate((el) => {
+    el.scrollIntoView({ block: 'start' });
+    window.scrollBy(0, -16);
+    const hits = () => {
+      const r = el.getBoundingClientRect();
+      return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === el;
+    };
+    for (let i = 0; i < 40 && !hits(); i++) window.scrollBy(0, -8);
+    const help = document.getElementById(el.getAttribute('aria-describedby') || '')?.getBoundingClientRect();
+    return { checkboxTop: el.getBoundingClientRect().top, notCovered: hits(), helpBottom: help?.bottom ?? null, viewport: window.innerHeight };
+  });
+}
 const disabledJobs: string[] = [];
 let martianAsin = '';
 
@@ -105,8 +123,7 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
     const warnings = page.getByTestId('requester-tag-warnings');
     await expect(warnings).toBeVisible();
     ui.warningText = (await warnings.textContent())?.replace(/\s+/g, ' ');
-    await box.evaluate((el) => el.scrollIntoView({ block: 'start' }));
-    await page.evaluate(() => window.scrollBy(0, -96));
+    ui.inView1280 = await showBelowHeader(box);
     await settled(DIR, 'setting-1280-light');
     const putP = page.waitForRequest((r) => r.method() === 'PUT' && new URL(r.url()).pathname === '/api/admin/settings/audiobookshelf');
     const resP = page.waitForResponse((r) => r.request().method() === 'PUT' && new URL(r.url()).pathname === '/api/admin/settings/audiobookshelf');
@@ -121,10 +138,7 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
     const box = page.getByRole('checkbox', { name: /Tag items with the requester's username/ });
     await expect(box).toBeChecked({ timeout: 30_000 });
     // The checkbox, its title and text at the top of the shot, the amber box below
-    await box.evaluate((el) => el.scrollIntoView({ block: 'start' }));
-    await page.evaluate(() => window.scrollBy(0, -96));
-    const helpBox = await page.locator(`[id="${await box.getAttribute('aria-describedby')}"]`).boundingBox();
-    ui.inView375 = { checkboxTop: (await box.boundingBox())?.y ?? null, helpBottom: helpBox ? helpBox.y + helpBox.height : null, viewport: 812 };
+    ui.inView375 = await showBelowHeader(box);
     await settled(DIR, 'setting-375-dark');
     ui.overflowX = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     await ctx.close();
@@ -266,8 +280,10 @@ test('#232: the requester is tagged on the Audiobookshelf item, and only when th
   expect.soft(String(ui.warningText), 'amber box: untaggable').toContain(`"${NAME.cjk}" has no letters or digits`);
   expect.soft(String(ui.warningText), 'amber box: a tag of your own, not the shared one').toContain('a tag of your own in Audiobookshelf, not the shared one');
   expect.soft(ui.overflowX, '375: no horizontal overflow').toBe(0);
-  const inView = ui.inView375 as { checkboxTop: number | null; helpBottom: number | null; viewport: number };
-  expect.soft(inView.checkboxTop !== null && inView.checkboxTop >= 0 && inView.helpBottom !== null && inView.helpBottom <= inView.viewport, `375: checkbox and its text in the shot ${JSON.stringify(inView)}`).toBe(true);
+  for (const [label, seen] of [['1280', ui.inView1280], ['375', ui.inView375]] as const) {
+    const v = seen as { notCovered: boolean; helpBottom: number | null; viewport: number };
+    expect.soft(v.notCovered && v.helpBottom !== null && v.helpBottom <= v.viewport, `${label}: the checkbox (not under the header) and its text in the shot ${JSON.stringify(v)}`).toBe(true);
+  }
   expect.soft(settingsAfterUi.tagRequester, 'saved').toBe(true);
   expect.soft(aliceStatusBefore, 'precondition: delivered, not yet available').toBe('downloaded');
   expect.soft(s1Before.tags, 'precondition: the manual tag is on the item before RMAB writes').toEqual(['keepme']);
