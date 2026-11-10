@@ -568,6 +568,35 @@ test('categories (#46): seeded categories, SABnzbd lower-case names, autoTMM=fal
   assert.equal(st.sabCategories.books, undefined);
 });
 
+test('#290: unlisted releases stay out of search and RSS; release-torrent hands out the magnet and bytes; uploads are recorded', async () => {
+  await loadDef({ name: 'unit-290', book: 'phm', releases: [
+    { id: 'listed', title: '{{title}} listed', fixture: 'phm-mp3' },
+    { id: 'file', title: '{{title}} file', fixture: 'phm-mp3', unlisted: true, download: { completeMs: 300 } },
+    { id: 'mag', title: '{{title}} magnet', fixture: 'phm-mp3', unlisted: true, link: 'magnet' },
+  ] });
+  assert.deepEqual((await search('Fixture')).map((r) => r.title), ['Fixture Book One listed']);
+  const rss = await fetch(`${base('prowlarr')}/1/api?apikey=${KEY}&t=search`).then((r) => r.text());
+  assert.ok(rss.includes('Fixture Book One listed') && !rss.includes('Fixture Book One file') && !rss.includes('Fixture Book One magnet'));
+
+  const file = await control('/release-torrent?id=file');
+  const bytes = Buffer.from(file.torrentFile, 'base64');
+  assert.equal((await parseTorrent(bytes)).infoHash, file.infoHash);
+  assert.match(file.magnet, new RegExp(`^magnet:\\?xt=urn:btih:${file.infoHash}&`));
+  const mag = await control('/release-torrent?id=mag');
+  assert.equal(mag.torrentFile, null);
+  assert.equal(mag.sha256, null);
+  assert.match(mag.magnet, /^magnet:\?xt=urn:btih:[0-9a-f]{40}&/);
+  assert.equal((await control('/release-torrent?id=nope')).ok, false);
+
+  const cookie = await qbitLogin();
+  const fd = new FormData();
+  fd.append('torrents', new Blob([bytes], { type: 'application/x-bittorrent' }), `${file.infoHash}.torrent`);
+  assert.equal(await fetch(`${base('qbit')}/api/v2/torrents/add`, { method: 'POST', headers: { Cookie: cookie }, body: fd }).then((r) => r.text()), 'Ok.');
+  const add = (await control('/requests')).filter((r) => r.service === 'qbit' && r.path.endsWith('/torrents/add')).at(-1);
+  assert.deepEqual(add.files, [{ filename: `${file.infoHash}.torrent`, bytes: bytes.length, sha256: file.sha256 }]);
+  assert.deepEqual(add.added, [{ hash: file.infoHash, releaseId: 'file' }]);
+});
+
 test('categories (#46): a SABnzbd dir ending in "*" has no job folder; a category can be removed', async () => {
   await loadDef({ name: 'unit-cat46-flat', book: 'phm', indexers: [{ id: 2, name: 'U', protocol: 'usenet' }], releases: [
     { id: 'n', protocol: 'usenet', indexerId: 2, title: '{{title}} nzb', fixture: 'phm-m4b', download: { completeMs: 300 } },

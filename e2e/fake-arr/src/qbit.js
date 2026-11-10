@@ -10,7 +10,7 @@
  * `count` torrents/delete calls answer an HTTP error without deleting anything (#228).
  */
 
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readParams, sendJson, sendText, notFound } from './http-util.js';
 import { startDownload, snapshot, pauseJob, resumeJob, removeJobFiles, materialize } from './sim.js';
 
@@ -257,7 +257,10 @@ function addTorrents(state, res, params, files, recordEntry) {
     if (record) added.push(record);
     else duplicates.push(hash);
   }
-  for (const file of files.filter((f) => f.name === 'torrents')) {
+  const uploads = files.filter((f) => f.name === 'torrents');
+  // Each uploaded file as received (#290: the bytes reach the client unchanged, under a fixed name)
+  if (uploads.length) recordEntry.files = uploads.map((f) => ({ filename: f.filename, bytes: f.data.length, sha256: createHash('sha256').update(f.data).digest('hex') }));
+  for (const file of uploads) {
     const release = [...state.releases.values()].find((r) => r.torrentFile && r.torrentFile.equals(file.data));
     if (!release) return sendText(res, 200, 'Fails.');
     const record = addTorrentRecord(state, { hash: release.infoHash, release, name: release.name, ...common });

@@ -11,6 +11,8 @@ import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { InteractiveTorrentSearchModal } from '@/components/requests/InteractiveTorrentSearchModal';
 import { AdjustSearchTermsModal } from './AdjustSearchTermsModal';
+import { AddTorrentMenuItem, canAddTorrent } from './AddTorrentMenuItem';
+import { AddTorrentDialog } from './AddTorrentDialog';
 import { useSmartDropdownPosition } from '@/hooks/useSmartDropdownPosition';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { CANCELLABLE_STATUSES, EBOOK_FETCHABLE_STATUSES, SEARCHABLE_STATUSES } from '@/lib/constants/request-statuses';
@@ -62,6 +64,7 @@ export function RequestActionsDropdown({
   const [showInteractiveSearch, setShowInteractiveSearch] = useState(false);
   const [showInteractiveSearchEbook, setShowInteractiveSearchEbook] = useState(false);
   const [showAdjustSearchTerms, setShowAdjustSearchTerms] = useState(false);
+  const [showAddTorrent, setShowAddTorrent] = useState(false);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const { containerRef, dropdownRef, positionAbove, style } = useSmartDropdownPosition(isOpen);
@@ -330,6 +333,8 @@ export function RequestActionsDropdown({
               </button>
             )}
 
+            {canAddTorrent(request) && <AddTorrentMenuItem onClick={() => { setIsOpen(false); setShowAddTorrent(true); }} />}
+
             {/* View Source */}
             {canViewSource && viewSourceUrl && (
               <a
@@ -552,6 +557,10 @@ export function RequestActionsDropdown({
         currentSearchTerms={request.customSearchTerms}
         onSuccess={onSearchTermsUpdated}
       />
+
+      {showAddTorrent && (
+        <AddTorrentDialog isOpen onClose={() => setShowAddTorrent(false)} requestId={request.requestId} bookTitle={request.title} />
+      )}
 
       <ConfirmModal
         isOpen={confirmCancelOpen}

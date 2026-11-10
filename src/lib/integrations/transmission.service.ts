@@ -215,13 +215,24 @@ export class TransmissionService implements IDownloadClient {
     if (!url || typeof url !== 'string' || url.trim() === '') {
       throw new Error('Invalid download URL: URL is required and must be a non-empty string');
     }
+    return this.addSource(url, options);
+  }
 
+  /** A .torrent file's own bytes (admin Add Torrent): the same add as addDownload, sent as they are */
+  async addTorrentData(data: Buffer, options?: AddDownloadOptions): Promise<AddDownloadResult> {
+    return this.addSource(data, options);
+  }
+
+  /** Shared by addDownload and addTorrentData: the label (category) and the add */
+  private async addSource(source: string | Buffer, options?: AddDownloadOptions): Promise<AddDownloadResult> {
     const category = options?.category || this.defaultCategory;
 
-    if (url.startsWith('magnet:')) {
-      return this.addMagnetLink(url, category, options);
+    if (Buffer.isBuffer(source)) {
+      return this.addTorrentBuffer(source, category, options);
+    } else if (source.startsWith('magnet:')) {
+      return this.addMagnetLink(source, category, options);
     } else {
-      return this.addTorrentFile(url, category, options);
+      return this.addTorrentFile(source, category, options);
     }
   }
 
@@ -296,10 +307,16 @@ export class TransmissionService implements IDownloadClient {
     if (source.kind === 'magnet') {
       return this.addMagnetLink(source.magnetUrl, category, options);
     }
+    return this.addTorrentBuffer(source.data, category, options);
+  }
 
-    const torrentBuffer = source.data;
+  /** Shared by fetched and uploaded .torrent files: parse for the hash, then send the bytes unchanged */
+  private async addTorrentBuffer(
+    torrentBuffer: Buffer,
+    category: string,
+    options?: AddDownloadOptions
+  ): Promise<AddDownloadResult> {
     if (!isWellFormedTorrentFile(torrentBuffer)) throw new Error(INVALID_TORRENT_FILE);
-
     let parsedTorrentData: any;
     try {
       parsedTorrentData = await parseTorrent(torrentBuffer);

@@ -12,5 +12,8 @@ export const MAX_SOURCE_FILE_BYTES = 50 * 1024 * 1024;
 /** Bodies at or below this size are checked for a bare magnet link */
 export const MAX_MAGNET_BODY_BYTES = 16 * 1024;
 
+/** Max size of a .torrent file an admin uploads to a request (Add Torrent) */
+export const MAX_UPLOADED_TORRENT_BYTES = 2 * 1024 * 1024;
+
 /** Placeholder written in place of a redacted secret */
 export const REDACTED_VALUE = 'REDACTED';
