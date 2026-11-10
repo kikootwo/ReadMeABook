@@ -359,7 +359,7 @@ describe('DelugeService', () => {
 
   it('fails a malformed .torrent file before it reaches parse-torrent', async () => {
     const service = new DelugeService('http://deluge', '', 'pass');
-    (service as any).sessionCookie = '_session_id=abc';
+    Object.assign(service, { sessionCookie: '_session_id=abc' });
 
     axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('l-3:e') });
 

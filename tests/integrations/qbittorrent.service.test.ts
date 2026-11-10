@@ -777,10 +777,10 @@ describe('QBittorrentService', () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
 
     axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('l-3:e') });
+    const addTorrentFile = (service as unknown as { addTorrentFile: (url: string, category: string) => Promise<unknown> })
+      .addTorrentFile.bind(service);
 
-    await expect(
-      (service as any).addTorrentFile('http://example.com/file.torrent', 'readmeabook')
-    ).rejects.toThrow(INVALID_TORRENT_FILE);
+    await expect(addTorrentFile('http://example.com/file.torrent', 'readmeabook')).rejects.toThrow(INVALID_TORRENT_FILE);
     expect(parseTorrentMock).not.toHaveBeenCalled();
     expect(clientMock.post).not.toHaveBeenCalled();
   });
