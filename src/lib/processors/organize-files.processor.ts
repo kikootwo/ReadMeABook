@@ -27,6 +27,7 @@ import {
 import { getAudibleService } from '../integrations/audible.service';
 import { addAutoBlock } from '../services/blocklist.service';
 import { updateRequestUnlessStopped } from '../utils/request-stop-guard';
+import { createMergeProgressReporter } from '../utils/merge-progress';
 import { createAudibleDetailsLoader, readMetadataTaggingEnabled, resolveTagDetails } from './organize-tag-details';
 import { applyPostImportCategory } from './post-import-category';
 import { triggerScanAfterImport } from './post-import-scan';
@@ -226,7 +227,10 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
 
     const tagDetails = await tagDetailsPending;
 
-    // Organize files (pass template, logger, and rename config to file organizer)
+    // Organize files (pass template, logger, and rename config to file organizer). The merge's
+    // progress is saved on the request; settle() waits for the final 100 before anything follows
+    // (a failed 100 is issued once more; if that fails too, the percent shows until the request leaves processing)
+    const mergeProgress = createMergeProgressReporter(requestId, logger);
     const result = await organizer.organize(
       downloadPath,
       {
@@ -244,8 +248,13 @@ export async function processOrganizeFiles(payload: OrganizeFilesPayload): Promi
       jobId ? { jobId, context: 'FileOrganizer' } : undefined,
       renameConfig,
       selectedFiles,
-      { compareExisting, metadataTaggingEnabled, stopInPlaceDiscLayout: !downloadHistoryId && typeof cleanupSource === 'boolean' }
-    );
+      {
+        compareExisting,
+        metadataTaggingEnabled,
+        stopInPlaceDiscLayout: !downloadHistoryId && typeof cleanupSource === 'boolean',
+        onMergeProgress: (percent) => mergeProgress.report(percent),
+      }
+    ).finally(() => mergeProgress.settle());
 
     if (!result.success) {
       throw new Error(`File organization failed: ${result.errors.join(', ')}`);

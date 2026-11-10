@@ -16,6 +16,7 @@
     "artemis-mp3-128": { "book": "artemis", "kind": "mp3-multi", "tracks": 3, "seconds": 5, "bitrate": "128k", "folder": "{{title}}" },
     "phm-mp3-128": { "book": "phm", "kind": "mp3-multi", "tracks": 3, "seconds": 5, "bitrate": "128k", "folder": "{{title}}" },
     "martian-mp3-128": { "book": "martian", "kind": "mp3-multi", "tracks": 3, "seconds": 5, "bitrate": "128k", "folder": "{{title}}" },
+    "phm-mp3-128-long": { "book": "phm", "kind": "mp3-multi", "tracks": 3, "seconds": 180, "bitrate": "128k", "sampleRate": 44100, "channels": 2, "folder": "{{title}}" },
     "wrong-files": { "kind": "wrong", "folder": "Sample Pack" }
   }
 }

@@ -324,13 +324,15 @@ async function downloadFileWithProgress(
         logger.info(`Download progress: ${percent}% (${(bytesDownloaded / (1024 * 1024)).toFixed(1)} MB, ${speedMBps.toFixed(2)} MB/s)`);
         lastLogTime = now;
 
-        // Update database with progress (non-blocking, at most 1 in-flight at a time)
+        // Update database with progress (non-blocking, at most 1 in-flight at a time). Only while
+        // downloading: this write can land after the processing hand-off, where a percent under
+        // 100 reads "Merging chapters" (#216)
         if (now - lastDbUpdateTime >= PROGRESS_UPDATE_INTERVAL_MS && !dbUpdatePending) {
           lastDbUpdateTime = now;
           dbUpdatePending = true;
 
-          prisma.request.update({
-            where: { id: tracking.requestId },
+          prisma.request.updateMany({
+            where: { id: tracking.requestId, status: 'downloading' },
             data: {
               progress: Math.min(percent, 99), // Cap at 99% until fully complete
               updatedAt: new Date(),
@@ -421,7 +423,7 @@ export async function processMonitorDirectDownload(payload: MonitorDirectDownloa
     };
   }
 
-  // Update database with progress
+  // Update database with progress (only while downloading, see downloadFileWithProgress)
   const progress = download.bytesTotal > 0
     ? Math.min(99, Math.round((download.bytesDownloaded / download.bytesTotal) * 100))
     : 0;
@@ -432,8 +434,8 @@ export async function processMonitorDirectDownload(payload: MonitorDirectDownloa
     ? Math.round((download.bytesTotal - download.bytesDownloaded) / speed)
     : 0;
 
-  await prisma.request.update({
-    where: { id: requestId },
+  await prisma.request.updateMany({
+    where: { id: requestId, status: 'downloading' },
     data: {
       progress,
       updatedAt: new Date(),

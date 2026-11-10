@@ -15,6 +15,7 @@ import { authenticatedFetcher, fetchWithAuth } from '@/lib/utils/api';
 import { useToast } from '@/components/ui/Toast';
 import { AudiobookDetailsModal } from '@/components/audiobooks/AudiobookDetailsModal';
 import { BlockedReleasesChip } from './BlockedReleasesChip';
+import { requestPhase, requestPhaseText } from '@/lib/constants/request-statuses';
 
 interface RecentRequest {
   requestId: string;
@@ -24,6 +25,7 @@ interface RecentRequest {
   displayAuthor?: string;
   asin?: string | null;
   status: string;
+  progress?: number;
   type?: 'audiobook' | 'ebook';
   userId: string;
   user: string;
@@ -121,6 +123,17 @@ function getStatusBadge(status: string) {
     >
       {label}
     </span>
+  );
+}
+
+/** What a processing request is doing, under its badge (#216). */
+function PhaseLine({ status, progress }: { status: string; progress?: number }) {
+  const phase = requestPhase(status, progress);
+  if (!phase) return null;
+  return (
+    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+      {requestPhaseText(phase)}
+    </div>
   );
 }
 
@@ -767,7 +780,10 @@ export function RecentRequestsTable({ ebookSidecarEnabled = false, annasArchiveB
                     <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">
                       {request.user}
                     </td>
-                    <td className="px-6 py-4">{getStatusBadge(request.status)}</td>
+                    <td className="px-6 py-4">
+                      {getStatusBadge(request.status)}
+                      <PhaseLine status={request.status} progress={request.progress} />
+                    </td>
                     <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400">
                       {formatDistanceToNow(new Date(request.createdAt), { addSuffix: true })}
                     </td>

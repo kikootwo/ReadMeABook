@@ -2,7 +2,7 @@
 # Documentation: documentation/testing/e2e-harness.md
 #
 # Build context: e2e/ (needs fake-arr/, fixtures/, scenarios/). ffmpeg lives only in the
-# throwaway "fixtures" stage; the runtime image is node:24-alpine3.23 + ~250 KB of fixtures.
+# throwaway "fixtures" stage; the runtime image is node:24-alpine3.23 + ~10 MB of fixtures (mostly the #216 long merge book).
 # Fixture metadata (title/author) is resolved from Audnexus by ASIN at build time; pass
 # --build-arg FIXTURE_METADATA=test/offline-metadata.json to build offline.
 

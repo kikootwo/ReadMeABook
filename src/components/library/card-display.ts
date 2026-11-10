@@ -6,6 +6,7 @@
 import type { CoverTone } from '@/components/audiobooks/BookCover';
 import { statusLabel } from '@/components/requests/StatusBadge';
 import { STATUS_GROUP_OF } from '@/lib/library-view/constants';
+import { requestPhase } from '@/lib/constants/request-statuses';
 import type { LibraryItem, StatusGroup } from '@/lib/library-view/types';
 
 /**
@@ -111,6 +112,10 @@ export function sizeLabel(bytes: string | null | undefined): string | null {
 }
 
 function percent(item: Pick<LibraryItem, 'status' | 'progress'>): string | null {
+  if (item.status === 'processing') {
+    const merging = requestPhase(item.status, item.progress)?.percent;
+    return merging != null ? `${merging}%` : null;
+  }
   return item.status === 'downloading' && item.progress != null && item.progress > 0
     ? `${Math.round(item.progress)}%`
     : null;
@@ -121,10 +126,23 @@ function sentenceCase(label: string): string {
   return label.charAt(0).toUpperCase() + label.slice(1).toLowerCase();
 }
 
-/** The card's status label (StatusBadge's wording, sentence case); "In your library" for library books. */
+/**
+ * The card's status label (StatusBadge's wording, sentence case); "In your library" for library
+ * books; a processing book says what it is doing (requestPhase, as on My Requests, #216).
+ */
 export function cardLabel(item: Pick<LibraryItem, 'inLibrary' | 'status' | 'progress'>): string {
   if (item.inLibrary || item.status === 'available') return 'In your library';
+  const phase = requestPhase(item.status, item.progress);
+  if (phase) return phase.label;
   return sentenceCase(statusLabel(item.status, item.progress ?? undefined));
+}
+
+/**
+ * The label with its percent: "Downloading 42%". A merge puts the percent first ("14% Merging
+ * chapters"), since a small card truncates the end of the pill and the line (#216).
+ */
+function withPercent(item: Pick<LibraryItem, 'inLibrary' | 'status' | 'progress'>, pct: string, separator: string): string {
+  return item.status === 'processing' ? `${pct}${separator}${cardLabel(item)}` : `${cardLabel(item)}${separator}${pct}`;
 }
 
 /** The cover pill for books not in the library; null for library books. */
@@ -132,7 +150,7 @@ export function cardPill(item: LibraryItem, now?: Date): string | null {
   if (item.inLibrary || item.status === 'available') return null;
   if (item.status === 'awaiting_release') return releaseLabel(item.releaseDate, now) ?? cardLabel(item);
   const pct = percent(item);
-  return pct ? `${cardLabel(item)} ${pct}` : cardLabel(item);
+  return pct ? withPercent(item, pct, ' ') : cardLabel(item);
 }
 
 /** The line under the author: duration (else year) in the library, else the status. */
@@ -141,16 +159,17 @@ export function cardMeta(item: LibraryItem): string {
     return formatDuration(item.durationMinutes) ?? (item.year ? String(item.year) : '');
   }
   const pct = percent(item);
-  return pct ? `${cardLabel(item)} · ${pct}` : cardLabel(item);
+  return pct ? withPercent(item, pct, ' · ') : cardLabel(item);
 }
 
 export function cardAriaLabel(item: LibraryItem): string {
   return `${item.title} by ${item.author}, ${cardLabel(item)}`;
 }
 
-/** Shows the moving bar under the cover. */
-export function showsProgress(item: Pick<LibraryItem, 'inLibrary' | 'status'>): boolean {
-  return !item.inLibrary && item.status === 'downloading';
+/** Shows the moving bar under the cover: downloading, or processing while chapters merge. */
+export function showsProgress(item: Pick<LibraryItem, 'inLibrary' | 'status' | 'progress'>): boolean {
+  if (item.inLibrary) return false;
+  return item.status === 'downloading' || requestPhase(item.status, item.progress)?.percent != null;
 }
 
 /** A requester's name in the rail and chips ("name (deleted)" for a removed account). */

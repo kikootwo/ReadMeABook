@@ -86,6 +86,7 @@ Manages background job queue using Bull (Redis-backed) for async tasks: searchin
 - Tracks `import_attempts` (max 5 default)
 - After max retries → 'warn' status for manual intervention
 - Success → 'downloaded' status (green, waiting for Plex scan)
+- Chapter merge progress (#216): saved on `request.progress` at most every 10 s while the merge's ffmpeg runs (0-99), back to 100 before any status write; app init resets `processing` rows below 100 after a restart. See [chapter-merging.md](../../features/chapter-merging.md#merge-progress-216)
 - No longer triggers immediate match_plex job
 
 **scan_plex:**

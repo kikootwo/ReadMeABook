@@ -32,18 +32,31 @@ before(async () => {
 
 after(() => fs.rmSync(path.dirname(out), { recursive: true, force: true }));
 
-test('index lists every manifest fixture with real file sizes, total under 2 MB', () => {
+test('index lists every manifest fixture with real file sizes, total under 2 MB (the long merge fixture under 10 MB)', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'manifest.json'), 'utf8'));
   assert.deepEqual(Object.keys(index.fixtures).sort(), Object.keys(manifest.fixtures).sort());
   let total = 0;
+  let long = 0;
   for (const [id, fx] of Object.entries(index.fixtures)) {
     for (const f of fx.files) {
       const size = fs.statSync(path.join(out, id, f.rel)).size;
       assert.equal(size, f.size);
-      total += size;
+      if (id.endsWith('-long')) long += size;
+      else total += size;
     }
   }
   assert.ok(total < 2 * 1024 * 1024, `fixtures total ${total} bytes`);
+  assert.ok(long > 0 && long < 10 * 1024 * 1024, `long fixtures total ${long} bytes`);
+});
+
+test('the long merge fixture (#216) is 3 x 180 s of 44.1 kHz stereo at 128 kb/s', () => {
+  const fx = index.fixtures['phm-mp3-128-long'];
+  assert.equal(fx.files.length, 3);
+  const info = probe(path.join(out, 'phm-mp3-128-long', fx.files[0].rel), ['-show_entries', 'stream=sample_rate,channels:format=duration,bit_rate']);
+  assert.equal(info.streams[0].sample_rate, '44100');
+  assert.equal(info.streams[0].channels, 2);
+  assert.ok(Math.abs(Number(info.format.duration) - 180) < 0.5, `duration ${info.format.duration}`);
+  assert.ok(Math.abs(Number(info.format.bit_rate) - 128000) < 4000, `bit rate ${info.format.bit_rate}`);
 });
 
 test('multi-file mp3s carry album / album_artist / composer / track tags', () => {
