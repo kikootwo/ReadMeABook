@@ -61,6 +61,7 @@ model Request {
 1. **Find Request**
    - Query: `deletedAt: null`
    - Return 404 if not found or already deleted
+   - `refuseInLibrary` (bulk delete, #212) only: `deleteTouchesLibrary()` on this load (plus `request.count` of live `processing` requests on the same `audiobookId`) true → `error: 'InLibrary'`, nothing changed. See [Bulk delete](#bulk-delete-212)
 
 2. **Handle Downloads & Seeding**
 
@@ -224,11 +225,11 @@ One rule for request delete, the seeding cleanup and the cancel step: `holdOf()`
 
 ### API Endpoint
 
-**DELETE** `/api/admin/requests/:id`
+**DELETE** `/api/admin/requests/:id[?keepLibrary=1]`
 
 **Authorization:** Admin only
 
-**Request:** No body
+**Request:** No body. `keepLibrary=1` (bulk delete): `deleteRequest(id, admin, { refuseInLibrary: true })`; any other value or none: `deleteRequest(id, admin)`, unchanged
 
 **Response:**
 ```json
@@ -255,6 +256,7 @@ One rule for request delete, the seeding cleanup and the cancel step: `holdOf()`
 - 401: Unauthorized (not logged in)
 - 403: Forbidden (not admin)
 - 404: Request not found or already deleted
+- 409: `InLibrary` (only with `keepLibrary=1`): the book is in the library or being imported; nothing changed
 - 500: Internal server error
 
 ### Frontend Components
@@ -272,7 +274,21 @@ One rule for request delete, the seeding cleanup and the cancel step: `holdOf()`
 - Files kept: warning toast `Request deleted; files kept: <reason>` (10 s) instead of the success toast
 - Folder kept (#526): warning toast with the result message (10 s)
 
+## Bulk delete (#212)
+
+The admin table's bulk Delete ([bulk-request-actions.md](bulk-request-actions.md)) calls `DELETE /api/admin/requests/:id?keepLibrary=1` once per request, one at a time.
+- **Rule** (`deleteTouchesLibrary(row, bookBeingImported)`, `src/lib/utils/delete-touches-library.ts`), by data, not by the request's own status:
+  - audiobook request: book `filePath`, `absItemId` or `plexGuid` set
+  - ebook request: `placedEbookFiles` set and not `[]` (markers and unreadable records count), or delivered (`status === 'downloaded'` or `completedAt` set) with no record or `[]`
+  - any request: a live request on the same `audiobookId` is `processing` (`BEING_IMPORTED_WHERE`), this one included
+- **Where:** inside `deleteRequest`, right after its own load, before any side effect (download step, files, records, soft delete). A cancelled or denied request sharing a book row with a delivered or importing one is refused.
+- **List flag:** `GET /api/admin/requests` returns `inLibrary` from the same rule (book `filePath`/`plexGuid` and `requests: {where: processing, take 1}` loaded in the same query, never returned) so the bar can count the skipped.
+- **Over-skip is the safe direction:** a stale stored folder still counts. Single delete handles those.
+- **Library index left alone:** a delete that passes skips `deleteLibraryRecords` (RMAB's `plex_library` rows for the book: by ASIN, else exact title and author). The book can be in the library by another route (added by hand after a cancel or deny, another edition), and removing its rows would let a user or a shelf request it again before the next scan. The single delete still removes them.
+
 ## Re-Requesting After Deletion
+
+- **Automatic callers come back:** shelf sync (shelves with auto-request) and watched authors/series call `createRequestForUser(..., { automatic: true })` on every run. The duplicate check reads only `deletedAt: null` requests, so a deleted request is created again on the next run (its blocklist stays on the deleted row). A `cancelled` request is never replaced automatically (`decideAutoReRequest`, `auto-rerequest.ts`): cancel, or remove the shelf or watch, to stop it.
 
 **Application-Level Uniqueness:**
 
@@ -412,6 +428,7 @@ where: {
 Backend:
 - prisma/schema.prisma (deletedAt, deletedBy fields)
 - src/lib/services/request-delete.service.ts (deletion logic)
+- src/lib/utils/delete-touches-library.ts (bulk delete refusal and the list's inLibrary flag)
 - src/lib/services/request-delete-download.ts (download in the client: remove / keep seeding / leave alone)
 - src/lib/utils/torrent-ownership.ts (whether RMAB added the torrent)
 - src/lib/services/request-delete-files.ts (library files, backend items, plex_library records)
@@ -465,7 +482,6 @@ Queries Updated (deletedAt: null filters):
 
 - Toast notifications instead of console.log
 - Deletion history view (soft-deleted requests)
-- Bulk delete operations
 - Restore deleted requests (undo)
 - Email notifications for deletions
 - Deletion reason/notes field

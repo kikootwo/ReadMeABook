@@ -505,7 +505,8 @@ function AdminDashboardContent() {
   const isLoading = !metrics || !downloadsData;
   const hasError = metricsError || downloadsError;
 
-  if (hasError) {
+  // Only before the first load: a later failed poll keeps the dashboard (and a bulk run in the table) on screen
+  if (hasError && isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-8">
         <div className="max-w-7xl mx-auto">
@@ -548,6 +549,12 @@ function AdminDashboardContent() {
             <span className="sm:hidden">Home</span>
           </Link>
         </div>
+
+        {hasError && (
+          <div role="alert" className="mb-6 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+            Couldn&apos;t refresh the dashboard: {metricsError?.message || downloadsError?.message || 'no answer from RMAB'}
+          </div>
+        )}
 
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
