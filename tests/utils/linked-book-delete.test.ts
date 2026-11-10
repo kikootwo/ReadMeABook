@@ -66,7 +66,7 @@ describe('deleting a hard-linked book', () => {
     const { targets, evidence } = linkedBook();
     const before = targets.map((t) => fs.readFileSync(t, 'utf8'));
 
-    const gone = await removeImportedFilesOnly(download, download, evidence, { info: vi.fn() } as any);
+    const gone = await removeImportedFilesOnly(download, download, evidence, { info: vi.fn() } as never);
 
     expect(gone).toBe(true);
     expect(fs.existsSync(download)).toBe(false);

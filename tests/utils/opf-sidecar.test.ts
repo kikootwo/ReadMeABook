@@ -28,7 +28,7 @@ const BOOK: OpfMetadata = {
   language: 'english',
 };
 
-type Parsed = { package: { metadata: Array<Record<string, any>> } };
+type Parsed = { package: { metadata: Array<Record<string, unknown>> } };
 const parse = async (xml: string) => ((await parseStringPromise(xml)) as Parsed).package.metadata[0];
 
 describe('buildOpf', () => {

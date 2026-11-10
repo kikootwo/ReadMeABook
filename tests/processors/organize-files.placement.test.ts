@@ -41,7 +41,7 @@ const requestWrites = () => prismaMock.request.update.mock.calls.map((c: unknown
 
 async function run(payload: Record<string, unknown> = {}) {
   const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
-  return processOrganizeFiles({ requestId: 'req-1', audiobookId: 'a1', downloadPath: '/downloads/book', jobId: 'job-1', downloadHistoryId: 'dh-1', ...payload } as any);
+  return processOrganizeFiles({ requestId: 'req-1', audiobookId: 'a1', downloadPath: '/downloads/book', jobId: 'job-1', downloadHistoryId: 'dh-1', ...payload } as never);
 }
 
 describe('processOrganizeFiles: File placement and metadata.opf', () => {

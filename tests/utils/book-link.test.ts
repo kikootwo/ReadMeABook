@@ -25,7 +25,7 @@ vi.mock('fs/promises', async (importOriginal) => {
     return fsState.linkHook ? fsState.linkHook(String(source), String(target), real) : real();
   }) as typeof actual.link;
   const stat = (async (p: unknown, options?: unknown) => {
-    const result = await (actual.stat as (...a: unknown[]) => Promise<any>)(p, options);
+    const result = await (actual.stat as (...a: unknown[]) => Promise<object>)(p, options);
     const override = fsState.devOverride;
     if (override && nodePath.resolve(String(p)) === override.path) {
       return Object.assign(Object.create(Object.getPrototypeOf(result)), result, { dev: override.dev });

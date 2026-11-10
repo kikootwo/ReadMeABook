@@ -27,7 +27,7 @@ const BASE = { downloadDir: '/downloads', mediaDir: '/media/audiobooks' };
 
 async function put(body: Record<string, unknown>) {
   const { PUT } = await import('@/app/api/admin/settings/paths/route');
-  const response = await PUT({ json: vi.fn().mockResolvedValue({ ...BASE, ...body }) } as any);
+  const response = await PUT({ json: vi.fn().mockResolvedValue({ ...BASE, ...body }) } as never);
   return { status: response.status, payload: await response.json() };
 }
 
@@ -110,11 +110,11 @@ describe('GET /api/admin/settings: File placement values', () => {
     ]);
     prismaMock.user.count.mockResolvedValue(0);
     const { GET } = await import('@/app/api/admin/settings/route');
-    const payload = await (await GET({} as any)).json();
+    const payload = await (await GET({} as never)).json();
     expect(payload.paths).toMatchObject({ filePlacement: 'hardlink_only', metadataOpfEnabled: true, linkFallbackLast: note });
 
     prismaMock.configuration.findMany.mockResolvedValueOnce([{ key: 'audiobook_file_placement', value: 'symlink' }]);
-    const defaults = await (await GET({} as any)).json();
+    const defaults = await (await GET({} as never)).json();
     expect(defaults.paths).toMatchObject({ filePlacement: 'copy', metadataOpfEnabled: false, linkFallbackLast: null });
   });
 });

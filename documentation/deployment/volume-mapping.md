@@ -123,6 +123,15 @@ Files will be found correctly because all paths align.
 - After import, cleanup removes only the imported files there, never the folder's other contents, and nothing at all when the job has no folder of its own (it reports the category's folder itself) or the folders can't be worked out as absolute paths (SABnzbd's default relative `complete_dir`)
 - qBittorrent is different: a shared category's torrents still download to RMAB's folder (Manual mode)
 
+## Hard Links (Audiobookshelf File placement, #68)
+
+- Hard links need the download and media folders on **one filesystem, seen through one mount**: mount a shared parent (e.g. `/data` holding `/data/downloads` and `/data/media`) rather than two separate volumes. Two bind mounts of the same disk still return EXDEV
+- Separate ZFS datasets, btrfs subvolumes and Unraid pools are separate filesystems: EXDEV
+- RMAB (PUID) must own the download files or they must be group-writable; otherwise the kernel's `protected_hardlinks` refuses (EPERM)
+- Audiobookshelf's library folder must not contain the downloads (a download inside `media_dir` is never linked)
+- A post-import category move in the download client to another filesystem copies the data and undoes the saving
+- Details and refusal words → [features/library-placement.md](../features/library-placement.md)
+
 ## Remote Path Mapping (Advanced)
 
 **Note:** 99% of users don't need this. If your download client and RMAB run on the same machine or have access to the same file system (a NAS for example) with matching volume mounts (as shown above), skip this section.

@@ -235,6 +235,8 @@ ffmpeg -y -f concat -safe 0 -protocol_whitelist file -i filelist.txt \
   ↳ ☑ Delete original chapter files after merge
 ```
 
+**Audiobookshelf mode:** the merge checkbox sits in the Library files section and is disabled while File placement is a hard link; a linked book is never merged, even with a stored merge setting ([library-placement.md](library-placement.md)).
+
 **Setup wizard (Paths step):**
 - Checkbox: "Merge chapter files" (default: unchecked)
 - Tooltip: "Combines separate chapter files into single audiobook with chapter markers"

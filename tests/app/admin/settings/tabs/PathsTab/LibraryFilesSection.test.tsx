@@ -27,21 +27,25 @@ const BASE: PathsSettings = {
   linkFallbackLast: null,
 };
 
-let latest: PathsSettings = BASE;
+/** The last paths the tab handed to onChange (or the initial ones). */
+const seen: { paths: PathsSettings } = { paths: BASE };
 function Harness({ initial, backendMode }: { initial: PathsSettings; backendMode: 'plex' | 'audiobookshelf' }) {
   const [paths, setPaths] = useState(initial);
-  latest = paths;
-  return <PathsTab paths={paths} backendMode={backendMode} onChange={(p) => { latest = p; setPaths(p); }} onValidationChange={() => undefined} />;
+  return <PathsTab paths={paths} backendMode={backendMode} onChange={(p) => { seen.paths = p; setPaths(p); }} onValidationChange={() => undefined} />;
 }
+const renderTab = (initial: PathsSettings, backendMode: 'plex' | 'audiobookshelf') => {
+  seen.paths = initial;
+  return render(<Harness initial={initial} backendMode={backendMode} />);
+};
 
 const radio = (name: RegExp) => screen.getByRole('radio', { name }) as HTMLInputElement;
 const merge = () => screen.getByRole('checkbox', { name: /Auto-merge chapters to M4B/ }) as HTMLInputElement;
 const conflict = (paths: PathsSettings, backendMode: 'plex' | 'audiobookshelf') =>
-  pathsPlacementConflict({ backendMode, paths } as any);
+  pathsPlacementConflict({ backendMode, paths } as Parameters<typeof pathsPlacementConflict>[0]);
 
 describe('PathsTab Library files', () => {
   it('Audiobookshelf mode shows both settings with the exact words, and replaces the tagging checkbox', () => {
-    render(<Harness initial={BASE} backendMode="audiobookshelf" />);
+    renderTab(BASE, 'audiobookshelf');
     expect(screen.getByText('Library files')).toBeTruthy();
     for (const label of ['Copy', 'Hard link (copy if not possible)', "Hard link only (don't import if not possible)",
       'Tags in the audio files', 'OPF file (metadata.opf)', 'None (leave files as they are)']) {
@@ -52,7 +56,7 @@ describe('PathsTab Library files', () => {
   });
 
   it('Plex mode is unchanged: no Library files, the tagging and merge checkboxes stay', () => {
-    render(<Harness initial={{ ...BASE, filePlacement: 'hardlink', metadataOpfEnabled: true }} backendMode="plex" />);
+    renderTab({ ...BASE, filePlacement: 'hardlink', metadataOpfEnabled: true }, 'plex');
     expect(screen.queryByText('Library files')).toBeNull();
     expect(screen.queryByRole('radio')).toBeNull();
     const tagging = screen.getByLabelText(/Auto-tag audio files with metadata/) as HTMLInputElement;
@@ -61,28 +65,28 @@ describe('PathsTab Library files', () => {
   });
 
   it('guards both ways: hard links disabled while Tags or merge is on; Tags and merge disabled while linking', () => {
-    render(<Harness initial={BASE} backendMode="audiobookshelf" />);
+    renderTab(BASE, 'audiobookshelf');
     expect(radio(/^Hard link \(copy/).disabled).toBe(true);
     expect(radio(/^Hard link only/).disabled).toBe(true);
     expect(screen.getByText('Needs Metadata: OPF file or None, and chapter merge off.')).toBeTruthy();
 
     fireEvent.click(radio(/^OPF file/));
-    expect(latest).toMatchObject({ metadataTaggingEnabled: false, metadataOpfEnabled: true });
+    expect(seen.paths).toMatchObject({ metadataTaggingEnabled: false, metadataOpfEnabled: true });
     expect(radio(/^Hard link \(copy/).disabled).toBe(false);
 
     fireEvent.click(radio(/^Hard link \(copy/));
-    expect(latest.filePlacement).toBe('hardlink');
+    expect(seen.paths.filePlacement).toBe('hardlink');
     expect(radio(/^Tags in the audio files/).disabled).toBe(true);
     expect(merge().disabled).toBe(true);
     expect(screen.getByText(/Don't use Audiobookshelf's Embed Metadata on linked books: it changes the download too, and the download client may later undo it\./)).toBeTruthy();
-    expect(conflict(latest, 'audiobookshelf')).toBeNull();
+    expect(conflict(seen.paths, 'audiobookshelf')).toBeNull();
 
     fireEvent.click(radio(/^None/));
-    expect(latest).toMatchObject({ metadataTaggingEnabled: false, metadataOpfEnabled: false });
+    expect(seen.paths).toMatchObject({ metadataTaggingEnabled: false, metadataOpfEnabled: false });
   });
 
   it('merge on disables the hard links too', () => {
-    render(<Harness initial={{ ...BASE, metadataTaggingEnabled: false, chapterMergingEnabled: true }} backendMode="audiobookshelf" />);
+    renderTab({ ...BASE, metadataTaggingEnabled: false, chapterMergingEnabled: true }, 'audiobookshelf');
     expect(radio(/^Hard link only/).disabled).toBe(true);
     fireEvent.click(merge());
     expect(radio(/^Hard link only/).disabled).toBe(false);
@@ -91,19 +95,19 @@ describe('PathsTab Library files', () => {
   it('a stored conflict (after ticking tagging in Plex mode) shows as stored, explains itself and blocks the save', () => {
     const stored = { ...BASE, filePlacement: 'hardlink' as const, metadataTaggingEnabled: true, metadataOpfEnabled: true };
     expect(conflict(stored, 'plex')).toBeNull();
-    render(<Harness initial={stored} backendMode="audiobookshelf" />);
+    renderTab(stored, 'audiobookshelf');
     expect(radio(/^Hard link \(copy/).checked).toBe(true);
     expect(radio(/^Tags in the audio files/).checked).toBe(true);
     expect(radio(/^OPF file/).checked).toBe(false);
     expect(screen.getByRole('alert').textContent).toBe('Needs Metadata: OPF file or None, and chapter merge off.');
-    expect(conflict(latest, 'audiobookshelf')).toBe('Hard links need Metadata set to OPF file or None.');
+    expect(conflict(seen.paths, 'audiobookshelf')).toBe('Hard links need Metadata set to OPF file or None.');
     fireEvent.click(radio(/^OPF file/));
-    expect(conflict(latest, 'audiobookshelf')).toBeNull();
+    expect(conflict(seen.paths, 'audiobookshelf')).toBeNull();
   });
 
   it('shows the last copy fallback while a hard link is selected', () => {
     const linkFallbackLast = { title: 'A Book', reason: 'the download and library folders are separate mounts (EXDEV)', at: '2026-11-10T12:00:00.000Z' };
-    render(<Harness initial={{ ...BASE, metadataTaggingEnabled: false, filePlacement: 'hardlink', linkFallbackLast }} backendMode="audiobookshelf" />);
+    renderTab({ ...BASE, metadataTaggingEnabled: false, filePlacement: 'hardlink', linkFallbackLast }, 'audiobookshelf');
     expect(screen.getByTestId('link-fallback-last').textContent).toMatch(
       /^Last book copied instead of linked: A Book \(the download and library folders are separate mounts \(EXDEV\)\), /
     );
