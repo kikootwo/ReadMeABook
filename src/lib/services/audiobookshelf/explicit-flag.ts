@@ -78,5 +78,5 @@ export async function markItemExplicitNow(absItemId: string): Promise<{ written:
   if (outcome.httpStatus === 403) {
     return { written: false, reason: "the Audiobookshelf API key's user needs permission to update items" };
   }
-  return { written: false, reason: `Audiobookshelf answered: ${outcome.error ?? 'unknown error'}` };
+  return { written: false, reason: `the write failed (${outcome.error ?? 'unknown error'})` };
 }

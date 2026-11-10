@@ -167,3 +167,51 @@ describe('request-with-torrent refuses a pick that duplicates an existing reques
     }
   );
 });
+
+describe('request-with-torrent and the Explicit mark (#542)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    rows = [];
+    prismaMock.request.findFirst.mockImplementation(async ({ where }: { where: Record<string, unknown> }) => rows.find((r) => matchesWhere(r, where)) ?? null);
+    prismaMock.audiobook.findFirst.mockResolvedValue(BOOK);
+    prismaMock.user.findUnique.mockResolvedValue({ id: 'user-1', role: 'user', autoApproveRequests: true, plexUsername: 'user-1' });
+    prismaMock.request.create.mockResolvedValue({ id: 'req-new', audiobook: BOOK, user: { id: 'user-1', plexUsername: 'user-1' } });
+    prismaMock.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn(prismaMock));
+    prismaMock.blockedRelease.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.request.deleteMany.mockResolvedValue({ count: 1 });
+  });
+
+  async function pickWith(body: Record<string, unknown>) {
+    authRequest = { user: { id: 'user-1', role: 'user' }, json: vi.fn().mockResolvedValue({ ...PICK, ...body }) };
+    const { POST } = await import('@/app/api/audiobooks/request-with-torrent/route');
+    const response = await POST({} as never);
+    return { status: response.status, data: prismaMock.request.create.mock.calls[0]?.[0]?.data };
+  }
+
+  it.each([
+    [{ explicit: true }, true],
+    [{ explicit: false }, false],
+    [{}, false],
+  ])('a new pick with %o stores explicit %s', async (body, expected) => {
+    const result = await pickWith(body);
+
+    expect(result.status).toBe(201);
+    expect(result.data.explicit).toBe(expected);
+  });
+
+  it('a non-boolean explicit → 400, nothing created', async () => {
+    const result = await pickWith({ explicit: 'yes' });
+
+    expect(result.status).toBe(400);
+    expect(prismaMock.request.create).not.toHaveBeenCalled();
+  });
+
+  it.each([{ explicit: false }, {}])('re-picking a marked failed request with %o keeps the mark (only an admin clears it)', async (body) => {
+    rows.push({ ...row('failed', 'user-1'), explicit: true });
+
+    const result = await pickWith(body);
+
+    expect(result.status).toBe(201);
+    expect(result.data.explicit).toBe(true);
+  });
+});

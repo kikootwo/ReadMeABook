@@ -112,6 +112,17 @@ describe('Admin requests routes', () => {
     expect(payload.requests[0].userId).toBe('u-1');
   });
 
+  it('each row carries explicit (#542): true only when the request is marked', async () => {
+    const base = { status: 'available', createdAt: new Date(), completedAt: null, errorMessage: null, audiobook: { id: 'ab-1', title: 'T', author: 'A' }, user: { id: 'u-1', plexUsername: 'user' }, downloadHistory: [] };
+    prismaMock.request.count.mockResolvedValueOnce(3);
+    prismaMock.request.findMany.mockResolvedValueOnce([{ ...base, id: 'r1', explicit: true }, { ...base, id: 'r2', explicit: false }, { ...base, id: 'r3' }]);
+
+    const { GET } = await import('@/app/api/admin/requests/route');
+    const payload = await (await GET({ url: 'http://localhost/api/admin/requests' } as any)).json();
+
+    expect(payload.requests.map((r: { explicit: unknown }) => r.explicit)).toEqual([true, false, false]);
+  });
+
   it('filters requests by status', async () => {
     prismaMock.request.count.mockResolvedValueOnce(1);
     prismaMock.request.findMany.mockResolvedValueOnce([
