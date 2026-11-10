@@ -47,7 +47,10 @@ async function submitLogin(page: Page, password: string): Promise<{ path: string
     return { path: new URL(page.url()).pathname, error: null };
   }
   await expect(errorBox).toBeVisible({ timeout: 15_000 });
-  await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'));
+  // The login background floats forever; wait only for animations that end (the error box fade)
+  await page.waitForFunction(() =>
+    document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity)
+  );
   return { path: new URL(page.url()).pathname, error: (await errorBox.innerText()).trim() };
 }
 
