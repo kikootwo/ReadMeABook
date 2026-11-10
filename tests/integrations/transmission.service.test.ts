@@ -5,6 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TransmissionService } from '@/lib/integrations/transmission.service';
+import { INVALID_TORRENT_FILE } from '@/lib/integrations/torrent-file-check';
 
 const clientMock = vi.hoisted(() => ({
   get: vi.fn(),
@@ -220,7 +221,7 @@ describe('TransmissionService', () => {
       async (kind) => {
         const service = new TransmissionService('http://transmission', 'user', 'pass');
         if (kind === 'file') {
-          axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent-data') });
+          axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('d4:infod4:name4:Bookee') });
           parseTorrentMock.mockResolvedValueOnce({ infoHash: 'parsed-hash', name: 'Book' });
         }
         const hash = kind === 'file' ? 'parsed-hash' : '0123456789abcdef0123456789abcdef01234567';
@@ -266,7 +267,7 @@ describe('TransmissionService', () => {
     it('adds .torrent files via metainfo base64', async () => {
       const service = new TransmissionService('http://transmission', 'user', 'pass');
 
-      axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent-data') });
+      axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('d4:infod4:name4:Bookee') });
       parseTorrentMock.mockResolvedValueOnce({ infoHash: 'parsed-hash', name: 'Book' });
 
       // getTorrentByHash - not found
@@ -296,7 +297,7 @@ describe('TransmissionService', () => {
     it('throws when a .torrent add answer has neither torrent-added nor torrent-duplicate', async () => {
       const service = new TransmissionService('http://transmission', 'user', 'pass');
 
-      axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent-data') });
+      axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('d4:infod4:name4:Bookee') });
       parseTorrentMock.mockResolvedValueOnce({ infoHash: 'parsed-hash', name: 'Book' });
       clientMock.post
         .mockResolvedValueOnce({ data: { result: 'success', arguments: { torrents: [] } } })
@@ -342,12 +343,21 @@ describe('TransmissionService', () => {
     it('throws on invalid .torrent file', async () => {
       const service = new TransmissionService('http://transmission', 'user', 'pass');
 
-      axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('not-a-torrent') });
+      axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('d4:infod4:name4:Bookee') });
       parseTorrentMock.mockRejectedValueOnce(new Error('bad torrent'));
 
       await expect(service.addDownload('http://example.com/file.torrent')).rejects.toThrow(
         'Invalid .torrent file - failed to parse'
       );
+    });
+
+    it('fails a malformed .torrent file before it reaches parse-torrent', async () => {
+      const service = new TransmissionService('http://transmission', 'user', 'pass');
+
+      axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('d4:infod4:name-9:e') });
+
+      await expect(service.addDownload('http://example.com/file.torrent')).rejects.toThrow(INVALID_TORRENT_FILE);
+      expect(parseTorrentMock).not.toHaveBeenCalled();
     });
   });
 

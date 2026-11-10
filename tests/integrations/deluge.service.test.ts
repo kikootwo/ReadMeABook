@@ -5,6 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DelugeService, getDelugeService, invalidateDelugeService } from '@/lib/integrations/deluge.service';
+import { INVALID_TORRENT_FILE } from '@/lib/integrations/torrent-file-check';
 
 const clientMock = vi.hoisted(() => ({
   post: vi.fn(),
@@ -301,7 +302,7 @@ describe('DelugeService', () => {
     const service = new DelugeService('http://deluge', '', 'pass');
     (service as any).sessionCookie = '_session_id=abc';
 
-    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent-data') });
+    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('d4:infod4:name4:Bookee') });
     parseTorrentMock.mockResolvedValueOnce({ infoHash: 'hash-1', name: 'Book' });
 
     mockRpc({}); // not duplicate
@@ -350,10 +351,20 @@ describe('DelugeService', () => {
     const service = new DelugeService('http://deluge', '', 'pass');
     (service as any).sessionCookie = '_session_id=abc';
 
-    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('bad-data') });
+    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('d4:infod4:name4:Bookee') });
     parseTorrentMock.mockRejectedValueOnce(new Error('bad torrent'));
 
     await expect(service.addDownload('http://example.com/file.torrent')).rejects.toThrow('Invalid .torrent file');
+  });
+
+  it('fails a malformed .torrent file before it reaches parse-torrent', async () => {
+    const service = new DelugeService('http://deluge', '', 'pass');
+    (service as any).sessionCookie = '_session_id=abc';
+
+    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('l-3:e') });
+
+    await expect(service.addDownload('http://example.com/file.torrent')).rejects.toThrow(INVALID_TORRENT_FILE);
+    expect(parseTorrentMock).not.toHaveBeenCalled();
   });
 
   it('pauses and resumes torrents', async () => {

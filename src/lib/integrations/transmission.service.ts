@@ -11,6 +11,7 @@ import { DOWNLOAD_CLIENT_TIMEOUT } from '../constants/download-timeouts';
 import * as parseTorrentModule from 'parse-torrent';
 import { RMABLogger } from '../utils/logger';
 import { fetchDownloadSource } from './download-source';
+import { INVALID_TORRENT_FILE, isWellFormedTorrentFile } from './torrent-file-check';
 import { urlForLog } from '../utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '../utils/path-mapper';
 import { sameHash, transmissionProbeMatch } from './torrent-probe';
@@ -297,6 +298,7 @@ export class TransmissionService implements IDownloadClient {
     }
 
     const torrentBuffer = source.data;
+    if (!isWellFormedTorrentFile(torrentBuffer)) throw new Error(INVALID_TORRENT_FILE);
 
     let parsedTorrentData: any;
     try {
