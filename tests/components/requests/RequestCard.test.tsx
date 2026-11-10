@@ -84,6 +84,7 @@ describe('RequestCard', () => {
     expect(screen.getByText('Downloading')).toBeInTheDocument();
     expect(screen.getByText('Active')).toBeInTheDocument();
     expect(screen.getByText('45%')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '45');
   });
 
   it('toggles the error message for failed requests', async () => {
@@ -159,20 +160,66 @@ describe('RequestCard', () => {
     expect(screen.queryByRole('button', { name: 'Interactive Search' })).toBeNull();
   });
 
-  it('shows setup indicator when progress is zero', async () => {
+  it.each(['searching', 'downloading'])('shows the setup indicator when a %s request is at zero', async (status) => {
     const { RequestCard } = await import('@/components/requests/RequestCard');
 
-    render(
-      <RequestCard
-        request={{
-          ...baseRequest,
-          status: 'processing',
-          progress: 0,
-        }}
-      />
-    );
+    render(<RequestCard request={{ ...baseRequest, status, progress: 0 }} />);
 
     expect(screen.getByText('Setting up...')).toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).toBeNull();
+  });
+
+  describe('processing says what it is doing (#216)', () => {
+    it('organizing files: the label, no bar and no percent', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+
+      render(<RequestCard request={{ ...baseRequest, status: 'processing', progress: 100 }} />);
+
+      expect(screen.getByText('Processing')).toBeInTheDocument();
+      expect(screen.getByText('Organizing files')).toBeInTheDocument();
+      expect(screen.queryByRole('progressbar')).toBeNull();
+      expect(screen.queryByText('100%')).toBeNull();
+      expect(screen.queryByText('Active')).toBeNull();
+    });
+
+    it('merging chapters: the label, the percent and a bar of that width', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+
+      render(<RequestCard request={{ ...baseRequest, status: 'processing', progress: 42 }} />);
+
+      expect(screen.getByText('Merging chapters')).toBeInTheDocument();
+      expect(screen.getByText('42%')).toBeInTheDocument();
+      const bar = screen.getByRole('progressbar', { name: 'Progress' });
+      expect(bar).toHaveAttribute('aria-valuenow', '42');
+      expect((bar.firstElementChild as HTMLElement).style.width).toBe('42%');
+      expect(screen.queryByText('Active')).toBeNull();
+    });
+
+    it('merging at 0%: the bar at zero, never "Setting up..."', async () => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+
+      render(<RequestCard request={{ ...baseRequest, status: 'processing', progress: 0 }} />);
+
+      expect(screen.getByText('Merging chapters')).toBeInTheDocument();
+      expect(screen.getByText('0%')).toBeInTheDocument();
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
+      expect(screen.queryByText('Setting up...')).toBeNull();
+    });
+
+    it.each([
+      ['downloaded', 'audiobook'],
+      ['downloaded', 'ebook'],
+      ['awaiting_import', 'audiobook'],
+    ] as const)('%s (%s) stays as it was: no phase label, no bar', async (status, type) => {
+      const { RequestCard } = await import('@/components/requests/RequestCard');
+
+      render(<RequestCard request={{ ...baseRequest, status, type, progress: 42 }} />);
+
+      expect(screen.queryByText('Organizing files')).toBeNull();
+      expect(screen.queryByText('Merging chapters')).toBeNull();
+      expect(screen.queryByText(/library scan/i)).toBeNull();
+      expect(screen.queryByRole('progressbar')).toBeNull();
+    });
   });
 
   it('hides action buttons when showActions is false', async () => {

@@ -1,0 +1,9 @@
+{
+  "name": "merge-progress",
+  "description": "#216: one 3-file 128 kb/s mp3 release of 9 minutes (44.1 kHz stereo) for book 'phm', so the chapter merge's re-encode runs long enough to be stepped through while held (SIGSTOP).",
+  "book": "phm",
+  "indexers": [{ "id": 1, "name": "E2E Torrents", "protocol": "torrent", "priority": 25 }],
+  "releases": [
+    { "id": "long", "title": "{{author}} - {{title}} (Unabridged) [MP3]", "sizeMB": 300, "seeders": 50, "fixture": "phm-mp3-128-long" }
+  ]
+}

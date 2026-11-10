@@ -90,6 +90,35 @@ export const LIVE_RECENT_STATUSES = ['downloaded', 'awaiting_import'] as const;
 export const LIVE_RECENT_WINDOW_MS = 15 * 60 * 1000;
 
 /**
+ * What a processing request is doing (#216), shown beside its badge. Only the
+ * chapter merge can be measured, so it is the only phase with a percent.
+ *
+ * Contract for `request.progress` while `processing`: every write that sets status
+ * 'processing' also sets progress 100. Only the chapter merge lowers it (0-99 while
+ * its ffmpeg runs, src/lib/utils/merge-progress.ts) and it is back at 100 the
+ * moment ffmpeg exits. A new writer must keep this, or the request reads
+ * "Merging chapters N%" (tests/constants/processing-progress-invariant.test.ts).
+ */
+export interface RequestPhase {
+  label: 'Organizing files' | 'Merging chapters';
+  /** 0-99 while merging, otherwise null (no bar). */
+  percent: number | null;
+}
+
+export function requestPhase(status: string, progress: number | null | undefined): RequestPhase | null {
+  if (status !== 'processing') return null;
+  if (typeof progress === 'number' && progress >= 0 && progress < 100) {
+    return { label: 'Merging chapters', percent: Math.floor(progress) };
+  }
+  return { label: 'Organizing files', percent: null };
+}
+
+/** One-line text for a phase: "Merging chapters · 42%" or "Organizing files". */
+export function requestPhaseText(phase: RequestPhase): string {
+  return phase.percent === null ? phase.label : `${phase.label} · ${phase.percent}%`;
+}
+
+/**
  * errorMessage of an audiobook request the library scan failed because the book
  * left the library and no audio is left in its organized folder (#214). Users
  * may request it again; automatic callers (shelf sync, watched lists) never do.

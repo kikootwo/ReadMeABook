@@ -6,7 +6,7 @@
  * Usage: node e2e/fixtures/generate.mjs --out <dir> [--manifest <file>] [--metadata <file>] [--ffmpeg <bin>]
  *   --metadata  JSON { "<asin>": { title, author, narrator, runtimeMin } } used instead of Audnexus (offline).
  * Writes <out>/<fixtureId>/<files> and <out>/index.json (books + fixture file lists with sizes).
- * Output is small (well under 2 MB total). Nothing here is committed.
+ * Output is about 10 MB in all (phm-mp3-128-long, 9 min of 44.1 kHz stereo, is most of it). Nothing here is committed.
  */
 
 import fs from 'node:fs';
@@ -62,8 +62,8 @@ function ffmpeg(bin, args) {
   execFileSync(bin, ['-hide_banner', '-loglevel', 'error', '-y', ...args], { stdio: ['ignore', 'ignore', 'pipe'] });
 }
 
-function tone(i) {
-  return `sine=frequency=${220 + 110 * i}:sample_rate=22050`;
+function tone(i, sampleRate = 22050) {
+  return `sine=frequency=${220 + 110 * i}:sample_rate=${sampleRate}`;
 }
 
 function genMp3Multi(bin, dir, def, book) {
@@ -71,8 +71,8 @@ function genMp3Multi(bin, dir, def, book) {
   for (let n = 1; n <= def.tracks; n++) {
     const file = `${String(n).padStart(2, '0')} - Chapter ${n}.mp3`;
     ffmpeg(bin, [
-      '-f', 'lavfi', '-i', `${tone(n)}:duration=${def.seconds}`,
-      '-ac', '1', '-c:a', 'libmp3lame', '-b:a', def.bitrate ?? '32k', '-id3v2_version', '3',
+      '-f', 'lavfi', '-i', `${tone(n, def.sampleRate)}:duration=${def.seconds}`,
+      '-ac', String(def.channels ?? 1), '-c:a', 'libmp3lame', '-b:a', def.bitrate ?? '32k', '-id3v2_version', '3',
       '-metadata', `title=Chapter ${n}`,
       '-metadata', `album=${book.title}`,
       '-metadata', `album_artist=${book.author}`,

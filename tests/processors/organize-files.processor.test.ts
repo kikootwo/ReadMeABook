@@ -133,6 +133,41 @@ describe('processOrganizeFiles', () => {
     expect(audibleServiceMock.getAudiobookDetails).toHaveBeenCalledWith('ASIN1', { fillSeries: true });
   });
 
+  it('saves the merge progress and has it back at 100 before the downloaded write (#216)', async () => {
+    prismaMock.audiobook.findUnique.mockResolvedValue({ id: 'a1', title: 'Book', author: 'Author', narrator: null, coverArtUrl: null, audibleAsin: null });
+    prismaMock.audiobook.update.mockResolvedValue({});
+    prismaMock.request.update.mockResolvedValue({});
+    configMock.getBackendMode.mockResolvedValue('plex');
+    configMock.get.mockResolvedValue(null);
+    // The merge's first write is slow: the 100 queues behind it and settle waits for both
+    let releaseFirst!: () => void;
+    prismaMock.request.updateMany.mockImplementation(async (args: { where: { status?: unknown }; data: { progress?: number } }) => {
+      if (args.where.status === 'processing' && args.data.progress === 0) {
+        await new Promise<void>((resolve) => { releaseFirst = resolve; });
+      }
+      return { count: 1 };
+    });
+    organizerMock.organize.mockImplementation(async (...args: unknown[]) => {
+      const { onMergeProgress } = args[6] as { onMergeProgress: (p: number) => void };
+      onMergeProgress(0);
+      onMergeProgress(42); // inside the 10 s interval: held back, then dropped by the close
+      setTimeout(() => releaseFirst(), 20);
+      return { success: true, targetPath: '/media/Author/Book', filesMovedCount: 1, errors: [], audioFiles: ['/media/Author/Book/Book.m4b'] };
+    });
+
+    const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+    const result = await processOrganizeFiles({ requestId: 'req-1', audiobookId: 'a1', downloadPath: '/downloads/book', jobId: 'job-1' });
+
+    expect(result.success).toBe(true);
+    const progressWrites = prismaMock.request.updateMany.mock.calls
+      .map((call: unknown[], i: number) => ({ args: call[0] as { where: Record<string, unknown>; data: { progress?: number } }, order: prismaMock.request.updateMany.mock.invocationCallOrder[i] }))
+      .filter(({ args }) => args.where.status === 'processing' && args.where.deletedAt === null);
+    expect(progressWrites.map(({ args }) => args.data.progress)).toEqual([0, 100]);
+    const downloaded = prismaMock.request.update.mock.calls.findIndex((call: unknown[]) => (call[0] as { data: { status?: string } }).data.status === 'downloaded');
+    expect(downloaded).toBeGreaterThanOrEqual(0);
+    expect(progressWrites[1].order).toBeLessThan(prismaMock.request.update.mock.invocationCallOrder[downloaded]);
+  });
+
   it('skips filesystem scan when disabled', async () => {
     prismaMock.request.update.mockResolvedValue({});
     prismaMock.audiobook.findUnique.mockResolvedValue({

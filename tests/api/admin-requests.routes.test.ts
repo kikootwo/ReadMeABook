@@ -86,7 +86,8 @@ describe('Admin requests routes', () => {
     prismaMock.request.findMany.mockResolvedValueOnce([
       {
         id: 'req-1',
-        status: 'pending',
+        status: 'processing',
+        progress: 42,
         createdAt: new Date(),
         completedAt: null,
         errorMessage: null,
@@ -110,6 +111,8 @@ describe('Admin requests routes', () => {
     expect(payload.pageSize).toBe(25);
     expect(payload.totalPages).toBe(1);
     expect(payload.requests[0].userId).toBe('u-1');
+    // The row's phase line reads it (#216)
+    expect(payload.requests[0].progress).toBe(42);
   });
 
   it('each row carries explicit (#542): true only when the request is marked', async () => {

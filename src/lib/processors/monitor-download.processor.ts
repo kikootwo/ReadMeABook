@@ -114,9 +114,10 @@ export async function processMonitorDownload(payload: MonitorDownloadPayload): P
       });
     }
 
-    // Update request progress
-    await prisma.request.update({
-      where: { id: requestId },
+    // Update request progress, only while downloading: an older chain's late poll must not put a
+    // percent on a processing request, where under 100 reads "Merging chapters" (#216)
+    await prisma.request.updateMany({
+      where: { id: requestId, status: 'downloading' },
       data: {
         progress: progressPercent,
         updatedAt: new Date(),

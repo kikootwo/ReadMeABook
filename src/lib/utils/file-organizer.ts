@@ -74,6 +74,8 @@ export interface PlacementOptions {
   metadataTaggingEnabled?: boolean;
   /** Manual/Bulk Import: stop a multi-disc import whose source is its own target folder. */
   stopInPlaceDiscLayout?: boolean;
+  /** Chapter merge progress (MergeOptions.onProgress), e.g. the request's merge progress reporter (#216). */
+  onMergeProgress?: (percent: number) => void;
 }
 
 export interface EbookOrganizationResult {
@@ -260,6 +262,7 @@ export class FileOrganizer {
                       year: audiobook.year,
                       outputPath,
                       dirMode: this.dirMode,
+                      onProgress: placement?.onMergeProgress,
                     },
                     logger ?? undefined
                   );

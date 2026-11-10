@@ -110,9 +110,10 @@ test('#177 page: the admin grid, groups, search, filters, sheet, live overlay an
   await shot(page, 'card-downloading');
   await page.evaluate(() => window.scrollTo(0, 0));
 
-  // Live overlay: a status change reaches the card without a list reload
-  psql(`update requests set status = 'processing', updated_at = now() where id = ${sqlStr(requestIds.downloading)}`);
-  await expect(card(page, TITLES.downloading)).toHaveAttribute('aria-label', /Processing/, { timeout: 10_000 });
+  // Live overlay: a status change reaches the card without a list reload (processing is written
+  // with progress 100, as the app does; the card then says what it is doing, #216)
+  psql(`update requests set status = 'processing', progress = 100, updated_at = now() where id = ${sqlStr(requestIds.downloading)}`);
+  await expect(card(page, TITLES.downloading)).toHaveAttribute('aria-label', /Organizing files/, { timeout: 10_000 });
 
   // The book leaves live (now available): one settle, so exactly one list call
   const listCalls = recordListCalls(page);
