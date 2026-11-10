@@ -33,6 +33,8 @@ export interface BookLinkInput {
 
 export type BookLinkResult =
   | { kind: 'placed'; placed: Array<{ file: BookLinkFile; result: PlaceResult }> }
+  /** Every source already is its target (a Bulk or Manual Import in place): nothing to link or copy. */
+  | { kind: 'inplace' }
   /** `leftBehind`: names of this run that could not be removed again (never removed recursively). */
   | { kind: 'cannot'; refusal: LinkRefusal; leftBehind: string[] };
 
@@ -166,6 +168,8 @@ async function rollback(
  * file's placeFile result (linked, in place, or another file by that name left untouched).
  */
 export async function linkBook(input: BookLinkInput): Promise<BookLinkResult> {
+  const same = (file: BookLinkFile) => path.resolve(file.source) === path.resolve(file.target);
+  if (input.files.length > 0 && input.files.every(same)) return { kind: 'inplace' };
   return withBookLock(input.targetDir, async () => {
     let checked: Precheck;
     try {

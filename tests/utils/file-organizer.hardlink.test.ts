@@ -20,7 +20,7 @@ const fsState = vi.hoisted(() => ({
   fakeSymlinks: new Set<string>(),
 }));
 const placeState = vi.hoisted(() => ({ audioCalls: [] as unknown[][] }));
-const opfState = vi.hoisted(() => ({ failWrite: null as null | string }));
+const opfState = vi.hoisted(() => ({ failWrite: null as null | string, once: false }));
 const rootsState = vi.hoisted(() => ({ roots: null as null | { mediaDir: string; downloadRoots: string[]; otherRoots: string[] } }));
 
 vi.mock('fs/promises', async (importOriginal) => {
@@ -61,7 +61,9 @@ vi.mock('@/lib/utils/organize-copy', async (importOriginal) => {
 vi.mock('@/lib/utils/opf-sidecar', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/utils/opf-sidecar')>();
   const writeOpfSidecar = (async (...args: Parameters<typeof actual.writeOpfSidecar>) => {
-    if (opfState.failWrite) throw Object.assign(new Error(`${opfState.failWrite}: injected`), { code: opfState.failWrite });
+    const code = opfState.failWrite;
+    if (opfState.once) opfState.failWrite = null;
+    if (code) throw Object.assign(new Error(`${code}: injected`), { code });
     return actual.writeOpfSidecar(...args);
   }) as typeof actual.writeOpfSidecar;
   return { ...actual, writeOpfSidecar };
@@ -141,6 +143,7 @@ describe('FileOrganizer hard link placement', () => {
     fsState.fakeSymlinks.clear();
     placeState.audioCalls = [];
     opfState.failWrite = null;
+    opfState.once = false;
     vi.mocked(tagMultipleFiles).mockClear();
     vi.mocked(addMp4FreeformTags).mockClear();
     vi.mocked(detectChapterFiles).mockClear();
@@ -269,13 +272,25 @@ describe('FileOrganizer hard link placement', () => {
       expect(fs.readdirSync(shelf).sort()).toEqual(['Part 1.mp3', 'Part 2.mp3']);
     });
 
-    it('a Bulk Import of a book already in its place resolves to in place under Hard link', async () => {
+    it.each(['hardlink', 'hardlink_only'] as const)('a Bulk Import of a book already in its place imports in place under %s, with no copy note', async (filePlacement) => {
       write(path.join(book, 'Part 1.mp3'), 'one');
-      const result = await organize({ filePlacement: 'hardlink' }, book);
+      write(path.join(book, 'Part 2.mp3'), 'two');
+      const result = await organize({ filePlacement, writeOpf: true }, book);
 
       expect(result.success).toBe(true);
-      expect(result.records!.map((r) => r.status)).toEqual(['identical']);
+      expect(result.records!.map((r) => r.status)).toEqual(['identical', 'identical']);
+      expect(result.linkFallback).toBeUndefined();
+      expect(result.linkRefused).toBeUndefined();
+      expect(result.filesMovedCount).toBe(0);
       expect(fs.readFileSync(path.join(book, 'Part 1.mp3'), 'utf8')).toBe('one');
+      expect(fs.existsSync(path.join(book, 'metadata.opf'))).toBe(true);
+    });
+
+    it('a book in the media folder under other names is a real copy and keeps the note', async () => {
+      const result = await organize({ filePlacement: 'hardlink' }, shelf);
+
+      expect(result.linkFallback).toMatchObject({ code: 'OUTSIDE' });
+      expect(result.filesMovedCount).toBe(2);
     });
   });
 
@@ -349,6 +364,20 @@ describe('FileOrganizer hard link placement', () => {
     expect(result.success).toBe(true);
     expect(result.opfError).toBe('EACCES');
     expect(result.linkedCount).toBe(1);
+  });
+
+  it('an OPF that failed before the link pass and is written by the copy fallback leaves no error behind', async () => {
+    write(path.join(source, 'Part 1.mp3'), 'one');
+    fsState.failLinkNamed = { name: 'Part 1.mp3', code: 'EXDEV' };
+    opfState.failWrite = 'EACCES';
+    opfState.once = true;
+
+    const result = await organize({ filePlacement: 'hardlink', writeOpf: true });
+
+    expect(result.linkFallback).toMatchObject({ code: 'EXDEV' });
+    expect(fs.existsSync(path.join(book, 'metadata.opf'))).toBe(true);
+    expect(result.opfError).toBeUndefined();
+    expect(result.errors).not.toContain('Failed to write metadata.opf');
   });
 
   it('copy (the default) is unchanged: tags and merge still run', async () => {

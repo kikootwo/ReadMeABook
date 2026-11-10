@@ -432,8 +432,8 @@ export class FileOrganizer {
           return result;
         }
         audioPlaced = pass.kind === 'linked';
-        // The copy fallback is Copy mode: OPF first, then the copy loop for every file
-        if (!audioPlaced && placement?.writeOpf) opf = await placeOpf(targetPath, audiobook, this.fileMode, result, logger);
+        // The copy fallback is Copy mode: OPF first, then the copy loop for every file (in place: finds each one there)
+        if (pass.kind === 'copy' && placement?.writeOpf) opf = await placeOpf(targetPath, audiobook, this.fileMode, result, logger);
       }
 
       // Copy audio files (do NOT delete originals - needed for seeding)

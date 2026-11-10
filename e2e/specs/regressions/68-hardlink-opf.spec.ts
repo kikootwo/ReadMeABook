@@ -19,7 +19,8 @@
  *    cleanup and after a request delete (the fake client has no recheck: "listed, bytes unchanged").
  * 6. Manual Import from the media folder (outside the download folders): Hard link copies it and says
  *    why, Hard link only imports nothing and says why. A failure on file 3 of 3 (an interrupted copy in
- *    the library) leaves no link behind in either mode.
+ *    the library) leaves no link behind in either mode. The book imported again from its own library
+ *    folder imports in place under Hard link only, with no note.
  * The settings each leg changes are put back afterwards. Exec bridge required.
  */
 
@@ -421,6 +422,17 @@ test('6: Manual Import from outside the download folders, and a failure in the m
     expect.soft(cCopy.message).toMatch(/^copied, not hard-linked \(an interrupted copy of this file is in the library, PREFIX\)/);
     expect.soft([...cCopy.folder, ...cCopy.sources].every((f) => f.nlink === 1), 'copied: no link left from the pass').toBe(true);
     expect.soft(cCopy.folder.map((f) => f.sha)).toEqual(cCopy.sources.map((f) => f.sha));
+
+    // d. The same book imported again from its own library folder (in place) under Hard link only: imported, untouched, no note
+    expect((await savePaths(rmab, { filePlacement: 'hardlink_only' })).status).toBe(200);
+    const mp3s = () => filesUnder(cFolder).filter((f) => f.endsWith('.mp3')).map(fileId);
+    const before = mp3s();
+    const d = await manualImport(rmab, cFolder, { requestId: c.requestId });
+    const dLeg = { ...d, message: requestMessage(c.requestId), before, after: mp3s() };
+    results.inPlaceHardlinkOnly = dLeg;
+    expect.soft(dLeg.status).toBe('downloaded');
+    expect.soft(dLeg.message ?? '', 'no copy note, no refusal').toBe('');
+    expect.soft(dLeg.after, 'the same files, untouched').toEqual(dLeg.before);
   } finally {
     writeEvidence('68/leg6-outside-and-mid-pass.json', results);
     if (template !== null) {

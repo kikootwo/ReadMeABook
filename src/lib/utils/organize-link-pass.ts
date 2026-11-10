@@ -32,7 +32,11 @@ export type LinkPassOutcome =
   /** Hard link (copy if not possible): the copy loop places the whole book, exactly as Copy mode. */
   | { kind: 'copy' }
   /** Hard link only: nothing is imported. */
-  | { kind: 'stop' };
+  | { kind: 'stop' }
+  /** The book already is its library folder: the copy loop finds every file in place; no copy note. */
+  | { kind: 'inplace' };
+
+const OPF_WRITE_FAILED = 'Failed to write metadata.opf';
 
 /**
  * Write metadata.opf before any audio (once Audiobookshelf has scanned a book, its own
@@ -42,14 +46,19 @@ export type LinkPassOutcome =
 export async function placeOpf(
   targetPath: string, book: OpfMetadata, fileMode: number, result: OrganizationResult, logger: RMABLogger | null
 ): Promise<OpfOutcome | null> {
+  // A second write (the copy fallback) replaces what the first attempt reported
+  delete result.opfError;
+  if (result.errors.includes(OPF_WRITE_FAILED)) result.errors.splice(result.errors.indexOf(OPF_WRITE_FAILED), 1);
   try {
     const opf = await writeOpfSidecar(targetPath, book, fileMode);
     await logger?.info(opf.outcome === 'written' ? 'Wrote metadata.opf' : 'metadata.opf already exists; kept');
-    if (opf.outcome === 'written' && opf.warning) (result.permissionWarnings ??= []).push(opf.warning);
+    if (opf.outcome === 'written' && opf.warning && !result.permissionWarnings?.includes(opf.warning)) {
+      (result.permissionWarnings ??= []).push(opf.warning);
+    }
     return opf;
   } catch (error) {
     await logger?.warn(`Could not write metadata.opf: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    result.errors.push('Failed to write metadata.opf');
+    result.errors.push(OPF_WRITE_FAILED);
     result.opfError = refusalFromError(error).code;
     return null;
   }
@@ -84,6 +93,10 @@ export async function runLinkPass(input: LinkPassInput): Promise<LinkPassOutcome
     logger,
   });
 
+  if (outcome.kind === 'inplace') {
+    await logger?.info('The book is already in its library folder: nothing to link or copy');
+    return { kind: 'inplace' };
+  }
   if (outcome.kind === 'cannot') {
     const leftBehind = [...outcome.leftBehind];
     if (!(await removeWrittenOpf(input.opf, logger))) leftBehind.push(OPF_FILE_NAME);
