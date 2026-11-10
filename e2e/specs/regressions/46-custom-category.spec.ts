@@ -232,7 +232,8 @@ test('5 restore, then the setup wizard step with an existing category', async ({
     const suffix = page.getByText('(existing, left as is)');
     await expect(suffix).toBeVisible();
     c.check(`wizard card: Category: Books with the amber suffix (${await suffix.getAttribute('class')})`, /amber/.test((await suffix.getAttribute('class')) ?? ''), 'control');
-    await suffix.scrollIntoViewIfNeeded();
+    // Centred, so the wizard's fixed footer can't cover the card's Category line
+    await suffix.evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await page.screenshot(shot('wizard-download-step-1280-light'));
     await ctx.close();
   } finally {
