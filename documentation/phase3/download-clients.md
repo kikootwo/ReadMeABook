@@ -56,29 +56,29 @@ interface DownloadClientConfig {
 ```
 
 ### Download Categories (#46, #579)
-**Rule:** RMAB creates, or sets the save path of, only its own category: `readmeabook` (any case, always RMAB's) or `ownedCategory` (any case). A category that already existed in the client is used as is: never created, never re-pathed. No schema change.
+**Rule:** RMAB creates, or sets the save path of, only its own category: `readmeabook` (any case, always RMAB's) or `ownedCategory` (any case). A category that already existed in the client is used as is: never created, never re-pathed. `ownedCategory` is only ever the category RMAB created and uses now (cleared when the stored category moves off it). No schema change.
 **Helper:** `src/lib/utils/download-category.ts` (client-safe; services, routes, modal, card). Path clients: qBittorrent, SABnzbd, NZBGet. Deluge/Transmission are labels (no path; ownership n/a).
 **Decided on save only** (`resolveCategoryChoice`), from the client's own list via `manager.listCategories(config)` (fresh service, never the id-keyed cache):
 
 | Input | Lists | Stored |
 |---|---|---|
-| empty / `readmeabook` (any case) | no | `readmeabook`; `ownedCategory` unchanged |
+| any client: `/`, `\`, a control character, or `*` | no | field error (modal and server) |
+| empty / `readmeabook` (any case) | no | `readmeabook`; `ownedCategory` cleared |
 | Deluge | no | lower-cased; field error unless `[a-z0-9_.-]` |
 | Transmission | no | as typed |
-| unchanged from saved (any case) | no | saved values |
-| equals saved `ownedCategory` | no | owned again |
+| unchanged from saved (any case) | no | saved category; `ownedCategory` kept only when it is that category |
 | new, missing in client | yes | as typed (SABnzbd lower-cased); `ownedCategory` = name |
-| new, present (any case) | yes | client's spelling; not owned |
+| new, present (any case) | yes | client's spelling; `ownedCategory` cleared |
 | list throws | yes | 400 `Couldn't read <Client>'s categories: <reason>`; nothing written |
 
 - **Where:** POST add (after the connection test), PUT edit (only when `category` is sent; the list comes from the new URL), setup complete (validation block, before any write; the wizard's display-only `categoryInClient` and any sent `ownedCategory` are dropped). The legacy single-client route carries `ownedCategory` over. A URL change alone never re-decides
-- **`*`:** SABnzbd's default category; left out of lists, refused as a name
-- **At add time:** owned → today's behaviour (missing → created, path differs → updated; qBittorrent/NZBGet lookups exact first, then any case, and act on the client's key). Not owned → no create/edit/`set_config`/`saveconfig`; qBittorrent adds in Manual mode (`autoTMM=false` + `savepath` = RMAB's folder, the #326 branch); SABnzbd/NZBGet send the name and the job lands in that category's folder (its settings, sorter and script apply); RMAB imports from the reported path, which must be reachable through the mapping ([volume-mapping.md](../deployment/volume-mapping.md))
+- **`*`:** SABnzbd's default category; left out of lists, refused as a name. A list without `*` (array or object form) is unreadable; a qBittorrent list that isn't a plain object is unreadable
+- **At add time:** owned → today's behaviour (missing → created, path differs → updated; qBittorrent's lookup is the exact name only (names are case-sensitive, RMAB creates that spelling); NZBGet/SABnzbd look up any case and act on the client's key). Not owned → no create/edit/`set_config`/`saveconfig`; qBittorrent adds in Manual mode (`autoTMM=false` + `savepath` = RMAB's folder, the #326 branch); SABnzbd/NZBGet send the name and the job lands in that category's folder (its settings, sorter and script apply); RMAB imports from the reported path, which must be reachable through the mapping ([volume-mapping.md](../deployment/volume-mapping.md))
 - **In flight:** a change applies to the next grab; RMAB never renames, moves or deletes a category. The old owned category stays in the client
 - **NZBGet cancel:** passes `category` to `deleteQueuedDownload` only when owned; otherwise name only
-- **Usenet cleanup, not owned:** imported files only, folder only when empty ([file-organization.md](file-organization.md#download-cleanup-in-a-category-rmab-did-not-create))
-- **UI:** "Category" field (`DownloadCategoryField.tsx`) after "Enabled": required, suggestions after a passed Test (every client type), amber note when the name is in the client and not RMAB's own. Card: `Category: x` only for a non-default name; amber `(existing, left as is)` on a path client when not owned (wizard: the modal's `categoryInClient` preview); the name truncates, the suffix never does
-- **Ownership is never re-checked** (accepted): deleted in the client and re-created by another app; a restored or hand-edited config; a URL moved to another instance with the same name; re-adding a client in RMAB (forgets its old custom category); another RMAB using `readmeabook`. A custom category set through the API before this change reads as not owned (Manual mode on qBittorrent, no folder sync on usenet)
+- **Usenet cleanup:** decided from the job's category as the client reports it, not the setting; anything but RMAB's own → imported files only, folder only when empty, nothing when the job has no folder of its own or the client can't be read ([file-organization.md](file-organization.md#download-cleanup-in-a-category-rmab-did-not-create))
+- **UI:** "Category" field (`DownloadCategoryField.tsx`) after "Enabled": required, suggestions after a passed Test (every client type; only the newest answer is shown), amber note when the name is in the client and not RMAB's own (edit mode: a saved not-owned category shows it before any Test). Card: `Category: x` only for a non-default name; amber `(existing, left as is)` on a path client when not owned (wizard: the modal's `categoryInClient` preview); the name truncates, the suffix never does
+- **Ownership is never re-checked** (accepted): deleted in the client and re-created by another app; a restored or hand-edited config; a URL moved to another instance with the same name; re-adding a client in RMAB (forgets its old custom category); moving the category off RMAB's own forgets it too, so a return trip reads the client again and, if the name is still there (RMAB's old category included), stores it as existing (fails safe: Manual mode on qBittorrent, amber on the card); another RMAB using `readmeabook`. A custom category set through the API before this change reads as not owned (Manual mode on qBittorrent, no folder sync on usenet)
 - **Deluge labels carry options:** "Move completed" and "remove at ratio" on an existing label apply on `label.set_torrent` (modal note: "Already in Deluge; its label settings apply.")
 
 ### Transmission Service
