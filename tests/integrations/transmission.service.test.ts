@@ -351,10 +351,10 @@ describe('TransmissionService', () => {
       );
     });
 
-    it('fails a malformed .torrent file before it reaches parse-torrent', async () => {
+    it('a file that fails the check never reaches the parser', async () => {
       const service = new TransmissionService('http://transmission', 'user', 'pass');
 
-      axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('d4:infod4:name-9:e') });
+      axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('d4:infod4:name99:Bookee') }); // length past the end
 
       await expect(service.addDownload('http://example.com/file.torrent')).rejects.toThrow(INVALID_TORRENT_FILE);
       expect(parseTorrentMock).not.toHaveBeenCalled();

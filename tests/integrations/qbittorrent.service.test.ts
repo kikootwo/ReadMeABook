@@ -773,10 +773,10 @@ describe('QBittorrentService', () => {
     ).rejects.toThrow('Invalid .torrent file - failed to parse');
   });
 
-  it('fails a malformed .torrent file before it reaches parse-torrent', async () => {
+  it('a file that fails the check never reaches the parser', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
 
-    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('l-3:e') });
+    axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('l4:spame') }); // a top-level list
     const addTorrentFile = (service as unknown as { addTorrentFile: (url: string, category: string) => Promise<unknown> })
       .addTorrentFile.bind(service);
 

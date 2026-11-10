@@ -58,9 +58,10 @@ function skipInteger(buf: Uint8Array, pos: number): number {
 }
 
 /**
- * True when `bytes` is exactly one well-formed bencoded dict: strings are `<digits>:` with a
+ * True when `bytes` starts with one well-formed bencoded dict: strings are `<digits>:` with a
  * length that ends inside the buffer, integers are `i-?<digits>e`, dict keys are strings,
- * every list/dict is closed, nesting is at most MAX_TORRENT_DEPTH, and nothing follows.
+ * every list/dict is closed, and nesting is at most MAX_TORRENT_DEPTH. The walk stops where the
+ * top-level dict closes; any bytes after it are ignored, as the parser ignores them.
  */
 export function isWellFormedTorrentFile(bytes: Buffer): boolean {
   if (!(bytes instanceof Uint8Array) || bytes.length === 0 || bytes[0] !== DICT) return false;
@@ -92,7 +93,7 @@ export function isWellFormedTorrentFile(bytes: Buffer): boolean {
     } else {
       return false;
     }
-    if (stack.length === 0) return pos === bytes.length;
+    if (stack.length === 0) return true;
   }
   return false;
 }

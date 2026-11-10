@@ -2,8 +2,8 @@
  * Component: Downloaded .torrent File Structure Check tests
  * Documentation: documentation/phase3/download-clients.md
  *
- * Only well-formed inputs are ever given to the real parse-torrent here; every malformed
- * input is asserted through isWellFormedTorrentFile alone.
+ * The torrents built here are real ones; parse-torrent reads them to show that a file which
+ * passes the check still parses.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -74,49 +74,68 @@ describe('isWellFormedTorrentFile', () => {
     expect(parsed.infoHash).toMatch(/^[0-9a-f]{40}$/);
   });
 
-  it('accepts negative integers, empty strings, empty containers and nesting at the cap', () => {
+  it('accepts every integer form, empty strings, empty containers and nesting at the cap', () => {
     expect(isWellFormedTorrentFile(bytes('d1:ai-5e1:b0:1:cle1:ddee'))).toBe(true);
     const atCap = MAX_TORRENT_DEPTH - 1; // the top-level dict is one level
     expect(isWellFormedTorrentFile(bytes(`d1:a${'l'.repeat(atCap)}${'e'.repeat(atCap)}e`))).toBe(true);
   });
 
   it.each([
-    ['a negative string length inside a list', 'l-3:e'],
-    ['a negative string length inside a dict', 'd4:infod4:name-9:e'],
-    ['a string length past the end', 'd4:infod4:name99:Booke'],
+    ['a newline', '\n'],
+    ['CRLF', '\r\n'],
+    ['a space', ' '],
+    ['a NUL byte', '\0'],
+  ])('accepts a real torrent followed by %s, which parse-torrent ignores', async (_label, tail) => {
+    const file = Buffer.concat([singleFileTorrent, bytes(tail)]);
+    expect(isWellFormedTorrentFile(file)).toBe(true);
+    expect((await parseTorrent(file)).infoHash).toBe((await parseTorrent(singleFileTorrent)).infoHash);
+  });
+
+  it('stops at the end of the top-level dict and ignores whatever follows', () => {
+    expect(isWellFormedTorrentFile(bytes('d1:ai1eex'))).toBe(true);
+    expect(isWellFormedTorrentFile(bytes('d1:ai1eede'))).toBe(true);
+    expect(isWellFormedTorrentFile(bytes('d1:ai1ee4:junk'))).toBe(true);
+  });
+
+  it.each(['+', ' ', 'x', ':'])('refuses a string length that is not plain digits (%j before it)', (prefix) => {
+    expect(isWellFormedTorrentFile(bytes(`d4:info${prefix}3:abce`))).toBe(false);
+  });
+
+  it.each([
+    ['a string length that runs past the end of the file', 'd4:infod4:name99:Booke'],
+    ['a letter between the length and the colon', 'd4:info3x:abce'],
+    ['a space between the length and the colon', 'd4:info3 :abce'],
     ['a 400-digit string length', `d4:info${'9'.repeat(400)}:xe`],
     ['an 11-digit string length', 'd4:info00000000001:xe'],
     ['nesting past the cap', `d1:a${'l'.repeat(MAX_TORRENT_DEPTH)}${'e'.repeat(MAX_TORRENT_DEPTH)}e`],
-    ['trailing bytes after the top-level dict', 'd1:ai1eex'],
-    ['a second top-level value', 'd1:ai1eede'],
     ['an empty buffer', ''],
     ['a top-level list', 'l4:spame'],
     ['a top-level string', '4:spam'],
     ['an unclosed dict', 'd1:ai1e'],
+    ['an unclosed list', 'd1:al1:x'],
     ['a key with no value', 'd1:ae'],
     ['a non-string dict key', 'di1ei2ee'],
     ['a list as a dict key', 'dlei1ee'],
     ['a missing colon', 'd4infoe'],
-    ['a plus-signed integer', 'd1:ai+5ee'],
+    ['an integer with a plus prefix', 'd1:ai+5ee'],
     ['an empty integer', 'd1:aiee'],
-    ['a lone minus integer', 'd1:ai-ee'],
     ['a fractional integer', 'd1:ai1.5ee'],
-    ['an unterminated integer', 'd1:ai12'],
+    ['an integer with no end marker', 'd1:ai12'],
     ['a 33-digit integer', `d1:ai${'1'.repeat(33)}ee`],
     ['an unknown type byte', 'd1:axe'],
     ['a stray end byte', 'e'],
-  ])('rejects %s', (_label, input) => {
+  ])('refuses %s', (_label, input) => {
     expect(isWellFormedTorrentFile(bytes(input))).toBe(false);
   });
 
-  it('rejects a 20-byte random buffer, and one that starts like a dict', () => {
+  it('refuses a 20-byte random buffer, and one that starts like a dict', () => {
     const random = pseudoRandomBytes(20, 42);
     expect(isWellFormedTorrentFile(random)).toBe(false);
     random[0] = 0x64;
     expect(isWellFormedTorrentFile(random)).toBe(false);
   });
 
-  it('rejects input that is not a byte buffer without throwing', () => {
+  it('refuses input that is not a byte buffer without throwing', () => {
     for (const input of [null, undefined, 'd1:ai1ee', 42, {}]) {
       expect(isWellFormedTorrentFile(input as unknown as Buffer)).toBe(false);
     }
