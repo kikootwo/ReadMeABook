@@ -5,6 +5,7 @@
  * Derived from src/lib/integrations/sabnzbd.service.ts: version :219, get_config :242,
  * set_config :423/:445, queue :155/:636/:719, history :662/:745, pause :689, resume :703,
  * addfile (multipart) :553, queue/history delete (deleteNZB / archiveCompletedNZB).
+ * Category names are lower-case (set_config keyword, addfile cat, job category), like SABnzbd.
  */
 
 import path from 'node:path';
@@ -105,14 +106,17 @@ export async function handleSab(state, req, res, url, recordEntry) {
         },
       });
     case 'set_config':
-      if (params.section === 'categories' && params.keyword) state.sabCategories[params.keyword] = params.dir || '';
+      // Real SABnzbd stores category names lower-case
+      if (params.section === 'categories' && params.keyword) state.sabCategories[String(params.keyword).toLowerCase()] = params.dir || '';
       return sendJson(res, 200, { status: true });
     case 'addfile': {
       const file = files.find((f) => f.name === 'nzbfile' || f.name === 'name');
       if (!file) return sendJson(res, 200, { status: false, error: 'No NZB file' });
+      recordEntry.body = { cat: params.cat || '' };
       const release = state.releaseForNzb(file.data);
       if (!release) return sendJson(res, 200, { status: false, error: 'Unknown NZB (not from this scenario)' });
-      const nzoId = addJob(state, release, params.cat || '*', release.name);
+      // The job keeps the lower-case name, as in SABnzbd's queue and history
+      const nzoId = addJob(state, release, String(params.cat || '*').toLowerCase(), release.name);
       recordEntry.added = [{ nzoId, releaseId: release.id }];
       return sendJson(res, 200, { status: true, nzo_ids: [nzoId] });
     }

@@ -180,8 +180,8 @@ export interface Recorded {
   added?: { hash?: string; nzoId?: string; releaseId: string | null }[];
   /** qBittorrent add: hashes the client already had (answered "Fails." when nothing was new). */
   duplicates?: string[];
-  /** qBittorrent delete / setCategory form fields. */
-  body?: { hashes?: string; deleteFiles?: boolean; category?: string };
+  /** Form fields: qBittorrent delete / setCategory / add / create|editCategory, SABnzbd addfile. */
+  body?: { hashes?: string; deleteFiles?: boolean; category?: string; savePath?: string; autoTMM?: string; savepath?: string; cat?: string };
 }
 
 /** fetch() against fake-arr /__control (adds the per-run control token). */
@@ -205,6 +205,14 @@ export const fakeArr = {
   },
   async state(): Promise<any> {
     return json(await ctl('/state'), 'fake-arr state');
+  },
+  /** A category another app made before RMAB; POST /__control/reset removes it. */
+  async seedCategory(client: 'qbit' | 'sab', name: string, dir = '') {
+    const res = await ctl('/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client, name, path: dir }) });
+    return json<{ ok: boolean; category: { client: string; name: string; path: string } }>(res, `seed ${client} category ${name}`);
+  },
+  async reset() {
+    return json<{ ok: boolean }>(await ctl('/reset', { method: 'POST' }), 'fake-arr reset');
   },
 };
 
