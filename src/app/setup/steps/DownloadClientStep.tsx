@@ -8,7 +8,13 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { DownloadClientManagement } from '@/components/admin/download-clients/DownloadClientManagement';
-import { DownloadClientType } from '@/lib/interfaces/download-client.interface';
+import {
+  DownloadClientType,
+  ProtocolType,
+  SUPPORTED_CLIENT_TYPES,
+  CLIENT_PROTOCOL_MAP,
+  getClientDisplayName,
+} from '@/lib/interfaces/download-client.interface';
 
 interface DownloadClient {
   id: string;
@@ -23,6 +29,8 @@ interface DownloadClient {
   remotePath?: string;
   localPath?: string;
   category?: string;
+  ownedCategory?: string; // set by the server (download-category.ts)
+  categoryInClient?: boolean; // wizard preview from the modal; display only
   customPath?: string;
   postImportCategory?: string;
 }
@@ -34,6 +42,12 @@ interface DownloadClientStepProps {
   onNext: () => void;
   onBack: () => void;
 }
+
+/** "qBittorrent, Transmission, or Deluge": every supported client of one protocol */
+const clientNames = (protocol: ProtocolType) =>
+  new Intl.ListFormat('en', { type: 'disjunction' }).format(
+    SUPPORTED_CLIENT_TYPES.filter((type) => CLIENT_PROTOCOL_MAP[type] === protocol).map(getClientDisplayName)
+  );
 
 export function DownloadClientStep({
   downloadClients,
@@ -71,7 +85,7 @@ export function DownloadClientStep({
           Configure Download Clients
         </h2>
         <p className="text-gray-600 dark:text-gray-400">
-          Add at least one download client. You can configure a torrent client (qBittorrent or Transmission) and/or a usenet client (SABnzbd or NZBGet) to search across all indexer types.
+          Add at least one download client. You can configure a torrent client ({clientNames('torrent')}) and/or a usenet client ({clientNames('usenet')}) to search across all indexer types.
         </p>
       </div>
 

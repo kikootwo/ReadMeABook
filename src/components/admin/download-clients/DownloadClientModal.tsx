@@ -5,13 +5,15 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { fetchWithAuth } from '@/lib/utils/api';
 import { DownloadClientType, getClientDisplayName, CLIENT_PROTOCOL_MAP } from '@/lib/interfaces/download-client.interface';
 import { MASKED_PASSWORD } from '@/lib/utils/saved-credential';
+import { categoryInputError, existsInClient, isSharedCategory, normalizeCategory, sameCategory } from '@/lib/utils/download-category';
+import { DownloadCategoryField } from './DownloadCategoryField';
 
 interface DownloadClientModalProps {
   isOpen: boolean;
@@ -31,6 +33,9 @@ interface DownloadClientModalProps {
     remotePath?: string;
     localPath?: string;
     category?: string;
+    ownedCategory?: string;
+    /** Wizard only: the display-only preview saved with the client */
+    categoryInClient?: boolean;
     customPath?: string;
     postImportCategory?: string;
   };
@@ -67,6 +72,7 @@ export function DownloadClientModal({
   const [postImportCategory, setPostImportCategory] = useState('');
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const [fetchingCategories, setFetchingCategories] = useState(false);
+  const categoryRequest = useRef(0); // only the newest category answer is shown
 
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -108,6 +114,7 @@ export function DownloadClientModal({
       }
       setTestResult(null);
       setErrors({});
+      categoryRequest.current++;
       setAvailableCategories([]);
       setFetchingCategories(false);
     }
@@ -129,6 +136,11 @@ export function DownloadClientModal({
       newErrors.password = 'API key is required';
     }
 
+    const categoryError = category.trim() ? categoryInputError(type, category) : 'Category is required';
+    if (categoryError) {
+      newErrors.category = categoryError;
+    }
+
     if (customPath.includes('..')) {
       newErrors.customPath = 'Path cannot contain ".."';
     }
@@ -147,6 +159,7 @@ export function DownloadClientModal({
   };
 
   const fetchCategories = async () => {
+    const ticket = ++categoryRequest.current;
     setFetchingCategories(true);
     try {
       const isPasswordMasked = password === MASKED_PASSWORD;
@@ -180,13 +193,13 @@ export function DownloadClientModal({
           });
 
       const data = await response.json();
-      if (response.ok && data.success) {
+      if (ticket === categoryRequest.current && response.ok && data.success) {
         setAvailableCategories(data.categories || []);
       }
     } catch {
       // Non-critical — categories are optional
     } finally {
-      setFetchingCategories(false);
+      if (ticket === categoryRequest.current) setFetchingCategories(false);
     }
   };
 
@@ -241,10 +254,7 @@ export function DownloadClientModal({
         const message = data.message || (data.version ? `Connected successfully (v${data.version})` : 'Connection successful');
         setTestResult({ success: true, message });
 
-        // Fetch categories for torrent clients after successful connection
-        if (type && CLIENT_PROTOCOL_MAP[type] === 'torrent') {
-          fetchCategories();
-        }
+        fetchCategories(); // suggestions and the "already in the client" note
       } else {
         setTestResult({ success: false, message: data.error || 'Connection test failed' });
       }
@@ -257,6 +267,19 @@ export function DownloadClientModal({
       setTesting(false);
     }
   };
+
+  const cleanCustomPath = customPath.replace(/^\/+|\/+$/g, '').trim();
+  const downloadsTo = cleanCustomPath ? `${downloadDir}/${cleanCustomPath}` : downloadDir;
+  // Edit mode: a saved category that isn't ReadMeABook's own shows the note before any Test. A wizard
+  // client has no ownership yet (setup complete decides), so only the client's list from its last save counts
+  const savedShared = mode === 'edit' && !!initialClient && sameCategory(category, initialClient.category)
+    && (apiMode === 'wizard'
+      ? !!initialClient.categoryInClient
+      : isSharedCategory(type, initialClient.category, initialClient.ownedCategory));
+  const categoryInClient = savedShared || existsInClient(type, category, availableCategories, initialClient?.ownedCategory);
+  const usenetFolder = categoryInClient && (type === 'sabnzbd' || type === 'nzbget')
+    ? `${typeName}'s “${normalizeCategory(type, category)}” folder (ReadMeABook must be able to read it)`
+    : null;
 
   const handleSave = async () => {
     if (!validate()) {
@@ -286,7 +309,8 @@ export function DownloadClientModal({
         remotePathMappingEnabled,
         remotePath: remotePathMappingEnabled ? remotePath : undefined,
         localPath: remotePathMappingEnabled ? localPath : undefined,
-        category,
+        category: category.trim(),
+        categoryInClient, // display-only preview for the wizard's card; the server decides ownership
         customPath: sanitizedCustomPath,
         postImportCategory,
       };
@@ -427,6 +451,16 @@ export function DownloadClientModal({
           </label>
         </div>
 
+        <DownloadCategoryField
+          type={type}
+          value={category}
+          onChange={setCategory}
+          error={errors.category}
+          suggestions={availableCategories}
+          inClient={categoryInClient}
+          downloadsTo={downloadsTo}
+        />
+
         {/* Custom Download Path */}
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -442,9 +476,7 @@ export function DownloadClientModal({
             Optional relative sub-path appended to the base download directory
           </p>
           <p className="mt-1 text-xs font-medium text-blue-600 dark:text-blue-400">
-            Downloads to: {customPath.replace(/^\/+|\/+$/g, '').trim()
-              ? `${downloadDir}/${customPath.replace(/^\/+|\/+$/g, '').trim()}`
-              : downloadDir}
+            Downloads to: {usenetFolder ?? downloadsTo}
           </p>
         </div>
 

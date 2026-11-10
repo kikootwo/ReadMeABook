@@ -81,7 +81,9 @@ Service uses singleton pattern for performance. When settings change (via admin 
 
 ## Category Management
 
-**Category:** `readmeabook` (auto-created for all torrents)
+**Category:** `readmeabook` by default, or the client's chosen category (#46). Created and synced only when it is RMAB's own (`readmeabook`, or `ownedCategory`); one that already existed in qBittorrent is never created or edited, and adds use Manual mode (`autoTMM=false` + `savepath` = RMAB's download folder). See [download-clients.md](download-clients.md#download-categories-46-579)
+- `ensureCategory()` returns the category (exact name only: qBittorrent names are case-sensitive and RMAB creates that spelling, so another app's `Audiobooks` or a hand-made `ReadMeABook` is never edited) or `null` (not ensured, list unreadable or not a plain object, or not RMAB's own → Manual mode)
+- `getCategories()` throws when qBittorrent can't be read
 
 **Save Path Synchronization:**
 - Category created/updated on every torrent addition

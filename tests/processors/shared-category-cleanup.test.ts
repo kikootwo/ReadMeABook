@@ -1,0 +1,292 @@
+/**
+ * Component: Download Cleanup in a Category ReadMeABook Did Not Create (real filesystem)
+ * Documentation: documentation/phase3/file-organization.md
+ *
+ * The mode comes from the job as the client reports it (its category and folder), never from the
+ * setting alone, and fails closed. ReadMeABook's own category keeps the whole-folder removal; any
+ * other job unlinks only the verified imported files and removes a folder only when it became
+ * empty, never above the job folder; a job with no folder of its own, or a client that can't be
+ * read, removes nothing.
+ */
+
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createPrismaMock } from '../helpers/prisma';
+import { parseSabCategories, sabCategoryFolder } from '@/lib/integrations/sabnzbd-categories';
+
+const prismaMock = createPrismaMock();
+const organizerMock = vi.hoisted(() => ({ organize: vi.fn(), organizeEbook: vi.fn() }));
+const jobQueueMock = vi.hoisted(() => ({ addNotificationJob: vi.fn(() => Promise.resolve()) }));
+const configMock = vi.hoisted(() => ({ getBackendMode: vi.fn(), get: vi.fn() }));
+const postProcess = vi.hoisted(() => vi.fn(async () => undefined));
+const usenet = vi.hoisted(() => ({
+  config: null as null | Record<string, unknown>,
+  job: null as null | Error | { category: string; downloadPath?: string },
+  categoryFolder: null as null | Error | string,
+}));
+
+vi.mock('@/lib/db', () => ({ prisma: prismaMock }));
+vi.mock('@/lib/utils/file-organizer', () => ({ getFileOrganizer: () => organizerMock }));
+vi.mock('@/lib/services/library', () => ({ getLibraryService: () => ({ triggerLibraryScan: vi.fn() }) }));
+vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => configMock }));
+vi.mock('@/lib/services/job-queue.service', () => ({ getJobQueueService: () => jobQueueMock }));
+vi.mock('@/lib/utils/format-coercion', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/utils/format-coercion')>()),
+  coerceToPlexCompatible: vi.fn(async (paths: string[]) => ({ renamed: [], warnings: [], errors: [], finalAudioFiles: paths })),
+}));
+vi.mock('@/lib/services/download-client-manager.service', () => ({
+  getDownloadClientManager: () => ({
+    getAllClients: async () => [],
+    getClientForProtocol: async () => usenet.config,
+    createFreshService: async () => ({
+      getDownload: async () => {
+        if (usenet.job instanceof Error) throw usenet.job;
+        return usenet.job;
+      },
+      getCategoryFolder: async () => {
+        if (usenet.categoryFolder instanceof Error) throw usenet.categoryFolder;
+        return usenet.categoryFolder;
+      },
+    }),
+    getClientServiceForProtocol: async () => ({ clientType: 'sabnzbd', postProcess }),
+  }),
+}));
+
+let root: string;
+let downloads: string;
+let media: string;
+
+function mkfile(filePath: string, content = 'audio-bytes'): string {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content);
+  return filePath;
+}
+
+function useCompletedDownload(downloadPath: string) {
+  const row = {
+    id: 'dh-1', requestId: 'req-1', indexerId: 7, downloadClientId: 'nzo_1', downloadClient: 'sabnzbd',
+    downloadStatus: 'completed', downloadPath, createdAt: new Date(),
+  };
+  prismaMock.downloadHistory.findFirst.mockResolvedValue(row);
+  prismaMock.downloadHistory.findUnique.mockImplementation(async ({ where }: { where?: { id?: string } }) =>
+    where?.id === row.id ? row : null
+  );
+}
+
+function organizeAllCopied(target: string, sources: string[], cover?: string) {
+  organizerMock.organize.mockResolvedValue({
+    coverRecord: cover ? { source: cover, target: path.join(target, 'cover.jpg'), status: 'copied', verified: true } : undefined,
+    success: true,
+    targetPath: target,
+    filesMovedCount: sources.length,
+    errors: [],
+    audioFiles: sources.map((s) => path.join(target, path.basename(s))),
+    records: sources.map((source) => ({ source, target: path.join(target, path.basename(source)), status: 'copied', verified: true })),
+    inventory: { kind: 'audio', files: sources, complete: true },
+  });
+}
+
+async function runOrganize(downloadPath: string) {
+  const { processOrganizeFiles } = await import('@/lib/processors/organize-files.processor');
+  return processOrganizeFiles({
+    requestId: 'req-1', audiobookId: 'a1', jobId: 'job-1', downloadPath, downloadHistoryId: 'dh-1',
+  } as Parameters<typeof processOrganizeFiles>[0]);
+}
+
+describe('cleanup in a usenet category ReadMeABook did not create', () => {
+  beforeAll(async () => {
+    await import('@/lib/processors/organize-files.processor');
+  }, 60000);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prismaMock.request.updateMany.mockResolvedValue({ count: 1 });
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rmab-shared-cat-')));
+    downloads = path.join(root, 'downloads');
+    media = path.join(root, 'media');
+    fs.mkdirSync(downloads, { recursive: true });
+    fs.mkdirSync(media, { recursive: true });
+    prismaMock.request.findUnique.mockResolvedValue({ id: 'req-1', userId: 'u1', type: 'audiobook', user: { plexUsername: 'tester' } });
+    prismaMock.audiobook.findUnique.mockResolvedValue({
+      id: 'a1', title: 'Book', author: 'Author', narrator: null, coverArtUrl: null, audibleAsin: null, year: 2020,
+    });
+    prismaMock.configuration.findUnique.mockImplementation(async ({ where }: { where?: { key?: string } }) => {
+      if (where?.key === 'media_dir') return { value: media };
+      if (where?.key === 'download_dir') return { value: downloads };
+      return null;
+    });
+    configMock.getBackendMode.mockResolvedValue('plex');
+    configMock.get.mockImplementation(async (key: string) =>
+      key === 'prowlarr_indexers' ? JSON.stringify([{ id: 7, protocol: 'usenet', removeAfterProcessing: true }]) : null
+    );
+    usenet.config = { type: 'sabnzbd', category: 'books' }; // no ownedCategory: it already existed
+    usenet.job = null;
+    usenet.categoryFolder = null;
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const target = () => path.join(media, 'Author', 'Book');
+  /** The job as SABnzbd reports it: in `category`, at `folder`; the category writes to `categoryFolder` */
+  const reports = (category: string, folder: string, categoryFolder: string | null | Error) => {
+    usenet.job = { category, downloadPath: folder };
+    usenet.categoryFolder = categoryFolder;
+  };
+
+  it('another app\'s file next to the job survives; only the imported files go', async () => {
+    const folder = path.join(downloads, 'other-app', 'Book.Name');
+    const parts = ['Book - 01.mp3', path.join('CD2', 'Book - 02.mp3')].map((n) => mkfile(path.join(folder, n)));
+    const foreign = mkfile(path.join(folder, 'Other Book.epub'), 'other app');
+    reports('books', folder, path.join(downloads, 'other-app'));
+    useCompletedDownload(folder);
+    organizeAllCopied(target(), parts);
+
+    await runOrganize(folder);
+
+    expect(parts.some((p) => fs.existsSync(p))).toBe(false);
+    expect(fs.existsSync(path.join(folder, 'CD2'))).toBe(false); // emptied by the import
+    expect(fs.readFileSync(foreign, 'utf8')).toBe('other app');
+    expect(postProcess).toHaveBeenCalledWith('nzo_1');
+  });
+
+  it('the job folder goes once empty, but never the other app\'s category folder above it', async () => {
+    const categoryFolder = path.join(downloads, 'books');
+    const folder = path.join(categoryFolder, 'Book.Name');
+    const parts = ['Part 1.mp3', '...And Then.mp3'].map((n) => mkfile(path.join(folder, n)));
+    const cover = mkfile(path.join(folder, 'cover.jpg'), 'jpeg');
+    reports('books', folder, categoryFolder);
+    useCompletedDownload(folder);
+    organizeAllCopied(target(), parts, cover);
+
+    await runOrganize(folder);
+
+    expect(fs.existsSync(folder)).toBe(false); // a name starting with ".." and the cover went too
+    expect(fs.existsSync(categoryFolder)).toBe(true);
+  });
+
+  it('ReadMeABook\'s own category keeps the whole-folder removal (extras go with it)', async () => {
+    usenet.config = { type: 'sabnzbd', category: 'books', ownedCategory: 'books' };
+    const folder = path.join(downloads, 'Book.Name');
+    const parts = ['Part 1.mp3'].map((n) => mkfile(path.join(folder, n)));
+    mkfile(path.join(folder, 'release.nfo'), 'nfo');
+    reports('Books', folder, new Error('not asked for an own category'));
+    useCompletedDownload(folder);
+    organizeAllCopied(target(), parts);
+
+    await runOrganize(folder);
+
+    expect(fs.existsSync(folder)).toBe(false);
+  });
+
+  it('switched back to readmeabook while the job was in another app\'s category: the job decides (careful)', async () => {
+    usenet.config = { type: 'sabnzbd', category: 'readmeabook' };
+    const folder = path.join(downloads, 'other-app', 'Book.Name');
+    const parts = ['Part 1.mp3'].map((n) => mkfile(path.join(folder, n)));
+    const foreign = mkfile(path.join(folder, 'notes.nfo'), 'other app');
+    reports('books', folder, path.join(downloads, 'other-app'));
+    useCompletedDownload(folder);
+    organizeAllCopied(target(), parts);
+
+    await runOrganize(folder);
+
+    expect(fs.existsSync(parts[0])).toBe(false);
+    expect(fs.readFileSync(foreign, 'utf8')).toBe('other app');
+  });
+
+  it('a job with no folder of its own (the category\'s folder) removes nothing: another app\'s .mp3 stays', async () => {
+    const folder = path.join(downloads, 'other-app');
+    const parts = ['Book - 01.mp3'].map((n) => mkfile(path.join(folder, n)));
+    const foreign = mkfile(path.join(folder, 'Other Book - 01.mp3'), 'other app audio');
+    reports('books', `${folder}/`, folder);
+    useCompletedDownload(folder);
+    organizeAllCopied(target(), [...parts, foreign]); // the organizer imports every audio file there
+
+    await runOrganize(folder);
+
+    expect(fs.readFileSync(foreign, 'utf8')).toBe('other app audio');
+    expect(fs.existsSync(parts[0])).toBe(true);
+    expect(postProcess).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the usenet client was removed', () => { usenet.config = null; }],
+    ['the usenet client was replaced by another type', () => { usenet.config = { type: 'nzbget', category: 'readmeabook' }; }],
+    ['the job can\'t be read', () => { usenet.job = new Error('ECONNREFUSED'); }],
+    ['the job reports no category', () => { usenet.job = { category: '', downloadPath: '/x' }; }],
+    ['the category\'s folder can\'t be read', () => { usenet.categoryFolder = new Error('ECONNREFUSED'); }],
+    ['the category\'s folder is unknown', () => { usenet.categoryFolder = null; }],
+  ])('%s: nothing is removed', async (_label, arrange) => {
+    const folder = path.join(downloads, 'books', 'Book.Name');
+    const parts = ['Part 1.mp3'].map((n) => mkfile(path.join(folder, n)));
+    reports('books', folder, path.join(downloads, 'books'));
+    arrange();
+    useCompletedDownload(folder);
+    organizeAllCopied(target(), parts);
+
+    await runOrganize(folder);
+
+    expect(fs.existsSync(parts[0])).toBe(true);
+    expect(postProcess).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['ReadMeABook\'s own category (whole folder)', 'readmeabook'],
+    ['another app\'s category (careful)', 'books'],
+  ])('a reused job id that now points at another job removes nothing: %s', async (_label, category) => {
+    const folder = path.join(downloads, 'books', 'Book.Name');
+    const parts = ['Part 1.mp3'].map((n) => mkfile(path.join(folder, n)));
+    reports(category, path.join(downloads, 'books', 'Some.Other.Job'), path.join(downloads, 'books'));
+    useCompletedDownload(folder);
+    organizeAllCopied(target(), parts);
+
+    await runOrganize(folder);
+
+    expect(fs.existsSync(parts[0])).toBe(true);
+    expect(postProcess).not.toHaveBeenCalled();
+  });
+});
+
+describe('chooseCleanupMode: the folders compared', () => {
+  const sab = (completeDir: string, dir: string) =>
+    sabCategoryFolder(completeDir, parseSabCategories([{ name: '*', dir: '' }, { name: 'books', dir }]), 'books');
+  const decide = async (jobPath: string, categoryFolder: string | null | Error) => {
+    usenet.config = { type: 'sabnzbd', category: 'books' };
+    usenet.job = { category: 'books', downloadPath: jobPath };
+    usenet.categoryFolder = categoryFolder;
+    const { chooseCleanupMode } = await import('@/lib/processors/shared-category-cleanup');
+    return chooseCleanupMode('sabnzbd', 'nzo_1', jobPath, configMock as never);
+  };
+
+  it.each([
+    ['SABnzbd\'s default relative complete_dir', '/config/Downloads/complete/books', () => sab('Downloads/complete', 'books*')],
+    ['a category dir of ../shared', '/data/shared', () => sab('/data/complete', '../shared*')],
+    ['a category dir of ./books', '/data/complete/books', () => sab('/data/complete', './books*')],
+    ['a Windows drive path in another case', 'c:/data/complete/books', () => sab('C:\\Data\\Complete', 'books*')],
+    ['a trailing slash on the job folder', '/data/complete/books/', () => sab('/data/complete', 'books*')],
+    ['the plain absolute layout', '/data/complete/books', () => sab('/data/complete', 'books*')],
+    ['a job folder reported as a relative path', 'complete/books/Book.Name', () => '/data/complete/books'],
+  ])('no folder of its own, or one that can\'t be told: skip (%s)', async (_label, jobPath, folder) => {
+    expect((await decide(jobPath, folder())).mode).toBe('skip');
+  });
+
+  it('a real job folder under an absolute category folder still gets the careful removal', async () => {
+    expect(await decide('/data/complete/books/Book.Name', sab('/data/complete', 'books'))).toEqual({ mode: 'careful' });
+    expect(await decide('D:\\Complete\\Books\\Book.Name\\', sab('D:\\Complete', 'books'))).toEqual({ mode: 'careful' });
+  });
+
+  it('the skip names the cause, with no query string or credentials from the error', async () => {
+    usenet.config = { type: 'sabnzbd', category: 'books' };
+    usenet.job = new Error('connect ECONNREFUSED 10.0.0.5:8080 at http://user:pw@sab:8080/api?apikey=SECRETKEY&mode=history');
+    const { chooseCleanupMode } = await import('@/lib/processors/shared-category-cleanup');
+    const read = await chooseCleanupMode('sabnzbd', 'nzo_1', '/data/complete/books/Book.Name', configMock as never);
+    expect(read).toMatchObject({ mode: 'skip', reason: expect.stringContaining('ECONNREFUSED 10.0.0.5:8080') });
+    expect(JSON.stringify(read)).not.toMatch(/SECRETKEY|apikey|user:pw/);
+
+    const folder = await decide('/data/complete/books/Book.Name', new Error('Failed to get SABnzbd categories: timeout of 30000ms exceeded'));
+    expect(folder).toMatchObject({ mode: 'skip', reason: expect.stringContaining('timeout of 30000ms exceeded') });
+  });
+});

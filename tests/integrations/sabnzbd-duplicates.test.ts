@@ -59,7 +59,7 @@ function fakeSab(initial: { queue?: RawQueueSlot[]; history?: RawHistorySlot[]; 
 
   clientMock.get.mockImplementation(async (_path: string, { params }: SabRequest) => {
     if (params.mode === 'get_config') {
-      return { data: { config: { version: '4.5.5', misc: { complete_dir: '/sab/complete' }, categories: { [CATEGORY]: { dir: '' } } } } };
+      return { data: { config: { version: '4.5.5', misc: { complete_dir: '/sab/complete' }, categories: { '*': { dir: '' }, [CATEGORY]: { dir: '' } } } } };
     }
     if (params.mode === 'queue' && params.name === 'delete') {
       state.queueDeletes.push(params.value);

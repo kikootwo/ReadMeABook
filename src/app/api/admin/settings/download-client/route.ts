@@ -126,6 +126,7 @@ export async function PUT(request: NextRequest) {
           remotePath: remotePath || undefined,
           localPath: localPath || undefined,
           category: existingIndex >= 0 ? existingClients[existingIndex].category : 'readmeabook',
+          ownedCategory: existingIndex >= 0 ? existingClients[existingIndex].ownedCategory : undefined,
         };
 
         // Update or add client

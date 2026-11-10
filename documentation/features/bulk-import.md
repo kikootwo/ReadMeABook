@@ -8,7 +8,18 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 ## Flow
 1. **Select Folder** — Browse base folders (Downloads, Media Library, Book Drop), pick scan root
 2. **Scan & Match** — Recursively discover audiobook folders (max 10 levels), read metadata via ffprobe, search Audible per book (1.5s rate limit)
-3. **Review & Import** — Scrollable list with skip toggles, library status, confidence badges; Start Import queues organize_files jobs
+3. **Review & Import** — Scrollable list with skip toggles, library status, confidence badges, **Change match / Find match** per row (#189); Start Import queues organize_files jobs
+
+## Change match / Find match (#189)
+- **Rows with the control:** matched (incl. Low Confidence) and Requested rows → "Change match"; No Match rows → "Find match". **None** on In Library rows or rows with `inMediaFolder` (`canChangeMatch`, `row-match.ts`)
+- **Dialog** (`ChangeMatchDialog.tsx`, absolute overlay inside the wizard panel): one search field ("Title, author or ASIN", `text-base sm:text-sm`), pre-filled with the row's `searchTerm` cut to `MATCH_QUERY_MAX_LENGTH` (200; also the field's `maxLength`). A row with a book searches on open; a No Match row waits for Search/Enter. One request in flight: a new Search replaces one still loading (the last is aborted). Results: cover, title, author · narrator, ASIN · duration; In Library / Requested hits show the badge and are disabled. Polite live region: `Searching…`, `N results`, `No results`, `Nothing came back for <ASIN> from <store>` (the Audible service answers an outage with nothing, so empty answers are worded to be true either way), `Couldn't reach Audible. Try again.` (route 502). Phones (below `sm`): once results show, focus moves from the field to the panel so the keyboard drops. Esc, × or a click on the dimmed panel (press and release both on it; a drag out of the field doesn't close) closes it; Tab stays inside; focus returns to the row's button
+- **Typed ASIN:** `TYPED_ASIN_PATTERN` `^(B0[A-Z0-9]{8}|\d{9}[\dX])$` (i, trimmed, upper-cased; `asin.ts`); a 10-letter title stays a text search. Region: the configured one
+- **Row state (client only, never stored):** `chosen: { match }` beside the scan's `match` (kept for Undo). Effective match = `chosen ?? match`; a changed row has no In Library/Requested flags, no Low Confidence badge, is included, and shows "Undo" (back to the scan match and its default skip). Picking the scan's own ASIN = no change, unless the scan flagged it In Library/Requested and the dialog found it free: then it is kept as a pick (no stale flag, can be skipped, Undo). A reload, Back or rescan drops changes
+- **Same book twice:** included rows sharing an effective ASIN get an amber `SAME_BOOK_MARKER` badge ("Same book as another row: change or skip one") and are held back (`splitForImport`): not in "N books to import", never sent; with only marked rows included Start Import is disabled; the finished screen lists them as "Same book as another row". Execute refuses every repeated row as the backstop. Merging is not offered: a book split across folders (Part 1, Part 2) imports whole only after its parts are moved into one folder and scanned again (the scanner folds them into one entry); skipping one part imports a partial book under the full book's ASIN
+- **Dimming:** a skipped row dims cover, text and badges only; Change match, Find match and Undo stay full strength
+- **While importing:** Change match and Undo are disabled
+- **Backdrop:** while the dialog is open or any row is changed, a click on the wizard backdrop does nothing (× still closes); on the finished screen it closes again
+- **Finished screen:** queued count + rows not queued with reasons (refused by execute, then held back); nothing queued → "Nothing Queued", grey icon, no success text
 
 ## Key Details
 - **Access:** Admin-only, modal opened from admin dashboard Quick Actions
@@ -28,7 +39,8 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 - **Scan depth:** Max 10 levels recursion
 - **Language filter:** never applied; scan text searches pass `ignoreLanguageFilter: true` ([audible-language-filter.md](../integrations/audible-language-filter.md))
 - **Rate limiting:** 1.5s delay between Audible searches (same as existing scraping rate limit)
-- **Library check:** Uses `findPlexMatch()` for ASIN-based availability detection
+- **Library check:** `getImportBlocks()` (`bulk-import-checks.ts`): In Library = `plex_library.asin` equal ignoring case (`mode: 'insensitive'` in the query) or the ASIN in `plex_guid` (as `findPlexMatch`); Requested = any user's request in `IMPORT_BLOCKING_STATUSES` (`request-statuses.ts`: pending, searching, downloading, processing, awaiting_search, awaiting_import, awaiting_approval, downloaded, available). One query per table for any number of ASINs; the scan, the match route and execute share it
+- **Media-folder rows:** `inMediaFolder` = the folder or the folder of any `audioFiles` entry is under the media root (`getMediaDir()`), after `realpath`; the deepest root decides (downloads nested in media count as downloads), media wins a tie (download_dir = media_dir). UI only: execute has no media check (admins may bulk-import from the media folder)
 - **Import:** Reuses existing `organize_files` job queue (same as manual import)
 - **No new database tables** — all state is ephemeral during wizard session
 
@@ -38,13 +50,25 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 - Body: `{ rootPath: string }`
 - Path validation: must be within download_dir, media_dir, or /bookdrop
 - Streams events: `progress`, `discovery_complete`, `matching`, `book_matched`, `complete`, `error`
-- Each `book_matched` event includes: folderPath, match (Audible data), inLibrary, hasActiveRequest, metadataSource
+- Each `book_matched` event includes: folderPath, match (Audible data), inLibrary, hasActiveRequest (only when not inLibrary), inMediaFolder, metadataSource
+
+**GET /api/admin/bulk-import/match?q=** (admin session only; not on the API token allowlist, so a token gets 403)
+- `q` 1-200 chars trimmed, else 400. Typed ASIN → `resolveBookByAsin` (audiobooks row → audible_cache → `getAudiobookDetails(asin, { fillSeries: false })`); else `search(q, 1, { ignoreLanguageFilter: true })`, first 20 (`MATCH_RESULT_LIMIT`)
+- Returns `{ kind: 'asin'|'search', asin: string|null, store: 'audible.com'|..., results: [{ asin, title, author, narrator?, coverArtUrl?, durationMinutes?, inLibrary, hasActiveRequest }] }`; anything that throws (in practice a database error: `search`/`getAudiobookDetails` catch Audible failures and answer empty/null, so an outage reads as no results) → 502 `{ error: 'Audible lookup failed' }`. Calls only Audible/Audnexus hosts the app already calls
 
 **POST /api/admin/bulk-import/execute**
-- Body: `{ imports: Array<{ folderPath: string, asin: string }> }`
+- Body: `{ imports: Array<{ folderPath: string, asin: string, audioFiles?: string[] }> }`
 - Creates audiobook records + requests, queues organize_files jobs
-- Recycles the book's newest audiobook request of **any** user (`failed`/`warn`/`cancelled`/`denied`/`pending`/`awaiting_search`/`awaiting_approval`/`downloaded`/`available`), else creates one for the admin. Guarded on the exact status that was read: a row that changed meanwhile -> that item `{ success: false, error: 'Request changed while importing; try again' }`, no job queued, other items continue (#232)
-- Recycling another user's `awaiting_approval`, `denied` or `cancelled` request sets `Request.approvalBypassedBy = bulk_import:<status>` (status, notifications and delivery unchanged); the importing admin's own request is never recorded. A recorded request is never given a requester tag, and neither is a request the import creates for the importing admin when there is none to recycle ([requester-tags.md](requester-tags.md)). See [database.md](../backend/database.md#requests)
+- **Every row, in this order** (no flag; changed and scan-matched rows alike, #189/#588); a refusal is `{ success: false, error }` for that row, nothing written, other rows continue:
+  1. ASIN shape (`asinShaped`, upper-cased) → `Invalid ASIN`; a missing ASIN runs no lookup (#588: `findFirst` with an undefined ASIN matched any book)
+  2. ASIN named by another row of the call → `Same book as another row` (every such row)
+  3. Folder under a root / is a directory / has audio (existing messages)
+  4. Resolve (audiobooks row → audible_cache → live) → `Audiobook not found` / `Failed to fetch audiobook details`
+  5. In the library → `Already in your library`
+  6. Any user's request in `IMPORT_BLOCKING_STATUSES` → `Already requested`; checked again just before the write on any audiobooks row with the ASIN (`audible_asin` is not unique), and on this row's newest request
+- Reasons: `BULK_IMPORT_REFUSAL` (`src/lib/constants/bulk-import.ts`), shown per row on the finished screen (mapped by index)
+- Then recycles the book's newest audiobook request of **any** user when it is `failed`/`warn`/`cancelled`/`denied`, else creates one for the admin. Guarded on the exact status that was read: a row that changed meanwhile -> that item `{ success: false, error: 'Request changed while importing; try again' }`, no job queued, other items continue (#232). Before #189 it also recycled `pending`/`awaiting_search`/`awaiting_approval`/`downloaded`/`available` (rows the review screen already blocked)
+- Recycling another user's `denied` or `cancelled` request sets `Request.approvalBypassedBy = bulk_import:<status>` (status, notifications and delivery unchanged); the importing admin's own request is never recorded. A recorded request is never given a requester tag, and neither is a request the import creates for the importing admin when there is none to recycle ([requester-tags.md](requester-tags.md)). See [database.md](../backend/database.md#requests)
 - Returns: `{ success, results[], summary: { total, succeeded, failed } }`
 
 ## SSE Event Types
@@ -63,10 +87,13 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 | State | Visual |
 |---|---|
 | Normal (will import) | Full opacity, blue toggle ON |
-| Skipped by user | 40% opacity, gray toggle OFF |
-| Already in library | 40% opacity, green "In Library" badge, toggle disabled |
-| Active request exists | 40% opacity, purple "Requested" badge, toggle disabled |
-| No Audible match | Red "No Match" badge, folder name shown, pre-skipped |
+| Skipped by user | Cover/text 40% opacity, gray toggle OFF; controls full strength |
+| Already in library | Cover/text 40% opacity, green "In Library" badge, toggle disabled, no Change match |
+| Active request exists | Cover/text 40% opacity, purple "Requested" badge, toggle disabled, "Change match" |
+| No Audible match | Red "No Match" badge, folder name shown, pre-skipped, "Find match" |
+| Changed (book picked) | Picked cover/title/author · narrator, no flags, included, "Undo" |
+| Same book as another included row | Amber "Same book as another row: change or skip one" badge; held back (not counted, not sent) |
+| In the media folder | No Change match / Find match |
 | ASIN extracted from folder name | No badge (high confidence — direct ASIN lookup) |
 | Low confidence (folder name or file name fallback, no ASIN) | Amber "Low Confidence" badge |
 
@@ -80,6 +107,9 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 - `src/lib/utils/bulk-import-asin.ts` — All-digit ASIN candidate (`extractDigitAsinCandidate`) + title check (`catalogTitleFitsFolder`)
 - `src/app/api/admin/bulk-import/scan/route.ts` — SSE scan endpoint
 - `src/app/api/admin/bulk-import/execute/route.ts` — Batch import endpoint
+- `src/app/api/admin/bulk-import/match/route.ts` — Change match search / typed ASIN
+- `src/lib/utils/bulk-import-checks.ts` — `getImportBlocks`, `resolveBookByAsin`, `loadImportRoots`/`rootKind`/`isInMediaFolder`
+- `src/lib/constants/bulk-import.ts` — refusal reasons, match limits (client-safe)
 
 **Frontend:**
 - `src/components/admin/BulkImportWizard.tsx` — Modal orchestrator
@@ -87,11 +117,15 @@ Lets admins scan a server folder recursively, discover audiobook subfolders, mat
 - `src/components/admin/bulk-import/ScanFolderStep.tsx` — Folder browser
 - `src/components/admin/bulk-import/ScanProgressStep.tsx` — Progress display
 - `src/components/admin/bulk-import/MatchReviewStep.tsx` — Review list + import
+- `src/components/admin/bulk-import/ChangeMatchDialog.tsx` — Change match / Find match dialog
+- `src/components/admin/bulk-import/ImportResultsView.tsx` — Finished screen (refused rows + reasons)
+- `src/components/admin/bulk-import/row-match.ts` — Effective match, eligibility, Undo, payload, shared ASINs, `splitForImport` (send / held back)
 
 **Modified:**
 - `src/app/admin/page.tsx` — Added Bulk Import quick action + modal
 
 ## Fixed Issues
+- **Row without an ASIN imported an arbitrary book (#588):** execute looked the row up with `audibleAsin: undefined`, which Prisma drops, so `findFirst` returned any audiobook. Fixed: ASIN shape checked first, no lookup
 - **All-digit ASINs ignored (#280):** only `B` ASINs were read, so an ISBN-10 ASIN (also in the default `{title} {asin}` folder, no brackets) fell to a text search that could pick another book. Fixed: read as a candidate, confirmed by the catalog title (above)
 
 ## Related
