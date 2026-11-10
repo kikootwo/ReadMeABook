@@ -1,6 +1,6 @@
 /**
  * Local Login Endpoint
- * Documentation: documentation/features/audiobookshelf-integration.md
+ * Documentation: documentation/backend/services/auth.md
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -8,6 +8,7 @@ import { LocalAuthProvider } from '@/lib/services/auth/LocalAuthProvider';
 import { RMABLogger } from '@/lib/utils/logger';
 import { readJsonBody, AUTH_JSON_BODY_LIMIT_BYTES } from '@/lib/utils/request-body';
 import { PENDING_APPROVAL_MESSAGE } from '@/lib/services/auth/local-account-status';
+import { createSignInGuard, loggedUsername, tooManyAttemptsResponse } from '@/lib/services/auth/signin-guard';
 
 const logger = RMABLogger.create('API.Auth.LocalLogin');
 
@@ -25,21 +26,25 @@ export async function POST(request: NextRequest) {
     if (!bodyResult.ok) return bodyResult.response;
     const { username, password } = bodyResult.data;
 
-    if (!username || !password) {
+    if (!username || !password || typeof username !== 'string' || typeof password !== 'string') {
       return NextResponse.json(
         { error: 'Username and password are required' },
         { status: 400 }
       );
     }
 
-    logger.info('Attempting login', { username });
+    logger.info('Attempting login', { username: loggedUsername(username) });
 
+    const guard = createSignInGuard(request);
     const provider = new LocalAuthProvider();
-    const result = await provider.handleCallback({ username, password });
+    const result = await provider.handleCallback({ username, password, guard });
 
     if (!result.success) {
+      if (result.retryAfterSeconds !== undefined) {
+        return tooManyAttemptsResponse(result.error ?? 'Too many sign-in attempts', result.retryAfterSeconds);
+      }
       if (result.requiresApproval) {
-        logger.info('Account pending approval', { username });
+        logger.info('Account pending approval', { username: loggedUsername(username) });
         return NextResponse.json({
           success: false,
           pendingApproval: true,
@@ -53,17 +58,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    logger.info('Login successful', { username });
+    logger.info('Login successful', { username: loggedUsername(username) });
     logger.debug('User data', { user: result.user });
     logger.debug('Token generated successfully');
 
     // Return tokens for login
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       user: result.user,
       accessToken: result.tokens!.accessToken,
       refreshToken: result.tokens!.refreshToken,
     });
+    guard.remember(response);
+    return response;
   } catch (error) {
     logger.error('Error', { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(

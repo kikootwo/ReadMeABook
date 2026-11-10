@@ -1,9 +1,9 @@
 /**
  * Local Auth Provider (Username/Password)
- * Documentation: documentation/features/audiobookshelf-integration.md
+ * Documentation: documentation/backend/services/auth.md
  */
 
-import bcrypt from 'bcrypt';
+import { verifyPassword, type SignInGuard } from './signin-guard';
 import {
   IAuthProvider,
   LoginInitiation,
@@ -14,7 +14,6 @@ import {
 } from './IAuthProvider';
 import { generateAccessToken, generateRefreshToken } from '@/lib/utils/jwt';
 import { getConfigService } from '@/lib/services/config.service';
-import { getEncryptionService } from '@/lib/services/encryption.service';
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { getRegistrationRefusal, REJECTED_ACCOUNT_ERROR } from './local-account-status';
@@ -25,6 +24,8 @@ const logger = RMABLogger.create('LocalAuth');
 interface LocalLoginParams extends CallbackParams {
   username: string;
   password: string;
+  /** Sign-in attempt limits; required (a call without one is refused) */
+  guard: SignInGuard;
 }
 
 interface RegisterParams {
@@ -35,7 +36,6 @@ interface RegisterParams {
 export class LocalAuthProvider implements IAuthProvider {
   type: 'local' = 'local';
   private configService = getConfigService();
-  private encryptionService = getEncryptionService();
 
   /**
    * Initiate login (no-op for local auth)
@@ -50,7 +50,13 @@ export class LocalAuthProvider implements IAuthProvider {
    */
   async handleCallback(params: CallbackParams): Promise<AuthResult> {
     try {
-      const { username, password } = params as LocalLoginParams;
+      const { username, password, guard } = params as LocalLoginParams;
+
+      // No guard means no attempt limits: refuse rather than check the password
+      if (!guard) {
+        logger.error('Sign-in refused: no attempt-limit guard was passed');
+        return { success: false, error: 'Invalid username or password' };
+      }
 
       if (!username || !password) {
         return { success: false, error: 'Username and password required' };
@@ -67,11 +73,20 @@ export class LocalAuthProvider implements IAuthProvider {
         },
       });
 
-      if (!user) {
+      const attempt = guard.begin(normalizedUsername, user ?? null);
+      if (!attempt.ok) {
+        return { success: false, error: attempt.error, retryAfterSeconds: attempt.retryAfterSeconds };
+      }
+
+      // Unknown names are checked against a dummy hash, so they answer like a wrong password
+      const passwordValid = await verifyPassword(user ?? null, password);
+      guard.settle(passwordValid);
+
+      if (!user || !passwordValid) {
         return { success: false, error: 'Invalid username or password' };
       }
 
-      // Check registration status
+      // Registration status is checked after the password, as on the admin route
       const refusal = getRegistrationRefusal(user.registrationStatus);
       if (refusal === 'pending_approval') {
         return {
@@ -82,21 +97,6 @@ export class LocalAuthProvider implements IAuthProvider {
 
       if (refusal === 'rejected') {
         return { success: false, error: REJECTED_ACCOUNT_ERROR };
-      }
-
-      // Verify password
-      let passwordValid = false;
-      try {
-        // Decrypt the stored hash
-        const decryptedHash = this.encryptionService.decrypt(user.authToken || '');
-        passwordValid = await bcrypt.compare(password, decryptedHash);
-      } catch (error) {
-        logger.error('Password verification failed', { error: error instanceof Error ? error.message : String(error) });
-        return { success: false, error: 'Invalid username or password' };
-      }
-
-      if (!passwordValid) {
-        return { success: false, error: 'Invalid username or password' };
       }
 
       // Update last login

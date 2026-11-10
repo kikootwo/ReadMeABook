@@ -25,9 +25,10 @@ const makeRequest = (body: any, headers?: Record<string, string>) => ({
 });
 
 describe('Local auth routes', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     delete process.env.DISABLE_LOCAL_LOGIN;
+    (await import('@/lib/utils/rateLimit'))._resetBuckets();
   });
 
   it('rejects login when local auth is disabled', async () => {
@@ -89,7 +90,7 @@ describe('Local auth routes', () => {
     });
     const { POST } = await import('@/app/api/auth/register/route');
 
-    const request = makeRequest({ username: 'user', password: 'pass' }, { 'x-forwarded-for': 'ip-1' });
+    const request = makeRequest({ username: 'user', password: 'pass' }, { 'x-forwarded-for': '203.0.113.1' });
     const response = await POST(request as any);
     const payload = await response.json();
 
@@ -106,7 +107,7 @@ describe('Local auth routes', () => {
     });
     const { POST } = await import('@/app/api/auth/register/route');
 
-    const request = makeRequest({ username: 'user', password: 'pass' }, { 'x-forwarded-for': 'ip-2' });
+    const request = makeRequest({ username: 'user', password: 'pass' }, { 'x-forwarded-for': '203.0.113.2' });
     for (let i = 0; i < 5; i += 1) {
       const response = await POST(request as any);
       expect(response.status).toBe(200);
@@ -117,6 +118,25 @@ describe('Local auth routes', () => {
 
     expect(blocked.status).toBe(429);
     expect(payload.error).toMatch(/Too many registration attempts/);
+    expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0);
+
+    // Another address is still allowed
+    const other = makeRequest({ username: 'user', password: 'pass' }, { 'x-forwarded-for': '203.0.113.20' });
+    expect((await POST(other as any)).status).toBe(200);
+  });
+
+  it('counts sign-ups by the address the proxy appended, whatever comes before it', async () => {
+    localAuthProviderMock.register.mockResolvedValue({ success: false, error: 'That username is already taken' });
+    const { POST } = await import('@/app/api/auth/register/route');
+
+    const prefixes = ['made-up', '198.51.100.1', '10.0.0.1, 192.0.2.44', 'unknown', '[::1]'];
+    for (const prefix of prefixes) {
+      const request = makeRequest({ username: 'user', password: 'pass' }, { 'x-forwarded-for': `${prefix}, 203.0.113.9` });
+      expect((await POST(request as any)).status).toBe(400);
+    }
+
+    const sixth = makeRequest({ username: 'user', password: 'pass' }, { 'x-forwarded-for': 'another, 203.0.113.9' });
+    expect((await POST(sixth as any)).status).toBe(429);
   });
 
   describe('request size limit (64 KB)', () => {
@@ -133,7 +153,7 @@ describe('Local auth routes', () => {
     it('returns 413 for an oversized login body without checking credentials', async () => {
       const { POST } = await import('@/app/api/auth/local/login/route');
 
-      const response = await POST(await realRequest('/api/auth/local/login', 'ip-3'));
+      const response = await POST(await realRequest('/api/auth/local/login', '203.0.113.3'));
 
       expect(response.status).toBe(413);
       expect(await response.json()).toEqual({ error: 'PayloadTooLarge', message: 'Request body is larger than 64 KB' });
@@ -143,7 +163,7 @@ describe('Local auth routes', () => {
     it('returns 413 for an oversized registration body without registering', async () => {
       const { POST } = await import('@/app/api/auth/register/route');
 
-      const response = await POST(await realRequest('/api/auth/register', 'ip-4'));
+      const response = await POST(await realRequest('/api/auth/register', '203.0.113.4'));
 
       expect(response.status).toBe(413);
       expect(localAuthProviderMock.register).not.toHaveBeenCalled();

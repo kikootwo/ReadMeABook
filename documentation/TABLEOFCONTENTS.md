@@ -13,6 +13,7 @@
 - **Route protection, auth guards** → [frontend/routing-auth.md](frontend/routing-auth.md)
 - **Login page UI/UX** → [frontend/pages/login.md](frontend/pages/login.md)
 - **Credential recovery (lost CONFIG_ENCRYPTION_KEY, locked-out admin)** → [admin-features/credential-recovery.md](admin-features/credential-recovery.md)
+- **Sign-in and sign-up attempt limits, known-browser cookie, client address key, rate-limit namespaces** → [backend/services/auth.md](backend/services/auth.md#local-admin-authentication), [deployment/unified.md](deployment/unified.md#security-notes)
 
 ## Configuration & Setup
 - **First-time setup wizard** → [setup-wizard.md](setup-wizard.md)

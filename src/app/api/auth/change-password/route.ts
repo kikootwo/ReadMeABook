@@ -10,6 +10,7 @@ import bcrypt from 'bcrypt';
 import { getEncryptionService } from '@/lib/services/encryption.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { readJsonBody } from '@/lib/utils/request-body';
+import { formatRetryAfter, refund, reserve } from '@/lib/utils/rateLimit';
 
 const logger = RMABLogger.create('API.Auth.ChangePassword');
 
@@ -137,8 +138,25 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      // 10 current-password checks per 15 minutes per user, refunded when it is right
+      const attempt = reserve([{ namespace: 'password-change', key: user.id }]);
+      if (!attempt.ok) {
+        if (attempt.refusal.firstRefusal) {
+          logger.warn('Password change attempts paused', { userId: user.id });
+        }
+        const { retryAfterSeconds } = attempt.refusal;
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Too many password attempts. Try again in ${formatRetryAfter(retryAfterSeconds)}.`,
+          },
+          { status: 429, headers: { 'Retry-After': String(retryAfterSeconds) } }
+        );
+      }
+
       // Verify current password
       const currentPasswordValid = await bcrypt.compare(currentPassword, decryptedHash);
+      if (currentPasswordValid) refund(attempt.reservations);
 
       if (!currentPasswordValid) {
         return NextResponse.json(

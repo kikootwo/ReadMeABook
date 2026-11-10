@@ -34,6 +34,9 @@ vi.mock('bcrypt', () => ({
   hash: bcryptHash,
 }));
 
+// A guard that allows every attempt; the limits themselves are tested in tests/api/sign-in-limits.routes.test.ts
+const allowAll = () => ({ begin: vi.fn(() => ({ ok: true as const })), settle: vi.fn(), remember: vi.fn() });
+
 describe('LocalAuthProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -55,7 +58,7 @@ describe('LocalAuthProvider', () => {
 
     const { LocalAuthProvider } = await import('@/lib/services/auth/LocalAuthProvider');
     const provider = new LocalAuthProvider();
-    const result = await provider.handleCallback({ username: 'user', password: 'pass' });
+    const result = await provider.handleCallback({ username: 'user', password: 'pass', guard: allowAll() });
 
     expect(result.success).toBe(true);
     expect(result.user?.authProvider).toBe('local');
@@ -66,7 +69,7 @@ describe('LocalAuthProvider', () => {
   it('rejects login when credentials are missing', async () => {
     const { LocalAuthProvider } = await import('@/lib/services/auth/LocalAuthProvider');
     const provider = new LocalAuthProvider();
-    const result = await provider.handleCallback({ username: '', password: '' });
+    const result = await provider.handleCallback({ username: '', password: '', guard: allowAll() });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('Username and password required');
@@ -83,10 +86,11 @@ describe('LocalAuthProvider', () => {
       registrationStatus: 'pending_approval',
       deletedAt: null,
     });
+    bcryptCompare.mockResolvedValue(true);
 
     const { LocalAuthProvider } = await import('@/lib/services/auth/LocalAuthProvider');
     const provider = new LocalAuthProvider();
-    const result = await provider.handleCallback({ username: 'user', password: 'pass' });
+    const result = await provider.handleCallback({ username: 'user', password: 'pass', guard: allowAll() });
 
     expect(result.success).toBe(false);
     expect(result.requiresApproval).toBe(true);
@@ -103,10 +107,11 @@ describe('LocalAuthProvider', () => {
       registrationStatus: 'rejected',
       deletedAt: null,
     });
+    bcryptCompare.mockResolvedValue(true);
 
     const { LocalAuthProvider } = await import('@/lib/services/auth/LocalAuthProvider');
     const provider = new LocalAuthProvider();
-    const result = await provider.handleCallback({ username: 'user', password: 'pass' });
+    const result = await provider.handleCallback({ username: 'user', password: 'pass', guard: allowAll() });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('rejected');
@@ -127,7 +132,7 @@ describe('LocalAuthProvider', () => {
 
     const { LocalAuthProvider } = await import('@/lib/services/auth/LocalAuthProvider');
     const provider = new LocalAuthProvider();
-    const result = await provider.handleCallback({ username: 'user', password: 'bad' });
+    const result = await provider.handleCallback({ username: 'user', password: 'bad', guard: allowAll() });
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/invalid username or password/i);
@@ -150,7 +155,7 @@ describe('LocalAuthProvider', () => {
 
     const { LocalAuthProvider } = await import('@/lib/services/auth/LocalAuthProvider');
     const provider = new LocalAuthProvider();
-    const result = await provider.handleCallback({ username: 'user', password: 'pass' });
+    const result = await provider.handleCallback({ username: 'user', password: 'pass', guard: allowAll() });
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/invalid username or password/i);
@@ -161,7 +166,7 @@ describe('LocalAuthProvider', () => {
 
     const { LocalAuthProvider } = await import('@/lib/services/auth/LocalAuthProvider');
     const provider = new LocalAuthProvider();
-    const result = await provider.handleCallback({ username: 'user', password: 'pass' });
+    const result = await provider.handleCallback({ username: 'user', password: 'pass', guard: allowAll() });
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/invalid username or password/i);
@@ -183,7 +188,7 @@ describe('LocalAuthProvider', () => {
 
     const { LocalAuthProvider } = await import('@/lib/services/auth/LocalAuthProvider');
     const provider = new LocalAuthProvider();
-    await provider.handleCallback({ username: 'Admin', password: 'pass' });
+    await provider.handleCallback({ username: 'Admin', password: 'pass', guard: allowAll() });
 
     expect(prismaMock.user.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({

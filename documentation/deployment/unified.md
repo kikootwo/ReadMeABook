@@ -697,6 +697,7 @@ docker volume rm readmeabook-pgdata readmeabook-redis readmeabook-cache
 5. **No external DB access:** PostgreSQL bound to 127.0.0.1
 6. **No external Redis access:** Redis bound to 127.0.0.1
 7. **Use reverse proxy:** HTTPS termination (Nginx, Caddy, Traefik)
+8. **Client address behind a proxy:** sign-in, sign-up and token-login limits count per client address, read from the right of `X-Forwarded-For` (first public entry). Proxies should append to it (nginx `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`). Behind a tunnel (Cloudflare, Tailscale), Traefik or Caddy must trust the tunnel connector's address (Traefik `forwardedHeaders.trustedIPs`, Caddy `trusted_proxies`), or every client shares the connector's address and one address limit. On a directly published port the client chooses the header, so the per-account limit is what bounds password guesses. Details: [auth.md](../backend/services/auth.md) Sign-in attempt limits
 
 ## Fixed Issues ✅
 

@@ -79,6 +79,18 @@ function getSecrets(): JwtSecrets {
   return resolvedSecrets;
 }
 
+const PURPOSE_KEY_SALT = 'readmeabook:purpose-key-derivation';
+const PURPOSE_KEY_BYTES = 32;
+
+/**
+ * A 32-byte key for one purpose (e.g. 'known-browser:v1'), derived by HKDF-SHA256 from the
+ * access-token secret. Each label gives a different key, and none of them is the secret itself.
+ */
+export function derivePurposeKey(label: string): Buffer {
+  const derived = crypto.hkdfSync('sha256', getSecrets().access, PURPOSE_KEY_SALT, `readmeabook:${label}`, PURPOSE_KEY_BYTES);
+  return Buffer.from(derived);
+}
+
 export interface TokenPayload {
   sub: string; // User ID
   plexId: string;

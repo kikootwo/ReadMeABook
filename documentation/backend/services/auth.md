@@ -140,6 +140,36 @@ Handles authentication and authorization: Multiple auth providers (Plex OAuth, O
 - Validates current password before allowing change
 - Properly decrypts stored password hash before bcrypt comparison
 - Available to all local users (setup admin, locally registered users)
+- Limit: 10 current-password checks per 15 min per user id (`password-change`), refunded when correct. Over it: 429 `{success:false, error:'Too many password attempts. Try again in N minutes.'}` + `Retry-After`
+
+**Sign-in attempt limits** (`src/lib/services/auth/signin-guard.ts`, `known-browser.ts`, `src/lib/utils/rateLimit.ts`, `client-address.ts`):
+- Both password routes (`admin/login`, `local/login`) use one guard. Order: 403 disabled → 413 body → 400 missing or non-string fields → account lookup → **reserve** (synchronous, before the password check) → password check → right password refunds this attempt's own slots → 401 / pending / rejected / tokens
+- Reserve: a browser with a valid known-browser cookie for that account reserves only its own bucket; any other browser reserves the account bucket and its address bucket, all or none. A refusal is a 429 with no password check
+- Unknown, deleted, Plex and OIDC names have account buckets too and get a bcrypt check against a fixed cost-10 dummy hash (`DUMMY_PASSWORD_HASH`), so they answer and count like a wrong password. Local route checks pending/rejected after the password (as the admin route): a wrong password on those accounts is the generic 401
+- `LocalAuthProvider.handleCallback` requires `guard` in its params; without one it refuses (no lookup, no check, error log)
+
+| Namespace | Key | Limit / window | Max entries |
+|---|---|---|---|
+| `signin-account` | sha256(trimmed, lowercased username), shared by both routes | 10 / 15 min | 10,000 |
+| `signin-address` | client address key | 20 / 15 min | 10,000 |
+| `signin-known-browser` | sha256(recomputed cookie MAC) | 10 / 15 min | 2,000 |
+| `register-address` | client address key | 5 / 1 h | 10,000 |
+| `token-login` | client address key | 10 / 15 min | 10,000 |
+| `password-change` | user id | 10 / 15 min | 10,000 |
+| `api-token-create` / `api-token-revoke` | user id | 10 / 20 per min | 10,000 |
+
+- Store: in memory, one per process (`processSingleton('rate-limit-store')`), fixed windows (up to 2x a limit across a window edge). **A restart clears every counter.** A full namespace drops an expired entry or one under half its limit; never one at or past half. With nothing to drop, new keys are refused (429) and `warn Rate-limit store full; new keys refused {namespace}` logs once a minute
+- Client address key (`clientAddressKey`): last 1,024 chars of `X-Forwarded-For`, at most 16 entries walked from the right, entries over 64 chars or with `%` skipped before parsing, port stripped only from `[v6]:port` and `v4:port`, `::ffff:a.b.c.d` → IPv4, IPv6 keyed by /64. First public entry wins; else the rightmost valid one; else `none`. Non-public: `0/8 10/8 127/8 169.254/16 172.16/12 192.168/16`, `::`, `::1`, `fe80::/10`, `fc00::/7` (CGNAT `100.64/10` counts as a client). Proxy setup: [deployment/unified.md](../../deployment/unified.md) Security Notes
+- Known-browser cookie `rmab_known_browser`: `v1.<userId>.<issuedAt>.<mac>`, HMAC-SHA256 over user id, issue time and sha256 of the stored `authToken`, key `derivePurposeKey('known-browser:v1')` (HKDF of the access JWT secret). httpOnly, SameSite=Strict, Path=/api/auth, Max-Age 90 days, `Secure` only when the first `X-Forwarded-Proto` is `https` (session cookies' `NODE_ENV` rule would drop it on plain-http installs)
+  - Set or renewed only on a full password sign-in (tokens issued) on either route; never on a wrong password, pending, rejected or 429; not at setup or registration. One account per browser (last sign-in wins)
+  - Valid only for its own account, with the MAC decoding to exactly 32 bytes, issued within 90 days and not over 5 min ahead. Ends when the password changes (`authToken` is re-encrypted with a new IV), the account is deleted, or the secret changes. Sign-out leaves it (it grants no session)
+- Refusal texts (`error`, plus `Retry-After` seconds; N = minutes rounded up, at least 1):
+  - account: `Too many sign-in attempts for this account. Try again in N minutes, or sign in from a browser you've used with this account before.`
+  - address: `Too many sign-in attempts from your network. Try again in N minutes.`
+  - known browser: `Too many sign-in attempts from this browser. Try again in N minutes.`
+  - register and token login keep their texts (`Too many registration attempts. Please try again later.`, `Too many login attempts. Please try again later.`)
+- Admin refused on a new browser: sign in from a browser that has signed in to that account before; or wait for the window (15 min from its first attempt; new attempts keep refilling it); or restart the container (`docker restart readmeabook`, clears all counters); an existing session keeps working. **A known browser can still be refused at its own limit** (10 wrong passwords from that browser in 15 min): then wait, use another known browser, or restart
+- Logs (never the password or cookie; usernames cut to 64 chars): `warn Sign-in attempts paused for an account {username, minutes}` / `for an address {address}` / `for a known browser {userId}`, once per bucket per window; `warn Password change attempts paused {userId}`
 
 ## Plex Home Profile Support
 
