@@ -128,7 +128,7 @@ model Request {
      |-------|--------|------------|
      | direct non-folder entries with an audio name | unlinked first, only when they still hash to `filesHash` (else nothing removed: `folder contents changed since import`); ENOENT = already gone | |
      | `.rmab-partial-*.part` regular file (`PARTIAL_FILE_PATTERN`) | older than 24 h: unlinked; newer: kept | `an import is still writing it` |
-     | `cover.jpg` (regular file, never a link) and the junk list | unlinked only when nothing else is left but these and ebooks recorded by active ebook requests | `kept with the other files` |
+     | `cover.jpg`, `metadata.opf` (regular files, never symlinks; #68) and the junk list | unlinked only when nothing else is left but these and ebooks recorded by active ebook requests | `kept with the other files` |
      | ebook file named by an active ebook request's `placedEbookFiles` (canonical folder + name; a label, never a delete input) | kept; does not keep the cover | `ebook of another request` |
      | anything else (user files, unrecorded/legacy ebooks, subfolders `name/`, links) | kept; never entered | `RMAB has no record that it placed it` |
    - Junk list (`src/lib/utils/book-folder-junk.ts`): files `.DS_Store`, `Thumbs.db`, `desktop.ini`, `._*`, `metadata.json`, `metadata.abs` (exact names, regular files); folders `@eaDir`, `.@__thumb` through a limited walk (lstat, links never followed, files unlinked and folders rmdir'd one by one, each folder re-checked by dev/ino first and held open from the walk until its own rmdir, so on a local filesystem a folder made in its place can't pass the re-check with a reused inode number (not covered: a swap after the re-check, or mergerfs/NFS, where a folder remade at the same path can keep its number); every plan is released on all paths); a junk folder holding a link, special file, audio or ebook file, deeper than 3 levels or more than 500 entries is kept whole (`RMAB has no record that it placed it (<why>)`)
@@ -327,6 +327,7 @@ where: {
 1. ✅ **Torrent not in qBittorrent** - Skip deletion, continue with files
 1a. ✅ **Torrent RMAB did not add** (already in the client at grab time, #423) - Kept, never removed or re-categorized; `torrentsKeptNotOwned`
 1b. ✅ **Row already `removed`** - No client call, never written back to `completed`
+1c. ✅ **Hard-linked book** (#68) - Unlink removes only the library name; the download keeps its data and seeds on (and download cleanup leaves the library file) → [features/library-placement.md](../features/library-placement.md#deleting)
 2. ✅ **Unlimited seeding (time and ratio both 0, or no config)** - Keep in qBittorrent, hard-delete orphaned request
 3. ✅ **Incomplete download** - Delete torrent + files immediately
 4. ✅ **Seeding requirement met** - Delete torrent + files

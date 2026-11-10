@@ -118,6 +118,8 @@ const CONFIG_DEFAULTS = {
 };
 ```
 
+**Library placement keys (#68, absent = default, no seed row):** `audiobook_file_placement` (`copy` | `hardlink` | `hardlink_only`, unknown → `copy`), `metadata_opf_enabled` (`'true'`/`'false'`, default false), `audiobook_link_fallback_last` (JSON `{title, reason, at}`, written by the import, deleted by the next linked book) → [features/library-placement.md](../../features/library-placement.md)
+
 ## Required for App Function
 
 **Plex:** `server_url`, `library_id`, `auth_token`

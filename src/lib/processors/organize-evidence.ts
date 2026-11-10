@@ -10,6 +10,7 @@ import { planDownloadCleanup } from './organize-cleanup-guard';
 import { ebookInventory, type ImportEvidence, type ImportInventory, type PlacementRecord } from '../utils/import-inventory';
 import type { EbookOrganizationResult, OrganizationResult } from '../utils/file-organizer';
 import { summarizePermissionWarnings } from '../utils/organize-copy';
+import { describeRefusal } from '../utils/link-file';
 
 /** What download cleanup would do for this job: remove an indexer download, a direct download file, nothing, or unknown (lookup failed). */
 export type DownloadCleanupKind = 'indexer' | 'direct' | 'none' | 'unknown';
@@ -60,6 +61,10 @@ export function audioEvidence(result: OrganizationResult): ImportEvidence {
     coverRecord: result.coverRecord,
     inventory: result.inventory ?? MISSING_INVENTORY,
     permissionWarnings: result.permissionWarnings,
+    linkFallbackReason: result.linkFallback
+      ? describeRefusal(result.linkFallback) + (result.linkLeftBehind ? `; could not remove ${result.linkLeftBehind.join(', ')}` : '')
+      : undefined,
+    opfError: result.opfError,
   };
 }
 
@@ -100,7 +105,9 @@ export function importStatusMessage(evidence: ImportEvidence, context: ImportSta
 
 /** Placement, tagging and kept-download message, without the permissions note. */
 function outcomeMessage(evidence: ImportEvidence, context: ImportStatusContext): string | null {
-  const parts = [placementStatusMessage(evidence), tagsMessage(evidence)].filter((p): p is string => p !== null);
+  const linkFallback = evidence.linkFallbackReason ? `copied, not hard-linked (${evidence.linkFallbackReason})` : null;
+  const opf = evidence.opfError ? `metadata.opf could not be written (${evidence.opfError})` : null;
+  const parts = [linkFallback, opf, placementStatusMessage(evidence), tagsMessage(evidence)].filter((p): p is string => p !== null);
   if (parts.length > 0) {
     return parts.join('; ');
   }

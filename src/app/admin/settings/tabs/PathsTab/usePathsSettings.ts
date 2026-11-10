@@ -27,6 +27,12 @@ export function usePathsSettings({ paths, onChange, onValidationChange }: UsePat
     onValidationChange(false);
   };
 
+  /** Update several fields at once (the Metadata choice sets two keys) */
+  const updatePaths = (patch: Partial<PathsSettings>) => {
+    onChange({ ...paths, ...patch });
+    onValidationChange(false);
+  };
+
   /**
    * Test if paths are valid and writable, including template validation
    */
@@ -86,6 +92,7 @@ export function usePathsSettings({ paths, onChange, onValidationChange }: UsePat
     testing,
     testResult,
     updatePath,
+    updatePaths,
     testPaths,
   };
 }

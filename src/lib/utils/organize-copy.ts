@@ -5,8 +5,9 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { copyFile, filesEqual, isSameFile, PARTIAL_FILE_PATTERN, partialNameHash, sameLeadingBytes } from './copy-file';
+import { copyFile, filesEqual, isSameFile, PARTIAL_FILE_PATTERN, partialNameHash, sameLeadingBytes, type FileIdentity } from './copy-file';
 import type { PlacementStatus } from './import-inventory';
+import { describeRefusal, linkInto, linkRefusal, type LinkRefusal } from './link-file';
 
 const STALE_PARTIAL_MS = 24 * 60 * 60 * 1000;
 
@@ -23,6 +24,11 @@ export interface PlaceOptions {
    * replaced, whatever it holds.
    */
   resumeInterrupted?: boolean;
+  /**
+   * Publish a new target as a hard link to the source instead of a copy; the source's
+   * identity from the precheck (book-link.ts). A linked file is never chmod-ed: it is the download.
+   */
+  link?: FileIdentity;
 }
 
 export interface PlaceResult {
@@ -32,6 +38,10 @@ export interface PlaceResult {
   reason?: string;
   /** Non-fatal problem with a placed file (e.g. permissions could not be set). */
   warning?: string;
+  /** This call created the target as a hard link to the source. */
+  linked?: boolean;
+  /** Link mode only: this file can't be hard-linked here (the whole book then copies or stops). */
+  cannotLink?: LinkRefusal;
 }
 
 /** chmod codes meaning there is no file at the path: the placement did not land. */
@@ -143,6 +153,14 @@ async function copyInto(
     : { status: 'copied', target };
 }
 
+/** A new target as a hard link: no bytes written, no chmod (it would change the download's mode). */
+async function linkNew(source: string, target: string, expected: FileIdentity): Promise<PlaceResult & { exists?: boolean }> {
+  const outcome = await linkInto(source, target, expected);
+  if (outcome.kind === 'linked') return { status: 'copied', target, linked: true };
+  if (outcome.kind === 'exists') return { status: 'failed', target, reason: 'target appeared during the link', exists: true };
+  return { status: 'failed', target, reason: describeRefusal(outcome.refusal), cannotLink: outcome.refusal };
+}
+
 // Placements into the same target (any extension: .mp4 and its coerced .m4b) run one at a time,
 // and so does the coercion rename between those names (format-coercion.ts)
 const targetLocks = new Map<string, Promise<void>>();
@@ -186,7 +204,9 @@ async function placeUnlocked(source: string, target: string, options: PlaceOptio
 
   const existing = await findExistingTarget(target);
   if (!existing) {
-    const created = await copyInto(source, target, options.fileMode, 'create');
+    const created = options.link
+      ? await linkNew(source, target, options.link)
+      : await copyInto(source, target, options.fileMode, 'create');
     if (created.exists && retryOnRace) {
       return placeUnlocked(source, target, options, false);
     }
@@ -214,6 +234,11 @@ async function placeUnlocked(source: string, target: string, options: PlaceOptio
   try {
     if (targetStat.size < sourceStat.size) {
       if (options.resumeInterrupted !== false && await sameLeadingBytes(existing, source, targetStat.size)) {
+        if (options.link) {
+          // Never replaced by a link (a linked partial would carry the download's old mtime): the copy repairs it
+          const refusal = linkRefusal('PREFIX');
+          return { status: 'failed', target: existing, reason: describeRefusal(refusal), cannotLink: refusal };
+        }
         // Only an interrupted copy of this exact source leaves a byte-prefix behind
         const { exists: _exists, ...result } = await copyInto(source, existing, options.fileMode, 'replace');
         void _exists;

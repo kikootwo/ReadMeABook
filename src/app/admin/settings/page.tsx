@@ -29,7 +29,7 @@ import type { Settings, Message } from './lib/types';
 import { isIndexerLoadFailureMessage, useConfiguredIndexers } from './lib/useConfiguredIndexers';
 import { useSettingsTabUrlState } from './hooks/useSettingsTabUrlState';
 
-import { parseArrayToCommaSeparated, saveTabSettings, validateAuthSettings, getTabValidation, getTabs } from './lib/helpers';
+import { parseArrayToCommaSeparated, saveTabSettings, validateAuthSettings, getTabValidation, getTabs, pathsPlacementConflict } from './lib/helpers';
 
 // Saved while the indexer list was not loaded: nothing the admin could edit was lost (editing is locked)
 const INDEXERS_NOT_LOADED_MESSAGE =
@@ -308,6 +308,7 @@ function AdminSettingsContent() {
           {activeTab === 'paths' && (
             <PathsTab
               paths={settings.paths}
+              backendMode={settings.backendMode}
               onChange={(paths) => setSettings({ ...settings, paths })}
               onValidationChange={(isValid) => setValidated({ ...validated, paths: isValid })}
             />
@@ -353,7 +354,9 @@ function AdminSettingsContent() {
                 <p className="text-sm text-gray-500 dark:text-gray-400 self-center">
                   {activeTab === 'prowlarr'
                     ? 'Please test the Prowlarr connection before saving'
-                    : 'Please test the connection before saving'}
+                    : activeTab === 'paths' && pathsPlacementConflict(settings)
+                      ? pathsPlacementConflict(settings)
+                      : 'Please test the connection before saving'}
                 </p>
               )}
             </div>

@@ -477,6 +477,7 @@ async function organize(
 - **Metadata tagging:** `metadata_tagging_enabled` (boolean, default: true)
 - **Chapter merging:** `chapter_merging_enabled` (boolean, default: false)
 - **Plex format coercion:** `plex_format_coercion_enabled` (boolean, default: true)
+- **File placement / OPF (Audiobookshelf only, #68):** `audiobook_file_placement` (`copy` default, `hardlink`, `hardlink_only`), `metadata_opf_enabled` (default false). A linked book is never tagged, merged or chmod-ed → [features/library-placement.md](../features/library-placement.md)
 - **Fallback:** `/media/audiobooks` if media_dir not configured
 - **Temp directory:** `/tmp/readmeabook` (or `TEMP_DIR` env var)
 
