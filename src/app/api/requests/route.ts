@@ -13,6 +13,7 @@ import { createRequestForUser } from '@/lib/services/request-creator.service';
 import { COMPLETED_STATUSES } from '@/lib/constants/request-statuses';
 import { readJsonBody } from '@/lib/utils/request-body';
 import { hidePlacementRecord } from '@/lib/services/request-detail-query';
+import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 import { withLibraryDisplayAll } from '@/lib/services/library/library-display';
 import { isExplicitMarkOn } from '@/lib/services/audiobookshelf/explicit-flag';
 
@@ -192,7 +193,7 @@ export async function GET(request: NextRequest) {
       const nextCursor = hasNextPage ? page[page.length - 1].id : null;
 
       // A followed audiobook request shows the linked library item (#325a); one query per page
-      const enriched = (await withLibraryDisplayAll(page)).map(r => {
+      const shown = (await withLibraryDisplayAll(page)).map(r => {
         const isCompleted = COMPLETED_STATUSES.includes(r.status as typeof COMPLETED_STATUSES[number]);
         const downloadAvailable = isCompleted && !!r.audiobook?.filePath;
         const audiobook = r.audiobook ? { ...r.audiobook, filePath: undefined } : r.audiobook;
@@ -202,6 +203,8 @@ export async function GET(request: NextRequest) {
         // the approval record (#232) is server-side only
         return { ...r, selectedTorrent, audiobook, downloadAvailable, placedEbookFiles: undefined, approvalBypassedBy: undefined };
       });
+      // An admin's page carries stored picks: they go out without the indexer key
+      const enriched = isAdmin ? await stripProwlarrKeyFromResults(shown) : shown;
 
       // ── Accurate counts per group (always scoped to ownership/type filter) ──
       const countWhere = { ...baseWhere };

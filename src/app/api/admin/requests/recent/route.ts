@@ -8,6 +8,7 @@ import { requireAuth, requireAdmin, AuthenticatedRequest } from '@/lib/middlewar
 import { prisma } from '@/lib/db';
 import { RMABLogger } from '@/lib/utils/logger';
 import { loadLinkedRows, withLibraryDisplay } from '@/lib/services/library/library-display';
+import { stripProwlarrKeyFromResults } from '@/lib/services/download-selection-guard';
 
 const logger = RMABLogger.create('API.Admin.Requests.Recent');
 
@@ -36,16 +37,6 @@ export async function GET(request: NextRequest) {
             plexUsername: true,
           },
         },
-        downloadHistory: {
-          where: {
-            selected: true,
-          },
-          select: {
-            torrentUrl: true,
-          },
-          orderBy: { createdAt: 'desc' }, // the newest selected row (#332)
-          take: 1,
-        },
       },
       orderBy: {
         createdAt: 'desc',
@@ -71,11 +62,11 @@ export async function GET(request: NextRequest) {
         createdAt: request.createdAt,
         completedAt: request.completedAt,
         errorMessage: request.errorMessage,
-        torrentUrl: request.downloadHistory[0]?.torrentUrl || null,
       };
     });
 
-    return NextResponse.json({ requests: formatted });
+    // No stored download links here; any other text goes out without the indexer key
+    return NextResponse.json({ requests: await stripProwlarrKeyFromResults(formatted) });
       } catch (error) {
         logger.error('Failed to fetch recent requests', { error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json(
