@@ -36,14 +36,15 @@ export function LibraryStats({ stats, live }: LibraryStatsProps) {
           </span>
         )}
       </div>
-      <dl className="grid grid-cols-4 gap-2 sm:gap-4">
+      {/* Phones: two rows of two, so every label reads whole */}
+      <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
         {TILES.map((tile) => (
           <div
             key={tile.key}
-            className="rounded-xl sm:rounded-2xl px-2.5 py-2 sm:px-4 sm:py-3 bg-white/90 dark:bg-gray-800/90 border border-gray-200/50 dark:border-gray-700/50 shadow-sm min-w-0"
+            className="rounded-xl sm:rounded-2xl px-3 py-2 sm:px-4 sm:py-3 bg-white/90 dark:bg-gray-800/90 border border-gray-200/50 dark:border-gray-700/50 shadow-sm min-w-0"
           >
-            <dt className="flex items-center gap-1.5 text-[11px] sm:text-sm text-gray-600 dark:text-gray-400 truncate">
-              <span className={`hidden sm:inline-block w-2 h-2 rounded-full flex-shrink-0 ${tile.dot}`} aria-hidden="true" />
+            <dt className="flex items-center gap-1.5 text-xs sm:text-sm text-gray-600 dark:text-gray-400 truncate">
+              <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${tile.dot}`} aria-hidden="true" />
               <span className="truncate">{tile.label}</span>
             </dt>
             <dd className="mt-0.5 text-lg sm:text-2xl font-semibold text-gray-900 dark:text-gray-100 tabular-nums">

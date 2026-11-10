@@ -51,9 +51,16 @@ test.afterAll(() => {
   if (execBridgeAvailable()) cleanupPageSeeds();
 });
 
-/** Evidence shot with the pointer parked in the left gutter (no hover state in the picture). */
+/**
+ * Evidence shot with the pointer parked in the left gutter (no hover state in the picture), after
+ * every CSS transition has ended (a theme switch fades `transition-colors` text for 150 ms).
+ */
 async function shot(page: Page, name: string) {
   await page.mouse.move(1, 400);
+  await page.evaluate(async () => {
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await Promise.all(document.getAnimations().filter((a) => a instanceof CSSTransition).map((a) => a.finished.catch(() => null)));
+  });
   await snap(page, DIR, name);
 }
 
@@ -120,12 +127,14 @@ test('#177 page: the admin grid, groups, search, filters, sheet, live overlay an
   await page.keyboard.press('Escape');
   await expect(sheet).toBeHidden();
 
-  // Empty state: the real response with every book taken out
+  // Empty state: the real responses with every book taken out (an empty library has nothing live)
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.emulateMedia({ colorScheme: 'light' });
-  await page.route(/\/api\/library\?(?!live=1)/, async (route) => {
+  const LIST = /\/api\/library\?/;
+  await page.route(LIST, async (route) => {
     const res = await route.fetch();
     const body = await res.json();
+    if (route.request().url().includes('live=1')) return route.fulfill({ response: res, json: { ...body, items: [], refreshMs: 0 } });
     const zero = (o: Record<string, number>) => Object.fromEntries(Object.keys(o).map((k) => [k, 0]));
     await route.fulfill({
       response: res,
@@ -137,7 +146,8 @@ test('#177 page: the admin grid, groups, search, filters, sheet, live overlay an
   await expect(page.getByText('Nothing here yet')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole('button', { name: 'Scan library now' })).toBeVisible();
   await shot(page, 'empty-state');
-  await page.unroute(/\/api\/library\?(?!live=1)/);
+  await expect(page.getByText('Live', { exact: true })).toHaveCount(0);
+  await page.unroute(LIST);
 });
 
 test('#177 page: a requester sees their own request, Interactive search until it is turned off', async ({ browser, baseURL }) => {
