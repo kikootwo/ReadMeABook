@@ -92,6 +92,11 @@ test('#177 page: the admin grid, groups, search, filters, sheet, live overlay an
   await shot(page, 'grid-1280-dark');
   await page.emulateMedia({ colorScheme: 'light' });
 
+  // A downloading card: status pill and progress bar
+  await card(page, TITLES.downloading).scrollIntoViewIfNeeded();
+  await shot(page, 'card-downloading');
+  await page.evaluate(() => window.scrollTo(0, 0));
+
   // Live overlay: a status change reaches the card without a list reload
   psql(`update requests set status = 'processing', updated_at = now() where id = ${sqlStr(requestIds.downloading)}`);
   await expect(card(page, TITLES.downloading)).toHaveAttribute('aria-label', /Processing/, { timeout: 10_000 });
@@ -125,6 +130,11 @@ test('#177 page: the admin grid, groups, search, filters, sheet, live overlay an
 
   await page.setViewportSize({ width: 768, height: 1024 });
   await shot(page, 'grid-768');
+  await page.getByRole('button', { name: /^Filters/ }).click();
+  await expect(page.getByRole('dialog', { name: 'Filters' })).toBeVisible();
+  await shot(page, 'filter-sheet-768');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Filters' })).toBeHidden();
   await page.setViewportSize({ width: 375, height: 812 });
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(page.getByRole('complementary', { name: 'Filters' })).toBeHidden();
