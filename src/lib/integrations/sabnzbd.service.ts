@@ -11,6 +11,8 @@ import { RMABLogger } from '@/lib/utils/logger';
 import { fetchDownloadSource, type SourceAuth } from '@/lib/integrations/download-source';
 import { urlForLog } from '@/lib/utils/prowlarr-url';
 import { PathMapper, PathMappingConfig } from '@/lib/utils/path-mapper';
+import { findCategory } from '@/lib/utils/download-category';
+import { parseSabCategories, sabCategoryFolder } from './sabnzbd-categories';
 import {
   duplicateOfNewJob,
   findExistingJob,
@@ -134,6 +136,7 @@ export class SABnzbdService implements IDownloadClient {
   private baseUrl: string;
   private apiKey: string;
   private defaultCategory: string;
+  private categoryOwned: boolean;
   private defaultDownloadDir: string;
   private disableSSLVerify: boolean;
   private httpsAgent?: https.Agent;
@@ -145,11 +148,13 @@ export class SABnzbdService implements IDownloadClient {
     defaultCategory: string = 'readmeabook',
     defaultDownloadDir: string = '/downloads',
     disableSSLVerify: boolean = false,
-    pathMappingConfig?: PathMappingConfig
+    pathMappingConfig?: PathMappingConfig,
+    categoryOwned: boolean = true // false: the category already existed; never created or re-pathed
   ) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.apiKey = apiKey?.trim() || '';
     this.defaultCategory = defaultCategory;
+    this.categoryOwned = categoryOwned;
     this.defaultDownloadDir = defaultDownloadDir;
     this.disableSSLVerify = disableSSLVerify;
     this.pathMappingConfig = pathMappingConfig || { enabled: false, remotePath: '', localPath: '' };
@@ -267,7 +272,8 @@ export class SABnzbdService implements IDownloadClient {
    *
    * SABnzbd config structure:
    * - misc.complete_dir: The base folder where completed downloads are stored
-   * - categories: Object mapping category names to their settings (dir is relative to complete_dir)
+   * - categories: array of {name, dir, ...} with `*` first (dir is relative to complete_dir);
+   *   parsed by parseSabCategories, which throws on a list it can't read
    */
   async getConfig(): Promise<SABnzbdConfig> {
     const response = await this.client.get('/api', {
@@ -286,25 +292,16 @@ export class SABnzbdService implements IDownloadClient {
     // Extract complete_dir from misc section
     // This is where SABnzbd stores completed downloads before category subdirectories are applied
     const completeDir = config.misc?.complete_dir || '';
+    const categories = parseSabCategories(config.categories);
 
     logger.debug('SABnzbd config retrieved from API', {
       completeDir: completeDir || '(not configured)',
       downloadDir: config.misc?.download_dir || '(not set)',
-      categoryCount: Object.keys(config.categories || {}).length,
-      categories: Object.entries(config.categories || {}).map(([name, details]: [string, any]) => ({
-        name,
-        dir: details.dir || '(root)',
-      })),
+      categoryCount: categories.length,
+      categories: categories.map((c) => ({ name: c.name, dir: c.dir || '(root)' })),
     });
 
-    return {
-      version: config.version || '',
-      completeDir,
-      categories: Object.entries(config.categories || {}).map(([name, details]: [string, any]) => ({
-        name,
-        dir: details.dir || '',
-      })),
-    };
+    return { version: config.version || '', completeDir, categories };
   }
 
   /**
@@ -380,6 +377,10 @@ export class SABnzbdService implements IDownloadClient {
    * Called before every download to ensure path settings stay synchronized.
    */
   async ensureCategory(): Promise<void> {
+    if (!this.categoryOwned) {
+      logger.debug(`Category "${this.defaultCategory}" already existed in SABnzbd; left as is`);
+      return;
+    }
     try {
       logger.debug('ensureCategory() called - syncing category path with SABnzbd');
 
@@ -432,7 +433,8 @@ export class SABnzbdService implements IDownloadClient {
       });
 
       // Check if category exists and has the correct path
-      const existingCategory = config.categories.find(cat => cat.name === this.defaultCategory);
+      const existingName = findCategory(config.categories.map(cat => cat.name), this.defaultCategory);
+      const existingCategory = config.categories.find(cat => cat.name === existingName);
 
       logger.debug('Checking existing category', {
         categoryName: this.defaultCategory,
@@ -468,7 +470,7 @@ export class SABnzbdService implements IDownloadClient {
         logger.info(`Updating category "${this.defaultCategory}" path from "${existingCategory.dir || '(root)'}" to "${categoryPath || '(root)'}"`);
         logger.debug('SABnzbd API call: set_config (update category)', {
           section: 'categories',
-          keyword: this.defaultCategory,
+          keyword: existingCategory.name,
           oldDir: existingCategory.dir,
           newDir: categoryPath,
         });
@@ -477,7 +479,7 @@ export class SABnzbdService implements IDownloadClient {
           params: {
             mode: 'set_config',
             section: 'categories',
-            keyword: this.defaultCategory,
+            keyword: existingCategory.name,
             dir: categoryPath,
             output: 'json',
             apikey: this.apiKey,
@@ -973,9 +975,22 @@ export class SABnzbdService implements IDownloadClient {
     await this.archiveCompletedNZB(id);
   }
 
-  /** Not applicable for usenet clients */
+  /** SABnzbd's category names (its default `*` left out); throws when they can't be read */
   async getCategories(): Promise<string[]> {
-    return [];
+    try {
+      const config = await this.getConfig();
+      return config.categories.map((category) => category.name).filter((name) => name && name !== '*');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('Failed to get categories', { error: message });
+      throw new Error(`Failed to get SABnzbd categories: ${message}`);
+    }
+  }
+
+  /** The folder `category` writes jobs to, as SABnzbd sees it; null when unknown, throws when unreadable */
+  async getCategoryFolder(category: string): Promise<string | null> {
+    const config = await this.getConfig();
+    return sabCategoryFolder(config.completeDir, config.categories, category);
   }
 
   /** Not applicable for usenet clients */

@@ -29,6 +29,8 @@ interface DownloadClient {
   remotePath?: string;
   localPath?: string;
   category?: string;
+  ownedCategory?: string; // set by the server (download-category.ts)
+  categoryInClient?: boolean; // wizard preview from the modal; display only
   customPath?: string;
   postImportCategory?: string;
 }

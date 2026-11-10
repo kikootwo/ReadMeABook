@@ -127,7 +127,7 @@ describe('SABnzbdService', () => {
     // Mock getConfig for ensureCategory (called before adding NZB)
     clientMock.get
       .mockResolvedValueOnce({
-        data: { config: { version: '1', misc: { complete_dir: '/downloads' }, categories: { books: { dir: '' } } } },
+        data: { config: { version: '1', misc: { complete_dir: '/downloads' }, categories: { '*': { dir: '' }, books: { dir: '' } } } },
       });
     // Mock NZB file download (global axios.get)
     axiosMock.get.mockResolvedValueOnce({
@@ -153,7 +153,7 @@ describe('SABnzbdService', () => {
     // Mock getConfig for ensureCategory (called before adding NZB)
     clientMock.get
       .mockResolvedValueOnce({
-        data: { config: { version: '1', misc: { complete_dir: '/downloads' }, categories: { readmeabook: { dir: '' } } } },
+        data: { config: { version: '1', misc: { complete_dir: '/downloads' }, categories: { '*': { dir: '' }, readmeabook: { dir: '' } } } },
       });
     // Mock NZB file download
     axiosMock.get.mockResolvedValueOnce({
@@ -467,7 +467,7 @@ describe('SABnzbdService', () => {
   it('creates the default category when missing', async () => {
     clientMock.get
       .mockResolvedValueOnce({
-        data: { config: { version: '1', misc: { complete_dir: '/mnt/usenet/complete' }, categories: {} } },
+        data: { config: { version: '1', misc: { complete_dir: '/mnt/usenet/complete' }, categories: { '*': { dir: '' } } } },
       })
       .mockResolvedValueOnce({ data: { status: true } });
 
@@ -494,7 +494,7 @@ describe('SABnzbdService', () => {
         config: {
           version: '1',
           misc: { complete_dir: '/mnt/usenet/complete' },
-          categories: { readmeabook: { dir: '/downloads' } },
+          categories: { '*': { dir: '' }, readmeabook: { dir: '/downloads' } },
         },
       },
     });
@@ -510,7 +510,7 @@ describe('SABnzbdService', () => {
     // Mock getConfig for ensureCategory, then the upload failure
     clientMock.get
       .mockResolvedValueOnce({
-        data: { config: { version: '1', misc: { complete_dir: '/downloads' }, categories: { readmeabook: { dir: '' } } } },
+        data: { config: { version: '1', misc: { complete_dir: '/downloads' }, categories: { '*': { dir: '' }, readmeabook: { dir: '' } } } },
       });
     axiosMock.get.mockResolvedValueOnce({
       data: Buffer.from('fake-nzb-content'),
@@ -529,7 +529,7 @@ describe('SABnzbdService', () => {
     // Mock getConfig for ensureCategory, then the upload with empty IDs
     clientMock.get
       .mockResolvedValueOnce({
-        data: { config: { version: '1', misc: { complete_dir: '/downloads' }, categories: { readmeabook: { dir: '' } } } },
+        data: { config: { version: '1', misc: { complete_dir: '/downloads' }, categories: { '*': { dir: '' }, readmeabook: { dir: '' } } } },
       });
     axiosMock.get.mockResolvedValueOnce({
       data: Buffer.from('fake-nzb-content'),
@@ -641,7 +641,7 @@ describe('SABnzbdService', () => {
             config: {
               version: '1',
               misc: { complete_dir: '/downloads' },
-              categories: {},
+              categories: { '*': { dir: '' } },
             },
           },
         })
@@ -665,7 +665,7 @@ describe('SABnzbdService', () => {
             config: {
               version: '1',
               misc: { complete_dir: '/mnt/usenet/complete' },
-              categories: {},
+              categories: { '*': { dir: '' } },
             },
           },
         })
@@ -693,7 +693,7 @@ describe('SABnzbdService', () => {
             config: {
               version: '1',
               misc: { complete_dir: '/mnt/usenet/complete' },
-              categories: {},
+              categories: { '*': { dir: '' } },
             },
           },
         })
@@ -721,7 +721,7 @@ describe('SABnzbdService', () => {
             config: {
               version: '1',
               misc: { complete_dir: '/mnt/usenet/complete' },
-              categories: {},
+              categories: { '*': { dir: '' } },
             },
           },
         })
@@ -760,7 +760,7 @@ describe('SABnzbdService', () => {
             config: {
               version: '1',
               misc: { complete_dir: '/mnt/usenet/complete' },
-              categories: { readmeabook: { dir: '/old/path' } },
+              categories: { '*': { dir: '' }, readmeabook: { dir: '/old/path' } },
             },
           },
         })
@@ -788,7 +788,7 @@ describe('SABnzbdService', () => {
           config: {
             version: '4.0.0',
             misc: { complete_dir: '/mnt/usenet/complete' },
-            categories: { test: { dir: 'test-dir' } },
+            categories: { '*': { dir: '' }, test: { dir: 'test-dir' } },
           },
         },
       });
@@ -797,7 +797,7 @@ describe('SABnzbdService', () => {
       const config = await service.getConfig();
 
       expect(config.completeDir).toBe('/mnt/usenet/complete');
-      expect(config.categories).toEqual([{ name: 'test', dir: 'test-dir' }]);
+      expect(config.categories).toEqual([{ name: '*', dir: '' }, { name: 'test', dir: 'test-dir' }]);
     });
 
     it('returns complete_dir via getCompleteDir helper', async () => {
@@ -806,7 +806,7 @@ describe('SABnzbdService', () => {
           config: {
             version: '4.0.0',
             misc: { complete_dir: '/var/usenet/done' },
-            categories: {},
+            categories: { '*': { dir: '' } },
           },
         },
       });
@@ -824,7 +824,7 @@ describe('SABnzbdService', () => {
             config: {
               version: '4.0.0',
               misc: {}, // No complete_dir
-              categories: {},
+              categories: { '*': { dir: '' } },
             },
           },
         })
@@ -848,7 +848,7 @@ describe('SABnzbdService', () => {
             config: {
               version: '1',
               misc: { complete_dir: 'D:\\Usenet\\Complete' },
-              categories: {},
+              categories: { '*': { dir: '' } },
             },
           },
         })

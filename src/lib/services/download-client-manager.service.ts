@@ -18,6 +18,7 @@ import { NZBGetService } from '@/lib/integrations/nzbget.service';
 import { TransmissionService } from '@/lib/integrations/transmission.service';
 import { DelugeService } from '@/lib/integrations/deluge.service';
 import { PathMappingConfig } from '@/lib/utils/path-mapper';
+import { ownsCategory } from '@/lib/utils/download-category';
 import { IDownloadClient, DownloadClientType, ProtocolType, CLIENT_PROTOCOL_MAP, getClientDisplayName } from '@/lib/interfaces/download-client.interface';
 
 const logger = RMABLogger.create('DownloadClientManager');
@@ -35,6 +36,7 @@ export interface DownloadClientConfig {
   remotePath?: string;
   localPath?: string;
   category?: string; // Default: 'readmeabook'
+  ownedCategory?: string; // The category ReadMeABook created in this client (download-category.ts)
   customPath?: string; // Relative sub-path appended to download_dir
   postImportCategory?: string; // Category to assign after import (torrent clients only)
 }
@@ -248,6 +250,21 @@ export class DownloadClientManager {
   }
 
   /**
+   * The client's category names from a fresh, uncached service (like testConnection): the
+   * cache is keyed by id and can hold another client's or an old URL's service. Throws when
+   * the client can't be read.
+   */
+  async listCategories(config: DownloadClientConfig): Promise<string[]> {
+    const service = await this.createService(config);
+    return service.getCategories();
+  }
+
+  /** A fresh, uncached service for one careful read (see listCategories) */
+  async createFreshService(config: DownloadClientConfig): Promise<IDownloadClient> {
+    return this.createService(config);
+  }
+
+  /**
    * Create qBittorrent service instance
    */
   private createQBittorrentService(config: DownloadClientConfig, downloadDir: string): QBittorrentService {
@@ -266,7 +283,8 @@ export class DownloadClientManager {
       downloadDir,
       config.category || 'readmeabook',
       config.disableSSLVerify,
-      pathMapping
+      pathMapping,
+      ownsCategory(config.category, config.ownedCategory)
     );
   }
 
@@ -288,7 +306,8 @@ export class DownloadClientManager {
       config.category || 'readmeabook',
       downloadDir,
       config.disableSSLVerify,
-      pathMapping
+      pathMapping,
+      ownsCategory(config.category, config.ownedCategory)
     );
   }
 
@@ -311,7 +330,8 @@ export class DownloadClientManager {
       config.category || 'readmeabook',
       downloadDir,
       config.disableSSLVerify,
-      pathMapping
+      pathMapping,
+      ownsCategory(config.category, config.ownedCategory)
     );
   }
 

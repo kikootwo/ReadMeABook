@@ -104,8 +104,7 @@ export async function POST(request: NextRequest) {
           category: 'readmeabook',
         };
 
-        const service = await manager.createClientFromConfig(testConfig);
-        const categories = await service.getCategories();
+        const categories = await manager.listCategories(testConfig); // fresh service, never the cache
 
         return NextResponse.json({ success: true, categories });
       } catch (error) {

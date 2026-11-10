@@ -55,6 +55,7 @@ export class State {
     this.qbitCategories = {};
     this.qbitSessions = new Set();
     this.sabCategories = {};
+    this.seededCategories = []; // { client, name } added by POST /__control/categories; /reset removes them
     this.sabPaused = false;
     this.plexRefreshes = 0;
     this.plexSeen = new Map(); // ratingKey -> album last seen on disk (with its audio files), like Plex's database

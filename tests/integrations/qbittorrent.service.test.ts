@@ -582,7 +582,7 @@ describe('QBittorrentService', () => {
   it('reports a magnet already in the client as taken over and sends no add', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=dup';
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
+    vi.spyOn(service as any, 'ensureCategory').mockImplementation(async (name: unknown) => name);
     vi.spyOn(service as any, 'getTorrent').mockResolvedValue({ hash: 'existing' });
 
     const result = await service.addTorrent('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567');
@@ -594,7 +594,7 @@ describe('QBittorrentService', () => {
   it('reports a .torrent already in the client as taken over and sends no add', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=dup';
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
+    vi.spyOn(service as any, 'ensureCategory').mockImplementation(async (name: unknown) => name);
     vi.spyOn(service as any, 'getTorrent').mockResolvedValue({ hash: 'hash-1' });
     axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent') });
     parseTorrentMock.mockResolvedValueOnce({ infoHash: 'hash-1', name: 'Book' });
@@ -608,7 +608,7 @@ describe('QBittorrentService', () => {
   it('adds magnet links when not already present', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=add';
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
+    vi.spyOn(service as any, 'ensureCategory').mockImplementation(async (name: unknown) => name);
     clientMock.get.mockResolvedValue({ status: 200, data: [] }); // lookups by ID and the full list: absent
     clientMock.post.mockResolvedValue({ data: 'Ok.' });
 
@@ -654,7 +654,7 @@ describe('QBittorrentService', () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=old';
 
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
+    vi.spyOn(service as any, 'ensureCategory').mockImplementation(async (name: unknown) => name);
     const loginSpy = vi.spyOn(service, 'login').mockResolvedValue();
     const addMagnetSpy = vi.spyOn(service as any, 'addMagnetLink')
       .mockRejectedValueOnce({ isAxiosError: true, response: { status: 403 } })
@@ -670,7 +670,7 @@ describe('QBittorrentService', () => {
   it('follows redirect to magnet link when downloading torrent files', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=redir';
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
+    vi.spyOn(service as any, 'ensureCategory').mockImplementation(async (name: unknown) => name);
     const addMagnetSpy = vi.spyOn(service as any, 'addMagnetLink').mockResolvedValue('redirect-hash');
 
     axiosMock.get.mockRejectedValueOnce({
@@ -687,7 +687,7 @@ describe('QBittorrentService', () => {
   it('treats magnet response bodies as magnet links', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=body';
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
+    vi.spyOn(service as any, 'ensureCategory').mockImplementation(async (name: unknown) => name);
     const addMagnetSpy = vi.spyOn(service as any, 'addMagnetLink').mockResolvedValue('body-hash');
 
     axiosMock.get.mockResolvedValueOnce({
@@ -704,7 +704,7 @@ describe('QBittorrentService', () => {
   it('adds torrent files after parsing successfully', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=ok';
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
+    vi.spyOn(service as any, 'ensureCategory').mockImplementation(async (name: unknown) => name);
     clientMock.get.mockResolvedValue({ status: 200, data: [] });
 
     axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('torrent') });
@@ -724,7 +724,7 @@ describe('QBittorrentService', () => {
   it('preserves upstream HTTP status and forwards source headers', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=source-error';
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
+    vi.spyOn(service as any, 'ensureCategory').mockImplementation(async (name: unknown) => name);
 
     axiosMock.get.mockRejectedValueOnce({
       isAxiosError: true,
@@ -800,7 +800,7 @@ describe('QBittorrentService', () => {
   it('throws when torrent parsing fails', async () => {
     const service = new QBittorrentService('http://qb', 'user', 'pass');
     (service as any).cookie = 'SID=parse';
-    vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
+    vi.spyOn(service as any, 'ensureCategory').mockImplementation(async (name: unknown) => name);
 
     axiosMock.get.mockResolvedValueOnce({ data: Buffer.from('not-a-torrent') });
     parseTorrentMock.mockRejectedValueOnce(new Error('bad torrent'));
@@ -835,7 +835,7 @@ describe('QBittorrentService', () => {
       response: { status: 500 },
     });
 
-    await expect((service as any).ensureCategory('readmeabook')).resolves.toBe(false);
+    await expect((service as any).ensureCategory('readmeabook')).resolves.toBeNull();
   });
 
   it('updates category when save path mismatches', async () => {
@@ -1362,7 +1362,7 @@ describe('QBittorrentService', () => {
 
     it('addTorrent does not attempt re-login on 403 when auth-optional', async () => {
       const service = new QBittorrentService('http://qb', '', '');
-      vi.spyOn(service as any, 'ensureCategory').mockResolvedValue(true);
+      vi.spyOn(service as any, 'ensureCategory').mockImplementation(async (name: unknown) => name);
       const loginSpy = vi.spyOn(service, 'login');
       vi.spyOn(service as any, 'addMagnetLink').mockRejectedValueOnce({
         isAxiosError: true,
