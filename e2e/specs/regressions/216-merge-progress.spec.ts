@@ -38,28 +38,27 @@ function getConfig(key: string): string | null {
 }
 
 /**
- * The stored percent once it has left `prev` and then held still for one write interval (a value
- * the interval held back is written when it ends). null when it never left `prev`.
+ * The stored value once every write of the last run window has landed. ffmpeg is stopped, so it
+ * reports nothing new: the only write left is a held-back value, written when the interval of the
+ * last write ends, which is at most one interval after the window closed. A second read 2 s later
+ * must agree (nothing moves while ffmpeg is held).
  */
-async function settledProgress(id: string, prev: number): Promise<{ status: string; progress: number } | null> {
-  const firstBy = Date.now() + INTERVAL_MS + 3_000;
-  let last = stored(id);
-  while (last.progress === prev && last.status === 'processing') {
-    if (Date.now() > firstBy) return null;
+async function quietProgress(id: string): Promise<{ status: string; progress: number }> {
+  await sleep(INTERVAL_MS + 4_000);
+  const value = stored(id);
+  await sleep(2_000);
+  expect(stored(id), 'nothing is written while ffmpeg is held').toEqual(value);
+  return value;
+}
+
+/** The merge's first stored value: processing below 100 (written before ffmpeg starts). */
+async function firstProgress(id: string): Promise<{ status: string; progress: number }> {
+  const end = Date.now() + 60_000;
+  for (let now = stored(id); !(now.status === 'processing' && now.progress < 100); now = stored(id)) {
+    if (Date.now() > end) throw new Error(`the merge never wrote a first value (${now.status}|${now.progress})`);
     await sleep(500);
-    last = stored(id);
   }
-  let stableSince = Date.now();
-  const end = Date.now() + 3 * INTERVAL_MS;
-  while (Date.now() - stableSince < INTERVAL_MS + 500 && Date.now() < end) {
-    await sleep(500);
-    const now = stored(id);
-    if (now.progress !== last.progress || now.status !== last.status) {
-      last = now;
-      stableSince = Date.now();
-    }
-  }
-  return last;
+  return quietProgress(id);
 }
 
 const card = (page: Page, title: string) =>
@@ -100,24 +99,24 @@ test('#216 the card and the admin row show the chapter merge moving', async ({ b
     await dark.page.goto('/requests');
 
     // Held at the start: the merge wrote its first value
-    const first = await settledProgress(id, -1);
-    expect(first?.status, 'held merge: the request is processing').toBe('processing');
-    expect(first!.progress, 'held merge: progress under 100').toBeLessThan(100);
-    await expectCardAt(light.page, book.title, first!.progress);
-    await expectCardAt(dark.page, book.title, first!.progress);
+    const first = await firstProgress(id);
+    expect(first.status, 'held merge: the request is processing').toBe('processing');
+    expect(first.progress, 'held merge: progress under 100').toBeLessThan(100);
+    await expectCardAt(light.page, book.title, first.progress);
+    await expectCardAt(dark.page, book.title, first.progress);
 
     // Step forward until two rising non-zero values are stored
     const seen: number[] = [];
     const steps: { windowMs: number; progress: number | null; status?: string }[] = [];
-    let prev = first!.progress;
+    let prev = first.progress;
     let windowMs = 150;
     for (let i = 0; seen.length < 2 && i < 14; i++) {
       step(pid, windowMs);
-      const next = await settledProgress(id, prev);
-      steps.push({ windowMs, progress: next?.progress ?? null, status: next?.status });
+      const next = await quietProgress(id);
+      steps.push({ windowMs, progress: next.progress, status: next.status });
       out.steps = steps;
       save();
-      if (!next) {
+      if (next.status === 'processing' && next.progress === prev) {
         windowMs = Math.min(windowMs * 2, 4000);
         continue;
       }
@@ -176,8 +175,9 @@ test('#216 the card and the admin row show the chapter merge moving', async ({ b
     expect(Number(probe.duration)).toBeGreaterThan(530);
     expect(mbPerMinute).toBeGreaterThanOrEqual(0.4);
 
-    // Staged: "Organizing files" (processing at 100) lasts a moment in a real run
-    psql(`update requests set status = 'processing', progress = 100, updated_at = now() where id = ${sqlStr(id)}`);
+    // Staged: "Organizing files" (processing at 100, not completed yet) lasts a moment in a real run
+    const completedAt = psql(`select completed_at from requests where id = ${sqlStr(id)}`);
+    psql(`update requests set status = 'processing', progress = 100, completed_at = null, updated_at = now() where id = ${sqlStr(id)}`);
     await light.page.reload();
     await expect(card(light.page, book.title).getByText('Organizing files', { exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(card(light.page, book.title).getByRole('progressbar')).toHaveCount(0);
@@ -185,7 +185,7 @@ test('#216 the card and the admin row show the chapter merge moving', async ({ b
 
     // A Downloaded card is unchanged: no phase line, no bar (staged when the scan already made it available)
     const downloadedStaged = final.status !== 'downloaded';
-    psql(`update requests set status = 'downloaded', progress = 100, updated_at = now() where id = ${sqlStr(id)}`);
+    psql(`update requests set status = 'downloaded', progress = 100, completed_at = ${completedAt ? sqlStr(completedAt) : 'null'}, updated_at = now() where id = ${sqlStr(id)}`);
     await light.page.reload();
     const c = card(light.page, book.title);
     await expect(c.getByText('Downloaded', { exact: true })).toBeVisible({ timeout: 20_000 });
