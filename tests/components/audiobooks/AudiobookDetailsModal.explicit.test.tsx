@@ -39,7 +39,7 @@ vi.mock('@/components/requests/InteractiveTorrentSearchModal', () => ({
     return <div data-testid="interactive-modal" />;
   },
 }));
-vi.mock('next/image', () => ({ __esModule: true, default: (props: Record<string, unknown>) => <img alt="" {...props} /> }));
+vi.mock('next/image', () => ({ __esModule: true, default: () => null }));
 
 const { AudiobookDetailsModal } = await import('@/components/audiobooks/AudiobookDetailsModal');
 

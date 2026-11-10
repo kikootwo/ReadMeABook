@@ -38,8 +38,9 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - Method comparison is case-insensitive.
 
 ## POST `/api/requests` (Write)
-- Body: `{ "audiobook": { "asin", "title", "author", "narrator?", "description?", "coverArtUrl?" } }`
-- Internally calls `createRequestForUser(req.user.id, audiobook, { bypassIgnore: true })` — token requests bypass the ignore list, matching UI behavior.
+- Body: `{ "audiobook": { "asin", "title", "author", "narrator?", "description?", "coverArtUrl?" }, "explicit?": boolean }`
+- `explicit: true` marks the request Explicit (#542; Audiobookshelf mode turns on the item's Explicit flag on delivery, [explicit-flag.md](../../features/explicit-flag.md)); a re-request keeps the replaced request's mark either way. Later changes go through `PUT /api/requests/:id/explicit`, which is NOT on the allowlist (UI only); `src/lib/constants/api-tokens.ts` is unchanged by #542.
+- Internally calls `createRequestForUser(req.user.id, audiobook, { bypassIgnore: true, explicit })` — token requests bypass the ignore list, matching UI behavior.
 - Optional query param: `?skipAutoSearch=true` defers search-job creation.
 - Side effects (identical to UI): duplicate detection, library check, Audnexus enrichment, audiobook upsert, ignore-list check (bypassed), per-user dedup, auto-approve gating, release-date gate, notification queue, search-job queue.
 - Auto-approve: follows the token owner's per-user `autoApproveRequests` setting, then global. No bypass.
@@ -49,6 +50,7 @@ Source of truth: `src/lib/constants/api-tokens.ts` (`API_TOKEN_ALLOWED_ENDPOINTS
 - Query: `status` (group `active`|`waiting`|`completed`|`failed`|`cancelled`, or one status), `cursor`, `take` (default 20, max 100; legacy `limit`), `myOnly`, `type` (`audiobook`|`ebook`). Response: `{ requests, nextCursor, counts }`; users see their own, admins all (`myOnly=true` for their own).
 - Each `request.audiobook` is shown as the card shows it (#325a): for an `available` audiobook request that follows its Audiobookshelf item, `title`, `author`, `narrator` are the linked item's, `coverArtUrl` is a relative `/api/cache/library/<file>` (the cached library cover, served without auth; null when none is cached), and `libraryAsin` is the effective library ASIN. Every other request: stored values, `libraryAsin: null`. `audibleAsin`, series, year, description stay the requested ones. See [fixes/file-hash-matching.md](../../fixes/file-hash-matching.md#delivered-requests-follow-the-library-asin-325a).
 - Never included: `audiobook.filePath`, `placedEbookFiles`; `selectedTorrent` for admins only.
+- Each request carries `explicit` (boolean, #542); so do `POST /api/requests` and `GET /api/requests/:id`.
 
 ## GET `/api/requests/:id`
 - Returns request including `audiobook`, `downloadHistory` (selected), and recent `jobs`.

@@ -124,8 +124,13 @@ export function AudiobookDetailsModal({
   const [isDownloading, setIsDownloading] = useState(false);
   const [coverError, setCoverError] = useState(false);
   const [isTogglingIgnore, setIsTogglingIgnore] = useState(false);
+  // The Explicit box starts from the request's mark each time the modal opens or the mark changes
   const [explicit, setExplicit] = useState(requestExplicit);
-  useEffect(() => setExplicit(requestExplicit), [requestExplicit, isOpen]);
+  const [explicitFrom, setExplicitFrom] = useState({ requestExplicit, isOpen });
+  if (explicitFrom.requestExplicit !== requestExplicit || explicitFrom.isOpen !== isOpen) {
+    setExplicitFrom({ requestExplicit, isOpen });
+    setExplicit(requestExplicit);
+  }
   const isABS = useIsAudiobookshelf();
 
   // Sync local status when the prop changes (e.g. page data refreshes)

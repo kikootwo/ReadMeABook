@@ -11,7 +11,7 @@
 
 'use client';
 
-import React, { useEffect, useId, useState } from 'react';
+import React, { useId, useState } from 'react';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { useToast } from '@/components/ui/Toast';
 import { useSetExplicit } from '@/lib/hooks/useExplicitMark';
@@ -97,10 +97,14 @@ interface RequestExplicitControlProps {
 export function RequestExplicitControl({ requestId, explicit, isAdmin, className }: RequestExplicitControlProps) {
   const { setExplicit, isLoading } = useSetExplicit();
   const toast = useToast();
-  // Shown at once; the list refresh that follows confirms it
+  // Shown at once; the list refresh that follows confirms it (a new value from the list wins)
   const [shown, setShown] = useState<boolean | null>(null);
+  const [shownFor, setShownFor] = useState(explicit);
+  if (shownFor !== explicit) {
+    setShownFor(explicit);
+    setShown(null);
+  }
   const checked = shown ?? explicit;
-  useEffect(() => setShown(null), [explicit]);
 
   const save = async (next: boolean) => {
     setShown(next);

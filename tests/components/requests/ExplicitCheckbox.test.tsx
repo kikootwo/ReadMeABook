@@ -25,7 +25,7 @@ vi.mock('@/lib/hooks/useExplicitMark', () => ({
 vi.mock('@/components/ui/Toast', () => ({ useToast: () => toastMock }));
 vi.mock('@/lib/hooks/useRequests', () => ({ useCancelRequest: () => ({ cancelRequest: vi.fn(), isLoading: false }) }));
 vi.mock('@/components/audiobooks/AudiobookDetailsModal', () => ({ AudiobookDetailsModal: () => null }));
-vi.mock('next/image', () => ({ __esModule: true, default: (props: Record<string, unknown>) => <img alt="" {...props} /> }));
+vi.mock('next/image', () => ({ __esModule: true, default: () => null }));
 vi.mock('@/contexts/PreferencesContext', () => ({ usePreferences: () => ({ squareCovers: false }) }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'user-1', role: state.role } }) }));
 

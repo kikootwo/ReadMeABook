@@ -118,7 +118,7 @@ describe('Admin requests routes', () => {
     prismaMock.request.findMany.mockResolvedValueOnce([{ ...base, id: 'r1', explicit: true }, { ...base, id: 'r2', explicit: false }, { ...base, id: 'r3' }]);
 
     const { GET } = await import('@/app/api/admin/requests/route');
-    const payload = await (await GET({ url: 'http://localhost/api/admin/requests' } as any)).json();
+    const payload = await (await GET({ url: 'http://localhost/api/admin/requests' } as never)).json();
 
     expect(payload.requests.map((r: { explicit: unknown }) => r.explicit)).toEqual([true, false, false]);
   });
