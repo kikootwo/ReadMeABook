@@ -17,7 +17,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { test, expect, type Page } from '@playwright/test';
-import { execBridgeAvailable, EXEC_BRIDGE_SKIP, loginAdminUi, Rmab, snap, writeEvidence } from '../../lib/harness';
+import { execBridgeAvailable, EXEC_BRIDGE_SKIP, loginAdminUi, Rmab, snap, waitFor, writeEvidence } from '../../lib/harness';
 import { psql, sqlStr } from './242-helpers';
 import {
   card, cleanupPageSeeds, contextFor, FAILED_ERROR, headerFigures, HEADER_OPTION_B_CSS, seedBooks, TITLES, viewer, type Viewer,
@@ -40,6 +40,11 @@ test.beforeAll(async () => {
   longAdmin = await viewer(admin, 'lib177padminname', { admin: true }); // 16 characters
   const adminId = psql(`select id from users where role = 'admin' order by created_at limit 1`);
   requestIds = seedBooks({ requester: requester.id, other: other.id, admin: adminId });
+  // Row changes are rebuilt in the background: wait until the list carries every scan-only row
+  await waitFor('the seeded library rows in the list', async () => {
+    const body = await admin.get(`/api/library?limit=120&source=scan`);
+    return TITLES.scan.every((t) => body.items.some((i: any) => i.title === t));
+  }, { timeoutMs: 60_000, intervalMs: 1_000 });
 });
 
 test.afterAll(() => {
