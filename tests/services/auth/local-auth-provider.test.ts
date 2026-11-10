@@ -259,7 +259,7 @@ describe('LocalAuthProvider', () => {
     const result = await provider.register({ username: 'user', password: 'password123' });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Username already taken');
+    expect(result.error).toBe('That username is already taken');
   });
 
   it('stores lowercase username and plexId on registration', async () => {
@@ -298,7 +298,7 @@ describe('LocalAuthProvider', () => {
     const result = await provider.register({ username: 'User', password: 'password123' });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Username already taken');
+    expect(result.error).toBe('That username is already taken');
     // The lookup should use the lowercased username
     expect(prismaMock.user.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({

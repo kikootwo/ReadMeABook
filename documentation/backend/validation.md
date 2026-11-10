@@ -8,7 +8,7 @@ API routes read JSON bodies through `readJsonBody` (`src/lib/utils/request-body.
 ## Request Size Limits
 | Tier | Constant | Limit | Routes |
 |---|---|---|---|
-| Sign-in | `AUTH_JSON_BODY_LIMIT_BYTES` | 64 KB | POST auth/admin/login, auth/local/login, auth/token/login, auth/register, auth/refresh, auth/plex/switch-profile |
+| Sign-in | `AUTH_JSON_BODY_LIMIT_BYTES` | 64 KB | POST auth/admin/login, auth/local/login, auth/token/login, auth/register, auth/refresh, auth/plex/switch-profile, admin/users (add local user) |
 | Default | `JSON_BODY_LIMIT_BYTES` | 1 MB | every other API route body |
 | Bulk import | `BULK_IMPORT_JSON_BODY_LIMIT_BYTES` | 32 MB | POST admin/bulk-import/execute |
 
