@@ -100,7 +100,7 @@ describe('POST /api/admin/users', () => {
     expect(JSON.stringify(state.logLines)).not.toContain(PASSWORD);
   });
 
-  it('creates an approved local user with the User role and returns no secrets', async () => {
+  it('creates an approved local user with the User role, never signed in, and returns no secrets', async () => {
     const { status, text, payload } = await call(post({ username: 'NewReader', password: PASSWORD }));
 
     expect(status).toBe(201);
@@ -117,6 +117,7 @@ describe('POST /api/admin/users', () => {
       role: 'user',
       isSetupAdmin: false,
       registrationStatus: 'approved',
+      lastLoginAt: null,
     });
     expect(data.authToken).toMatch(/^enc:\$2[aby]\$10\$/);
     expect(data.authToken).not.toContain(PASSWORD);

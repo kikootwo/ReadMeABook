@@ -53,7 +53,7 @@ Comprehensive overview of system metrics, active requests, download monitoring, 
 **POST /api/admin/users** (#77)
 - Admin session only (`requireAuth` + `requireAdmin`; not on the API-token allowlist → tokens 403)
 - Body `{ username, password }` (`AUTH_JSON_BODY_LIMIT_BYTES`, zod strings; other keys ignored)
-- Creates a local user via `createLocalAccount`: role `user`, `isSetupAdmin` false, `registrationStatus` approved, whatever `auth.registration_enabled` / `auth.require_admin_approval` say
+- Creates a local user via `createLocalAccount`: role `user`, `isSetupAdmin` false, `registrationStatus` approved, `lastLoginAt` null, whatever `auth.registration_enabled` / `auth.require_admin_approval` say
 - 201 `{ user: { id, plexUsername, role, authProvider } }`; password never logged or returned
 - Errors (`{ error, message }`): 403 local login off (`Local login is not enabled, so local users cannot be added`); 400 rule message (username min 3, password required / min 8 unless `ALLOW_WEAK_PASSWORD`) or `Username and password are required` (missing, non-string, bad JSON); 409 `That username is already taken`; 500 `Failed to add user`
 

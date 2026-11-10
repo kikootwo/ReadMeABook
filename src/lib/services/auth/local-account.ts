@@ -20,6 +20,8 @@ export interface LocalAccountState {
   role: 'user' | 'admin';
   isSetupAdmin: boolean;
   registrationStatus: 'approved' | 'pending_approval';
+  /** Now for a sign-up (it signs in at once); null for an account nobody has signed in to yet */
+  lastLoginAt: Date | null;
 }
 
 export type CreateLocalAccountResult =
@@ -82,7 +84,7 @@ export async function createLocalAccount(
         role: state.role,
         isSetupAdmin: state.isSetupAdmin,
         registrationStatus: state.registrationStatus,
-        lastLoginAt: new Date(),
+        lastLoginAt: state.lastLoginAt,
       },
     });
     return { ok: true, user };

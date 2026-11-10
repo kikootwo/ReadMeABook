@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
 
         const created = await createLocalAccount(
           { username, password },
-          { role: 'user', isSetupAdmin: false, registrationStatus: 'approved' }
+          { role: 'user', isSetupAdmin: false, registrationStatus: 'approved', lastLoginAt: null }
         );
         if (!created.ok) {
           const taken = created.error === USERNAME_TAKEN_ERROR;

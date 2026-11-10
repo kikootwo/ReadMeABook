@@ -23,7 +23,7 @@ vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => config
 vi.mock('@/lib/services/encryption.service', () => ({ getEncryptionService: () => encryptionMock }));
 vi.mock('bcrypt', () => ({ default: { hash: bcryptHash, compare: vi.fn() }, hash: bcryptHash }));
 
-const APPROVED_USER = { role: 'user', isSetupAdmin: false, registrationStatus: 'approved' } as const;
+const APPROVED_USER = { role: 'user', isSetupAdmin: false, registrationStatus: 'approved', lastLoginAt: null } as const;
 const uniqueKeyError = () =>
   Object.assign(new Error('Unique constraint failed on the fields: (`plex_id`)'), { code: 'P2002' });
 
@@ -111,21 +111,22 @@ describe('createLocalAccount', () => {
       role: 'user',
       isSetupAdmin: false,
       registrationStatus: 'approved',
-      lastLoginAt: expect.any(Date),
+      lastLoginAt: null,
     });
     expect(JSON.stringify(data)).not.toContain('password123');
   });
 
-  it('passes a pending first-run state through unchanged', async () => {
+  it('passes a pending first-run state (and its sign-in time) through unchanged', async () => {
     const { createLocalAccount } = await import('@/lib/services/auth/local-account');
     await createLocalAccount(
       { username: 'first', password: 'password123' },
-      { role: 'admin', isSetupAdmin: true, registrationStatus: 'pending_approval' }
+      { role: 'admin', isSetupAdmin: true, registrationStatus: 'pending_approval', lastLoginAt: new Date(5) }
     );
     expect(prismaMock.user.create.mock.calls[0][0].data).toMatchObject({
       role: 'admin',
       isSetupAdmin: true,
       registrationStatus: 'pending_approval',
+      lastLoginAt: new Date(5),
     });
   });
 
@@ -171,7 +172,7 @@ describe('createLocalAccount', () => {
   });
 });
 
-describe('LocalAuthProvider.register on a unique-key clash', () => {
+describe('LocalAuthProvider.register through the shared creator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     config.values = { 'auth.registration_enabled': 'true', 'auth.require_admin_approval': 'false' };
@@ -188,6 +189,21 @@ describe('LocalAuthProvider.register on a unique-key clash', () => {
     });
 
     expect(result).toEqual({ success: false, error: 'That username is already taken' });
+  });
+
+  it('still records the sign-up as a sign-in (lastLoginAt now), unlike an admin-added account', async () => {
+    prismaMock.user.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'new-1', ...data }));
+    const { LocalAuthProvider } = await import('@/lib/services/auth/LocalAuthProvider');
+    const result = await new LocalAuthProvider().register({ username: 'Reader', password: 'password123' });
+
+    expect(result.success).toBe(true);
+    expect(prismaMock.user.create.mock.calls[0][0].data).toMatchObject({
+      plexId: 'local-reader',
+      role: 'user',
+      isSetupAdmin: false,
+      registrationStatus: 'approved',
+      lastLoginAt: expect.any(Date),
+    });
   });
 });
 

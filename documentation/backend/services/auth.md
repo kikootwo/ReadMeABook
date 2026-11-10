@@ -289,9 +289,9 @@ oidc.admin_claim_value       = 'readmeabook-admin'
 - One creator: `createLocalAccount(input, state)` (`src/lib/services/auth/local-account.ts`), called by `LocalAuthProvider.register` (POST `/api/auth/register`) and POST `/api/admin/users` (#77)
 - Rules (`checkLocalCredentials`): username trimmed + lowercased, min 3 (`Username must be at least 3 characters`); password a non-empty string (`Password is required`), min 8 unless `ALLOW_WEAK_PASSWORD=true` (`Password must be at least 8 characters`); username checked first
 - Taken: a non-deleted `authProvider='local'` row with that `plexUsername` (deleted accounts' names are free), or a P2002 on write (concurrent sign-up, or a name equal to a deleted account's freed key `local-<name>-deleted-<ms>`) → `That username is already taken` (never the database text)
-- Row: `plexId` `local-<username>`, bcrypt (10) hash encrypted into `authToken`, `authProvider` local, `lastLoginAt` now; `role`/`isSetupAdmin`/`registrationStatus` from the caller
-- Self-registration state: first user ever (deleted rows count) → admin + setup admin + approved; else user, `pending_approval` when `auth.require_admin_approval`. Order: rules → `auth.registration_enabled` (`Registration is disabled`) → create
-- Admin-added state: user, not setup admin, approved, regardless of `auth.registration_enabled` and `auth.require_admin_approval`
+- Row: `plexId` `local-<username>`, bcrypt (10) hash encrypted into `authToken`, `authProvider` local; `role`/`isSetupAdmin`/`registrationStatus`/`lastLoginAt` from the caller
+- Self-registration state: first user ever (deleted rows count) → admin + setup admin + approved; else user, `pending_approval` when `auth.require_admin_approval`; `lastLoginAt` now. Order: rules → `auth.registration_enabled` (`Registration is disabled`) → create
+- Admin-added state: user, not setup admin, approved, `lastLoginAt` null (Users page: Never), regardless of `auth.registration_enabled` and `auth.require_admin_approval`
 - Local login enabled (`isLocalLoginEnabled`): Audiobookshelf mode and `DISABLE_LOCAL_LOGIN` not `'true'` (the conditions `/api/auth/providers` puts the `local` form behind; it also hides the form while no local account exists and registration is off). Gates POST `/api/admin/users` and the Users page Add User button. API: [admin-dashboard.md](../../admin-dashboard.md)
 
 ## Deleting Users

@@ -6,7 +6,7 @@
  *   1  1280 px, light: page with Add User, empty dialog, taken-name error (the admin's own name in
  *      upper case), list after adding
  *   2  375 px, dark: the same with a password mismatch as the inline error
- * Each added user is local, role user, approved; the first one then signs in on /login.
+ * Each added user is local, role user, approved, never signed in; the first one then signs in on /login.
  * Snapshots come before the checks (`expect.soft`), so a run on an older image still leaves its shots.
  */
 
@@ -32,11 +32,11 @@ function registrationSettings(): Registration {
 }
 
 function userRow(username: string) {
-  const [authProvider, role, status, isSetupAdmin, plexId] = psql(
-    `select concat_ws('|', auth_provider, role, coalesce(registration_status, ''), is_setup_admin::text, plex_id)
+  const [authProvider, role, status, isSetupAdmin, plexId, lastLoginAt] = psql(
+    `select concat_ws('|', auth_provider, role, coalesce(registration_status, ''), is_setup_admin::text, plex_id, coalesce(last_login_at::text, 'never'))
      from users where plex_username = ${sqlStr(username)} and deleted_at is null`
   ).split('\n')[0].split('|');
-  return { authProvider, role, status, isSetupAdmin, plexId };
+  return { authProvider, role, status, isSetupAdmin, plexId, lastLoginAt };
 }
 
 async function session(browser: Browser, opts: { width: number; height: number; dark: boolean; signedIn: boolean }) {
@@ -171,6 +171,7 @@ test('77: an admin adds local users from the Users page and the new user signs i
       status: 'approved',
       isSetupAdmin: 'false',
       plexId: `local-${name.toLowerCase()}`,
+      lastLoginAt: 'never',
     });
   }
   expect.soft(result.signIn).toEqual({

@@ -176,6 +176,7 @@ export class LocalAuthProvider implements IAuthProvider {
           role: isFirstUser ? 'admin' : 'user',
           isSetupAdmin: isFirstUser,
           registrationStatus: isFirstUser || !requireApproval ? 'approved' : 'pending_approval',
+          lastLoginAt: new Date(),
         }
       );
       if (!created.ok) {
