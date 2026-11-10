@@ -93,7 +93,8 @@ test('#542: a request marked Explicit marks the Audiobookshelf item explicit', a
     await page.getByPlaceholder('Search by title, author, or narrator...').fill(A.title);
     const card = page.getByRole('button', { name: `View details for ${A.title} by ${A.author}` }).first();
     await expect(card).toBeVisible({ timeout: 30_000 });
-    await card.click();
+    // The title, not the card's centre: the centre can be the card's own Request button
+    await card.getByRole('heading', { name: A.title }).click();
     const box = page.getByRole('checkbox', { name: /^Explicit/ });
     await expect(box).toBeVisible({ timeout: 30_000 });
     await box.scrollIntoViewIfNeeded();
