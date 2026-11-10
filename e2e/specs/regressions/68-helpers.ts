@@ -159,6 +159,24 @@ export async function fullShot(page: Page, name: string) {
   await page.setViewportSize(size);
 }
 
+/** One capture from the top of `top` to the bottom of `bottom` (e.g. the section down to the Save row). */
+export async function regionShot(page: Page, top: ReturnType<Page['locator']>, bottom: ReturnType<Page['locator']>, name: string) {
+  const size = page.viewportSize()!;
+  const height = await page.evaluate(() => document.documentElement.scrollHeight);
+  await page.setViewportSize({ width: size.width, height: Math.max(size.height, height) });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(300);
+  const a = await top.boundingBox();
+  const b = await bottom.boundingBox();
+  if (!a || !b) throw new Error(`regionShot ${name}: element not on the page`);
+  const y = Math.max(0, a.y - 12);
+  await page.screenshot({
+    path: evidencePath(SHOTS, 'shots', `${name}.jpg`), type: 'jpeg', quality: 85,
+    clip: { x: Math.max(0, a.x - 12), y, width: Math.min(size.width, a.width + 24), height: b.y + b.height + 12 - y },
+  });
+  await page.setViewportSize(size);
+}
+
 export async function elementShot(page: Page, selector: ReturnType<Page['locator']>, name: string) {
   await selector.scrollIntoViewIfNeeded();
   await page.waitForTimeout(300);

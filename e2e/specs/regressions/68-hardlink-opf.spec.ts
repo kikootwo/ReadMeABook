@@ -24,7 +24,7 @@ import { execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rmab, waitFor, writeEvi
 import { asApp, psql, sqlStr } from './242-helpers';
 import {
   absBookPageShot, absItemFor, adminPage, blocklistRows, bookFolder, devOf, elementShot, fileId, filesUnder, fullShot, loadRelease, openPaths,
-  requestAndWait, requestMessage, requestStatus, savePaths, seedBook, SHARED_DOWNLOADS, STOCK_DOWNLOADS, torrentOf,
+  regionShot, requestAndWait, requestMessage, requestStatus, savePaths, seedBook, SHARED_DOWNLOADS, STOCK_DOWNLOADS, torrentOf,
 } from './68-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
@@ -121,10 +121,10 @@ test('0: the Paths page shows File placement and Metadata in Audiobookshelf mode
     await expect(section.getByRole('alert')).toHaveText('Needs Metadata: OPF file or None, and chapter merge off.');
     // Nothing changed yet, so Save is simply off; the red line is the explanation
     await expect(page.getByRole('button', { name: 'Save Settings' })).toBeDisabled();
-    await elementShot(page, section, 'refusal-stored-conflict-tags');
+    await regionShot(page, section, page.getByRole('button', { name: 'Save Settings' }), 'refusal-stored-conflict-tags');
     await page.getByRole('radio', { name: 'OPF file (metadata.opf)' }).check();
     await expect(page.getByText('Turn off chapter merge to use hard links.').first()).toBeVisible();
-    await elementShot(page, section, 'refusal-stored-conflict-merge');
+    await regionShot(page, section, page.getByRole('button', { name: 'Save Settings' }), 'refusal-stored-conflict-merge');
   } finally {
     await ctx.close();
   }
@@ -266,7 +266,8 @@ test('1, 4, 5: one mount, Hard link + OPF: one file on disk, Audiobookshelf read
   const item = await absItemFor(folder);
   writeEvidence('68/leg4-abs-item.json', item);
   expect.soft(item.title).toBe(book.title);
-  expect.soft(item.authors).toEqual(['Test Author', 'Second Writer']);
+  // Audiobookshelf doesn't keep the OPF's author order (it listed Second Writer first)
+  expect.soft([...item.authors].sort()).toEqual(['Second Writer', 'Test Author']);
   expect.soft(item.narrators).toEqual([book.narrator]);
   expect.soft(item.series).toEqual([{ name: 'Fixture Saga', sequence: '1' }]);
   expect.soft(item.asin).toBe(book.asin);
