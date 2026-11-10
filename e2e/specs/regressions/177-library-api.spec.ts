@@ -9,8 +9,9 @@
  * failed request's owner and the admin. Asserts the gating table (keys omitted, not nulled), that
  * no canary (Audiobookshelf folder, placed ebook path, approval bypass mark, raw library ASIN, the
  * ebook's `epub` format, the Plex thumb token) appears in any response, and that a canary `q`
- * matches nothing for anyone. Evidence: `177/<viewer>-full.json`, `177/<viewer>-live.json`,
- * `177/result.json`. Values read first, then `expect.soft`.
+ * matches nothing for anyone. Then a row change that keeps `updated_at` reaches the list, and a newer
+ * request on the downloading book takes it out of live mode. Evidence: `177/<viewer>-full.json`,
+ * `177/<viewer>-live.json`, `177/result.json`, `177/follow-up.json`. Values read first, then `expect.soft`.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 

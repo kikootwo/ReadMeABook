@@ -156,6 +156,7 @@ test('#177: Library full and live modes at the design load (10k rows, 2 CPUs), 3
     seedRequests([adminId, ...users.map((u) => u.id)]);
     psql('analyze plex_library; analyze requests; analyze audiobooks;');
     const rowCount = () => Number(psql(`select count(*) from plex_library where plex_library_id = ${sqlStr(libraryId)}`));
+    const seeded = rowCount();
     const guidWindows = Number(psql(`select count(*) from plex_library where plex_library_id = ${sqlStr(libraryId)} and plex_guid ~ '[A-Za-z0-9]{10}'`));
 
     const result: Record<string, unknown> = { cpuMax: cpus, budget: BUDGET, windowMs: WINDOW_MS, guidRowsWithAsinWindows: guidWindows };
@@ -166,7 +167,8 @@ test('#177: Library full and live modes at the design load (10k rows, 2 CPUs), 3
     const idle10 = await idleBaseline(admin);
     const window10 = await realisticWindow(viewers, libraryId, cursor);
     result.rows10000 = {
-      counts: { libraryRows: rowCount(), total: cold.body?.stats?.total },
+      // seeded before the window; the window adds one library row at 40 s
+      counts: { libraryRows: seeded, afterWindow: rowCount(), total: cold.body?.stats?.total },
       coldFirstMs: Math.round(cold.ms),
       ...summarize(idle10, window10),
       stress: await stressWindow(viewers[0], viewers[1]),
@@ -196,8 +198,9 @@ test('#177: Library full and live modes at the design load (10k rows, 2 CPUs), 3
     };
     writeEvidence('177-perf/result.json', result);
 
-    const r = result.rows10000 as ReturnType<typeof summarize> & { counts: { libraryRows: number; total: number } };
+    const r = result.rows10000 as ReturnType<typeof summarize> & { counts: { libraryRows: number; afterWindow: number; total: number } };
     expect.soft(r.counts.libraryRows, '10k rows seeded').toBe(10_000);
+    expect.soft(r.counts.afterWindow, 'the window inserted one library row').toBe(10_001);
     expect.soft(r.counts.total, 'entries: library rows + 1000 request-only books').toBe(11_000);
     expect.soft(guidWindows, 'guid index populated by real id shapes').toBeGreaterThan(9_000);
     expect.soft(r.errors, 'no failed call in the window').toEqual([]);
