@@ -268,14 +268,13 @@ export async function processDownloadTorrent(payload: DownloadTorrentPayload, at
         logger.error('Failed to queue grab notification', { error: error instanceof Error ? error.message : String(error) });
       });
 
-      // Trigger monitor download job with initial delay
-      await jobQueue.addMonitorJob(
-        requestId,
-        downloadHistory.id,
-        downloadClientId,
-        client.clientType,
-        3 // Wait 3 seconds before first check
-      );
+      // Trigger monitor download job with initial delay; an automatic grab carries its chain count (#332)
+      const monitorArgs = [requestId, downloadHistory.id, downloadClientId, client.clientType, 3] as const; // 3 s before the first check
+      if (payload.clientFailures !== undefined) {
+        await jobQueue.addMonitorJob(...monitorArgs, undefined, undefined, undefined, undefined, { clientFailures: payload.clientFailures });
+      } else {
+        await jobQueue.addMonitorJob(...monitorArgs);
+      }
 
       logger.info(`Started monitoring job for request ${requestId} (${client.clientType}, 3s initial delay)`);
 

@@ -50,6 +50,12 @@ export interface SearchIndexersPayload extends JobPayload {
     author: string;
     asin?: string; // Optional ASIN for runtime-based size scoring
   };
+  clientFailures?: number; // Release failures so far in an automatic chain (#332)
+}
+
+/** Carried search → download → monitor by automatic grabs; absent on a download/monitor job = hand-picked (#332) */
+export interface ClientFailureChain {
+  clientFailures?: number;
 }
 
 export interface DownloadTorrentPayload extends JobPayload {
@@ -62,6 +68,7 @@ export interface DownloadTorrentPayload extends JobPayload {
   torrent: TorrentResult;
   /** Ranked candidates after `torrent`, used when an upstream grab is rate-limited/unavailable. */
   alternateTorrents?: TorrentResult[];
+  clientFailures?: number; // Set only by automatic search (#332)
 }
 
 export interface MonitorDownloadPayload extends JobPayload {
@@ -73,6 +80,7 @@ export interface MonitorDownloadPayload extends JobPayload {
   stallCount?: number;    // Consecutive polls with no progress change (drives backoff)
   pathWaitCount?: number; // Consecutive polls waiting for content_path to relocate to save_path
   connectionFailureCount?: number; // Consecutive polls where the download client was unreachable
+  clientFailures?: number; // Set only for automatic grabs (#332)
 }
 
 export interface OrganizeFilesPayload extends JobPayload {
@@ -598,15 +606,21 @@ export class JobQueueService {
   /**
    * Add search indexers job
    */
-  async addSearchJob(requestId: string, audiobook: { id: string; title: string; author: string; asin?: string }): Promise<string> {
+  async addSearchJob(
+    requestId: string,
+    audiobook: { id: string; title: string; author: string; asin?: string },
+    chain?: ClientFailureChain & { jobId?: string } // jobId: fixed Bull id, a duplicate add is ignored (#332)
+  ): Promise<string> {
     return await this.addJob(
       'search_indexers',
       {
         requestId,
         audiobook,
+        ...(chain?.clientFailures !== undefined && { clientFailures: chain.clientFailures }),
       } as SearchIndexersPayload,
       {
         priority: 10, // High priority for user-initiated requests
+        ...(chain?.jobId && { jobId: chain.jobId }),
       }
     );
   }
@@ -618,7 +632,8 @@ export class JobQueueService {
     requestId: string,
     audiobook: { id: string; title: string; author: string },
     torrent: TorrentResult,
-    alternateTorrents: TorrentResult[] = []
+    alternateTorrents: TorrentResult[] = [],
+    chain?: ClientFailureChain
   ): Promise<string> {
     return await this.addJob(
       'download_torrent',
@@ -627,6 +642,7 @@ export class JobQueueService {
         audiobook,
         torrent,
         alternateTorrents,
+        ...(chain?.clientFailures !== undefined && { clientFailures: chain.clientFailures }),
       } as DownloadTorrentPayload,
       {
         priority: 9, // High priority - download selected torrent
@@ -646,7 +662,8 @@ export class JobQueueService {
     lastProgress?: number,
     stallCount?: number,
     pathWaitCount?: number,
-    connectionFailureCount?: number
+    connectionFailureCount?: number,
+    chain?: ClientFailureChain
   ): Promise<string> {
     return await this.addJob(
       'monitor_download',
@@ -659,6 +676,7 @@ export class JobQueueService {
         stallCount,
         pathWaitCount,
         connectionFailureCount,
+        ...(chain?.clientFailures !== undefined && { clientFailures: chain.clientFailures }),
       } as MonitorDownloadPayload,
       {
         priority: 5, // Medium priority

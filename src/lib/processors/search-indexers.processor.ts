@@ -12,12 +12,36 @@ import { groupIndexersByCategories, getGroupDescription } from '../utils/indexer
 import { RMABLogger } from '../utils/logger';
 import { getLanguageForRegion } from '../constants/language-config';
 import { filterBlockedResults } from '../utils/filter-blocked-results';
-import { addGroupSearch, logSearchSummary, newSearchStats, noResultsMessage, recordFailure } from '../utils/indexer-search-failures';
+import { addGroupSearch, logSearchSummary, newSearchStats, noResultsMessage, recordFailure, type SearchStats } from '../utils/indexer-search-failures';
 import { markRequestFailedUnlessStopped, updateRequestUnlessStopped } from '../utils/request-stop-guard';
+import { notifyRequestError } from './client-failure';
 import type { AudibleRegion } from '../types/audible';
 
 const MAX_RANKED_RESULTS = 100;
 const CANCELLED_DURING_SEARCH = 'Request cancelled or deleted during the search, not re-queued';
+
+/**
+ * A search for the next release after a download-client failure (#332) that found nothing
+ * usable ends the request `failed` with one notification, unless an indexer search failed
+ * (#522: then `awaiting_search` as usual). Returns the job result, or null to carry on.
+ */
+async function failChainIfNothingLeft(
+  payload: SearchIndexersPayload,
+  reason: string,
+  searchStats: SearchStats,
+  logger: ReturnType<typeof RMABLogger.forJob>
+): Promise<{ success: boolean; message: string; requestId: string } | null> {
+  if (!payload.clientFailures || searchStats.queriesFailed > 0) return null;
+  const { requestId } = payload;
+  const message = `Download failed; no other release found: ${reason}`;
+  logger.warn(`${message} (request ${requestId})`);
+  if (!(await markRequestFailedUnlessStopped(requestId, message))) {
+    logger.info(`Request ${requestId} was cancelled or deleted during the search, not re-queued`);
+    return { success: true, message: CANCELLED_DURING_SEARCH, requestId };
+  }
+  await notifyRequestError(requestId, message, logger);
+  return { success: false, message, requestId };
+}
 
 /**
  * Process search indexers job
@@ -138,6 +162,9 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
         ? `No usable releases — ${preBlocklistCount} candidates tried, all blocked`
         : noResultsMessage('No torrents/nzbs found', searchStats);
 
+      const ended = await failChainIfNothingLeft(payload, errorMessage, searchStats, logger);
+      if (ended) return ended;
+
       logger.warn(`${errorMessage} for request ${requestId}, marking as awaiting_search`);
 
       // Unless a cancel or delete landed during the search: re-queueing it would
@@ -244,12 +271,16 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
     }
 
     if (filteredResults.length === 0) {
+      const noMatchMessage = noResultsMessage('No quality matches found', searchStats);
+      const ended = await failChainIfNothingLeft(payload, noMatchMessage, searchStats, logger);
+      if (ended) return ended;
+
       // No quality results found - queue for re-search instead of failing
       logger.warn(`No quality matches found for request ${requestId} (all below 50/100), marking as awaiting_search`);
 
       if (!(await updateRequestUnlessStopped(requestId, {
         status: 'awaiting_search',
-        errorMessage: noResultsMessage('No quality matches found', searchStats),
+        errorMessage: noMatchMessage,
         lastSearchAt: new Date(),
       }))) {
         logger.info(`Request ${requestId} was cancelled or deleted during the search, not re-queued`);
@@ -311,7 +342,7 @@ export async function processSearchIndexers(payload: SearchIndexersPayload): Pro
       id: audiobook.id,
       title: audiobook.title,
       author: audiobook.author,
-    }, bestResult, filteredResults.slice(1));
+    }, bestResult, filteredResults.slice(1), { clientFailures: payload.clientFailures ?? 0 }); // automatic grab (#332)
 
     return {
       success: true,
