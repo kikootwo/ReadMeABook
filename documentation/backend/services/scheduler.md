@@ -195,6 +195,7 @@ interface ScheduledJob {
 - ✅ Scheduled jobs triggered by timer not updating lastRun timestamp → Job queue now updates lastRun when processing timer-triggered jobs
 - ✅ `scheduledJob.update()` "No record was found" error on every run (#222) → a repeatable job left in Redis after its row was deleted (e.g. database reset) kept firing; startup now removes it, and the lastRun update warns once instead
 - ✅ `plexLibrary.create()` unique `plex_guid` error in the recently-added check / full scan (#222) → two jobs inserting the same new item at once; the losing insert now updates the winner's row (`src/lib/processors/library-row-insert.ts`), same field rules as any existing row (an ASIN is never cleared)
+- ✅ Library Scan (and Audible Data Refresh) not scheduled after setup until the next app start (#583) → both are created disabled and `start()` schedules only enabled jobs; `POST /api/setup/complete` now calls `enableJob(id)` for each job it enables
 - ✅ Daily cron patterns at non-midnight hours not recognized → Fixed `getIntervalFromCron` to parse any daily time (e.g., "0 4 * * *")
 - ✅ "Every 24 hours" interval validation error → Auto-converts 24+ hour intervals to daily schedule (0 0 * * *)
 

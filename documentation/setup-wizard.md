@@ -44,7 +44,7 @@
 **POST /api/setup/complete**
 - Saves all config to database
 - Creates admin user account
-- Enables auto jobs (Plex scan, Audible refresh)
+- Enables auto jobs (Plex scan, Audible refresh), then registers their repeating schedules at once via `getSchedulerService().enableJob(id)` (the admin jobs page path; same repeat key, so a repeat or the next app start adds no copy). A scheduling failure only warns (`Could not schedule job "<name>"; a restart schedules it`); setup still succeeds (#583)
 - Marks setup as complete
 - Returns JWT tokens for auto-login
 
