@@ -136,6 +136,7 @@
 - **Bulk import (scan folders, match Audible, batch import)** → [features/bulk-import.md](features/bulk-import.md)
 - **Jobs management UI** → [backend/services/scheduler.md](backend/services/scheduler.md)
 - **Request deletion (soft delete, seeding awareness, library delete guard, files kept reason)** → [admin-features/request-deletion.md](admin-features/request-deletion.md)
+- **Shared torrent rule (who keeps a torrent several requests use, and until when)** → [admin-features/request-deletion.md](admin-features/request-deletion.md#shared-torrent-holds)
 - **Request cancel (stops the download, cancelled-download cleanup pass, token cancel route)** → [admin-features/request-cancel.md](admin-features/request-cancel.md)
 - **Request approval system, auto-approve settings** → [admin-features/request-approval.md](admin-features/request-approval.md)
 - **Release blocklist (auto-block failed releases, /admin/blocklist)** → [admin-features/release-blocklist.md](admin-features/release-blocklist.md)

@@ -96,11 +96,13 @@ model Request {
    ELSE IF download not completed, OR evaluateSeeding(config, {seedingTime, ratio}).met:
      (src/lib/utils/seeding-policy.ts, same rule as cleanup_seeded_torrents: every set
       limit met; 0 turns a limit off; unreported ratio with ratioLimit > 0 = not met)
-     IF another active request uses the same torrentHash (otherActiveRequestsUsingTorrent,
-        src/lib/utils/shared-torrent.ts), whatever its status, even finished and done seeding:
-       → Keep torrent → torrentsKeptShared++ (the cleanup job may remove it later, see below)
+     IF another request keeps it (torrentHolds(), src/lib/utils/shared-torrent.ts; table in
+        Shared Torrent Holds below; "finished" for holds: anything but a clearly partial torrent):
+       → Keep torrent → torrentsKeptShared++ → completed in the client but not in history:
+         write downloadStatus completed (the cleanup job comes back to this request)
      ELSE:
        → Delete torrent + files → torrentsRemoved++ → row downloadStatus = 'removed'
+         → other requests' selected rows on the hash for this client 'removed' (markOtherRowsRemoved)
 
    ELSE (still seeding):
      → Log: "Keeping ... to finish seeding: ratio a/b, time x/y min"
@@ -195,13 +197,29 @@ where: {
 - **Soft-deleted requests:** Delete torrent + hard-delete request when seeding complete
 - **Unlimited seeding:** Hard-delete orphaned request immediately (no monitoring)
 - **Not RMAB's torrent:** never removed; a soft-deleted request is hard-deleted, the torrent stays. Details: [scheduler.md](../backend/services/scheduler.md) (cleanup_seeded_torrents)
-- **Shared torrent (#283):** after ownership and this row's seeding check, `otherActiveRequestsSharingTorrent()` lists the other non-deleted requests on the torrent (same hash forms as the delete guard). Each keeps it (logged with the reason) unless `siblingKeepsTorrent()` (`src/lib/utils/shared-torrent.ts`) finds it:
-  - finished: `FINISHED_REQUESTS` (audiobook `available`, ebook `downloaded`; also the candidate query's statuses). Any other status keeps it (`downloading`, `processing`, audiobook `downloaded`, `failed`, `cancelled`, ...)
-  - an audiobook also imported by RMAB since it took the torrent: its book record `completed` with a `filePath` (written only by the organizer after the copy) and `completedAt` later than the row's `createdAt`. A library scan can mark it `available` mid-copy, and a library match alone never passes, so either keeps it
-  - every row it has for the torrent recorded for the configured client type
-  - its own indexer's requirement met (`evaluateSeeding()` with its row's indexer, by the same probe answer); unlimited or unconfigured indexer keeps it
-  - None keeps it → one `deleteDownload`, this row `removed` (or soft-deleted: hard-deleted), the siblings' rows `removed` in one `updateMany` (also rows RMAB did not add, which never reach the guard themselves). Same run: `deletedHashes`; later runs: the probe's not-found → `removed`
-  - Soft-deleted requests never keep it (unchanged)
+- **Shared torrent (#283, #545):** after ownership and this row's seeding check, `torrentHolds()` (`src/lib/utils/shared-torrent.ts`) applies [Shared Torrent Holds](#shared-torrent-holds) to every other request on the torrent, active and soft-deleted (same hash forms as the delete guard), by the same probe answer. Each hold is logged with its reason
+  - Held, soft-deleted candidate: hard-deleted unless a hold is `until_met` (then it stays soft-deleted and is probed again next run: nobody else may ever come back to remove the torrent)
+  - None holds → one `deleteDownload`, this row `removed` (or soft-deleted: hard-deleted), every other request's selected row on the hash for this client `removed` in one `updateMany` (`markOtherRowsRemoved()`; deleted requests' rows too, which then stay soft-deleted; also rows RMAB did not add, which never reach the guard themselves). Same run: `deletedHashes`; later runs: the probe's not-found → `removed`
+
+### Shared Torrent Holds
+One rule for request delete, the seeding cleanup and the cancel step: `holdOf()` in `src/lib/utils/shared-torrent.ts`, read through `torrentHolds(requestId, hash, { clientType, addedAt, seeding })`. `seeding` = the other row's own indexer rule (`evaluateSeeding()`) by the client's answer for a finished torrent; null for a partial one. Only live rows count (`downloadStatus` not `removed`). "Owns" = a live row recorded for the configured client type that `resolveOwnership(row, addedAt)` calls RMAB's ([#423](../phase3/download-clients.md#torrent-ownership-423)).
+
+| Other request | Partial torrent | Finished torrent | Kind |
+|---|---|---|---|
+| Active, not finished (`downloading`, `processing`, audiobook `downloaded`, `failed`, ...) | keeps | keeps | `active` if it owns a row, else `until_met` |
+| Finished (audiobook `available`, ebook `downloaded`): own rule not met, unlimited, not RMAB-imported since its row (`importedSince`), or a row for another client | keeps | keeps | same |
+| Finished, imported since, same client, own rule met | keeps | lets go | |
+| Soft-deleted, owns a row, limited rule not met | lets go | keeps until met | `until_met` |
+| Soft-deleted: rule met, unlimited, or no row that owns it | lets go | lets go | |
+| Cancelled (`cancelledAt` NULL or set), owns a row, rule not met | lets go | keeps until met | `until_met` |
+| Cancelled, owns a row, unlimited | lets go | keeps forever (as its own `kept_unlimited`) | `forever` |
+| Cancelled: rule met, or no row that owns it | lets go | lets go | |
+| Any request whose rows on the hash are all `removed` | lets go | lets go | |
+
+- Kinds (seeding cleanup only): `active` = that request removes the torrent itself once it lets go; `until_met` = the hold ends but the holder may never remove the torrent (deleted, cancelled, or active that only took it over), so a soft-deleted candidate stays; `forever` = nothing releases it
+- "Finished" per caller: seeding cleanup always; cancel `!clearlyPartial()` (unclear states stop earlier); request delete `!clearlyPartial()`: a partial state (`downloading`/`queued`/`paused`), progress < 1, no `completedAt` and the row not `completed`. A recheck (`checking`) counts as finished, so deleted and cancelled owners still hold
+- Cancel only, after the rule: `sameBookGrabInProgress` (another request for the book `searching`/`downloading` without a selected row)
+- Usenet: unchanged (`otherActiveRequestsUsingNzb`, any non-deleted request holds)
 
 ### API Endpoint
 
@@ -359,6 +377,14 @@ where: {
 - **Cause:** the evidence check proves only that the folder's direct audio is this import; nothing limited the removal to it
 - **Fix:** D1 table above (audio of the hashed set; cover and junk only when nothing else is left; folder only when empty; `folderKept` lists what stayed); delivered ebook children stay, unlinked, the book keeps their folder; D2 empty-folder step. The automatic ebook request (`createEbookRequestIfEnabled`) and `find_missing_ebooks` look for an active ebook request by book (`audiobookId`), not by parent; a re-request's import links the surviving ebook request to the new audiobook request (the manual ebook routes look it up by parent). A reported-issue replace keeps the stored ebook path while a delivered ebook request remains
 - **Limits:** other users' audiobook requests for the same book still lose the shared audio (per-user duplicate check, `request-creator.service.ts`; as before); a user-customized `cover.jpg` in a folder with nothing else of theirs is removed; folders holding other user files now stay (listed); a delivered legacy ebook child (no record) survives with `filePath` null, so its download 404s until the book is imported again; another user's completed audiobook request on the same book keeps a Download button that 404s after the delete (the stored path now points at the ebook folder, the download serves audio only)
+
+**10. Shared Torrent: Deleted Requests Ignored, Cancelled Ones Kept It Forever (#545)**
+- **Issue:** request delete and the seeding cleanup ignored a soft-deleted request still seeding the torrent (removed before its own indexer rule was met when the two rows had different rules); the cleanup and request delete counted any `cancelled` request as "not finished", so it kept the torrent forever (pre-upgrade cancels are never swept by the cancel pass). Request delete also kept a torrent for a finished, done-seeding request (the cleanup removed it ≤ 30 min later)
+- **Cause:** three different checks (`otherActiveRequestsUsingTorrent` on delete, `siblingKeepsTorrent` in the cleanup, `holdReason` on cancel)
+- **Fix:** one rule, [Shared Torrent Holds](#shared-torrent-holds), used by all three; deleted and cancelled requests hold only through a row that owns the torrent; one `markOtherRowsRemoved()` scoped to the client type
+- **Scope:** an early removal needs two rows that both own the same live torrent: legacy NULL rows both inside the [−15, +5] min window, or v1.2.11 duplicate rows. A new second grab of a torrent already in the client is recorded `addedByRmab: false` and never holds as deleted or cancelled
+- **After upgrade:** the first cleanup run removes torrents that were kept only by a cancelled request whose own rule is met (or by requests whose rows are all `removed`); each is RMAB's own, done seeding, and logged
+- **Limits (kept, never lost):** a torrent whose only owner is a pre-upgrade cancel (`cancelledAt` NULL) stays: that cancel is never swept, and a request that only took the torrent over can't remove it. Soft-deleted owners the cleanup already hard-deleted before this fix ("kept shared download") can't come back: their torrents stay (remove them by hand). A partial torrent deleted while a request that took it over is still downloading: no `completed` row, the cleanup never visits the owner. Usenet unchanged
 
 ## File Structure
 

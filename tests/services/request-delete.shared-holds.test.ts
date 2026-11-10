@@ -8,6 +8,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DownloadHistory } from '@/generated/prisma';
 import { createPrismaMock } from '../helpers/prisma';
 
 const prismaMock = createPrismaMock();
@@ -25,12 +26,12 @@ const SEEDING = { status: 'seeding', progress: 1 };
 const PARTIAL = { status: 'downloading', progress: 0.4 };
 
 /** The deleted request's own row: RMAB's, on Fast (30 min; 40 min seeded = met) */
-function ownRow(overrides: Record<string, unknown> = {}): any {
+function ownRow(overrides: Record<string, unknown> = {}): DownloadHistory {
   return {
     id: 'dh-1', requestId: 'req-1', selected: true, torrentHash: HASH, downloadClientId: HASH, downloadClient: 'qbittorrent',
     indexerName: 'Fast', indexerId: 1, downloadStatus: 'completed', completedAt: null, addedByRmab: true, createdAt: CREATED_AT, nzbId: null,
     ...overrides,
-  };
+  } as unknown as DownloadHistory;
 }
 
 /** Another request's row on the same torrent; Slow = 600 min (not met) */
@@ -49,15 +50,15 @@ const NOT_OWNED: [string, Record<string, unknown>][] = [
   ['recorded for another client', { downloadClient: 'transmission' }],
 ];
 
-function db({ active = [] as any[], deleted = [] as any[] } = {}) {
-  prismaMock.request.findMany.mockImplementation(async (args: any) => (args.where.deletedAt === null ? active : deleted));
+function db({ active = [] as unknown[], deleted = [] as unknown[] } = {}) {
+  prismaMock.request.findMany.mockImplementation(async (args: { where: { deletedAt: unknown } }) => (args.where.deletedAt === null ? active : deleted));
 }
 
 const cancelled = (row: Record<string, unknown> = {}) =>
   ({ id: 'req-2', status: 'cancelled', type: 'audiobook', audiobook: null, downloadHistory: [otherRow(row)] });
 const softDeleted = (row: Record<string, unknown> = {}) => ({ id: 'req-2', downloadHistory: [otherRow(row)] });
 
-async function deleteWith(row: any, answer: Record<string, unknown>) {
+async function deleteWith(row: DownloadHistory, answer: Record<string, unknown>) {
   configMock.get.mockImplementation(async (key: string) => (key === 'prowlarr_indexers'
     ? JSON.stringify([
       { id: 1, name: 'Fast', protocol: 'torrent', seedingTimeMinutes: 30 },
@@ -75,8 +76,8 @@ async function deleteWith(row: any, answer: Record<string, unknown>) {
   return { counts: await cleanUpRequestDownload('req-1', row), client };
 }
 
-const statusWrites = () => prismaMock.downloadHistory.update.mock.calls.map(([a]: any[]) => a.data);
-const otherRowsMarked = () => prismaMock.downloadHistory.updateMany.mock.calls.map(([a]: any[]) => a.where.requestId);
+const statusWrites = () => (prismaMock.downloadHistory.update.mock.calls as [{ data: unknown }][]).map(([a]) => a.data);
+const otherRowsMarked = () => (prismaMock.downloadHistory.updateMany.mock.calls as [{ where: { requestId: unknown } }][]).map(([a]) => a.where.requestId);
 
 beforeEach(() => {
   vi.clearAllMocks();

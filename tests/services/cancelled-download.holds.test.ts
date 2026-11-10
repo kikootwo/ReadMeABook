@@ -8,6 +8,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DownloadHistory } from '@/generated/prisma';
 import { createPrismaMock } from '../helpers/prisma';
 
 const prismaMock = createPrismaMock();
@@ -24,10 +25,10 @@ const HASH = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const REQUEST = { id: 'req-1', audiobookId: 'ab-1', type: 'audiobook' };
 
 // This request's row is on Tracker (60 min); 61 min seeded meets it, not Slow (600 min)
-const row = (): any => ({
+const row = (): DownloadHistory => ({
   id: 'dh-1', requestId: 'req-1', selected: true, downloadStatus: 'completed', torrentHash: HASH, downloadClientId: HASH,
   downloadClient: 'qbittorrent', indexerName: 'Tracker', indexerId: 1, createdAt, addedByRmab: true, completedAt: null, nzbId: null,
-});
+} as unknown as DownloadHistory);
 const FINISHED = { id: HASH, name: 'Book', status: 'seeding', progress: 1, addedAt, seedingTime: 61 * 60, ratio: 0 };
 
 const otherRow = (overrides: Record<string, unknown> = {}) => ({
@@ -48,8 +49,8 @@ const NOT_OWNED: [string, Record<string, unknown>][] = [
 ];
 const UNLIMITED = { indexerName: 'Unconfigured', indexerId: 9 };
 
-function db({ siblings = [] as any[], softDeletedHolders = [] as any[] } = {}) {
-  prismaMock.request.findMany.mockImplementation(async (args: any) => (args.where.deletedAt === null ? siblings : softDeletedHolders));
+function db({ siblings = [] as unknown[], softDeletedHolders = [] as unknown[] } = {}) {
+  prismaMock.request.findMany.mockImplementation(async (args: { where: { deletedAt: unknown } }) => (args.where.deletedAt === null ? siblings : softDeletedHolders));
   prismaMock.request.findFirst.mockResolvedValue(null);
   prismaMock.downloadHistory.findFirst.mockResolvedValue({ id: 'dh-1' });
 }
