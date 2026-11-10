@@ -17,6 +17,8 @@ const fsState = vi.hoisted(() => ({
   devOverride: null as null | { path: string; dev: bigint },
   // Paths lstat reports as a symbolic link (file symlinks need admin rights on Windows)
   fakeSymlinks: new Set<string>(),
+  // Every handle fs.open returned (the link pass pins its sources)
+  opened: [] as Array<{ fd: number }>,
 }));
 
 vi.mock('fs/promises', async (importOriginal) => {
@@ -39,7 +41,12 @@ vi.mock('fs/promises', async (importOriginal) => {
     if (!fsState.fakeSymlinks.has(nodePath.resolve(String(p)))) return result;
     return Object.assign(Object.create(Object.getPrototypeOf(result)), result, { isSymbolicLink: () => true, isFile: () => false });
   }) as typeof actual.lstat;
-  return { ...actual, default: { ...actual, link, stat, lstat }, link, stat, lstat };
+  const open = (async (...args: unknown[]) => {
+    const handle = await (actual.open as (...a: unknown[]) => Promise<{ fd: number }>)(...args);
+    fsState.opened.push(handle);
+    return handle;
+  }) as typeof actual.open;
+  return { ...actual, default: { ...actual, link, stat, lstat, open }, link, stat, lstat, open };
 });
 
 const placeState = vi.hoisted(() => ({ hook: null as null | ((source: string, real: () => Promise<unknown>) => Promise<unknown>) }));
@@ -60,7 +67,7 @@ vi.mock('@/lib/processors/organize-cleanup-guard', () => ({
   }),
 }));
 
-import { linkInto } from '@/lib/utils/link-file';
+import { linkInto, pinFile } from '@/lib/utils/link-file';
 import { linkBook } from '@/lib/utils/book-link';
 
 const errno = (code: string) => Object.assign(new Error(`${code}: injected`), { code });
@@ -87,6 +94,7 @@ beforeEach(() => {
   fsState.linkHook = null;
   fsState.devOverride = null;
   fsState.fakeSymlinks.clear();
+  fsState.opened = [];
   placeState.hook = null;
 });
 
@@ -148,12 +156,40 @@ describe('linkInto', () => {
 
   it('a source swapped after the precheck fails the identity check and the name is removed', async () => {
     const source = download('a.m4b');
-    const captured = identity(source);
-    fs.rmSync(source);
-    fs.writeFileSync(source, 'another file');
-    const target = path.join(book, 'a.m4b');
-    expect(await linkInto(source, target, captured)).toMatchObject({ kind: 'refused', refusal: { code: 'VERIFY' } });
-    expect(fs.existsSync(target)).toBe(false);
+    // The precheck pins the source (book-link.ts), as here
+    const pin = await pinFile(source);
+    if (!('pinned' in pin)) throw new Error('not pinned');
+    try {
+      fs.rmSync(source);
+      fs.writeFileSync(source, 'another file');
+      const target = path.join(book, 'a.m4b');
+      expect(await linkInto(source, target, pin.pinned.id)).toMatchObject({ kind: 'refused', refusal: { code: 'VERIFY' } });
+      expect(fs.existsSync(target)).toBe(false);
+    } finally {
+      await pin.pinned.close();
+    }
+  });
+
+  it('a pinned file keeps its inode number from a replacement (Linux reuses a freed one at once)', async () => {
+    const source = download('a.m4b');
+    const pin = await pinFile(source);
+    if (!('pinned' in pin)) throw new Error('not pinned');
+    try {
+      fs.rmSync(source);
+      fs.writeFileSync(source, 'audio a.m4b');
+      expect(identity(source).ino).not.toBe(pin.pinned.id.ino);
+    } finally {
+      await pin.pinned.close();
+    }
+  });
+
+  it('pinFile refuses a folder, and a symbolic link without following it', async () => {
+    expect(await pinFile(downloads)).toEqual({ code: 'NOT_REGULAR' });
+    if (process.platform !== 'win32') {
+      const link = path.join(downloads, 'link.m4b');
+      fs.symlinkSync(download('real.m4b'), link);
+      expect(await pinFile(link)).toEqual({ code: 'SYMLINK' });
+    }
   });
 
   it.skipIf(process.platform === 'win32')('mergerfs-style symlink on EXDEV is caught and removed', async () => {
@@ -167,6 +203,31 @@ describe('linkInto', () => {
 });
 
 describe('linkBook', () => {
+  it('holds every source open during the pass and closes them all after it, linked or not', async () => {
+    expect((await run(bookFiles('01.mp3', '02.mp3'))).kind).toBe('placed');
+    fsState.linkHook = async (source, _target, real) => {
+      if (source.endsWith('13.mp3')) throw errno('EXDEV');
+      return real();
+    };
+    expect((await run(bookFiles('11.mp3', '12.mp3', '13.mp3'))).kind).toBe('cannot');
+    expect(fsState.opened).toHaveLength(5);
+    expect(fsState.opened.every((handle) => handle.fd === -1)).toBe(true);
+  });
+
+  it('a source swapped during the pass is not linked, and the earlier links are removed', async () => {
+    const files = bookFiles('01.mp3', '02.mp3', '03.mp3');
+    placeState.hook = async (source, real) => {
+      if (source.endsWith('02.mp3')) {
+        fs.rmSync(source);
+        fs.writeFileSync(source, 'audio 02.mp3');
+      }
+      return real();
+    };
+    expect(await run(files)).toMatchObject({ kind: 'cannot', refusal: { code: 'VERIFY' }, leftBehind: [] });
+    for (const f of files) expect(fs.existsSync(f.target)).toBe(false);
+    expect(nlink(files[0].source)).toBe(1);
+  });
+
   it('links every file of the book', async () => {
     const files = bookFiles('01.mp3', '02.mp3');
     const outcome = await run(files);

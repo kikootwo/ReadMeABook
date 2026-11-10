@@ -7,6 +7,7 @@
  * published create-only: an existing metadata.opf is kept and never opened.
  */
 
+import { createHash } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { writeFileAtomic, sameIdentity, type FileIdentity } from './copy-file';
@@ -132,7 +133,8 @@ export function buildOpf(book: OpfMetadata): string {
 }
 
 export type OpfOutcome =
-  | { outcome: 'written'; path: string; identity: FileIdentity; warning?: string }
+  /** `digest`: sha256 of the bytes written (dev/ino alone can name a replacement on Linux). */
+  | { outcome: 'written'; path: string; identity: FileIdentity; digest: string; warning?: string }
   | { outcome: 'kept'; path: string };
 
 /**
@@ -144,27 +146,37 @@ export async function writeOpfSidecar(dir: string, book: OpfMetadata, fileMode: 
   return withTargetLock(target, async () => {
     await removeStalePartials(dir, OPF_FILE_NAME);
     if (await fs.lstat(target).then(() => true, () => false)) return { outcome: 'kept', path: target };
+    const bytes = Buffer.from(buildOpf(book), 'utf8');
     try {
-      await writeFileAtomic(target, Buffer.from(buildOpf(book), 'utf8'), { mode: 'create' });
+      await writeFileAtomic(target, bytes, { mode: 'create' });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') return { outcome: 'kept', path: target };
       throw error;
     }
     const stat = await fs.lstat(target, { bigint: true });
     const identity = { dev: stat.dev, ino: stat.ino };
+    const digest = sha256(bytes);
     const permissions = await applyFileMode(target, fileMode);
     if (permissions.kind === 'missing') throw new Error(permissions.reason);
     return permissions.kind === 'refused'
-      ? { outcome: 'written', path: target, identity, warning: permissions.warning }
-      : { outcome: 'written', path: target, identity };
+      ? { outcome: 'written', path: target, identity, digest, warning: permissions.warning }
+      : { outcome: 'written', path: target, identity, digest };
   });
 }
 
-/** Remove the metadata.opf this run wrote, only while it still is that file. */
+const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+
+/**
+ * Remove the metadata.opf this run wrote, only while it still is that file: same dev/ino
+ * AND the same bytes (Linux gives a freed inode number to the next new file at once, so
+ * a replacement can carry the old numbers; one holding exactly our bytes loses nothing).
+ */
 export async function removeOwnOpf(written: Extract<OpfOutcome, { outcome: 'written' }>): Promise<boolean> {
   return withTargetLock(written.path, async () => {
     const stat = await fs.lstat(written.path, { bigint: true }).catch(() => null);
     if (!stat?.isFile() || !sameIdentity({ dev: stat.dev, ino: stat.ino }, written.identity)) return false;
+    const now = await fs.readFile(written.path).catch(() => null);
+    if (!now || sha256(now) !== written.digest) return false;
     await fs.unlink(written.path);
     return true;
   });

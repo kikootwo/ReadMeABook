@@ -165,4 +165,13 @@ describe('writeOpfSidecar', () => {
     expect(await removeOwnOpf(again)).toBe(true);
     expect(fs.existsSync(again.path)).toBe(false);
   });
+
+  it('keeps a file at the same device and inode that holds other bytes (as a replacement reusing the inode number does)', async () => {
+    const outcome = await writeOpfSidecar(dir, BOOK, 0o664);
+    if (outcome.outcome !== 'written') throw new Error('not written');
+    // Rewritten in place: the dev/ino stay, the bytes are someone else's
+    fs.writeFileSync(outcome.path, 'someone else');
+    expect(await removeOwnOpf(outcome)).toBe(false);
+    expect(fs.readFileSync(outcome.path, 'utf8')).toBe('someone else');
+  });
 });

@@ -15,7 +15,7 @@ import { collectGuardRoots } from '../processors/organize-cleanup-guard';
 import { canonicalize, isSameEntry, isStrictlyInside, type CanonicalPath } from './delete-guard';
 import { sameIdentity, type FileIdentity } from './copy-file';
 import { placeFile, withTargetLock, type PlaceResult } from './organize-copy';
-import { describeRefusal, linkRefusal, refusalFromError, type LinkRefusal } from './link-file';
+import { describeRefusal, linkRefusal, pinFile, refusalFromError, type LinkRefusal, type PinnedFile } from './link-file';
 import type { RMABLogger } from './logger';
 
 export interface BookLinkFile {
@@ -60,9 +60,9 @@ async function withBookLock<T>(dir: string, fn: () => Promise<T>): Promise<T> {
 
 interface Roots { media: CanonicalPath; allowed: CanonicalPath[] }
 
-/** One file: its identity when it may be linked, else the refusal code. */
+/** One file: its identity when it may be linked (the file stays pinned in `pins`), else the refusal code. */
 async function vet(
-  source: string, roots: Roots | null, canonicalDir: (dir: string) => Promise<CanonicalPath>
+  source: string, roots: Roots | null, canonicalDir: (dir: string) => Promise<CanonicalPath>, pins: PinnedFile[]
 ): Promise<{ code: string } | { id: FileIdentity }> {
   let stat;
   try {
@@ -80,12 +80,17 @@ async function vet(
     // Audiobookshelf would index both names of one inode
     if (inside(roots.media)) return { code: 'IN_LIBRARY' };
   }
-  return { id: { dev: stat.dev, ino: stat.ino } };
+  const pin = await pinFile(source);
+  if ('code' in pin) return pin;
+  pins.push(pin.pinned);
+  // Swapped between the lstat and the open
+  if (!sameIdentity(pin.pinned.id, { dev: stat.dev, ino: stat.ino })) return { code: 'VERIFY' };
+  return { id: pin.pinned.id };
 }
 
 type Precheck = { eligible: Array<BookLinkFile & { id: FileIdentity }> } | { refusal: LinkRefusal };
 
-async function precheck(files: BookLinkFile[], targetDir: string, logger?: RMABLogger | null): Promise<Precheck> {
+async function precheck(files: BookLinkFile[], targetDir: string, pins: PinnedFile[], logger?: RMABLogger | null): Promise<Precheck> {
   let roots: Roots | null = null;
   try {
     const configured = await collectGuardRoots();
@@ -105,7 +110,7 @@ async function precheck(files: BookLinkFile[], targetDir: string, logger?: RMABL
   const eligible: Array<BookLinkFile & { id: FileIdentity }> = [];
   let unsafe: string | null = null;
   for (const file of files) {
-    const vetted = await vet(file.source, roots, canonicalDir);
+    const vetted = await vet(file.source, roots, canonicalDir, pins);
     if ('code' in vetted) {
       await logger?.warn(`Can't hard-link ${path.basename(file.source)}: ${describeRefusal(linkRefusal(vetted.code))}`);
       unsafe ??= vetted.code;
@@ -125,7 +130,8 @@ const lstatOrNull = (p: string) => fs.lstat(p, { bigint: true }).catch(() => nul
 
 /**
  * Remove, by name, every link this run made: a name that was not there before the pass and
- * is now the download file. A name someone else put there stays. Returns the names that
+ * is now the download file (dev/ino of a source still pinned, so no replacement can carry
+ * them). A name someone else put there stays. Returns the names that
  * should go and could not (including `failedTarget` when its failed link stayed).
  */
 async function rollback(
@@ -171,41 +177,51 @@ export async function linkBook(input: BookLinkInput): Promise<BookLinkResult> {
   const same = (file: BookLinkFile) => path.resolve(file.source) === path.resolve(file.target);
   if (input.files.length > 0 && input.files.every(same)) return { kind: 'inplace' };
   return withBookLock(input.targetDir, async () => {
-    let checked: Precheck;
+    // Every vetted source stays open until the pass and any rollback are done (pinFile)
+    const pins: PinnedFile[] = [];
     try {
-      checked = await precheck(input.files, input.targetDir, input.logger);
-    } catch (error) {
-      return { kind: 'cannot', refusal: refusalFromError(error), leftBehind: [] };
+      return await linkPinned(input, pins);
+    } finally {
+      await Promise.all(pins.map((pin) => pin.close()));
     }
-    if ('refusal' in checked) return { kind: 'cannot', refusal: checked.refusal, leftBehind: [] };
-
-    const eligible = checked.eligible;
-    const before = new Set<string>();
-    for (const file of eligible) if (await lstatOrNull(file.target)) before.add(file.target);
-    const created: Array<{ target: string; id: FileIdentity }> = [];
-    const placed: Array<{ file: BookLinkFile; result: PlaceResult }> = [];
-    for (const file of eligible) {
-      let result: PlaceResult;
-      try {
-        result = await placeFile(file.source, file.target, {
-          fileMode: input.fileMode,
-          compareExisting: input.compareExisting(file.target),
-          link: file.id,
-        });
-      } catch (error) {
-        await input.logger?.warn(`Linking ${path.basename(file.target)} failed: ${error instanceof Error ? error.message : String(error)}`);
-        const leftBehind = await rollback(eligible, before, created, null, input.logger);
-        return { kind: 'cannot', refusal: refusalFromError(error), leftBehind };
-      }
-      if (result.status === 'failed') {
-        if (result.reason) await input.logger?.warn(`Linking ${path.basename(file.target)} failed: ${result.reason}`);
-        const failedTarget = result.cannotLink?.code === 'VERIFY' ? file.target : null;
-        const leftBehind = await rollback(eligible, before, created, failedTarget, input.logger);
-        return { kind: 'cannot', refusal: result.cannotLink ?? linkRefusal(/^(E[A-Z]+)\b/.exec(result.reason ?? '')?.[1] ?? 'ERROR'), leftBehind };
-      }
-      if (result.linked) created.push({ target: result.target, id: file.id });
-      placed.push({ file: { source: file.source, target: file.target }, result });
-    }
-    return { kind: 'placed', placed };
   });
+}
+
+async function linkPinned(input: BookLinkInput, pins: PinnedFile[]): Promise<BookLinkResult> {
+  let checked: Precheck;
+  try {
+    checked = await precheck(input.files, input.targetDir, pins, input.logger);
+  } catch (error) {
+    return { kind: 'cannot', refusal: refusalFromError(error), leftBehind: [] };
+  }
+  if ('refusal' in checked) return { kind: 'cannot', refusal: checked.refusal, leftBehind: [] };
+
+  const eligible = checked.eligible;
+  const before = new Set<string>();
+  for (const file of eligible) if (await lstatOrNull(file.target)) before.add(file.target);
+  const created: Array<{ target: string; id: FileIdentity }> = [];
+  const placed: Array<{ file: BookLinkFile; result: PlaceResult }> = [];
+  for (const file of eligible) {
+    let result: PlaceResult;
+    try {
+      result = await placeFile(file.source, file.target, {
+        fileMode: input.fileMode,
+        compareExisting: input.compareExisting(file.target),
+        link: file.id,
+      });
+    } catch (error) {
+      await input.logger?.warn(`Linking ${path.basename(file.target)} failed: ${error instanceof Error ? error.message : String(error)}`);
+      const leftBehind = await rollback(eligible, before, created, null, input.logger);
+      return { kind: 'cannot', refusal: refusalFromError(error), leftBehind };
+    }
+    if (result.status === 'failed') {
+      if (result.reason) await input.logger?.warn(`Linking ${path.basename(file.target)} failed: ${result.reason}`);
+      const failedTarget = result.cannotLink?.code === 'VERIFY' ? file.target : null;
+      const leftBehind = await rollback(eligible, before, created, failedTarget, input.logger);
+      return { kind: 'cannot', refusal: result.cannotLink ?? linkRefusal(/^(E[A-Z]+)\b/.exec(result.reason ?? '')?.[1] ?? 'ERROR'), leftBehind };
+    }
+    if (result.linked) created.push({ target: result.target, id: file.id });
+    placed.push({ file: { source: file.source, target: file.target }, result });
+  }
+  return { kind: 'placed', placed };
 }

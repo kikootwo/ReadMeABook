@@ -6,6 +6,7 @@
  * Called by placeFile (organize-copy.ts) under its per-target lock.
  */
 
+import { constants as fsConstants } from 'fs';
 import * as fs from 'fs/promises';
 import { LINK_UNSUPPORTED, sameIdentity, type FileIdentity } from './copy-file';
 
@@ -57,6 +58,36 @@ export function describeRefusal(refusal: LinkRefusal): string {
   return `${refusal.words}, ${refusal.code}`;
 }
 
+/**
+ * A source file held open for the link pass. Device and inode alone don't name a file over
+ * time: Linux hands a freed inode number to the next new file at once, so a file swapped
+ * after the precheck can come back with the same numbers. An open handle keeps the inode
+ * allocated, so while it is open no other file can get its number, and the dev/ino checks
+ * after link() and in the rollback hold. Close it when the pass (and any rollback) is done.
+ */
+export interface PinnedFile {
+  id: FileIdentity;
+  close: () => Promise<void>;
+}
+
+/** Open `p` (a regular file, not followed if a symlink) and hold it; or the refusal code. */
+export async function pinFile(p: string): Promise<{ pinned: PinnedFile } | { code: string }> {
+  // No symlink followed, and a FIFO swapped in never blocks the open (each flag is 0 where unknown)
+  const flags = (fsConstants?.O_RDONLY ?? 0) | (fsConstants?.O_NOFOLLOW ?? 0) | (fsConstants?.O_NONBLOCK ?? 0);
+  let handle: fs.FileHandle;
+  try {
+    handle = await fs.open(p, flags);
+  } catch (error) {
+    return { code: (error as NodeJS.ErrnoException).code === 'ELOOP' ? 'SYMLINK' : refusalFromError(error).code };
+  }
+  const stat = await handle.stat({ bigint: true }).catch(() => null);
+  if (!stat?.isFile()) {
+    await handle.close().catch(() => undefined);
+    return { code: stat ? 'NOT_REGULAR' : 'ERROR' };
+  }
+  return { pinned: { id: { dev: stat.dev, ino: stat.ino }, close: () => handle.close().catch(() => undefined) } };
+}
+
 export type LinkOutcome =
   | { kind: 'linked' }
   /** The target name appeared meanwhile: the caller applies its existing-target rules. */
@@ -75,7 +106,7 @@ async function identityOf(p: string): Promise<{ id: FileIdentity; file: boolean;
 
 /**
  * Hard-link `source` at `target` (which must not exist) and verify the result against
- * `expected`, the source's identity captured at the precheck: the new name is a regular
+ * `expected`, the identity of the source pinned at the precheck (pinFile, still open): the new name is a regular
  * file with that dev and inode and at least 2 links, and the source path still names
  * that file. This catches a source swapped after the precheck, mergerfs creating a
  * symlink on EXDEV, and filesystems reporting other inodes (CIFS noserverino): each
