@@ -286,6 +286,35 @@ describe('file organizer', () => {
     expect(chapterMock.mergeChapters).toHaveBeenCalled();
   });
 
+  it('hands the caller\'s merge progress callback to the chapter merge (#216)', async () => {
+    configState.values.set('chapter_merging_enabled', 'true');
+    configState.values.set('metadata_tagging_enabled', 'false');
+    configState.values.set('ebook_sidecar_enabled', 'false');
+    chapterMock.detectChapterFiles.mockResolvedValue(true);
+    chapterMock.estimateOutputSize.mockResolvedValue(100);
+    chapterMock.checkDiskSpace.mockResolvedValue(1000);
+    chapterMock.analyzeChapterFiles.mockResolvedValue([
+      { path: '/downloads/book/disc1.mp3', filename: 'disc1.mp3', duration: 1000, chapterTitle: 'One' },
+    ]);
+    chapterMock.mergeChapters.mockResolvedValue({ success: false, error: 'merge failed' });
+    const downloadRoot = path.normalize(path.join('/downloads', 'book'));
+    fsMock.access.mockImplementation(async (filePath: string) => {
+      if (path.normalize(filePath).startsWith(downloadRoot)) return undefined;
+      throw new Error('missing');
+    });
+    fsMock.mkdir.mockResolvedValue(undefined);
+    copyFileMock.copyFile.mockResolvedValue(undefined);
+    fsMock.chmod.mockResolvedValue(undefined);
+    const organizer = new FileOrganizer('/media', '/tmp');
+    vi.spyOn(organizer as unknown as { findAudiobookFiles: () => Promise<unknown> }, 'findAudiobookFiles')
+      .mockResolvedValue({ audioFiles: ['disc1.mp3', 'disc2.mp3'], coverFile: undefined, isFile: false });
+    const onMergeProgress = vi.fn();
+
+    await organizer.organize('/downloads/book', { title: 'Book', author: 'Author' }, '{author}/{title}', undefined, undefined, undefined, { onMergeProgress });
+
+    expect(chapterMock.mergeChapters.mock.calls[0][1].onProgress).toBe(onMergeProgress);
+  });
+
   it.each([
     ['a long Cyrillic title is cut to fit 255 bytes, keeping .m4b (#264)', 'Преступление и наказание '.repeat(10).trim(), false, null],
     ['a title that fits keeps its name', 'Book: Title', false, 'Book Title.m4b'],
