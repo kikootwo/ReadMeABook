@@ -39,7 +39,7 @@ docker exec -it <container-name> npm run rmab:recover
 **Simple Password Reset (key works):**
 - Only updates the chosen user's `authToken` (new bcrypt, re-encrypted) and sets `sessionsInvalidatedAt` (`passwordResetData`)
 - No other data touched
-- No container restart needed
+- No container restart needed; if sign-in then says too many attempts, wait the minutes shown or restart the container (sign-in counters are in memory, and the reset ends every known-browser cookie for that user)
 
 **Full Recovery (key broken):**
 - Generates new `CONFIG_ENCRYPTION_KEY` (32 random bytes, base64)

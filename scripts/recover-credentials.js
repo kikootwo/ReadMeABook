@@ -673,6 +673,7 @@ async function main() {
     } else {
       console.log('  Encryption key was healthy — only the password was reset.');
       console.log(`  Log in as "${chosenUser.plexUsername}" with the new password. No restart needed.`);
+      console.log('  If sign-in says too many attempts, wait the minutes shown or restart the container.');
     }
     console.log('');
   } catch (err) {
