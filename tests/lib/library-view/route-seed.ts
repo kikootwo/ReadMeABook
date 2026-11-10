@@ -7,11 +7,18 @@
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { createHash } from 'crypto';
 import { vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { USERS, request, row } from './fixtures';
 
 let installs = 0;
+
+/** Stand-in for the SQL checksum: changes whenever any field of any record changes. */
+function checksum(records: unknown[]): string {
+  const json = JSON.stringify(records, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
+  return createHash('sha1').update(json).digest('hex');
+}
 
 export const CANARY = {
   absFolder: '/audiobookshelf/media/CANARY-abs-folder/Book',
@@ -19,6 +26,7 @@ export const CANARY = {
   bypass: 'asin_match:awaiting_approval',
   rawLibraryAsin: 'B0RAWCANRY',
   error: 'CANARY download failed: tracker said no',
+  aliceError: 'CANARY alice only: indexer refused',
   adminPath: '/media/audiobooks/CANARY-admin-path/Book',
   requestedCover: 'https://img.example/CANARY-requested-edition.jpg',
 };
@@ -54,7 +62,7 @@ export function seedStack() {
   });
   const bobFailed = request({ status: 'failed', user: USERS.bob, errorMessage: CANARY.error, audiobook: { title: 'Failed Book', audibleAsin: 'B0FAILED01' } });
   const carolPending = request({ status: 'downloading', progress: 42, user: USERS.goneCarol, audiobook: { title: 'Gone Carol Book', audibleAsin: 'B0PENDING1' } });
-  const aliceApproval = request({ status: 'awaiting_approval', user: USERS.alice, audiobook: { title: 'Asked Book' } });
+  const aliceApproval = request({ status: 'awaiting_approval', user: USERS.alice, errorMessage: CANARY.aliceError, audiobook: { title: 'Asked Book' } });
   const bobRelease = request({ status: 'awaiting_release', user: USERS.bob, releaseDate: new Date('2027-01-01'), audiobook: { title: 'Future Book' } });
   const aliceDenied = request({ status: 'denied', user: USERS.alice, audiobook: { title: 'Denied Book' } });
 
@@ -73,6 +81,11 @@ export interface Mocks {
   config: { getBackendMode: Mock; get: Mock; getPlexConfig: Mock };
 }
 
+/** Drop the row snapshot (module state) so a test starts cold; call from beforeEach (dynamic import keeps vi.mock hoisting intact). */
+export async function coldStart(): Promise<void> {
+  (await import('@/lib/library-view/snapshot')).resetLibrarySnapshot();
+}
+
 /** Wire the mocks for one stack (mockReset clears implementations before each test). */
 export function installStack(m: Mocks, stack = seedStack(), opts: { libraryId?: string | null; ebookSources?: boolean } = {}) {
   const libraryId = opts.libraryId === undefined ? 'abs-lib-1' : opts.libraryId;
@@ -83,7 +96,10 @@ export function installStack(m: Mocks, stack = seedStack(), opts: { libraryId?: 
     if (key === 'ebook_indexer_search_enabled') return opts.ebookSources === false ? 'false' : 'true';
     return null;
   });
-  // A new row version per install: the snapshot cache (module state) never carries rows across tests.
+  m.prisma.$queryRaw.mockImplementation(async (query: any) => {
+    const records = String(query?.sql ?? '').includes('from plex_library') ? stack.rows : stack.requests;
+    return [{ n: records.length, h: checksum(records) }];
+  });
   m.prisma.plexLibrary.aggregate ??= vi.fn();
   m.prisma.plexLibrary.aggregate.mockResolvedValue({ _count: { _all: stack.rows.length }, _max: { updatedAt: new Date(++installs) } });
   m.prisma.plexLibrary.findMany.mockResolvedValue(stack.rows);

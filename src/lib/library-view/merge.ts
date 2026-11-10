@@ -40,8 +40,8 @@ function haystack(values: (string | null | undefined)[]): string {
   return values.map(fold).filter(Boolean).join('\n');
 }
 
-/** Newest first; ties by id so the primary request is deterministic. */
-function newestFirst(a: RequestRecord, b: RequestRecord): number {
+/** Newest first; ties by id (larger first) so the primary request is deterministic. Live mode uses it too. */
+export function newestFirst(a: { id: string; createdAt: Date }, b: { id: string; createdAt: Date }): number {
   const diff = b.createdAt.getTime() - a.createdAt.getTime();
   return diff !== 0 ? diff : a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
 }

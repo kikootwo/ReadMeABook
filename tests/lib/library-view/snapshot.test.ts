@@ -1,20 +1,21 @@
 /**
- * Component: Library view snapshot cache tests (version key, TTL, shared builds, stale builds)
+ * Component: Library view snapshot cache tests (content key, stale-while-rebuilding, one build per library)
  * Documentation: documentation/features/library-view.md
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { row } from './fixtures';
 
 const loader = vi.hoisted(() => ({
   version: { current: '1:1' },
+  versions: [] as string[],
   rows: { current: [] as unknown[] },
   loads: { count: 0 },
   next: [] as (() => Promise<unknown[]>)[],
 }));
 
 vi.mock('@/lib/library-view/loader', () => ({
-  libraryRowsVersion: async () => loader.version.current,
+  libraryRowsVersion: async () => loader.versions.shift() ?? loader.version.current,
   loadLibraryRows: async () => {
     loader.loads.count += 1;
     const once = loader.next.shift();
@@ -22,22 +23,34 @@ vi.mock('@/lib/library-view/loader', () => ({
   },
 }));
 
+const BLOCKED = 'blocked';
+const tick = (ms = 10) => new Promise((resolve) => setTimeout(resolve, ms));
+/** The call's result, or BLOCKED when it is still waiting on a load after 30 ms. */
+const settle = <T>(promise: Promise<T>) => Promise.race([promise, tick(30).then(() => BLOCKED)]);
+
+/** The next load waits until the returned release function runs. */
+function gatedLoad(rows: unknown[]): () => void {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  loader.next.push(async () => {
+    await gate;
+    return rows;
+  });
+  return release;
+}
+
 async function load() {
-  const mod = await import('@/lib/library-view/snapshot');
-  return mod;
+  return import('@/lib/library-view/snapshot');
 }
 
 describe('library snapshot cache', () => {
   beforeEach(async () => {
     (await load()).resetLibrarySnapshot();
     loader.version.current = '1:1';
+    loader.versions = [];
     loader.rows.current = [row({ id: 'r1', plexGuid: 'g1', asin: 'B000000001' })];
     loader.loads.count = 0;
     loader.next = [];
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
   });
 
   it('no library configured: empty, no load', async () => {
@@ -57,63 +70,80 @@ describe('library snapshot cache', () => {
     expect(Object.isFrozen(a.scanEntries[0])).toBe(true);
   });
 
-  it('rebuilds when the version, library id or backend changes', async () => {
+  it('a version change serves the previous snapshot while one rebuild runs (no stampede)', async () => {
     const { getPreparedLibrary } = await load();
-    await getPreparedLibrary('audiobookshelf', 'lib-1');
-    loader.version.current = '2:5';
-    loader.rows.current = [...loader.rows.current, row({ id: 'r2', plexGuid: 'g2' })];
-    expect((await getPreparedLibrary('audiobookshelf', 'lib-1')).rows).toHaveLength(2);
-    await getPreparedLibrary('audiobookshelf', 'lib-2');
-    await getPreparedLibrary('plex', 'lib-2');
-    expect(loader.loads.count).toBe(4);
-  });
+    const a = await getPreparedLibrary('plex', 'lib-1');
+    loader.version.current = '2:2';
+    const release = gatedLoad([row({ id: 'r2', plexGuid: 'g2' })]);
 
-  it('rebuilds after the safety TTL even when the version holds', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    const { getPreparedLibrary } = await load();
-    const { SNAPSHOT_MAX_AGE_MS } = await import('@/lib/library-view/constants');
-    await getPreparedLibrary('plex', 'lib-1');
-    vi.setSystemTime(Date.now() + SNAPSHOT_MAX_AGE_MS + 1);
-    await getPreparedLibrary('plex', 'lib-1');
+    expect(await settle(getPreparedLibrary('plex', 'lib-1'))).toBe(a);
+    expect(await settle(getPreparedLibrary('plex', 'lib-1'))).toBe(a);
+    expect(await settle(getPreparedLibrary('plex', 'lib-1'))).toBe(a);
+    expect(loader.loads.count).toBe(2);
+
+    release();
+    await tick();
+    expect((await getPreparedLibrary('plex', 'lib-1')).rows[0].id).toBe('r2');
     expect(loader.loads.count).toBe(2);
   });
 
-  it('concurrent misses on one key share a single build', async () => {
+  it('a write during a rebuild is not lost: the next rebuild sees it', async () => {
     const { getPreparedLibrary } = await load();
-    const [a, b, c] = await Promise.all([
-      getPreparedLibrary('plex', 'lib-1'),
-      getPreparedLibrary('plex', 'lib-1'),
-      getPreparedLibrary('plex', 'lib-1'),
-    ]);
+    await getPreparedLibrary('plex', 'lib-1');
+    loader.version.current = '2:2';
+    const release = gatedLoad([row({ id: 'r2', plexGuid: 'g2' })]);
+    await settle(getPreparedLibrary('plex', 'lib-1')); // starts the rebuild for version 2
+
+    // A write lands while that rebuild is still loading
+    loader.version.current = '3:3';
+    loader.rows.current = [row({ id: 'r3', plexGuid: 'g3' })];
+    const during = await settle(getPreparedLibrary('plex', 'lib-1'));
+    expect(during).not.toBe(BLOCKED);
+    expect((during as Awaited<ReturnType<typeof getPreparedLibrary>>).rows[0].id).toBe('r1');
+    expect(loader.loads.count).toBe(2);
+
+    release();
+    await tick();
+    expect((await getPreparedLibrary('plex', 'lib-1')).rows[0].id).toBe('r2'); // built for version 2; sees 3
+    await tick();
+    expect((await getPreparedLibrary('plex', 'lib-1')).rows[0].id).toBe('r3');
+    expect(loader.loads.count).toBe(3);
+  });
+
+  it('two concurrent cold misses build once, even when the version moves between them', async () => {
+    const { getPreparedLibrary } = await load();
+    loader.versions.push('1:1', '1:2');
+    const [a, b] = await Promise.all([getPreparedLibrary('plex', 'lib-1'), getPreparedLibrary('plex', 'lib-1')]);
     expect(loader.loads.count).toBe(1);
     expect(b).toBe(a);
-    expect(c).toBe(a);
   });
 
-  it('an older build finishing after a newer one does not take the slot', async () => {
+  it('a failed rebuild keeps serving the previous snapshot and the next call retries', async () => {
     const { getPreparedLibrary } = await load();
-    const oldRows = [row({ id: 'old', plexGuid: 'g-old' })];
-    const newRows = [row({ id: 'new', plexGuid: 'g-new' })];
-    let releaseOld: () => void = () => {};
-    const gate = new Promise<void>((resolve) => (releaseOld = resolve));
-    loader.next.push(async () => {
-      await gate;
-      return oldRows;
-    });
-    loader.next.push(async () => newRows);
-
-    const older = getPreparedLibrary('plex', 'lib-1');
-    await Promise.resolve();
-    await Promise.resolve();
+    const a = await getPreparedLibrary('plex', 'lib-1');
     loader.version.current = '2:2';
-    const newer = await getPreparedLibrary('plex', 'lib-1');
-    releaseOld();
-    expect((await older).rows[0].id).toBe('old');
-    expect(newer.rows[0].id).toBe('new');
-    expect((await getPreparedLibrary('plex', 'lib-1')).rows[0].id).toBe('new');
+    loader.next.push(async () => {
+      throw new Error('db down');
+    });
+    expect(await settle(getPreparedLibrary('plex', 'lib-1'))).toBe(a);
+    await tick();
+    loader.rows.current = [row({ id: 'r2', plexGuid: 'g2' })];
+    expect(await getPreparedLibrary('plex', 'lib-1')).toBe(a); // retry starts here
+    await tick();
+    expect((await getPreparedLibrary('plex', 'lib-1')).rows[0].id).toBe('r2');
+    expect(loader.loads.count).toBe(3);
   });
 
-  it('a failed build is not cached and the next call retries', async () => {
+  it('another library or backend has no snapshot to serve: that call waits for its own build', async () => {
+    const { getPreparedLibrary } = await load();
+    await getPreparedLibrary('audiobookshelf', 'lib-1');
+    loader.rows.current = [row({ id: 'r9', plexGuid: 'g9' })];
+    expect((await getPreparedLibrary('audiobookshelf', 'lib-2')).rows[0].id).toBe('r9');
+    expect((await getPreparedLibrary('plex', 'lib-2')).rows[0].id).toBe('r9');
+    expect(loader.loads.count).toBe(3);
+  });
+
+  it('a failed cold build is not cached and the next call retries', async () => {
     const { getPreparedLibrary } = await load();
     loader.next.push(async () => {
       throw new Error('db down');

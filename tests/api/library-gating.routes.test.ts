@@ -6,7 +6,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPrismaMock } from '../helpers/prisma';
-import { CANARY, VIEWERS, get, installStack, seedStack } from '../lib/library-view/route-seed';
+import { CANARY, VIEWERS, coldStart, get, installStack, seedStack } from '../lib/library-view/route-seed';
 
 const prismaMock = createPrismaMock();
 const requireAuthMock = vi.hoisted(() => vi.fn());
@@ -32,11 +32,16 @@ async function raw(qs: string, viewer: { id: string; role: string }) {
 
 const byTitle = (body: any, title: string) => body.items.find((i: any) => i.title === title);
 
+const PUBLIC_ITEM_KEYS = ['addedAt', 'author', 'canSeeRequestDetails', 'coverUrl', 'durationMinutes', 'id', 'inLibrary', 'narrator', 'progress', 'releaseDate', 'request', 'series', 'seriesPart', 'source', 'status', 'statusGroup', 'title', 'year'];
+const PUBLIC_REQUEST_KEYS = ['createdAt', 'id', 'isMine', 'requestedBy'];
+const GATED_REQUEST_KEYS = [...PUBLIC_REQUEST_KEYS, 'completedAt', 'downloadSizeBytes', 'errorMessage'].sort();
+
 describe('GET /api/library gating', () => {
   let stack: ReturnType<typeof seedStack>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    await coldStart();
     stack = installStack(mocks);
   });
 
@@ -50,13 +55,14 @@ describe('GET /api/library gating', () => {
     const { body, text } = await raw('limit=120', VIEWERS.other);
     expect(body.viewer).toEqual({ isAdmin: false });
     for (const item of body.items) {
-      expect(item).not.toHaveProperty('path');
+      expect(Object.keys(item).sort()).toEqual(PUBLIC_ITEM_KEYS);
       expect(item.canSeeRequestDetails).toBe(false);
       if (!item.request) continue;
-      expect(Object.keys(item.request).sort()).toEqual(['createdAt', 'id', 'isMine', 'requestedBy']);
+      expect(Object.keys(item.request).sort()).toEqual(PUBLIC_REQUEST_KEYS);
       expect(item.request.isMine).toBe(false);
     }
     expect(text).not.toContain(CANARY.error);
+    expect(text).not.toContain(CANARY.aliceError);
     expect(text).not.toContain(CANARY.adminPath);
     // everyone sees everyone's request status and requester (LV-6)
     expect(byTitle(body, 'Failed Book')).toMatchObject({ statusGroup: 'problem', request: { requestedBy: { username: 'bob' } } });
@@ -67,10 +73,20 @@ describe('GET /api/library gating', () => {
     const failed = byTitle(body, 'Failed Book');
     expect(failed.request).toEqual(expect.objectContaining({ isMine: true, errorMessage: CANARY.error, completedAt: null, downloadSizeBytes: '123' }));
     expect(failed.canSeeRequestDetails).toBe(true);
-    const alices = byTitle(body, 'Library Edition');
-    expect(alices.request).not.toHaveProperty('errorMessage');
-    expect(alices.request).not.toHaveProperty('completedAt');
-    expect(alices.request).not.toHaveProperty('downloadSizeBytes');
+    // Every item bob does not own: public keys only, on the item and on its request
+    const foreign = body.items.filter((i: any) => !i.request?.isMine);
+    expect(foreign.filter((i: any) => i.request).length).toBeGreaterThanOrEqual(5);
+    for (const item of foreign) {
+      expect(Object.keys(item).sort()).toEqual(PUBLIC_ITEM_KEYS);
+      expect(item.canSeeRequestDetails).toBe(false);
+      if (item.request) expect(Object.keys(item.request).sort()).toEqual(PUBLIC_REQUEST_KEYS);
+    }
+    // Alice's error sits on a request-only book bob can see; only her and the admin may read it
+    expect(byTitle(body, 'Asked Book').request.requestedBy.username).toBe('alice');
+    expect(text).not.toContain(CANARY.aliceError);
+    for (const item of body.items.filter((i: any) => i.request?.isMine)) {
+      expect(Object.keys(item.request).sort()).toEqual(GATED_REQUEST_KEYS);
+    }
     expect(body.items.some((i: any) => 'path' in i)).toBe(false);
     expect(body.viewer).toEqual({ isAdmin: false });
     expect(text).not.toContain(CANARY.adminPath);
@@ -81,6 +97,7 @@ describe('GET /api/library gating', () => {
     expect(body.viewer).toEqual({ isAdmin: true, canFetchEbook: true });
     expect(body.items.every((i: any) => 'path' in i)).toBe(true);
     expect(byTitle(body, 'Failed Book').request).toMatchObject({ errorMessage: CANARY.error, downloadSizeBytes: '123' });
+    expect(byTitle(body, 'Asked Book').request.errorMessage).toBe(CANARY.aliceError); // the canary is planted
     expect(byTitle(body, 'Library Edition')).toMatchObject({ path: CANARY.adminPath, request: { completedAt: '2026-03-01T00:00:00.000Z' } });
     expect(byTitle(body, 'Scan Only Book')).toMatchObject({ path: null, request: null, canSeeRequestDetails: false });
   });
@@ -103,9 +120,24 @@ describe('GET /api/library gating', () => {
     expect(ebookQuery.where).not.toHaveProperty('deletedAt'); // deleted ebook requests count too
   });
 
-  it('a q equal to a canary path or error matches nothing for every viewer', async () => {
+  it("a warm cache never carries one viewer's gated fields to another", async () => {
+    const admin = await raw('limit=120', VIEWERS.admin);
+    expect(admin.text).toContain(CANARY.error);
+    const bob = await raw('limit=120', VIEWERS.bob);
+    const other = await raw('limit=120', VIEWERS.other);
+    const reads = prismaMock.request.findMany.mock.calls.filter((c: any[]) => c[0]?.where?.type === 'audiobook' && c[0]?.select?.user);
+    expect(reads).toHaveLength(1); // all three calls were served from the same cached entries
+    expect(bob.text).not.toContain(CANARY.aliceError);
+    expect(bob.text).not.toContain(CANARY.adminPath);
+    for (const canary of [CANARY.error, CANARY.aliceError, CANARY.adminPath]) expect(other.text).not.toContain(canary);
+    for (const item of other.body.items) expect(Object.keys(item).sort()).toEqual(PUBLIC_ITEM_KEYS);
+    expect(other.body.viewer).toEqual({ isAdmin: false });
+  });
+
+  it('a q equal to any canary matches nothing for every viewer', async () => {
+    const searched = [CANARY.absFolder, CANARY.placedEbook, CANARY.error, CANARY.aliceError, CANARY.adminPath, CANARY.bypass, CANARY.rawLibraryAsin, CANARY.requestedCover, 'X-Plex-Token', 'CANARY terms', 'epub'];
     for (const viewer of Object.values(VIEWERS)) {
-      for (const q of [CANARY.absFolder, CANARY.placedEbook, CANARY.error, CANARY.adminPath, CANARY.bypass]) {
+      for (const q of searched) {
         const { body } = await call(`q=${encodeURIComponent(q)}`, viewer);
         expect(body.matched).toBe(0);
       }

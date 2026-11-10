@@ -103,11 +103,18 @@ describe('runQuery', () => {
     expect(next.page.map((e) => e.id)).toEqual(expected.page.map((e) => e.id));
   });
 
-  it('group=author orders by author then title and counts groups over all matches', () => {
-    const result = runQuery(entries(), NO_FILTERS, { sort: 'author', order: 'asc', group: 'author' }, null, 2);
-    expect(result.page.map((e) => e.author)).toEqual(['Amy Author', 'Dan Simmons']);
-    expect(result.groups?.map((g) => g.label)).toEqual(['Amy Author', 'Dan Simmons', 'Erich Kästner', 'Frank Herbert', 'Ned Author', 'Zed Author']);
-    expect(result.groups?.every((g) => g.count === 1)).toBe(true);
+  it('group=author orders by author then title; groups cover the page only, each counted over all matches', () => {
+    const BY_AUTHOR: LibrarySortSpec = { sort: 'author', order: 'asc', group: 'author' };
+    const { rows, requests } = seed();
+    const more = request({ status: 'pending', user: USERS.bob, audiobook: { title: 'Zebra Book', author: 'Amy Author' } });
+    const all = mergeLibrary(rows, [...requests, more]);
+
+    const first = runQuery(all, NO_FILTERS, BY_AUTHOR, null, 2);
+    expect(first.page.map((e) => [e.author, e.title])).toEqual([['Amy Author', 'Asked Book'], ['Amy Author', 'Zebra Book']]);
+    expect(first.groups).toEqual([{ key: 'amy author', label: 'Amy Author', count: 2 }]);
+
+    const second = runQuery(all, NO_FILTERS, BY_AUTHOR, first.nextTuple, 2);
+    expect(second.groups?.map((g) => [g.label, g.count])).toEqual([['Dan Simmons', 1], ['Erich Kästner', 1]]);
     expect(runQuery(entries(), NO_FILTERS, BY_ADDED, null, 60).groups).toBeNull();
   });
 

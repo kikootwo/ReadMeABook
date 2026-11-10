@@ -9,6 +9,7 @@
  * for the cover rule and never serialized.
  */
 
+import { Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/db';
 import { getConfigService } from '@/lib/services/config.service';
 import {
@@ -86,17 +87,98 @@ export async function resolveActiveLibrary(): Promise<ActiveLibrary> {
   return { backend: 'plex', libraryId: plex.libraryId || null };
 }
 
+/** DB column of every LIBRARY_ROW_SELECT field (the row version hashes exactly these; a test pins it). */
+export const LIBRARY_ROW_COLUMNS: Record<keyof typeof LIBRARY_ROW_SELECT, string> = {
+  id: 'id',
+  plexGuid: 'plex_guid',
+  title: 'title',
+  author: 'author',
+  narrator: 'narrator',
+  duration: 'duration',
+  year: 'year',
+  asin: 'asin',
+  addedAt: 'added_at',
+  createdAt: 'created_at',
+  cachedLibraryCoverPath: 'cached_library_cover_path',
+};
+
+type RequestSelect = typeof LIBRARY_REQUEST_SELECT;
+
+/** DB columns of every LIBRARY_REQUEST_SELECT field, per table (the requests version hashes these). */
+export const LIBRARY_REQUEST_COLUMNS: {
+  request: Record<Exclude<keyof RequestSelect, 'user' | 'audiobook'>, string>;
+  user: Record<keyof RequestSelect['user']['select'], string>;
+  audiobook: Record<keyof RequestSelect['audiobook']['select'], string>;
+} = {
+  request: {
+    id: 'id',
+    audiobookId: 'audiobook_id',
+    type: 'type',
+    status: 'status',
+    progress: 'progress',
+    createdAt: 'created_at',
+    updatedAt: 'updated_at',
+    completedAt: 'completed_at',
+    releaseDate: 'release_date',
+    errorMessage: 'error_message',
+    deletedAt: 'deleted_at',
+  },
+  user: { id: 'id', plexUsername: 'plex_username', deletedAt: 'deleted_at' },
+  audiobook: {
+    id: 'id',
+    audibleAsin: 'audible_asin',
+    title: 'title',
+    author: 'author',
+    narrator: 'narrator',
+    series: 'series',
+    seriesPart: 'series_part',
+    year: 'year',
+    plexGuid: 'plex_guid',
+    absItemId: 'abs_item_id',
+    libraryAsin: 'library_asin',
+    coverArtUrl: 'cover_art_url',
+  },
+};
+
+/** `alias.column, ...` from constant column maps (never user input). */
+function columnList(alias: string, columns: Record<string, string>): string {
+  return Object.values(columns)
+    .map((c) => `${alias}.${c}`)
+    .join(', ');
+}
+
+/** count + order-independent sum of a 64-bit hash of each record's text form (row() keeps NULL distinct from ''). */
+async function contentVersion(query: Prisma.Sql): Promise<string> {
+  const [result] = await prisma.$queryRaw<{ n: number; h: string }[]>(query);
+  return `${result?.n ?? 0}:${result?.h ?? '0'}`;
+}
+
 /**
- * Load 1's version: row count and newest updated_at for one library. Every plex_library write goes
- * through Prisma (@updatedAt, including updateMany), so any insert, update or delete changes it.
+ * Load 1's version: a checksum of exactly the selected columns of the library's committed rows. Any
+ * insert, delete or change of a selected value moves it, whatever its updated_at says (late commits,
+ * same-millisecond writes, raw SQL); a write that changes nothing selected (the recently-added check
+ * stamping last_scanned_at, a scan rewriting a row unchanged) leaves it, so the snapshot holds.
  */
 export async function libraryRowsVersion(libraryId: string): Promise<string> {
-  const agg = await prisma.plexLibrary.aggregate({
-    where: { plexLibraryId: libraryId },
-    _count: { _all: true },
-    _max: { updatedAt: true },
-  });
-  return `${agg._count._all}:${agg._max.updatedAt?.getTime() ?? 0}`;
+  const columns = Prisma.raw(columnList('p', LIBRARY_ROW_COLUMNS));
+  return contentVersion(Prisma.sql`
+    select count(*)::int as n,
+           coalesce(sum(hashtextextended(row(${columns})::text, 0)::numeric), 0)::text as h
+    from plex_library p
+    where p.plex_library_id = ${libraryId}`);
+}
+
+/** Load 2's version: the same checksum over the qualifying requests joined to their user and audiobook. */
+export async function libraryRequestsVersion(): Promise<string> {
+  const { request, user, audiobook } = LIBRARY_REQUEST_COLUMNS;
+  const columns = Prisma.raw([columnList('r', request), columnList('u', user), columnList('a', audiobook)].join(', '));
+  return contentVersion(Prisma.sql`
+    select count(*)::int as n,
+           coalesce(sum(hashtextextended(row(${columns})::text, 0)::numeric), 0)::text as h
+    from requests r
+    join users u on u.id = r.user_id
+    join audiobooks a on a.id = r.audiobook_id
+    where r.type = 'audiobook' and r.deleted_at is null and r.status <> 'cancelled'`);
 }
 
 /** Load 1: the active library's rows, in id order (cached by snapshot.ts). */
@@ -133,6 +215,7 @@ export async function loadDurations(asins: string[]): Promise<Map<string, number
 }
 
 export interface LiveRequestRecord {
+  id: string;
   audiobookId: string;
   status: string;
   progress: number;
@@ -151,7 +234,16 @@ export async function loadLiveRequests(now: number): Promise<LiveRequestRecord[]
         { status: { in: [...LIVE_RECENT_STATUSES] }, updatedAt: { gte: new Date(now - LIVE_RECENT_WINDOW_MS) } },
       ],
     },
-    select: { audiobookId: true, status: true, progress: true, updatedAt: true, createdAt: true },
+    select: { id: true, audiobookId: true, status: true, progress: true, updatedAt: true, createdAt: true },
     orderBy: { createdAt: 'desc' },
+  });
+}
+
+/** Every qualifying request of these books (id and createdAt only): live mode picks full mode's primary. */
+export async function loadBookRequests(audiobookIds: string[]): Promise<{ id: string; audiobookId: string; createdAt: Date }[]> {
+  if (audiobookIds.length === 0) return [];
+  return prisma.request.findMany({
+    where: { ...LIBRARY_REQUEST_WHERE, audiobookId: { in: audiobookIds } },
+    select: { id: true, audiobookId: true, createdAt: true },
   });
 }

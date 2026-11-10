@@ -82,5 +82,5 @@ export const LIVE_FAST_REFRESH_MS = 5000;
 export const LIVE_SLOW_REFRESH_MS = 30000;
 export const LIVE_FAST_STATUSES = ['searching', 'downloading', 'processing'] as const;
 
-/** Safety TTL for the cached library-row snapshot (snapshot.ts); the version key normally decides. */
-export const SNAPSHOT_MAX_AGE_MS = 10 * 60 * 1000;
+/** Filtered/sorted results kept per merged copy (memo.ts), least recently used dropped first. */
+export const QUERY_MEMO_SIZE = 16;

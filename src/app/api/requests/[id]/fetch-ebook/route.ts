@@ -11,6 +11,7 @@ import { prisma } from '@/lib/db';
 import { getJobQueueService } from '@/lib/services/job-queue.service';
 import { RMABLogger } from '@/lib/utils/logger';
 import { EBOOK_FETCHABLE_STATUSES } from '@/lib/constants/request-statuses';
+import { ebookSourcesEnabled } from '@/lib/services/ebook-sources';
 
 const logger = RMABLogger.create('API.FetchEbook');
 
@@ -23,20 +24,8 @@ export async function POST(
       try {
         const { id: parentRequestId } = await params;
 
-        // Check which ebook sources are enabled
-        const [annasArchiveConfig, indexerSearchConfig, legacyConfig] = await Promise.all([
-          prisma.configuration.findUnique({ where: { key: 'ebook_annas_archive_enabled' } }),
-          prisma.configuration.findUnique({ where: { key: 'ebook_indexer_search_enabled' } }),
-          prisma.configuration.findUnique({ where: { key: 'ebook_sidecar_enabled' } }),
-        ]);
-
-        // Legacy migration: check old key if new keys don't exist
-        const isAnnasArchiveEnabled = annasArchiveConfig?.value === 'true' ||
-          (annasArchiveConfig === null && legacyConfig?.value === 'true');
-        const isIndexerSearchEnabled = indexerSearchConfig?.value === 'true';
-
-        // If no sources are enabled, return error
-        if (!isAnnasArchiveEnabled && !isIndexerSearchEnabled) {
+        // One rule with the Library's viewer.canFetchEbook and the ebook status route
+        if (!(await ebookSourcesEnabled())) {
           return NextResponse.json(
             { error: 'E-book sidecar feature is not enabled (no sources configured)' },
             { status: 400 }

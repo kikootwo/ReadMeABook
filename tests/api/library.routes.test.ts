@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextResponse } from 'next/server';
 import { createPrismaMock } from '../helpers/prisma';
 import { API_TOKEN_ALLOWED_ENDPOINTS } from '@/lib/constants/api-tokens';
-import { CANARY, VIEWERS, get, installStack } from '../lib/library-view/route-seed';
+import { CANARY, VIEWERS, coldStart, get, installStack } from '../lib/library-view/route-seed';
 
 const prismaMock = createPrismaMock();
 const requireAuthMock = vi.hoisted(() => vi.fn());
@@ -21,6 +21,13 @@ vi.mock('@/lib/services/config.service', () => ({ getConfigService: () => config
 const mocks = { prisma: prismaMock, config: configMock };
 const FORBIDDEN_SELECTS = ['fileFormat', 'ebookAutoRetryCount', 'customSearchTerms', 'placedEbookFiles', 'approvalBypassedBy', 'cancelledAt', 'autoRerequestCount', 'filePath', 'thumbUrl', 'summary', 'selectedTorrent'];
 
+const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
+/** Full-mode request loads (Load 2), as opposed to the live, newest-request and ebook queries. */
+const requestLoads = () => prismaMock.request.findMany.mock.calls.filter((c: any[]) => c[0]?.where?.type === 'audiobook' && c[0]?.select?.user).length;
+/** ASINs looked up in audible_cache for durations (the cover lookup selects coverArtUrl instead). */
+const durationLookups = () =>
+  prismaMock.audibleCache.findMany.mock.calls.filter((c: any[]) => c[0]?.select?.durationMinutes).map((c: any[]) => [...c[0].where.asin.in].sort());
+
 async function call(qs = '', viewer = VIEWERS.admin) {
   const { GET } = await import('@/app/api/library/route');
   const response = await GET(get(qs, viewer, requireAuthMock));
@@ -28,9 +35,12 @@ async function call(qs = '', viewer = VIEWERS.admin) {
 }
 
 describe('GET /api/library', () => {
-  beforeEach(() => {
+  let stack: ReturnType<typeof installStack>;
+
+  beforeEach(async () => {
     vi.clearAllMocks();
-    installStack(mocks);
+    await coldStart();
+    stack = installStack(mocks);
   });
 
   it('goes through requireAuth (401 without a session)', async () => {
@@ -63,15 +73,44 @@ describe('GET /api/library', () => {
     const select = JSON.stringify(args.select);
     for (const key of ['filePath', 'thumbUrl', 'summary']) expect(select).not.toContain(`"${key}"`);
     expect(configMock.get).not.toHaveBeenCalledWith('audiobookshelf.ebook_library_id');
-    expect(prismaMock.plexLibrary.aggregate.mock.calls[0][0].where).toEqual({ plexLibraryId: 'abs-lib-1' });
+    const rowVersion = prismaMock.$queryRaw.mock.calls.map((c: any[]) => c[0]).find((q: any) => q.sql.includes('from plex_library'));
+    expect(rowVersion.values).toEqual(['abs-lib-1']);
   });
 
-  it('reuses the row snapshot while the version holds; requests are read fresh every call', async () => {
+  it('reuses the rows and the merged requests while both versions hold', async () => {
     await call();
     await call('q=dune');
+    await call('sort=title', VIEWERS.other);
     expect(prismaMock.plexLibrary.findMany).toHaveBeenCalledTimes(1);
-    expect(prismaMock.plexLibrary.aggregate).toHaveBeenCalledTimes(2);
-    expect(prismaMock.request.findMany.mock.calls.filter((c: any[]) => c[0]?.where?.type === 'audiobook').length).toBeGreaterThanOrEqual(2);
+    expect(requestLoads()).toBe(1);
+  });
+
+  it('a request change reaches the very next call', async () => {
+    await call();
+    stack.requests[3].status = 'downloading'; // bob's failed request, same count
+    const { body } = await call('limit=120');
+    expect(body.items.find((i: any) => i.title === 'Failed Book')).toMatchObject({ status: 'downloading', statusGroup: 'on_the_way' });
+    expect(requestLoads()).toBe(2);
+  });
+
+  it('a row change with the same count and stamps reaches the next rebuild', async () => {
+    await call();
+    stack.rows[3].title = 'Renamed Scan Book'; // count and updated_at unchanged
+    await call(); // serves the previous rows and starts one rebuild
+    await tick();
+    const { body } = await call('limit=120');
+    expect(body.items.map((i: any) => i.title)).toContain('Renamed Scan Book');
+    expect(prismaMock.plexLibrary.findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('durations: every request-only book for sort=duration; otherwise the returned page only', async () => {
+    await call('sort=title&order=asc&limit=2'); // Asked Book, Denied Book: no ASIN
+    expect(durationLookups()).toEqual([]);
+    await call('sort=title&order=asc&limit=3'); // adds Failed Book
+    expect(durationLookups()).toEqual([['B0FAILED01']]);
+    const { body } = await call('sort=duration');
+    expect(durationLookups()[1]).toEqual(['B0FAILED01', 'B0PENDING1']);
+    expect(body.items[0]).toMatchObject({ title: 'Failed Book', durationMinutes: 300 });
   });
 
   it('uses the Plex library id in Plex mode', async () => {
@@ -138,9 +177,9 @@ describe('GET /api/library', () => {
     it('reads only live audiobook requests and maps them to entry ids', async () => {
       const now = Date.now();
       prismaMock.request.findMany.mockResolvedValue([
-        { audiobookId: 'ab-1', status: 'downloading', progress: 40, updatedAt: new Date(now), createdAt: new Date(now) },
-        { audiobookId: 'ab-1', status: 'pending', progress: 0, updatedAt: new Date(now), createdAt: new Date(now - 1000) },
-        { audiobookId: 'ab-2', status: 'downloaded', progress: 100, updatedAt: new Date(now), createdAt: new Date(now) },
+        { id: 'q-1', audiobookId: 'ab-1', status: 'downloading', progress: 40, updatedAt: new Date(now), createdAt: new Date(now) },
+        { id: 'q-2', audiobookId: 'ab-1', status: 'pending', progress: 0, updatedAt: new Date(now), createdAt: new Date(now - 1000) },
+        { id: 'q-3', audiobookId: 'ab-2', status: 'downloaded', progress: 100, updatedAt: new Date(now), createdAt: new Date(now) },
       ]);
       const { status, body } = await call('live=1', VIEWERS.other);
       expect(status).toBe(200);
@@ -162,9 +201,34 @@ describe('GET /api/library', () => {
       expect(prismaMock.plexLibrary.findMany).not.toHaveBeenCalled();
     });
 
+    it('a book whose newest qualifying request is not live is left out (the request full mode shows)', async () => {
+      const now = Date.now();
+      prismaMock.request.findMany.mockImplementation(async (args: any) => {
+        if (args.where.OR) {
+          return [
+            { id: 'q-1', audiobookId: 'ab-1', status: 'downloaded', progress: 100, updatedAt: new Date(now), createdAt: new Date(now - 60_000) },
+            { id: 'q-2', audiobookId: 'ab-2', status: 'downloading', progress: 10, updatedAt: new Date(now), createdAt: new Date(now - 60_000) },
+            { id: 'q-4', audiobookId: 'ab-3', status: 'pending', progress: 0, updatedAt: new Date(now), createdAt: new Date(now - 5000) },
+          ];
+        }
+        return [
+          { id: 'q-3', audiobookId: 'ab-1', createdAt: new Date(now - 1000) }, // a second user's newer request (awaiting approval)
+          { id: 'q-1', audiobookId: 'ab-1', createdAt: new Date(now - 60_000) },
+          { id: 'q-2', audiobookId: 'ab-2', createdAt: new Date(now - 60_000) },
+          { id: 'q-4', audiobookId: 'ab-3', createdAt: new Date(now - 5000) },
+          { id: 'q-5', audiobookId: 'ab-3', createdAt: new Date(now - 5000) }, // same instant: the larger id wins, as in full mode
+        ];
+      });
+      const { body } = await call('live=1');
+      expect(body.items.map((i: any) => i.id)).toEqual(['req_ab-2']);
+      const newest = prismaMock.request.findMany.mock.calls.map((c: any[]) => c[0]).find((a: any) => a.where.audiobookId);
+      const { LIBRARY_REQUEST_WHERE } = await import('@/lib/library-view/loader');
+      expect(newest.where).toEqual({ ...LIBRARY_REQUEST_WHERE, audiobookId: { in: ['ab-1', 'ab-2', 'ab-3'] } });
+    });
+
     it('30 s while only slow statuses remain, 0 when nothing is live', async () => {
       prismaMock.request.findMany.mockResolvedValue([
-        { audiobookId: 'ab-3', status: 'pending', progress: 0, updatedAt: new Date(), createdAt: new Date() },
+        { id: 'q-9', audiobookId: 'ab-3', status: 'pending', progress: 0, updatedAt: new Date(), createdAt: new Date() },
       ]);
       expect((await call('live=1')).body.refreshMs).toBe(30000);
       prismaMock.request.findMany.mockResolvedValue([]);
