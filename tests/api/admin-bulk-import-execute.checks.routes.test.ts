@@ -10,9 +10,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { createPrismaMock } from '../helpers/prisma';
-import { IMPORT_BLOCKING_STATUSES } from '@/lib/constants/request-statuses';
 
 type Row = Record<string, unknown>;
+
+/** The review screen's Requested statuses (IMPORT_BLOCKING_STATUSES; listed here so the file also runs on main). */
+const ACTIVE_STATUSES = ['pending', 'searching', 'downloading', 'processing', 'awaiting_search', 'awaiting_import', 'awaiting_approval', 'downloaded', 'available'];
 
 const prismaMock = createPrismaMock();
 const jobQueueMock = vi.hoisted(() => ({ addOrganizeJob: vi.fn() }));
@@ -162,13 +164,13 @@ describe('bulk import execute: the same checks on every row', () => {
     nothingWritten();
   });
 
-  it.each(IMPORT_BLOCKING_STATUSES.map((s) => [s]))('refuses a book another user has a %s request for', async (status) => {
+  it.each(ACTIVE_STATUSES.map((s) => [s]))('refuses a book another user has a %s request for', async (status) => {
     requests = [{ id: 'req-9', userId: 'user-2', asin: 'B0BOOK0001', status }];
 
     const res = await post([item('B0BOOK0001')]);
 
     expect(res.body.results[0]).toMatchObject({ success: false, error: 'Already requested' });
-    expect(prismaMock.request.findMany.mock.calls[0][0].where).toMatchObject({ type: 'audiobook', deletedAt: null, status: { in: [...IMPORT_BLOCKING_STATUSES] } });
+    expect(prismaMock.request.findMany.mock.calls[0][0].where).toMatchObject({ type: 'audiobook', deletedAt: null, status: { in: ACTIVE_STATUSES } });
     nothingWritten();
   });
 
