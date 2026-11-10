@@ -5,7 +5,9 @@
  * Inline scenario: three torrent releases on indexer 1 "E2E Torrents" (seeds 1 min); indexer 3 "Slow"
  * seeds 600 min. The admin requests all three books for real (grab, download, organize, available).
  * A second (local) user's requests on the same books are written into the DB with a selected row on the
- * same torrent, the states the product reaches:
+ * same torrent. A and B pair the admin's row (added_by_rmab true) with a legacy NULL row grabbed at the
+ * same time; the product can't make that exact pair (NULL rows predate the column), but every verdict is
+ * the one for two legacy rows inside the ownership window, or two v1.2.11 duplicate rows, which it can:
  *   A artemis: R2 soft-deleted on Slow, a legacy row (added_by_rmab NULL) grabbed with the same torrent.
  *   B martian: R5 cancelled before cancelled_at existed (NULL), legacy row grabbed with it, on Slow.
  *   C phm:     R9 cancelled (NULL) and R10 soft-deleted, both took the torrent over (false), on Slow.
@@ -13,6 +15,8 @@
  * Admin delete of A's request: kept (torrentsKeptShared 1), its row stays completed.
  * Slow set to 1 min, cleanup 2: A removed through the deleted owner, B removed (R5 met).
  * Fails before the fix: cleanup 1 removes A (deleted requests ignored) and keeps C forever; B is never removed.
+ * Covers the seeding cleanup and request delete only; the cancel step's holds and the `until_met` hold of an
+ * active request that took the torrent over are covered by unit tests.
  */
 
 import { test, expect } from '@playwright/test';

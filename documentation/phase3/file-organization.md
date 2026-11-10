@@ -325,18 +325,16 @@ exiftool "audiobook.m4b" | grep -i asin
 **Cleanup Job:** `cleanup_seeded_torrents` (every 30 mins)
 1. Find requests with status 'available' or soft-deleted (orphaned downloads)
 2. Query qBittorrent for actual `seeding_time` field
-3. **CRITICAL: Check if torrent hash is shared by other active requests**
-   - Any of them not finished, or not done seeding by its own indexer (#283) → Skip torrent deletion, only hard-delete the soft-deleted request record
-   - Else → Delete torrent + files, mark every sharing row removed ([request-deletion.md](../admin-features/request-deletion.md))
+3. **CRITICAL: Check whether another request keeps the shared torrent** (`torrentHolds()`, rule: [request-deletion.md#shared-torrent-holds](../admin-features/request-deletion.md#shared-torrent-holds), #283, #545)
+   - Held → skip torrent deletion; a soft-deleted candidate is hard-deleted, or stays soft-deleted when the hold is `until_met`
+   - Else → Delete torrent + files, mark every sharing row removed
 4. Delete torrent + files only after seeding requirement met
 5. Respects config (0 = never cleanup)
 
 **Shared Torrent Protection:**
 When user deletes and re-requests the same audiobook:
 - Both requests share the same torrent hash (same files)
-- Cleanup finds old soft-deleted request
-- Before deleting torrent, checks if any active (non-deleted) request uses same hash
-- If found → Keeps torrent, only removes soft-deleted database record
+- Active, deleted and cancelled requests on the hash are asked per [Shared Torrent Holds](../admin-features/request-deletion.md#shared-torrent-holds); deleted and cancelled ones hold only through a row that owns the torrent
 - Prevents deleting source files for active requests during chapter merging
 
 ## Post-Organize Cleanup Safety
