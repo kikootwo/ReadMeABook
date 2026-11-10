@@ -19,7 +19,7 @@
  * Exec bridge required.
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { execBridgeAvailable, EXEC_BRIDGE_SKIP, fakeArr, Rmab, waitFor, writeEvidence, type Book } from '../../lib/harness';
 import { asApp, psql, sqlStr } from './242-helpers';
 import {
@@ -32,6 +32,12 @@ test.describe.configure({ mode: 'serial', timeout: 900_000 });
 
 const AUTHORS = 'Test Author, Second Writer';
 const OFF = { metadataTaggingEnabled: false, chapterMergingEnabled: false };
+/** The page saves a changed Paths tab only after Test Paths passed (as an admin does). */
+async function testThenSave(page: Page) {
+  await page.getByRole('button', { name: 'Test Paths' }).click();
+  await expect(page.getByText('All paths are valid and writable')).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Save Settings' }).click();
+}
 let books: Record<string, Book>;
 let rmab: Rmab;
 
@@ -58,7 +64,7 @@ test('0: the Paths page shows File placement and Metadata in Audiobookshelf mode
       await fullShot(page, `paths-abs-${view.name}`);
       if (view.name === '1280-light') {
         const saved = page.waitForResponse((r) => r.url().endsWith('/api/admin/settings/paths') && r.request().method() === 'PUT');
-        await page.getByRole('button', { name: 'Save Settings' }).click();
+        await testThenSave(page);
         expect((await saved).status(), 'saved through the page').toBe(200);
         expect(psql(`select value from configuration where key = 'audiobook_file_placement'`)).toBe('hardlink');
         expect(psql(`select value from configuration where key = 'metadata_opf_enabled'`)).toBe('true');
@@ -96,7 +102,7 @@ test('0: the Paths page shows File placement and Metadata in Audiobookshelf mode
       await page.getByLabel(/Auto-tag audio files with metadata/).check();
       await page.getByRole('checkbox', { name: /Auto-merge chapters/ }).check();
       const saved = page.waitForResponse((r) => r.url().endsWith('/api/admin/settings/paths') && r.request().method() === 'PUT');
-      await page.getByRole('button', { name: 'Save Settings' }).click();
+      await testThenSave(page);
       expect((await saved).status(), 'Plex mode never refuses').toBe(200);
     } finally {
       await ctx.close();
@@ -139,7 +145,7 @@ test('2: separate mounts, Hard link: the book is copied, and the Paths page keep
   expect.soft(library.length, 'both files copied').toBe(2);
   expect.soft(library.every((f) => f.nlink === 1) && downloads.every((f) => f.nlink === 1), 'separate files, link count 1').toBe(true);
   expect.soft(library.map((f) => f.sha).sort()).toEqual(downloads.map((f) => f.sha).sort());
-  expect.soft(message).toBe('copied, not hard-linked (the download and library folders are separate mounts (EXDEV))');
+  expect.soft(message).toMatch(/^copied, not hard-linked \(the download and library folders are separate mounts \(EXDEV\)\)/);
   expect.soft(filesUnder(folder).some((f) => f.endsWith('/metadata.opf')), 'metadata.opf written on the copy fallback too').toBe(true);
 
   {
@@ -220,7 +226,8 @@ test('3: separate mounts, Hard link only: nothing imported, request in warn; Ret
   const after = { status, folder, library: filesUnder(folder).map(fileId), download: filesUnder(torrent.contentPath!).map(fileId), message: requestMessage(run.requestId) };
   writeEvidence('68/leg3-retried.json', after);
   expect.soft(status).toMatch(/downloaded|available/);
-  expect.soft(after.library.filter((f) => f.path.endsWith('.mp3')).length, 'imported by copy').toBe(2);
+  expect.soft(after.library.filter((f) => f.path.endsWith('.mp3')).length, 'every audio file imported by copy').toBe(before.filter((f) => f.path.endsWith('.mp3')).length);
+  expect.soft(after.library.every((f) => f.nlink === 1), 'copies, not links').toBe(true);
   expect.soft(after.download.map((f) => f.sha), 'download unchanged').toEqual(before.map((f) => f.sha));
 });
 
