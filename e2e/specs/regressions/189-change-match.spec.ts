@@ -180,7 +180,7 @@ const dialog = (page: Page) => page.getByRole('dialog');
 
 async function typeAsin(page: Page, asin: string) {
   await dialog(page).getByRole('searchbox').fill(asin);
-  await dialog(page).getByRole('button', { name: 'Search' }).click();
+  await dialog(page).getByRole('button', { name: 'Search', exact: true }).click();
   await expect(dialog(page).getByRole('status')).not.toHaveText('Searching…', { timeout: 30_000 });
   await expect(dialog(page).getByRole('status')).not.toHaveText('');
 }
