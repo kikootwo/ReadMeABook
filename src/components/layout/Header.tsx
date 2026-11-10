@@ -132,9 +132,9 @@ export function Header() {
                 ReadMeABook
               </span>
             </Link>
-            {/* Version badge: not on phones; from 1024 to 1279 px the inline nav needs its room */}
-            <div className="hidden sm:block lg:hidden xl:block flex-shrink-0">
-              <VersionBadge />
+            {/* Version badge: not on phones; from 1024 to 1279 px only its update dot (the inline nav needs the room) */}
+            <div className="hidden sm:block flex-shrink-0">
+              <VersionBadge compactAtLg />
             </div>
           </div>
 

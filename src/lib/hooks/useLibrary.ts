@@ -23,6 +23,8 @@ import type { LibraryQuery } from './useLibraryQuery';
 export const LIVE_KEY = '/api/library?live=1';
 export const SETTLE_DELAY_MS = 1000;
 export const SETTLE_JITTER_MS = 1000;
+export const LIVE_RETRY_MS = 5000;
+const LIVE_RETRY_MAX_MS = 30000;
 const MAX_RETRIES = 2;
 
 export class LibraryFetchError extends Error {
@@ -66,6 +68,21 @@ async function fetchPage(url: string): Promise<LibraryPage> {
   return { ...body, base: url.split('&cursor=')[0] };
 }
 
+/**
+ * A failed live poll is retried quietly (5xx or network: 5 s, doubling to 30 s), never on a 4xx.
+ * SWR's interval skips a key that holds an error, so without a retry one failure stops polling.
+ */
+function onLiveErrorRetry(
+  error: LibraryFetchError,
+  _key: string,
+  _config: unknown,
+  revalidate: (opts: { retryCount: number }) => void,
+  { retryCount }: { retryCount: number }
+) {
+  if (error.status !== undefined && error.status < 500) return;
+  setTimeout(() => revalidate({ retryCount }), Math.min(LIVE_RETRY_MS * 2 ** (retryCount - 1), LIVE_RETRY_MAX_MS));
+}
+
 /** No retry on a 4xx; at most two on a 5xx or a network failure. */
 function onErrorRetry(
   error: LibraryFetchError,
@@ -79,13 +96,18 @@ function onErrorRetry(
   setTimeout(() => revalidate({ retryCount }), 1000 * 2 ** (retryCount - 1));
 }
 
-/** A live entry applied to a loaded card (never to an in-library card). */
+/**
+ * A live entry applied to a loaded card (never to an in-library card). A new status drops the
+ * request's error: it belonged to the status the list sent with it.
+ */
 export function applyLive(item: LibraryItem, live: LibraryLiveItem | undefined): LibraryItem {
   if (!live || item.inLibrary) return item;
   const statusGroup = STATUS_GROUP_OF[live.status] ?? item.statusGroup;
   const progress = statusGroup === 'on_the_way' ? live.progress : null;
   if (live.status === item.status && progress === item.progress && statusGroup === item.statusGroup) return item;
-  return { ...item, status: live.status, statusGroup, progress };
+  const request =
+    live.status !== item.status && item.request?.errorMessage ? { ...item.request, errorMessage: null } : item.request;
+  return { ...item, status: live.status, statusGroup, progress, request };
 }
 
 interface MergedPages {
@@ -160,7 +182,7 @@ export function useLibrary(query: LibraryQuery, hideAvailable: boolean, enabled:
   const live = useSWR<LibraryLiveResponse, LibraryFetchError>(merged.first ? LIVE_KEY : null, fetchJson, {
     refreshInterval: (latest) => latest?.refreshMs ?? 0,
     revalidateOnFocus: true,
-    onErrorRetry: () => {}, // silent: the last overlay stays
+    onErrorRetry: onLiveErrorRetry, // quiet: the last overlay stays meanwhile
   });
   const mutateLive = live.mutate;
 
@@ -190,34 +212,47 @@ export function useLibrary(query: LibraryQuery, hideAvailable: boolean, enabled:
     if (settleTimer.current) clearTimeout(settleTimer.current);
   }, []);
 
-  const loadedRef = useRef(merged.items);
-  useEffect(() => {
-    loadedRef.current = merged.items;
-  }, [merged.items]);
+  // A live id that leaves the live set.
   const previousLiveIds = useRef<Set<string> | null>(null);
-  const groupMovesSeen = useRef(new Set<string>());
   useEffect(() => {
     if (!live.data) return;
     const ids = new Set(live.data.items.map((i) => i.id));
-    let settle = false;
-    for (const id of previousLiveIds.current ?? []) if (!ids.has(id)) settle = true;
+    let left = false;
+    for (const id of previousLiveIds.current ?? []) if (!ids.has(id)) left = true;
     previousLiveIds.current = ids;
-    const loaded = new Map(loadedRef.current.map((i) => [i.id, i]));
+    if (left) scheduleSettle();
+  }, [live.data, scheduleSettle]);
+
+  // A live status that moves a loaded card to another group. Checked again when the pages change,
+  // never while a list fetch runs (its result is checked when it lands, so an action costs one reload).
+  const groupMovesSeen = useRef(new Set<string>());
+  useEffect(() => {
+    if (!live.data || isValidating) return;
+    const loaded = new Map(merged.items.map((i) => [i.id, i]));
+    let settle = false;
     for (const entry of live.data.items) {
       const item = loaded.get(entry.id);
       const group = STATUS_GROUP_OF[entry.status];
-      if (!item || item.inLibrary || !group || group === item.statusGroup) continue;
+      if (!item || item.inLibrary || !group) continue;
       const move = `${entry.id}:${entry.status}`; // once per move, so a lagging list cannot loop
+      if (group === item.statusGroup) {
+        groupMovesSeen.current.delete(move); // the list caught up: the same move later settles again
+        continue;
+      }
       if (!groupMovesSeen.current.has(move)) {
         groupMovesSeen.current.add(move);
         settle = true;
       }
     }
     if (settle) scheduleSettle();
-  }, [live.data, scheduleSettle]);
+  }, [live.data, merged.items, isValidating, scheduleSettle]);
 
-  /** After an action: the list (every loaded page) and live. */
+  /** After an action: the list (every loaded page) and live; a pending settle is folded into it. */
   const revalidate = useCallback(async () => {
+    if (settleTimer.current) {
+      clearTimeout(settleTimer.current);
+      settleTimer.current = null;
+    }
     await Promise.all([mutateRef.current(), mutateLive()]);
   }, [mutateLive]);
 
@@ -236,12 +271,14 @@ export function useLibrary(query: LibraryQuery, hideAvailable: boolean, enabled:
     hasMore: !lagging && merged.hasMore,
     /** Nothing to show yet for this query. */
     isLoading: enabled && !error && !first,
-    isLoadingMore: !!pages && size > pages.length && !error,
+    // Only while a fetch runs: a reload that ends a page earlier leaves size above pages.length
+    isLoadingMore: isValidating && !!pages && size > pages.length && !error,
     isValidating,
     lagging,
     error: error ?? null,
     loaded: !!first,
-    liveRefreshMs: live.data?.refreshMs ?? 0,
+    /** 0 unless polling really runs (a failed poll turns it off until a retry succeeds). */
+    liveRefreshMs: live.error ? 0 : live.data?.refreshMs ?? 0,
     liveIds: liveById,
     loadMore: useCallback(() => void setSize((s) => s + 1), [setSize]),
     retry: useCallback(() => void mutateRef.current(), []),

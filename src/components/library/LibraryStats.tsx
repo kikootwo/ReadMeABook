@@ -7,6 +7,7 @@
 
 import React from 'react';
 import type { LibraryResponse } from '@/lib/library-view/types';
+import { STATUS_GROUP_DOTS } from './card-display';
 
 interface LibraryStatsProps {
   stats: LibraryResponse['stats'] | null;
@@ -14,11 +15,12 @@ interface LibraryStatsProps {
   live: boolean;
 }
 
-const TILES: { key: keyof LibraryResponse['stats']; label: string; dot: string }[] = [
-  { key: 'total', label: 'Books', dot: 'bg-gray-400' },
-  { key: 'available', label: 'In your library', dot: 'bg-emerald-400' },
-  { key: 'onTheWay', label: 'On the way', dot: 'bg-amber-400' },
-  { key: 'needsALook', label: 'Need a look', dot: 'bg-red-400' },
+/** Each tile's dots are its status groups' colours ("Need a look" counts two groups, so two dots). */
+const TILES: { key: keyof LibraryResponse['stats']; label: string; dots: string[] }[] = [
+  { key: 'total', label: 'Books', dots: ['bg-gray-400'] },
+  { key: 'available', label: 'In your library', dots: [STATUS_GROUP_DOTS.available] },
+  { key: 'onTheWay', label: 'On the way', dots: [STATUS_GROUP_DOTS.on_the_way] },
+  { key: 'needsALook', label: 'Need a look', dots: [STATUS_GROUP_DOTS.problem, STATUS_GROUP_DOTS.needs_approval] },
 ];
 
 export function LibraryStats({ stats, live }: LibraryStatsProps) {
@@ -44,7 +46,11 @@ export function LibraryStats({ stats, live }: LibraryStatsProps) {
             className="rounded-xl sm:rounded-2xl px-3 py-2 sm:px-4 sm:py-3 bg-white/90 dark:bg-gray-800/90 border border-gray-200/50 dark:border-gray-700/50 shadow-sm min-w-0"
           >
             <dt className="flex items-center gap-1.5 text-xs sm:text-sm text-gray-600 dark:text-gray-400 truncate">
-              <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${tile.dot}`} aria-hidden="true" />
+              <span className="inline-flex -space-x-0.5 flex-shrink-0" aria-hidden="true" data-tile-dots={tile.key}>
+                {tile.dots.map((dot) => (
+                  <span key={dot} className={`inline-block w-2 h-2 rounded-full ring-1 ring-white dark:ring-gray-800 ${dot}`} />
+                ))}
+              </span>
               <span className="truncate">{tile.label}</span>
             </dt>
             <dd className="mt-0.5 text-lg sm:text-2xl font-semibold text-gray-900 dark:text-gray-100 tabular-nums">

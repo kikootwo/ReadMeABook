@@ -73,7 +73,9 @@ function Option({
         className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
       />
       {marker}
-      <span className="flex-1 min-w-0 truncate">{label}</span>
+      <span className="flex-1 min-w-0 truncate" title={label}>
+        {label}
+      </span>
       <span className="text-xs tabular-nums text-gray-500 dark:text-gray-400">{count.toLocaleString()}</span>
     </label>
   );

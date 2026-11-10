@@ -57,7 +57,7 @@ export function LibraryCard({ item, squareCovers, showPill, onOpen }: LibraryCar
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400 truncate">{item.author}</p>
         <p
           className={`mt-0.5 text-xs truncate ${
-            inLibrary || !tone ? 'text-gray-500 dark:text-gray-400' : TONE_TEXT[tone]
+            inLibrary ? 'text-gray-500 dark:text-gray-400' : TONE_TEXT[tone]
           }`}
         >
           {cardMeta(item) || ' '}

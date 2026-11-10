@@ -9,6 +9,20 @@ import React from 'react';
 import { JOB_TYPE_LABELS } from '@/lib/constants/job-labels';
 import type { RequestHistory } from '@/lib/hooks/useLibraryRequestDetail';
 
+/** Job statuses as words (jobs.status: pending, active, completed, failed, delayed, stuck). */
+const JOB_STATUS_LABELS: Record<string, string> = {
+  pending: 'Queued',
+  active: 'Running',
+  completed: 'Done',
+  failed: 'Failed',
+  delayed: 'Delayed',
+  stuck: 'Stuck',
+};
+
+export function jobStatusLabel(status: string): string {
+  return JOB_STATUS_LABELS[status] ?? (status ? status.charAt(0).toUpperCase() + status.slice(1) : '');
+}
+
 export function formatDateTime(value: string | null | undefined): string | null {
   if (!value) return null;
   const date = new Date(value);
@@ -63,7 +77,7 @@ export function LibraryHistory({ history, isLoading }: { history: RequestHistory
               <li key={job.id} className="flex items-center justify-between gap-3 text-sm">
                 <span className="text-gray-800 dark:text-gray-200 truncate">{JOB_TYPE_LABELS[job.type] ?? job.type}</span>
                 <span className="text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                  {job.status}
+                  {jobStatusLabel(job.status)}
                   {formatDateTime(job.createdAt) ? ` · ${formatDateTime(job.createdAt)}` : ''}
                 </span>
               </li>

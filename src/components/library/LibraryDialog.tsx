@@ -4,7 +4,8 @@
  *
  * z-[45]: above the sticky header (z-40), below toasts (z-50) and the stacked Interactive search
  * modal (z-[60]). While `childOpen` is set, a child dialog owns the keyboard: Esc and the Tab trap
- * pause, and the scroll lock is set again when the child closes (its cleanup clears it).
+ * pause. The scroll lock holds while the child is open and is set again when it closes (its
+ * cleanup clears it).
  */
 
 'use client';
@@ -50,14 +51,22 @@ export function LibraryDialog({ open, onClose, labelledBy, variant = 'center', c
     };
   }, [open]);
 
-  // Scroll lock; set again whenever a child dialog closes.
+  // Scroll lock for as long as the dialog is open. A child dialog reports itself open one commit
+  // after it locked the body, so the lock never depends on childOpen (that cleanup would unlock it).
   useEffect(() => {
-    if (!open || childOpen) return;
+    if (!open) return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = previous;
     };
+  }, [open]);
+
+  // A child's cleanup clears the lock when it closes: set it again.
+  const childWasOpen = useRef(false);
+  useEffect(() => {
+    if (open && !childOpen && childWasOpen.current) document.body.style.overflow = 'hidden';
+    childWasOpen.current = childOpen;
   }, [open, childOpen]);
 
   // Esc and the Tab trap (paused while a child dialog is open).

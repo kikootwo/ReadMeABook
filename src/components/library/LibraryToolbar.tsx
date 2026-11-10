@@ -107,7 +107,7 @@ export function LibraryToolbar({
         aria-label="Group by"
         className="inline-flex h-10 items-center rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-1 text-sm"
       >
-        <span className="px-2 text-gray-500 dark:text-gray-400 hidden sm:inline">Group</span>
+        <span className="px-2 text-gray-500 dark:text-gray-400">Group</span>
         {(['none', 'author'] as const).map((mode) => (
           <button
             key={mode}

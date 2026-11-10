@@ -36,10 +36,14 @@ export function LibraryView() {
   const [snapshot, setSnapshot] = useState<LibraryItem | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  // The open book: the loaded card while it is on a page, else the last snapshot patched from live.
+  // The open book: the loaded card while it is on a page, else the snapshot patched from live. Each
+  // newer copy becomes the snapshot (derived state, set while rendering), so the detail never falls
+  // back to an older status; off the pages and out of live, the detail asks the request itself.
   const loadedOpen = useMemo(() => (openId ? data.items.find((i) => i.id === openId) ?? null : null), [openId, data.items]);
-  if (loadedOpen && loadedOpen !== snapshot) setSnapshot(loadedOpen); // derived state, set while rendering
-  const openItem = openId ? loadedOpen ?? (snapshot && snapshot.id === openId ? data.withLive(snapshot) : null) : null;
+  const patchedSnapshot = !loadedOpen && snapshot && snapshot.id === openId ? data.withLive(snapshot) : null;
+  const latest = loadedOpen ?? patchedSnapshot;
+  if (latest && latest !== snapshot) setSnapshot(latest);
+  const openItem = openId ? latest : null;
 
   const openDetail = useCallback((item: LibraryItem) => {
     setSnapshot(item);
@@ -76,6 +80,8 @@ export function LibraryView() {
   }, [q, prefs]);
 
   const isAdmin = data.viewer?.isAdmin ?? false;
+  /** Nothing in the library and nothing requested: no rail, toolbar or chips around the empty state. */
+  const emptyLibrary = data.loaded && (data.stats?.total ?? 0) === 0;
   const activeFilterCount = query.status.length + query.source.length + query.requestedBy.length;
   const facetProps = {
     facets: data.facets,
@@ -124,46 +130,52 @@ export function LibraryView() {
       <LibraryStats stats={data.stats} live={data.liveRefreshMs > 0} />
       {isAdmin && data.loaded && !data.libraryConfigured && <NotConfiguredNotice />}
 
-      <LibraryToolbar
-        input={q.input}
-        onInput={q.setInput}
-        sort={query.sort}
-        onSort={q.setSort}
-        group={query.group}
-        onGroup={q.setGroup}
-        activeFilterCount={activeFilterCount}
-        onOpenFilters={() => setSheetOpen(true)}
-        view={{
-          hideAvailable: prefs.hideAvailable,
-          onToggleHideAvailable: prefs.setHideAvailable,
-          squareCovers: prefs.squareCovers,
-          onToggleSquareCovers: prefs.setSquareCovers,
-          cardSize: prefs.cardSize,
-          onCardSizeChange: prefs.setCardSize,
-        }}
-      />
+      {!emptyLibrary && (
+        <>
+          <LibraryToolbar
+            input={q.input}
+            onInput={q.setInput}
+            sort={query.sort}
+            onSort={q.setSort}
+            group={query.group}
+            onGroup={q.setGroup}
+            activeFilterCount={activeFilterCount}
+            onOpenFilters={() => setSheetOpen(true)}
+            view={{
+              hideAvailable: prefs.hideAvailable,
+              onToggleHideAvailable: prefs.setHideAvailable,
+              squareCovers: prefs.squareCovers,
+              onToggleSquareCovers: prefs.setSquareCovers,
+              cardSize: prefs.cardSize,
+              onCardSizeChange: prefs.setCardSize,
+            }}
+          />
 
-      <ActiveChips
-        query={query}
-        hideAvailable={prefs.hideAvailable}
-        requesters={data.facets?.requestedBy ?? []}
-        onClearSearch={q.clearSearch}
-        onToggleStatus={q.toggleStatus}
-        onToggleSource={q.toggleSource}
-        onToggleRequestedBy={q.toggleRequestedBy}
-        onShowAvailable={() => prefs.setHideAvailable(false)}
-        onClearAll={clearAll}
-      />
+          <ActiveChips
+            query={query}
+            hideAvailable={prefs.hideAvailable}
+            requesters={data.facets?.requestedBy ?? []}
+            onClearSearch={q.clearSearch}
+            onToggleStatus={q.toggleStatus}
+            onToggleSource={q.toggleSource}
+            onToggleRequestedBy={q.toggleRequestedBy}
+            onShowAvailable={() => prefs.setHideAvailable(false)}
+            onClearAll={clearAll}
+          />
+        </>
+      )}
 
       <div className="flex gap-8 items-start" ref={gridTop} style={{ scrollMarginTop: '5rem' }}>
-        <aside className="hidden lg:block w-[220px] flex-shrink-0 sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto pr-1" aria-label="Filters">
-          <FacetList {...facetProps} />
-        </aside>
+        {!emptyLibrary && (
+          <aside className="hidden lg:block w-[220px] flex-shrink-0 sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto pr-1" aria-label="Filters">
+            <FacetList {...facetProps} />
+          </aside>
+        )}
         <div className="flex-1 min-w-0">{body}</div>
       </div>
 
       <FilterSheet
-        open={sheetOpen}
+        open={sheetOpen && !emptyLibrary}
         onClose={() => setSheetOpen(false)}
         matched={data.matched}
         onClearAll={clearAll}
@@ -175,6 +187,7 @@ export function LibraryView() {
         viewer={data.viewer}
         user={user}
         live={!!openItem && data.liveIds.has(openItem.id)}
+        offPage={!!openItem && !loadedOpen}
         onClose={closeDetail}
         onChanged={onChanged}
       />

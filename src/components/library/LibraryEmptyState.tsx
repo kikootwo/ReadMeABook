@@ -48,7 +48,7 @@ function ScanNowButton() {
       const run = await fetchWithAuth(`/api/admin/jobs/${job.id}/trigger`, { method: 'POST' });
       const result = await run.json().catch(() => null);
       if (!run.ok) throw new Error(result?.message || 'Failed to start the library scan');
-      toast.success('Library scan started. Books appear here when it finishes.');
+      toast.success('Library scan started.');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to start the library scan');
     } finally {

@@ -95,12 +95,29 @@ describe('LibraryDetail: what each viewer sees', () => {
     }
   });
 
-  it('the path row comes only from item.path: a dash when null, absent without the key', () => {
+  it('the path row comes only from item.path and only with a path: hidden when null or without the key', () => {
     const { unmount } = renderDetail(gated({ path: null }));
-    expect(screen.getByText('Path').nextElementSibling?.textContent).toBe('—');
+    expect(screen.queryByText('Path')).toBeNull();
+    expect(screen.getByText('Details')).toBeInTheDocument(); // a neutral heading over "Library: Not yet"
+    expect(screen.queryByText('In your library')).toBeNull();
     unmount();
     renderDetail(gated(), { isAdmin: false }, {});
     expect(screen.queryByText('Path')).toBeNull();
+  });
+
+  it('a pending book: amber dot and amber badge (its On the way colour), the badge text unchanged', () => {
+    const { container } = renderDetail(gated({ status: 'pending', statusGroup: 'on_the_way' }));
+    const badge = screen.getByText('Pending');
+    expect(badge.className).toContain('bg-amber-100');
+    expect(badge.className).not.toContain('yellow');
+    expect(container.ownerDocument.querySelector('.bg-amber-400.rounded-full')).not.toBeNull();
+    expect(container.ownerDocument.querySelector('.bg-blue-400.rounded-full')).toBeNull();
+  });
+
+  it('job statuses read as words', async () => {
+    renderDetail(gated());
+    expect(await screen.findByText(/^Done/)).toBeInTheDocument();
+    expect(screen.queryByText(/^completed/)).toBeNull();
   });
 
   it('another user: public fields only, no sections, no actions and no request detail call', async () => {
@@ -144,6 +161,30 @@ describe('LibraryDetail: what each viewer sees', () => {
       );
       await act(async () => vi.advanceTimersByTime(11_000));
       expect(detailCalls()).toBeGreaterThanOrEqual(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('one failed history poll does not stop the poll while the book is live', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let fail = true;
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url !== '/api/requests/request-1') return ok({ success: true });
+        if (fail) {
+          fail = false;
+          return ok({ message: 'Bad gateway' }, 502);
+        }
+        return ok(OWNER_PAYLOAD);
+      });
+      renderDetail(gated(), ADMIN_VIEWER, { live: true });
+      await waitFor(() => expect(detailCalls()).toBe(1));
+      await act(async () => vi.advanceTimersByTime(6_000));
+      await waitFor(() => expect(detailCalls()).toBe(2)); // the quiet retry
+      await screen.findByText('Found on IndexerOne');
+      await act(async () => vi.advanceTimersByTime(6_000));
+      await waitFor(() => expect(detailCalls()).toBeGreaterThanOrEqual(3)); // polling again
     } finally {
       vi.useRealTimers();
     }

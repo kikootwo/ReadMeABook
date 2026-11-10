@@ -34,10 +34,13 @@ const ADMIN = { viewer: { isAdmin: true, canFetchEbook: false } };
 
 let pages: Record<string, unknown>;
 let live: { items: unknown[]; refreshMs: number };
+/** GET /api/requests/request-1 (the detail's history): the request's own status and error. */
+let requestDetail: () => ReturnType<typeof ok>;
 
 function serve() {
   fetchMock.mockImplementation(async (url: string) => {
     if (url.includes('live=1')) return ok(live);
+    if (url === '/api/requests/request-1') return requestDetail();
     if (url.startsWith('/api/requests/')) return ok({ success: true, request: { id: 'request-1' } });
     if (url === '/api/admin/jobs') return ok({ jobs: [{ id: 'job-9', type: 'plex_library_scan' }] });
     if (url.startsWith('/api/admin/jobs/')) return ok({ success: true });
@@ -69,6 +72,7 @@ beforeEach(() => {
   auth.user = { id: 'admin-1', role: 'admin', username: 'admin' };
   pages = {};
   live = { items: [], refreshMs: 0 };
+  requestDetail = () => ok({ success: true, request: { id: 'request-1' } });
   serve();
 });
 
@@ -78,8 +82,13 @@ describe('LibraryView states', () => {
     renderView();
     await screen.findByText('Nothing here yet');
     expect(screen.getByRole('link', { name: 'Find a book' })).toHaveAttribute('href', '/search');
+    // Nothing to filter or sort: no rail, toolbar or Filters button around the empty state
+    expect(screen.queryByRole('complementary', { name: 'Filters' })).toBeNull();
+    expect(screen.queryByRole('searchbox')).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Group by' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Scan library now' }));
-    await screen.findByText(/Library scan started/);
+    // Says only what happened: the page does not reload by itself when the scan ends
+    expect(await screen.findByText('Library scan started.')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/admin/jobs/job-9/trigger', { method: 'POST' });
   });
 
@@ -204,6 +213,48 @@ describe('LibraryView detail snapshot', () => {
     await screen.findByText('Searching again for Dune');
     await screen.findByText('No books match');
     expect(screen.getByRole('dialog', { name: 'Dune' })).toBeInTheDocument();
+  });
+
+  it('follows its book off the pages: live status without the old error, then the request itself, never an older status', async () => {
+    setMockSearchParams('status=problem');
+    const key = '/api/library?status=problem&limit=60';
+    const failed = item({ id: 'req_a', status: 'failed', statusGroup: 'problem', canSeeRequestDetails: true, request: { ...item().request!, errorMessage: 'No release matched' } });
+    pages[key] = response([failed], ADMIN);
+    requestDetail = () => ok({ success: true, request: { id: 'request-1', status: 'failed', errorMessage: 'No release matched' } });
+    renderView();
+    fireEvent.click(await screen.findByRole('button', { name: /Dune by Frank Herbert/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Dune' });
+    expect(within(dialog).getByText('No release matched')).toBeInTheDocument();
+
+    // Search again: the route clears the error and the book is pending (live), off the Problem filter
+    pages[key] = withStats(response([], { ...ADMIN, matched: 0 }), 1);
+    live = { items: [{ id: 'req_a', status: 'pending', progress: 0, updatedAt: '' }], refreshMs: 40 };
+    requestDetail = () => ok({ success: true, request: { id: 'request-1', status: 'pending', errorMessage: null } });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Search again' }));
+    });
+    await screen.findByText('No books match');
+    await waitFor(() => expect(within(dialog).getByText('Pending')).toBeInTheDocument());
+    expect(within(dialog).queryByText('No release matched')).toBeNull(); // never the old error under a new badge
+
+    // It downloads, then leaves live: the history fetch fails, so the last status seen stays (not "Failed")
+    live = { items: [{ id: 'req_a', status: 'downloading', progress: 40, updatedAt: '' }], refreshMs: 40 };
+    await waitFor(() => expect(within(dialog).getByText('Downloading')).toBeInTheDocument());
+    requestDetail = () => ok({ message: 'Bad gateway' }, 502);
+    live = { items: [], refreshMs: 40 };
+    await waitFor(() => expect(fetchMock.mock.calls.filter((c) => c[0] === '/api/requests/request-1').length).toBeGreaterThanOrEqual(3));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(within(dialog).getByText('Downloading')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Failed')).toBeNull();
+
+    // In live once more, then out with the request answering: its own status and error now
+    live = { items: [{ id: 'req_a', status: 'searching', progress: 0, updatedAt: '' }], refreshMs: 40 };
+    await waitFor(() => expect(within(dialog).getByText('Searching...')).toBeInTheDocument());
+    requestDetail = () => ok({ success: true, request: { id: 'request-1', status: 'failed', errorMessage: 'Still nothing on the indexers' } });
+    live = { items: [], refreshMs: 40 };
+    await waitFor(() => expect(within(dialog).getByText('Still nothing on the indexers')).toBeInTheDocument());
+    expect(within(dialog).getByText('Failed')).toBeInTheDocument();
+    expect(within(dialog).queryByText('No release matched')).toBeNull();
   });
 
   it('a scan-only book opens with no actions', async () => {

@@ -12,6 +12,8 @@ interface StatusBadgeProps {
   status: string;
   progress?: number;
   className?: string;
+  /** Background and text classes in place of the status's own (the label stays). */
+  color?: string;
 }
 
 /** Label and colour of every request status (one source for status labels: badge, Library cards). */
@@ -85,7 +87,7 @@ export function statusLabel(status: string, progress?: number): string {
   return statusConfigFor(progress)[status]?.label ?? status;
 }
 
-export function StatusBadge({ status, progress, className }: StatusBadgeProps) {
+export function StatusBadge({ status, progress, className, color }: StatusBadgeProps) {
   const config = statusConfigFor(progress)[status] || {
     label: status,
     color: 'bg-gray-100 text-gray-800',
@@ -95,7 +97,7 @@ export function StatusBadge({ status, progress, className }: StatusBadgeProps) {
     <span
       className={cn(
         'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium',
-        config.color,
+        color ?? config.color,
         className
       )}
     >

@@ -5,48 +5,71 @@
 
 import type { CoverTone } from '@/components/audiobooks/BookCover';
 import { statusLabel } from '@/components/requests/StatusBadge';
+import { STATUS_GROUP_OF } from '@/lib/library-view/constants';
 import type { LibraryItem, StatusGroup } from '@/lib/library-view/types';
 
-const AMBER = new Set(['downloading', 'processing', 'downloaded', 'awaiting_import']);
-const BLUE = new Set(['pending', 'awaiting_search', 'searching', 'awaiting_approval', 'awaiting_release']);
-const RED = new Set(['failed', 'warn', 'denied']);
+/**
+ * One colour per status group: the card's dot, the stat tiles, the rail, the chips and the detail's
+ * dot and badge all use it (a pending or searching book is "On the way", so amber).
+ */
+export const GROUP_TONE: Record<StatusGroup, CoverTone> = {
+  available: 'emerald',
+  on_the_way: 'amber',
+  needs_approval: 'blue',
+  awaiting_release: 'blue',
+  problem: 'red',
+  denied: 'red',
+};
 
-/** Status group labels (filter rail, chips, stats). */
+/** Dot classes per tone (keep in step with BookCover's dot). */
+export const TONE_DOT: Record<CoverTone, string> = {
+  emerald: 'bg-emerald-400',
+  amber: 'bg-amber-400',
+  blue: 'bg-blue-400',
+  red: 'bg-red-400',
+};
+
+/** Badge colours per tone (the detail's status badge; its text stays StatusBadge's). */
+export const TONE_BADGE: Record<CoverTone, string> = {
+  emerald: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200',
+  amber: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
+  blue: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+  red: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+};
+
+/** Status group labels (filter rail, chips), worded like the cards and tiles. */
 export const STATUS_GROUP_LABELS: Record<StatusGroup, string> = {
-  available: 'Available',
+  available: 'In your library',
   on_the_way: 'On the way',
-  needs_approval: 'Needs approval',
+  needs_approval: 'Pending approval',
   awaiting_release: 'Awaiting release',
   problem: 'Problem',
-  denied: 'Denied',
+  denied: 'Request denied',
 };
 
 /** Dot colour per status group (filter rail, chips). */
-export const STATUS_GROUP_DOTS: Record<StatusGroup, string> = {
-  available: 'bg-emerald-400',
-  on_the_way: 'bg-amber-400',
-  needs_approval: 'bg-blue-400',
-  awaiting_release: 'bg-blue-400',
-  problem: 'bg-red-400',
-  denied: 'bg-red-400',
-};
+export const STATUS_GROUP_DOTS = Object.fromEntries(
+  Object.entries(GROUP_TONE).map(([group, tone]) => [group, TONE_DOT[tone]])
+) as Record<StatusGroup, string>;
 
 export const SOURCE_LABELS = { scan: 'Found by library scan', rmab: 'Requested in ReadMeABook' } as const;
 
-/** Text colour of a card's status meta line, per tone. */
+/** Text colour of a card's status meta line, per tone (at least 4.5:1 for small text in light mode). */
 export const TONE_TEXT: Record<CoverTone, string> = {
-  emerald: 'text-emerald-600 dark:text-emerald-400',
-  amber: 'text-amber-600 dark:text-amber-400',
+  emerald: 'text-emerald-700 dark:text-emerald-400',
+  amber: 'text-amber-700 dark:text-amber-400',
   blue: 'text-blue-600 dark:text-blue-400',
   red: 'text-red-600 dark:text-red-400',
 };
 
-export function coverTone(item: Pick<LibraryItem, 'inLibrary' | 'status'>): CoverTone | null {
-  if (item.inLibrary || item.status === 'available') return 'emerald';
-  if (AMBER.has(item.status)) return 'amber';
-  if (BLUE.has(item.status)) return 'blue';
-  if (RED.has(item.status)) return 'red';
-  return null;
+/** The status group a card shows: from its status (a live patch), else the list's group. */
+export function shownGroup(item: Pick<LibraryItem, 'inLibrary' | 'status' | 'statusGroup'>): StatusGroup {
+  if (item.inLibrary || item.status === 'available') return 'available';
+  return STATUS_GROUP_OF[item.status] ?? item.statusGroup;
+}
+
+export function coverTone(item: Pick<LibraryItem, 'inLibrary' | 'status' | 'statusGroup'>): CoverTone {
+  return GROUP_TONE[shownGroup(item)];
 }
 
 /** "12h 4m", "45m"; null when unknown. */
@@ -93,10 +116,15 @@ function percent(item: Pick<LibraryItem, 'status' | 'progress'>): string | null 
     : null;
 }
 
-/** The card's status label (StatusBadge's wording); "In your library" for library books. */
+/** "Pending Approval" → "Pending approval": the page's labels are in sentence case. */
+function sentenceCase(label: string): string {
+  return label.charAt(0).toUpperCase() + label.slice(1).toLowerCase();
+}
+
+/** The card's status label (StatusBadge's wording, sentence case); "In your library" for library books. */
 export function cardLabel(item: Pick<LibraryItem, 'inLibrary' | 'status' | 'progress'>): string {
   if (item.inLibrary || item.status === 'available') return 'In your library';
-  return statusLabel(item.status, item.progress ?? undefined);
+  return sentenceCase(statusLabel(item.status, item.progress ?? undefined));
 }
 
 /** The cover pill for books not in the library; null for library books. */

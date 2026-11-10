@@ -26,6 +26,7 @@ src/components/
 - **Header** ✅ - Top nav, search input, user menu with "Change Password" option (local users only), theme switch (System / Light / Dark, see [Theme Switch](#theme-switch)), logout
 - **Sidebar** - Admin side nav
 - **Footer** - Version, links
+- **VersionBadge** - `src/components/ui/VersionBadge.tsx`: version + amber update dot (checks GitHub's package.json, 6 h). `compactAtLg`: from 1024 to 1279 px only the update dot (no update: hidden there); the header uses it.
 
 **Audiobooks**
 - **AudiobookCard** ✅ - Cover, title, author, narrator, duration, request button, clickable to open details modal. Shows "Requested by [username]" when someone else has requested the book, "Requested" when current user has requested it
@@ -37,7 +38,7 @@ src/components/
 
 **Requests**
 - **RequestCard** ✅ - Cover, title, author (a followed request: the library's edition from the API, #325a; the details modal keeps `audibleAsin`), status badge, progress bar, timestamps, action buttons (cancel, manual search, interactive search). When status=`awaiting_release` and `releaseDate` is set, shows "Releases &lt;Mon DD, YYYY&gt;" next to the status badge (UTC-formatted)
-- **StatusBadge** - Exports `statusLabel(status, progress?)` (the badge text, also used by Library cards). Color-coded status (pending=yellow, awaiting_search=yellow, searching=blue, downloading=purple, downloaded=green, processing=orange, awaiting_import=orange, available=green, completed=green, failed=red, warn=orange, cancelled=gray, awaiting_approval=yellow, awaiting_release=teal "Awaiting Release", denied=red). Shows "Initializing..." when downloading with 0% progress (fetching torrent info), "Downloading" when progress > 0%
+- **StatusBadge** - Exports `statusLabel(status, progress?)` (the badge text, also used by Library cards). Optional `color` replaces the status's colour classes, never its label (the Library detail passes its status group's colour). Color-coded status (pending=yellow, awaiting_search=yellow, searching=blue, downloading=purple, downloaded=green, processing=orange, awaiting_import=orange, available=green, completed=green, failed=red, warn=orange, cancelled=gray, awaiting_approval=yellow, awaiting_release=teal "Awaiting Release", denied=red). Shows "Initializing..." when downloading with 0% progress (fetching torrent info), "Downloading" when progress > 0%
 - **ProgressBar** - Animated fill with percentage
 - **InteractiveTorrentSearchModal** ✅ - Responsive table of ranked torrent results, uses ConfirmModal for downloads, hides columns on smaller screens (size on mobile, seeds on tablet, indexer on desktop). Titles render verbatim; bracketed tags (e.g. `[German]`, `[Unabridged]`) parsed via `extractTitleTags` render as slate chips in the metadata row (de-duped vs `displayFormat`); an explicit chevron-disclosure button toggles per-`guid` expand only when the title is truncated (via `useIsTruncated`), state resets on close
 - Active indicator: "Setting up..." with spinner when progress = 0%, "Active" with pulsing dot when progress > 0%

@@ -11,11 +11,17 @@ import {
   cardPill,
   coverTone,
   formatDuration,
+  GROUP_TONE,
+  STATUS_GROUP_DOTS,
+  STATUS_GROUP_LABELS,
+  TONE_DOT,
+  TONE_TEXT,
   releaseLabel,
   requesterLabel,
   showsProgress,
   sizeLabel,
 } from '@/components/library/card-display';
+import { STATUS_GROUP_OF } from '@/lib/library-view/constants';
 import { item, scanItem } from './fixtures';
 
 describe('card display', () => {
@@ -25,9 +31,9 @@ describe('card display', () => {
     ['processing', 'amber'],
     ['downloaded', 'amber'],
     ['awaiting_import', 'amber'],
-    ['pending', 'blue'],
-    ['awaiting_search', 'blue'],
-    ['searching', 'blue'],
+    ['pending', 'amber'],
+    ['awaiting_search', 'amber'],
+    ['searching', 'amber'],
     ['awaiting_approval', 'blue'],
     ['awaiting_release', 'blue'],
     ['failed', 'red'],
@@ -46,10 +52,33 @@ describe('card display', () => {
     expect(cardLabel(lib)).toBe('In your library');
   });
 
-  it('labels come from StatusBadge', () => {
-    expect(cardLabel(item({ status: 'awaiting_approval' }))).toBe('Pending Approval');
-    expect(cardLabel(item({ status: 'awaiting_release' }))).toBe('Awaiting Release');
-    expect(cardLabel(item({ status: 'denied' }))).toBe('Request Denied');
+  it('labels are StatusBadge wording in sentence case, like the rest of the page', () => {
+    expect(cardLabel(item({ status: 'awaiting_approval' }))).toBe('Pending approval');
+    expect(cardLabel(item({ status: 'awaiting_release' }))).toBe('Awaiting release');
+    expect(cardLabel(item({ status: 'denied' }))).toBe('Request denied');
+    expect(cardLabel(item({ status: 'searching' }))).toBe('Searching...');
+  });
+
+  it('one colour per status group: every status of a group has its dot, and the rail uses the same', () => {
+    for (const [status, group] of Object.entries(STATUS_GROUP_OF)) {
+      const tone = coverTone(item({ status, statusGroup: group }));
+      expect(tone, status).toBe(GROUP_TONE[group]);
+      expect(STATUS_GROUP_DOTS[group], status).toBe(TONE_DOT[tone]);
+    }
+    // the group a live patch moved the card to wins over a stale statusGroup
+    expect(coverTone(item({ status: 'pending', statusGroup: 'problem' }))).toBe('amber');
+  });
+
+  it('rail labels match the cards and tiles', () => {
+    expect(STATUS_GROUP_LABELS.available).toBe('In your library');
+    expect(STATUS_GROUP_LABELS.needs_approval).toBe(cardLabel(item({ status: 'awaiting_approval' })));
+    expect(STATUS_GROUP_LABELS.awaiting_release).toBe(cardLabel(item({ status: 'awaiting_release' })));
+    expect(STATUS_GROUP_LABELS.denied).toBe(cardLabel(item({ status: 'denied' })));
+  });
+
+  it('the amber status line is dark enough for small text on white (amber-700, not amber-600)', () => {
+    expect(TONE_TEXT.amber).toContain('text-amber-700');
+    expect(TONE_TEXT.amber).not.toContain('text-amber-600');
   });
 
   it('downloading shows the percentage in the pill and the meta line, and the bar', () => {
@@ -63,7 +92,7 @@ describe('card display', () => {
   it('awaiting release shows the release date when known', () => {
     const now = new Date('2026-11-09T00:00:00Z');
     expect(cardPill(item({ status: 'awaiting_release', releaseDate: '2026-11-12T00:00:00.000Z' }), now)).toBe('Out Nov 12');
-    expect(cardPill(item({ status: 'awaiting_release', releaseDate: null }), now)).toBe('Awaiting Release');
+    expect(cardPill(item({ status: 'awaiting_release', releaseDate: null }), now)).toBe('Awaiting release');
     expect(releaseLabel('2027-02-03T00:00:00.000Z', now)).toBe('Out Feb 3, 2027');
     expect(releaseLabel('not a date', now)).toBeNull();
   });

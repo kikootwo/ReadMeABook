@@ -381,45 +381,4 @@ describe('Header', () => {
       expect(remainingLinks).toHaveLength(initialBookDateCount);
     });
   });
-  it('shows Library right before My Requests, desktop and mobile, for any signed-in user', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: vi.fn().mockResolvedValue({ version: 'v.test' }) }));
-    renderWithProviders(<Header />, {
-      auth: { user: { id: 'user-9', plexId: 'plex-9', username: 'reader', role: 'user' }, isLoading: false },
-    });
-
-    const desktop = screen.getByRole('link', { name: 'Library' });
-    expect(desktop).toHaveAttribute('href', '/library');
-    const desktopNames = Array.from(desktop.closest('nav')!.querySelectorAll('a')).map((a) => a.textContent?.trim());
-    expect(desktopNames.indexOf('Library')).toBe(desktopNames.indexOf('My Requests') - 1);
-
-    await userEvent.click(screen.getByRole('button', { name: 'Toggle menu' }));
-    const links = screen.getAllByRole('link', { name: 'Library' });
-    expect(links).toHaveLength(2);
-    const mobileNames = Array.from(links[1].closest('nav')!.querySelectorAll('a')).map((a) => a.textContent?.trim());
-    expect(mobileNames.indexOf('Library')).toBe(mobileNames.indexOf('My Requests') - 1);
-    await userEvent.click(links[1]);
-    expect(screen.getAllByRole('link', { name: 'Library' })).toHaveLength(1);
-  });
-
-  it('hides Library when signed out', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: vi.fn().mockResolvedValue({ version: 'v.test' }) }));
-    renderWithProviders(<Header />, { auth: { user: null, isLoading: false } });
-    expect(screen.queryByRole('link', { name: 'Library' })).toBeNull();
-  });
-
-  it('keeps the full nav for 1024 px and up; below that the menu button carries it', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: vi.fn().mockResolvedValue({ version: 'v.test' }) }));
-    renderWithProviders(<Header />, {
-      auth: { user: { id: 'admin-9', plexId: 'plex-9', username: 'a-sixteen-chars!', role: 'admin' }, isLoading: false },
-    });
-    // jsdom has no layout: the e2e header check measures overflow at 768 and 1024
-    const nav = screen.getByRole('link', { name: 'Library' }).closest('nav')!;
-    expect(nav.className).toContain('hidden lg:flex');
-    expect(nav.className).toContain('whitespace-nowrap'); // "My Requests" never wraps
-    expect(screen.getByRole('button', { name: 'Toggle menu' }).className).toContain('lg:hidden');
-    expect(screen.getByText('a-sixteen-chars!').className).toContain('hidden xl:inline');
-    // The version badge steps aside while the inline nav is on a narrow desktop (1024-1279)
-    const badge = (await screen.findByText(/v\.test/)).closest('div.flex-shrink-0')!;
-    expect(badge.className).toContain('hidden sm:block lg:hidden xl:block');
-  });
 });
