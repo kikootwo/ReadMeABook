@@ -189,4 +189,26 @@ describe('AdminDashboard', () => {
     expect(await screen.findByText('Error Loading Dashboard')).toBeInTheDocument();
     expect(screen.getByText('Metrics unavailable')).toBeInTheDocument();
   });
+
+  it('a failed poll after the data loaded keeps the dashboard and the requests table on screen (#212)', async () => {
+    swrState.set('/api/admin/metrics', {
+      data: { totalRequests: 1, activeDownloads: 0, completedLast30Days: 0, failedLast30Days: 0, totalUsers: 1, systemHealth: { status: 'healthy', issues: [] } },
+    });
+    // SWR keeps the last data when a later poll fails
+    swrState.set('/api/admin/downloads/active', { data: { downloads: [] }, error: new Error('Download client unreachable') });
+    swrState.set('/api/admin/requests?page=1&pageSize=25&search=&status=all&type=all&userId=&sortBy=createdAt&sortOrder=desc', {
+      data: {
+        requests: [{ requestId: 'req-1', title: 'Made Up Book', author: 'Made Up Author', status: 'downloading', userId: 'user-1', user: 'Sam', createdAt: new Date('2024-01-02T00:00:00Z'), completedAt: null, errorMessage: null }],
+        total: 1, page: 1, pageSize: 25, totalPages: 1,
+      },
+    });
+    swrState.set('/api/admin/users', { data: { users: [] } });
+    swrState.set('/api/admin/settings', { data: { ebook: { enabled: false } } });
+
+    render(<AdminDashboard />);
+
+    expect(await screen.findByText('Made Up Book')).toBeInTheDocument();
+    expect(screen.queryByText('Error Loading Dashboard')).toBeNull();
+    expect(screen.getByRole('alert')).toHaveTextContent('Download client unreachable');
+  });
 });
