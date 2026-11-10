@@ -8,6 +8,7 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import type { Audiobook } from '@/lib/hooks/useAudiobooks';
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ user: { id: 'user-1', username: 'user' } }),
@@ -23,7 +24,8 @@ vi.mock('@/components/audiobooks/AudiobookDetailsModal', () => ({
 
 vi.mock('next/image', () => ({
   __esModule: true,
-  default: ({ fill, ...props }: any) => <img data-fill={fill ? 'true' : undefined} {...props} />,
+  // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
+  default: ({ fill, ...props }: React.ImgHTMLAttributes<HTMLImageElement> & { fill?: boolean }) => <img data-fill={fill ? 'true' : undefined} {...props} />,
 }));
 
 const base = { asin: 'asin-1', title: 'Test Book', author: 'Author', coverArtUrl: 'https://img.test/c.jpg' };
@@ -57,7 +59,7 @@ const cases: [string, Record<string, unknown>][] = [
 describe('AudiobookCard render equality', () => {
   it.each(cases)('%s renders the same DOM', async (_label, extra) => {
     const { AudiobookCard } = await import('@/components/audiobooks/AudiobookCard');
-    const { container } = render(<AudiobookCard audiobook={{ ...base, ...extra } as any} />);
+    const { container } = render(<AudiobookCard audiobook={{ ...base, ...extra } as Audiobook} />);
     expect(normalized(container.firstElementChild!)).toMatchSnapshot();
   });
 
@@ -69,7 +71,7 @@ describe('AudiobookCard render equality', () => {
 
   it('a broken cover falls back to the placeholder', async () => {
     const { AudiobookCard } = await import('@/components/audiobooks/AudiobookCard');
-    const { container } = render(<AudiobookCard audiobook={base as any} />);
+    const { container } = render(<AudiobookCard audiobook={base as Audiobook} />);
     fireEvent.error(container.querySelector('img')!);
     expect(container.querySelector('img')!.getAttribute('src')).toBe('/placeholder_cover.svg');
     expect(normalized(container.firstElementChild!)).toMatchSnapshot();
