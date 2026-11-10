@@ -194,6 +194,7 @@ test('2 an admin pastes a magnet on a failed request', async ({ browser }) => {
   c.check(`200 (${res.status()})`, res.status() === 200);
   await expect(page.getByText(ADDED, { exact: true })).toBeVisible({ timeout: 15_000 });
   await expect(field).toHaveCount(0);
+  await settle(page); // the toast slides in (0.3 s); it stays 5 s
   await snap(page, `${DIR}/shots`, 'dialog-toast-added-1280-light');
 
   const status = await waitStatus(id, ['downloading'], 'phm', 60_000);
