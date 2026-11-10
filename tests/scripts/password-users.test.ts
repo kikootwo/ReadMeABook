@@ -119,7 +119,12 @@ describe('a reset password works at the admin login', () => {
     prismaMock.user.update.mockResolvedValue({});
 
     const { POST } = await import('@/app/api/auth/admin/login/route');
-    const login = (password: string) => POST({ json: async () => ({ username: ' Admin ', password }) } as any);
+    const login = (password: string) =>
+      POST({
+        json: async () => ({ username: ' Admin ', password }),
+        headers: new Headers({ 'x-forwarded-for': '203.0.113.7' }),
+        cookies: { get: () => undefined },
+      } as any);
 
     expect((await login('new-Passw0rd')).status).toBe(200);
     expect((await login('old-password')).status).toBe(401);
