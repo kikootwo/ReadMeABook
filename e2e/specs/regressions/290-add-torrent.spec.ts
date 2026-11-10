@@ -26,7 +26,7 @@ import { QBIT, VIEWS, adminPage, lastSeq, callsSince, putCategory } from './46-h
 import { viewer, contextFor, card, type Viewer } from './177-library-page-helpers';
 import {
   DIR, ADD_PATH, loadScenario, releaseTorrent, addTorrent, addTorrentChunked, requestStatus, jobCount, waitStatus,
-  historyRows, storedFilePayload, addsFor, openActions, settle,
+  manualHistory, storedFilePayload, addsFor, openActions, settle,
 } from './290-helpers';
 
 test.skip(!execBridgeAvailable(), EXEC_BRIDGE_SKIP);
@@ -184,7 +184,7 @@ test('2 an admin pastes a magnet on a failed request', async ({ browser }) => {
   c.save('qbit-adds.json', adds.adds.map((r) => ({ seq: r.seq, body: r.body, added: r.added, duplicates: r.duplicates })));
   c.check(`one add of the magnet's hash, release magnet-phm (${JSON.stringify(adds.added.map((r) => r.added))})`, adds.added.length === 1 && adds.added[0].added?.[0].releaseId === 'magnet-phm');
   c.check(`category readmeabook (${JSON.stringify(adds.added[0]?.body)})`, adds.added[0]?.body?.category === 'readmeabook');
-  const history = historyRows(id);
+  const history = await manualHistory(id);
   c.save('download-history.txt', `${history.join('\n')}\n`);
   const manual = history.at(-1)?.split('|') ?? [];
   c.check(`history: indexer Manual, no indexer id, the hash (${history.at(-1)})`, status === 'downloading' && manual[0] === 'Manual' && manual[1] === '' && manual[2] === release.infoHash);
@@ -250,7 +250,7 @@ test('3 an admin uploads a .torrent; a pre-existing custom category is left as i
   const payload = storedFilePayload(id, release.torrentFile!);
   c.save('job-payload.json', payload);
   c.check(`jobs row: placeholder ${payload.stored}, no row holds the bytes (${payload.rowsHoldingBytes})`, JSON.parse(payload.stored).omitted === true && payload.rowsHoldingBytes === 0);
-  const history = historyRows(id);
+  const history = await manualHistory(id);
   c.save('download-history.txt', `${history.join('\n')}\n`);
   c.check(`history: Manual, the file's hash (${history.at(-1)})`, history.at(-1)?.startsWith(`Manual||${release.infoHash}|`) === true);
   c.check(`then downloaded (${await waitStatus(id, ['downloaded', 'available'], 'martian')})`, true, 'control');

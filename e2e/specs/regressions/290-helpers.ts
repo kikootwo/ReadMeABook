@@ -23,8 +23,8 @@ export async function loadScenario() {
     indexers: [{ id: 1, name: 'E2E Torrents', protocol: 'torrent', priority: 25 }],
     releases: [
       { id: 'fail-phm', book: 'phm', title: TITLE, sizeMB: 300, seeders: 50, fixture: 'phm-mp3', download: { failAtPct: 30 } },
-      // 40 s of downloading, so the admin views show it while it runs
-      { id: 'magnet-phm', book: 'phm', title: TITLE, name: '{{title}} (hand-added magnet)', fixture: 'phm-mp3', link: 'magnet', unlisted: true, download: { completeMs: 40_000 } },
+      // 90 s of downloading, so the admin views show it while it runs
+      { id: 'magnet-phm', book: 'phm', title: TITLE, name: '{{title}} (hand-added magnet)', fixture: 'phm-mp3', link: 'magnet', unlisted: true, download: { completeMs: 90_000 } },
       { id: 'file-martian', book: 'martian', title: TITLE, name: '{{title}} (hand-added file)', fixture: 'martian-mp3', unlisted: true },
       { id: 'magnet-artemis', book: 'artemis', title: TITLE, name: '{{title}} (hand-added twice)', fixture: 'artemis-mp3', link: 'magnet', unlisted: true },
     ],
@@ -89,6 +89,14 @@ export function historyRows(id: string): string[] {
     `select coalesce(indexer_name,'') || '|' || coalesce(indexer_id::text,'') || '|' || coalesce(torrent_hash,'') || '|' || coalesce(torrent_name,'') || '|' || coalesce(download_client,'')
      from download_history where request_id = ${sqlStr(id)} order by created_at`
   ).split('\n').filter(Boolean);
+}
+
+/** The history rows once the processor has written the Manual one (it writes after the client add). */
+export async function manualHistory(id: string): Promise<string[]> {
+  return waitFor(`Manual download_history row for ${id}`, async () => {
+    const rows = historyRows(id);
+    return rows.some((r) => r.startsWith('Manual|')) ? rows : null;
+  }, { timeoutMs: 30_000 });
 }
 
 /** The download job's jobs.payload->'torrentFile' and whether the row's payload holds any of the base64. */
