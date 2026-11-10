@@ -124,6 +124,9 @@ export async function openActions(page: Page, title: string) {
   await row.getByTitle('Actions').click();
 }
 
+/** Wait for finite animations (slide-ins, fades) to end; endless ones (spinners, progress shimmer) never do. */
 export async function settle(page: Page) {
-  await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'));
+  await page.waitForFunction(() =>
+    document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity)
+  );
 }
